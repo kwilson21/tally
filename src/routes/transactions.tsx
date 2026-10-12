@@ -130,6 +130,7 @@ import {
 	LIST_LOAD_PAUSE,
 	MAX_SELECTED,
 	NOT_ON_PAGE_FIELD,
+	NOT_ON_PAGE_IDS_FIELD,
 	NotOnPage,
 	NotOnPageCount,
 	SELECTION_BAR_OOB,
@@ -821,6 +822,7 @@ async function renderList(
 								count={tickCount}
 								notOnPage={offPage.length}
 								rows={offPageRows}
+								notOnPageIds={offPage.map((row) => row.id)}
 								back={back}
 								pageIds={pageIds}
 								selection={current}
@@ -1001,9 +1003,7 @@ transactions.get("/transactions/select/count", async (c) => {
 			ticks: read.ticks,
 			held: read.held,
 			all: read.all,
-			unticked: read.all
-				? unticksFrom(read.hidden, read.ids, read.pageIds)
-				: [],
+			unticked: read.unticked,
 		},
 		new Set(matched),
 	);
@@ -1068,6 +1068,9 @@ function selectionFields(fields: SelectionReadable) {
 	const ids = parseIds(fields.getAll("ids"));
 	const all = fields.get("all") === "1";
 	const onPage = pageIds.length > 0 ? parseIds(pageIds) : undefined;
+	// The rows the not-on-this-page line lists, ticked or not: an unticked one is a box the request drew (#321).
+	const lineIds = parseIds(fields.getAll(NOT_ON_PAGE_IDS_FIELD));
+	const drawn = [...(onPage ?? []), ...lineIds];
 	return {
 		/** The ticked boxes, on this page or not (the form's checkboxes, or the address's ids). */
 		ids,
@@ -1076,8 +1079,8 @@ function selectionFields(fields: SelectionReadable) {
 		all,
 		/** The ticks the request means: in all mode the page's own boxes are the set's, not ticks (ticksFrom, #321). */
 		ticks: ticksFrom(ids, all, onPage),
-		/** The rows unticked from the whole set, as the hidden fields and the address carry them. */
-		hidden: parseIds(fields.getAll("unticked")),
+		/** The rows unticked from the whole set: the unchecked boxes the page and the line drew, and the hidden fields (#321). */
+		unticked: unticksFrom(parseIds(fields.getAll("unticked")), ids, drawn),
 		/** The ticks the whole set also holds, as the hidden fields and the address carry them (#350). */
 		held: parseIds(fields.getAll("held")),
 	};
@@ -1107,9 +1110,7 @@ async function requestedSelection(
 		ticks,
 		held,
 		all: true,
-		unticked: wholeAgain
-			? []
-			: unticksFrom(read.hidden, read.ids, read.pageIds),
+		unticked: wholeAgain ? [] : read.unticked,
 	};
 }
 

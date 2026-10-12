@@ -24,19 +24,20 @@ export const NO_SELECTION: Selection = {
 };
 
 /**
- * The rows unticked from the set, read from the page's boxes: a row on the page is unticked when its box is not
- * checked (`pageIds` minus `checked`), and `hidden` keeps the rows that were off the page. Without `pageIds`
- * (a request that drew no page) `hidden` stands. A checked row is never unticked.
+ * The rows unticked from the set, read from the boxes the request drew (`drawn`: the page's rows and the rows the
+ * not-on-this-page line lists): a drawn row is unticked when its box is not checked (`drawn` minus `checked`), and
+ * `hidden` keeps the rows that were not drawn. Without `drawn` (a request that drew nothing) `hidden` stands. A
+ * checked row is never unticked.
  */
 export function unticksFrom(
 	hidden: number[],
 	checked: number[],
-	pageIds?: number[],
+	drawn?: number[],
 ): number[] {
 	const ticked = new Set(checked);
-	const onPage = new Set(pageIds);
-	const kept = hidden.filter((id) => !onPage.has(id));
-	const unticked = (pageIds ?? []).filter((id) => !ticked.has(id));
+	const drawnSet = new Set(drawn);
+	const kept = hidden.filter((id) => !drawnSet.has(id));
+	const unticked = (drawn ?? []).filter((id) => !ticked.has(id));
 	return [...new Set([...kept, ...unticked])].filter((id) => !ticked.has(id));
 }
 

@@ -43,15 +43,23 @@ export const LIST_LOAD_PAUSE = {
 
 /**
  * Every ticked row in the selection form, on this page or not (the rows a list request carries, #350), and
- * the fields that carry the rest of the selection: the page's rows, the all-mode flag and the unticked rows (#321).
+ * the fields that carry the rest of the selection: the page's rows, the line's rows, the all-mode flag and the
+ * unticked rows (#321).
  */
-const TICKS = "#selection-form input[name=ids]:checked, #select-all-page input";
+const TICKS =
+	"#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]";
 
 /**
  * The form field the "not on this page" line sends while it is drawn, so a count that empties the line
  * can tell the last tick was unticked in the disclosure, and move focus into the bar (#350).
  */
 export const NOT_ON_PAGE_FIELD = "not-on-page";
+
+/**
+ * The rows the "not on this page" line lists, comma-joined, ticked or not. A row the line lists whose box is
+ * not posted was unticked in the disclosure, so the request ends its tick (#321).
+ */
+export const NOT_ON_PAGE_IDS_FIELD = "not-on-page-ids";
 
 /**
  * Every ticked row rides in a list request, on this page or not, so the ticks survive a change of
@@ -357,11 +365,14 @@ export function NotOnPageCount({
 export function NotOnPage({
 	count,
 	rows,
+	ids = [],
 	open = false,
 	oob = false,
 }: {
 	count: number;
 	rows?: Child;
+	/** The rows the line lists, ticked or not (NOT_ON_PAGE_IDS_FIELD). */
+	ids?: number[];
 	open?: boolean;
 	oob?: boolean;
 }) {
@@ -375,6 +386,13 @@ export function NotOnPage({
 				<>
 					{/* Sent with every count while the line is drawn (NOT_ON_PAGE_FIELD). */}
 					<input type="hidden" name={NOT_ON_PAGE_FIELD} value="1" />
+					{ids.length > 0 && (
+						<input
+							type="hidden"
+							name={NOT_ON_PAGE_IDS_FIELD}
+							value={ids.join(",")}
+						/>
+					)}
 					<details class="group" open={open}>
 						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
 							<NotOnPageCount count={count} />
@@ -401,6 +419,7 @@ export function SelectionActionBar({
 	count,
 	notOnPage,
 	rows,
+	notOnPageIds,
 	back,
 	pageIds,
 	selection,
@@ -419,6 +438,8 @@ export function SelectionActionBar({
 	notOnPage: number;
 	/** Those rows, under their day headings, for the disclosure. */
 	rows?: Child;
+	/** The rows the line lists, ticked or not (NOT_ON_PAGE_IDS_FIELD). */
+	notOnPageIds?: number[];
 	/** The list's own address, which Select all builds on. */
 	back: string;
 	pageIds: number[];
@@ -452,7 +473,12 @@ export function SelectionActionBar({
 				/>
 			</div>
 			<SelectionLimit count={selection.ticks.length} />
-			<NotOnPage count={notOnPage} rows={rows} open={openNotOnPage} />
+			<NotOnPage
+				count={notOnPage}
+				rows={rows}
+				ids={notOnPageIds}
+				open={openNotOnPage}
+			/>
 			<div class="flex gap-2">
 				<SelectionActionButtons
 					disabled={disabled}

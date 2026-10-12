@@ -995,7 +995,7 @@ describe("select several transactions", () => {
 			);
 			const link = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0] ?? "";
 			expect(link).toContain(
-				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input"',
+				'hx-include="#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]"',
 			);
 			expect(link).toContain(
 				'hx-get="/transactions?month=all&amp;page=2&amp;select=1&amp;focus=set-category-selection"',
@@ -1265,7 +1265,7 @@ describe("select several transactions", () => {
 				"/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1",
 			);
 			expect(attribute(addCash, "hx-include")).toBe(
-				"#selection-form input[name=ids]:checked, #select-all-page input",
+				"#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]",
 			);
 			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
 			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
@@ -1990,6 +1990,138 @@ describe("select several transactions", () => {
 			).text();
 			expect(html).toContain("102 selected");
 			expect(html).toContain("1 not on this page");
+		});
+
+		/** The rows the page's hidden page-ids field names: the rows the list drew (SelectAllOnPage). */
+		const pageIdsOf = (html: string) =>
+			(html.match(/name="page-ids" value="([\d,]*)"/)?.[1] ?? "")
+				.split(",")
+				.filter(Boolean)
+				.map(Number);
+
+		it("unticking a tick on the not-on-this-page line, after a search narrows the filters, ends it: clearing the search leaves it out, and the save changes only the rest (#321)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const total = await selectableTotal();
+			const search = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=?",
+			)
+				.bind(x)
+				.run();
+			// The search after Select all: the held tick is off its rows, so it is drawn on the line, ticked.
+			const narrowed = await (
+				await request(
+					`${search}&select=1&${new URLSearchParams([
+						["page-ids", old.join(",")],
+						["all", "1"],
+						...old.map((id): [string, string] => ["ids", String(id)]),
+						["held", String(x)],
+					])}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(narrowed).toContain("102 selected");
+			expect(narrowed).toContain(`name="not-on-page-ids" value="${x}"`);
+			// The row's box is unticked on the line: the line still lists it, but its box posts nothing.
+			const zq = pageIdsOf(narrowed);
+			const count = await request(
+				`/transactions/select/count?${new URLSearchParams([
+					["back", search],
+					["page-ids", zq.join(",")],
+					["all", "1"],
+					["not-on-page", "1"],
+					["not-on-page-ids", String(x)],
+					...zq.map((id): [string, string] => ["ids", String(id)]),
+				])}`,
+			);
+			const counted = await count.text();
+			expect(counted).toContain("101 selected");
+			expect(counted).not.toContain("not on this page");
+			const replaced = count.headers.get("HX-Replace-Url") ?? "";
+			expect(replaced).toContain(`unticked=${x}`);
+			expect(
+				new URL(replaced, "http://tally.test").searchParams
+					.get("ids")
+					?.split(",")
+					.map(Number) ?? [],
+			).not.toContain(x);
+			expect(counted).toContain(`name="unticked" value="${x}"`);
+			// Clearing the search carries what the reply left in the form: the unticked row, which stays out.
+			const cleared = await (
+				await request(
+					`/transactions?month=all&select=1&${new URLSearchParams([
+						["page-ids", zq.join(",")],
+						["all", "1"],
+						["unticked", String(x)],
+						...zq.map((id): [string, string] => ["ids", String(id)]),
+					])}`,
+					{ headers: { "HX-Request": "true" } },
+				)
+			).text();
+			expect(cleared).toContain(`${total - 1} selected`);
+			expect(cleared).not.toContain("not on this page");
+			expect(tickedIds(cleared)).not.toContain(x);
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([
+					["page-ids", zq.join(",")],
+					["back", "/transactions?month=all"],
+					["all", "1"],
+					["unticked", String(x)],
+					["category", "1"],
+					...zq.map((id): [string, string] => ["ids", String(id)]),
+				]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Set ${total - 1} transactions to Groceries.`);
+			expect(
+				await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
+					.bind(x)
+					.first(),
+			).toEqual({ category_id: 2 });
+		});
+
+		it("a search change that carries an untick on the not-on-this-page line keeps the row unticked in the address it pushes (#321)", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const x = await hiddenRow(old);
+			const zq = pageIdsOf(
+				await (
+					await request(
+						`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
+							[
+								["page-ids", old.join(",")],
+								["all", "1"],
+								...old.map((id): [string, string] => ["ids", String(id)]),
+								["held", String(x)],
+							],
+						)}`,
+						{ headers: { "HX-Request": "true" } },
+					)
+				).text(),
+			);
+			const listed = await request(
+				`/transactions?month=all&q=ZQ+TEST+BAKERY&select=1&${new URLSearchParams(
+					[
+						["page-ids", zq.join(",")],
+						["all", "1"],
+						["not-on-page", "1"],
+						["not-on-page-ids", String(x)],
+						...zq.map((id): [string, string] => ["ids", String(id)]),
+					],
+				)}`,
+				{ headers: { "HX-Request": "true" } },
+			);
+			const html = await listed.text();
+			expect(html).toContain("101 selected");
+			expect(html).not.toContain("not on this page");
+			expect(listed.headers.get("HX-Push-Url") ?? "").toContain(
+				`unticked=${x}`,
+			);
 		});
 	});
 });
