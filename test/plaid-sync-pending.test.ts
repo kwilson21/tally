@@ -2235,6 +2235,107 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		}
 	});
 
+	it("keeps one of two pending payments that match the posted part, dismisses the other on each part, and the sync still lands (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		// A second pending part with the first one's amount and category, so both could keep onto the one posted part.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 600, category_id = 1 WHERE id = ?",
+		)
+			.bind(pending[1])
+			.run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9864, 'Water', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9865, 'Gas', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9864, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[0]),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9865, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[1]),
+		]);
+
+		await post(item);
+		await matchBillPayments(env.DB, "2026-09-22");
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, transaction_id, status FROM bill_payments WHERE status = 'linked' ORDER BY bill_id",
+				).all()
+			).results,
+		).toEqual([{ bill_id: 9864, transaction_id: own[0], status: "linked" }]);
+		for (const part of own) {
+			expect(
+				await count(
+					"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 9865 AND period = '2026-09' AND transaction_id = ? AND status = 'dismissed' AND matched_by = 'auto'",
+					part,
+				),
+			).toBe(1);
+		}
+	});
+
+	it("keeps each of two pending payments on its own posted part when the posted row has two parts that match them (decision 99)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		// A second posted part with the first one's amount and category.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 600, category_id = 1 WHERE id = ?",
+		)
+			.bind(own[1])
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET merchant_name = 'Shop' WHERE parent_id = ?",
+		)
+			.bind(ids.posted)
+			.run();
+		const pending = await splitInto(ids.pending, 600, 634);
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 600, category_id = 1 WHERE id = ?",
+		)
+			.bind(pending[1])
+			.run();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9866, 'Water', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, active) VALUES (9867, 'Gas', 600, 28, 'monthly', 'Shop', 1)",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9866, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[0]),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9867, '2026-09', ?, 'auto', 'linked')",
+			).bind(pending[1]),
+		]);
+
+		await post(item);
+
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT bill_id, transaction_id, status FROM bill_payments WHERE status = 'linked' ORDER BY bill_id",
+				).all()
+			).results,
+		).toEqual([
+			{ bill_id: 9866, transaction_id: own[0], status: "linked" },
+			{ bill_id: 9867, transaction_id: own[1], status: "linked" },
+		]);
+	});
+
 	it("does the same when the drop came on an earlier page than the link", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
