@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
 import { FilterSelect } from "../src/views/filter-select";
@@ -745,6 +746,26 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 		);
 		expect(rowIds(onlyOctober.html)).toContain(99320);
 		expect(rowIds(onlyOctober.html)).not.toContain(99321);
+	});
+
+	it("searches only the notes a row shows: a guessed note hidden by the details switch doesn't match (#314)", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed) VALUES (99340, 1, '${THIS}-05', -2500, 'TARGET 00412', 1, 'Birthday gift', 1)`,
+			),
+			env.DB.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, note, note_guessed) VALUES (99341, 1, '${THIS}-05', -2600, 'TARGET 00413', 1, 'Birthday kept', 0)`,
+			),
+		]);
+		const search = `/transactions?q=birthday&month=${THIS}`;
+		await saveAiSwitches(env.DB, { details: false });
+		const hidden = await get(search);
+		expect(rowIds(hidden.html)).not.toContain(99340);
+		expect(rowIds(hidden.html)).toContain(99341);
+		await saveAiSwitches(env.DB, { details: true });
+		const shown = await get(search);
+		expect(rowIds(shown.html)).toContain(99340);
+		expect(rowIds(shown.html)).toContain(99341);
 	});
 });
 
