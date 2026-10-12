@@ -1157,7 +1157,8 @@ export async function saveEdit(
 	}
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
 	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
-	// place. A pending new-category suggestion the row is behind is released with it, so the row leaves the
+	// place, unless the same save ticks Always for this merchant, which settles the category (oneOffGuessesAgain).
+	// A pending new-category suggestion the row is behind is released with it, so the row leaves the
 	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
 	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
 	const askable = {

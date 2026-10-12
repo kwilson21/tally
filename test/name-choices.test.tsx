@@ -129,6 +129,7 @@ describe("the re-guess note follows the edit form's controls", () => {
 			],
 		},
 		{ field: "creditReviewed", hooks: both("creditReviewed") },
+		{ field: "always", hooks: both("always") },
 		{
 			field: "name_pick",
 			hooks: ["group-has-[.name-same:checked]/edit:hidden"],

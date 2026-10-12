@@ -53,8 +53,9 @@ export const NAME_PICK_CLASS = "name-pick";
 /** The class of the "Type your own" radio: the field under it is shown while it is ticked. */
 export const OWN_PICK_CLASS = "name-own";
 /**
- * The edit panel's form: its category, Exclude, Income and refund controls fold the re-guess note under This one
- * only away once they change (CSS only), so it is a named group that NameChoices' and the Chips' unnamed `group` don't meet.
+ * The edit panel's form: its category, Exclude, Income, refund and Always for this merchant controls fold the re-guess
+ * note under This one only away once they change (CSS only), so it is a named group that NameChoices' and the Chips'
+ * unnamed `group` don't meet.
  */
 export const EDIT_FORM_GROUP = "group/edit";
 /**
@@ -192,12 +193,14 @@ export type RenameFacts = {
  * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
  * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
  *   keeps the note, and the save is still right: the route keeps the row's name. This is the one known limit.
+ * - always (the Always for this merchant checkbox): covered here, both ways. Ticking it makes the save keep the category,
+ *   since the rule settles it. always_was and rule_category_was are the state it was drawn in, so they need no hook.
  * - name_scope: no hook. The note is a line under This one only and describes that choice whichever scope is ticked.
  * - Hidden or server-side, so no hook: merchant_was, jevCategories, paysBill, isSplit and the stored category.
  *   details_action=keep and displayed_name_guess: with nothing ticked the Rename list is hidden, and the save names
  *   Tally's guess for All, so no note shows.
- * - The rest parseEdit reads (always, always_was, rule_category_was, note, note_was, kind, kind_was, for_person_id,
- *   for_person_id_was, details_visible) doesn't feed the re-guess.
+ * - The rest parseEdit reads (note, note_was, kind, kind_was, for_person_id, for_person_id_was, details_visible)
+ *   doesn't feed the re-guess.
  */
 const GUESS_AGAIN_FOLDS = [
 	"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
@@ -205,6 +208,8 @@ const GUESS_AGAIN_FOLDS = [
 	"group-has-[input[name=income][checked]:not(:checked)]/edit:hidden",
 	String.raw`group-has-[input[name=refund\_of]:checked:not([checked])]/edit:hidden`,
 	"group-has-[.name-same:checked]/edit:hidden",
+	"group-has-[input[name=always]:checked:not([checked])]/edit:hidden",
+	"group-has-[input[name=always][checked]:not(:checked)]/edit:hidden",
 ];
 /** Exclude changes whether Jev is asked, unless the row pays a bill (excludeCounts). */
 const EXCLUDE_FOLDS = [

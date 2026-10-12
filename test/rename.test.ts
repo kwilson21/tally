@@ -102,6 +102,30 @@ describe("a one-off name makes Tally guess the category again", () => {
 			}),
 		).toBe(true);
 	});
+
+	it("not when the same save ticks Always for this merchant, which settles the category", () => {
+		expect(
+			guess({
+				edit: { ...named, alwaysForMerchant: true },
+				current: { categoryId: 4, categorySource: "jev" },
+				postedCategory: 4,
+			}),
+		).toBe(false);
+		expect(
+			guess({
+				edit: { ...named, alwaysForMerchant: true },
+				current: { categoryId: null, categorySource: null },
+				postedCategory: null,
+			}),
+		).toBe(false);
+		expect(
+			guess({
+				edit: { ...named, alwaysForMerchant: false },
+				current: { categoryId: 4, categorySource: "jev" },
+				postedCategory: null,
+			}),
+		).toBe(true);
+	});
 });
 
 // The Rename list's words (decision 101, Name row round 2 A). Every count is what the change really does.

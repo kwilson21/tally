@@ -516,6 +516,44 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 	});
 
+	it("keeps Tally's category when the same save ticks Always for this merchant: the rule is made, Jev is asked nothing, and the words say nothing of guessing again", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+			always: "1",
+			always_was: "0",
+			rule_category_was: "",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(
+			await db
+				.prepare(
+					"SELECT default_category_id FROM merchants WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+				)
+				.first(),
+		).toMatchObject({ default_category_id: category });
+		const categoryName = (
+			await db
+				.prepare("SELECT name FROM categories WHERE id = ?")
+				.bind(category)
+				.first<{ name: string }>()
+		)?.name;
+		const trigger = JSON.parse(response.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.announce).toBe(`Saved. Dog bed is now ${categoryName}.`);
+		expect(trigger.announce).not.toContain("guesses its category again");
+		expect(trigger.toast.message).toBe("Saved Dog bed");
+	});
+
 	it("says Tally guesses its category again while Jev answers categories", async () => {
 		await pickedByTally(await firstCategory());
 		expect(await panel({ JEV_API_KEY: "jev-key" })).toContain(
@@ -535,6 +573,20 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		)?.[1];
 		expect(note).toContain(
 			"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+		);
+	});
+
+	it("folds the note both ways when Always for this merchant changes, since ticking it keeps the category", async () => {
+		await pickedByTally(await firstCategory());
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		const note = html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toContain(
+			"group-has-[input[name=always]:checked:not([checked])]/edit:hidden",
+		);
+		expect(note).toContain(
+			"group-has-[input[name=always][checked]:not(:checked)]/edit:hidden",
 		);
 	});
 
@@ -572,6 +624,23 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		});
 		expect(response.status).toBe(422);
 		expect(html).toContain("Tally guesses its category again.");
+	});
+
+	it("draws no note on a 422 redraw that posts the row's own category with Always for this merchant ticked, since the save keeps it", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		fakeJev();
+		const { response, html } = await save(bakery, {
+			category: String(category),
+			name_pick: "own",
+			merchant: "",
+			name_scope: "one",
+			always: "1",
+			always_was: "0",
+			rule_category_was: "",
+		});
+		expect(response.status).toBe(422);
+		expect(html).not.toContain("Tally guesses its category again.");
 	});
 
 	it("draws no note on a row whose category was set by a person, even with no category id", async () => {
