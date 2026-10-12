@@ -80,13 +80,28 @@ export const JEV_ANSWER_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, transacti
 	SELECT 'income', id, ?1 FROM transactions WHERE id = ?2 AND ?4 = 1 AND income_source = 'jev'`;
 
 /**
+ * When a kept name is logged, on a merchant row `m`: the merchant is still pending and not yet named, and the
+ * name (`?`) is one of its suggestions.
+ */
+const KEPT_NAME_CONDITIONS = `m.suggestion_status = 'pending' AND m.display_name IS NULL
+		AND instr(char(10) || COALESCE(m.suggested_name, '') || char(10), char(10) || ? || char(10)) > 0`;
+
+/**
  * The log row for a name Tally guessed that a person is keeping (spec §8.6): parameters are the day, the
  * merchant's key and the name. It is written before the save that settles the suggestion, and only while
  * the suggestion is still pending and the name is one of its suggestions. Callers check first that the
  * name is Tally's guess and not the bank's (`nameSource`). A merchant is counted once. A caller may narrow it
- * further by appending a condition to its WHERE clause (saveOrganizeGroup adds its upsert's guard).
+ * further by appending a condition to its WHERE clause.
  */
 export const KEPT_NAME_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, merchant_raw_name, household_day)
 	SELECT 'name', m.raw_name, ? FROM merchants m
-	WHERE m.raw_name = ? AND m.suggestion_status = 'pending' AND m.display_name IS NULL
-		AND instr(char(10) || COALESCE(m.suggested_name, '') || char(10), char(10) || ? || char(10)) > 0`;
+	WHERE m.raw_name = ? AND ${KEPT_NAME_CONDITIONS}`;
+
+/**
+ * KEPT_NAME_LOG_SQL for many merchants in one statement, so a save of hundreds of merchants stays under D1's
+ * statement limit. It writes the same rows: parameters are the day, a JSON array of the merchants' keys, and the
+ * name. A caller narrows it the same way as KEPT_NAME_LOG_SQL (saveOrganizeGroup adds its upsert's EXISTS guard).
+ */
+export const KEPT_NAMES_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, merchant_raw_name, household_day)
+	SELECT 'name', m.raw_name, ? FROM merchants m
+	WHERE m.raw_name IN (SELECT value FROM json_each(?)) AND ${KEPT_NAME_CONDITIONS}`;

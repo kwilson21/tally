@@ -1,5 +1,5 @@
 import { householdToday } from "../dates";
-import { KEPT_NAME_LOG_SQL } from "../db/ai-log";
+import { KEPT_NAMES_LOG_SQL } from "../db/ai-log";
 import {
 	COUNTED_JOINS,
 	countedCategorySql,
@@ -158,24 +158,25 @@ export async function saveOrganizeGroup(
 	}
 	// A merchant gets its rule only while one of its charges still needs a category when this batch starts, so a group
 	// another save filed first keeps its rule. The checks run ahead of the updates that file the charges.
-	// A guessed name a person keeps for each merchant is logged in this batch, just before its merchant's settling
-	// upsert (spec §8.6). The log reads the merchant as the upsert finds it, so it must come first. It has the
+	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
+	// upsert (spec §8.6). The log reads each merchant as its upsert finds it, so it must come first. It has the
 	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
 	const today = displayName ? await householdToday(db) : null;
 	const settles: D1PreparedStatement[] = [];
+	const kept = displayName
+		? names.filter(
+				(merchantKey) => nameSource([displayName], merchantKey) === "tally",
+			)
+		: [];
+	if (kept.length > 0)
+		settles.push(
+			db
+				.prepare(
+					`${KEPT_NAMES_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = m.raw_name)`,
+				)
+				.bind(today, JSON.stringify(kept), displayName),
+		);
 	for (const merchantKey of names) {
-		if (
-			today &&
-			displayName &&
-			nameSource([displayName], merchantKey) === "tally"
-		)
-			settles.push(
-				db
-					.prepare(
-						`${KEPT_NAME_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)`,
-					)
-					.bind(today, merchantKey, displayName, merchantKey),
-			);
 		settles.push(
 			db
 				.prepare(

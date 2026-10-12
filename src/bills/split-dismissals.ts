@@ -23,6 +23,20 @@ export const movePartDismissalsSql = (
 		AND own.status = 'dismissed' AND own.matched_by = 'user')`;
 
 /**
+ * SQL that lifts the Not this one a link replaces, for one bill and period, once the payment is linked: the
+ * automatic dismissal an earlier build left on the payment itself, and a person's own Not this one on its purchase
+ * family, which is the purchase and each of its parts (decision 105). Linking one of a purchase's payments, from the
+ * picker or by Undo, lifts a purchase-wide Not this one for every part of it, and no other payment's. `?1` is the
+ * bill, `?2` the period and `?3` the payment. It runs after the link is in, and lifts nothing unless the payment is
+ * linked for that occurrence.
+ */
+export const liftNotThisOneSql = `DELETE FROM bill_payments WHERE bill_id = ?1 AND period = ?2 AND status = 'dismissed'
+	AND ((matched_by = 'auto' AND transaction_id = ?3) OR (matched_by = 'user' AND transaction_id IN (
+		SELECT id FROM transactions WHERE id = COALESCE((SELECT parent_id FROM transactions WHERE id = ?3), ?3)
+		OR parent_id = COALESCE((SELECT parent_id FROM transactions WHERE id = ?3), ?3))))
+	AND EXISTS (SELECT 1 FROM bill_payments WHERE bill_id = ?1 AND period = ?2 AND transaction_id = ?3 AND status = 'linked')`;
+
+/**
  * SQL that gives each part of `purchase` the purchase's own Not this one, once per bill and period, so every part
  * the purchase has from then on starts with it. Run it after the new parts are in place: saveSplit runs it after a
  * replacement has restored its kept payments, and Change the parts (correctCashSplit) runs it after its inserts.

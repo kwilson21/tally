@@ -13,6 +13,8 @@ export type PaymentPickerCandidate = {
 	amountCents: number;
 	/** An excluded payment can pay a bill, and counts in the budget once linked (spec §6.1 rule 4, §8.5). */
 	excluded?: boolean;
+	/** The person said Not this one to it for this month: it is listed last, under "You said not this one" (#340). */
+	turnedAway?: boolean;
 };
 export type PaymentPickerPeriod = {
 	value: string;
@@ -49,6 +51,36 @@ export function BillMonthExplanation({
 				? `It counts in ${month(countedMonth)}'s spending, not ${bankName}'s. The bank's date stays ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${paymentDate}T00:00:00Z`))}.`
 				: `It counts in ${bankName}'s spending, its bank month.`}
 		</p>
+	);
+}
+
+/** One payment as a radio chip. The first chip in the list is required, so the group needs a choice. */
+function PaymentChip({
+	billId,
+	candidate,
+	index,
+	selectedTransactionId,
+}: {
+	billId: number;
+	candidate: PaymentPickerCandidate;
+	index: number;
+	selectedTransactionId?: number;
+}) {
+	return (
+		<Chip
+			type="radio"
+			name="transaction_id"
+			value={String(candidate.id)}
+			// Nothing is chosen for the person; one required radio makes the group required.
+			required={index === 0}
+			checked={candidate.id === selectedTransactionId}
+			hx-get={`/bills/${billId}/month-explanation`}
+			hx-include="[name='transaction_id'],[name='period']"
+			hx-target="#bill-month-explanation"
+			hx-swap="innerHTML"
+		>
+			{`${candidate.displayName} · ${candidate.dateLabel} · ${formatCents(candidate.amountCents)}${candidate.excluded ? " · Excluded" : ""}`}
+		</Chip>
 	);
 }
 
@@ -94,6 +126,10 @@ export function BillPaymentPicker({
 	// A page that opens on a month with nothing to link shows the empty state alone. Once a payment is listed, or a
 	// month choice has swapped the picker in (rerender), the month choices stay, so another month can still be picked.
 	const monthChoices = candidates.length > 0 || rerender;
+	// A turned-away payment comes last, under its own muted line; each keeps its place in the list, so the first is required.
+	const listed = candidates.map((candidate, index) => ({ candidate, index }));
+	const regular = listed.filter(({ candidate }) => !candidate.turnedAway);
+	const turnedAway = listed.filter(({ candidate }) => candidate.turnedAway);
 	return (
 		<section
 			id="payment-picker"
@@ -124,22 +160,29 @@ export function BillPaymentPicker({
 						<fieldset>
 							<legend>Payment</legend>
 							<div class="mt-1 flex flex-col gap-2">
-								{candidates.map((t, index) => (
-									<Chip
-										type="radio"
-										name="transaction_id"
-										value={String(t.id)}
-										// Nothing is chosen for the person; one required radio makes the group required.
-										required={index === 0}
-										checked={t.id === selectedTransactionId}
-										hx-get={`/bills/${billId}/month-explanation`}
-										hx-include="[name='transaction_id'],[name='period']"
-										hx-target="#bill-month-explanation"
-										hx-swap="innerHTML"
-									>
-										{`${t.displayName} · ${t.dateLabel} · ${formatCents(t.amountCents)}${t.excluded ? " · Excluded" : ""}`}
-									</Chip>
+								{regular.map(({ candidate, index }) => (
+									<PaymentChip
+										billId={billId}
+										candidate={candidate}
+										index={index}
+										selectedTransactionId={selectedTransactionId}
+									/>
 								))}
+								{turnedAway.length ? (
+									<fieldset class="flex flex-col gap-2">
+										<legend class="text-sm text-muted">
+											You said not this one
+										</legend>
+										{turnedAway.map(({ candidate, index }) => (
+											<PaymentChip
+												billId={billId}
+												candidate={candidate}
+												index={index}
+												selectedTransactionId={selectedTransactionId}
+											/>
+										))}
+									</fieldset>
+								) : null}
 							</div>
 						</fieldset>
 					) : (
