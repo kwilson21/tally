@@ -25,6 +25,11 @@ const endsWithRule = (ending: string, display: RegExp) =>
 		(rule) => rule.selector.endsWith(ending) && display.test(rule.body),
 	);
 
+/** The Bills group under a status heading. Each group is one `<section`, so a check reads only that group's own total. */
+const groupUnder = (html: string, heading: string) =>
+	html.split("<section").find((part) => part.includes(`>${heading}</h2>`)) ??
+	"";
+
 /** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
 // A row is found by its label, which may carry the occurrence's amount after " · " (decision 101).
 const occurrenceRow = (html: string, label: string) =>
@@ -110,13 +115,15 @@ describe("Bills", () => {
 			expect(html).toMatch(
 				/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
 			);
-			for (const heading of [
-				/Overdue<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$123\.45<\/span>/,
-				/Due in the next 7 days<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$234\.56<\/span>/,
-				/Upcoming<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$345\.67 this month<\/span>/,
-				/Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$12\.34<\/span>/,
-			])
-				expect(html).toMatch(heading);
+			for (const [status, total] of [
+				["Overdue", "$123.45"],
+				["Due in the next 7 days", "$234.56"],
+				["Upcoming", "$345.67 this month"],
+				["Paid this month", "$12.34"],
+			] as const)
+				expect(groupUnder(html, status)).toContain(
+					`<span class="ml-auto shrink-0">${total}</span>`,
+				);
 		},
 	);
 	it.each([
@@ -179,10 +186,8 @@ describe("Bills", () => {
 			])
 				expect(html.includes(status)).toBe(groups.includes(status));
 			for (const status of groups)
-				expect(html).toMatch(
-					new RegExp(
-						`${status}<\\/h2>[\\s\\S]*?<span class="ml-auto shrink-0">\\$100\\.00`,
-					),
+				expect(groupUnder(html, status)).toContain(
+					'<span class="ml-auto shrink-0">$100.00',
 				);
 		},
 	);
@@ -219,8 +224,9 @@ describe("Bills", () => {
 			];
 			const groups = new Map<string, { total: number; rowTotal: number }>();
 			for (const [, section] of sections) {
+				// The group's total is the only ml-auto span in its section (rows never use it).
 				const heading = section?.match(
-					/<h2[^>]*>[\s\S]*?<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
+					/<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
 				);
 				if (!heading || !section) continue;
 				const title = section.match(
@@ -1029,11 +1035,11 @@ describe("Bills", () => {
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
 		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
-		expect(html).toMatch(
-			/Due in the next 7 days<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$240\.00<\/span>/,
+		expect(groupUnder(html, "Due in the next 7 days")).toContain(
+			'<span class="ml-auto shrink-0">$240.00</span>',
 		);
-		expect(html).toMatch(
-			/Upcoming<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$580\.00 this month<\/span>/,
+		expect(groupUnder(html, "Upcoming")).toContain(
+			'<span class="ml-auto shrink-0">$580.00 this month</span>',
 		);
 		expect(html).toContain("$820 still to pay in October");
 	});
@@ -3098,10 +3104,7 @@ describe("Bills' status headings and inactive bills", () => {
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
-			const group =
-				html
-					.split("<section")
-					.find((part) => part.includes(`>${heading}</h2>`)) ?? "";
+			const group = groupUnder(html, heading);
 			expect(group).toContain(`aria-label="Why? ${topic}"`);
 			expect(group).toMatch(
 				new RegExp(

@@ -64,7 +64,13 @@ export function billCadenceLabel(bill: BillSchedule) {
  * "Quarterly, from Jan 15". A biweekly bill's day is its weekday (`dueDay`), set when it is saved.
  */
 export function billScheduleLabel(bill: BillSchedule) {
-	const anchor = monthDay(bill.anchorMonth ?? 1, bill.dueDay);
+	const month = bill.anchorMonth ?? 1;
+	// A day past the month's end reads as its last day, as the due date clamps it. Year 2000 is a leap year, so
+	// February keeps its 29th.
+	const anchor = monthDay(
+		month,
+		Math.min(bill.dueDay, daysInMonth(2000, month)),
+	);
 	if (bill.frequency === "weekly")
 		return `Weekly, on ${WEEKDAYS[bill.dueDay - 1]}s`;
 	if (bill.frequency === "biweekly")

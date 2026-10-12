@@ -103,7 +103,7 @@ const BILL_STATUSES = [
 	[
 		"overdue",
 		"Overdue",
-		"Its due date has passed and it isn't paid. A monthly, yearly or quarterly bill stays overdue, with its amount set aside, until it's paid or the next one is due. A weekly or every-two-weeks bill stays overdue until it's paid.",
+		"Its due date has passed and it isn't paid. A monthly, yearly or quarterly bill stays overdue, with its amount set aside, until it's paid or the next one is due. A weekly or every-two-weeks bill stays overdue until it's paid, within the month it was due.",
 	],
 	[
 		"due",

@@ -519,8 +519,9 @@ describe("a price that moved after September went overdue", () => {
 	it("shows the monthly share at the bill's current amount, and the overdue total at September's", async () => {
 		const page = await get("/bills");
 		expect(page).toContain("$120 a month in bills");
-		expect(page).toMatch(
-			/Overdue<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$100\.00/,
-		);
+		const overdueGroup =
+			page.split("<section").find((part) => part.includes(">Overdue</h2>")) ??
+			"";
+		expect(overdueGroup).toContain('<span class="ml-auto shrink-0">$100.00');
 	});
 });

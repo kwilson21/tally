@@ -771,6 +771,19 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 		}
 	});
 
+	it("says a weekly or every-two-weeks miss is overdue only within the month it was due", async () => {
+		// billOccurrence drops an earlier month's weekly miss from Overdue, so the page must say the same.
+		const html = billsSection(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		expect(html).toContain(
+			"A weekly or every-two-weeks bill stays overdue until it's paid, within the month it was due.",
+		);
+		expect(html).not.toContain(
+			"A weekly or every-two-weeks bill stays overdue until it's paid. ",
+		);
+	});
+
 	it("says so plainly for a status no bill has", async () => {
 		await env.DB.prepare("DELETE FROM bills").run();
 		const html = billsSection(

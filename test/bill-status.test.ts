@@ -335,6 +335,13 @@ describe("the schedule an inactive bill shows", () => {
 		[{ frequency: "monthly", dueDay: 15 }, "Monthly, on the 15th"],
 		[{ frequency: "monthly", dueDay: 1 }, "Monthly, on the 1st"],
 		[{ frequency: "yearly", dueDay: 15, anchorMonth: 7 }, "Yearly, on Jul 15"],
+		// A day past the anchor month's end reads as that month's last day, as the due date clamps it.
+		[{ frequency: "yearly", dueDay: 30, anchorMonth: 2 }, "Yearly, on Feb 29"],
+		[{ frequency: "yearly", dueDay: 29, anchorMonth: 2 }, "Yearly, on Feb 29"],
+		[
+			{ frequency: "quarterly", dueDay: 31, anchorMonth: 4 },
+			"Quarterly, from Apr 30",
+		],
 		[{ frequency: "weekly", dueDay: 1 }, "Weekly, on Mondays"],
 		[{ frequency: "weekly", dueDay: 7 }, "Weekly, on Sundays"],
 		[{ frequency: "biweekly", dueDay: 5 }, "Every two weeks, on Fridays"],
