@@ -1381,10 +1381,10 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			status: 422,
 			selectionError: error,
 		});
-	// With Select all, Exclude changes exactly the rows the bar counts, so a matched split part is excluded on its own (P81 A); ticked rows keep the edit panel's rule that a part excludes its whole purchase.
+	// With Select all, Exclude changes the matched rows not excluded yet (RETURNING names them), so a matched split part is excluded on its own (P81 A); ticked rows keep the edit panel's rule that a part excludes its whole purchase.
 	const exclude = selection.all
 		? `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
-		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1))`
+		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1)) RETURNING id`
 		: `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
 		WHERE excluded=0 AND (
 			id IN (SELECT value FROM json_each(?1))
@@ -1392,14 +1392,19 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			OR id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
 			OR parent_id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
 		)`;
-	await c.env.DB.prepare(exclude).bind(JSON.stringify(ids), actor(c)).run();
+	const changed = await c.env.DB.prepare(exclude)
+		.bind(JSON.stringify(ids), actor(c))
+		.all<{ id: number }>();
+	// The toast and the bill note count what this Exclude excluded: with Select all a match that was excluded
+	// already is not counted again, and ticked rows count as the bar does.
+	const excluded = selection.all ? changed.results.map((row) => row.id) : ids;
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
-	const paying = await payingBillsCount(c.env.DB, ids);
+	const paying = await payingBillsCount(c.env.DB, excluded);
 	const stillCounts =
 		paying === 0
 			? ""
-			: ids.length === 1
+			: excluded.length === 1
 				? " It still counts while it pays a bill."
 				: paying === 1
 					? " 1 still counts while it pays a bill."
@@ -1408,7 +1413,7 @@ transactions.post("/transactions/select/exclude", async (c) => {
 		c,
 		today,
 		back,
-		`Excluded ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"}.${stillCounts}`,
+		`Excluded ${excluded.length} ${excluded.length === 1 ? "transaction" : "transactions"}.${stillCounts}`,
 	);
 });
 

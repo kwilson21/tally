@@ -1701,6 +1701,52 @@ describe("select several transactions", () => {
 			}
 		});
 
+		it("with Select all, the toast and the bill note count only the rows this Exclude excludes, not matches already excluded (#321)", async () => {
+			const matched = await seedMatches();
+			// Jev excluded 30 of the matches already; the bar still counts them on the default All view.
+			const already = matched.slice(0, 30);
+			await env.DB.prepare(
+				"UPDATE transactions SET excluded=1, excluded_source='jev' WHERE id BETWEEN 5001 AND 5030",
+			).run();
+			// 5001 is excluded already and pays a bill; 5040 is not, and pays one. The note counts 5040 alone.
+			await env.DB.batch([
+				...[9800, 9801].map((id) =>
+					env.DB.prepare(
+						"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (?, 'Club', 1200, 1, 'monthly', 1, 'CLUB')",
+					).bind(id),
+				),
+				...[
+					[9800, 5001],
+					[9801, 5040],
+				].map(([bill, transaction]) =>
+					env.DB.prepare(
+						"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?1, substr(date, 1, 7), ?2, 'user', 'linked' FROM transactions WHERE id = ?2",
+					).bind(bill, transaction),
+				),
+			]);
+			const back = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			expect(await wholeCount([], [], back)).toMatch(/^101 selected</);
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams({ all: "1", back }),
+			);
+			expect(res.status).toBe(200);
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+			expect(trigger.toast.message).toBe(
+				"Excluded 71 transactions. 1 still counts while it pays a bill.",
+			);
+			expect(trigger.announce).toBe(trigger.toast.message);
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (already.includes(row.id))
+					expect(row).toEqual(beforeById.get(row.id));
+				else if (matched.includes(row.id))
+					expect(row).toMatchObject({ excluded: 1, excluded_source: "user" });
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
 		it("opens Set category over the whole set with its all-mode fields, and titles every row it changes", async () => {
 			await seedMatches();
 			const res = await post(
