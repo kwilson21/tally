@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
+import { householdToday } from "../src/dates";
 import {
 	AI_TALLY_SQL,
 	type AiTallyCounts,
@@ -17,6 +18,7 @@ import { tallyExport } from "../src/settings/export";
 import { saveOrganizeGroup } from "../src/transactions/organize";
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
+import { D1_STATEMENT_LIMIT } from "./d1-limits";
 
 // What AI did this month (spec §8.6, decisions 91 and 101): a small log of what Tally's AI applied,
 // with no amounts, counted from the day it ships. The tally under the AI suggestions switches, its Off
@@ -1033,6 +1035,96 @@ describe("what the Jev run and the names write", () => {
 				)
 				.first<{ display_name: string | null }>(),
 		).toEqual({ display_name: null });
+	});
+
+	it("logs a small Organize group's kept guesses under the day it is saved, and no bank name, settled name or unknown merchant", async () => {
+		await db
+			.prepare(
+				`INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES
+				 ('GRP*ONE', 'Group Shop', 'pending', NULL), ('GRP*TWO', 'Group Shop', 'pending', NULL),
+				 ('GRP*BANK', 'GRP*BANK', 'pending', NULL), ('GRP*DONE', 'Group Shop', 'accepted', 'Group Shop')`,
+			)
+			.run();
+		const keys = ["GRP*ONE", "GRP*TWO", "GRP*BANK", "GRP*DONE", "GRP*NEW"];
+		for (const key of keys) await chargeAt(key);
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		expect(
+			await saveOrganizeGroup(
+				db,
+				keys,
+				category?.id as number,
+				"Group Shop",
+				"test",
+			),
+		).toBe(5);
+
+		const day = await householdToday(db);
+		const rows = await db
+			.prepare(
+				"SELECT merchant_raw_name AS name, household_day AS day FROM ai_log WHERE kind = 'name' ORDER BY merchant_raw_name",
+			)
+			.all<{ name: string; day: string }>();
+		expect(rows.results).toEqual([
+			{ name: "GRP*ONE", day },
+			{ name: "GRP*TWO", day },
+		]);
+	});
+
+	it("saves a group of 600 merchants that share one guessed name within D1's statement limit", async () => {
+		await db.batch([
+			db.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+				 SELECT 'BIG SHOP ' || i, 'Big Shop', 'pending' FROM n`,
+			),
+			db
+				.prepare(
+					`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by)
+				 SELECT 1, ?, 650, 'BIG SHOP ' || i, 'test' FROM n`,
+				)
+				.bind(TODAY),
+		]);
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const keys = Array.from({ length: 600 }, (_, i) => `BIG SHOP ${i + 1}`);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		expect(
+			await saveOrganizeGroup(
+				counted,
+				keys,
+				category?.id as number,
+				"Big Shop",
+				"test",
+			),
+		).toBe(600);
+		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
+		expect(await logNames()).toHaveLength(600);
+		const categorized = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'BIG SHOP %' AND category_id = ?",
+			)
+			.bind(category?.id)
+			.first<{ n: number }>();
+		expect(categorized?.n).toBe(600);
 	});
 });
 
