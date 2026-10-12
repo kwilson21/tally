@@ -409,7 +409,12 @@ export async function createFromSuggestion(
 			error: "Tick at least one transaction, or dismiss this suggestion.",
 		};
 	}
-	const leftOut = (results[5]?.results as { id: number }[]) ?? [];
+	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
+	// arrived after the page was drawn, is still cleared by the write above (its NULL confidence sends it to the
+	// night), but it is not named.
+	const leftOut = ((results[5]?.results as { id: number }[]) ?? []).filter(
+		(row) => attached.includes(row.id),
+	);
 	// The write made no category, so the ticks joined one the family already had (or one made during the write).
 	const joined = (results[1]?.meta.changes ?? 0) === 0;
 	// A joined category is named as the family stored it, whatever capitals the suggestion has. It is read after

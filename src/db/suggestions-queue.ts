@@ -13,7 +13,7 @@ import { jevAsksAboutSql, paysBillSql } from "./counted-month";
 import { maybeIncomeConfidenceSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
-import type { NeverSuggestKind } from "./never-suggest";
+import { neverSuggestedSql } from "./never-suggest";
 
 /** A transaction a person is asked about: income, a transfer, or a category guess. */
 export type TransactionSuggestion = {
@@ -86,19 +86,6 @@ const ORDER: SuggestionKind[] = [
 	"name",
 ];
 
-const ruleKey = (kind: NeverSuggestKind, merchantKey: string) =>
-	`${kind}\u0000${merchantKey}`;
-
-/** Every "Never suggest" line, as lookups: a store with a line for a kind is never asked about it. */
-async function neverSuggestLines(db: D1Database): Promise<Set<string>> {
-	const { results } = await db
-		.prepare(
-			"SELECT merchant_key AS merchantKey, kind FROM never_suggest_rules",
-		)
-		.all<{ merchantKey: string; kind: NeverSuggestKind }>();
-	return new Set(results.map((row) => ruleKey(row.kind, row.merchantKey)));
-}
-
 const LABEL_SQL = `m.display_name AS displayName`;
 const JOIN_MERCHANT = `LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}`;
 
@@ -158,13 +145,13 @@ async function incomeSuggestions(
 }
 
 /**
- * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias).
+ * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A store with a "Never suggest" transfer line is never asked (decision 101).
  */
 export const transferAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.transfer_confidence IS NOT NULL
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
-		AND NOT ${paysBillSql(alias)})`;
+		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(merchantKeySql(alias), "transfer")})`;
 
 /**
  * Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`).
@@ -172,7 +159,6 @@ export const transferAskedSql = (alias: string) =>
  */
 async function transferSuggestions(
 	db: D1Database,
-	never: Set<string>,
 ): Promise<{ item: TransactionSuggestion; order: number }[]> {
 	const { results } = await db
 		.prepare(
@@ -183,11 +169,7 @@ async function transferSuggestions(
 		)
 		.all<Candidate & { transferConfidence: number }>();
 	return results
-		.filter(
-			(row) =>
-				isUnsure(row.transferConfidence) &&
-				!never.has(ruleKey("transfer", row.merchantKey)),
-		)
+		.filter((row) => isUnsure(row.transferConfidence))
 		.map((row) => ({
 			order: row.id,
 			item: {
@@ -384,10 +366,9 @@ export async function suggestionQueue(
 	switches?: AiSwitches,
 ): Promise<SuggestionItem[]> {
 	const s = switches ?? (await readAiSwitches(db));
-	const never = await neverSuggestLines(db);
 	const [income, transfer, category, newCategory, names] = await Promise.all([
 		s.income ? incomeSuggestions(db) : [],
-		s.categories ? transferSuggestions(db, never) : [],
+		s.categories ? transferSuggestions(db) : [],
 		s.categories ? categorySuggestions(db) : [],
 		s.categories ? newCategorySuggestions(db) : [],
 		nameSuggestions(db, s),

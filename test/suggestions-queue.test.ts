@@ -552,6 +552,30 @@ describe("transferAskedSql", () => {
 			.all<{ id: number }>();
 		expect(asked.results.map((row) => row.id)).toEqual([plain]);
 	});
+
+	it("never matches a store with a Never suggest transfer line, so a stale Yes or No can't answer it either", async () => {
+		const lined = await transaction({
+			amount: 20000,
+			raw: "NEVER TRANSFER",
+			transferConfidence: 0.5,
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "NEVER TRANSFER",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		const asked = await db
+			.prepare(
+				`SELECT id FROM transactions WHERE ${transferAskedSql("transactions")}`,
+			)
+			.all<{ id: number }>();
+		expect(asked.results.map((row) => row.id)).not.toContain(lined);
+		expect(
+			(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).filter(
+				(item) => item.kind === "transfer",
+			),
+		).toEqual([]);
+	});
 });
 
 describe("incomeAskedSql", () => {

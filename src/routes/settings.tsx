@@ -803,11 +803,13 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	const id = Number(form.get("id")?.toString() ?? "");
+	const merchantKey = String(form.get("merchant_key") ?? "");
+	const kind = String(form.get("kind") ?? "");
 	const search = String(form.get("rules_search") ?? "");
 	const lines = await neverSuggestRules(c.env.DB);
 	const removed =
 		Number.isInteger(id) && id > 0
-			? await removeNeverSuggest(c.env.DB, id)
+			? await removeNeverSuggest(c.env.DB, { id, merchantKey, kind })
 			: null;
 	if (!removed) {
 		// A line that is already gone: a plain form goes back to the rules, as a Remove that worked does.

@@ -876,9 +876,13 @@ describe("syncItem", () => {
 			).run();
 			await syncVenmo(id, "venmo-1", -25);
 			const named = await env.DB.prepare(
-				"SELECT id FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
-			).first<{ id: number }>();
-			await removeNeverSuggest(env.DB, named?.id ?? 0);
+				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+			).first<{ id: number; merchantKey: string; kind: string }>();
+			await removeNeverSuggest(env.DB, {
+				id: named?.id ?? 0,
+				merchantKey: named?.merchantKey ?? "",
+				kind: named?.kind ?? "",
+			});
 			await syncVenmo(id, "venmo-2", -10);
 			await env.DB.prepare(
 				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-2'",

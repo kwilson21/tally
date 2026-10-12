@@ -174,6 +174,13 @@ const row = (sql: string, ...binds: unknown[]) =>
 		.bind(...binds)
 		.first<Record<string, unknown>>();
 
+/** The fields a Never suggest Remove form posts for one line: its id, store and kind (decision 101). */
+const removal = (line: Record<string, unknown> | null) => ({
+	id: String(line?.id),
+	merchant_key: String(line?.merchant_key),
+	kind: String(line?.kind),
+});
+
 /** The flags a Maybe answer could change: a No must leave every one of them as it was (spec §8.6). */
 const moneyState = (id: number) =>
 	row(
@@ -1173,6 +1180,32 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 		);
 	});
 
+	it("doesn't count or send to Jev a row a Never suggest line hides, though the suggestion still holds it", async () => {
+		const ids = await oneOfEach();
+		const asked = fakeJev();
+		const [chewy] = ids.pets;
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('BANFIELD 5', 'new_category', '2026-10-03')",
+			)
+			.run();
+		const { res } = await answerYes(
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: [String(chewy)],
+			},
+			{ JEV_API_KEY: "jev-key" },
+		);
+		expect(res.status).toBe(200);
+		await background();
+		expect(asked).toEqual(["PETSMART 22"]);
+		expect(trigger(res).announce).toContain(
+			"The 1 you left out goes back to Tally to sort again.",
+		);
+	});
+
 	it("schedules nothing without a Jev key", async () => {
 		const ids = await oneOfEach();
 		const asked = fakeJev();
@@ -1399,6 +1432,63 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		expect(
 			await row("SELECT category_id FROM transactions WHERE id = ?", credit),
 		).toMatchObject({ category_id: null });
+	});
+
+	/** Another person says Never suggest a transfer for a store, after the queue was read (decision 101). */
+	const neverTransfer = (merchantKey: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'transfer', '2026-10-03')",
+			)
+			.bind(merchantKey)
+			.run();
+
+	it("a transfer whose store got a Never suggest line after the queue was read is not left out by a Yes", async () => {
+		const transfer = await insertTx({
+			raw: CHASE,
+			amount: 20000,
+			transferConfidence: 0.5,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="transfer-${transfer}"`,
+		);
+		const res = await answer(
+			{ id: `transfer-${transfer}`, answer: "yes" },
+			racing("UPDATE transactions SET excluded = 1", () =>
+				neverTransfer(CHASE),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row(
+				"SELECT excluded, excluded_source FROM transactions WHERE id = ?",
+				transfer,
+			),
+		).toMatchObject({ excluded: 0, excluded_source: null });
+	});
+
+	it("a transfer whose store got a Never suggest line after the queue was read can't take a No either", async () => {
+		const transfer = await insertTx({
+			raw: CHASE,
+			amount: 20000,
+			transferConfidence: 0.5,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="transfer-${transfer}"`,
+		);
+		const res = await answer(
+			{ id: `transfer-${transfer}`, answer: "no" },
+			racing("UPDATE transactions SET transfer_maybe_declined = 1", () =>
+				neverTransfer(CHASE),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row(
+				"SELECT transfer_maybe_declined FROM transactions WHERE id = ?",
+				transfer,
+			),
+		).toMatchObject({ transfer_maybe_declined: 0 });
 	});
 });
 
@@ -1845,10 +1935,12 @@ describe("Settings' Never suggest list", () => {
 		const { html } = await get("/settings");
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
 		expect(textOf(html)).toMatch(/You said No on [A-Z][a-z]{2} \d{1,2}/);
-		const rule = await row("SELECT id FROM never_suggest_rules");
+		const rule = await row(
+			"SELECT id, merchant_key, kind FROM never_suggest_rules",
+		);
 		const removed = await post(
 			"/settings/never-suggest/remove",
-			{ id: String(rule?.id) },
+			removal(rule),
 			true,
 		);
 		expect(trigger(removed.res).toast?.message).toBe(
@@ -1886,14 +1978,16 @@ describe("Settings' Never suggest list", () => {
 			)
 			.bind(VENMO)
 			.run();
-		const rule = await row("SELECT id FROM never_suggest_rules");
+		const rule = await row(
+			"SELECT id, merchant_key, kind FROM never_suggest_rules",
+		);
 		const search = await get("/settings?rules_search=Match");
 		expect(search.html).toMatch(
 			/never-suggest\/remove"[\s\S]*?name="rules_search" value="Match"/,
 		);
 		const scripted = await post(
 			"/settings/never-suggest/remove",
-			{ id: String(rule?.id), rules_search: "Match" },
+			{ ...removal(rule), rules_search: "Match" },
 			true,
 		);
 		expect(textOf(scripted.html)).toContain("merchants matching “Match”");
@@ -1903,9 +1997,11 @@ describe("Settings' Never suggest list", () => {
 			)
 			.bind(VENMO)
 			.run();
-		const again = await row("SELECT id FROM never_suggest_rules");
+		const again = await row(
+			"SELECT id, merchant_key, kind FROM never_suggest_rules",
+		);
 		const plain = await post("/settings/never-suggest/remove", {
-			id: String(again?.id),
+			...removal(again),
 			rules_search: "Match",
 		});
 		expect(plain.res.status).toBe(303);
@@ -1933,22 +2029,22 @@ describe("Settings' Never suggest list", () => {
 		]);
 		// Newest first: Chewy is the first line, so its Remove is the first; Venmo's comes after it.
 		const chewy = await row(
-			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM 1'",
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM 1'",
 		);
 		const first = await post(
 			"/settings/never-suggest/remove",
-			{ id: String(chewy?.id) },
+			removal(chewy),
 			true,
 		);
 		expect(focusedNeverLine(first.html)).toContain(
 			"Never suggest income for Venmo",
 		);
 		const venmo = await row(
-			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
 		);
 		const last = await post(
 			"/settings/never-suggest/remove",
-			{ id: String(venmo?.id) },
+			removal(venmo),
 			true,
 		);
 		expect(last.html).toMatch(
@@ -1973,13 +2069,9 @@ describe("Settings' Never suggest list", () => {
 			"Never suggest income for Venmo",
 		);
 		const venmo = await row(
-			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
 		);
-		await post(
-			"/settings/never-suggest/remove",
-			{ id: String(venmo?.id) },
-			true,
-		);
+		await post("/settings/never-suggest/remove", removal(venmo), true);
 		const empty = await post(
 			"/settings/never-suggest/remove",
 			{ id: "999999" },

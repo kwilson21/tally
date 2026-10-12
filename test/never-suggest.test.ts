@@ -16,6 +16,15 @@ import { parseFilters } from "../src/transactions/filters";
 
 const db = env.DB;
 
+/** The fields a Remove form posts for a line: its id, store and kind. */
+const lineKey = (
+	line?: { id: number; merchantKey: string; kind: string } | null,
+) => ({
+	id: line?.id ?? 0,
+	merchantKey: line?.merchantKey ?? "",
+	kind: line?.kind ?? "",
+});
+
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.prepare("DELETE FROM never_suggest_rules").run();
@@ -86,11 +95,56 @@ describe("never_suggest_rules table", () => {
 			decidedOn: "2026-10-03",
 		});
 		const [rule] = await neverSuggestRules(db);
-		const removed = await removeNeverSuggest(db, rule?.id ?? 0);
+		const removed = await removeNeverSuggest(db, lineKey(rule));
 		expect(removed?.rule.kind).toBe("transfer");
 		expect(removed?.removedCount).toBe(1);
 		expect(await neverSuggestRules(db)).toEqual([]);
-		expect(await removeNeverSuggest(db, rule?.id ?? 0)).toBeNull();
+		expect(await removeNeverSuggest(db, lineKey(rule))).toBeNull();
+	});
+
+	it("a stale Remove whose id now names another store's line removes nothing, and keeps the new line", async () => {
+		await addNeverSuggest(db, {
+			merchantKey: "VENMO",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "CHEWY",
+			kind: "new_category",
+			decidedOn: "2026-10-09",
+		});
+		const [chewy] = await neverSuggestRules(db);
+		expect(chewy?.merchantKey).toBe("CHEWY");
+		await removeNeverSuggest(db, lineKey(chewy));
+		await addNeverSuggest(db, {
+			merchantKey: "PETCO",
+			kind: "transfer",
+			decidedOn: "2026-10-10",
+		});
+		const [petco] = await neverSuggestRules(db);
+		expect(petco?.merchantKey).toBe("PETCO");
+		// The clicked Remove still names Chewy's old line, so it finds nothing even if SQLite reused its id.
+		expect(await removeNeverSuggest(db, lineKey(chewy))).toBeNull();
+		expect(
+			(await neverSuggestRules(db)).map((rule) => rule.merchantKey),
+		).toEqual(["PETCO", "VENMO"]);
+		expect(petco?.id).not.toBe(chewy?.id);
+	});
+
+	it("a live id posted with another kind or another store deletes nothing", async () => {
+		await addNeverSuggest(db, {
+			merchantKey: "VENMO",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		const [rule] = await neverSuggestRules(db);
+		expect(
+			await removeNeverSuggest(db, { ...lineKey(rule), kind: "transfer" }),
+		).toBeNull();
+		expect(
+			await removeNeverSuggest(db, { ...lineKey(rule), merchantKey: "CHEWY" }),
+		).toBeNull();
+		expect(await neverSuggestRules(db)).toEqual([rule]);
 	});
 });
 
@@ -158,7 +212,7 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 		).text();
 		expect(panel).not.toContain("Maybe income");
 		const [rule] = await neverSuggestRules(db);
-		await removeNeverSuggest(db, rule?.id ?? 0);
+		await removeNeverSuggest(db, lineKey(rule));
 		expect((await listed(id))?.incomeConfidence).toBe(0.6);
 		expect((await getTransaction(db, id))?.incomeConfidence).toBe(0.6);
 		expect(await rowHtml(id)).toContain("Maybe income");
@@ -197,7 +251,7 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 		);
 		expect((await listed(petco))?.maybeCategoryName).toBe("new:Pet Care");
 		const [rule] = await neverSuggestRules(db);
-		await removeNeverSuggest(db, rule?.id ?? 0);
+		await removeNeverSuggest(db, lineKey(rule));
 		expect((await getTransaction(db, chewy))?.maybeCategoryName).toBe(
 			"new:Pet Care",
 		);
@@ -271,10 +325,10 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 	it("removing the bank-text line also removes the store-name line of the same kind, and nothing else", async () => {
 		const bank = await db
 			.prepare(
-				"SELECT id FROM never_suggest_rules WHERE merchant_key='VENMO 123' AND kind='income'",
+				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key='VENMO 123' AND kind='income'",
 			)
-			.first<{ id: number }>();
-		const removed = await removeNeverSuggest(db, bank?.id ?? 0);
+			.first<{ id: number; merchantKey: string; kind: string }>();
+		const removed = await removeNeverSuggest(db, lineKey(bank));
 		expect(removed?.rule.kind).toBe("income");
 		expect(removed?.removedCount).toBe(2);
 		expect(await lines()).toEqual(["CHEWY:income", "Venmo:transfer"]);
@@ -284,7 +338,7 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 		const name = (await neverSuggestRules(db)).find(
 			(rule) => rule.merchantKey === "Venmo" && rule.kind === "income",
 		);
-		await removeNeverSuggest(db, name?.id ?? 0);
+		await removeNeverSuggest(db, lineKey(name));
 		expect(await lines()).toEqual(["CHEWY:income", "Venmo:transfer"]);
 	});
 });

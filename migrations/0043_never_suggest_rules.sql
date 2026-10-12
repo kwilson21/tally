@@ -3,7 +3,7 @@
 -- `kind` is the suggestion a Yes can stop: a new category, income or a transfer. A name or a category has
 -- no No, so it never has a row. `decided_on` is the household's day of the answer ("You said No on Oct 3").
 CREATE TABLE never_suggest_rules (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   merchant_key TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('new_category', 'income', 'transfer')),
   decided_on TEXT NOT NULL,

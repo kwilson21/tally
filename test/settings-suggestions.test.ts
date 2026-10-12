@@ -817,6 +817,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await neverLine("Petco", "income", "2026-09-01");
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
 		]);
 		expect(focusedLine(html)).toContain("for Petco");
 	});
@@ -830,6 +832,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await neverLine("Petco", "income", "2026-10-02");
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("VENMO 123"))],
+			["merchant_key", "VENMO 123"],
+			["kind", "income"],
 		]);
 		const stored = await db
 			.prepare(
@@ -845,6 +849,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await neverLine("Chewy", "income", "2026-09-01");
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
 		]);
 		expect(
 			html
@@ -858,6 +864,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await linked();
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
 		]);
 		expect(html).toMatch(
 			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
@@ -870,6 +878,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		await neverLine("Chewy", "income", "2026-09-01");
 		const { res } = await post("/settings/never-suggest/remove", [
 			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
 		]);
 		expect(trigger(res).toast?.message).toBe(
 			"Removed. Tally can suggest that again.",
@@ -877,6 +887,23 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 		expect(trigger(res).announce).toContain(
 			"Never suggest income for Venmo is gone.",
 		);
+	});
+
+	it("a Remove with a live id but another kind changes nothing, and answers as stale", async () => {
+		await linked();
+		const { res, html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "transfer"],
+		]);
+		expect(trigger(res).toast).toBeUndefined();
+		expect(trigger(res).announce).toBe("Tally's rules list updated.");
+		expect(textOf(html)).toContain("Never suggest income for Venmo");
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM never_suggest_rules")
+				.first<{ n: number }>(),
+		).toEqual({ n: 2 });
 	});
 });
 
@@ -947,6 +974,8 @@ describe("the Band follows the Settings swaps that change the queue (#195)", () 
 			.first<{ id: number }>();
 		const { html } = await post("/settings/never-suggest/remove", [
 			["id", String(line?.id)],
+			["merchant_key", "CHEWY.COM"],
+			["kind", "new_category"],
 		]);
 		expect(html).toMatch(/<div id="names-band">[\s\S]*?1 suggestion to check/);
 	});

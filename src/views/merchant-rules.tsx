@@ -240,6 +240,12 @@ export function NeverSuggestList({
 									hx-swap="outerHTML"
 								>
 									<input type="hidden" name="id" value={String(rule.id)} />
+									<input
+										type="hidden"
+										name="merchant_key"
+										value={rule.merchantKey}
+									/>
+									<input type="hidden" name="kind" value={rule.kind} />
 									{search && (
 										<input type="hidden" name="rules_search" value={search} />
 									)}

@@ -120,15 +120,19 @@ export async function addNeverSuggest(
  * Removes the clicked line and returns it, so the toast can name it, with how many lines went. The store's
  * other lines of the same kind go too: the store-name line and the bank-text lines of its charges, under
  * every key the store goes by (decision 101), so a later sync can't copy a removed line back. A stale Remove
- * (the line is gone already) returns null and changes nothing.
+ * changes nothing and returns null: the line is gone already, or its id now names another store's or kind's
+ * line (SQLite can reuse a deleted id), so the form's store and kind must match the line too.
  */
 export async function removeNeverSuggest(
 	db: D1Database,
-	id: number,
+	{ id, merchantKey, kind }: { id: number; merchantKey: string; kind: string },
 ): Promise<{ rule: NeverSuggestRule; removedCount: number } | null> {
+	if (!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind)) return null;
 	const rule = await db
-		.prepare(`${RULE_SELECT} WHERE r.id = ?`)
-		.bind(id)
+		.prepare(
+			`${RULE_SELECT} WHERE r.id = ? AND r.merchant_key = ? AND r.kind = ?`,
+		)
+		.bind(id, merchantKey, kind)
 		.first<Row>();
 	if (!rule) return null;
 	const result = await db
