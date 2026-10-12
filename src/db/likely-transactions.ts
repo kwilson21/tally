@@ -1,6 +1,7 @@
 // The transactions that might belong in a category a person has just made from one transaction (spec §8.4,
 // decision 76). Same-merchant rows come ticked; Tally's guesses come unticked, and only for a name Tally
 // suggested for them (decision 30). Nothing moves until a person adds them (addLikely).
+import { STILL_UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { monthsBefore } from "../dates";
 import { sameName } from "../settings/category-form";
 import { shownName } from "../transactions/name-suggestions";
@@ -68,7 +69,7 @@ const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amou
 	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},
 	rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate,
 	${paysBillSql("t")} AS paysBill, ${BILL_NAME_COLUMN}, ${COUNTS_IN_MONTH_COLUMN},
-	t.split_removed_from_cents AS splitRemovedFromCents,
+	t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 	t.pending AS pending, ${sameMerchantSql("t", "src")} AS sameMerchant
 	FROM transactions t ${COUNTED_JOINS}
 	${MAYBE_CATEGORY_JOINS}
@@ -241,7 +242,7 @@ export async function addLikely(
 	const result = await db
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
-				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, updated_by = ?6, updated_at = datetime('now')
+				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?6, updated_at = datetime('now')
 			WHERE category_id IS NULL AND EXISTS (SELECT 1 FROM categories WHERE id = ?5 AND archived = 0) AND id IN (
 				SELECT t.id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
 				AND t.id IN (SELECT value FROM json_each(?7)))`,

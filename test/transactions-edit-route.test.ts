@@ -45,6 +45,43 @@ beforeEach(async () => {
 	)?.id as number;
 });
 
+describe("a bank change's bill names end when a person sets the category (decision 99)", () => {
+	it.each([
+		["changes", "2"],
+		["confirms", "1"],
+	])(
+		"clears the names when the edit panel %s the category of a purchase the bank took out of its split",
+		async (_, category) => {
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id = 1, category_source = 'jev', split_removed_from_cents = 5000, split_removed_bills = ? WHERE id = ?",
+			)
+				.bind('[{"name":"Water","period":"2026-09"}]', bakery)
+				.run();
+
+			await post(`/transactions/${bakery}`, {
+				merchant: "Local Bakery",
+				note: "",
+				back: "/transactions",
+				category,
+			});
+
+			expect(
+				await env.DB.prepare(
+					"SELECT split_removed_from_cents, split_removed_bills FROM transactions WHERE id = ?",
+				)
+					.bind(bakery)
+					.first(),
+			).toEqual({ split_removed_from_cents: null, split_removed_bills: null });
+			const data = (await (
+				await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+			).json()) as { transactions: Record<string, unknown>[] };
+			expect(data.transactions.find((row) => row.id === bakery)).toMatchObject({
+				split_removed_bills: null,
+			});
+		},
+	);
+});
+
 describe("row links", () => {
 	it("open the edit sheet for that row, keeping the list's filters", async () => {
 		const { html } = await get("/transactions?uncategorized=1");

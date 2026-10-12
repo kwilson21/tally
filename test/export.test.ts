@@ -388,6 +388,7 @@ describe("data exports", () => {
 				"raw_name",
 				"refund_of_id",
 				"refund_unlinked_purchase_date",
+				"split_removed_bills",
 				"split_removed_from_cents",
 				"transfer_confidence",
 				"updated_at",

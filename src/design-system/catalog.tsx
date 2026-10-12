@@ -2168,7 +2168,7 @@ function Categorization() {
 				components={["RuleOffer", "Button", "Icon"]}
 				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
 			>
-				<div hx-ignore class="max-w-xl">
+				<div inert class="max-w-xl">
 					<RuleOffer
 						value={{
 							merchantKey: "COSTCO",
