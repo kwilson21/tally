@@ -548,7 +548,8 @@ howItWorks.get("/how-it-works", async (c) => {
 							overdue until it is paid, and one from an earlier month says “Not
 							paid” and is no longer set aside. A missed monthly, yearly or
 							quarterly occurrence stays overdue until it is paid or the next
-							one is due. Safe to spend sets aside every due or overdue
+							one is due. A due date from before the day a bill was added is not
+							counted as missed. Safe to spend sets aside every due or overdue
 							occurrence that is unpaid.
 						</li>
 						<li>
