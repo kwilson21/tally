@@ -256,7 +256,7 @@ describe("data exports", () => {
 				"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (1, '2020-01-01', 12345)",
 			),
 			env.DB.prepare(
-				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (1, 'Internet', 5000, 1, 'monthly', 'ISP')",
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name, added_on) VALUES (1, 'Internet', 5000, 1, 'monthly', 'ISP', '2026-09-01')",
 			),
 			env.DB.prepare(
 				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) VALUES (1, '2026-09', 5000)",
@@ -401,6 +401,7 @@ describe("data exports", () => {
 			],
 			bills: [
 				"active",
+				"added_on",
 				"amount_cents",
 				"anchor_month",
 				"anchor_date",
@@ -439,6 +440,10 @@ describe("data exports", () => {
 				table,
 			).toEqual([...columns].sort());
 		}
+		expect((data.bills as object[])[0]).toMatchObject({
+			id: 1,
+			added_on: "2026-09-01",
+		});
 		expect((data.documents as object[])[0]).toEqual({
 			filename: "statement.pdf",
 			uploaded_at: "2026-09-12 10:30:00",
