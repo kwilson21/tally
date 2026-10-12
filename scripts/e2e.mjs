@@ -537,6 +537,8 @@ await goto(`${BASE}/transactions?uncategorized=1`, {
 await page.getByRole("link", { name: "Select" }).click();
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 const selectAll = page.getByRole("link", { name: /^Select all \d+$/ });
+// The tick's count reply swaps this link out, so wait for that reply before focusing the link (#438).
+await page.getByText("1 selected", { exact: true }).waitFor();
 await selectAll.focus();
 await page.keyboard.press("Enter");
 await selectAll.waitFor({ state: "detached" });
