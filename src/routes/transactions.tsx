@@ -1362,20 +1362,18 @@ transactions.post("/transactions/select/exclude", async (c) => {
 			status: 422,
 			selectionError: error,
 		});
-	// As in the edit panel (saveEdit): a split is one bank transaction, so excluding a part
-	// excludes the purchase and all its parts. Rows already excluded keep who excluded them.
-	// One statement for every row the selection holds (#321).
-	await c.env.DB.prepare(
-		`UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+	// With Select all, Exclude changes exactly the rows the bar counts, so a matched split part is excluded on its own (P81 A); ticked rows keep the edit panel's rule that a part excludes its whole purchase.
+	const exclude = selection.all
+		? `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
+		WHERE excluded=0 AND id IN (SELECT value FROM json_each(?1))`
+		: `UPDATE transactions SET excluded=1, excluded_source='user', updated_by=?2, updated_at=datetime('now')
 		WHERE excluded=0 AND (
 			id IN (SELECT value FROM json_each(?1))
 			OR parent_id IN (SELECT value FROM json_each(?1))
 			OR id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
 			OR parent_id IN (SELECT parent_id FROM transactions WHERE id IN (SELECT value FROM json_each(?1)) AND parent_id IS NOT NULL)
-		)`,
-	)
-		.bind(JSON.stringify(ids), actor(c))
-		.run();
+		)`;
+	await c.env.DB.prepare(exclude).bind(JSON.stringify(ids), actor(c)).run();
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
 	const paying = await payingBillsCount(c.env.DB, ids);

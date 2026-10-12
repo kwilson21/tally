@@ -1662,6 +1662,44 @@ describe("select several transactions", () => {
 			}
 		});
 
+		it("with Select all, Exclude changes only the rows the bar counts, so a matched split part is excluded on its own (P81 A)", async () => {
+			await splitParent();
+			await env.DB.prepare(
+				"UPDATE transactions SET category_id=2, category_source='user' WHERE id=990",
+			).run();
+			const back = "/transactions?month=all&category=2";
+			const matched = new Set(
+				(
+					await env.DB.prepare(
+						"SELECT id FROM transactions WHERE is_split=0 AND category_id=2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id),
+			);
+			const before = (await snapshot()) as SnapshotRow[];
+			const counted = Number(
+				(await wholeCount([], [], back)).match(/^(\d+) selected/)?.[1],
+			);
+			expect(counted).toBe(matched.size);
+			const res = await post(
+				"/transactions/select/exclude",
+				new URLSearchParams({ all: "1", back }),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe(`Excluded ${counted} transactions.`);
+			const after = (await snapshot()) as SnapshotRow[];
+			expect(after.find((row) => row.id === 990)).toMatchObject({
+				excluded: 1,
+				excluded_source: "user",
+			});
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of after) {
+				if (matched.has(row.id)) expect(row.excluded).toBe(1);
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
 		it("opens Set category over the whole set with its all-mode fields, and titles every row it changes", async () => {
 			await seedMatches();
 			const res = await post(
