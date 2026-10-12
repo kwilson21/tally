@@ -1,5 +1,9 @@
 import type { Child } from "hono/jsx";
-import { NO_SELECTION, type Selection } from "../transactions/selection";
+import {
+	NO_SELECTION,
+	type Selection,
+	unique,
+} from "../transactions/selection";
 import { Button } from "./button";
 import { Icon } from "./icons";
 
@@ -56,25 +60,31 @@ export const NOT_ON_PAGE_FIELD = "not-on-page";
 export const TICKS_INCLUDE = { "hx-include": TICKS };
 
 /**
- * The selection as address parameters, each only when it is set: the ticks, the all-mode flag, and the rows
- * unticked from the whole set (#321). Each is written in the address, so a reload keeps the selection.
+ * The selection as address parameters, each only when it is set: the ticks and the held ticks as `ids` (each
+ * once), the all-mode flag, and the rows unticked from the whole set (#321). Each is written in the address, so
+ * a reload keeps the selection, and an address read sorts a held tick back into place (settle).
  */
-export const selectionQuery = (selection: Selection) =>
-	`${selection.ticks.length ? `&ids=${selection.ticks.join(",")}` : ""}${selection.all ? "&all=1" : ""}${selection.all && selection.unticked.length ? `&unticked=${selection.unticked.join(",")}` : ""}`;
+export const selectionQuery = (selection: Selection) => {
+	const ids = unique([...selection.ticks, ...selection.held]);
+	return `${ids.length ? `&ids=${ids.join(",")}` : ""}${selection.all ? "&all=1" : ""}${selection.all && selection.unticked.length ? `&unticked=${selection.unticked.join(",")}` : ""}`;
+};
 
 /** The select-mode list at `back` (the list's own address), with this selection. */
 export const selectModeHref = (back: string, selection: Selection) =>
 	`${back}${back.includes("?") ? "&" : "?"}select=1${selectionQuery(selection)}`;
 
 /**
- * The all-mode fields a form posts: the flag and each row unticked from the set (#321). The page's own
- * rows are read from their boxes, so these are for the rows off the page.
+ * The all-mode fields a form posts: the flag, each tick the set holds (`held`), and each row unticked from the
+ * set (#321). The page's own rows are read from their boxes, so these are for the rows off the page.
  */
 export function SelectionFields({ selection }: { selection: Selection }) {
 	if (!selection.all) return null;
 	return (
 		<>
 			<input type="hidden" name="all" value="1" />
+			{selection.held.map((id) => (
+				<input type="hidden" name="held" value={id} />
+			))}
 			{selection.unticked.map((id) => (
 				<input type="hidden" name="unticked" value={id} />
 			))}
@@ -195,15 +205,17 @@ export function SelectAllOnPage({
 		all: selection.all,
 		unselected,
 	});
-	// Each id once: the ticks, then this page's rows that aren't ticked yet (the address both forms share).
+	// Each id once: the ticks, the held ones, then this page's rows that aren't ticked yet (the address both forms share).
 	const pageAddress = selectModeHref(back, {
-		ticks: [...new Set([...selection.ticks, ...pageIds])],
+		ticks: unique([...selection.ticks, ...selection.held, ...pageIds]),
+		held: [],
 		all: false,
 		unticked: [],
 	});
 	// The whole set, with every tick kept and no unticked rows: the link ticks everything the filters match.
 	const wholeAddress = selectModeHref(back, {
 		ticks: selection.ticks,
+		held: selection.held,
 		all: true,
 		unticked: [],
 	});
@@ -240,7 +252,7 @@ export function SelectAllOnPage({
 					href={wholeAddress}
 					class="-mr-2"
 					// As the page link: the all-mode flag rides in the request, and the ticks and the fields come as parameters.
-					hx-get={`${selectModeHref(back, { ticks: [], all: true, unticked: [] })}&focus=${FOCUS_SET_CATEGORY}`}
+					hx-get={`${selectModeHref(back, { ticks: [], held: [], all: true, unticked: [] })}&focus=${FOCUS_SET_CATEGORY}`}
 					{...LIST_LOAD_PAUSE}
 					hx-include={TICKS}
 					hx-sync="#filters:replace"

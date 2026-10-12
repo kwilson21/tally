@@ -377,8 +377,10 @@ async function renderList(
 	// A tick to a row that is gone, or is now a split, drops out here, whichever caller drew the list (#350).
 	const offIds = new Set(offPage.map((row) => row.id));
 	const ticks = settled.ticks.filter((id) => onPage.has(id) || offIds.has(id));
+	// Held ticks are rows the filters match, so they exist: they are not filtered by the gone-row rule above.
 	const current: Selection = {
 		ticks,
+		held: settled.held,
 		all: settled.all,
 		unticked: settled.unticked,
 	};
@@ -997,6 +999,7 @@ transactions.get("/transactions/select/count", async (c) => {
 	const selection = settle(
 		{
 			ticks: read.ticks,
+			held: read.held,
 			all: read.all,
 			unticked: read.all
 				? unticksFrom(read.hidden, read.ids, read.pageIds)
@@ -1075,12 +1078,14 @@ function selectionFields(fields: SelectionReadable) {
 		ticks: ticksFrom(ids, all, onPage),
 		/** The rows unticked from the whole set, as the hidden fields and the address carry them. */
 		hidden: parseIds(fields.getAll("unticked")),
+		/** The ticks the whole set also holds, as the hidden fields and the address carry them (#350). */
+		held: parseIds(fields.getAll("held")),
 	};
 }
 
 /**
- * The selection a request means, before the filters settle it (#321): its ticks, as selectable rows (a tick
- * to a gone or split row drops out, #350), and in all mode the rows unticked from the set. `pageLink` also
+ * The selection a request means, before the filters settle it (#321): its ticks and held ticks, as selectable rows
+ * (a tick to a gone or split row drops out, #350), and in all mode the rows unticked from the set. `pageLink` also
  * ticks the page's rows (Select all's page link); `wholeAgain` ticks the whole set again, clearing the unticks.
  */
 async function requestedSelection(
@@ -1090,9 +1095,17 @@ async function requestedSelection(
 ): Promise<Selection> {
 	const ids = [...read.ticks, ...(pageLink ? (read.pageIds ?? []) : [])];
 	const ticks = await selectableTickIds(db, [...new Set(ids)]);
-	if (!read.all) return { ticks, all: false, unticked: [] };
+	const held = await selectableTickIds(db, read.held);
+	if (!read.all)
+		return {
+			ticks: [...new Set([...ticks, ...held])],
+			held: [],
+			all: false,
+			unticked: [],
+		};
 	return {
 		ticks,
+		held,
 		all: true,
 		unticked: wholeAgain
 			? []

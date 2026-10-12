@@ -1970,7 +1970,12 @@ function Rows() {
 						<SelectionActionBar
 							count={3}
 							notOnPage={0}
-							selection={{ ticks: [101, 103, 104], all: false, unticked: [] }}
+							selection={{
+								ticks: [101, 103, 104],
+								held: [],
+								all: false,
+								unticked: [],
+							}}
 							unselected={109}
 							total={112}
 							words="September"
@@ -1984,7 +1989,12 @@ function Rows() {
 						<SelectionActionBar
 							count={25}
 							notOnPage={0}
-							selection={{ ticks: SAMPLE_PAGE_IDS, all: false, unticked: [] }}
+							selection={{
+								ticks: SAMPLE_PAGE_IDS,
+								held: [],
+								all: false,
+								unticked: [],
+							}}
 							unselected={87}
 							total={112}
 							words="September"
@@ -1998,7 +2008,7 @@ function Rows() {
 						<SelectionActionBar
 							count={112}
 							notOnPage={0}
-							selection={{ ticks: [], all: true, unticked: [] }}
+							selection={{ ticks: [], held: [], all: true, unticked: [] }}
 							unselected={0}
 							total={112}
 							words="September"
@@ -2014,6 +2024,7 @@ function Rows() {
 							notOnPage={0}
 							selection={{
 								ticks: [],
+								held: [],
 								all: true,
 								unticked: [101],
 							}}
@@ -2032,6 +2043,7 @@ function Rows() {
 							notOnPage={0}
 							selection={{
 								ticks: [],
+								held: [],
 								all: true,
 								unticked: [101],
 							}}
@@ -2048,7 +2060,7 @@ function Rows() {
 						<SelectionActionBar
 							count={0}
 							notOnPage={0}
-							selection={{ ticks: [], all: false, unticked: [] }}
+							selection={{ ticks: [], held: [], all: false, unticked: [] }}
 							unselected={112}
 							total={112}
 							words="September"
@@ -2065,6 +2077,7 @@ function Rows() {
 							notOnPage={3}
 							selection={{
 								ticks: [101, ...OFF_PAGE_IDS.slice(0, 3)],
+								held: [],
 								all: false,
 								unticked: [],
 							}}
@@ -2090,6 +2103,7 @@ function Rows() {
 							notOnPage={3}
 							selection={{
 								ticks: [101, ...OFF_PAGE_IDS.slice(0, 3)],
+								held: [],
 								all: false,
 								unticked: [],
 							}}
@@ -2116,6 +2130,7 @@ function Rows() {
 							notOnPage={76}
 							selection={{
 								ticks: [...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS],
+								held: [],
 								all: false,
 								unticked: [],
 							}}
@@ -2147,6 +2162,7 @@ function Rows() {
 									ticks: TRANSACTION_ROWS.slice(1, 2).map(
 										(state) => state.row.id,
 									),
+									held: [],
 									all: false,
 									unticked: [],
 								}}

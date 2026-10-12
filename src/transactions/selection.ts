@@ -5,13 +5,23 @@
 export type Selection = {
 	/** Ticked rows, each once. In "all" mode, only those the filters don't match: the set holds the rest. */
 	ticks: number[];
+	/**
+	 * Ticks the whole set also holds, each once: kept so a tick outlives a filter change (#350). Empty once settled
+	 * outside "all" mode, where they fold into `ticks`.
+	 */
+	held: number[];
 	/** Every selectable row the filters match is selected, except `unticked` (decision 80). */
 	all: boolean;
 	/** Rows unticked from the whole set. Empty unless `all`. */
 	unticked: number[];
 };
 
-export const NO_SELECTION: Selection = { ticks: [], all: false, unticked: [] };
+export const NO_SELECTION: Selection = {
+	ticks: [],
+	held: [],
+	all: false,
+	unticked: [],
+};
 
 /**
  * The rows unticked from the set, read from the page's boxes: a row on the page is unticked when its box is not
@@ -46,20 +56,35 @@ export function ticksFrom(
 }
 
 /**
- * The selection once the rows the filters match are known. In "all" mode a tick on a matched row is already
- * selected by the set, so it is dropped from the ticks; the unticked rows stay. Idempotent.
+ * The selection once the rows the filters match are known. In "all" mode a tick on a matched row is held by the
+ * set (`held`), a held row the filters no longer match is a tick again, and a row unticked from the set is in
+ * neither (unticking ends a tick). Outside "all" mode held folds into the ticks. Idempotent.
  */
 export function settle(
 	selection: Selection,
 	matched: ReadonlySet<number>,
 ): Selection {
+	const everyTick = [...selection.ticks, ...selection.held];
 	if (!selection.all)
-		return { ticks: selection.ticks, all: false, unticked: [] };
+		return {
+			ticks: unique(everyTick),
+			held: [],
+			all: false,
+			unticked: [],
+		};
+	const off = new Set(selection.unticked);
+	const keep = (id: number) => !off.has(id);
 	return {
-		ticks: selection.ticks.filter((id) => !matched.has(id)),
+		ticks: unique(everyTick.filter((id) => !matched.has(id) && keep(id))),
+		held: unique(everyTick.filter((id) => matched.has(id) && keep(id))),
 		all: true,
 		unticked: selection.unticked,
 	};
+}
+
+/** Each id once, in the order first given. */
+export function unique(ids: number[]): number[] {
+	return [...new Set(ids)];
 }
 
 /** The rows a settled selection acts on: in "all" mode the matches less the unticked rows, then the ticks. */
