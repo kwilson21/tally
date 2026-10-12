@@ -149,6 +149,16 @@ describe("a part-paid rent on its page and in its picker", () => {
 		expect(await linkedIds()).toEqual([9520, 9522]);
 	});
 
+	it("a payment already linked to a part-paid month says so, and links nothing new", async () => {
+		const res = await post(`/bills/${RENT}/link`, {
+			transaction_id: "9520",
+			period: PERIOD,
+			opened_period: PERIOD,
+		});
+		expect(await res.text()).toContain("That payment is already linked.");
+		expect(await linkedIds()).toEqual([9520]);
+	});
+
 	it("the picker's month choices keep a part-paid month, and drop a paid one", async () => {
 		const part = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
 		expect(part).toContain(`value="${PERIOD}"`);
