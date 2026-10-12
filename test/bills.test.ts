@@ -1559,6 +1559,152 @@ describe("Bills", () => {
 		});
 	});
 
+	// Choosing a month swaps the picker into the page (#323): the response must be the picker alone, not a second
+	// copy of the page (a second <main>, #announcer, skip link and sidebar) nested in it.
+	describe("choosing a month in Link a payment", () => {
+		const period = "2026-10";
+		const pickerFor = (headers: Record<string, string> = {}, chosen = period) =>
+			exports.default.fetch(
+				`http://tally.test/bills/1/occurrences/${chosen}/link`,
+				{ headers },
+			);
+		// What the vendored htmx 4 sends when a month chip (inside section#payment-picker) asks for its picker.
+		const monthChipRequest = {
+			"HX-Request": "true",
+			"HX-Target": "section#payment-picker",
+		};
+		const pickerSection = (html: string) =>
+			html.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
+
+		beforeEach(async () => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+			await resetDemo(env.DB, "2026-10-10");
+			await env.DB.batch([
+				env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+				env.DB.prepare(
+					"UPDATE bills SET frequency='monthly',due_day=15,anchor_month=NULL,anchor_date=NULL,amount_cents=1500,merchant_raw_name='STREAM CO',merchant_raw_text=0 WHERE id=1",
+				),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9960,1,'2026-10-12',1500,'STREAM CO'),(9961,1,'2026-10-13',1400,'STREAM CO')",
+				),
+			]);
+		});
+		afterEach(() => vi.useRealTimers());
+
+		it("answers a month chip with only the picker, for htmx 4's real HX-Target header", async () => {
+			const res = await pickerFor(monthChipRequest);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html.trimStart().startsWith('<section id="payment-picker"')).toBe(
+				true,
+			);
+			expect(html).not.toContain("<html");
+			expect(html).not.toContain("<main");
+			expect(html).not.toContain('id="announcer"');
+			expect(html).not.toContain('id="toasts"');
+			expect(html.match(/id="payment-picker"/g)).toHaveLength(1);
+		});
+
+		it("leaves one main, one announcer and one picker once the swap puts the picker into the page", async () => {
+			const page = await (await pickerFor()).text();
+			const fragment = await (await pickerFor(monthChipRequest)).text();
+			const swapped = page.replace(pickerSection(page), () => fragment);
+			expect(swapped.match(/<main/g)).toHaveLength(1);
+			expect(swapped.match(/id="announcer"/g)).toHaveLength(1);
+			expect(swapped.match(/id="payment-picker"/g)).toHaveLength(1);
+		});
+
+		it("keeps focus on the chosen month and does not autofocus the section on a re-render", async () => {
+			const html = await (await pickerFor(monthChipRequest)).text();
+			const section = html.match(/<section[^>]*>/)?.[0] ?? "";
+			expect(section).not.toContain("autofocus");
+			const focused = html.match(/<input[^>]*autofocus[^>]*>/g) ?? [];
+			expect(focused).toHaveLength(1);
+			expect(focused[0]).toContain(`name="period" value="${period}"`);
+		});
+
+		it("still autofocuses the section when the page opens on its picker", async () => {
+			const res = await pickerFor();
+			const page = await res.text();
+			expect(page.match(/<section id="payment-picker"[^>]*>/)?.[0]).toContain(
+				"autofocus",
+			);
+			expect(pickerSection(page)).not.toMatch(/<input[^>]*autofocus/);
+			// A full page open announces nothing; only a month choice's swap does.
+			const trigger = res.headers.get("HX-Trigger");
+			expect(trigger === null ? {} : JSON.parse(trigger)).not.toHaveProperty(
+				"announce",
+			);
+		});
+
+		it("announces the new candidate count once, through the announcer", async () => {
+			const res = await pickerFor(monthChipRequest);
+			const html = await res.text();
+			const count = (html.match(/name="transaction_id" value="/g) ?? []).length;
+			expect(count).toBeGreaterThanOrEqual(2);
+			// The picker arrives whole, so a live line inside it isn't reliably spoken: the count goes to the announcer only.
+			expect(html).not.toContain(`${count} payments to link`);
+			expect(html).not.toContain("payments to link");
+			expect(html).toContain(
+				'<div id="bill-month-explanation" aria-live="polite">',
+			);
+			const line =
+				html.match(
+					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
+				)?.[1] ?? "";
+			expect(line).not.toContain('class="sr-only"');
+			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+				announce: `${count} payments to link`,
+			});
+		});
+
+		it("keeps the month choices, with focus on the chosen one, when that month has no payments to link", async () => {
+			// Income can't pay a bill, so flagging everything within 30 days of November's due date (Nov 15) leaves no payment.
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income=1 WHERE date BETWEEN '2026-10-16' AND '2026-12-15'",
+			).run();
+			const chosen = "2026-11";
+			const otherMonth = await (await pickerFor(monthChipRequest)).text();
+			const res = await pickerFor(monthChipRequest, chosen);
+			expect(res.status).toBe(200);
+			const html = await res.text();
+			expect(html.match(/name="transaction_id"/g)).toBeNull();
+			expect(html).toContain(`name="period" value="${chosen}"`);
+			expect(html.match(/name="period" value="/g)).toHaveLength(
+				otherMonth.match(/name="period" value="/g)?.length ?? -1,
+			);
+			const focused = html.match(/<input[^>]*autofocus[^>]*>/g) ?? [];
+			expect(focused).toHaveLength(1);
+			expect(focused[0]).toContain(`name="period" value="${chosen}"`);
+			// The visible empty state says it once; the count reaches screen readers through the announcer only.
+			expect(html.match(/No payments to link/g)).toHaveLength(1);
+			expect(html).toContain(
+				'<div id="bill-month-explanation" aria-live="polite">',
+			);
+			const line =
+				html.match(
+					/<div id="bill-month-explanation" aria-live="polite">([\s\S]*?)<\/div>/,
+				)?.[1] ?? "";
+			expect(line).not.toContain("No payments to link");
+			expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+				announce: "No payments to link",
+			});
+		});
+
+		it("shows only the empty state when the page opens on a month with no payments to link", async () => {
+			// The same setup as above: nothing within 30 days of November's due date can pay the bill.
+			await env.DB.prepare(
+				"UPDATE transactions SET flag_income=1 WHERE date BETWEEN '2026-10-16' AND '2026-12-15'",
+			).run();
+			const page = await (await pickerFor({}, "2026-11")).text();
+			const section = pickerSection(page);
+			expect(section).toContain("No payments to link");
+			expect(section).not.toContain('name="period"');
+			expect(section).not.toContain('id="bill-month-explanation"');
+		});
+	});
+
 	it("refreshes candidates and explanation when the chosen month changes", async () => {
 		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		await env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1").run();

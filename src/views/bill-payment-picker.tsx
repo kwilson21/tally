@@ -19,6 +19,12 @@ export type PaymentPickerPeriod = {
 	label: string;
 };
 
+/** The count a month choice announces: "2 payments to link", or none. */
+export const paymentCountSentence = (count: number) =>
+	count === 0
+		? "No payments to link"
+		: `${count} ${count === 1 ? "payment" : "payments"} to link`;
+
 const month = (value: string) =>
 	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
 		new Date(`${value}-01T00:00:00Z`),
@@ -57,6 +63,7 @@ export function BillPaymentPicker({
 	candidates,
 	periods,
 	selectedTransactionId,
+	rerender = false,
 }: {
 	billId: number;
 	billName: string;
@@ -67,6 +74,8 @@ export function BillPaymentPicker({
 	candidates: PaymentPickerCandidate[];
 	periods: PaymentPickerPeriod[];
 	selectedTransactionId?: number;
+	/** True when a month chip swapped this picker in: focus stays on the chosen month, not the section. */
+	rerender?: boolean;
 }) {
 	const action = `/bills/${billId}/link`;
 	const windowDays = manualLinkWindowDays(bill.frequency);
@@ -75,11 +84,21 @@ export function BillPaymentPicker({
 	const selectedPayment = candidates.find(
 		(candidate) => candidate.id === selectedTransactionId,
 	);
+	const emptyState = (
+		<EmptyState
+			kind="search"
+			sentence="No payments to link"
+			hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
+		/>
+	);
+	// A page that opens on a month with nothing to link shows the empty state alone. Once a payment is listed, or a
+	// month choice has swapped the picker in (rerender), the month choices stay, so another month can still be picked.
+	const monthChoices = candidates.length > 0 || rerender;
 	return (
 		<section
 			id="payment-picker"
 			tabindex={-1}
-			autofocus
+			autofocus={!rerender}
 			class="mt-6 border-t border-rule pt-4"
 		>
 			<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>
@@ -91,7 +110,7 @@ export function BillPaymentPicker({
 				Within {windowDays} days of {dueDateLabel}, same merchant first, then
 				closest amount.
 			</p>
-			{candidates.length ? (
+			{monthChoices ? (
 				<form
 					method="post"
 					action={action}
@@ -101,27 +120,31 @@ export function BillPaymentPicker({
 					class="mt-4 flex flex-col gap-3"
 				>
 					<input type="hidden" name="opened_period" value={openedPeriod} />
-					<fieldset>
-						<legend>Payment</legend>
-						<div class="mt-1 flex flex-col gap-2">
-							{candidates.map((t, index) => (
-								<Chip
-									type="radio"
-									name="transaction_id"
-									value={String(t.id)}
-									// Nothing is chosen for the person; one required radio makes the group required.
-									required={index === 0}
-									checked={t.id === selectedTransactionId}
-									hx-get={`/bills/${billId}/month-explanation`}
-									hx-include="[name='transaction_id'],[name='period']"
-									hx-target="#bill-month-explanation"
-									hx-swap="innerHTML"
-								>
-									{`${t.displayName} · ${t.dateLabel} · ${formatCents(t.amountCents)}${t.excluded ? " · Excluded" : ""}`}
-								</Chip>
-							))}
-						</div>
-					</fieldset>
+					{candidates.length ? (
+						<fieldset>
+							<legend>Payment</legend>
+							<div class="mt-1 flex flex-col gap-2">
+								{candidates.map((t, index) => (
+									<Chip
+										type="radio"
+										name="transaction_id"
+										value={String(t.id)}
+										// Nothing is chosen for the person; one required radio makes the group required.
+										required={index === 0}
+										checked={t.id === selectedTransactionId}
+										hx-get={`/bills/${billId}/month-explanation`}
+										hx-include="[name='transaction_id'],[name='period']"
+										hx-target="#bill-month-explanation"
+										hx-swap="innerHTML"
+									>
+										{`${t.displayName} · ${t.dateLabel} · ${formatCents(t.amountCents)}${t.excluded ? " · Excluded" : ""}`}
+									</Chip>
+								))}
+							</div>
+						</fieldset>
+					) : (
+						emptyState
+					)}
 					<fieldset>
 						<legend>Which month's bill does it pay?</legend>
 						<div class="mt-2 flex flex-wrap gap-2">
@@ -131,6 +154,7 @@ export function BillPaymentPicker({
 									name="period"
 									value={period.value}
 									checked={period.value === opened?.value}
+									autofocus={rerender && period.value === opened?.value}
 									hx-get={`/bills/${billId}/occurrences/${encodeURIComponent(period.value)}/link`}
 									hx-include="[name='transaction_id'],[name='period']"
 									hx-target="#payment-picker"
@@ -155,19 +179,17 @@ export function BillPaymentPicker({
 							)}
 						</div>
 					</fieldset>
-					<div class="flex gap-3">
-						<Button type="submit">Link</Button>
-						<Button kind="text" href={`/bills/${billId}`}>
-							Cancel
-						</Button>
-					</div>
+					{candidates.length ? (
+						<div class="flex gap-3">
+							<Button type="submit">Link</Button>
+							<Button kind="text" href={`/bills/${billId}`}>
+								Cancel
+							</Button>
+						</div>
+					) : null}
 				</form>
 			) : (
-				<EmptyState
-					kind="search"
-					sentence="No payments to link"
-					hint={`There are no eligible, unclaimed payments within ${windowDays} days.`}
-				/>
+				emptyState
 			)}
 		</section>
 	);

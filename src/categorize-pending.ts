@@ -140,6 +140,7 @@ export async function categorizePending(
 		id: number;
 		kind: string | null;
 		forPersonId: number | null;
+		noteWorthWriting: number | null;
 	}[] = [];
 	try {
 		const histories = start.categories
@@ -229,10 +230,14 @@ export async function categorizePending(
 					person.label.startsWith("person:")
 						? Number(person.label.slice("person:".length)) || null
 						: null;
+				// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
+				const worth = result.answer.noteWorthWriting;
 				detailsAnswers.push({
 					id: tx.id,
 					kind: kindValue,
 					forPersonId: personValue,
+					noteWorthWriting:
+						worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
 				});
 			}
 		}
