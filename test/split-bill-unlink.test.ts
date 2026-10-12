@@ -242,28 +242,24 @@ async function dismissedPayments(billId: number) {
 	return results;
 }
 
-describe("the matcher does not link a bill a split change unlinked (decision 99)", () => {
+describe("a split change leaves no dismissal, so the matcher may link the bill again (decision 101)", () => {
 	// The parts sum to $42.00, which the bill's tolerance accepts once they are one purchase again.
 	const smallPart = { ...groceriesPart, cents: 200 };
 
-	it("records the unlink as a dismissal on the whole purchase when the split is removed", async () => {
+	it("links the bill to the whole purchase again when the split is removed and it still matches", async () => {
 		await seedSplit([membershipPart, smallPart]);
 
 		await removeSplit(db, PURCHASE, "test");
 		await matchBillPayments(db, TODAY);
 
-		expect(await dismissedPayments(MEMBERSHIP)).toEqual([
-			{
-				transaction_id: PURCHASE,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			},
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: PURCHASE, parentId: null, matchedBy: "auto" },
 		]);
-		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+		expect(await membershipStatus()).toBe("paid");
 	});
 
-	it("records a dismissal on each new part when the parts are replaced", async () => {
+	it("leaves no dismissal on the new parts when the parts are replaced", async () => {
 		await seedSplit([membershipPart, smallPart]);
 
 		await saveSplit(
@@ -277,20 +273,8 @@ describe("the matcher does not link a bill a split change unlinked (decision 99)
 		);
 		await matchBillPayments(db, TODAY);
 
-		const { results: parts } = await db
-			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
-			.bind(PURCHASE)
-			.all<{ id: number }>();
-		expect(parts).toHaveLength(2);
-		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
-			parts.map((part) => ({
-				transaction_id: part.id,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			})),
-		);
-		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+		expect(await partIds(PURCHASE)).toHaveLength(2);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
 });
 
@@ -354,7 +338,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
 
-	it("unlinks the bill when the linked part's amount changes, and dismisses it on each new part", async () => {
+	it("unlinks the bill when the linked part's amount changes, leaving no dismissal", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 
 		const result = await saveSplit(
@@ -373,14 +357,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			bills: [{ name: "Costco membership", period: "2026" }],
 		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
-		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
-			(await partIds(PURCHASE)).map((id) => ({
-				transaction_id: id,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			})),
-		);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
 
 	it("unlinks the bill when the linked part's category changes", async () => {
@@ -402,7 +379,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			bills: [{ name: "Costco membership", period: "2026" }],
 		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
-		expect(await dismissedPayments(MEMBERSHIP)).toHaveLength(2);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
 
 	it("keeps each link when two identical parts are linked to different bills", async () => {
@@ -540,10 +517,10 @@ describe("Link a payment lists a split change's dismissal, and linking it links 
 	});
 });
 
-describe("a split change's dismissal moves with the purchase's parts (decision 99)", () => {
+describe("a split change leaves no dismissal, and a person's Not this one is kept (decision 101)", () => {
 	const smallPart = { ...groceriesPart, cents: 200 };
 
-	it("carries the dismissal through two replacements", async () => {
+	it("leaves no dismissal through two replacements", async () => {
 		await seedSplit([membershipPart, smallPart]);
 		await saveSplit(
 			db,
@@ -565,18 +542,63 @@ describe("a split change's dismissal moves with the purchase's parts (decision 9
 		);
 		await matchBillPayments(db, TODAY);
 
-		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
-			(await partIds(PURCHASE)).map((id) => ({
-				transaction_id: id,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			})),
-		);
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 	});
 
-	it("gives a new split of the purchase the dismissal, after removeSplit", async () => {
+	it("keeps a person's own Not this one on the purchase when the split is removed", async () => {
+		await seedSplit([membershipPart, smallPart]);
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026', ?, 'user', 'dismissed')",
+			)
+			.bind(MEMBERSHIP, PURCHASE)
+			.run();
+
+		await removeSplit(db, PURCHASE, "test");
+		await matchBillPayments(db, TODAY);
+
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([
+			{
+				transaction_id: PURCHASE,
+				period: "2026",
+				matched_by: "user",
+				status: "dismissed",
+			},
+		]);
+	});
+
+	it("keeps a person's own Not this one on the purchase when the parts are replaced", async () => {
+		await seedSplit([membershipPart, smallPart]);
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026', ?, 'user', 'dismissed')",
+			)
+			.bind(MEMBERSHIP, PURCHASE)
+			.run();
+
+		await saveSplit(
+			db,
+			PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 3500 },
+				{ categoryId: GROCERIES, amountCents: 700 },
+			],
+			"test",
+		);
+
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([
+			{
+				transaction_id: PURCHASE,
+				period: "2026",
+				matched_by: "user",
+				status: "dismissed",
+			},
+		]);
+	});
+
+	it("gives a new split of the purchase no dismissal, after removeSplit", async () => {
 		await seedSplit([membershipPart, smallPart]);
 		await removeSplit(db, PURCHASE, "test");
 		await saveSplit(
@@ -592,18 +614,14 @@ describe("a split change's dismissal moves with the purchase's parts (decision 9
 
 		const parts = await partIds(PURCHASE);
 		expect(parts).toHaveLength(2);
-		expect(await dismissedPayments(MEMBERSHIP)).toEqual(
-			[PURCHASE, ...parts].map((id) => ({
-				transaction_id: id,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			})),
-		);
-		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
+		// The part that is $40.00 matches the bill again, so the matcher links it.
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: parts[0], amountCents: 4000, matchedBy: "auto" },
+		]);
 	});
 
-	it("moves the dismissal onto the purchase when a replacement unlinked it and the split is then removed", async () => {
+	it("links the bill to the purchase when a replacement unlinked it and the split is then removed", async () => {
 		await seedSplit([membershipPart, smallPart]);
 		await saveSplit(
 			db,
@@ -617,16 +635,9 @@ describe("a split change's dismissal moves with the purchase's parts (decision 9
 		await removeSplit(db, PURCHASE, "test");
 		await matchBillPayments(db, TODAY);
 
-		// Each new part carried a copy, and each copy moves onto the purchase.
-		const rows = await dismissedPayments(MEMBERSHIP);
-		expect(rows.length).toBeGreaterThan(0);
-		for (const row of rows)
-			expect(row).toEqual({
-				transaction_id: PURCHASE,
-				period: "2026",
-				matched_by: "auto",
-				status: "dismissed",
-			});
-		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: PURCHASE, parentId: null, matchedBy: "auto" },
+		]);
 	});
 });

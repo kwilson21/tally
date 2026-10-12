@@ -194,7 +194,8 @@ const OWNS_LOCK =
 
 /**
  * Before a bank change removes a split (its amount changed), the bills its parts paid are kept on the
- * purchase for its note, and their payments are dismissed on the purchase, so the matcher does not link them again (decision 99).
+ * purchase for its note, and their payments are unlinked with no dismissal left, so the matcher may link
+ * the bill to the purchase again when it still matches (decisions 99 and 101).
  * Both run before the parts are deleted.
  */
 function splitBillStatements(
@@ -212,16 +213,9 @@ function splitBillStatements(
 			 WHERE plaid_transaction_id = ? AND is_split = 1 AND amount_cents != ? AND ${OWNS_LOCK}`,
 		).bind(plaidTransactionId, cents, itemRowId, lockId),
 		env.DB.prepare(
-			`UPDATE bill_payments SET transaction_id = ${purchase}, status = 'dismissed', matched_by = 'auto'
-			 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${OWNS_LOCK}`,
-		).bind(
-			plaidTransactionId,
-			cents,
-			plaidTransactionId,
-			cents,
-			itemRowId,
-			lockId,
-		),
+			`DELETE FROM bill_payments
+			 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${purchase}) AND ${OWNS_LOCK}`,
+		).bind(plaidTransactionId, cents, itemRowId, lockId),
 	];
 }
 
