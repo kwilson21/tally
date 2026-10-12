@@ -102,27 +102,44 @@ const GENERIC_NOTE_WORDS = new Set([
 	"for",
 	"and",
 	"from",
+	"to",
+	"with",
+	"my",
+	"our",
 ]);
 
+/** A name's letter runs, so "AT&T" gives "at" and "t", and "APPLE.COM/BILL" gives "apple", "com" and "bill". */
 const wordsOf = (text: string) =>
 	text
 		.toLowerCase()
 		.split(/[^\p{L}]+/u)
 		.filter(Boolean);
 
+/** A name's whitespace-separated runs, so a run never joins the next word: "Trader Joe's" gives "trader" and "joe's". */
+const runsOf = (text: string) =>
+	text.toLowerCase().split(/\s+/).filter(Boolean);
+
+/** A run with its punctuation removed: "at&t" is "att", "joe's" is "joes", and "#552" is nothing. */
+const joinedOf = (run: string) => run.replace(/[^\p{L}]/gu, "");
+
 /**
- * True when a "what it was" line says nothing beyond the store: every word is in the store's name (the bank's
- * text or its merchant name) or is a generic word such as "purchase" (decision 103). "CVS purchase." for CVS
- * PHARMACY is dropped, while "App or iCloud subscription" for APPLE.COM/BILL is kept, since "app" and
- * "subscription" are not in the store's name.
+ * True when every word of a "what it was" line is in the store's name, with or without its inner punctuation (so
+ * "AT&T" matches "ATT"), or is a generic word such as "purchase" (decision 103).
  */
 export function restatesStore(
 	note: string,
 	storeNames: (string | null)[],
 ): boolean {
-	const store = new Set(storeNames.flatMap((name) => wordsOf(name ?? "")));
-	return wordsOf(note).every(
-		(word) => store.has(word) || GENERIC_NOTE_WORDS.has(word),
+	const names = storeNames.map((name) => name ?? "");
+	const store = new Set([
+		...names.flatMap(wordsOf),
+		...names.flatMap((name) => runsOf(name).map(joinedOf)),
+	]);
+	const covered = (word: string) =>
+		store.has(word) || GENERIC_NOTE_WORDS.has(word);
+	// A run is covered when its joined form is, or when each of its letter words is.
+	return runsOf(note).every(
+		(run) => covered(joinedOf(run)) || wordsOf(run).every(covered),
 	);
 }
 

@@ -235,6 +235,57 @@ describe("suggestNote", () => {
 		});
 	});
 
+	it.each([
+		["ATT bill", "AT&T", null],
+		["AT&T bill", "AT&T", null],
+		["Trader Joes purchase", "TRADER JOE'S #552", "Trader Joe's"],
+		["Trader Joe's purchase", "TRADER JOES #552", null],
+		["Walmart purchase", "WAL-MART #1234", null],
+	])(
+		"drops %j for %j, since the store's name matches once its inner punctuation is dropped",
+		async (answer, rawName, merchantName) => {
+			expect(
+				await suggestNote(fakeAi(answer), rawName, [merchantName]),
+			).toEqual({ ok: true, note: null });
+		},
+	);
+
+	it("keeps a line that names something the store's name with punctuation doesn't", async () => {
+		expect(await suggestNote(fakeAi("Wireless plan"), "AT&T", [null])).toEqual({
+			ok: true,
+			note: "Wireless plan",
+		});
+	});
+
+	it.each([
+		["Trip to CVS", "CVS PHARMACY #1234", "CVS Pharmacy"],
+		["Visit to CVS", "CVS PHARMACY #1234", "CVS Pharmacy"],
+		["My CVS order", "CVS PHARMACY #1234", "CVS Pharmacy"],
+		["Our Costco trip", "COSTCO WHSE #1234", "Costco"],
+	])(
+		"drops %j for %j, since to, my and our only add filler to the store's name",
+		async (answer, rawName, merchantName) => {
+			expect(
+				await suggestNote(fakeAi(answer), rawName, [merchantName]),
+			).toEqual({ ok: true, note: null });
+		},
+	);
+
+	it("keeps a line that says what was bought, even with to, with or my in it", async () => {
+		expect(
+			await suggestNote(
+				fakeAi("Trip to CVS for allergy meds"),
+				"CVS PHARMACY #1234",
+				["CVS Pharmacy"],
+			),
+		).toEqual({ ok: true, note: "Trip to CVS for allergy meds" });
+		expect(
+			await suggestNote(fakeAi("Lunch with my team"), "THAI PALACE", [
+				"Thai Palace",
+			]),
+		).toEqual({ ok: true, note: "Lunch with my team" });
+	});
+
 	it("drops a line that repeats a name the row shows, when the bank sent no merchant name", async () => {
 		expect(
 			await suggestNote(fakeAi("Blue Bottle Coffee purchase"), "BL BTTL COF", [
