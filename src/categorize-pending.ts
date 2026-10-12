@@ -142,6 +142,7 @@ export async function categorizePending(
 		id: number;
 		kind: string | null;
 		forPersonId: number | null;
+		noteWorthWriting: number | null;
 	}[] = [];
 	// The switches read after one answer also serve as the read before the next call, since only that answer's
 	// save runs in between. That keeps a call at three D1 statements (this read, and the answer saved with its
@@ -246,10 +247,14 @@ export async function categorizePending(
 					person.label.startsWith("person:")
 						? Number(person.label.slice("person:".length)) || null
 						: null;
+				// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
+				const worth = result.answer.noteWorthWriting;
 				detailsAnswers.push({
 					id: tx.id,
 					kind: kindValue,
 					forPersonId: personValue,
+					noteWorthWriting:
+						worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
 				});
 			}
 			// Nothing but this answer's save (if one ran) comes between `now` and the next call, so `now` serves as its read.

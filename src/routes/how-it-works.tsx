@@ -437,10 +437,11 @@ howItWorks.get("/how-it-works", async (c) => {
 					</p>
 					<p class="mt-3">
 						With Fill in details on, Tally can also guess what a purchase was,
-						its kind, and who it was for. These stay Tally's guess until a
-						person changes or keeps them. Turning the switch off hides unkept
-						guesses and keeps a person's choices visible. A person's choices
-						always win.
+						its kind, and who it was for. Tally writes “What it was” only when
+						it can say more than the store's name. These stay Tally's guess
+						until a person changes or keeps them. Turning the switch off hides
+						unkept guesses and keeps a person's choices visible. A person's
+						choices always win.
 					</p>
 					{hasTransactions ? (
 						<>

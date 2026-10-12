@@ -1329,7 +1329,7 @@ function Rows() {
 				title="Bill occurrence and payment picker"
 				tier="visual"
 				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker."
+				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none."
 			>
 				<State label="Paid occurrence">
 					<div inert>
@@ -1425,6 +1425,24 @@ function Rows() {
 							bill={{ frequency: "monthly", anchorMonth: null }}
 							candidates={[]}
 							periods={[{ value: "2026-09", label: "September" }]}
+						/>
+					</div>
+				</State>
+				<State label="Chosen month with no payments">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-10"
+							dueDateLabel="Oct 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+							rerender
 						/>
 					</div>
 				</State>

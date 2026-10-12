@@ -791,6 +791,74 @@ describe("categorizePending", () => {
 		});
 	});
 
+	describe("the merchant Jev is told when a person hasn't chosen one", () => {
+		/** Sends one transaction for Jev and returns the merchant it was told. */
+		const merchantJevIsTold = async (
+			rawName: string,
+			merchantName: string | null,
+		) => {
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			const target = await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 1200, ?, ?) RETURNING id",
+				)
+				.bind(`${MONTH}-20`, rawName, merchantName)
+				.first<{ id: number }>();
+			let sent: SentRequest | undefined;
+			await categorizePending(
+				withKey,
+				async (_url, init) => {
+					sent = JSON.parse(String(init?.body));
+					return reply(0.5);
+				},
+				{ rulesApplied: true, onlyIds: [target?.id as number] },
+			);
+			return sent?.state.merchant;
+		};
+
+		it("tells Jev the bank's own store name when no name is chosen", async () => {
+			await db
+				.prepare(
+					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle Coffee', 'pending')",
+				)
+				.run();
+			expect(await merchantJevIsTold("BL BTTL COF", "Blue Bottle Coffee")).toBe(
+				"Blue Bottle Coffee",
+			);
+		});
+
+		it("doesn't tell Jev a name Tally guessed", async () => {
+			await db
+				.prepare(
+					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('BL BTTL COF', 'Blue Bottle Coffee', 'pending')",
+				)
+				.run();
+			expect(await merchantJevIsTold("BL BTTL COF", null)).toBeNull();
+		});
+
+		it("tells Jev the chosen name over the bank's own", async () => {
+			await db
+				.prepare(
+					"INSERT INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle', 'Blue Bottle Coffee', 'pending')",
+				)
+				.run();
+			expect(await merchantJevIsTold("BL BTTL COF", "Blue Bottle Coffee")).toBe(
+				"Blue Bottle",
+			);
+		});
+
+		it("doesn't tell Jev a bank name the person turned down", async () => {
+			await db
+				.prepare(
+					"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Blue Bottle Coffee', 'Blue Bottle Coffee', 'rejected')",
+				)
+				.run();
+			expect(
+				await merchantJevIsTold("BL BTTL COF", "Blue Bottle Coffee"),
+			).toBeNull();
+		});
+	});
+
 	it("sends a transaction with no merchant history exactly as it did before", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const target = await db

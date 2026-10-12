@@ -51,6 +51,7 @@ const jevAnswer = () =>
 			income: { type: "noul", noul: 0.01 },
 			kind: { type: "choice", choice: "one_off", confidence: 0.99 },
 			for_person: { type: "choice", choice: "none", confidence: 0.99 },
+			note_worth_writing: { type: "noul", noul: 0.95 },
 		},
 	});
 
