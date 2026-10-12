@@ -183,8 +183,12 @@ describe("bill matching and price changes", () => {
 	const rows = async (table: string, where = "1=1") =>
 		(await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).all())
 			.results;
-	/** What the page showed, in integer cents: the bill's amount and the charge's (a payment at a new price: $100.00, $115.00). */
-	const SEEN = { bill_cents: "10000", charge_cents: "11500" };
+	/** What the page showed, in integer cents: the occurrence's amount, the charge and the bill's current amount (a payment at a new price: $100.00, $115.00). */
+	const SEEN = {
+		bill_cents: "10000",
+		charge_cents: "11500",
+		current_cents: "10000",
+	};
 	const accept = (
 		transaction: number,
 		htmx = true,
@@ -652,6 +656,7 @@ describe("bill matching and price changes", () => {
 				const fresh = await accept(1, true, {
 					bill_cents: "10000",
 					charge_cents: "12000",
+					current_cents: "10000",
 				});
 				expect(fresh.headers.get("HX-Trigger")).toContain("Bill updated");
 				expect((await billRow())?.amount_cents).toBe(12000);
@@ -662,9 +667,18 @@ describe("bill matching and price changes", () => {
 					{},
 					{ bill_cents: "10000" },
 					{ charge_cents: "11500" },
-					{ bill_cents: "100.00", charge_cents: "115.00" },
-					{ bill_cents: "10000.5", charge_cents: "11500" },
-					{ bill_cents: "", charge_cents: "" },
+					{ bill_cents: "10000", charge_cents: "11500" },
+					{
+						bill_cents: "100.00",
+						charge_cents: "115.00",
+						current_cents: "100.00",
+					},
+					{
+						bill_cents: "10000.5",
+						charge_cents: "11500",
+						current_cents: "10000",
+					},
+					{ bill_cents: "", charge_cents: "", current_cents: "" },
 				];
 				for (const seen of stale) {
 					const res = await accept(1, true, seen);
@@ -678,6 +692,7 @@ describe("bill matching and price changes", () => {
 				const page = await get("/bills/1");
 				expect(page).toContain('name="bill_cents" value="10000"');
 				expect(page).toContain('name="charge_cents" value="11500"');
+				expect(page).toContain('name="current_cents" value="10000"');
 			});
 		});
 
@@ -689,7 +704,15 @@ describe("bill matching and price changes", () => {
 				merchant: "Netflix",
 			};
 			const accepts = () =>
-				acceptPriceOffer(env.DB, 1, period, offer, 10000, period.slice(0, 7));
+				acceptPriceOffer(
+					env.DB,
+					1,
+					period,
+					offer,
+					10000,
+					period.slice(0, 7),
+					10000,
+				);
 			const unchanged = async (excluded = 1) => {
 				expect((await billRow())?.amount_cents).toBe(10000);
 				expect(

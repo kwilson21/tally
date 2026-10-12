@@ -1393,6 +1393,7 @@ function Rows() {
 									amountCents: 1799,
 									dateLabel: "Oct 3",
 									billAmountCents: 1549,
+									currentCents: 1549,
 									frequency: "monthly",
 								}}
 							/>

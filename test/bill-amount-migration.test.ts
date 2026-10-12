@@ -14,8 +14,8 @@ const BACKFILL = (migration?.queries ?? []).find((query) =>
 );
 
 const IDS = [9401, 9402, 9403];
-// The migration's "this month": UTC less five hours (see the migration's comment).
-const thisMonth = new Date(Date.now() - 5 * 3_600_000)
+// The migration's "this month": UTC less twelve hours (see the migration's comment).
+const thisMonth = new Date(Date.now() - 12 * 3_600_000)
 	.toISOString()
 	.slice(0, 7);
 
@@ -83,6 +83,25 @@ describe("migration 0044 bill amount history", () => {
 		await db.prepare(BACKFILL).run();
 		expect(await rowsOf(9402)).toEqual([
 			{ effectiveMonth: thisMonth, amountCents: 4000 },
+		]);
+	});
+
+	it("takes the fallback month from twelve hours behind UTC, so it is never ahead of any zone", async () => {
+		if (!BACKFILL) throw new Error("Migration 0044 backfill is missing");
+		expect(BACKFILL.match(/'now'/g)).toHaveLength(1);
+		expect(BACKFILL).toContain("'-12 hours'");
+	});
+
+	it("starts a bill with no payment in October at 06:00 UTC on November 1, still October in Hawaii", async () => {
+		if (!BACKFILL) throw new Error("Migration 0044 backfill is missing");
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9402,'Gym',4000,9,'monthly','GYM CO')",
+			)
+			.run();
+		await db.prepare(BACKFILL.replace("'now'", "'2026-11-01 06:00:00'")).run();
+		expect(await rowsOf(9402)).toEqual([
+			{ effectiveMonth: "2026-10", amountCents: 4000 },
 		]);
 	});
 

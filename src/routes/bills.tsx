@@ -144,6 +144,8 @@ export async function loadBillRows(db: D1Database, today: string) {
 		.all<DbBill>();
 	const result: (BillRowData & {
 		active: boolean;
+		/** The bill's own current amount (`bills.amount_cents`), which its monthly share reads. */
+		currentAmountCents: number;
 		frequency: BillTotalFrequency;
 		paidCents: number;
 		totalOccurrences: {
@@ -259,8 +261,10 @@ export async function loadBillRows(db: D1Database, today: string) {
 		result.push({
 			id: b.id,
 			name: b.name,
-			// The shown occurrence's amount: the Bills row, its status and its totals all read this.
+			// The shown occurrence's amount: the Bills row, its status and its set-aside totals read this. The
+			// monthly share reads currentAmountCents instead.
 			amountCents: amountOf(occurrence.dueDate),
+			currentAmountCents: b.amount_cents,
 			status: occurrence.status,
 			dueDate: occurrence.dueDate,
 			paidDate: payments.get(occurrence.period),
@@ -1410,6 +1414,7 @@ async function billPage(
 												amountCents: offer.amountCents,
 												dateLabel: shortDay(offer.date, today),
 												billAmountCents: currentCents,
+												currentCents: bill.amount_cents,
 												frequency: bill.frequency,
 												cadence: billCadenceLabel({
 													frequency: bill.frequency,
@@ -1685,9 +1690,9 @@ async function currentOffer(
 // "Price changed?" (P36 B, decision 72): a payment from the bill's merchant at another price is offered
 // on the bill's page. Yes links it and sets the bill's amount to what was charged; "Not this bill"
 // remembers the payment for that month. Both answer for the very payment the page showed, and Yes also
-// for the two prices it showed (the bill's amount and the charge's, in whole cents): once either has
-// changed, a page that has gone stale saves nothing and the person is told, so no one is made to accept
-// a price they didn't see.
+// for the prices it showed, in whole cents: the occurrence's amount, the charge, and the bill's current
+// amount. Once any of them has changed, a page that has gone stale saves nothing and the person is told,
+// so no one is made to accept a price they didn't see.
 const wholeCents = (value: unknown) =>
 	typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
 async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
@@ -1711,11 +1716,13 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 	if (!offer || offer.period !== period || offer.transactionId !== transaction)
 		return gone();
 	if (verb === "accept") {
-		// The two prices the page showed: the occurrence's amount and the charge (decision 101).
+		// The prices the page showed: the occurrence's amount, the charge (decision 101) and the bill's current amount.
 		const seenBill = wholeCents(form.bill_cents);
+		const seenCurrent = wholeCents(form.current_cents);
 		if (
 			seenBill !== offer.billCents ||
 			wholeCents(form.charge_cents) !== offer.amountCents ||
+			seenCurrent !== bill.amount_cents ||
 			!(await acceptPriceOffer(
 				c.env.DB,
 				id,
@@ -1723,6 +1730,7 @@ async function answerPrice(c: Context<App>, verb: "accept" | "dismiss") {
 				offer,
 				seenBill,
 				offer.dueMonth,
+				seenCurrent,
 				today.slice(0, 7),
 			))
 		)

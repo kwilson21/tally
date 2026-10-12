@@ -3,9 +3,10 @@
 --   date's month). Editing a bill's amount writes a row from this month on, so earlier months keep theirs.
 --   bills.amount_cents still holds the current amount.
 -- Every existing bill gets its first row here: at the month of its earliest linked payment (decision 79),
--- or this month when it has none. SQL can't read the household's time zone (Eastern by default, decision
--- 67), so "this month" is the UTC time less five hours. That is never ahead of Eastern's month, so the row
--- can only sit a month early in the first hour of a month, and an earlier row keeps the same amount.
+-- or this month when it has none. SQL can't read the household's time zone (decision 67), so "this month"
+-- is the UTC time less twelve hours. Settings' furthest-west zone is Hawaii (UTC-10), and no zone is more
+-- than 12 hours behind UTC, so this month is never ahead of the household's. A row a month early is
+-- harmless, because the earliest row gives both months the same amount.
 -- Bills added later get their first row when they are added (src/bills/write.ts).
 CREATE TABLE bill_amounts (
   bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
@@ -17,7 +18,7 @@ INSERT INTO bill_amounts (bill_id, effective_month, amount_cents)
   SELECT b.id,
     COALESCE(
       (SELECT substr(MIN(t.date), 1, 7) FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.bill_id = b.id AND bp.status = 'linked'),
-      strftime('%Y-%m', 'now', '-5 hours')
+      strftime('%Y-%m', 'now', '-12 hours')
     ),
     b.amount_cents
   FROM bills b
