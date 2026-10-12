@@ -1190,6 +1190,218 @@ describe("Yes on a new category asks Jev again about the rows left out (decision
 	});
 });
 
+describe("a stale answer that lands after the queue was read changes nothing (decision 96)", () => {
+	const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+	app.use("*", async (c, next) => {
+		c.set("actor", "test@example.com");
+		await next();
+	});
+	app.route("/", suggestions);
+
+	/**
+	 * The DB, with `rival` run just before the first `run()` of a statement whose SQL starts with `prefix`:
+	 * the change lands between the route's queue read and its write.
+	 */
+	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+		let raced = false;
+		const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
+			new Proxy(statement, {
+				get(target, prop) {
+					if (prop === "bind")
+						return (...values: unknown[]) => guard(target.bind(...values));
+					if (prop === "run")
+						return async () => {
+							if (!raced) {
+								raced = true;
+								await rival();
+							}
+							return target.run();
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+		return new Proxy(db, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						return sql.startsWith(prefix) ? guard(statement) : statement;
+					};
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	}
+
+	async function answer(
+		fields: Record<string, string>,
+		DB: D1Database,
+	): Promise<Response> {
+		const body = new URLSearchParams(fields);
+		return app.request(
+			"/settings/suggestions",
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: body.toString(),
+			},
+			{ ...env, DB },
+			{ waitUntil() {}, passThroughOnException() {}, props: {} },
+		);
+	}
+
+	const reviewAsNotIncome = (id: number) =>
+		db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+
+	const STALE = "That one was already answered.";
+
+	it("a credit a person reviewed as not income after the queue was read stays not income after a Yes", async () => {
+		const credit = await insertTx({
+			raw: VENMO,
+			amount: -250000,
+			incomeConfidence: 0.6,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="income-${credit}"`,
+		);
+		const res = await answer(
+			{ id: `income-${credit}`, answer: "yes" },
+			racing("UPDATE transactions SET flag_income = 1", () =>
+				reviewAsNotIncome(credit),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row(
+				"SELECT flag_income, income_source FROM transactions WHERE id = ?",
+				credit,
+			),
+		).toMatchObject({ flag_income: 0, income_source: null });
+	});
+
+	it("a credit a person reviewed as not income after the queue was read can't take a No either", async () => {
+		const credit = await insertTx({
+			raw: VENMO,
+			amount: -250000,
+			incomeConfidence: 0.6,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="income-${credit}"`,
+		);
+		const res = await answer(
+			{ id: `income-${credit}`, answer: "no" },
+			racing("UPDATE transactions SET income_maybe_declined = 1", () =>
+				reviewAsNotIncome(credit),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row(
+				"SELECT income_maybe_declined FROM transactions WHERE id = ?",
+				credit,
+			),
+		).toMatchObject({ income_maybe_declined: 0 });
+	});
+
+	it("a credit a person left out of the budget after the queue was read is not counted as income by a Yes", async () => {
+		const credit = await insertTx({
+			raw: VENMO,
+			amount: -250000,
+			incomeConfidence: 0.6,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="income-${credit}"`,
+		);
+		const res = await answer(
+			{ id: `income-${credit}`, answer: "yes" },
+			racing("UPDATE transactions SET flag_income = 1", () =>
+				db
+					.prepare(
+						"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+					)
+					.bind(credit)
+					.run(),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row("SELECT flag_income FROM transactions WHERE id = ?", credit),
+		).toMatchObject({ flag_income: 0 });
+	});
+
+	it("a category Jev changed after the queue was read is not set to the new category by a Yes", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		const groceries = await categoryId("Groceries");
+		const spent = await insertTx({
+			raw: LUPITA,
+			amount: 2300,
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="category-${spent}"`,
+		);
+		const res = await answer(
+			{ id: `category-${spent}`, answer: "yes" },
+			racing("UPDATE transactions SET category_id", () =>
+				db
+					.prepare("UPDATE transactions SET jev_category_id = ? WHERE id = ?")
+					.bind(groceries, spent)
+					.run(),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row("SELECT category_id FROM transactions WHERE id = ?", spent),
+		).toMatchObject({ category_id: null });
+	});
+
+	it("a reviewed credit held again after the queue was read gets no category from a Something else", async () => {
+		const eatingOut = await categoryId("Eating Out");
+		const groceries = await categoryId("Groceries");
+		const credit = await insertTx({
+			raw: "ZELLE PAYMENT",
+			amount: -2500,
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		await db
+			.prepare("UPDATE transactions SET credit_reviewed = 1 WHERE id = ?")
+			.bind(credit)
+			.run();
+		expect((await get("/settings/suggestions")).html).toContain(
+			`value="category-${credit}"`,
+		);
+		const res = await answer(
+			{
+				id: `category-${credit}`,
+				answer: "else",
+				category: String(groceries),
+			},
+			racing("UPDATE transactions SET category_id", () =>
+				db
+					.prepare("UPDATE transactions SET credit_reviewed = 0 WHERE id = ?")
+					.bind(credit)
+					.run(),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row("SELECT category_id FROM transactions WHERE id = ?", credit),
+		).toMatchObject({ category_id: null });
+	});
+});
+
 describe("names", () => {
 	it("Yes names the merchant with its first suggested name", async () => {
 		const ids = await oneOfEach();

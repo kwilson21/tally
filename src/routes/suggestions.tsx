@@ -6,7 +6,6 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
-import { jevAsksAboutSql } from "../db/counted-month";
 import {
 	type NameChoice,
 	type NameReview,
@@ -19,6 +18,8 @@ import {
 	questionStores,
 } from "../db/never-suggest";
 import {
+	categoryAskedSql,
+	incomeAskedSql,
 	type SuggestionItem,
 	suggestionQueue,
 	transferAskedSql,
@@ -381,7 +382,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET flag_income = 1, income_source = 'user', income_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
+						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
 					)
 					.bind(who, item.transactionId)
 					.run();
@@ -394,7 +395,7 @@ suggestions.post(PATH, async (c) => {
 				const result = await db
 					.prepare(
 						`UPDATE transactions SET income_maybe_declined = 1
-						WHERE id = ? AND income_maybe_declined = 0 AND flag_income = 0 AND amount_cents < 0 AND refund_of_id IS NULL`,
+						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
 					)
 					.bind(item.transactionId)
 					.run();
@@ -447,11 +448,9 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND jev_category_id IS NOT NULL
-							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)
-							AND ${jevAsksAboutSql("transactions")} AND (amount_cents >= 0 OR credit_reviewed = 1)`,
+						WHERE id = ? AND jev_category_id = ? AND ${categoryAskedSql("transactions")}`,
 					)
-					.bind(who, item.transactionId)
+					.bind(who, item.transactionId, item.categoryId)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
@@ -478,7 +477,7 @@ suggestions.post(PATH, async (c) => {
 					.prepare(
 						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
-						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND ${jevAsksAboutSql("transactions")} AND (amount_cents >= 0 OR credit_reviewed = 1)`,
+						WHERE id = ? AND ${categoryAskedSql("transactions")}`,
 					)
 					.bind(category.id, who, item.transactionId)
 					.run();

@@ -3,7 +3,7 @@
 // the screen shows it one item at a time, so the two can't drift apart.
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { confidencePercent } from "../ai/confidence";
-import { isUnsure, maybeIncomeVisible } from "../ai/maybe";
+import { isUnsure } from "../ai/maybe";
 import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
@@ -115,6 +115,14 @@ const merchantLabel = (displayName: string | null, key: string) =>
 	displayName || tidyName(key);
 
 /**
+ * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked.
+ */
+export const incomeAskedSql = (alias: string) =>
+	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
+		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillSql(alias)})
+		AND ${maybeIncomeConfidenceSql(alias)} IS NOT NULL)`;
+
+/**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
  * Spec §8.6, "Jev's income answer is used".
  */
@@ -124,32 +132,13 @@ async function incomeSuggestions(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
-				${maybeIncomeConfidenceSql("t")} AS incomeConfidence,
-				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded, ${paysBillSql("t")} AS paysBill
+				${maybeIncomeConfidenceSql("t")} AS incomeConfidence
 			FROM transactions t ${JOIN_MERCHANT}
-			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL AND t.refund_of_id IS NULL`,
+			WHERE ${incomeAskedSql("t")}`,
 		)
-		.all<
-			Candidate & {
-				incomeConfidence: number | null;
-				income: number;
-				creditReviewed: number;
-				excluded: number;
-				paysBill: number;
-			}
-		>();
-	// A store's "Never suggest" income line hides the guess in the SQL above (a null confidence is never a Maybe).
+		.all<Candidate & { incomeConfidence: number }>();
 	return results
-		.filter((row) =>
-			maybeIncomeVisible({
-				amountCents: row.amountCents,
-				income: row.income === 1,
-				incomeConfidence: row.incomeConfidence,
-				creditReviewed: row.creditReviewed === 1,
-				excluded: row.excluded === 1,
-				paysBill: row.paysBill === 1,
-			}),
-		)
+		.filter((row) => isUnsure(row.incomeConfidence))
 		.map((row) => ({
 			order: row.id,
 			item: {
@@ -218,6 +207,15 @@ async function transferSuggestions(
 }
 
 /**
+ * True when the review screen can ask about the category of the row `alias` names: the queue's own check, repeated by the route's Something else and Yes writes so a stale answer changes nothing. `JEV_THRESHOLD` is a code constant, so it is written in.
+ */
+export const categoryAskedSql = (alias: string) =>
+	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
+		AND ${alias}.category_confidence < ${JEV_THRESHOLD} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
+		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
+		AND EXISTS (SELECT 1 FROM categories ac WHERE ac.id = ${alias}.jev_category_id AND ac.archived = 0))`;
+
+/**
  * A category Tally guessed and nobody has set. Shown the same way as the row's dashed "Maybe" (the
  * category join in `MAYBE_CATEGORY_COLUMNS`): an active category, and an unsure guess. A credit held for
  * review waits until it is reviewed, as Needs category and Organize leave it out (decision 70). A payment
@@ -232,11 +230,8 @@ async function categorySuggestions(
 				t.category_confidence AS categoryConfidence, c.id AS categoryId, c.name AS category
 			FROM transactions t ${JOIN_MERCHANT}
 			JOIN categories c ON c.id = t.jev_category_id AND c.archived = 0
-			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.category_id IS NULL AND t.category_source IS NULL
-				AND t.category_confidence < ? AND t.flag_income = 0 AND ${jevAsksAboutSql("t")}
-				AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`,
+			WHERE ${categoryAskedSql("t")}`,
 		)
-		.bind(JEV_THRESHOLD)
 		.all<
 			Candidate & {
 				categoryConfidence: number;

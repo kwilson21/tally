@@ -2,7 +2,12 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AI_SWITCHES_ALL_ON, type AiSwitches } from "../src/db/ai-switches";
 import { addNeverSuggest } from "../src/db/never-suggest";
-import { suggestionQueue, transferAskedSql } from "../src/db/suggestions-queue";
+import {
+	categoryAskedSql,
+	incomeAskedSql,
+	suggestionQueue,
+	transferAskedSql,
+} from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" a person
@@ -546,5 +551,192 @@ describe("transferAskedSql", () => {
 			)
 			.all<{ id: number }>();
 		expect(asked.results.map((row) => row.id)).toEqual([plain]);
+	});
+});
+
+describe("incomeAskedSql", () => {
+	it("matches only a plain unsure credit, the same check the queue and the Yes and No writes share", async () => {
+		const plain = await transaction({
+			amount: -250000,
+			raw: "PLAIN CREDIT",
+			incomeConfidence: 0.5,
+		});
+		const reviewed = await transaction({
+			amount: -250000,
+			raw: "REVIEWED CREDIT",
+			incomeConfidence: 0.5,
+			creditReviewed: 1,
+			creditReviewedBy: "user",
+		});
+		const leftOut = await transaction({
+			amount: -250000,
+			raw: "LEFT OUT CREDIT",
+			incomeConfidence: 0.5,
+			excluded: 1,
+		});
+		const declined = await transaction({
+			amount: -250000,
+			raw: "DECLINED CREDIT",
+			incomeConfidence: 0.5,
+		});
+		await db
+			.prepare("UPDATE transactions SET income_maybe_declined = 1 WHERE id = ?")
+			.bind(declined)
+			.run();
+		const neverLine = await transaction({
+			amount: -250000,
+			raw: "NEVER INCOME",
+			incomeConfidence: 0.5,
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "NEVER INCOME",
+			kind: "income",
+			decidedOn: "2026-10-01",
+		});
+		const jevSaid = await transaction({
+			amount: -250000,
+			raw: "JEV CREDIT",
+			incomeConfidence: 0.5,
+			incomeSource: "jev",
+		});
+		const userSaid = await transaction({
+			amount: -250000,
+			raw: "USER CREDIT",
+			incomeConfidence: 0.5,
+			incomeSource: "user",
+		});
+		const cleared = await transaction({
+			amount: -250000,
+			raw: "CLEARED CREDIT",
+			incomeConfidence: null,
+		});
+		const purchase = await transaction({ amount: 2300, raw: "LUPITAS" });
+		const refund = await transaction({
+			amount: -2300,
+			raw: "REFUND",
+			incomeConfidence: 0.5,
+		});
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(purchase, refund)
+			.run();
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 250000, 1, 'monthly', 'BILL CREDIT') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const paysBill = await transaction({
+			amount: -250000,
+			raw: "BILL CREDIT",
+			incomeConfidence: 0.5,
+			excluded: 1,
+		});
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paysBill)
+			.run();
+		const counted = async (id: number) =>
+			(
+				await db
+					.prepare(
+						`SELECT COUNT(*) AS n FROM transactions WHERE id = ? AND ${incomeAskedSql("transactions")}`,
+					)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n;
+		const asked = Object.fromEntries(
+			await Promise.all(
+				Object.entries({
+					plain,
+					reviewed,
+					leftOut,
+					declined,
+					neverLine,
+					jevSaid,
+					userSaid,
+					cleared,
+					refund,
+					paysBill,
+				}).map(async ([name, id]) => [name, await counted(id)]),
+			),
+		);
+		expect(asked).toEqual({
+			plain: 1,
+			reviewed: 0,
+			leftOut: 0,
+			declined: 0,
+			neverLine: 0,
+			jevSaid: 0,
+			userSaid: 0,
+			cleared: 0,
+			refund: 0,
+			paysBill: 1,
+		});
+	});
+});
+
+describe("categoryAskedSql", () => {
+	it("matches only a plain unsure category guess, the same check the queue and the Something else and Yes writes share", async () => {
+		const retired = await db
+			.prepare(
+				"INSERT INTO categories (name, icon, color, archived) VALUES ('Retired', 'gas', 'cat-slate', 1) RETURNING id",
+			)
+			.first<{ id: number }>();
+		const plain = await transaction({
+			amount: 2300,
+			raw: "PLAIN SPEND",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const userSet = await transaction({
+			amount: 2300,
+			raw: "USER SET",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+			categorySource: "user",
+		});
+		const sure = await transaction({
+			amount: 2300,
+			raw: "SURE SPEND",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.9,
+		});
+		const archived = await transaction({
+			amount: 2300,
+			raw: "RETIRED SPEND",
+			jevCategoryId: retired?.id ?? null,
+			categoryConfidence: 0.5,
+		});
+		const held = await transaction({
+			amount: -2500,
+			raw: "HELD CREDIT",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const counted = async (id: number) =>
+			(
+				await db
+					.prepare(
+						`SELECT COUNT(*) AS n FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}`,
+					)
+					.bind(id)
+					.first<{ n: number }>()
+			)?.n;
+		const asked = Object.fromEntries(
+			await Promise.all(
+				Object.entries({ plain, userSet, sure, archived, held }).map(
+					async ([name, id]) => [name, await counted(id)],
+				),
+			),
+		);
+		expect(asked).toEqual({
+			plain: 1,
+			userSet: 0,
+			sure: 0,
+			archived: 0,
+			held: 0,
+		});
 	});
 });
