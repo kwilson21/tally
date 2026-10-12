@@ -852,7 +852,7 @@ describe("the answered", () => {
 		expect(textOf(html)).toContain("Suggestions · 1 of 4");
 	});
 
-	it("answering the last item shows Nothing left to check", async () => {
+	it("answering the last item shows Nothing left to check, and focus moves to it", async () => {
 		const ids = await oneOfEach();
 		const answers: [string, Record<string, string | string[]>][] = [
 			[`income-${ids.income}`, { answer: "yes" }],
@@ -875,6 +875,33 @@ describe("the answered", () => {
 			true,
 		);
 		expect(textOf(html)).toContain("Nothing left to check.");
+		// The swapped-out Yes took focus with it, so the sentence takes it (as the question heading does).
+		expect(html).toMatch(
+			/<div tabindex="-1" autofocus[^>]*>[\s\S]*Nothing left to check\./,
+		);
+	});
+
+	it("when the last answer leaves only items set aside for good, You skipped the rest takes focus", async () => {
+		const ids = await oneOfEach();
+		const others = [
+			`income-${ids.income}`,
+			`transfer-${ids.transfer}`,
+			`category-${ids.category}`,
+			`new-${ids.suggestion}`,
+		];
+		const query = [
+			...others.map((id) => `skip=${id}`),
+			...others.map((id) => `again=${id}`),
+		].join("&");
+		const { html } = await post(
+			`/settings/suggestions?${query}`,
+			{ id: await nameId(), answer: "yes" },
+			true,
+		);
+		expect(textOf(html)).toContain("You skipped the rest.");
+		expect(html).toMatch(
+			/<div tabindex="-1" autofocus[^>]*>[\s\S]*You skipped the rest\./,
+		);
 	});
 
 	it("a plain form post redirects back to the screen", async () => {

@@ -184,7 +184,11 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 						</div>
 					</>
 				) : skipped.length > 0 ? (
-					<div class="mt-2">
+					<div
+						tabindex={focus ? -1 : undefined}
+						autofocus={focus || undefined}
+						class="mt-2 outline-none"
+					>
 						<EmptyState
 							kind="done"
 							sentence="You skipped the rest."
@@ -192,7 +196,11 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 						/>
 					</div>
 				) : (
-					<div class="mt-2">
+					<div
+						tabindex={focus ? -1 : undefined}
+						autofocus={focus || undefined}
+						class="mt-2 outline-none"
+					>
 						<EmptyState
 							kind="done"
 							sentence="Nothing left to check."

@@ -320,6 +320,36 @@ describe("suggestionQueue", () => {
 		expect(await suggestionQueue(db, AI_SWITCHES_ALL_ON)).toEqual([]);
 	});
 
+	it("asks about an excluded credit that pays a bill, as its row shows it as Maybe income, and not one left out", async () => {
+		const paying = await transaction({
+			amount: -250000,
+			raw: "CARD PAYMENT CREDIT",
+			incomeConfidence: 0.5,
+			excluded: 1,
+		});
+		await transaction({
+			amount: -250000,
+			raw: "LEFT OUT CREDIT",
+			incomeConfidence: 0.5,
+			excluded: 1,
+		});
+		const bill = await db
+			.prepare(
+				"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Card', 250000, 1, 'monthly', 'CARD PAYMENT CREDIT') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+			)
+			.bind(bill?.id, paying)
+			.run();
+		const income = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap(
+			(item) => (item.kind === "income" ? [item.transactionId] : []),
+		);
+		expect(income).toEqual([paying]);
+	});
+
 	it("never asks a category for a transaction a person or Tally left out of the budget", async () => {
 		await transaction({
 			amount: 2300,

@@ -7,6 +7,7 @@ import { isUnsure, maybeIncomeVisible } from "../ai/maybe";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { pendingSuggestions } from "./category-suggestions";
+import { paysBillSql } from "./counted-month";
 import { hasIncomeAnswerSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
@@ -130,7 +131,7 @@ async function incomeSuggestions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
 				CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence,
-				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded
+				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded, ${paysBillSql("t")} AS paysBill
 			FROM transactions t ${JOIN_MERCHANT}
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL AND t.refund_of_id IS NULL`,
 		)
@@ -140,6 +141,7 @@ async function incomeSuggestions(
 				income: number;
 				creditReviewed: number;
 				excluded: number;
+				paysBill: number;
 			}
 		>();
 	return results
@@ -151,6 +153,7 @@ async function incomeSuggestions(
 					incomeConfidence: row.incomeConfidence,
 					creditReviewed: row.creditReviewed === 1,
 					excluded: row.excluded === 1,
+					paysBill: row.paysBill === 1,
 				}) && !never.has(ruleKey("income", row.merchantKey)),
 		)
 		.map((row) => ({
