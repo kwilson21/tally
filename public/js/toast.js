@@ -197,9 +197,10 @@
 		if (undo) {
 			undoToasts.set(toast, undo);
 			window.htmx?.process(toast);
-			toast.setAttribute(
-				"style",
-				`--duration-undo-toast: ${Math.min(10_000, undoExpiresInMs)}ms`,
+			// A property, not a style attribute: the page's CSP (style-src 'self') refuses the attribute.
+			toast.style.setProperty(
+				"--duration-undo-toast",
+				`${Math.min(10_000, undoExpiresInMs)}ms`,
 			);
 			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
 			// user can press it at once. The HX-Trigger runs after the swap (htmx's finally), so this wins over

@@ -300,14 +300,16 @@ describe("toasts", () => {
 		);
 		// The same animation for a drawing of a toast, which sits outside #toasts.
 		expect(selectorsOf(toast as Rule)).toContain(".toast-motion");
-		// toast.js writes no motion. Its only style writes set and clear two measured heights: the Select
-		// bar's, on #toasts, and the toasts' own, on the root element where --toast-top-room reads it.
+		// toast.js writes no animation or transition. Its style writes set and clear two measured heights: the
+		// Select bar's, on #toasts, and the toasts' own, on the root element where --toast-top-room reads it. Its
+		// one other write is an Undo toast's remaining window, the only duration it sets, as a property (CSP refuses a style attribute).
 		expect(toastSource).not.toMatch(/animation|transition/);
 		expect(toastSource.match(/style\.\w+\(/g)).toEqual([
 			"style.setProperty(",
 			"style.removeProperty(",
 			"style.setProperty(",
 			"style.removeProperty(",
+			"style.setProperty(",
 		]);
 		expect(toastSource).toMatch(
 			/documentElement\.style\.setProperty\(\s*"--toasts-height"/,
