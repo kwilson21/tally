@@ -354,6 +354,16 @@ describe("finding bills", () => {
 	it.each([
 		["Jev", "flag_transfer=1, excluded=1, excluded_source='jev'", "JEV MOVE"],
 		["a person", "excluded=1, excluded_source='user'", "PERSON MOVE"],
+		[
+			"Jev on a car loan",
+			"plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CAR_PAYMENT', excluded=1, excluded_source='jev'",
+			"JEV LOAN",
+		],
+		[
+			"a person on a car loan",
+			"plaid_category='LOAN_PAYMENTS', plaid_detailed_category='LOAN_PAYMENTS_CAR_PAYMENT', excluded=1, excluded_source='user'",
+			"PERSON LOAN",
+		],
 	] as const)(
 		"never suggests a steady charge left out of the budget by %s",
 		async (_label, mutation, rawName) => {
