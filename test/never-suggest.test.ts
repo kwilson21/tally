@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { noneFitTransactions } from "../src/db/category-suggestions";
 import {
@@ -7,7 +7,9 @@ import {
 	neverSuggestRules,
 	removeNeverSuggest,
 } from "../src/db/never-suggest";
+import { getTransaction, listTransactions } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { parseFilters } from "../src/transactions/filters";
 
 // "Never suggest" rules (spec §5, §7, §8.6, decision 101): one row per suggestion a person said Yes to
 // stopping. Tally never makes that suggestion for that store again until the family removes the line.
@@ -88,6 +90,116 @@ describe("never_suggest_rules table", () => {
 		expect(removed?.kind).toBe("transfer");
 		expect(await neverSuggestRules(db)).toEqual([]);
 		expect(await removeNeverSuggest(db, rule?.id ?? 0)).toBeNull();
+	});
+});
+
+describe("a Never suggest line hides the store's Maybe on the rows and the panel (decision 101)", () => {
+	const insertTx = async (fields: {
+		raw: string;
+		merchant?: string;
+		amount: number;
+		incomeConfidence?: number;
+		suggestionId?: number;
+	}): Promise<number> => {
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name,
+					income_confidence, category_suggestion_id)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-03', ?, ?, ?, ?, ?) RETURNING id`,
+			)
+			.bind(
+				`plaid-${crypto.randomUUID()}`,
+				fields.amount,
+				fields.raw,
+				fields.merchant ?? null,
+				fields.incomeConfidence ?? null,
+				fields.suggestionId ?? null,
+			)
+			.first<{ id: number }>();
+		return row?.id ?? 0;
+	};
+	const listed = async (id: number) =>
+		(
+			await listTransactions(
+				db,
+				parseFilters(new URLSearchParams("show=all"), "2026-10"),
+				[id],
+			)
+		).rows[0];
+	const rowHtml = async (id: number) => {
+		const html = await (
+			await exports.default.fetch(
+				"http://tally.test/transactions?show=all&month=all&q=VENMO+123",
+			)
+		).text();
+		const row = html.slice(html.indexOf(`data-transaction="${id}"`));
+		return row.slice(0, row.indexOf("</li>"));
+	};
+
+	it("hides Maybe income on the list, the panel and the detail, and shows it again once the line is removed", async () => {
+		const id = await insertTx({
+			raw: "VENMO 123",
+			merchant: "Venmo",
+			amount: -2500,
+			incomeConfidence: 0.6,
+		});
+		expect((await rowHtml(id)).includes("Maybe income")).toBe(true);
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		expect((await listed(id))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, id))?.incomeConfidence).toBeNull();
+		expect(await rowHtml(id)).not.toContain("Maybe income");
+		const panel = await (
+			await exports.default.fetch(`http://tally.test/transactions/${id}`)
+		).text();
+		expect(panel).not.toContain("Maybe income");
+		const [rule] = await neverSuggestRules(db);
+		await removeNeverSuggest(db, rule?.id ?? 0);
+		expect((await listed(id))?.incomeConfidence).toBe(0.6);
+		expect((await getTransaction(db, id))?.incomeConfidence).toBe(0.6);
+		expect(await rowHtml(id)).toContain("Maybe income");
+	});
+
+	it("hides a Maybe new category chip for a store with a new-category line, and only that store's", async () => {
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const suggestionId = suggestion?.id ?? 0;
+		const chewy = await insertTx({
+			raw: "CHEWY.COM",
+			merchant: "Chewy",
+			amount: 4500,
+			suggestionId,
+		});
+		const petco = await insertTx({
+			raw: "PETCO 22",
+			merchant: "Petco",
+			amount: 2399,
+			suggestionId,
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "Chewy",
+			kind: "new_category",
+			decidedOn: "2026-10-03",
+		});
+		const chewyRow = await getTransaction(db, chewy);
+		expect(chewyRow?.maybeCategoryName).toBeNull();
+		expect(chewyRow?.maybeCategoryNew).toBeFalsy();
+		expect((await listed(chewy))?.maybeCategoryName).toBeNull();
+		expect((await getTransaction(db, petco))?.maybeCategoryName).toBe(
+			"new:Pet Care",
+		);
+		expect((await listed(petco))?.maybeCategoryName).toBe("new:Pet Care");
+		const [rule] = await neverSuggestRules(db);
+		await removeNeverSuggest(db, rule?.id ?? 0);
+		expect((await getTransaction(db, chewy))?.maybeCategoryName).toBe(
+			"new:Pet Care",
+		);
 	});
 });
 

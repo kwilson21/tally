@@ -48,7 +48,7 @@ import {
 	PAYS_A_BILL,
 	paysBillSql,
 } from "./counted-month";
-import { hasIncomeAnswerSql, plaidSetIncomeSql } from "./income";
+import { maybeIncomeConfidenceSql, plaidSetIncomeSql } from "./income";
 import {
 	merchantColumnSql,
 	merchantKeySql,
@@ -56,6 +56,7 @@ import {
 } from "./merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
 import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
+import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
 import {
 	refundedByOthersSql,
@@ -132,7 +133,7 @@ type NameSuggestionColumns = {
 // transactions panel all draw rows from these, so a row looks the same in each (src/views/transaction-row.tsx).
 /** The joins behind the Maybe chip: Tally's category guess, and the pending suggestion a new category came from. */
 export const MAYBE_CATEGORY_JOINS = `LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
-	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending'`;
+	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}`;
 /** The Maybe chip's category name (a new one as "new:name"), and whether it is a new one; needs MAYBE_CATEGORY_JOINS. */
 export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
@@ -370,7 +371,7 @@ export async function listTransactions(
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				${BILL_NAME_COLUMN},
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
-				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				${MAYBE_CATEGORY_COLUMNS},
 				${COUNTS_IN_MONTH_COLUMN}
@@ -730,7 +731,7 @@ export async function getTransaction(
 				${REFUNDED_COLUMN},
 				t.excluded, ${paysBillSql("t")} AS paysBill,
 				${BILL_NAME_COLUMN},
-				${PENDING_SQL} AS pending, t.flag_income AS income, CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
+				${PENDING_SQL} AS pending, t.flag_income AS income, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,

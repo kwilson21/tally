@@ -138,9 +138,9 @@ export function neverSuggestRuleLine(rule: NeverSuggestRule): string {
 }
 
 /**
- * SQL that is true when the store (`merchantKeySql`, an expression for the merchant key) has no "Never
- * suggest" line of `kind`. Used by the review queue and the new-category grouping, so a refused
- * suggestion never comes back. `kind` is one of the typed kinds, never user input.
+ * SQL that is true when the store (`merchantKeySql`, an expression for the merchant key) has a "Never
+ * suggest" line of `kind`. Used by the Maybe rows, the review queue and the new-category grouping, so a
+ * refused suggestion never comes back. `kind` is one of the typed kinds, never user input.
  */
 export const neverSuggestedSql = (
 	merchantKeySql: string,

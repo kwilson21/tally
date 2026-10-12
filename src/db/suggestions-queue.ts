@@ -10,7 +10,7 @@ import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
 import { pendingSuggestions } from "./category-suggestions";
 import { jevAsksAboutSql, paysBillSql } from "./counted-month";
-import { hasIncomeAnswerSql } from "./income";
+import { maybeIncomeConfidenceSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
 import type { NeverSuggestKind } from "./never-suggest";
@@ -120,12 +120,11 @@ const merchantLabel = (displayName: string | null, key: string) =>
  */
 async function incomeSuggestions(
 	db: D1Database,
-	never: Set<string>,
 ): Promise<{ item: TransactionSuggestion; order: number }[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS bankText, ${merchantKeySql("t")} AS merchantKey, ${LABEL_SQL},
-				CASE WHEN ${hasIncomeAnswerSql("t")} OR t.income_maybe_declined = 1 THEN NULL ELSE t.income_confidence END AS incomeConfidence,
+				${maybeIncomeConfidenceSql("t")} AS incomeConfidence,
 				t.flag_income AS income, t.credit_reviewed AS creditReviewed, t.excluded AS excluded, ${paysBillSql("t")} AS paysBill
 			FROM transactions t ${JOIN_MERCHANT}
 			WHERE t.parent_id IS NULL AND t.is_split = 0 AND t.income_confidence IS NOT NULL AND t.refund_of_id IS NULL`,
@@ -139,17 +138,17 @@ async function incomeSuggestions(
 				paysBill: number;
 			}
 		>();
+	// A store's "Never suggest" income line hides the guess in the SQL above (a null confidence is never a Maybe).
 	return results
-		.filter(
-			(row) =>
-				maybeIncomeVisible({
-					amountCents: row.amountCents,
-					income: row.income === 1,
-					incomeConfidence: row.incomeConfidence,
-					creditReviewed: row.creditReviewed === 1,
-					excluded: row.excluded === 1,
-					paysBill: row.paysBill === 1,
-				}) && !never.has(ruleKey("income", row.merchantKey)),
+		.filter((row) =>
+			maybeIncomeVisible({
+				amountCents: row.amountCents,
+				income: row.income === 1,
+				incomeConfidence: row.incomeConfidence,
+				creditReviewed: row.creditReviewed === 1,
+				excluded: row.excluded === 1,
+				paysBill: row.paysBill === 1,
+			}),
 		)
 		.map((row) => ({
 			order: row.id,
@@ -379,7 +378,7 @@ export async function suggestionQueue(
 	const s = switches ?? (await readAiSwitches(db));
 	const never = await neverSuggestLines(db);
 	const [income, transfer, category, newCategory, names] = await Promise.all([
-		s.income ? incomeSuggestions(db, never) : [],
+		s.income ? incomeSuggestions(db) : [],
 		s.categories ? transferSuggestions(db, never) : [],
 		s.categories ? categorySuggestions(db) : [],
 		s.categories ? newCategorySuggestions(db) : [],
