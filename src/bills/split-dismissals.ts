@@ -24,8 +24,9 @@ export const movePartDismissalsSql = (
 
 /**
  * SQL that gives each part of `purchase` the purchase's own Not this one, once per bill and period, so every part
- * the purchase has from then on starts with it. Run it after the new parts are in place, and after a replacement has
- * restored its kept payments. `guard` as above.
+ * the purchase has from then on starts with it. Run it after the new parts are in place: saveSplit runs it after a
+ * replacement has restored its kept payments, and Change the parts (correctCashSplit) runs it after its inserts.
+ * `guard` as above.
  */
 export const purchaseDismissalsToPartsSql = (
 	purchase: string,

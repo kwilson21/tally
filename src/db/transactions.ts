@@ -1620,18 +1620,20 @@ export type CashSplitPart = {
 /**
  * Change the parts (spec §8.4): saves a split cash entry's new total and its corrected parts in one
  * atomic batch. Saved parts are updated in place by id and new ones are added, so the split and every
- * refund linked to a part stay linked (decision 79: a cash entry's split is never reset). Unlike
- * saveSplit, nothing is deleted or unlinked.
+ * refund linked to a part stay linked (decision 79: a cash entry's split is never reset). Unlike saveSplit,
+ * nothing is deleted or unlinked; a new part starts with the purchase's own Not this one (decision 105).
  *
- * Every statement carries the same gate, so a refusal writes nothing. The gate checks that the entry is
+ * Every statement carries the same gate, so a refusal writes nothing, except the copy of the Not this one
+ * to the new parts, which guards on the parts' count instead (see below). The gate checks that the entry is
  * still the split it was drawn as (`amountWasCents`, or the new total once the parent statement has set
  * it), that every posted saved part is still one of its parts, that the refunds linked to the entry and to
  * its parts together fit the new total, that the refunds linked to each part still fit its new amount
  * (src/db/refunded.ts), and that the entry has no parts but the saved ones. The parent's amount is set
- * first and the new parts are inserted last, in one statement, so nothing the gate reads changes under an
- * earlier statement: a part another save added in the meantime refuses every statement, and no statement
- * can pass after an earlier one refused. Returns `refundTotalCents` (what the refunds linked to the entry
- * and its parts together take) when those are more than the new total, which moving the parts can't fix.
+ * first and the new parts are inserted last among the gated statements, in one statement, so nothing the
+ * gate reads changes under an earlier statement: a part another save added in the meantime refuses every
+ * statement, and no statement can pass after an earlier one refused. Returns `refundTotalCents` (what the
+ * refunds linked to the entry and its parts together take) when those are more than the new total, which
+ * moving the parts can't fix.
  * Returns `refundPart` (the part's 1-based position and what its refunds take) when a part's refunds don't
  * fit; throws when the entry or its parts are no longer as they were drawn, so the save is an error.
  */
@@ -1702,6 +1704,7 @@ export async function correctCashSplit(
 				],
 	);
 	// Every new part in one statement, so the count the gate reads is still the saved parts' count until it runs.
+	// The copy of the purchase's Not this one below is the one statement after it, and it is not gated.
 	const newParts = parts.flatMap((part) =>
 		part.id === null
 			? [{ cents: part.amountCents, categoryId: part.categoryId }]
@@ -1720,11 +1723,29 @@ export async function correctCashSplit(
 						[by, JSON.stringify(newParts), parentId],
 					),
 				];
-	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written.
+	// The copy of the purchase's Not this one to the new parts (decision 105) follows the insert and is not gated: the
+	// gate's last check fails once the new parts exist. It guards on the parts' count instead, which is the posted count
+	// only if the insert ran, so a refused batch still writes nothing.
+	const purchaseDismissals =
+		newParts.length === 0
+			? []
+			: [
+					db
+						.prepare(
+							purchaseDismissalsToPartsSql(
+								"?1",
+								"EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?1 AND cash.is_split = 1 AND cash.amount_cents = ?3) AND (SELECT COUNT(*) FROM transactions WHERE parent_id = ?1) = ?2",
+							),
+						)
+						.bind(parentId, parts.length, totalCents),
+				];
+	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written. The
+	// purchase's Not this one copy runs last, after the insert, and only when a part was added.
 	const results = await db.batch([
 		parentStatement,
 		...partStatements,
 		...insertStatements,
+		...purchaseDismissals,
 	]);
 	if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
 
