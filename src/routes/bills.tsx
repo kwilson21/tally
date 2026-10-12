@@ -25,6 +25,7 @@ import {
 	billOccurrence,
 	billOccurrenceForMonth,
 	billOccurrencesForMonth,
+	handledBeforeAdded,
 	manualLinkWindowDays,
 } from "../bills/status";
 import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
@@ -92,6 +93,7 @@ type DbBill = {
 	merchant_raw_name: string;
 	merchant_raw_text: number;
 	active: number;
+	added_on: string | null;
 	icon: string | null;
 	color: string | null;
 	payment_period?: string | null;
@@ -212,6 +214,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 				dueDay: b.due_day,
 				anchorMonth: b.anchor_month,
 				anchorDate: b.anchor_date,
+				addedOn: b.added_on,
 			},
 			today,
 			new Set(payments.keys()),
@@ -235,7 +238,14 @@ export async function loadBillRows(db: D1Database, today: string) {
 			Number(today.slice(5, 7)),
 		);
 		for (const current of monthOccurrences)
-			if (!totalOccurrences.some((item) => item.dueDate === current.dueDate)) {
+			if (
+				!handledBeforeAdded(
+					b.added_on,
+					current.dueDate,
+					payments.has(current.period),
+				) &&
+				!totalOccurrences.some((item) => item.dueDate === current.dueDate)
+			) {
 				totalOccurrences.push({
 					dueDate: current.dueDate,
 					status: occurrenceStatus(
@@ -1019,7 +1029,7 @@ async function save(c: Context<App>, id?: number) {
 	const month = today.slice(0, 7);
 	const written = id
 		? await updateBill(c.env.DB, id, fields, periodKeysChanged, month)
-		: await insertBill(c.env.DB, fields, month);
+		: await insertBill(c.env.DB, fields, today);
 	// Another save took the name since the check above, and the write refused it.
 	if (!written)
 		return nameTaken(c, { bill: bill ?? undefined, values, bigAmount });
@@ -1215,6 +1225,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 		))
 			result.add(occurrence.period);
 	}
+	// The picker and the link routes keep every period, handled ones included (decision 99); only the Payments list leaves them out.
 	result.add(
 		billOccurrence(
 			{
@@ -1256,6 +1267,16 @@ async function billPage(
 	const byPeriod = new Map(
 		payments.map((payment) => [payment.period, payment]),
 	);
+	// An unpaid occurrence due before the day the bill was added is already handled, so it has no row (decision 99).
+	// The picker still lists every period, so a payment can be linked to one by hand.
+	const listedPeriods = periods.filter(
+		(period) =>
+			!handledBeforeAdded(
+				bill.added_on,
+				occurrenceDate(bill, period),
+				byPeriod.has(period),
+			),
+	);
 	// Each occurrence is judged at its own month's amount (decision 101), so the page, the picker and the
 	// price offer all read the same figure for one occurrence.
 	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
@@ -1289,6 +1310,7 @@ async function billPage(
 			dueDay: bill.due_day,
 			anchorMonth: bill.anchor_month,
 			anchorDate: bill.anchor_date,
+			addedOn: bill.added_on,
 		},
 		today,
 		new Set(payments.map((p) => p.period)),
@@ -1375,7 +1397,7 @@ async function billPage(
 				)}
 				<h2 class="mt-6 text-sm text-muted">Payments</h2>
 				<ul class="divide-y divide-rule border-y border-rule">
-					{periods.map((period) => {
+					{listedPeriods.map((period) => {
 						const payment = byPeriod.get(period);
 						const due = occurrenceDate(bill, period);
 						// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
@@ -1677,6 +1699,7 @@ async function currentOffer(
 			dueDay: bill.due_day,
 			anchorMonth: bill.anchor_month,
 			anchorDate: bill.anchor_date,
+			addedOn: bill.added_on,
 		},
 		today,
 		new Set(linked.map((row) => row.period)),

@@ -56,6 +56,22 @@ describe("bill writes", () => {
 			});
 		});
 
+		// Decision 99 (#337): the day a bill is added is the household's day when it is saved, unless one is given.
+		it("records the day it was added", async () => {
+			expect(
+				await insertBill(env.DB, fields({ name: "Dated" }), "2026-10-10"),
+			).toBe(true);
+			const dated = await env.DB.prepare(
+				"SELECT added_on AS addedOn FROM bills WHERE name='Dated'",
+			).first<{ addedOn: string }>();
+			expect(dated?.addedOn).toBe("2026-10-10");
+			expect(await insertBill(env.DB, fields({ name: "Undated" }))).toBe(true);
+			const undated = await env.DB.prepare(
+				"SELECT added_on AS addedOn FROM bills WHERE name='Undated'",
+			).first<{ addedOn: string }>();
+			expect(undated?.addedOn).toBe(todayIn(DEFAULT_TIME_ZONE));
+		});
+
 		it.each(["Water", "water", "  WATER  "])(
 			"writes nothing when an active bill is already called %j",
 			async (name) => {
