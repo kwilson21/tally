@@ -556,6 +556,11 @@ howItWorks.get("/how-it-works", async (c) => {
 							the month when it appeared at the bank.
 						</li>
 						<li>
+							A bill's amount for a month is its latest amount set on or before
+							that month, as a budget's is. A changed price applies from the
+							month it's changed in, and earlier months keep theirs.
+						</li>
+						<li>
 							You can link a payment to a chosen month, or reject a wrong match
 							so Tally will not suggest it again.
 						</li>

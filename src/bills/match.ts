@@ -1,5 +1,7 @@
 import { householdToday } from "../dates";
+import { amountRowsByBill } from "../db/bill-amounts";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
+import { type AmountRow, amountForMonth } from "./amount";
 import {
 	type BillFrequency,
 	billOccurrenceForMonth,
@@ -89,6 +91,14 @@ type Bill = {
 	merchant_raw_text: number;
 };
 
+/** The amount an occurrence due on `due` is matched at: its month's amount (src/bills/amount.ts). */
+const occurrenceCents = (
+	bill: Bill,
+	due: string,
+	rows: ReadonlyMap<number, AmountRow[]>,
+) =>
+	amountForMonth(rows.get(bill.id) ?? [], due.slice(0, 7), bill.amount_cents);
+
 /**
  * Fills every unlinked occurrence in range; unique indexes remain the final concurrency guard.
  * `given` is the household's date when the caller already has it, otherwise it's read here.
@@ -110,6 +120,8 @@ export async function matchBillPayments(
 			.all<Bill>()
 	).results;
 	const endDay = dayNumber(today) + 7;
+	// Each occurrence is matched at its own month's amount (decision 101, src/bills/amount.ts).
+	const amountRows = await amountRowsByBill(db);
 	type Pair = {
 		bill: Bill;
 		period: string;
@@ -188,9 +200,10 @@ export async function matchBillPayments(
 					finishDate,
 				);
 				for (const { due, period, day } of occurrenceDates) {
+					const cents = occurrenceCents(bill, due, amountRows);
 					for (const candidate of candidates) {
 						if (
-							!pickBillPayment([candidate], due, bill.amount_cents, window) ||
+							!pickBillPayment([candidate], due, cents, window) ||
 							dismissed.has(`${bill.id}:${period}:${candidate.id}`)
 						)
 							continue;
@@ -199,9 +212,7 @@ export async function matchBillPayments(
 							period,
 							candidate,
 							dateDistance: Math.abs(dayNumber(candidate.date) - day),
-							amountDistance: Math.abs(
-								candidate.amountCents - bill.amount_cents,
-							),
+							amountDistance: Math.abs(candidate.amountCents - cents),
 						});
 					}
 				}
@@ -271,10 +282,11 @@ export async function matchBillPayments(
 				shiftDay(firstDue.due, -BILL_DATE_WINDOW_DAYS),
 				shiftDay(lastDue.due, BILL_DATE_WINDOW_DAYS),
 			);
-			for (const { due, period } of occurrences)
+			for (const { due, period } of occurrences) {
+				const cents = occurrenceCents(bill, due, amountRows);
 				for (const candidate of candidates) {
 					if (
-						!pickBillPayment([candidate], due, bill.amount_cents) ||
+						!pickBillPayment([candidate], due, cents) ||
 						dismissed.has(`${bill.id}:${period}:${candidate.id}`)
 					)
 						continue;
@@ -283,9 +295,10 @@ export async function matchBillPayments(
 						period,
 						candidate,
 						dateDistance: Math.abs(dayNumber(candidate.date) - dayNumber(due)),
-						amountDistance: Math.abs(candidate.amountCents - bill.amount_cents),
+						amountDistance: Math.abs(candidate.amountCents - cents),
 					});
 				}
+			}
 		}
 	}
 	pairs.sort(

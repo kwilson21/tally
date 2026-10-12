@@ -73,6 +73,14 @@ export async function householdToday(
 	return todayIn(await householdTimeZone(db), now);
 }
 
+/** The household's month, 'YYYY-MM': the month of `householdToday` (a bill's amount applies from it). */
+export async function householdMonth(
+	db: D1Database,
+	now: Date = new Date(),
+): Promise<string> {
+	return (await householdToday(db, now)).slice(0, 7);
+}
+
 /** "2026-09" → "September". */
 export function monthName(month: string): string {
 	return MONTHS[Number(month.slice(5, 7)) - 1] ?? month;
