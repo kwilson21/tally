@@ -525,6 +525,31 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("names the bill a bank change left unpaid in TransactionRow's sentence, as DESIGN.md says (#443)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		// The specimen's own sentence, the words the owner reads above the states.
+		const sentence =
+			section.match(
+				/<p class="mt-1 max-w-prose text-muted">([^<]*)<\/p>/,
+			)?.[1] ?? "";
+		expect(sentence).toContain(
+			"“The bank changed this from $187.42, so its split was removed.”",
+		);
+		expect(sentence).toContain(
+			"“The Costco membership bill for 2026 is no longer paid.”",
+		);
+		expect(sentence).toContain("“2 bills are no longer paid.”");
+		expect(sentence).toContain(
+			"“for September 2026”, “for Q3 2026” or “for Sep 14, 2026”",
+		);
+		expect(sentence).toContain("a bill paid again drops out");
+		expect(design).toMatch(
+			/\| TransactionRow \|[^\n]*The Costco membership bill for 2026 is no longer paid\./,
+		);
+	});
+
 	it("shows the Chip disabled, as the edit panel draws it while a refund is linked to a purchase, and DESIGN.md says how it looks", async () => {
 		const { html } = await get("/design-system");
 		const section = html.split('id="chip"')[1]?.split("</section>")[0] ?? "";
@@ -652,6 +677,17 @@ describe("GET /design-system in the demo", () => {
 			/\| BillOccurrenceRow \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
 		);
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
+	});
+
+	it("says in the price offer's use spec what Update checks, with no count of prices (#422)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		// Named by what it checks: the payment, its charge, the month's amount and the bill's current one.
+		expect(page).toContain(
+			"Update saves only if the payment, its charge, the month&#39;s amount and the bill&#39;s current amount are all still the ones the page showed.",
+		);
+		expect(html).not.toContain("saves only the two prices");
 	});
 
 	it("shows the picker a month choice finds empty, with its month choices kept (#323)", async () => {
