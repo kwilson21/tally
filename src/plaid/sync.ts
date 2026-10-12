@@ -226,7 +226,10 @@ function splitBillStatements(
 }
 
 /**
- * A bank correction that clears Jev's category (its amount changed) lets go of that category's What AI did row, so a later pick isn't counted as changing Tally's work; the row still counts as sorted (spec section 5). It mirrors the Jev arm of the category CASE in both update statements below, so a change to one must change the other.
+ * A bank correction that clears Jev's category (its amount changed) lets go of that category's What AI did
+ * row, so a later pick isn't counted as changing Tally's work; the row still counts as sorted (spec section 5).
+ * It mirrors the Jev arm of the category CASE in both update statements below, so a change to one must change
+ * the other.
  */
 function forgetClearedJevLog(
 	env: SyncEnv,
