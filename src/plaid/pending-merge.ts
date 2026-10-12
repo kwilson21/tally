@@ -25,7 +25,9 @@
  *   its split, unless a person picked the posted row's own category, and Jev's answers on the posted row are
  *   cleared with it, as in a same-row bank correction (they described the old amount). A split with none
  *   leaves the posted row in Needs category with the note. A refund of one of its parts is unlinked with the
- *   purchase's date (decision 99).
+ *   purchase's date (decision 99). When the posted row keeps its own split, a pending part's bill payment stays paid on
+ *   the posted part with the same amount and category, and otherwise it is dismissed on each of the posted row's parts
+ *   so the matcher does not link it again (decision 99).
  * Every statement checks that both rows still exist and that this run still holds the Item's lock, so
  * a replay or a lost lock changes nothing.
  */
@@ -76,6 +78,16 @@ const PERSON_TAKEN = takesDetailSql(
 	"for_person_guessed",
 	"for_person_cleared",
 );
+
+/**
+ * The posted row's part a pending part's linked bill payment moves to: its lowest-id part with the same amount and
+ * category and no linked payment of its own, as saveSplit keeps one (decision 99). Correlated to the payment's row.
+ */
+const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
+	WHERE pp.id = bill_payments.transaction_id AND part.parent_id = ${POSTED}
+	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
+	AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
+	ORDER BY part.id LIMIT 1)`;
 
 const STATEMENTS = [
 	// Category: a person's pick on the pending row wins over anything but a person's pick on the posted one.
@@ -203,8 +215,24 @@ const STATEMENTS = [
 	 WHERE refund_of_id IN (SELECT part.id FROM transactions part WHERE part.parent_id = ${PENDING})
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
 	 AND ${READY}`,
+	// When the posted row keeps its own split, a pending part's linked bill payment stays paid on the posted part with the
+	// same amount and category that has no payment of its own, as saveSplit keeps one (decision 99). A clash on a unique
+	// index leaves it on the pending part for the next statement.
+	`UPDATE OR IGNORE bill_payments SET transaction_id = ${KEEP_PART}
+	 WHERE status = 'linked' AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING})
+	 AND ${READY} AND ${KEEP_PART} IS NOT NULL`,
+	// A pending part's bill payment that is still linked, or is the matcher's auto dismissal, is dismissed on each part of the
+	// posted row too, so the matcher does not link it again (decision 99). Nothing happens when the posted row has no parts.
+	`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
+	 SELECT DISTINCT bp.bill_id, bp.period, part.id, 'auto', 'dismissed'
+	 FROM bill_payments bp
+	 JOIN transactions pp ON pp.id = bp.transaction_id AND pp.parent_id = ${PENDING}
+	 JOIN transactions part ON part.parent_id = ${POSTED}
+	 WHERE (bp.status = 'linked' OR (bp.status = 'dismissed' AND bp.matched_by = 'auto')) AND ${READY}
+	 AND NOT EXISTS (SELECT 1 FROM bill_payments d WHERE d.transaction_id = part.id AND d.bill_id = bp.bill_id AND d.period = bp.period AND d.status = 'dismissed')`,
 	// A bill payment of a part that goes with the pending row is dismissed on the posted row, so the matcher does not link it again
-	// (decision 99). The parts that moved to the posted row are not its parts any more, so they keep theirs.
+	// (decision 99). The parts that moved to the posted row are not its parts any more, so they keep theirs. Where the posted row
+	// has parts of its own, the statements above already dismissed the rest on those parts.
 	`UPDATE bill_payments SET transaction_id = ${POSTED}, status = 'dismissed', matched_by = 'auto'
 	 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${READY}`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
