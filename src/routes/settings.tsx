@@ -801,7 +801,10 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 			"HX-Trigger",
 			JSON.stringify({ announce: "Tally's rules list updated." }),
 		);
-		return renderSettings(c, { rulesSearch: search });
+		return renderSettings(c, {
+			rulesSearch: search,
+			focusNever: lines.length === 0 ? { heading: true } : { index: 0 },
+		});
 	}
 	const message = "Removed. Tally can suggest that again.";
 	if (c.req.header("HX-Request")) {

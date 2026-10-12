@@ -420,7 +420,7 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "yes") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
+						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND jev_category_id IS NOT NULL
 							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = transactions.jev_category_id AND c.archived = 0)`,
@@ -450,7 +450,7 @@ suggestions.post(PATH, async (c) => {
 					});
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL,
+						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND category_id IS NULL AND category_source IS NULL`,
 					)

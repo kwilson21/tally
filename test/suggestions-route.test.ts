@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
@@ -626,13 +627,13 @@ describe("categories", () => {
 		).toMatchObject({ n: 0 });
 	});
 
-	it("a category set here clears a split's removed-amount mark, as the edit panel does", async () => {
+	it("a category set here clears a split's removed-amount mark and its removed bills, as the edit panel does", async () => {
 		const ids = await oneOfEach();
 		await db
 			.prepare(
-				"UPDATE transactions SET split_removed_from_cents = 500 WHERE id = ?",
+				"UPDATE transactions SET split_removed_from_cents = 500, split_removed_bills = ? WHERE id = ?",
 			)
-			.bind(ids.category)
+			.bind('[{"billId":1,"name":"Rent","period":"2026-10"}]', ids.category)
 			.run();
 		await post(
 			"/settings/suggestions",
@@ -641,10 +642,43 @@ describe("categories", () => {
 		);
 		expect(
 			await row(
-				"SELECT split_removed_from_cents FROM transactions WHERE id = ?",
+				"SELECT split_removed_from_cents, split_removed_bills FROM transactions WHERE id = ?",
 				ids.category,
 			),
-		).toMatchObject({ split_removed_from_cents: null });
+		).toMatchObject({
+			split_removed_from_cents: null,
+			split_removed_bills: null,
+		});
+	});
+
+	it("Something else clears a split's removed-amount mark and its removed bills too", async () => {
+		const ids = await oneOfEach();
+		const groceries = await categoryId("Groceries");
+		await db
+			.prepare(
+				"UPDATE transactions SET split_removed_from_cents = 500, split_removed_bills = ? WHERE id = ?",
+			)
+			.bind('[{"billId":1,"name":"Rent","period":"2026-10"}]', ids.category)
+			.run();
+		await post(
+			"/settings/suggestions",
+			{
+				id: `category-${ids.category}`,
+				answer: "else",
+				category: String(groceries),
+			},
+			true,
+		);
+		expect(
+			await row(
+				"SELECT category_id, split_removed_from_cents, split_removed_bills FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toMatchObject({
+			category_id: groceries,
+			split_removed_from_cents: null,
+			split_removed_bills: null,
+		});
 	});
 
 	it("never excludes a refund linked to a purchase, even when a stale answer arrives for it", async () => {
@@ -831,6 +865,49 @@ describe("names", () => {
 			"Pick a name, keep the bank's, or type your own.",
 		);
 		expect(html).toMatch(/<details[^>]*\bopen/);
+	});
+
+	it("says a name the bank sent is From your bank, with no sparkles icon and no Why?, with the names switch on and off", async () => {
+		await insertTx({
+			raw: "SQ *COMCAST 99",
+			amount: 4000,
+			merchantName: "Comcast",
+		});
+		await insertTx({
+			raw: "SQ *COMCAST 99",
+			amount: 4000,
+			merchantName: "Comcast",
+		});
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('Comcast', 'Comcast', 'pending')",
+			)
+			.run();
+		for (const names of [true, false]) {
+			await saveAiSwitches(db, { names });
+			const { html } = await get("/settings/suggestions");
+			expect(textOf(html)).toContain("From your bank");
+			expect(textOf(html)).toContain("Yes, Comcast");
+			expect(html).not.toContain('data-icon="sparkles"');
+			expect(textOf(html)).not.toContain("Tally's guess");
+			expect(html).not.toContain("/how-it-works#names");
+		}
+	});
+
+	it("draws a long bank text in the review heading, wrapping it inside the column", async () => {
+		const raw = `SQ *${"x".repeat(48)}`;
+		await insertTx({ raw, amount: 1200 });
+		await insertTx({ raw, amount: 1200 });
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, 'Long Store Name', 'pending')",
+			)
+			.bind(raw)
+			.run();
+		const { html } = await get("/settings/suggestions");
+		expect(html).toContain(raw);
+		const heading = html.split("<h2").find((part) => part.includes(raw)) ?? "";
+		expect(heading.slice(0, heading.indexOf(">"))).toContain("wrap-anywhere");
 	});
 });
 
@@ -1048,6 +1125,40 @@ describe("Settings' Never suggest list", () => {
 			true,
 		);
 		expect(last.html).toMatch(
+			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
+		);
+	});
+
+	it("a Remove of a line already gone moves focus to the first line's Remove, or to the heading when none is left", async () => {
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO', 'income', '2026-10-03')",
+			)
+			.run();
+		// The focused Remove was taken away by another tab, so this one asks again for a line that is gone.
+		const stale = await post(
+			"/settings/never-suggest/remove",
+			{ id: "999999" },
+			true,
+		);
+		expect(stale.res.status).toBe(200);
+		expect(focusedNeverLine(stale.html)).toContain(
+			"Never suggest income for Venmo",
+		);
+		const venmo = await row(
+			"SELECT id FROM never_suggest_rules WHERE merchant_key = 'VENMO'",
+		);
+		await post(
+			"/settings/never-suggest/remove",
+			{ id: String(venmo?.id) },
+			true,
+		);
+		const empty = await post(
+			"/settings/never-suggest/remove",
+			{ id: "999999" },
+			true,
+		);
+		expect(empty.html).toMatch(
 			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
 		);
 	});
