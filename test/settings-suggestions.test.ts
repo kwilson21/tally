@@ -783,17 +783,62 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 				(item) =>
 					item.includes("autofocus") && item.includes("never-suggest/remove"),
 			) ?? "";
-	const linked = async () => {
-		// The charge is what links the two lines: its bank text and the Plaid name it came with (decision 101).
-		await db
+	/** A charge whose bank text is `raw` and whose Plaid name is Venmo: the link a pair of lines goes by (decision 101). */
+	const charge = (raw: string) =>
+		db
 			.prepare(
-				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name) VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', -2500, 'VENMO 123', 'Venmo')",
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name) VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', -2500, ?, 'Venmo')",
 			)
-			.bind(`plaid-${crypto.randomUUID()}`)
+			.bind(`plaid-${crypto.randomUUID()}`, raw)
 			.run();
+	const linked = async () => {
+		await charge("VENMO 123");
 		await neverLine("VENMO 123", "income", "2026-10-04");
 		await neverLine("Venmo", "income", "2026-10-03");
 	};
+
+	it("draws a linked pair as one line, under the store's name", async () => {
+		await linked();
+		const { html } = await get();
+		expect(
+			html
+				.split("<li ")
+				.filter((item) => item.includes("never-suggest/remove")),
+		).toHaveLength(1);
+		expect(html).toContain(`name="id" value="${await lineId("Venmo")}"`);
+		expect(html).not.toContain(
+			`name="id" value="${await lineId("VENMO 123")}"`,
+		);
+	});
+
+	it("between two stores, focuses the line that took the clicked one's place", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-10-05");
+		await neverLine("Petco", "income", "2026-09-01");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+		]);
+		expect(focusedLine(html)).toContain("for Petco");
+	});
+
+	it("with a visible line above the clicked one, focuses that line once the pair has gone", async () => {
+		await charge("VENMO 123");
+		await charge("VENMO 456");
+		await neverLine("VENMO 456", "income", "2026-10-05");
+		await neverLine("VENMO 123", "income", "2026-10-04");
+		await neverLine("Chewy", "income", "2026-10-03");
+		await neverLine("Petco", "income", "2026-10-02");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("VENMO 123"))],
+		]);
+		const stored = await db
+			.prepare(
+				"SELECT merchant_key AS key FROM never_suggest_rules ORDER BY key",
+			)
+			.all<{ key: string }>();
+		expect(stored.results.map((line) => line.key)).toEqual(["Chewy", "Petco"]);
+		expect(focusedLine(html)).toContain("for Chewy");
+	});
 
 	it("with a line of another store left, lists only that line and focuses its Remove", async () => {
 		await linked();

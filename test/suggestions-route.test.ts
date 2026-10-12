@@ -843,6 +843,22 @@ describe("new categories", () => {
 			.all<{ key: string }>();
 		expect(lines.results.map((line) => line.key)).toEqual(["CHEWY.COM 1"]);
 	});
+
+	it("asks a new category with Tally's guess and a Why? to How Tally works", async () => {
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		for (const raw of ["CHEWY.COM 1", "PETSMART 22", "BANFIELD 5"])
+			await insertTx({ raw, amount: 4500, suggestionId: suggestion?.id });
+		const { html } = await get("/settings/suggestions");
+		expect(textOf(html)).toContain("Maybe new: Pet Care");
+		expect(textOf(html)).toContain("Tally's guess");
+		expect(html).toContain('data-icon="sparkles"');
+		expect(html).toContain('href="/how-it-works#categorization"');
+		expect(html).toContain('aria-label="Why? Tally&#39;s guess"');
+	});
 });
 
 /** The purchases a new-category form ticks: the checkbox values that carry `checked`. */

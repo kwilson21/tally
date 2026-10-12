@@ -205,9 +205,16 @@ describe("a Never suggest line hides the store's Maybe on the rows and the panel
 });
 
 describe("Remove takes the store's linked lines away with the one clicked (decision 101)", () => {
+	// What is stored, not what Settings shows: a hidden bank-text line still counts here.
 	const lines = async () =>
-		(await neverSuggestRules(db))
-			.map((rule) => `${rule.merchantKey}:${rule.kind}`)
+		(
+			await db
+				.prepare(
+					"SELECT merchant_key AS merchantKey, kind FROM never_suggest_rules",
+				)
+				.all<{ merchantKey: string; kind: string }>()
+		).results
+			.map((row) => `${row.merchantKey}:${row.kind}`)
 			.sort();
 
 	beforeEach(async () => {
@@ -240,10 +247,33 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 		});
 	});
 
+	it("lists a bank-text line copied to the store's name once, as the store's name", async () => {
+		expect(
+			(await neverSuggestRules(db))
+				.map((rule) => `${rule.merchantKey}:${rule.kind}`)
+				.sort(),
+		).toEqual(["CHEWY:income", "Venmo:income", "Venmo:transfer"]);
+	});
+
+	it("still lists a bank-text line with no store-name line of its kind", async () => {
+		await addNeverSuggest(db, {
+			merchantKey: "VENMO 123",
+			kind: "new_category",
+			decidedOn: "2026-10-03",
+		});
+		expect(
+			(await neverSuggestRules(db)).map(
+				(rule) => `${rule.merchantKey}:${rule.kind}`,
+			),
+		).toContain("VENMO 123:new_category");
+	});
+
 	it("removing the bank-text line also removes the store-name line of the same kind, and nothing else", async () => {
-		const bank = (await neverSuggestRules(db)).find(
-			(rule) => rule.merchantKey === "VENMO 123",
-		);
+		const bank = await db
+			.prepare(
+				"SELECT id FROM never_suggest_rules WHERE merchant_key='VENMO 123' AND kind='income'",
+			)
+			.first<{ id: number }>();
 		const removed = await removeNeverSuggest(db, bank?.id ?? 0);
 		expect(removed?.rule.kind).toBe("income");
 		expect(removed?.removedCount).toBe(2);

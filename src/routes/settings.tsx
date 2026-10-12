@@ -798,7 +798,8 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 });
 
 // Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
-// The store's linked lines go with it (decision 101), so focus counts the lines left: the next line's Remove (the one above it when it was the last), or the heading when none is left.
+// The store's linked lines go with it (decision 101). Focus goes to the line that took the clicked line's place,
+// counting only the lines left above it, or to the heading when none is left.
 settings.post("/settings/never-suggest/remove", async (c) => {
 	const form = await c.req.formData();
 	const id = Number(form.get("id")?.toString() ?? "");
@@ -830,12 +831,18 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 				announce: `${message} ${neverSuggestRuleLine(removed.rule)} is gone.`,
 			}),
 		);
+		const after = await neverSuggestRules(c.env.DB);
+		const keep = new Set(after.map((line) => line.id));
 		const index = lines.findIndex((line) => line.id === removed.rule.id);
-		const left = lines.length - removed.removedCount;
+		const above = lines
+			.slice(0, Math.max(index, 0))
+			.filter((line) => keep.has(line.id)).length;
 		return renderSettings(c, {
 			rulesSearch: search,
 			focusNever:
-				left === 0 ? { heading: true } : { index: Math.min(index, left - 1) },
+				after.length === 0
+					? { heading: true }
+					: { index: Math.min(above, after.length - 1) },
 		});
 	}
 	return c.redirect(rulesAddress(search), 303);

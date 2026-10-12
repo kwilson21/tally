@@ -44,12 +44,23 @@ const toRule = (row: Row): NeverSuggestRule => ({
 	decidedOn: row.decidedOn,
 });
 
-/** Every line, newest first: the Settings list (spec §8.6, "Never suggest"). */
+/**
+ * The lines the family sees, newest first: the Settings list (spec §8.6, "Never suggest"). A bank-text line
+ * that sync copied to the store's name (decision 101) shows once, as the store-name line, whose Remove takes
+ * both. So a bank-text line is left out while a line of the same kind sits under a Plaid name one of its
+ * charges carries. Every stored row stays in the table, and removeNeverSuggest still finds a hidden one.
+ */
 export async function neverSuggestRules(
 	db: D1Database,
 ): Promise<NeverSuggestRule[]> {
 	const { results } = await db
-		.prepare(`${RULE_SELECT} ORDER BY r.decided_on DESC, r.id DESC`)
+		.prepare(
+			`${RULE_SELECT}
+			WHERE NOT EXISTS (SELECT 1 FROM transactions t
+				JOIN never_suggest_rules s ON s.merchant_key = t.merchant_name AND s.kind = r.kind
+				WHERE t.raw_name = r.merchant_key AND NULLIF(t.merchant_name, '') IS NOT NULL AND t.merchant_name != r.merchant_key)
+			ORDER BY r.decided_on DESC, r.id DESC`,
+		)
 		.all<Row>();
 	return results.map(toRule);
 }

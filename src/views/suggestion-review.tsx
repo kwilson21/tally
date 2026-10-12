@@ -218,6 +218,7 @@ export function SuggestionCard({
 			{item.kind === "new_category" && (
 				<>
 					<MaybeQuestion>Maybe new: {item.name}</MaybeQuestion>
+					<Guess section="categorization" />
 					<NewCategoryForm
 						action={action}
 						item={item}
