@@ -1,5 +1,13 @@
-import { env } from "cloudflare:workers";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { env, exports } from "cloudflare:workers";
+import {
+	afterAll,
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { billOccurrence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
@@ -11,14 +19,14 @@ import { billStatusLine } from "../src/views/bill-row";
 // links that earlier occurrence still shows it as Paid, and the matcher still links it.
 
 const db = env.DB;
-const IDS = [9701, 9702, 9703, 9704];
+const IDS = [9701, 9702, 9703, 9704, 9705, 9706, 9707, 9708];
 
 async function clean() {
 	await db.batch([
 		db.prepare(`DELETE FROM bill_payments WHERE bill_id IN (${IDS.join(",")})`),
 		db.prepare(`DELETE FROM bill_amounts WHERE bill_id IN (${IDS.join(",")})`),
 		db.prepare(`DELETE FROM bills WHERE id IN (${IDS.join(",")})`),
-		db.prepare("DELETE FROM transactions WHERE id IN (9701, 9702)"),
+		db.prepare("DELETE FROM transactions WHERE id IN (9701, 9702, 9703)"),
 	]);
 }
 
@@ -192,5 +200,102 @@ describe("the bills page and Home see the same handled occurrences", () => {
 			)
 			.first<{ period: string }>();
 		expect(link?.period).toBe("2026");
+	});
+});
+
+describe("the bill's own page leaves out a due date before the day the bill was added (decision 99, #337)", () => {
+	beforeEach(async () => {
+		await clean();
+		await db.batch([
+			db.prepare(
+				"INSERT OR IGNORE INTO accounts(id,name,type,balance_cents) VALUES(1,'Checking','depository',0)",
+			),
+		]);
+		vi.useFakeTimers({ toFake: ["Date"] });
+	});
+	afterEach(() => vi.useRealTimers());
+	afterAll(clean);
+
+	/** The Payments row whose label reads `${label} · ${amount}`, or "" when the page lists none. */
+	const paymentRow = (html: string, label: string) =>
+		(
+			html.split("<li").find((item) => item.includes(`>${label} · `)) ?? ""
+		).split("</li>")[0] ?? "";
+
+	/** The bill's page as the household sees it at `now` (an ISO instant). */
+	async function billPageAt(id: number, now: string) {
+		vi.setSystemTime(new Date(now));
+		return (
+			await exports.default.fetch(`http://tally.test/bills/${id}`)
+		).text();
+	}
+
+	it("lists no Overdue or Not paid Friday from before a weekly bill was added, and its next Friday as due", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name,added_on) VALUES(9705,'Friday bill',24000,5,'weekly','FRIDAY BILL','2026-10-12')",
+			)
+			.run();
+		// Monday, October 12, 2026: the Fridays of October 9 and 2 come before the day the bill was added.
+		const html = await billPageAt(9705, "2026-10-12T16:00:00Z");
+		expect(paymentRow(html, "Fri, Oct 9")).toBe("");
+		expect(paymentRow(html, "Fri, Oct 2")).toBe("");
+		expect(html).not.toContain("Overdue");
+		expect(html).not.toContain("Not paid");
+		expect(paymentRow(html, "Fri, Oct 16")).toContain("Due");
+	});
+
+	it("lists no Not paid month from before a monthly bill was added after its due day", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name,added_on) VALUES(9706,'Gym',4500,5,'monthly','GYM CO','2026-10-10')",
+			)
+			.run();
+		const html = await billPageAt(9706, "2026-10-12T16:00:00Z");
+		expect(paymentRow(html, "October")).toBe("");
+		expect(paymentRow(html, "September")).toBe("");
+		expect(html).not.toContain("Not paid");
+		expect(paymentRow(html, "November")).toContain("Upcoming");
+	});
+
+	it("still opens the picker for a handled occurrence, so a payment can be linked to it by hand", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name,added_on) VALUES(9706,'Gym',4500,5,'monthly','GYM CO','2026-10-10')",
+			)
+			.run();
+		vi.setSystemTime(new Date("2026-10-12T16:00:00Z"));
+		const picker = await exports.default.fetch(
+			"http://tally.test/bills/9706/occurrences/2026-10/link",
+		);
+		expect(picker.status).toBe(200);
+	});
+
+	it("still lists a payment that links a handled occurrence as Paid", async () => {
+		await db.batch([
+			db.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,added_on) VALUES(9707,'Car insurance',120000,3,'yearly',3,'INSURER','2026-10-10')",
+			),
+			db.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9703,1,'2026-03-03',120000,'INSURER')",
+			),
+			db.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9707,'2026',9703,'auto','linked')",
+			),
+		]);
+		const html = await billPageAt(9707, "2026-10-12T16:00:00Z");
+		expect(paymentRow(html, "March")).toContain("Paid");
+		expect(paymentRow(html, "March")).toContain("$1,200.00");
+		expect(paymentRow(html, "March 2027")).toContain("Upcoming");
+	});
+
+	it("still lists an unpaid due date after the day the bill was added as Overdue", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name,added_on) VALUES(9708,'Car insurance',120000,3,'yearly',3,'INSURER','2026-02-28')",
+			)
+			.run();
+		const html = await billPageAt(9708, "2026-03-04T16:00:00Z");
+		expect(paymentRow(html, "March")).toContain("Overdue");
 	});
 });

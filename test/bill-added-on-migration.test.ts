@@ -14,10 +14,15 @@ const BACKFILL = (migration?.queries ?? []).find((query) =>
 );
 
 const IDS = [9711, 9712];
-// The migration's day: UTC less twelve hours, as migration 0044 computes its month (see the migration's comment).
-const migrationDay = new Date(Date.now() - 12 * 3_600_000)
-	.toISOString()
-	.slice(0, 10);
+
+/** The day SQLite computes for the backfill (UTC less twelve hours, see the migration's comment). */
+async function sqlDay() {
+	return (
+		await db
+			.prepare("SELECT date('now','-12 hours') AS day")
+			.first<{ day: string }>()
+	)?.day;
+}
 
 async function clean() {
 	await db.batch([
@@ -50,9 +55,12 @@ describe("migration 0046 bill added day", () => {
 				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9711,'Water',1399,3,'monthly','WATER CO')",
 			)
 			.run();
+		// The day is read from SQLite on either side of the backfill, so a run that crosses the day's end still passes.
+		const before = await sqlDay();
 		await db.prepare(BACKFILL).run();
-		expect(await addedOn(9711)).toBe(migrationDay);
-		expect(migrationDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		const after = await sqlDay();
+		expect(before).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		expect([before, after]).toContain(await addedOn(9711));
 	});
 
 	it("leaves a bill that already has a day as it is", async () => {

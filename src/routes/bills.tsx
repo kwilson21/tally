@@ -1258,6 +1258,16 @@ async function billPage(
 	const byPeriod = new Map(
 		payments.map((payment) => [payment.period, payment]),
 	);
+	// An unpaid occurrence due before the day the bill was added is already handled, so it has no row (decision 99).
+	// The picker still lists every period, so a payment can be linked to one by hand.
+	const listedPeriods = periods.filter(
+		(period) =>
+			!handledBeforeAdded(
+				bill.added_on,
+				occurrenceDate(bill, period),
+				byPeriod.has(period),
+			),
+	);
 	// Each occurrence is judged at its own month's amount (decision 101), so the page, the picker and the
 	// price offer all read the same figure for one occurrence.
 	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
@@ -1378,7 +1388,7 @@ async function billPage(
 				)}
 				<h2 class="mt-6 text-sm text-muted">Payments</h2>
 				<ul class="divide-y divide-rule border-y border-rule">
-					{periods.map((period) => {
+					{listedPeriods.map((period) => {
 						const payment = byPeriod.get(period);
 						const due = occurrenceDate(bill, period);
 						// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
