@@ -31,7 +31,8 @@ export function otherTransactionsLine(
 /**
  * How many transactions "All" changes: every transaction from the merchant except the others that have
  * their own name (`total` counts this one; `owned` lists the others that do, not this one). A split part
- * with its own name is not counted: the purchase it belongs to is.
+ * with its own name is not counted: the purchase it belongs to is. A split purchase counts as changed even when
+ * every part has its own name: its parent row and each part's 'Split from' caption show the store's name.
  */
 export function allUpdateCount({
 	total,
