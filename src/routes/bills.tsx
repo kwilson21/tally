@@ -19,6 +19,7 @@ import {
 	loadPriceOffers,
 	type PriceOffer,
 } from "../bills/price-change";
+import { liftNotThisOneSql } from "../bills/split-dismissals";
 import {
 	type BillStatus,
 	billCadenceLabel,
@@ -1251,6 +1252,8 @@ async function billPage(
 	selectedTransactionId?: number,
 	given?: string,
 	rerender = false,
+	// The occurrence whose Not this one takes focus, when an Undo has just linked it again (#340).
+	focusPeriod?: string,
 ) {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
@@ -1285,23 +1288,27 @@ async function billPage(
 	const pickerAmount = pickerPeriod
 		? amountOn(occurrenceDate(bill, pickerPeriod))
 		: bill.amount_cents;
-	let candidates: (LinkedPayment & { sameMerchant: number })[] = [];
+	let candidates: (LinkedPayment & {
+		sameMerchant: number;
+		turnedAway: number;
+	})[] = [];
 	if (pickerPeriod) {
 		const due = occurrenceDate(bill, pickerPeriod);
+		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') ORDER BY sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
-					due,
-					manualLinkWindowDays(bill.frequency),
 					bill.id,
 					pickerPeriod,
+					due,
+					manualLinkWindowDays(bill.frequency),
 					pickerAmount,
 					due,
 				)
-				.all<LinkedPayment & { sameMerchant: number }>()
+				.all<LinkedPayment & { sameMerchant: number; turnedAway: number }>()
 		).results;
 	}
 	const current = billOccurrence(
@@ -1339,6 +1346,7 @@ async function billPage(
 				dateLabel: shortDate(t.date),
 				amountCents: t.amount_cents,
 				excluded: t.excluded === 1,
+				turnedAway: t.turnedAway === 1,
 			}))}
 			periods={periods
 				.filter((period) => !byPeriod.has(period))
@@ -1365,12 +1373,16 @@ async function billPage(
 			demo={c.env.DEMO === "true"}
 			currentPath={c.req.path}
 		>
-			<div class="max-w-2xl">
+			{/* #page is what an Undo toast swaps in (toast.js), as on the Transactions page. */}
+			<div id="page" class="max-w-2xl">
 				<a href="/bills" class="inline-flex min-h-11 items-center">
 					Bills
 				</a>
 				<p class="text-sm text-muted">{bill.merchant_raw_name}</p>
-				<h1 class="font-serif text-5xl font-semibold tracking-tight">
+				<h1
+					id="page-title"
+					class="font-serif text-5xl font-semibold tracking-tight"
+				>
 					{bill.name}
 				</h1>
 				<p class="text-lg">
@@ -1418,6 +1430,7 @@ async function billPage(
 							<BillOccurrenceRow
 								billId={id}
 								period={period}
+								focus={period === focusPeriod}
 								label={`${
 									["monthly", "yearly"].includes(bill.frequency)
 										? monthName(
@@ -1589,15 +1602,13 @@ bills.post("/bills/:id/link", async (c) => {
 	}
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
-	// An automatic dismissal an earlier build left on this payment (decision 99) is replaced by the link, which leaves one
-	// linked row. It is kept when the link wasn't made, since the DELETE needs the linked row this payment just got.
+	// The Not this one a link replaces (decision 99, and decision 105 for a purchase's) is lifted by liftNotThisOneSql, once
+	// the link is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got.
 	const [insert] = await c.env.DB.batch([
 		c.env.DB.prepare(
 			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?)`,
 		).bind(id, period, transaction, transaction, due, manualWindow),
-		c.env.DB.prepare(
-			`DELETE FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=? AND status='dismissed' AND matched_by='auto' AND EXISTS(SELECT 1 FROM bill_payments WHERE bill_id=? AND period=? AND transaction_id=? AND status='linked')`,
-		).bind(id, period, transaction, id, period, transaction),
+		c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
 	]);
 	if (!insert?.meta.changes)
 		return billPage(
@@ -1619,7 +1630,7 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 		.bind(id, period)
 		.first<{ transaction_id: number }>();
 	if (!linked) return c.notFound();
-	await c.env.DB.batch([
+	const [, dismissal] = await c.env.DB.batch([
 		c.env.DB.prepare(
 			"DELETE FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
 		).bind(id, period),
@@ -1627,7 +1638,117 @@ bills.post("/bills/:id/occurrences/:period/unlink", async (c) => {
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','dismissed')",
 		).bind(id, period, linked.transaction_id),
 	]);
-	return feedbackRedirect(c, id, "Payment unlinked");
+	// The dismissal's id is the Undo's token (#340): its created_at is when the ten seconds start.
+	const token = Number(dismissal?.meta.last_row_id);
+	return feedbackRedirect(
+		c,
+		id,
+		"Payment unlinked",
+		undefined,
+		"Payment unlinked. Undo for 10 seconds.",
+		{
+			undo: String(token),
+			undoExpiresInMs: await unlinkUndoMs(c.env.DB, token),
+			undoAction: `/bills/${id}/undo-unlink`,
+		},
+	);
+});
+/** The rest of an Undo's ten seconds for a Not this one, counted by the database's clock as its created_at was. */
+async function unlinkUndoMs(db: D1Database, dismissal: number) {
+	const row = await db
+		.prepare(
+			"SELECT CAST(MAX(0, MIN(10000, (julianday(created_at) + 10.0 / 86400 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM bill_payments WHERE id=?",
+		)
+		.bind(dismissal)
+		.first<{ ms: number }>();
+	return row?.ms ?? 0;
+}
+/**
+ * Undo for a Not this one (#340): relinks the payment to its month and lifts the dismissal. The token is the
+ * dismissal's id, and it works once and only within ten seconds of the dismissal, by the database's clock.
+ */
+bills.post("/bills/:id/undo-unlink", async (c) => {
+	const id = Number(c.req.param("id"));
+	const form = await c.req.parseBody();
+	const token = String(form.token ?? "");
+	// The Not this one the token names, if it is still there, and whether its ten seconds are still running.
+	const held = /^\d+$/.test(token)
+		? await c.env.DB.prepare(
+				"SELECT transaction_id AS transactionId, period, julianday('now')-julianday(created_at)<10.0/86400 AS fresh FROM bill_payments WHERE id=? AND bill_id=? AND status='dismissed' AND matched_by='user'",
+			)
+				.bind(Number(token), id)
+				.first<{ transactionId: number; period: string; fresh: number }>()
+		: null;
+	// The link comes back as the matcher's ('auto'): the dismissal doesn't remember how the payment was linked, and most
+	// links are the matcher's. Only a hand link's "by hand" label is lost (the export keeps the column).
+	const restored = held?.fresh
+		? (
+				await c.env.DB.batch([
+					c.env.DB.prepare(
+						`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
+						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE id=?4 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
+						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE bill_id=?1 AND period=?2 AND status='linked')
+						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE transaction_id=?3 AND status='linked')
+						 AND EXISTS(SELECT 1 FROM transactions WHERE id=?3 AND is_split=0 AND flag_income=0 AND amount_cents>0)`,
+					).bind(id, held.period, held.transactionId, Number(token)),
+					c.env.DB.prepare(liftNotThisOneSql).bind(
+						id,
+						held.period,
+						held.transactionId,
+					),
+				])
+			)[0]?.meta.changes === 1
+		: false;
+	// When an Undo within its ten seconds couldn't restore, the month may already have another payment linked.
+	const monthLinked =
+		held?.fresh && !restored
+			? await c.env.DB.prepare(
+					"SELECT 1 FROM bill_payments WHERE bill_id=? AND period=? AND status='linked'",
+				)
+					.bind(id, held.period)
+					.first()
+			: null;
+	if (!c.req.header("HX-Request")) return c.redirect(`/bills/${id}`, 303);
+	const response = await billPage(
+		c,
+		id,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		false,
+		restored ? held?.period : undefined,
+	);
+	// Each outcome claims only what is true of the payment: the link is back, the month has another, or it stays unlinked.
+	let toast: { message: string; type: "success" | "error"; undoDone?: string };
+	if (restored)
+		// undoDone names the Not this one toast this Undo answers, which ends with it (#397).
+		toast = {
+			message: "Payment linked again",
+			type: "success",
+			undoDone: token,
+		};
+	else if (monthLinked)
+		toast = {
+			message: "That month already has a payment linked.",
+			type: "success",
+		};
+	else if (!held) toast = { message: "Undo expired.", type: "error" };
+	else if (!held.fresh)
+		toast = {
+			message: "Undo expired. The payment stays unlinked.",
+			type: "error",
+		};
+	else
+		toast = {
+			message: "Couldn't undo. The payment stays unlinked.",
+			type: "error",
+		};
+	response.headers.set(
+		"HX-Trigger",
+		JSON.stringify({ toast, announce: toast.message }),
+	);
+	return response;
 });
 async function feedbackRedirect(
 	c: Context<App>,
@@ -1635,6 +1756,8 @@ async function feedbackRedirect(
 	message: string,
 	today?: string,
 	announce = message,
+	// Extra toast keys, such as an Undo's (see toast.js).
+	toast: Record<string, unknown> = {},
 ) {
 	if (c.req.header("HX-Request")) {
 		const response = await billPage(
@@ -1648,7 +1771,7 @@ async function feedbackRedirect(
 		response.headers.set(
 			"HX-Trigger",
 			JSON.stringify({
-				toast: { message, type: "success" },
+				toast: { message, type: "success", ...toast },
 				announce,
 			}),
 		);

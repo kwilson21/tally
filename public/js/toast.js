@@ -96,7 +96,10 @@
 			toast.contains(active) ||
 			(lostToo && (!active || active === document.body))
 		) {
-			const heading = document.getElementById("transactions-title");
+			// A page without the Transactions title (a bill's page) takes focus on its own page-title.
+			const heading =
+				document.getElementById("transactions-title") ??
+				document.getElementById("page-title");
 			if (heading) {
 				heading.setAttribute("tabindex", "-1");
 				heading.focus();
@@ -119,6 +122,8 @@
 			undo,
 			undoExpiresInMs,
 			undoDone,
+			// Where the Undo posts: the cash-delete Undo unless the toast names another (a Not this one's, #340).
+			undoAction = "/transactions/undo-cash-delete",
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
@@ -141,7 +146,7 @@
 				" pointer-events-auto flex items-center justify-center gap-4";
 			const form = document.createElement("form");
 			form.method = "post";
-			form.action = "/transactions/undo-cash-delete";
+			form.action = undoAction;
 			form.setAttribute("hx-post", form.action);
 			form.setAttribute("hx-target", "#page");
 			form.setAttribute("hx-select", "#page");

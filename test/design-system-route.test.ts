@@ -663,8 +663,8 @@ describe("GET /design-system in the demo", () => {
 			page
 				.split(`>${label}</p>`)[1]
 				?.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
-		// Three pickers: the one with payments, the page's empty one, and a chosen month with none.
-		expect(page.match(/<section id="payment-picker"/g)).toHaveLength(3);
+		// Four pickers: the one with payments, the one with a payment turned away (#340), the page's empty one, and a chosen month with none.
+		expect(page.match(/<section id="payment-picker"/g)).toHaveLength(4);
 		const chosen = pickerAfter("Chosen month with no payments");
 		expect(chosen).toContain("No payments to link");
 		expect(chosen.match(/name="period"/g)).toHaveLength(2);

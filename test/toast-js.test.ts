@@ -124,10 +124,13 @@ async function page({
 	listed = true,
 	bar,
 	resizeObserver = true,
+	billPage = false,
 }: {
 	listed?: boolean;
 	bar?: FakeNode;
 	resizeObserver?: boolean;
+	/** A bill's page: no Transactions title, but its own page-title, which takes focus instead. */
+	billPage?: boolean;
 } = {}) {
 	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
@@ -161,10 +164,14 @@ async function page({
 					: id === "selection-bar"
 						? (bar ?? null)
 						: id === "transactions-title"
-							? heading
-							: id === "result-count" && listed
-								? resultCount
-								: null,
+							? billPage
+								? null
+								: heading
+							: id === "page-title" && billPage
+								? heading
+								: id === "result-count" && listed
+									? resultCount
+									: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -627,6 +634,22 @@ describe("the toasts the server sends", () => {
 		expect(toastSource).not.toContain("undo ? 10_000");
 	});
 
+	it("posts a bill's Undo to the action the toast detail names", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Payment unlinked",
+			undo: "17",
+			undoExpiresInMs: 10000,
+			undoAction: "/bills/1/undo-unlink",
+		});
+		const form = (toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "form");
+		expect(form?.action).toBe("/bills/1/undo-unlink");
+		expect(form?.attrs.get("hx-post")).toBe("/bills/1/undo-unlink");
+		expect(form?.attrs.get("hx-select")).toBe("#page");
+	});
+
 	it("keeps an Undo toast for the server's remaining 4,000 ms", async () => {
 		const { body, toasts } = await page();
 		fire(body, "toast", {
@@ -791,6 +814,18 @@ describe("focus on an Undo toast", () => {
 		expect(heading.attrs.get("tabindex")).toBe("-1");
 		// The owner's pick (#342): the heading takes focus when the toast goes, not the list's count.
 		expect(countFocus).not.toHaveBeenCalled();
+	});
+
+	it("moves focus to a bill page's title when its Undo toast ends with focus on Undo", async () => {
+		const { body, document, toasts, heading } = await page({ billPage: true });
+		const titleFocus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		expect(document.activeElement).toBe(undoButton(undo));
+		vi.advanceTimersByTime(10000);
+		expect(toasts.children).toHaveLength(0);
+		expect(titleFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
 	});
 
 	it("moves focus to the same heading on the first-visit list, which has no result count", async () => {

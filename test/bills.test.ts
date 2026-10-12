@@ -1926,10 +1926,15 @@ describe("Bills", () => {
 				headers: { Origin: "http://tally.test", "HX-Request": "true" },
 			},
 		);
-		expect(JSON.parse(unlink.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			toast: { message: "Payment unlinked", type: "success" },
-			announce: "Payment unlinked",
+		const unlinkTrigger = JSON.parse(unlink.headers.get("HX-Trigger") ?? "{}");
+		expect(unlinkTrigger.toast).toMatchObject({
+			message: "Payment unlinked",
+			type: "success",
+			undoAction: "/bills/1/undo-unlink",
 		});
+		expect(unlinkTrigger.announce).toBe(
+			"Payment unlinked. Undo for 10 seconds.",
+		);
 		const link = await exports.default.fetch("http://tally.test/bills/1/link", {
 			method: "POST",
 			headers: {
@@ -2190,16 +2195,22 @@ describe("Bills", () => {
 				`http://tally.test/bills/1/occurrences/${period}/link`,
 			)
 		).text();
-		// Every eligible payment stays reachable, even the furthest in amount.
+		// Every eligible payment stays reachable, even the furthest in amount, and the one the person said Not this one
+		// to stays listed last, under "You said not this one" (#340).
 		expect(
 			html.match(/name="transaction_id" value="10\d\d"/g) ?? [],
-		).toHaveLength(54);
+		).toHaveLength(55);
 		expect(html).not.toContain("INCOME");
 		expect(html).not.toContain("TOO OLD");
-		expect(html).not.toContain("CANDIDATE 1");
 		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
 		expect(picker.indexOf('value="1054"')).toBeLessThan(
 			picker.indexOf('value="1000"'),
+		);
+		expect(picker.indexOf("You said not this one")).toBeGreaterThan(
+			picker.indexOf('value="1054"'),
+		);
+		expect(picker.indexOf('value="1001"')).toBeGreaterThan(
+			picker.indexOf("You said not this one"),
 		);
 	});
 
