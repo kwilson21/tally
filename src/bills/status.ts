@@ -1,3 +1,5 @@
+import { monthDay, ordinal } from "../dates";
+
 export type BillStatus = "paid" | "overdue" | "due" | "upcoming";
 export type BillFrequency =
 	| "monthly"
@@ -39,12 +41,37 @@ export const handledBeforeAdded = (
 	linked: boolean,
 ) => !linked && !!addedOn && dueDate < addedOn;
 
+const WEEKDAYS = [
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+	"Sunday",
+];
+
 export function billCadenceLabel(bill: BillSchedule) {
-	if (bill.frequency === "weekly")
-		return `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.dueDay - 1]}`;
+	if (bill.frequency === "weekly") return `every ${WEEKDAYS[bill.dueDay - 1]}`;
 	if (bill.frequency === "biweekly") return "every two weeks";
 	if (bill.frequency === "quarterly") return "every 3 months";
 	return bill.frequency === "yearly" ? "a year" : "a month";
+}
+
+/**
+ * An inactive bill's schedule, in the words its row shows instead of a due date (decision 99, #341):
+ * "Monthly, on the 15th", "Yearly, on Jul 15", "Weekly, on Mondays", "Every two weeks, on Fridays",
+ * "Quarterly, from Jan 15". A biweekly bill's day is its weekday (`dueDay`), set when it is saved.
+ */
+export function billScheduleLabel(bill: BillSchedule) {
+	const anchor = monthDay(bill.anchorMonth ?? 1, bill.dueDay);
+	if (bill.frequency === "weekly")
+		return `Weekly, on ${WEEKDAYS[bill.dueDay - 1]}s`;
+	if (bill.frequency === "biweekly")
+		return `Every two weeks, on ${WEEKDAYS[bill.dueDay - 1]}s`;
+	if (bill.frequency === "yearly") return `Yearly, on ${anchor}`;
+	if (bill.frequency === "quarterly") return `Quarterly, from ${anchor}`;
+	return `Monthly, on the ${ordinal(bill.dueDay)}`;
 }
 
 function leap(year: number) {

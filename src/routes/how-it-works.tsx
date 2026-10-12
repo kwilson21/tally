@@ -24,6 +24,7 @@ import {
 import { loadTrends } from "../db/trends";
 import { FORECAST_START_DAY } from "../home-forecast";
 import {
+	billStatusExamples,
 	budgetExample,
 	categorizationExample,
 	excludedTotal,
@@ -93,6 +94,33 @@ const PARTS: [string, string][] = [
 		"The command-line tool that deploys the Worker and stores secrets.",
 	],
 ];
+
+/**
+ * The four Bills groups in the words How Tally works uses for them (#341, decision 62), in the order Bills shows
+ * them. Each rule is followed by its example from the household's own bills.
+ */
+const BILL_STATUSES = [
+	[
+		"overdue",
+		"Overdue",
+		"Its due date has passed and it isn't paid. A monthly, yearly or quarterly bill stays overdue, with its amount set aside, until it's paid or the next one is due. A weekly or every-two-weeks bill stays overdue until it's paid.",
+	],
+	[
+		"due",
+		"Due in the next 7 days",
+		"It isn't paid, and its due date is within the next 7 days.",
+	],
+	[
+		"upcoming",
+		"Upcoming",
+		"It isn't paid, and its due date is more than 7 days away.",
+	],
+	[
+		"paid",
+		"Paid this month",
+		"A payment is linked to the occurrence Bills shows.",
+	],
+] as const;
 
 function Section({
 	id,
@@ -197,6 +225,7 @@ howItWorks.get("/how-it-works", async (c) => {
 			bill.paidDate &&
 			(!demo || bill.name === "Water"),
 	);
+	const billExamples = billStatusExamples(billData.rows, today);
 
 	return c.html(
 		<Layout
@@ -508,6 +537,17 @@ howItWorks.get("/how-it-works", async (c) => {
 						Tally matches each bill occurrence to at most one payment, while you
 						stay in control of every link.
 					</p>
+					<p class="mt-3">Bills puts each active bill in one of four groups:</p>
+					<dl class="mt-3 divide-y divide-rule border-y border-rule">
+						{BILL_STATUSES.map(([status, term, rule]) => (
+							<div class="grid gap-1 py-3 sm:grid-cols-[14rem_1fr] sm:gap-4">
+								<dt class="font-semibold">{term}</dt>
+								<dd>
+									{rule} {billExamples[status]}
+								</dd>
+							</div>
+						))}
+					</dl>
 					<ul class="mt-3 list-disc space-y-1 pl-5">
 						<li>
 							A match has the same merchant, is within{" "}
@@ -543,14 +583,11 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A payment can pay only one bill occurrence.</li>
 						<li>
 							Bills can repeat monthly, yearly, weekly, every two weeks or
-							quarterly. Bills shows each bill's next unpaid occurrence. A
-							missed weekly or every-two-weeks occurrence from this month stays
-							overdue until it is paid, and one from an earlier month says “Not
-							paid” and is no longer set aside. A missed monthly, yearly or
-							quarterly occurrence stays overdue until it is paid or the next
-							one is due. A due date from before the day a bill was added is not
-							counted as missed. Safe to spend sets aside every due or overdue
-							occurrence that is unpaid.
+							quarterly. A missed weekly or every-two-weeks occurrence from an
+							earlier month says “Not paid” and is no longer set aside. A due
+							date from before the day a bill was added is not counted as
+							missed. Safe to spend sets aside every due or overdue occurrence
+							that is unpaid.
 						</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of
@@ -566,7 +603,7 @@ howItWorks.get("/how-it-works", async (c) => {
 							so Tally will not suggest it again.
 						</li>
 					</ul>
-					{paidBill ? (
+					{paidBill && (
 						<>
 							<Diagram>
 								<BillsDiagram
@@ -591,8 +628,6 @@ howItWorks.get("/how-it-works", async (c) => {
 									: ", so it counts in the month it reached the bank."}
 							</Example>
 						</>
-					) : (
-						<p class="mt-3">No bill has been paid yet this month.</p>
 					)}
 				</Section>
 

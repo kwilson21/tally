@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
@@ -645,8 +645,12 @@ describe("the parts table", () => {
 		);
 		expect(rows.length).toBeGreaterThan(10);
 		const { html } = await get("/how-it-works");
+		// Only the architecture table: other sections (Bills' statuses, #341) are definition lists too.
+		const architecture =
+			html.match(/<section[^>]*id="architecture"[\s\S]*?<\/section>/)?.[0] ??
+			"";
 		const page = [
-			...html.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>([^<]+)<\/dd>/g),
+			...architecture.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd[^>]*>([^<]+)<\/dd>/g),
 		].map(([, part = "", job = ""]) => [decodeHtml(part), decodeHtml(job)]);
 		expect(page).toEqual(rows);
 	});
@@ -708,5 +712,73 @@ describe("new category suggestions in the Categories section (spec §7, #51)", (
 
 	it("never names Jev in the family app", async () => {
 		expect(sectionOf(await family())).not.toMatch(/jev/i);
+	});
+});
+
+describe("the Bills section's four statuses (decision 99, #341)", () => {
+	const billsSection = (html: string) =>
+		decodeHtml(html).match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ??
+		"";
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T16:00:00Z"));
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.prepare("DELETE FROM bills").run();
+		const [paid, earlier] = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 2",
+			).all<{ id: number }>()
+		).results;
+		// Electric overdue (Oct 3), Internet due in a week (Oct 14), Gym upcoming (Oct 25, September paid), Water paid (Oct 3).
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9721,'Electric',14200,3,'monthly',5,'STATUS ELECTRIC FIXTURE'),(9722,'Internet',6500,14,'monthly',5,'STATUS INTERNET FIXTURE'),(9723,'Gym',3000,25,'monthly',5,'STATUS GYM FIXTURE'),(9724,'Water',4820,3,'monthly',5,'STATUS WATER FIXTURE')",
+			),
+			env.DB.prepare(
+				"UPDATE transactions SET date = '2026-10-03' WHERE id = ?",
+			).bind(paid?.id ?? 0),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9723,'2026-09',?,'user','linked')",
+			).bind(earlier?.id ?? 0),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9724,'2026-10',?,'user','linked')",
+			).bind(paid?.id ?? 0),
+		]);
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("explains each status in plain words, with one of this household's bills as the example", async () => {
+		const demoHtml = (await get("/how-it-works")).html;
+		const familyHtml = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		for (const html of [demoHtml, familyHtml]) {
+			const bills = billsSection(html);
+			for (const term of [
+				"Overdue",
+				"Due in the next 7 days",
+				"Upcoming",
+				"Paid this month",
+			])
+				expect(bills).toContain(`<dt class="font-semibold">${term}</dt>`);
+			expect(bills).toContain("For example: Electric, due Oct 3.");
+			expect(bills).toContain("For example: Internet, due Oct 14.");
+			expect(bills).toContain("For example: Gym, due Oct 25.");
+			expect(bills).toContain("For example: Water, due Oct 3, paid Oct 3.");
+			expect(bills).toContain(
+				"A payment is linked to the occurrence Bills shows.",
+			);
+		}
+	});
+
+	it("says so plainly for a status no bill has", async () => {
+		await env.DB.prepare("DELETE FROM bills").run();
+		const html = billsSection(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		expect(html).toContain("No bill is overdue right now.");
+		expect(html).toContain("No bill is due in the next 7 days right now.");
+		expect(html).toContain("No bill is upcoming right now.");
+		expect(html).toContain("No bill has been paid yet this month.");
 	});
 });

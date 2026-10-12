@@ -520,7 +520,7 @@ describe("a price that moved after September went overdue", () => {
 		const page = await get("/bills");
 		expect(page).toContain("$120 a month in bills");
 		expect(page).toMatch(
-			/Overdue<\/span><span class="ml-auto shrink-0">\$100\.00/,
+			/Overdue<\/h2>[\s\S]*?<span class="ml-auto shrink-0">\$100\.00/,
 		);
 	});
 });

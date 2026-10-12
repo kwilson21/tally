@@ -261,7 +261,8 @@ describe("GET /design-system/proposals", () => {
 		expect(p113a).toContain('aria-label="How this works: bills"');
 		const p113b = option(p113, "Option B · ");
 		expect(picked(p113b)).toBe(false);
-		expect(p113b).not.toContain("/how-it-works#bills");
+		// Its headings' Why? links (decision 99, #341) go to the same section; only the HowLink is left out here.
+		expect(p113b).not.toContain('aria-label="How this works: bills"');
 	});
 
 	it("draws the owner's picks on Q60–Q62 (P114–P116, decision 85) as the app will have them", async () => {
