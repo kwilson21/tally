@@ -668,7 +668,9 @@ describe("merchant category rule offer", () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
+			name_pick: "own",
 			merchant: "Fresh Market",
+			name_scope: "all",
 		});
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
 		expect(
@@ -763,12 +765,26 @@ describe("merchant category rule offer", () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, {
 			...edit(groceries),
+			name_pick: "own",
 			merchant: "Fresh Market",
+			name_scope: "all",
 		});
 		expect(third.html).toContain("Always use Groceries for Fresh Market?");
 		expect(
 			JSON.parse(third.res.headers.get("HX-Trigger") ?? "{}").announce,
 		).toContain("Always use Groceries for Fresh Market?");
+	});
+
+	it("names the store, not a name given to this one transaction, since a rule is for the whole store", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		expect(third.html).toContain(`Always use Groceries for ${merchant}?`);
+		expect(third.html).not.toContain("Always use Groceries for Dog bed?");
 	});
 
 	it("names the merchant as it is saved when the panel was opened before another tab renamed it", async () => {
@@ -944,5 +960,77 @@ describe("firstRuleOfferAmong", () => {
 			groceries,
 		);
 		expect(offer).toBeNull();
+	});
+});
+
+describe("the rule offer names the store, not a name a row has of its own (decision 101)", () => {
+	it("Select names the store when the lowest-id row has its own name", async () => {
+		await post(`/transactions/${ids[0]}`, {
+			...edit(groceries),
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		const selected = await post("/transactions/select/category/save", {
+			ids: `${ids[0]},${ids[1]},${ids[2]}`,
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(selected.html).toContain(QUESTION);
+		expect(selected.html).not.toContain("Always use Groceries for Dog bed?");
+	});
+
+	it("an edit-panel category save on an own-named row offers the store's suggested name, not the tidied bank text", async () => {
+		await env.DB.prepare(
+			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+		)
+			.bind(ids[0])
+			.run();
+		await setCategory([ids[1], ids[2]], groceries, "user");
+		const third = await post(`/transactions/${ids[0]}`, edit(groceries));
+		expect(third.html).toContain("Always use Groceries for Pet Supplies Co?");
+		expect(third.html).not.toContain("Always use Groceries for Dog bed?");
+		expect(third.html).not.toContain(QUESTION);
+		expect(announced(third.res)).toContain(
+			"Always use Groceries for Pet Supplies Co?",
+		);
+	});
+});
+
+describe("the rule offer after the store's own name is picked (decision 101)", () => {
+	const suggest = () =>
+		env.DB.prepare(
+			"UPDATE merchants SET suggested_name = 'Pet Supplies Co', suggestion_status = 'pending' WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.run();
+
+	it("This one only keeps the store's suggestion, so the offer names the suggestion, not the tidied bank text", async () => {
+		await suggest();
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			name_pick: "store",
+			name_scope: "one",
+		});
+		expect(third.html).toContain("Always use Groceries for Pet Supplies Co?");
+		expect(third.html).not.toContain(QUESTION);
+	});
+
+	it("All turns the suggestion down, so the offer names the bank's text tidied", async () => {
+		await suggest();
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			name_pick: "store",
+			name_scope: "all",
+		});
+		expect(third.html).toContain(QUESTION);
+		expect(third.html).not.toContain("Pet Supplies Co");
 	});
 });

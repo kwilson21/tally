@@ -226,6 +226,28 @@ function splitBillStatements(
 }
 
 /**
+ * A bank correction that clears Jev's category (its amount changed) lets go of that category's What AI did
+ * row, so a later pick isn't counted as changing Tally's work; the row still counts as sorted (spec section 5).
+ * It mirrors the Jev arm of the category CASE in both update statements below, so a change to one must change
+ * the other.
+ */
+function forgetClearedJevLog(
+	env: SyncEnv,
+	itemRowId: number,
+	lockId: string,
+	plaidTransactionId: string,
+	cents: number,
+): D1PreparedStatement {
+	return env.DB.prepare(
+		`UPDATE ai_log SET transaction_id = NULL
+		 WHERE kind = 'category' AND transaction_id = (
+			SELECT id FROM transactions WHERE plaid_transaction_id = ?
+			AND is_split = 0 AND category_source = 'jev' AND split_removed_from_cents IS NULL AND amount_cents != ?
+		 ) AND ${OWNS_LOCK}`,
+	).bind(plaidTransactionId, cents, itemRowId, lockId);
+}
+
+/**
  * A split's parts follow the bank transaction's exclusion by the same rule (spec §8.5), because the
  * budget counts the parts, not the parent. A split a person excluded or included stays as they set it.
  * It runs before the parent's own write and reads the parent as it was.
@@ -618,6 +640,15 @@ export async function syncItem(
 				);
 				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
 				statements.push(
+					forgetClearedJevLog(
+						env,
+						itemRowId,
+						lockId,
+						transaction.transaction_id,
+						cents,
+					),
+				);
+				statements.push(
 					env.DB.prepare(
 						`INSERT INTO transactions
 							(plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, plaid_category, credit_reviewed, flag_income, excluded, excluded_source, pending)
@@ -708,6 +739,15 @@ export async function syncItem(
 					),
 				);
 				statements.push(partsExclusion(env, itemRowId, lockId, transaction));
+				statements.push(
+					forgetClearedJevLog(
+						env,
+						itemRowId,
+						lockId,
+						transaction.transaction_id,
+						cents,
+					),
+				);
 				statements.push(
 					env.DB.prepare(
 						`UPDATE transactions SET date = ?,

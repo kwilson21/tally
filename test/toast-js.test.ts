@@ -620,7 +620,9 @@ describe("the toasts the server sends", () => {
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(htmx.process).toHaveBeenCalledWith(toast);
 		expect(appStyles).toContain("--duration-undo-toast: 10s");
-		expect(toast.attrs.get("style")).toBe("--duration-undo-toast: 10000ms");
+		// The page's CSP (style-src 'self') refuses a style attribute, so the duration is set as a custom property.
+		expect(toast.attrs.has("style")).toBe(false);
+		expect(toast.style.values.get("--duration-undo-toast")).toBe("10000ms");
 		expect(toastSource).toContain("undoExpiresInMs");
 		expect(toastSource).not.toContain("undo ? 10_000");
 	});
@@ -635,6 +637,9 @@ describe("the toasts the server sends", () => {
 		const toast = toasts.children[0] as FakeNode;
 		expect(toast.attrs.get("role")).toBe("status");
 		expect(toast.all().some((node) => node.tag === "form")).toBe(true);
+		// A shorter remaining window still sets the per-toast duration, as a custom property and no style attribute.
+		expect(toast.attrs.has("style")).toBe(false);
+		expect(toast.style.values.get("--duration-undo-toast")).toBe("4000ms");
 		vi.advanceTimersByTime(3999);
 		expect(toasts.children).toContain(toast);
 		vi.advanceTimersByTime(1);

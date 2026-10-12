@@ -1,3 +1,5 @@
+import { householdToday } from "../dates";
+import { KEPT_NAME_LOG_SQL } from "../db/ai-log";
 import {
 	COUNTED_JOINS,
 	countedCategorySql,
@@ -7,6 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
+import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
 // The same set Home counts as needing a category (a linked refund goes by its purchase's category).
@@ -153,21 +156,41 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A merchant gets its rule only while this batch still has one of its charges to file, so a group another save
-	// filed first keeps its rule (the batch runs in order, so each check sees the charges just before the update that files them).
-	const upserts = names.map((merchantKey) =>
-		db
-			.prepare(
-				`INSERT INTO merchants (raw_name, display_name, default_category_id)
-				SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
-				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
-					display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
-					${SETTLE_SUGGESTION_SQL}`,
-			)
-			.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
-	);
-	const results = await db.batch([...upserts, ...updates]);
+	// A merchant gets its rule only while one of its charges still needs a category when this batch starts, so a group
+	// another save filed first keeps its rule. The checks run ahead of the updates that file the charges.
+	// A guessed name a person keeps for each merchant is logged in this batch, just before its merchant's settling
+	// upsert (spec §8.6). The log reads the merchant as the upsert finds it, so it must come first. It has the
+	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
+	const today = displayName ? await householdToday(db) : null;
+	const settles: D1PreparedStatement[] = [];
+	for (const merchantKey of names) {
+		if (
+			today &&
+			displayName &&
+			nameSource([displayName], merchantKey) === "tally"
+		)
+			settles.push(
+				db
+					.prepare(
+						`${KEPT_NAME_LOG_SQL} AND EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)`,
+					)
+					.bind(today, merchantKey, displayName, merchantKey),
+			);
+		settles.push(
+			db
+				.prepare(
+					`INSERT INTO merchants (raw_name, display_name, default_category_id)
+					SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
+					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
+						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
+						${SETTLE_SUGGESTION_SQL}`,
+				)
+				.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
+		);
+	}
+	const results = await db.batch([...settles, ...updates]);
+	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
 	return results
-		.slice(upserts.length)
+		.slice(settles.length)
 		.reduce((changed, result) => changed + result.meta.changes, 0);
 }

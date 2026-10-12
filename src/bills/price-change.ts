@@ -5,12 +5,13 @@
 // "Not this bill" stores a dismissal, the same `dismissed` row "Not this one" makes, so that payment is
 // never offered for that bill and month again. An offer never links anything by itself.
 
-import { daysBefore } from "../dates";
+import { daysBefore, householdMonth } from "../dates";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
 	merchantTextArgs,
 } from "../db/merchant-key";
+import { ownNameSql } from "../db/own-name";
 import { tidyName } from "../transactions/tidy-name";
 import { BIG_BILL_CENTS } from "./guards";
 import {
@@ -98,7 +99,7 @@ function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
 	return db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-			        ${merchantColumnSql("t", "display_name")} AS displayName
+			        COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName
 			 FROM transactions t
 			 WHERE ${isMerchantTextSql("t")} AND t.is_split = 0 AND t.flag_income = 0
 			   AND t.date BETWEEN ? AND ?
@@ -167,29 +168,42 @@ export async function loadPriceOffers(
 }
 
 /**
+ * The amount the occurrence due in ?6 is judged at, as src/bills/amount.ts's `amountForMonth` reads it: the
+ * latest row on or before that month, else the earliest row, else the bill's own amount.
+ */
+const occurrenceAmountSql = `COALESCE(
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 AND effective_month <= ?6 ORDER BY effective_month DESC LIMIT 1),
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 ORDER BY effective_month LIMIT 1),
+	(SELECT amount_cents FROM bills WHERE id = ?2))`;
+
+/**
  * What must still be true for an accept to go through, as one condition every statement of it shares:
  * linking the payment to the occurrence would be new (nothing is linked to the payment, and nothing to
- * the occurrence), the payment is still the charge the person saw, and the bill is still at the amount
- * they saw. (The bill may also be at the charge already: the amount update below runs before the link and
- * moves it there, and the link is then checked against the same condition.) Numbered parameters: ?1
- * payment, ?2 bill, ?3 period, and the charge and the amount seen, named by `charge` and `seen`.
+ * the occurrence), the payment is still the charge the person saw, the occurrence is still at the amount
+ * they saw, and the bill is still at its current amount, which `seenCurrent` (?7) holds. The bill may also
+ * be at the charge already: the amount update runs before the link and moves it there, and the link is then
+ * checked against the same condition. Numbered parameters: ?1 payment, ?2 bill, ?3 period, ?6 the
+ * occurrence's month, ?7 the bill's current amount on the page, and the charge and the occurrence's amount
+ * seen, named by `charge` and `seen`.
  */
 const stillOffered = (charge: string, seen: string) =>
 	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
 	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
-	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ${seen}))`;
+	 AND ${occurrenceAmountSql} IN (${charge}, ${seen})
+	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ?7))`;
 
 /**
  * A person says yes: the payment pays the occurrence (`matched_by = user`) and the bill's amount becomes
  * what was charged, in one batch. An excluded payment counts once linked, whatever its exclusion (spec
- * §8.5), which this never writes. `seenBillCents` is the bill's amount on the page they answered, and the
- * offer's amount is the charge on it.
+ * §8.5), which this never writes. The page's prices must all still hold: `seenBillCents` is the
+ * occurrence's amount on the page they answered, the offer's amount is the charge on it, and
+ * `seenCurrentCents` is the bill's own current amount there.
  *
- * Both statements carry the same condition (`stillOffered`), checked as the batch runs, so they
+ * Every statement carries the same condition (`stillOffered`), checked as the batch runs, so they
  * write together or not at all: if another tab linked this payment or this month in the meantime, or the
- * bill was edited, or the charge corrected, nothing is written and this returns false. The amount update
- * goes before the link on purpose, since it is the one that has to see the amount as it was.
+ * bill was edited, or the charge corrected, nothing is written and this returns false. The amount row and
+ * the update go before the link on purpose: the link is then checked against the charge the update set.
  */
 export async function acceptPriceOffer(
 	db: D1Database,
@@ -197,28 +211,46 @@ export async function acceptPriceOffer(
 	period: string,
 	offer: PriceOffer,
 	seenBillCents: number,
+	dueMonth: string,
+	/** The bill's current amount (`bills.amount_cents`) on the page they answered, in whole cents. */
+	seenCurrentCents: number,
+	/** The household's month (YYYY-MM) when the caller has it; read here otherwise. */
+	month?: string,
 ): Promise<boolean> {
+	// The new amount takes effect this month (decision 101): its row replaces this month's if there is one,
+	// and the bill's own amount is the current one. Earlier months keep the amounts they had.
 	const binds = [
 		offer.transactionId,
 		billId,
 		period,
 		offer.amountCents,
 		seenBillCents,
+		dueMonth,
+		seenCurrentCents,
+		month ?? (await householdMonth(db)),
 	];
+	// D1 wants exactly the parameters a statement names, so the two that don't use ?8 get the first seven.
 	const results = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO bill_amounts (bill_id, effective_month, amount_cents)
+				 SELECT ?2, ?8, ?4 WHERE ${stillOffered("?4", "?5")}
+				 ON CONFLICT (bill_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
+			)
+			.bind(...binds),
 		db
 			.prepare(
 				`UPDATE bills SET amount_cents = ?4 WHERE id = ?2 AND ${stillOffered("?4", "?5")}`,
 			)
-			.bind(...binds),
+			.bind(...binds.slice(0, 7)),
 		db
 			.prepare(
 				`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
 				 SELECT ?2, ?3, ?1, 'user', 'linked' WHERE ${stillOffered("?4", "?5")}`,
 			)
-			.bind(...binds),
+			.bind(...binds.slice(0, 7)),
 	]);
-	return (results[1]?.meta.changes ?? 0) > 0;
+	return (results[2]?.meta.changes ?? 0) > 0;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_TIME_ZONE,
 	monthsBefore,
@@ -8,6 +8,7 @@ import {
 } from "../src/dates";
 import { makeCategory, unmakeCategory } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
+import { transactions } from "../src/routes/transactions";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -758,5 +759,85 @@ describe("the likely transactions after a new category", () => {
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/transactions");
 		expect(await filedAs(first)).toEqual({ categoryId: null, source: null });
+	});
+});
+
+describe("a one-off name with a New category, on a row Jev categorized", () => {
+	/**
+	 * The edit panel posted the way a browser with JavaScript posts it, with Jev's key bound so the route asks
+	 * Jev whether it answers categories. Work queued after the answer is awaited here, so the test sees it finished.
+	 */
+	async function saveWithJev(id: number, fields: Record<string, string>) {
+		const queued: Promise<unknown>[] = [];
+		const response = await transactions.request(
+			`/transactions/${id}`,
+			{
+				method: "POST",
+				headers: {
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams(fields).toString(),
+			},
+			{ ...env, JEV_API_KEY: "jev-key" },
+			{
+				waitUntil: (work: Promise<unknown>) => {
+					queued.push(work);
+				},
+				passThroughOnException() {},
+				props: {},
+			},
+		);
+		await Promise.all(queued);
+		return response;
+	}
+
+	beforeEach(async () => {
+		// Jev filed the bakery row in Groceries, so a one-off name asks Jev again unless the save files it elsewhere.
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+		)
+			.bind(GROCERIES, bakery)
+			.run();
+		// Nothing here may reach the network: a Jev call would fail the test.
+		vi.stubGlobal("fetch", async () => {
+			throw new Error("the test makes no network call");
+		});
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("announces the category the save made, not that Tally guesses it again, and files the row in it with its own name", async () => {
+		const response = await saveWithJev(
+			bakery,
+			saveFields({
+				merchant: "Grandma's birthday cake",
+				name_pick: "own",
+				name_scope: "one",
+				category: "new",
+				new_category_name: "Birthdays",
+			}),
+		);
+
+		const made = await categoryNamed("Birthdays");
+		expect(response.status).toBe(200);
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved. Grandma's birthday cake is now Birthdays.");
+		expect(await filedAs(bakery)).toEqual({
+			categoryId: made?.id,
+			source: "user",
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT own_name AS ownName FROM transactions WHERE id = ?",
+				)
+					.bind(bakery)
+					.first<{ ownName: string | null }>()
+			)?.ownName,
+		).toBe("Grandma's birthday cake");
 	});
 });

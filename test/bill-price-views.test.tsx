@@ -74,6 +74,7 @@ describe("BillOccurrenceRow with a price change", () => {
 		amountCents: 1799,
 		dateLabel: "Oct 3",
 		billAmountCents: 1549,
+		currentCents: 1549,
 		frequency: "monthly" as const,
 	};
 	const html = String(
@@ -121,6 +122,9 @@ describe("BillOccurrenceRow with a price change", () => {
 		const yes = html.slice(html.indexOf(accept), html.indexOf(dismiss));
 		expect(yes).toContain('name="bill_cents" value="1549"');
 		expect(yes).toContain('name="charge_cents" value="1799"');
+		// The bill's current amount too, so an edit made since the page was drawn stops the save.
+		expect(yes).toContain('name="current_cents" value="1549"');
+		expect(html.match(/name="current_cents"/g)).toHaveLength(1);
 		expect(html.match(/name="bill_cents"/g)).toHaveLength(1);
 		expect(html).toContain("Update the bill to $17.99");
 		expect(html).toMatch(/bg-ink[^>]*>[\s\S]*Update the bill to \$17\.99/);

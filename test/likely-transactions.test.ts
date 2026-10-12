@@ -163,6 +163,25 @@ describe("likelyTransactions", () => {
 		]);
 	});
 
+	it("names a row by its own name, not the store's, as the list does", async () => {
+		const named = await tx(
+			`${THIS}-04`,
+			1250,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare("UPDATE transactions SET own_name = ? WHERE id = ?")
+			.bind("Grandma's birthday cake", named)
+			.run();
+
+		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+
+		expect(rows.find((row) => row.id === named)).toMatchObject({
+			displayName: "Grandma's birthday cake",
+			nameSuggested: false,
+		});
+	});
+
 	it("caps the list at six rows, same merchant first", async () => {
 		const sameIds = [
 			await tx(

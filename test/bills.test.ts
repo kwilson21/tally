@@ -26,10 +26,15 @@ const endsWithRule = (ending: string, display: RegExp) =>
 	);
 
 /** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
+// A row is found by its label, which may carry the occurrence's amount after " · " (decision 101).
 const occurrenceRow = (html: string, label: string) =>
-	(html.split("<li").find((item) => item.includes(`>${label}<`)) ?? "").split(
-		"</li>",
-	)[0] ?? "";
+	(
+		html
+			.split("<li")
+			.find(
+				(item) => item.includes(`>${label}<`) || item.includes(`>${label} · `),
+			) ?? ""
+	).split("</li>")[0] ?? "";
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
@@ -2017,6 +2022,8 @@ describe("Bills", () => {
 		const day = Number(today.slice(8, 10));
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			// Its amount history goes too: this fixture sets the bill's own amount, which then applies to every month.
+			env.DB.prepare("DELETE FROM bill_amounts WHERE bill_id=1"),
 			env.DB.prepare(
 				"UPDATE bills SET due_day=?,amount_cents=1000,frequency='monthly',merchant_raw_name='PREFERRED' WHERE id=1",
 			).bind(day),
@@ -2071,6 +2078,72 @@ describe("Bills", () => {
 				)
 			).status,
 		).toBe(404);
+	});
+
+	describe("a payment's own name shows as typed (decision 101)", () => {
+		const period = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const due = `${period}-15`;
+		/** A monthly bill due on the 15th, and nothing else until a test adds the transactions it needs. */
+		const bill = [
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9400,'Streaming',1500,15,'monthly','AMAZON')",
+			),
+		];
+		const bankAmazon = (id: number, ownName: string | null, extra = "") =>
+			env.DB.prepare(
+				`INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,own_name${extra ? ",is_split" : ""})
+				 SELECT ?,id,?,1500,'AMZN MKTP US*2K4',?${extra ? ", 1" : ""} FROM accounts LIMIT 1`,
+			).bind(id, due, ownName);
+		const pickerHtml = async () =>
+			(
+				await exports.default.fetch(
+					`http://tally.test/bills/9400/occurrences/${period}/link`,
+				)
+			).text();
+
+		it("shows a linked payment's own name on its occurrence row", async () => {
+			await env.DB.batch([
+				...bill,
+				bankAmazon(9401, "DOG BED"),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9400,?,9401,'user','linked')",
+				).bind(period),
+			]);
+			// The bill's page lists each occurrence with the payment that paid it.
+			const html = await (
+				await exports.default.fetch("http://tally.test/bills/9400")
+			).text();
+			expect(html).toContain("DOG BED");
+			expect(html).not.toContain("Amzn mktp");
+		});
+
+		it("lists a candidate that has its own name by that name, exactly as typed", async () => {
+			await env.DB.batch([...bill, bankAmazon(9401, "DOG BED")]);
+			const picker = (await pickerHtml()).split(
+				'<section id="payment-picker"',
+			)[1];
+			expect(picker).toContain('value="9401"');
+			expect(picker).toContain("DOG BED");
+			expect(picker).not.toContain("Amzn mktp");
+		});
+
+		it("lists a split part with no name of its own under its purchase's own name", async () => {
+			await env.DB.batch([
+				...bill,
+				bankAmazon(9401, "DOG BED", "split"),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id) SELECT 9402,id,?,1500,'AMZN MKTP US*2K4',9401 FROM accounts LIMIT 1",
+				).bind(due),
+			]);
+			const picker = (await pickerHtml()).split(
+				'<section id="payment-picker"',
+			)[1];
+			expect(picker).toContain('value="9402"');
+			expect(picker).toContain("DOG BED");
+			expect(picker).not.toContain("Amzn mktp");
+		});
 	});
 });
 
@@ -2318,11 +2391,15 @@ describe("Bill guards", () => {
 		/** The worker's env with a DB that runs `rival` just before the first statement starting with `sql` runs. */
 		const racing = (sql: string, rival: string) => {
 			let raced = false;
-			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
-				new Proxy(statement, {
+			const guard = (statement: D1PreparedStatement): D1PreparedStatement => {
+				const proxy: D1PreparedStatement = new Proxy(statement, {
 					get(target, prop) {
 						if (prop === "bind")
-							return (...values: unknown[]) => guard(target.bind(...values));
+							return (...values: unknown[]) => {
+								const bound = guard(target.bind(...values));
+								if (matched.has(proxy)) matched.add(bound);
+								return bound;
+							};
 						if (prop === "run")
 							return async () => {
 								if (!raced) {
@@ -2335,13 +2412,34 @@ describe("Bill guards", () => {
 						return typeof value === "function" ? value.bind(target) : value;
 					},
 				});
+				wrapped.set(proxy, statement);
+				return proxy;
+			};
+			// A save's bill and its amount row go in one batch, so the rival also lands just before a batch
+			// that holds a matching statement; the batch itself gets the real statements.
+			const matched = new Set<D1PreparedStatement>();
+			const wrapped = new Map<D1PreparedStatement, D1PreparedStatement>();
+			const rivalFirst = async () => {
+				if (!raced) {
+					raced = true;
+					await env.DB.prepare(rival).run();
+				}
+			};
 			const DB = new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop === "prepare")
-						return (text: string) =>
-							text.startsWith(sql)
-								? guard(target.prepare(text))
-								: target.prepare(text);
+						return (text: string) => {
+							const statement = target.prepare(text);
+							if (!text.startsWith(sql)) return statement;
+							const proxy = guard(statement);
+							matched.add(proxy);
+							return proxy;
+						};
+					if (prop === "batch")
+						return async (statements: D1PreparedStatement[]) => {
+							if (statements.some((s) => matched.has(s))) await rivalFirst();
+							return target.batch(statements.map((s) => wrapped.get(s) ?? s));
+						};
 					const value = Reflect.get(target, prop);
 					return typeof value === "function" ? value.bind(target) : value;
 				},

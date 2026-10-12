@@ -253,6 +253,21 @@ describe("noneFitTransactions: what counts as Jev being sure no category fits", 
 		expect(merchant(plaid)).toBe("Petsmart");
 		expect(merchant(tidied)).toBe("Banfield pet hospital");
 	});
+
+	it("names a one-off name as the person typed it, not tidied, and tidies the other names as before", async () => {
+		const own = await add({ rawName: "AMAZON MKTPLACE PMTS" });
+		const hulu = await add({ rawName: "HULU" });
+		await add({ rawName: "SPOTIFY" });
+		await db
+			.prepare("UPDATE transactions SET own_name = 'DOG BED' WHERE id = ?")
+			.bind(own)
+			.run();
+		const found = await noneFitTransactions(db);
+		const merchant = (id: number) => found.find((r) => r.id === id)?.merchant;
+		expect(merchant(own)).toBe("DOG BED");
+		expect(merchant(hulu)).toBe("Hulu");
+		expect(found.find((r) => r.id === own)).not.toHaveProperty("ownName");
+	});
 });
 
 describe("saveSuggestion", () => {

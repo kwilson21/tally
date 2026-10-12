@@ -1,6 +1,8 @@
 // Merchant names and their suggestions (spec §5, §7, decision 64): what to ask Workers AI about, where
 // its names are kept, and how a person's choice settles a suggestion. Which names to show is decided by
 // src/transactions/name-suggestions.ts.
+
+import { householdToday } from "../dates";
 import {
 	type NameSource,
 	nameSource,
@@ -8,6 +10,7 @@ import {
 	storeSuggestedNames,
 } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
+import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { merchantKeySql } from "./merchant-key";
 
@@ -105,6 +108,11 @@ export type NameReview = {
 	source: NameSource;
 	/** Its charges, a split counted once. */
 	count: number;
+	/**
+	 * Its charges that keep a name of their own when the merchant is named. A split purchase counts as changed even when
+	 * every part has its own name: its parent row and each part's 'Split from' caption show the store's name.
+	 */
+	owned: number;
 };
 
 /** Plain code-point order, as the database sorts text, so ties fall the same way everywhere. */
@@ -127,7 +135,8 @@ export async function namesToReview(
 	const namesOn = (switches ?? (await readAiSwitches(db))).names;
 	const { results } = await db
 		.prepare(
-			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count
+			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count,
+				SUM(t.own_name IS NOT NULL) AS owned
 			 FROM merchants m JOIN transactions t ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
 			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL AND COALESCE(m.suggested_name, '') != ''
 			 GROUP BY m.raw_name, t.raw_name`,
@@ -138,6 +147,7 @@ export async function namesToReview(
 			stored: string;
 			bankText: string;
 			count: number;
+			owned: number;
 		}>();
 	const byKey = new Map<string, typeof results>();
 	for (const row of results) {
@@ -148,6 +158,7 @@ export async function namesToReview(
 	const reviews: NameReview[] = [];
 	for (const [key, texts] of byKey) {
 		const total = texts.reduce((sum, text) => sum + text.count, 0);
+		const owned = texts.reduce((sum, text) => sum + text.owned, 0);
 		// The text with the most charges first, then A to Z, so the choice is the same every time.
 		texts.sort(
 			(a, b) => b.count - a.count || compareText(a.bankText, b.bankText),
@@ -166,6 +177,7 @@ export async function namesToReview(
 				names,
 				source: nameSource(names, key),
 				count: total,
+				owned,
 			});
 			break;
 		}
@@ -191,21 +203,30 @@ export async function settleSuggestion(
 	key: string,
 	choice: NameChoice,
 ): Promise<boolean> {
-	const result =
+	const update =
 		choice.kind === "keep"
-			? await db
+			? db
 					.prepare(
 						"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = ? AND suggestion_status = 'pending' AND display_name IS NULL",
 					)
 					.bind(key)
-					.run()
-			: await db
+			: db
 					.prepare(
 						`UPDATE merchants SET display_name = ?1,
 							suggestion_status = CASE WHEN instr(char(10) || COALESCE(suggested_name, '') || char(10), char(10) || ?1 || char(10)) > 0 THEN 'accepted' ELSE 'rejected' END
 						 WHERE raw_name = ?2 AND suggestion_status = 'pending' AND display_name IS NULL`,
 					)
-					.bind(choice.name, key)
-					.run();
-	return result.meta.changes > 0;
+					.bind(choice.name, key);
+	// A guessed name a person keeps is logged first, while the suggestion is still pending (spec §8.6).
+	if (choice.kind === "keep" || nameSource([choice.name], key) !== "tally") {
+		const result = await update.run();
+		return result.meta.changes > 0;
+	}
+	const [, result] = await db.batch([
+		db
+			.prepare(KEPT_NAME_LOG_SQL)
+			.bind(await householdToday(db), key, choice.name),
+		update,
+	]);
+	return (result?.meta.changes ?? 0) > 0;
 }

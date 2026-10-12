@@ -52,7 +52,9 @@ describe("schema", () => {
 	it("creates every table from spec §5", async () => {
 		expect(await tables()).toEqual([
 			"accounts",
+			"ai_log",
 			"balance_history",
+			"bill_amounts",
 			"bill_payments",
 			"bills",
 			"budget_amounts",
@@ -96,6 +98,7 @@ describe("schema", () => {
 				"details_asked",
 				"note_tried_at",
 				"note_dismissed",
+				"own_name",
 			]),
 		);
 		expect(await columns("household_people")).toEqual(

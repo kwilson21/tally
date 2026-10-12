@@ -5,13 +5,17 @@
  * posted row and the pending row is deleted, all in the page's own batch.
  *
  * What moves, and what wins:
- * - A person's category, note, exclusion and income choice move over a machine's value on the posted
- *   row. Where the posted row already holds a person's choice, it keeps it.
+ * - A person's category, note, own name (decision 101), exclusion and income choice move over a machine's
+ *   value on the posted row. Where the posted row already holds a person's choice, it keeps it.
  * - Tally's own answer (Jev's category pick and how sure it was, its transfer, reimbursement and income
  *   answers, decision 79) moves too, when the amount is unchanged and the posted row has no answer or
- *   choice of its own, so the posted row isn't asked again for nothing. A merchant rule's pick doesn't
- *   move: rules run on the posted row as on any new one. An exclusion Plaid put on the posted row is
- *   not an answer of its own (spec section 8.5): Jev's exclusion of the pending row moves over it and
+ *   choice of its own, so the posted row isn't asked again for nothing. A name the pending row alone got
+ *   clears the posted row's Jev answer, since that answer was for the old name, so the night run asks again
+ *   with the name; it clears only where Jev can be asked about the row (jevAsksAboutSql), so a row a person or
+ *   Plaid took out of the budget keeps its answer. A merchant rule's pick doesn't move: rules run on the posted
+ *   row as on any new one.
+ *   An exclusion Plaid put on the posted row is not an answer of its own (spec section 8.5): Jev's exclusion
+ *   of the pending row moves over it and
  *   keeps its source, as it does when the pending row simply takes the posted id, so it still holds
  *   if Plaid later stops calling the posted row a transfer.
  * - A bill payment is re-pointed to the posted row unless that row already pays a bill (one bill per
@@ -28,6 +32,9 @@
  *   purchase's date (decision 99). When the posted row keeps its own split, a pending part's bill payment stays paid on
  *   the posted part with the same amount and category, and otherwise it is dismissed on each of the posted row's parts
  *   so the matcher does not link it again (decision 99).
+ * - Tally's AI log of what it did (spec section 5) follows the category it counts: its row moves to the posted row
+ *   only when the pending row's category moves with it, so a person's later change is counted only on a category
+ *   Tally still holds. Otherwise the row keeps counting with no transaction. An income row always moves.
  * Every statement checks that both rows still exist and that this run still holds the Item's lock, so
  * a replay or a lost lock changes nothing.
  */
@@ -35,6 +42,7 @@
 // Parameters, shared by every statement: 1 the pending id, 2 the posted id, 3 the bank's amount in
 // cents now, 4 and 5 the Item row and its lock, 6 to 8 the posted date, bank text and merchant name.
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
+import { jevAsksAboutSql } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -79,6 +87,18 @@ const PERSON_TAKEN = takesDetailSql(
 	"for_person_cleared",
 );
 
+// Which category log row moves with the pending row's category (the first statement below). Each arm mirrors the
+// category statement it names, so a change to that statement must change its arm too. `p` is the pending row, `t` the posted.
+/** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
+const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
+	AND COALESCE(t.category_source, '') != 'user'`;
+/** Mirrors Jev's category statement: Jev's answer moves onto a posted row with no category, at the same amount. */
+const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
+	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL`;
+/** Mirrors the split statement that takes the pre-split category when the amount changed. */
+const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
+	AND t.is_split = 0 AND t.split_removed_from_cents IS NULL AND COALESCE(t.category_source, '') != 'user'`;
+
 /**
  * The posted row's part a pending part's linked bill payment moves to: its lowest-id part with the same amount and
  * category and no linked payment of its own, as saveSplit keeps one (decision 99). Correlated to the payment's row.
@@ -90,6 +110,15 @@ const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
 	ORDER BY part.id LIMIT 1)`;
 
 const STATEMENTS = [
+	// Tally's log of the pending row's category (spec section 5) moves to the posted row only when that category moves with
+	// it: a person's pick, Jev's answer at the same amount onto a posted row with no category, or a removed split's category.
+	// Otherwise the row stays on the pending id (see the income and delete statements below). It runs before the category
+	// statements, which change the columns Jev's arm tests.
+	`UPDATE OR IGNORE ai_log SET transaction_id = ${POSTED}
+	 WHERE kind = 'category' AND transaction_id = ${PENDING} AND ${READY}
+	 AND EXISTS (SELECT 1 FROM transactions AS p, transactions AS t
+		WHERE p.id = ${PENDING} AND t.id = ${POSTED}
+		AND (${LOG_PERSON_PICK} OR ${LOG_JEV_PICK} OR ${LOG_SPLIT_CATEGORY}))`,
 	// Category: a person's pick on the pending row wins over anything but a person's pick on the posted one.
 	`UPDATE transactions SET category_id = p.category_id, category_source = 'user', category_confidence = NULL
 	 ${FROM_PENDING} AND p.category_source = 'user' AND p.category_id IS NOT NULL
@@ -128,6 +157,20 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.income_source = 'user' AND COALESCE(transactions.income_source, '') != 'user'`,
 	`UPDATE transactions SET credit_reviewed = p.credit_reviewed, credit_reviewed_by = 'user'
 	 ${FROM_PENDING} AND p.credit_reviewed_by = 'user' AND COALESCE(transactions.credit_reviewed_by, '') != 'user'`,
+	// A name a person gave the pending row alone clears Tally's answer on the posted row, which was made for the old
+	// name, so the night run asks again with it. Only Jev's pick and an empty category (an unsure answer included):
+	// a person's pick and a merchant rule's stay. Only where Jev can be asked about the posted row and the pending
+	// one as they now stand, after the person's exclusion, income and review moves above: a row taken out of the
+	// budget keeps its answer. It runs before the name moves, since moving the name is the condition it reads.
+	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
+		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
+	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
+	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
+		AND transactions.category_source IS NULL))
+	 AND ${jevAsksAboutSql("transactions")} AND ${jevAsksAboutSql("p")}`,
+	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
+	`UPDATE transactions SET own_name = p.own_name
+	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Tally's own answer, after the person's choices above, so it only fills what's still unanswered. Each
 	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
 	// amount is a new question, as for any bank correction.
@@ -235,6 +278,16 @@ const STATEMENTS = [
 	// has parts of its own, the statements above already dismissed the rest on those parts.
 	`UPDATE bill_payments SET transaction_id = ${POSTED}, status = 'dismissed', matched_by = 'auto'
 	 WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto')) AND ${READY}`,
+	// Tally's log of the pending row's income moves to the posted row (spec section 5). It always moves, since the tally
+	// never reads the transaction of an income row, so it can't miscount. A category row moved above, with its category.
+	`UPDATE OR IGNORE ai_log SET transaction_id = ${POSTED} WHERE kind = 'income' AND transaction_id = ${PENDING} AND ${READY}`,
+	// A log row of the pending row whose kind the posted row already has is dropped with it: the posted row's own row already
+	// counts that purchase, so one purchase is never counted twice (spec section 8.6, one category row and one income row per
+	// transaction). A category row that neither moved nor collided stays on the pending id. The trigger ai_log_forget_deleted
+	// (migration 0041) clears its transaction_id when the final DELETE below removes the pending row, so it still counts, with
+	// no transaction. No statement here sets that id to NULL itself (sync.ts does, for a Jev category a bank correction clears).
+	`DELETE FROM ai_log WHERE transaction_id = ${PENDING} AND ${READY}
+	 AND EXISTS (SELECT 1 FROM ai_log own WHERE own.transaction_id = ${POSTED} AND own.kind = ai_log.kind)`,
 	// Last, the pending row goes, with whatever didn't move (its parts, a bill link, a refund link).
 	`DELETE FROM transactions WHERE id = ${PENDING} AND ${READY}`,
 ];

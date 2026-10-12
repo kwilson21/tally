@@ -82,13 +82,20 @@ const repeatsShown = (name: string, key: string, tidied: string) =>
  */
 export function shownName({
 	chosen,
+	ownName,
 	rawName,
 	...merchant
-}: Stored & { chosen: string | null; rawName: string }): {
+}: Stored & {
+	chosen: string | null;
+	/** A name given to this one transaction (decision 101), which wins over the merchant's. */
+	ownName?: string | null;
+	rawName: string;
+}): {
 	name: string;
 	suggested: boolean;
 	fromBank: boolean;
 } {
+	if (ownName) return { name: ownName, suggested: false, fromBank: false };
 	if (chosen) return { name: chosen, suggested: false, fromBank: false };
 	const tidied = tidyName(rawName);
 	const first = usableSuggestedNames(merchant).find(
