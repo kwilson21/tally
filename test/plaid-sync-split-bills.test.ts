@@ -145,6 +145,28 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		},
 	);
 
+	it("names a bill once when two of the split's parts pay the same occurrence", async () => {
+		const { item, purchase } = await splitPurchase();
+		// A second part, linked by hand to the same membership year (decision 101).
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?, '2026', id, 'user', 'linked' FROM transactions WHERE parent_id = ? AND amount_cents = 1000",
+		)
+			.bind(MEMBERSHIP, purchase)
+			.run();
+
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 60 })] }),
+		);
+
+		expect(
+			unpaidBillsNote(
+				(await getTransaction(env.DB, purchase))?.splitRemovedBills,
+			),
+		).toBe(" The Costco membership bill for 2026 is no longer paid.");
+	});
+
 	it("keeps the bill names when a later correction changes the amount again", async () => {
 		const { item, purchase } = await splitPurchase();
 		await syncItem(

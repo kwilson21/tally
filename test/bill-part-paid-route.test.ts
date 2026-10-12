@@ -134,6 +134,21 @@ describe("a part-paid rent on its page and in its picker", () => {
 		);
 	});
 
+	it("a payment posted to a month that is already Paid is refused, and nothing is linked", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9522,'user','linked')",
+		)
+			.bind(RENT, PERIOD)
+			.run();
+		const res = await post(`/bills/${RENT}/link`, {
+			transaction_id: "9521",
+			period: PERIOD,
+			opened_period: PERIOD,
+		});
+		expect(await res.text()).toContain("is already paid");
+		expect(await linkedIds()).toEqual([9520, 9522]);
+	});
+
 	it("the picker's month choices keep a part-paid month, and drop a paid one", async () => {
 		const part = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
 		expect(part).toContain(`value="${PERIOD}"`);

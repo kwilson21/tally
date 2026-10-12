@@ -194,16 +194,15 @@ describe("cash delete undo", () => {
 		{
 			period: "2026-11",
 			linkedPeriod: "2026-10",
-			restored: true,
 		},
+		// The month already holds the replacement's payment: a month takes more than one payment (decision 101).
 		{
 			period: "2026-10",
-			linkedPeriod: null,
-			restored: false,
+			linkedPeriod: "2026-10",
 		},
 	])(
 		"checks a reused transaction id against its remapped bill payment id ($period)",
-		async ({ period, linkedPeriod, restored }) => {
+		async ({ period, linkedPeriod }) => {
 			const account = await env.DB.prepare(
 				"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
 			).first<{ id: number }>();
@@ -254,29 +253,53 @@ describe("cash delete undo", () => {
 			)
 				.bind(bill.id)
 				.all<{ period: string; transaction_id: number }>();
-			if (restored) {
-				expect(restoredRow?.id).not.toBe(originalId);
-				expect(payments.results).toContainEqual({
-					period: linkedPeriod,
-					transaction_id: restoredRow?.id,
-				});
-				expect(
-					JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast
-						.message,
-				).toBe("Restored Remapped payment.");
-			} else {
-				expect(payments.results).toEqual([
-					{ period: "2026-10", transaction_id: originalId },
-				]);
-				expect(
-					JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast
-						.message,
-				).toBe(
-					`Restored Remapped payment. ${bill.name} payment no longer fits and was left off.`,
-				);
-			}
+			expect(restoredRow?.id).not.toBe(originalId);
+			expect(payments.results).toContainEqual({
+				period: linkedPeriod,
+				transaction_id: restoredRow?.id,
+			});
+			expect(
+				JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast
+					.message,
+			).toBe("Restored Remapped payment.");
 		},
 	);
+
+	it("restores a cash payment beside a bank payment already linked in the same month", async () => {
+		const id = await cashEntry();
+		const bank = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type!='cash' LIMIT 1",
+		).first<{ id: number }>();
+		const bill = await env.DB.prepare(
+			"SELECT id, name FROM bills WHERE active=1 AND id NOT IN (SELECT bill_id FROM bill_payments WHERE period='2026-10' AND status='linked') LIMIT 1",
+		).first<{ id: number; name: string }>();
+		if (!bank || !bill) throw new Error("bill seed missing");
+		const bankPayment = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-02', 60000, 'Bank rent', 'test')",
+		)
+			.bind(bank.id)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill.id, Number(bankPayment.meta.last_row_id))
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-10', ?, 'user', 'linked')",
+		)
+			.bind(bill.id, id)
+			.run();
+		const token = await holdCashDelete(env.DB, id, "Market");
+		const restored = await restoreCashDelete(env.DB, token as string);
+		expect(restored).toMatchObject({ lostLinks: [] });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id=? AND period='2026-10' AND status='linked'",
+			)
+				.bind(bill.id)
+				.first("n"),
+		).toBe(2);
+	});
 
 	it("sends the remaining server deadline computed from the stored hold time", async () => {
 		const id = await cashEntry();

@@ -1402,7 +1402,7 @@ describe("cash lifecycle", () => {
 		}
 	});
 
-	it("restores the entry but names a bill link that became unavailable", async () => {
+	it("restores the entry and its bill link beside the month's other payment", async () => {
 		const id = (
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
@@ -1448,14 +1448,22 @@ describe("cash lifecycle", () => {
 		});
 		const message = JSON.parse(restored.res.headers.get("HX-Trigger") ?? "{}")
 			.toast.message;
-		expect(message).toContain(
-			`${bill?.name} payment no longer fits and was left off.`,
-		);
+		// A month takes more than one payment (decision 101), so the entry's payment comes back beside the other one.
+		expect(message).toBe("Restored Farmers market.");
 		expect(
 			await env.DB.prepare(
 				"SELECT id FROM transactions WHERE raw_name='Farmers market' ORDER BY id DESC LIMIT 1",
 			).first(),
 		).not.toBeNull();
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) n FROM bill_payments WHERE bill_id=? AND period='2026-10' AND status='linked'",
+				)
+					.bind(bill?.id)
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(2);
 		expect(
 			(
 				await env.DB.prepare(

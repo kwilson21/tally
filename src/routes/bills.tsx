@@ -1626,6 +1626,33 @@ bills.post("/bills/:id/link", async (c) => {
 		);
 	const due = occurrenceDate(bill, period);
 	const manualWindow = manualLinkWindowDays(bill.frequency);
+	const label = ["monthly", "yearly"].includes(bill.frequency)
+		? monthName(
+				bill.frequency === "yearly"
+					? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
+					: period,
+				today,
+			)
+		: occurrenceLabel(due);
+	// A Paid month takes no more payments (decision 101): the picker lists none for it, so a request that names one is refused.
+	const paidCents =
+		(
+			await c.env.DB.prepare(
+				"SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.period=? AND bp.status='linked'",
+			)
+				.bind(id, period)
+				.first<{ cents: number }>()
+		)?.cents ?? 0;
+	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
+	if (paidPeriodsOf(bill, history, new Map([[period, paidCents]])).has(period))
+		return billPage(
+			c,
+			id,
+			opened,
+			`${label}'s bill is already paid.`,
+			undefined,
+			today,
+		);
 	// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324). A credit fails here
 	// and in the INSERT below, with the same message as a payment outside the window.
 	const eligible = await c.env.DB.prepare(
@@ -1634,14 +1661,6 @@ bills.post("/bills/:id/link", async (c) => {
 		.bind(transaction, due, manualWindow)
 		.first();
 	if (!eligible) {
-		const label = ["monthly", "yearly"].includes(bill.frequency)
-			? monthName(
-					bill.frequency === "yearly"
-						? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
-						: period,
-					today,
-				)
-			: occurrenceLabel(occurrenceDate(bill, period));
 		return billPage(
 			c,
 			id,

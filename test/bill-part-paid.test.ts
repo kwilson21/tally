@@ -5,6 +5,7 @@ import { occurrencePaid, partPaidSentence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
 import { resetDemo } from "../src/demo/reset";
 import { loadBillRows } from "../src/routes/bills";
+import { type BillRowData, billStatusLine } from "../src/views/bill-row";
 
 // Partial bill payments (Phase 5, decision 101, #205): more than one payment can pay one occurrence, and an
 // occurrence is Paid once its payments reach 90% of its amount. Until then it is part paid.
@@ -115,6 +116,22 @@ describe("partial payments on one rent bill", () => {
 			dueDate: "2026-10-08",
 			paidCents: 60000,
 		});
+	});
+
+	it("the Bills row reads Part paid in both its Due and its Overdue state", async () => {
+		await env.DB.prepare("UPDATE bills SET due_day=8 WHERE id=?")
+			.bind(RENT)
+			.run();
+		await addPayment(9601, "2026-10-04", 60000);
+		await link(9601);
+		const due = await rentRow("2026-10-05");
+		const overdue = await rentRow("2026-10-09");
+		expect(billStatusLine(due as BillRowData, "2026-10-05")).toBe(
+			"Part paid: $600 of $1,200",
+		);
+		expect(billStatusLine(overdue as BillRowData, "2026-10-09")).toBe(
+			"Part paid: $600 of $1,200",
+		);
 	});
 });
 

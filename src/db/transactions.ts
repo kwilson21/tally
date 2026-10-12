@@ -1463,7 +1463,7 @@ async function partBills(
 ): Promise<PartPayment[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT bp.id AS paymentId, b.name AS name, bp.period AS period,
+			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period,
 			part.amount_cents AS amountCents, part.category_id AS categoryId
 			FROM bill_payments bp JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
 			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
@@ -1475,6 +1475,7 @@ async function partBills(
 
 /** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
 type PartPayment = UnpaidBill & {
+	billId: number;
 	paymentId: number;
 	amountCents: number;
 	categoryId: number | null;
@@ -1487,7 +1488,7 @@ type PartPayment = UnpaidBill & {
 function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
 	const used = new Set<number>();
 	const kept: { paymentId: number; index: number }[] = [];
-	const lost: UnpaidBill[] = [];
+	const lost: PartPayment[] = [];
 	for (const payment of payments) {
 		const index = parts.findIndex(
 			(part, i) =>
@@ -1505,9 +1506,18 @@ function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
 	return { kept, lost };
 }
 
-/** The bills as the toast names them: a name and an occurrence, without the id. */
-const namedBills = (bills: UnpaidBill[]): UnpaidBill[] =>
-	bills.map(({ name, period }) => ({ name, period }));
+/**
+ * The bills as the toast names them: a name and an occurrence, without the id, once per occurrence. Two parts'
+ * payments can pay one occurrence (decision 101), and that is still one bill.
+ */
+const namedBills = (bills: PartPayment[]): UnpaidBill[] => [
+	...new Map(
+		bills.map(({ billId, name, period }) => [
+			`${billId}:${period}`,
+			{ name, period },
+		]),
+	).values(),
+];
 
 /**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows

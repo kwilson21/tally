@@ -224,6 +224,33 @@ describe("replacing a split's parts unlinks their bill payments (decision 99)", 
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set(["2026"]));
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
+
+	it("names a bill once when two replaced parts paid the same occurrence (#205)", async () => {
+		await seedSplit([
+			membershipPart,
+			{
+				id: PART_GROCERIES,
+				cents: 1000,
+				categoryId: GROCERIES,
+				bill: { id: MEMBERSHIP, period: "2026" },
+			},
+		]);
+
+		const result = await saveSplit(
+			db,
+			PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 3500 },
+				{ categoryId: GROCERIES, amountCents: 1500 },
+			],
+			"test",
+		);
+
+		expect(result.bills).toEqual([
+			{ name: "Costco membership", period: "2026" },
+		]);
+		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
+	});
 });
 
 /** The dismissed payments of a bill, as the matcher reads them. */

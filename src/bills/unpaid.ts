@@ -61,14 +61,15 @@ export function unpaidBillsNote(stored: string | null | undefined): string {
 
 /**
  * SQL for the bills the linked payments of a purchase's parts pay, as the JSON that
- * transactions.split_removed_bills stores, or NULL when none. `parent` is the SQL for the purchase's id.
+ * transactions.split_removed_bills stores, or NULL when none. One entry per bill occurrence, however many of its
+ * parts' payments pay it (decision 101). `parent` is the SQL for the purchase's id.
  * It must run before those parts are deleted, since their payments go with them.
  */
 export const UNPAID_BILLS_SQL = (parent: string) =>
 	`NULLIF((SELECT json_group_array(json_object('billId', billId, 'name', name, 'period', period)) FROM (
 		SELECT b.id AS billId, b.name AS name, bp.period AS period FROM bill_payments bp
 		JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
-		WHERE part.parent_id = ${parent} AND bp.status = 'linked' ORDER BY bp.id)), '[]')`;
+		WHERE part.parent_id = ${parent} AND bp.status = 'linked' GROUP BY b.id, bp.period ORDER BY MIN(bp.id))), '[]')`;
 
 /**
  * SQL for the bills in a stored split_removed_bills value (`column`) that are still unpaid: the entries whose

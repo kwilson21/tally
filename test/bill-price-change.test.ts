@@ -329,10 +329,11 @@ describe("bill matching and price changes", () => {
 					period,
 					opened_period: period,
 				});
-			// The month already has another payment: a part payment links too (decision 101), and the exclusion stays.
+			// The month already has a $500 part payment: another part payment links too (decision 101), and the
+			// exclusion stays. A month already Paid would refuse it.
 			await env.DB.batch([
 				env.DB.prepare(
-					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,185000,'ZELLE LANDLORD')",
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,50000,'ZELLE LANDLORD')",
 				).bind(paidOn),
 				env.DB.prepare(
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,2,'user','linked')",
@@ -358,7 +359,8 @@ describe("bill matching and price changes", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,1,'user','linked')",
 				).bind(period),
 			]);
-			expect(await (await link()).text()).toContain("already linked");
+			// This payment alone makes the month Paid, so the month's refusal comes before the duplicate check.
+			expect(await (await link()).text()).toContain("is already paid");
 			expect(await stillExcluded()).toHaveLength(1);
 		});
 	});
