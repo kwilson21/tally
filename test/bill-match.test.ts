@@ -212,8 +212,9 @@ describe("bill payment matching", () => {
 		};
 		const oneYear = await countForYears(1);
 		const threeYears = await countForYears(3);
-		expect(oneYear).toBe(15);
-		expect(threeYears).toBe(15);
+		// One more than before bill_amounts (decision 101): every bill's amount rows are read in one statement.
+		expect(oneYear).toBe(16);
+		expect(threeYears).toBe(16);
 		expect(threeYears).toBe(oneYear);
 		expect(threeYears).toBeLessThan(1_000);
 	});

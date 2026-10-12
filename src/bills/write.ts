@@ -1,3 +1,5 @@
+import { householdMonth } from "../dates";
+
 // The writes that make a bill's name count (spec §8.5): no two active bills share a name, ignoring
 // case and surrounding spaces. The form checks first, for a friendly message, but two saves can both
 // pass that check, so each write here checks again as part of the same statement: it changes nothing
@@ -11,6 +13,10 @@
 //
 // Only a name that is new is checked: adding, reactivating and renaming. Editing a bill under the
 // name it already has isn't, so two bills that already share a name stay editable.
+
+// Amounts by month (spec §5 `bill_amounts`, decision 101): a changed amount writes this month's row, so
+// earlier months keep theirs, and a second change in the same month replaces that row. `bills.amount_cents`
+// always holds the current amount.
 
 export type BillFields = {
 	name: string;
@@ -28,32 +34,54 @@ const FREE =
 	"NOT EXISTS (SELECT 1 FROM bills other WHERE other.active=1 AND other.id IS NOT ? AND lower(trim(other.name))=lower(trim(?)))";
 
 /**
+ * A name a bill may take: its own, as it is stored (spaces and A to Z case aside), or one no other active
+ * bill has. Binds the name, then the bill's id and the name again for FREE.
+ */
+const OWN_OR_FREE = `(lower(trim(name))=lower(trim(?)) OR ${FREE})`;
+
+/**
  * Adds a bill. False, with nothing written, when an active bill already has its name. Its merchant text
- * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1).
+ * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1). Its
+ * first `bill_amounts` row is this month's (the household's), so the amount applies from this month on.
  */
 export async function insertBill(
 	db: D1Database,
 	f: BillFields,
+	/** The household's month (YYYY-MM) when the caller has it; read here otherwise. */
+	month?: string,
 ): Promise<boolean> {
-	const { meta } = await db
-		.prepare(
-			`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text)
-			 SELECT ?,?,?,?,?,?,?,?,0 WHERE ${FREE}`,
-		)
-		.bind(
-			f.name,
-			f.amountCents,
-			f.dueDay,
-			f.frequency,
-			f.anchorMonth,
-			f.anchorDate ?? null,
-			f.categoryId,
-			f.merchantRawName,
-			null,
-			f.name,
-		)
-		.run();
-	return meta.changes > 0;
+	const at = month ?? (await householdMonth(db));
+	// One batch, so the bill and its first row land together or not at all. The row goes to whichever active
+	// bill has the new name and no row yet. That is only the bill just added, because every bill has a row
+	// (from migration 0044's backfill, from insertBill, and from the demo reset). The same rule keeps a refused
+	// add from giving its namesake a row, since the namesake already has one.
+	const [added] = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text)
+				 SELECT ?,?,?,?,?,?,?,?,0 WHERE ${FREE}`,
+			)
+			.bind(
+				f.name,
+				f.amountCents,
+				f.dueDay,
+				f.frequency,
+				f.anchorMonth,
+				f.anchorDate ?? null,
+				f.categoryId,
+				f.merchantRawName,
+				null,
+				f.name,
+			),
+		db
+			.prepare(
+				`INSERT INTO bill_amounts (bill_id, effective_month, amount_cents)
+				 SELECT id, ?, ? FROM bills WHERE active=1 AND lower(trim(name))=lower(trim(?))
+				   AND NOT EXISTS (SELECT 1 FROM bill_amounts WHERE bill_id=bills.id)`,
+			)
+			.bind(at, f.amountCents, f.name),
+	]);
+	return (added?.meta.changes ?? 0) > 0;
 }
 
 /**
@@ -71,13 +99,26 @@ export async function updateBill(
 	id: number,
 	f: BillFields,
 	dropDismissals: boolean,
+	/** The household's month (YYYY-MM) when the caller has it, which a changed amount applies from. */
+	month?: string,
 ): Promise<boolean> {
-	// In an UPDATE's WHERE, `name` is the row's name as it is now, before the SET.
+	const at = month ?? (await householdMonth(db));
+	// The amount row and the update share one condition (OWN_OR_FREE) and run in one batch, the row first.
+	// Both see the bill as it was before the batch, so the row lands exactly when the update applies, even
+	// when another write lands in between. A refused save leaves no row, and so does an unchanged amount.
+	// Here `name` in the conditions is the bill's name as it is now, before the batch's SET.
+	const amountRow = db
+		.prepare(
+			`INSERT INTO bill_amounts (bill_id, effective_month, amount_cents)
+			 SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bills WHERE id=? AND amount_cents<>? AND ${OWN_OR_FREE})
+			 ON CONFLICT (bill_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
+		)
+		.bind(id, at, f.amountCents, id, f.amountCents, f.name, id, f.name);
 	const update = db
 		.prepare(
 			`UPDATE bills SET name=?,amount_cents=?,due_day=?,frequency=?,anchor_month=?,anchor_date=?,category_id=?,
 			   merchant_raw_text=CASE WHEN merchant_raw_name=? THEN merchant_raw_text ELSE 0 END,merchant_raw_name=?
-			 WHERE id=? AND (lower(trim(name))=lower(trim(?)) OR ${FREE})`,
+			 WHERE id=? AND ${OWN_OR_FREE}`,
 		)
 		.bind(
 			f.name,
@@ -94,18 +135,19 @@ export async function updateBill(
 			id,
 			f.name,
 		);
-	if (!dropDismissals) return (await update.run()).meta.changes > 0;
 	// The bill has its new name exactly when the update just applied (it set it, and a refused update
 	// leaves a name that differs), so the dismissals go only then.
-	const [result] = await db.batch([
-		update,
-		db
-			.prepare(
-				"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
-			)
-			.bind(id, id, f.name),
-	]);
-	return (result?.meta.changes ?? 0) > 0;
+	const statements = [amountRow, update];
+	if (dropDismissals)
+		statements.push(
+			db
+				.prepare(
+					"DELETE FROM bill_payments WHERE bill_id=? AND EXISTS (SELECT 1 FROM bills WHERE id=? AND name=?)",
+				)
+				.bind(id, id, f.name),
+		);
+	const results = await db.batch(statements);
+	return (results[1]?.meta.changes ?? 0) > 0;
 }
 
 /**

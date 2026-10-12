@@ -26,10 +26,15 @@ const endsWithRule = (ending: string, display: RegExp) =>
 	);
 
 /** The page's row for one occurrence: its `<li>` block, found by its label as a whole (not "Fri, Oct 2" in "Fri, Oct 23"). */
+// A row is found by its label, which may carry the occurrence's amount after " · " (decision 101).
 const occurrenceRow = (html: string, label: string) =>
-	(html.split("<li").find((item) => item.includes(`>${label}<`)) ?? "").split(
-		"</li>",
-	)[0] ?? "";
+	(
+		html
+			.split("<li")
+			.find(
+				(item) => item.includes(`>${label}<`) || item.includes(`>${label} · `),
+			) ?? ""
+	).split("</li>")[0] ?? "";
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
@@ -2017,6 +2022,8 @@ describe("Bills", () => {
 		const day = Number(today.slice(8, 10));
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments WHERE bill_id=1"),
+			// Its amount history goes too: this fixture sets the bill's own amount, which then applies to every month.
+			env.DB.prepare("DELETE FROM bill_amounts WHERE bill_id=1"),
 			env.DB.prepare(
 				"UPDATE bills SET due_day=?,amount_cents=1000,frequency='monthly',merchant_raw_name='PREFERRED' WHERE id=1",
 			).bind(day),
@@ -2318,11 +2325,15 @@ describe("Bill guards", () => {
 		/** The worker's env with a DB that runs `rival` just before the first statement starting with `sql` runs. */
 		const racing = (sql: string, rival: string) => {
 			let raced = false;
-			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
-				new Proxy(statement, {
+			const guard = (statement: D1PreparedStatement): D1PreparedStatement => {
+				const proxy: D1PreparedStatement = new Proxy(statement, {
 					get(target, prop) {
 						if (prop === "bind")
-							return (...values: unknown[]) => guard(target.bind(...values));
+							return (...values: unknown[]) => {
+								const bound = guard(target.bind(...values));
+								if (matched.has(proxy)) matched.add(bound);
+								return bound;
+							};
 						if (prop === "run")
 							return async () => {
 								if (!raced) {
@@ -2335,13 +2346,34 @@ describe("Bill guards", () => {
 						return typeof value === "function" ? value.bind(target) : value;
 					},
 				});
+				wrapped.set(proxy, statement);
+				return proxy;
+			};
+			// A save's bill and its amount row go in one batch, so the rival also lands just before a batch
+			// that holds a matching statement; the batch itself gets the real statements.
+			const matched = new Set<D1PreparedStatement>();
+			const wrapped = new Map<D1PreparedStatement, D1PreparedStatement>();
+			const rivalFirst = async () => {
+				if (!raced) {
+					raced = true;
+					await env.DB.prepare(rival).run();
+				}
+			};
 			const DB = new Proxy(env.DB, {
 				get(target, prop) {
 					if (prop === "prepare")
-						return (text: string) =>
-							text.startsWith(sql)
-								? guard(target.prepare(text))
-								: target.prepare(text);
+						return (text: string) => {
+							const statement = target.prepare(text);
+							if (!text.startsWith(sql)) return statement;
+							const proxy = guard(statement);
+							matched.add(proxy);
+							return proxy;
+						};
+					if (prop === "batch")
+						return async (statements: D1PreparedStatement[]) => {
+							if (statements.some((s) => matched.has(s))) await rivalFirst();
+							return target.batch(statements.map((s) => wrapped.get(s) ?? s));
+						};
 					const value = Reflect.get(target, prop);
 					return typeof value === "function" ? value.bind(target) : value;
 				},

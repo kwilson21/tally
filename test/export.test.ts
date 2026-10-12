@@ -214,6 +214,9 @@ describe("data exports", () => {
 				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (1, 'Internet', 5000, 1, 'monthly', 'ISP')",
 			),
 			env.DB.prepare(
+				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) VALUES (1, '2026-09', 5000)",
+			),
+			env.DB.prepare(
 				"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (1, 1, '2026-09', 1, 'user', 'linked')",
 			),
 			env.DB.prepare(
@@ -248,6 +251,7 @@ describe("data exports", () => {
 			"balance_history",
 			"transactions",
 			"bills",
+			"bill_amounts",
 			"bill_payments",
 			"plaid_items",
 			"documents",
@@ -276,6 +280,7 @@ describe("data exports", () => {
 			],
 			category_archive_periods: ["archived_on", "category_id", "restored_on"],
 			budget_amounts: ["amount_cents", "category_id", "effective_month"],
+			bill_amounts: ["amount_cents", "bill_id", "effective_month"],
 			savings_goal_amounts: ["amount_cents", "effective_month"],
 			merchants: [
 				"default_category_id",
