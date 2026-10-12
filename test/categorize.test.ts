@@ -285,6 +285,82 @@ describe("askJev", () => {
 		});
 	});
 
+	it("asks whether a what-it-was line could say more than the store's name, only when details are asked", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(input, categories, "k", fetchImpl, {
+			details: true,
+			people: [{ id: 4, name: "Morgan" }],
+		});
+		await askJev(input, categories, "k", fetchImpl);
+
+		const withDetails = JSON.parse(String(calls[0]?.init.body));
+		expect(withDetails.questions.note_worth_writing.type).toBe("noul");
+		expect(withDetails.questions.note_worth_writing.instructions).toMatch(
+			/store's name/,
+		);
+		const withoutDetails = JSON.parse(String(calls[1]?.init.body));
+		expect(withoutDetails.questions).not.toHaveProperty("note_worth_writing");
+	});
+
+	describe("the what-it-was question", () => {
+		const detailAnswers = {
+			...goodBody.answers,
+			kind: { type: "choice", choice: "one_off", confidence: 0.9 },
+			for_person: { type: "choice", choice: "none", confidence: 0.9 },
+			note_worth_writing: { type: "noul", noul: 0.91 },
+		};
+		const people = [{ id: 4, name: "Morgan" }];
+
+		it("reads the yes-probability with the detail answers", async () => {
+			const { fetchImpl } = fakeFetch(() => ok({ answers: detailAnswers }));
+			expect(
+				await askJev(input, categories, "k", fetchImpl, {
+					details: true,
+					people,
+				}),
+			).toMatchObject({
+				ok: true,
+				answer: { noteWorthWriting: 0.91 },
+			});
+		});
+
+		it.each([
+			["omits it", undefined],
+			["gives a word", { noul: "yes" }],
+			["gives a number above one", { noul: 2 }],
+		])(
+			"treats an answer that %s as a no and keeps the rest of the answer",
+			async (_case, worth) => {
+				// JSON.stringify drops an undefined field, so Jev's answer simply has no question.
+				const { fetchImpl } = fakeFetch(() =>
+					ok({
+						answers: { ...detailAnswers, note_worth_writing: worth },
+					}),
+				);
+				const result = await askJev(input, categories, "k", fetchImpl, {
+					details: true,
+					people,
+				});
+				expect(result).toMatchObject({
+					ok: true,
+					answer: {
+						category: { label: "Eating Out" },
+						flags: { transfer: 0.02, reimbursement: 0.01, income: 0.03 },
+						kind: { label: "one_off" },
+						forPerson: { label: "none" },
+					},
+				});
+				expect(result.ok && "noteWorthWriting" in result.answer).toBe(false);
+			},
+		);
+
+		it("leaves the answer without a what-it-was field when details are not asked", async () => {
+			const { fetchImpl } = fakeFetch(() => ok(goodBody));
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result.ok && "noteWorthWriting" in result.answer).toBe(false);
+		});
+	});
+
 	it("starts with a threshold of 0.80", () => {
 		expect(JEV_THRESHOLD).toBe(0.8);
 	});

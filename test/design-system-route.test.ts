@@ -654,6 +654,40 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
 	});
 
+	it("shows the picker a month choice finds empty, with its month choices kept (#323)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		// The state's picker, found by the label above it.
+		const pickerAfter = (label: string) =>
+			page
+				.split(`>${label}</p>`)[1]
+				?.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
+		// Three pickers: the one with payments, the page's empty one, and a chosen month with none.
+		expect(page.match(/<section id="payment-picker"/g)).toHaveLength(3);
+		const chosen = pickerAfter("Chosen month with no payments");
+		expect(chosen).toContain("No payments to link");
+		expect(chosen.match(/name="period"/g)).toHaveLength(2);
+		const october =
+			chosen.match(/<input[^>]*name="period" value="2026-10"[^>]*>/)?.[0] ?? "";
+		expect(october).toMatch(/\bchecked\b/);
+		expect(october).toMatch(/\bautofocus\b/);
+		// Nothing to link, so no payment choice, no Link button and no Cancel.
+		expect(chosen).not.toContain('name="transaction_id"');
+		expect(chosen).not.toContain('type="submit"');
+		expect(chosen).not.toContain(">Cancel<");
+		// The page's own empty picker keeps its look: the empty state alone, no month choices.
+		const empty = pickerAfter("Empty picker");
+		expect(empty).toContain("No payments to link");
+		expect(empty).not.toContain('name="period"');
+		expect(design).toMatch(
+			/\| BillPaymentPicker \|[^\n]*the month choices stay below the "No payments to link" empty state/,
+		);
+		expect(design).toMatch(
+			/\| BillPaymentPicker \|[^\n]*announced once, through the announcer/,
+		);
+	});
+
 	it("shows Adjust mode with its whole use spec, for sign-off (#94)", async () => {
 		const { html } = await get("/design-system");
 		const section =

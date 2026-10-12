@@ -83,7 +83,8 @@ describe("monthCounts", () => {
 		expect(counts).toEqual({
 			counted: await countWhere("1 = 1"),
 			needsCategory: await needsCategoryCount(db, MONTH),
-			user: 1,
+			// The Farmers market cash row and the Costco split's two parts are the person's own picks.
+			user: 3,
 			merchantRule: 0,
 			// Two seeded bill payments, and the three Daycare Fridays this month.
 			bill: 5,
@@ -137,7 +138,8 @@ describe("monthCounts", () => {
 		const counts = await monthCounts(db, MONTH);
 		expect(counts).toMatchObject({
 			needsCategory: 8,
-			user: 2,
+			// The local bakery pick, the Farmers market row and the Costco split's two parts.
+			user: 4,
 			merchantRule: 1,
 			unsure: 1,
 			noneFit: 1,

@@ -98,6 +98,7 @@ const STATEMENTS = [
 		for_person_guessed = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_guessed ELSE transactions.for_person_guessed END,
 		for_person_cleared = CASE WHEN ${PERSON_TAKEN} THEN p.for_person_cleared ELSE transactions.for_person_cleared END,
 		details_asked = MAX(transactions.details_asked, p.details_asked),
+		note_worth_writing = COALESCE(transactions.note_worth_writing, p.note_worth_writing),
 		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
 		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)

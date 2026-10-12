@@ -125,7 +125,7 @@ describe("GET /how-it-works in the demo", () => {
 			"DELETE FROM merchants WHERE suggestion_status = 'pending'",
 		).run();
 		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('OLD SHOP 123', 'Old Shop', 'pending')",
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('OLD SHOP 123', 'Old Shop Market', 'pending')",
 		).run();
 		await env.DB.prepare(
 			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('old-shop-review', 1, '2025-01-10', 650, 'OLD SHOP 123')",
@@ -530,6 +530,16 @@ describe("links in the demo", () => {
 		);
 		expect(categorization).toContain(
 			"Removing a rule doesn&#39;t change transactions it already sorted.",
+		);
+	});
+
+	it("says a what-it-was line is written only when it can say more than the store's name (decision 103)", async () => {
+		const html = (await get("/how-it-works")).html;
+		const categorization =
+			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
+			"";
+		expect(categorization).toContain(
+			"Tally writes “What it was” only when it can say more than the store&#39;s name.",
 		);
 	});
 });

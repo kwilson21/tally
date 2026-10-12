@@ -402,8 +402,13 @@ describe("saveEdit", () => {
 		).toEqual({ kind_cleared: 1, for_person_cleared: 1 });
 
 		await saveJevDetails(db, [
-			{ id, kind: "subscription", forPersonId: 1 },
-			{ id: untouched, kind: "subscription", forPersonId: 1 },
+			{ id, kind: "subscription", forPersonId: 1, noteWorthWriting: null },
+			{
+				id: untouched,
+				kind: "subscription",
+				forPersonId: 1,
+				noteWorthWriting: null,
+			},
 		]);
 		const details =
 			"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?";
