@@ -67,6 +67,14 @@ export function usableSuggestedNames({
 }
 
 /**
+ * True when a suggestion repeats the shown text: exactly, or a Tally guess in other capitals (decision 103).
+ * The bank's own name is never dropped for only differing in capitals, since the bank sent it (P87 B).
+ */
+const repeatsShown = (name: string, key: string, tidied: string) =>
+	name === tidied ||
+	(!isBankName(name, key) && name.toLowerCase() === tidied.toLowerCase());
+
+/**
  * What a transaction's name reads as: a person's chosen name, else the first pending suggestion that
  * says something the tidied bank text doesn't, marked `suggested` (shown dashed until chosen, P29 A)
  * and, when it is the bank's, `fromBank` (no sparkles icon, P87 B), else the tidied bank text
@@ -83,7 +91,9 @@ export function shownName({
 } {
 	if (chosen) return { name: chosen, suggested: false, fromBank: false };
 	const tidied = tidyName(rawName);
-	const first = usableSuggestedNames(merchant).find((name) => name !== tidied);
+	const first = usableSuggestedNames(merchant).find(
+		(name) => !repeatsShown(name, merchant.key, tidied),
+	);
 	return first
 		? {
 				name: first,
@@ -96,5 +106,7 @@ export function shownName({
 /** The names the edit panel and the review offer: the usable ones that differ from the tidied bank text. */
 export function offeredNames(merchant: Stored, rawName: string): string[] {
 	const tidied = tidyName(rawName);
-	return usableSuggestedNames(merchant).filter((name) => name !== tidied);
+	return usableSuggestedNames(merchant).filter(
+		(name) => !repeatsShown(name, merchant.key, tidied),
+	);
 }

@@ -64,10 +64,93 @@ export async function suggestNames(
 	return { ok: true, names: cleanSuggestedNames(text, rawName) };
 }
 
-/** Workers AI's short, one-line guess for what a purchase was, from only the bank text. */
+/** Words a "what it was" line can use without saying anything about the purchase beyond its store (decision 103). */
+const GENERIC_NOTE_WORDS = new Set([
+	"purchase",
+	"purchases",
+	"payment",
+	"payments",
+	"order",
+	"orders",
+	"charge",
+	"charges",
+	"transaction",
+	"transactions",
+	"store",
+	"stores",
+	"shop",
+	"shops",
+	"visit",
+	"visits",
+	"trip",
+	"trips",
+	"bill",
+	"bills",
+	"item",
+	"items",
+	"stuff",
+	"thing",
+	"things",
+	"spending",
+	"expense",
+	"expenses",
+	"a",
+	"an",
+	"the",
+	"at",
+	"of",
+	"for",
+	"and",
+	"from",
+	"to",
+	"with",
+	"my",
+	"our",
+]);
+
+/** A name's letter runs, so "AT&T" gives "at" and "t", and "APPLE.COM/BILL" gives "apple", "com" and "bill". */
+const wordsOf = (text: string) =>
+	text
+		.toLowerCase()
+		.split(/[^\p{L}]+/u)
+		.filter(Boolean);
+
+/** A name's whitespace-separated runs, so a run never joins the next word: "Trader Joe's" gives "trader" and "joe's". */
+const runsOf = (text: string) =>
+	text.toLowerCase().split(/\s+/).filter(Boolean);
+
+/** A run with its punctuation removed: "at&t" is "att", "joe's" is "joes", and "#552" is nothing. */
+const joinedOf = (run: string) => run.replace(/[^\p{L}]/gu, "");
+
+/**
+ * True when every word of a "what it was" line is in the store's name, with or without its inner punctuation (so
+ * "AT&T" matches "ATT"), or is a generic word such as "purchase" (decision 103).
+ */
+export function restatesStore(
+	note: string,
+	storeNames: (string | null)[],
+): boolean {
+	const names = storeNames.map((name) => name ?? "");
+	const store = new Set([
+		...names.flatMap(wordsOf),
+		...names.flatMap((name) => runsOf(name).map(joinedOf)),
+	]);
+	const covered = (word: string) =>
+		store.has(word) || GENERIC_NOTE_WORDS.has(word);
+	// A run is covered when its joined form is, or when each of its letter words is.
+	return runsOf(note).every(
+		(run) => covered(joinedOf(run)) || wordsOf(run).every(covered),
+	);
+}
+
+/**
+ * Workers AI's short, one-line guess for what a purchase was, from only the bank text. Code then drops a line
+ * that only restates the store, by the bank text or the merchant's names (decision 103); those names are never sent.
+ */
 export async function suggestNote(
 	ai: Ai,
 	rawName: string,
+	shownNames: (string | null)[] = [],
 ): Promise<{ ok: true; note: string | null } | { ok: false }> {
 	try {
 		const answer = await ai.run(
@@ -102,7 +185,8 @@ export async function suggestNote(
 				note &&
 				note.length >= 2 &&
 				note.length <= 80 &&
-				!/https?:|www\.|\d{3,}|[$#]/i.test(note)
+				!/https?:|www\.|\d{3,}|[$#]/i.test(note) &&
+				!restatesStore(note, [rawName, ...shownNames])
 					? note
 					: null,
 		};
