@@ -1698,5 +1698,86 @@ describe("select several transactions", () => {
 			expect(text).toMatch(/^0 selected/);
 			expect(text).not.toContain("Select all");
 		});
+
+		/**
+		 * The 101 matches dated long ago, so the newest rows (the page Select all draws) are not the search's
+		 * matches. The seed's rows follow today's date, and these would otherwise sort to the top.
+		 */
+		const seedOldMatches = async () => {
+			const matched = await seedMatches();
+			await env.DB.prepare(
+				"UPDATE transactions SET date = '2000-01-01' WHERE id BETWEEN 5001 AND 5101",
+			).run();
+			return matched;
+		};
+
+		it("after Select all, a search selects what its filters match, not the rows the old page drew, and the save changes only those", async () => {
+			const matched = await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			const search = "/transactions?month=all&q=ZQ+TEST+BAKERY";
+			// The fields a filter change posts: the old page's boxes, all of them checked, and the old page's ids.
+			const fields: [string, string][] = [
+				["page-ids", old.join(",")],
+				["all", "1"],
+				...old.map((id): [string, string] => ["ids", String(id)]),
+			];
+			const list = await (
+				await request(`${search}&select=1&${new URLSearchParams(fields)}`, {
+					headers: { "HX-Request": "true" },
+				})
+			).text();
+			expect(list).toContain("101 selected");
+			expect(list).not.toContain("not on this page");
+			const counted = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([["back", search], ...fields])}`,
+				)
+			).text();
+			expect(counted).toContain("101 selected");
+			expect(counted).not.toContain("not on this page");
+			const before = (await snapshot()) as SnapshotRow[];
+			const res = await post(
+				"/transactions/select/category/save",
+				new URLSearchParams([["back", search], ["category", "1"], ...fields]),
+			);
+			expect(res.status).toBe(200);
+			expect(
+				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+			).toBe("Set 101 transactions to Groceries.");
+			const beforeById = new Map(before.map((row) => [row.id, row]));
+			for (const row of (await snapshot()) as SnapshotRow[]) {
+				if (matched.includes(row.id))
+					expect(row).toMatchObject({
+						category_id: 1,
+						category_source: "user",
+					});
+				else expect(row).toEqual(beforeById.get(row.id));
+			}
+		});
+
+		it("after Select all, keeps a tick the new filters hide on the not-on-this-page line, and counts none of the old page's boxes", async () => {
+			await seedOldMatches();
+			const old = rowIds(await pageHtml("month=all&select=1"));
+			// A row the search doesn't match and the old page doesn't show: a tick made before the filters changed.
+			const hidden = await env.DB.prepare(
+				`SELECT id FROM transactions WHERE is_split = 0 AND id < 5000 AND id NOT IN (${old.map(() => "?").join(",")}) ORDER BY id LIMIT 1`,
+			)
+				.bind(...old)
+				.first<{ id: number }>();
+			expect(hidden).not.toBeNull();
+			const counted = await (
+				await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["back", "/transactions?month=all&q=ZQ+TEST+BAKERY"],
+						["page-ids", old.join(",")],
+						["all", "1"],
+						...old.map((id) => ["ids", String(id)]),
+						["ids", String(hidden?.id)],
+					])}`,
+				)
+			).text();
+			expect(counted).toContain("102 selected");
+			expect(counted).toContain("1 not on this page");
+		});
 	});
 });

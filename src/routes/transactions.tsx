@@ -80,6 +80,7 @@ import {
 	type Selection,
 	selectedIds,
 	settle,
+	ticksFrom,
 	unticksFrom,
 } from "../transactions/selection";
 import { parseSplit } from "../transactions/split";
@@ -990,7 +991,7 @@ transactions.get("/transactions/select/count", async (c) => {
 	// The count counts the ticks the form posts, as it always has: an action is what drops a gone row (#350).
 	const selection = settle(
 		{
-			ticks: read.ids,
+			ticks: read.ticks,
 			all: read.all,
 			unticked: read.all
 				? unticksFrom(read.hidden, read.ids, read.pageIds)
@@ -1056,12 +1057,17 @@ type SelectionReadable = {
 };
 function selectionFields(fields: SelectionReadable) {
 	const pageIds = fields.getAll("page-ids");
+	const ids = parseIds(fields.getAll("ids"));
+	const all = fields.get("all") === "1";
+	const onPage = pageIds.length > 0 ? parseIds(pageIds) : undefined;
 	return {
-		/** The ticked rows, on this page or not (the form's checkboxes, or the address's ids). */
-		ids: parseIds(fields.getAll("ids")),
+		/** The ticked boxes, on this page or not (the form's checkboxes, or the address's ids). */
+		ids,
 		/** The rows the page drew, when the request names them (page-ids): their boxes say which are unticked. */
-		pageIds: pageIds.length > 0 ? parseIds(pageIds) : undefined,
-		all: fields.get("all") === "1",
+		pageIds: onPage,
+		all,
+		/** The ticks the request means: in all mode the page's own boxes are the set's, not ticks (ticksFrom, #321). */
+		ticks: ticksFrom(ids, all, onPage),
 		/** The rows unticked from the whole set, as the hidden fields and the address carry them. */
 		hidden: parseIds(fields.getAll("unticked")),
 	};
@@ -1077,7 +1083,7 @@ async function requestedSelection(
 	read: ReturnType<typeof selectionFields>,
 	{ pageLink, wholeAgain }: { pageLink: boolean; wholeAgain: boolean },
 ): Promise<Selection> {
-	const ids = [...read.ids, ...(pageLink ? (read.pageIds ?? []) : [])];
+	const ids = [...read.ticks, ...(pageLink ? (read.pageIds ?? []) : [])];
 	const ticks = await selectableTickIds(db, [...new Set(ids)]);
 	if (!read.all) return { ticks, all: false, unticked: [] };
 	return {

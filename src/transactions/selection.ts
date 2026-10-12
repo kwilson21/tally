@@ -31,6 +31,21 @@ export function unticksFrom(
 }
 
 /**
+ * The ticks a request posts (#321): every posted id, except in "all" mode the ids the page drew. There a checked
+ * box is a row the set holds, so only its unchecked state counts (unticksFrom), and the set follows the filters
+ * the request names. Without `pageIds` (a form that drew no page) every posted id is a tick.
+ */
+export function ticksFrom(
+	checked: number[],
+	all: boolean,
+	pageIds?: number[],
+): number[] {
+	if (!all || pageIds === undefined) return checked;
+	const onPage = new Set(pageIds);
+	return checked.filter((id) => !onPage.has(id));
+}
+
+/**
  * The selection once the rows the filters match are known. In "all" mode a tick on a matched row is already
  * selected by the set, so it is dropped from the ticks; the unticked rows stay. Idempotent.
  */
