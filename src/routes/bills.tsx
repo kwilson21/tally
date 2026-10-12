@@ -1090,6 +1090,8 @@ bills.post("/bills/:id/reactivate", async (c) => {
 	// A bill that would repeat an active bill's name comes back as the same Name error as adding.
 	if (!bill.active && !(await activateBill(c.env.DB, id, name)))
 		return nameTaken(c, { bill, values });
+	// A payment that arrived while the bill was off links now, as a save does (spec §6.1).
+	await matchBillPayments(c.env.DB);
 	return activeChanged(c, "Bill reactivated");
 });
 
