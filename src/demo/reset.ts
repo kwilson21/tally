@@ -17,6 +17,7 @@ const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
+	"ai_log",
 	"cash_delete_holds",
 	"bill_payments",
 	"bill_amounts",
@@ -186,6 +187,14 @@ export async function resetDemo(
 					t.refundOfId ?? null,
 					t.flagIncome ? "jev" : null,
 				),
+		),
+		// The seed's own Tally work (spec §8.6), read from the rows just inserted above: each transaction Jev
+		// gave a category or marked as income, dated by the transaction, so the demo's tally shows the family's work.
+		db.prepare(
+			"INSERT INTO ai_log (kind, transaction_id, household_day) SELECT 'category', id, date FROM transactions WHERE category_source = 'jev'",
+		),
+		db.prepare(
+			"INSERT INTO ai_log (kind, transaction_id, household_day) SELECT 'income', id, date FROM transactions WHERE income_source = 'jev'",
 		),
 		...demoBills(today, seed.transactions).map((bill) =>
 			db

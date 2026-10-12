@@ -1,6 +1,8 @@
 // Merchant names and their suggestions (spec §5, §7, decision 64): what to ask Workers AI about, where
 // its names are kept, and how a person's choice settles a suggestion. Which names to show is decided by
 // src/transactions/name-suggestions.ts.
+
+import { householdToday } from "../dates";
 import {
 	type NameSource,
 	nameSource,
@@ -8,6 +10,7 @@ import {
 	storeSuggestedNames,
 } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
+import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { merchantKeySql } from "./merchant-key";
 
@@ -191,21 +194,30 @@ export async function settleSuggestion(
 	key: string,
 	choice: NameChoice,
 ): Promise<boolean> {
-	const result =
+	const update =
 		choice.kind === "keep"
-			? await db
+			? db
 					.prepare(
 						"UPDATE merchants SET suggestion_status = 'rejected' WHERE raw_name = ? AND suggestion_status = 'pending' AND display_name IS NULL",
 					)
 					.bind(key)
-					.run()
-			: await db
+			: db
 					.prepare(
 						`UPDATE merchants SET display_name = ?1,
 							suggestion_status = CASE WHEN instr(char(10) || COALESCE(suggested_name, '') || char(10), char(10) || ?1 || char(10)) > 0 THEN 'accepted' ELSE 'rejected' END
 						 WHERE raw_name = ?2 AND suggestion_status = 'pending' AND display_name IS NULL`,
 					)
-					.bind(choice.name, key)
-					.run();
-	return result.meta.changes > 0;
+					.bind(choice.name, key);
+	// A guessed name a person keeps is logged first, while the suggestion is still pending (spec §8.6).
+	if (choice.kind === "keep" || nameSource([choice.name], key) !== "tally") {
+		const result = await update.run();
+		return result.meta.changes > 0;
+	}
+	const [, result] = await db.batch([
+		db
+			.prepare(KEPT_NAME_LOG_SQL)
+			.bind(await householdToday(db), key, choice.name),
+		update,
+	]);
+	return (result?.meta.changes ?? 0) > 0;
 }

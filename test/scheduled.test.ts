@@ -55,6 +55,19 @@ const jevAnswer = () =>
 		},
 	});
 
+/** What Jev answers when it is sure of everything, so every answer is applied and its log row written. */
+const jevSureAnswer = () =>
+	Response.json({
+		answers: {
+			category: { type: "choice", choice: "Eating Out", confidence: 0.99 },
+			transfer: { type: "noul", noul: 0.01 },
+			reimbursement: { type: "noul", noul: 0.01 },
+			income: { type: "noul", noul: 0.99 },
+			kind: { type: "choice", choice: "one_off", confidence: 0.99 },
+			for_person: { type: "choice", choice: "none", confidence: 0.99 },
+		},
+	});
+
 /** A fake Workers AI that always gives the same answer, and remembers each ask. */
 const aiThatSays = (response: string) =>
 	({ run: vi.fn(async () => ({ response })) }) as unknown as Ai & {
@@ -1102,7 +1115,7 @@ describe("scheduled handler: new category suggestions", () => {
 });
 
 // D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one. A Jev call
-// costs about three (the switches read before and after it, and saving its answer), plus one merchant-history
+// costs about three (the switches read, and saving its answer with its log row in one batch), plus one merchant-history
 // query per Jev run; a name costs about three too, and each new category suggestion about five. Each of
 // production's three runs and the demo's one is an invocation of its own, so each has to fit its worst case:
 // 09:00 the sync and feedback retry, 09:20 100 names, 200 Jev calls and 5 new category suggestions, and
@@ -1366,6 +1379,99 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 
 		expect(ai.run).not.toHaveBeenCalled();
 		expect(jev).toHaveBeenCalledTimes(300);
+		expect(counted.statements()).toBeLessThan(D1_LIMIT);
+		vi.restoreAllMocks();
+	}, 60_000);
+
+	/** The What AI did log rows, all kinds: each applied answer writes one, in the same batch as its save. */
+	const logRows = async () =>
+		(
+			await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_log").first<{
+				n: number;
+			}>()
+		)?.n ?? 0;
+	/** The transactions Jev has sorted, each of which the run must have logged. */
+	const jevSorted = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE category_source = 'jev'",
+			).first<{ n: number }>()
+		)?.n ?? 0;
+
+	it("production's 09:40 run with every Jev answer applied and logged stays under D1's 1,000 queries", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, { ...AI_SWITCHES_ALL_ON, details: false });
+		await addWaiting(400);
+		const counted = countingDb();
+		const ai = aiThatSays("Some Place Name");
+		const jev = vi.fn(async () => jevSureAnswer());
+		const logBefore = await logRows();
+
+		await runSecondSort(
+			{ ...env, DB: counted.db, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+			jev as unknown as typeof fetch,
+		);
+
+		expect(ai.run).not.toHaveBeenCalled();
+		expect(jev).toHaveBeenCalledTimes(300);
+		const sorted = await jevSorted();
+		expect(sorted).toBe(300);
+		expect(await logRows()).toBe(logBefore + sorted);
+		expect(counted.statements()).toBeLessThan(D1_LIMIT);
+		vi.restoreAllMocks();
+	}, 60_000);
+
+	it("production's 09:20 run with every Jev answer applied and logged stays under D1's 1,000 queries", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await addWaiting(400);
+		// Seven themes with three confident none-fits each: more than a night asks about, each its own name.
+		for (const theme of ["A", "B", "C", "D", "E", "F", "G"])
+			await env.DB.prepare(
+				`INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_category, category_confidence, jev_none_fit)
+				 VALUES (1, '2026-09-20', 900, 'PLACE ' || ?1 || ' ONE', ?1, 0.95, 1),
+					(1, '2026-09-20', 900, 'PLACE ' || ?1 || ' TWO', ?1, 0.95, 1),
+					(1, '2026-09-20', 900, 'PLACE ' || ?1 || ' THREE', ?1, 0.95, 1)`,
+			)
+				.bind(theme)
+				.run();
+		const counted = countingDb();
+		let named = 0;
+		const ai = {
+			run: vi.fn(async (_model: string, input: unknown) => {
+				const user = (
+					input as { messages: { role: string; content: string }[] }
+				).messages.find((m) => m.role === "user")?.content;
+				// A new name for each group, so each one is saved as a suggestion of its own.
+				return user?.startsWith("Places:")
+					? { response: `Group ${String.fromCharCode(65 + named++)}` }
+					: { response: "Some Place Name" };
+			}),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		const jev = vi.fn(async () => jevSureAnswer());
+		const logBefore = await logRows();
+
+		await runFirstSort(
+			{ ...env, DB: counted.db, DEMO: "false", AI: ai, JEV_API_KEY: "jev" },
+			jev as unknown as typeof fetch,
+		);
+
+		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit + categoryCallLimit);
+		expect(jev).toHaveBeenCalledTimes(200);
+		// The seven themes' 21 rows already carry a category confidence, so Jev's category answer doesn't sort
+		// them and nothing is logged for them; fewer than 200 are sorted, and every one that is sorted is logged.
+		const sorted = await jevSorted();
+		expect(sorted).toBeGreaterThan(0);
+		expect(await logRows()).toBe(logBefore + sorted);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT COUNT(*) AS n FROM category_suggestions WHERE status = 'pending'",
+				).first<{ n: number }>()
+			)?.n,
+		).toBe(categoryCallLimit);
 		expect(counted.statements()).toBeLessThan(D1_LIMIT);
 		vi.restoreAllMocks();
 	}, 60_000);

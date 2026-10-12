@@ -13,6 +13,7 @@ import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import { accountsByBank } from "../db/accounts";
+import { readAiTally } from "../db/ai-log";
 import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
 import {
@@ -159,6 +160,7 @@ howItWorks.get("/how-it-works", async (c) => {
 		bankDated,
 		trendsData,
 		waitingNames,
+		aiTally,
 	] = await Promise.all([
 		loadMonth(c.env.DB, month),
 		monthCounts(c.env.DB, month),
@@ -167,6 +169,7 @@ howItWorks.get("/how-it-works", async (c) => {
 		bankDatedCount(c.env.DB, month),
 		loadTrends(c.env.DB, today),
 		namesToReview(c.env.DB),
+		readAiTally(c.env.DB, today),
 	]);
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
@@ -632,6 +635,42 @@ howItWorks.get("/how-it-works", async (c) => {
 							Trends fill in as months pass, so there is nothing to compare yet.
 						</p>
 					)}
+				</Section>
+
+				<Section id="what-ai-did" title="What Tally did with AI">
+					<p class="mt-2">
+						Tally keeps a small record of the AI work it applies: a transaction
+						it gave a category, a paycheck it marked as income, and a store name
+						you kept. The record has no amounts, and code does the counting,
+						never the AI.
+					</p>
+					<ul class="mt-3 list-disc space-y-1 pl-5">
+						<li>
+							Sorted counts the transactions Tally gave a category this month.
+							You changed counts the ones you changed afterwards, by picking
+							another category, splitting it with a part in another category, or
+							with an Always rule you made. A bill's category never counts.
+						</li>
+						<li>
+							Cleaned counts the store names Tally guessed that you kept. A name
+							from your bank isn't counted.
+						</li>
+						<li>
+							Found counts the paychecks Tally marked as income this month.
+						</li>
+						<li>
+							The record starts the day this feature shipped, and each month
+							counts its own days. Early in a month with nothing yet, last
+							month's counts are shown, labelled with its name.
+						</li>
+						<li>
+							A feature you've switched off shows Off in place of its count.
+							Download everything includes the record.
+						</li>
+					</ul>
+					<Example demo={demo} monthName={monthName(aiTally.month)}>
+						{`Tally sorted ${aiTally.sorted} ${aiTally.sorted === 1 ? "transaction" : "transactions"} and you changed ${aiTally.changed}, cleaned ${aiTally.named} ${aiTally.named === 1 ? "merchant name" : "merchant names"} and found ${aiTally.paychecks} ${aiTally.paychecks === 1 ? "paycheck" : "paychecks"}.`}
+					</Example>
 				</Section>
 
 				<Section id="net-worth" title="Net worth">

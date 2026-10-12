@@ -2,6 +2,7 @@ import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import { STILL_UNPAID_BILLS_SQL, type UnpaidBill } from "../bills/unpaid";
+import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import {
 	type Edit,
@@ -25,7 +26,8 @@ import {
 } from "../transactions/name-suggestions";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
-import { readAiSwitches } from "./ai-switches";
+import { JEV_ANSWER_LOG_SQL, KEPT_NAME_LOG_SQL } from "./ai-log";
+import { readAiSwitches, STILL_ON_SQL, stillOnKeys } from "./ai-switches";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -999,6 +1001,19 @@ export async function saveEdit(
 					[noteChanged ? 1 : 0, edit.note, ...excludeArgs, ...reviewArgs],
 				),
 	);
+	// A guessed name a person keeps is logged before the merchant's suggestion settles (spec §8.6).
+	if (
+		edit.nameChanged !== false &&
+		edit.displayName &&
+		nameSource([edit.displayName], current.merchantKey) === "tally"
+	)
+		statements.push(
+			gated(KEPT_NAME_LOG_SQL, [
+				await householdToday(db),
+				current.merchantKey,
+				edit.displayName,
+			]),
+		);
 	// A name a person gives settles the merchant's pending suggestion: accepted when it is one of the
 	// suggested names, rejected when it is their own (spec §7). A form that gave no name leaves the
 	// merchant's name and suggestion alone; its row is still made, which a rule needs.
@@ -1763,6 +1778,9 @@ export async function pendingForJev(
 		categoryOnly: boolean;
 		merchantKey: string;
 		detailsAsked: boolean;
+		/** The transaction's source before this run, so the log counts only what Tally applies now (spec §8.6). */
+		categorySource: string | null;
+		incomeSource: string | null;
 	})[]
 > {
 	const { results } = await db
@@ -1772,6 +1790,7 @@ export async function pendingForJev(
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				t.details_asked AS detailsAsked,
+				t.category_source AS categorySource, t.income_source AS incomeSource,
 				${CATEGORY_ONLY} AS categoryOnly
 			FROM transactions t
 			JOIN accounts a ON a.id = t.account_id
@@ -1800,6 +1819,8 @@ export async function pendingForJev(
 				categoryOnly: number;
 				merchantKey: string;
 				detailsAsked: number;
+				categorySource: string | null;
+				incomeSource: string | null;
 				suggestedNames: string | null;
 				suggestionStatus: string | null;
 			}
@@ -2034,11 +2055,34 @@ export async function saveNoteAttempts(
 }
 
 /**
+ * Saves one Jev answer and, when it applies a category or income Tally should count, its What AI did row, in
+ * one D1 batch (spec §8.6), so the two land together or not at all. Returns whether the answer was written.
+ */
+async function saveJevAnswer(
+	db: D1Database,
+	update: D1PreparedStatement,
+	id: number,
+	log: { day: string; category: boolean; income: boolean } | undefined,
+): Promise<boolean> {
+	if (!log || (!log.category && !log.income))
+		return (await update.run()).meta.changes > 0;
+	const [saved] = await db.batch([
+		update,
+		db
+			.prepare(JEV_ANSWER_LOG_SQL)
+			.bind(log.day, id, log.category ? 1 : 0, log.income ? 1 : 0),
+	]);
+	return (saved?.meta.changes ?? 0) > 0;
+}
+
+/**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
  * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
- * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). Returns whether it wrote the row.
+ * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
+ * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
+ * waits for the next run. Returns whether it wrote the row.
  */
 export async function saveJevResult(
 	db: D1Database,
@@ -2048,11 +2092,18 @@ export async function saveJevResult(
 		categoryOnly?: boolean;
 		categoryAsked?: boolean;
 		switches?: { income: boolean; categories?: boolean };
+		/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
+		log?: { day: string; category: boolean; income: boolean };
 	} = {},
 ): Promise<boolean> {
+	const stillOn = stillOnKeys({
+		categories: options.switches?.categories,
+		income: options.switches?.income,
+	});
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
-		const category = await db
+		// It never writes income, so its log row carries no income.
+		const category = db
 			.prepare(
 				`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
@@ -2061,7 +2112,7 @@ export async function saveJevResult(
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
 			)
 			.bind(
 				options.categoryAsked === false ? null : d.categoryId,
@@ -2070,9 +2121,14 @@ export async function saveJevResult(
 				options.categoryAsked === false ? null : d.suggestedCategoryId,
 				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				id,
-			)
-			.run();
-		return category.meta.changes > 0;
+				stillOn,
+			);
+		return saveJevAnswer(
+			db,
+			category,
+			id,
+			options.log && { ...options.log, income: false },
+		);
 	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
 	// that pays a bill counts all the same (it is read as counted, spec §8.5), so it needs no exception here.
@@ -2083,7 +2139,7 @@ export async function saveJevResult(
 	const incomeConfidence = incomeOn
 		? (d.flagConfidence?.income ?? (income ? 1 : null))
 		: null;
-	const result = await db
+	const update = db
 		.prepare(
 			`UPDATE transactions SET
 				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
@@ -2108,7 +2164,8 @@ export async function saveJevResult(
 					(category_id IS NULL AND category_source IS NULL)
 					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
 						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
-				)`,
+				)
+				AND ${STILL_ON_SQL}`,
 		)
 		.bind(
 			options.categoryAsked === false ? null : d.categoryId,
@@ -2141,9 +2198,9 @@ export async function saveJevResult(
 			excludes,
 			excludes,
 			id,
-		)
-		.run();
-	return result.meta.changes > 0;
+			stillOn,
+		);
+	return saveJevAnswer(db, update, id, options.log);
 }
 
 /** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
