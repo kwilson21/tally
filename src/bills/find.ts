@@ -104,24 +104,35 @@ export function threeMonthsBack(today: string) {
 /** A charge's merchant key and raw name; a split part has its purchase's. */
 const CHARGE_KEY = `COALESCE(${merchantKeySql("p")},${merchantKeySql("t")})`;
 const CHARGE_RAW = "COALESCE(p.raw_name,t.raw_name)";
+/** A charge's Plaid categories; a split part has its purchase's, since saveSplit doesn't copy them. */
+const CHARGE_PLAID = "COALESCE(p.plaid_category,t.plaid_category)";
+const CHARGE_PLAID_DETAILED =
+	"COALESCE(p.plaid_detailed_category,t.plaid_detailed_category)";
 const chargeMerchant = (column: "display_name" | "default_category_id") =>
 	merchantColumnOfSql(CHARGE_KEY, column);
 
 /**
  * Suggests bills from the last three months of charges, one per merchant key. A charge is left out when
  * its key is marked Not a bill, or an existing bill covers it: by its key, or by its raw name for a bill
- * saved under the bank's raw text, before the key existed. A charge excluded from the budget is never
- * suggested, which is where card payments and moves between the family's own accounts go, whether Plaid,
- * Jev or a person excluded it; one a person brought back into the budget counts as spending and can be
- * suggested. The stored Plaid category is not checked: its main category alone can't tell a move between
- * the family's own accounts from a payment to someone else, or a card payment from a loan payment.
+ * saved under the bank's raw text, before the key existed. A payee's charges up to its latest payment linked
+ * to a bill, by hand or by the matcher, are left out, so it is suggested again only after two monthly payments
+ * in a row are left unlinked. Of the rest, a charge in the budget is suggested, and so is a loan payment Plaid
+ * left out at sync, unless its detailed category is a card payment or it has none stored. Any other exclusion
+ * keeps a charge out: Jev's, a person's, or Plaid's transfer rule, which is where card payments and moves
+ * between the family's own accounts go. A charge a person brought back into the budget counts as spending and
+ * can be suggested.
  */
 export async function loadBillSuggestions(
 	db: D1Database,
 	today: string,
 ): Promise<BillSuggestion[]> {
+	const from = threeMonthsBack(today);
 	const { results } = await db
-		.prepare(`SELECT ${CHARGE_KEY} AS rawName,
+		.prepare(`WITH last_linked AS (SELECT ${CHARGE_KEY} AS rawName, MAX(t.date) AS date
+	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
+	  JOIN bill_payments bp ON bp.transaction_id=t.id AND bp.status='linked'
+	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.is_split=0 GROUP BY 1)
+	SELECT ${CHARGE_KEY} AS rawName,
 	  ${CHARGE_RAW} AS bankText,
 	  ${chargeMerchant("display_name")} AS displayName,
 	  t.date, t.amount_cents AS amountCents,
@@ -130,11 +141,13 @@ export async function loadBillSuggestions(
 	  FROM transactions t LEFT JOIN transactions p ON p.id=t.parent_id
 	  LEFT JOIN categories tc ON tc.id=t.category_id
 	  LEFT JOIN categories dc ON dc.id=${chargeMerchant("default_category_id")}
-	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.excluded=0 AND t.flag_income=0
+	  WHERE t.date >= ? AND t.date <= ? AND t.amount_cents > 0 AND t.flag_income=0
+	   AND (t.excluded=0 OR (t.excluded_source='plaid' AND ${CHARGE_PLAID}='LOAN_PAYMENTS' AND ${CHARGE_PLAID_DETAILED} IS NOT NULL AND ${CHARGE_PLAID_DETAILED}<>'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'))
 	   AND t.is_split=0 AND NOT ${merchantNotABillSql(CHARGE_KEY)}
+	   AND t.date > COALESCE((SELECT l.date FROM last_linked l WHERE l.rawName=${CHARGE_KEY}), '')
 	   AND NOT EXISTS (SELECT 1 FROM bills b WHERE ${isMerchantTextOfSql(CHARGE_KEY, CHARGE_RAW, "b.merchant_raw_name", "b.merchant_raw_text")})
 	  ORDER BY ${CHARGE_KEY},t.date`)
-		.bind(threeMonthsBack(today), today)
+		.bind(from, today, from, today)
 		.all<BillFindingCharge>();
 	return findBillSuggestions(results);
 }

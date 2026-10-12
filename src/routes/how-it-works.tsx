@@ -570,6 +570,15 @@ howItWorks.get("/how-it-works", async (c) => {
 							goal on Home is for.
 						</li>
 						<li>
+							A steady loan payment, such as a car, mortgage or student loan
+							that your bank marks as one, is suggested even while it's left out
+							of the budget.
+						</li>
+						<li>
+							A merchant whose payment is already linked to a bill isn't
+							suggested until two monthly payments in a row are left unlinked.
+						</li>
+						<li>
 							A payment from the same merchant that is outside that{" "}
 							{Math.round(BILL_AMOUNT_TOLERANCE * 100)}% is not matched. Tally
 							asks "Price changed?" on the bill instead, and nothing changes

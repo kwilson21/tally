@@ -78,6 +78,23 @@ describe("GET /how-it-works in the demo", () => {
 		}
 	});
 
+	it("says in the Bills section that a steady loan payment is suggested, and a payee already linked to a bill is not, until two monthly payments in a row go unlinked", async () => {
+		const loan =
+			"A steady loan payment, such as a car, mortgage or student loan that your bank marks as one, is suggested even while it's left out of the budget.";
+		const linked =
+			"A merchant whose payment is already linked to a bill isn't suggested until two monthly payments in a row are left unlinked.";
+		const demoHtml = decodeHtml((await get("/how-it-works")).html);
+		const familyHtml = decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+		for (const html of [demoHtml, familyHtml]) {
+			const bills =
+				html.match(/<section[^>]*id="bills"[\s\S]*?<\/section>/)?.[0] ?? "";
+			expect(bills).toContain(loan);
+			expect(bills).toContain(linked);
+		}
+	});
+
 	it("has the architecture and the Phase 1 feature sections", async () => {
 		const { res, html } = await get("/how-it-works");
 		expect(res.status).toBe(200);
