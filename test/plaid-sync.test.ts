@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
+import { readAiTally } from "../src/db/ai-log";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
 import {
@@ -79,6 +80,42 @@ async function itemState(id: number) {
 	)
 		.bind(id)
 		.first();
+}
+
+/** Puts transaction-1 under Jev's category with its What AI did row, as a Jev answer does (spec §5, §8.6). */
+async function sortedByJev(today: string) {
+	const category = "(SELECT id FROM categories ORDER BY id LIMIT 1)";
+	await env.DB.batch([
+		env.DB.prepare("DELETE FROM ai_log"),
+		env.DB.prepare(
+			`UPDATE transactions SET category_id = ${category}, category_source = 'jev', category_confidence = 0.9, jev_category_id = ${category} WHERE plaid_transaction_id = 'transaction-1'`,
+		),
+		env.DB.prepare(
+			"INSERT INTO ai_log (kind, transaction_id, household_day) SELECT 'category', id, ? FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).bind(today),
+	]);
+}
+
+/** A person picks a category for transaction-1 in the transaction screen (category_source 'user'). */
+const personPicks = () =>
+	env.DB.prepare(
+		"UPDATE transactions SET category_id = (SELECT id FROM categories ORDER BY id LIMIT 1), category_source = 'user' WHERE plaid_transaction_id = 'transaction-1'",
+	).run();
+
+/** The category rows of What AI did, by the transaction each names. */
+async function categoryLog() {
+	const { results } = await env.DB.prepare(
+		"SELECT transaction_id FROM ai_log WHERE kind = 'category' ORDER BY id",
+	).all<{ transaction_id: number | null }>();
+	return results;
+}
+
+async function transactionId() {
+	return (
+		await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+		).first<{ id: number }>()
+	)?.id;
 }
 
 describe("syncItem", () => {
@@ -1236,6 +1273,139 @@ describe("syncItem", () => {
 				).first(),
 			).toEqual({ income_confidence: null, transfer_confidence: null });
 		}
+	});
+
+	it("lets go of the What AI did row when a bank correction clears Jev's category, so a later pick is not a change", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: 30 })] })),
+			),
+		);
+		const today = await householdToday(env.DB);
+		for (const [path, amount] of [
+			["added", 31],
+			["modified", 32],
+		] as const) {
+			await sortedByJev(today);
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() => response(page({ [path]: [transaction({ amount })] }))),
+			);
+			expect(await categoryLog()).toEqual([{ transaction_id: null }]);
+			expect(
+				await env.DB.prepare(
+					"SELECT category_source FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+				).first(),
+			).toEqual({ category_source: null });
+			expect(await readAiTally(env.DB, today)).toMatchObject({
+				sorted: 1,
+				changed: 0,
+			});
+			await personPicks();
+			expect(await readAiTally(env.DB, today)).toMatchObject({
+				sorted: 1,
+				changed: 0,
+			});
+		}
+	});
+
+	it("keeps the What AI did row when a resync leaves the amount as it was", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: 30 })] })),
+			),
+		);
+		const today = await householdToday(env.DB);
+		for (const path of ["added", "modified"] as const) {
+			await sortedByJev(today);
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() =>
+					response(page({ [path]: [transaction({ amount: 30 })] })),
+				),
+			);
+			expect(await categoryLog()).toEqual([
+				{ transaction_id: await transactionId() },
+			]);
+			await personPicks();
+			expect(await readAiTally(env.DB, today)).toMatchObject({
+				sorted: 1,
+				changed: 1,
+			});
+		}
+	});
+
+	it("keeps the What AI did row when a person already changed Tally's category, even when the amount changes", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: 30 })] })),
+			),
+		);
+		const today = await householdToday(env.DB);
+		for (const [path, amount] of [
+			["added", 31],
+			["modified", 32],
+		] as const) {
+			await sortedByJev(today);
+			await personPicks();
+			await syncItem(
+				opts,
+				id,
+				plaidFetch(() => response(page({ [path]: [transaction({ amount })] }))),
+			);
+			expect(await categoryLog()).toEqual([
+				{ transaction_id: await transactionId() },
+			]);
+			expect(await readAiTally(env.DB, today)).toMatchObject({
+				sorted: 1,
+				changed: 1,
+			});
+		}
+	});
+
+	it("keeps the What AI did row of a split parent that a bank change removes, so its category can be restored", async () => {
+		const id = await addItem();
+		const opts = { ...env, TOKEN_ENCRYPTION_KEY: KEY };
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ added: [transaction({ amount: 30 })] })),
+			),
+		);
+		await sortedByJev(await householdToday(env.DB));
+		await env.DB.prepare(
+			"UPDATE transactions SET is_split = 1 WHERE plaid_transaction_id = 'transaction-1'",
+		).run();
+		await syncItem(
+			opts,
+			id,
+			plaidFetch(() =>
+				response(page({ modified: [transaction({ amount: 31 })] })),
+			),
+		);
+		expect(await categoryLog()).toEqual([
+			{ transaction_id: await transactionId() },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT category_source FROM transactions WHERE plaid_transaction_id = 'transaction-1'",
+			).first(),
+		).toEqual({ category_source: "jev" });
 	});
 
 	it("keeps Jev ownership after a note-only save so a Plaid amount change reopens review", async () => {

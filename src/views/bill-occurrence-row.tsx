@@ -17,7 +17,10 @@ export type OccurrencePriceOffer = {
 	merchant: string;
 	amountCents: number;
 	dateLabel: string;
+	/** The occurrence's own amount, which the charge is asked against. */
 	billAmountCents: number;
+	/** The bill's current amount (`bills.amount_cents`), which Yes checks is still the one shown. */
+	currentCents: number;
 	frequency: "monthly" | "yearly" | "weekly" | "biweekly" | "quarterly";
 	cadence?: string;
 };
@@ -89,9 +92,10 @@ function PriceChanged({
 					name="transaction_id"
 					value={offer.transactionId}
 				/>
-				{/* The two prices shown above, in whole cents: the server saves only while both still hold. */}
+				{/* The prices shown above, in whole cents: the server saves only while all of them still hold. */}
 				<input type="hidden" name="bill_cents" value={offer.billAmountCents} />
 				<input type="hidden" name="charge_cents" value={offer.amountCents} />
+				<input type="hidden" name="current_cents" value={offer.currentCents} />
 				<Button type="submit" busyLabel="Updating…">
 					{`Update the bill to ${charged}`}
 				</Button>

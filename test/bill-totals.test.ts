@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBillTotals } from "../src/bills/totals";
+import { billTotalsForRows, calculateBillTotals } from "../src/bills/totals";
 
 const bill = (
 	amountCents: number,
@@ -13,6 +13,32 @@ const bill = (
 ) => ({ id: amountCents, amountCents, frequency, active });
 
 describe("bill totals", () => {
+	it("gives a monthly bill's share at its current amount, and its overdue occurrence at the amount it was due", () => {
+		const totals = billTotalsForRows("2026-10", [
+			{
+				id: 1,
+				active: true,
+				amountCents: 10000,
+				currentAmountCents: 12000,
+				frequency: "monthly",
+				dueDate: "2026-09-28",
+				status: "overdue",
+				paidCents: 0,
+				totalOccurrences: [
+					{
+						dueDate: "2026-09-28",
+						status: "overdue",
+						amountCents: 10000,
+						paidCents: 0,
+					},
+				],
+			},
+		]);
+		expect(totals.monthlyCents).toBe(12000);
+		expect(totals.groups.overdueCents).toBe(10000);
+		expect(totals.soonCents).toBe(10000);
+	});
+
 	it.each([
 		[54000, "yearly", 4500],
 		[24000, "weekly", 104000],

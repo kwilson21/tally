@@ -55,7 +55,10 @@ type BillTotalInput = {
 export type BillTotalsRow = {
 	id: number;
 	active: boolean;
+	/** The amount of the occurrence shown, which its status and its set-aside totals read. */
 	amountCents: number;
+	/** The bill's current amount, which its monthly share uses (`monthlyBillShare`), not a past month's. */
+	currentAmountCents: number;
 	frequency: BillTotalFrequency;
 	dueDate: string;
 	status: BillStatus;
@@ -83,9 +86,9 @@ export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 	const active = rows.filter((row) => row.active);
 	return calculateBillTotals({
 		month,
-		bills: active.map(({ id, amountCents, frequency }) => ({
+		bills: active.map(({ id, currentAmountCents, frequency }) => ({
 			id,
-			amountCents,
+			amountCents: currentAmountCents,
 			frequency,
 			active: true,
 		})),

@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
+import { type AiTallyCounts, readAiTally } from "../db/ai-log";
 import {
 	type AiSwitches,
 	readAiSwitches,
@@ -46,6 +47,7 @@ import {
 import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { tidyName } from "../transactions/tidy-name";
+import { AiTally } from "../views/ai-tally";
 import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
@@ -248,9 +250,11 @@ const SORT_GREYED = "sortOnArrivalGreyed";
 function AiSuggestions({
 	switches,
 	saved,
+	tally,
 }: {
 	switches: AiSwitches;
 	saved: boolean;
+	tally: AiTallyCounts;
 }) {
 	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
 	// A sync has useful Jev work when any of the three answer groups is enabled.
@@ -309,6 +313,7 @@ function AiSuggestions({
 					</Button>
 				</div>
 			</form>
+			<AiTally tally={tally} switches={switches} />
 		</section>
 	);
 }
@@ -476,6 +481,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const thisMonth = today.slice(0, 7);
 	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
 	const aiSwitches = await readAiSwitches(c.env.DB);
+	const aiTally = await readAiTally(c.env.DB, today);
 	const bankEmailsOn = await readBankSignInEmails(c.env.DB);
 	const members = await reconnectRecipients(c.env.DB);
 	const people = await c.env.DB.prepare(
@@ -707,7 +713,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					}
 				/>
 			</section>
-			<AiSuggestions switches={aiSwitches} saved={Boolean(view.aiSaved)} />
+			<AiSuggestions
+				switches={aiSwitches}
+				saved={Boolean(view.aiSaved)}
+				tally={aiTally}
+			/>
 			<section
 				aria-labelledby="your-data-title"
 				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
