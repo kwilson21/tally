@@ -148,10 +148,11 @@ const STATEMENTS = [
 	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL`,
 	`UPDATE transactions SET updated_by = p.updated_by
 	 ${FROM_PENDING} AND p.updated_by IS NOT NULL AND transactions.updated_by IS NULL`,
-	// A No on a Maybe income or transfer (decision 101) moves with the Maybe's confidence, so the posted row isn't asked again.
+	// A No on a Maybe income or transfer (decision 101) is the person's choice, so it moves with their other choices
+	// whatever the amount, as the same-row sync keeps it when the amount changes: the posted row isn't asked again.
 	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),
 		transfer_maybe_declined = MAX(transactions.transfer_maybe_declined, p.transfer_maybe_declined)
-	 ${FROM_PENDING} AND p.amount_cents = ?3 AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
+	 ${FROM_PENDING} AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
 	// A bill payment (and a dismissal) moves, unless the posted row is already linked to a bill.
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
 	 WHERE transaction_id = ${PENDING} AND ${READY}

@@ -1079,6 +1079,21 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("moves a No on a Maybe even when the bank changed the amount, as the person's other choices do", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item, { amount: -42 });
+			await env.DB.prepare(
+				"UPDATE transactions SET income_maybe_declined = 1, transfer_maybe_declined = 1 WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await post(item, { amount: -50 });
+			expect(await answerOf("posted-1")).toMatchObject({
+				income_maybe_declined: 1,
+				transfer_maybe_declined: 1,
+			});
+		});
+
 		it("moves both unsure confidences when the posted row has no answer", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item, { amount: -42 });

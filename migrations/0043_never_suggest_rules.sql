@@ -14,6 +14,6 @@ CREATE UNIQUE INDEX never_suggest_rules_one ON never_suggest_rules (merchant_key
 
 -- A No on a "Maybe income" or a "Maybe a transfer" (decision 101) changes nothing else on the transaction: it sets
 -- one of these flags, which hides that Maybe from the review screen and the row, and no sync or Jev answer raises it
--- again. A pending row's flags move onto the posted row with its other answers (§6), while the amount is unchanged.
+-- again. A pending row's flags move onto the posted row with the person's other choices (§6), whatever the amount.
 ALTER TABLE transactions ADD COLUMN income_maybe_declined INTEGER NOT NULL DEFAULT 0 CHECK (income_maybe_declined IN (0, 1));
 ALTER TABLE transactions ADD COLUMN transfer_maybe_declined INTEGER NOT NULL DEFAULT 0 CHECK (transfer_maybe_declined IN (0, 1));
