@@ -216,8 +216,8 @@ const STATEMENTS = [
 	 AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${PENDING} AND p.is_split = 1 AND p.amount_cents != ?3)
 	 AND ${READY}`,
 	// When the posted row keeps its own split, a pending part's linked bill payment stays paid on the posted part with the
-	// same amount and category that has no payment of its own, as saveSplit keeps one (decision 99). A clash on a unique
-	// index leaves it on the pending part for the next statement.
+	// same amount and category that has no payment of its own, as saveSplit keeps one (decision 99). When no such part is
+	// left for it (two pending payments for one posted part), OR IGNORE leaves it on the pending part for the next statement.
 	`UPDATE OR IGNORE bill_payments SET transaction_id = ${KEEP_PART}
 	 WHERE status = 'linked' AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING})
 	 AND ${READY} AND ${KEEP_PART} IS NOT NULL`,
