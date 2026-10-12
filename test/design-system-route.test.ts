@@ -654,6 +654,17 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
 	});
 
+	it("says in the price offer's use spec what Update checks, with no count of prices (#422)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		// Named by what it checks: the payment, its charge, the month's amount and the bill's current one.
+		expect(page).toContain(
+			"Update saves only if the payment, its charge, the month&#39;s amount and the bill&#39;s current amount are all still the ones the page showed.",
+		);
+		expect(html).not.toContain("saves only the two prices");
+	});
+
 	it("shows the picker a month choice finds empty, with its month choices kept (#323)", async () => {
 		const { html } = await get("/design-system");
 		const page =
