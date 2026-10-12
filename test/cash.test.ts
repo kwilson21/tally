@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
@@ -1994,6 +1995,30 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			.run();
 		return { id, a: a?.id as number, b: b?.id as number };
 	};
+	const BILL = 9950;
+	/** How many of the bill's payments this month are the person's own Not this one on the transaction. */
+	const dismissalsOn = async (transactionId: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = ? AND period = ? AND transaction_id = ? AND matched_by = 'user' AND status = 'dismissed'",
+			)
+				.bind(BILL, today().slice(0, 7), transactionId)
+				.first<{ n: number }>()
+		)?.n;
+	/** A monthly $30.00 bill paid by the cash entries of `merchant`, due on today's day of the month. */
+	const insertCashBill = (bill: number, merchant: string) =>
+		env.DB.prepare(
+			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (?, 'Cash bill', 3000, ?, 'monthly', NULL, NULL, ?, 1)",
+		)
+			.bind(bill, Number(today().slice(8, 10)), merchant)
+			.run();
+	/** A person's own Not this one on a transaction, for the bill's payment this month. */
+	const notThisOne = (bill: number, transactionId: number) =>
+		env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'dismissed')",
+		)
+			.bind(bill, today().slice(0, 7), transactionId)
+			.run();
 	/** Saves (or adds a part to) the correction sheet: a posted total of $100.00 over the saved $90.00. */
 	const correction = (
 		id: number,
@@ -3096,6 +3121,115 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 				.bind(id, a?.id, b?.id)
 				.first(),
 		).toEqual({ amountCents: 1000, d: "2026-09-10" });
+	});
+
+	it("gives a part that Change the parts adds the purchase's own Not this one, so the bill doesn't link to it", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today(),
+				amount: "90.00",
+				merchant: "Not this one part",
+				category: "1",
+			}),
+		});
+		const id = await idByName("Not this one part");
+		await insertCashBill(BILL, "Not this one part");
+		await notThisOne(BILL, id);
+		await saveSplit(
+			env.DB,
+			id,
+			[
+				{ amountCents: 6000, categoryId: 1 },
+				{ amountCents: 3000, categoryId: 5 },
+			],
+			"demo",
+		);
+		const [partA, partB] = await partsOf(id);
+		const a = partA?.id as number;
+		const b = partB?.id as number;
+		expect([await dismissalsOn(a), await dismissalsOn(b)]).toEqual([1, 1]);
+
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 12000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 6000 },
+						{ id: b, categoryId: 5, amountCents: 3000 },
+						{ id: null, categoryId: 5, amountCents: 3000 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({ saved: true });
+		const added = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? AND id NOT IN (?, ?)",
+			)
+				.bind(id, a, b)
+				.first<{ id: number }>()
+		)?.id as number;
+		expect([
+			await dismissalsOn(added),
+			await dismissalsOn(a),
+			await dismissalsOn(b),
+			await dismissalsOn(id),
+		]).toEqual([1, 1, 1, 1]);
+
+		// The bill's payment this month matches the new part's amount and date, but the part starts dismissed.
+		await matchBillPayments(env.DB, today());
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id = ? AND status = 'linked'",
+			)
+				.bind(added)
+				.first(),
+		).toEqual({ n: 0 });
+	});
+
+	it("refuses a correction that adds a part and writes no Not this one for it when a part's refund no longer fits", async () => {
+		const { id, a, b } = await splitCash("Refused new part");
+		await insertCashBill(BILL, "Refused new part");
+		// The purchase gets its own Not this one after the split, so neither part has one yet.
+		await notThisOne(BILL, id);
+		const rowCount = async () =>
+			(
+				await env.DB.prepare("SELECT COUNT(*) AS n FROM bill_payments").first<{
+					n: number;
+				}>()
+			)?.n;
+		const before = await rowCount();
+
+		// Part B keeps the $20.00 refund linked to it, so $15.00 can't hold it and the whole batch is refused.
+		await expect(
+			correctCashSplit(
+				env.DB,
+				id,
+				{
+					totalCents: 9000,
+					amountWasCents: 9000,
+					parts: [
+						{ id: a, categoryId: 1, amountCents: 6000 },
+						{ id: b, categoryId: 5, amountCents: 1500 },
+						{ id: null, categoryId: 5, amountCents: 1500 },
+					],
+				},
+				"demo",
+			),
+		).resolves.toEqual({
+			saved: false,
+			refundPart: { part: 2, refundCents: 2000 },
+		});
+		expect(await rowCount()).toBe(before);
 	});
 });
 

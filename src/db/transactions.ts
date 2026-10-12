@@ -1,6 +1,10 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
+import {
+	movePartDismissalsSql,
+	purchaseDismissalsToPartsSql,
+} from "../bills/split-dismissals";
 import { STILL_UNPAID_BILLS_SQL, type UnpaidBill } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
@@ -1459,7 +1463,7 @@ async function partBills(
 ): Promise<PartPayment[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period,
+			`SELECT bp.id AS paymentId, b.name AS name, bp.period AS period,
 			part.amount_cents AS amountCents, part.category_id AS categoryId
 			FROM bill_payments bp JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
 			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
@@ -1469,37 +1473,12 @@ async function partBills(
 	return results;
 }
 
-/** A bill a part's linked payment pays, with the bill's id: the key a dismissal records (decision 99). */
-type PartBill = UnpaidBill & { billId: number };
-
 /** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
-type PartPayment = PartBill & {
+type PartPayment = UnpaidBill & {
 	paymentId: number;
 	amountCents: number;
 	categoryId: number | null;
 };
-
-/** A bill occurrence a dismissal is recorded for: the bill's id and the period, as bill_payments keys it. */
-type BillKey = { billId: number; period: string };
-
-/**
- * The auto dismissals (decision 99) on a purchase's parts and on the purchase itself. A split change's
- * dismissal moves with the parts when they change again, and a new split of the purchase starts with it.
- */
-async function splitDismissals(
-	db: D1Database,
-	parentId: number,
-): Promise<BillKey[]> {
-	const { results } = await db
-		.prepare(
-			`SELECT bp.bill_id AS billId, bp.period AS period FROM bill_payments bp
-			WHERE bp.status = 'dismissed' AND bp.matched_by = 'auto'
-			AND (bp.transaction_id = ? OR bp.transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?))`,
-		)
-		.bind(parentId, parentId)
-		.all<BillKey>();
-	return results;
-}
 
 /**
  * Pairs each linked payment with the first unused new part of the same amount and category, oldest payment
@@ -1508,7 +1487,7 @@ async function splitDismissals(
 function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
 	const used = new Set<number>();
 	const kept: { paymentId: number; index: number }[] = [];
-	const lost: PartBill[] = [];
+	const lost: UnpaidBill[] = [];
 	for (const payment of payments) {
 		const index = parts.findIndex(
 			(part, i) =>
@@ -1527,7 +1506,7 @@ function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
 }
 
 /** The bills as the toast names them: a name and an occurrence, without the id. */
-const namedBills = (bills: PartBill[]): UnpaidBill[] =>
+const namedBills = (bills: UnpaidBill[]): UnpaidBill[] =>
 	bills.map(({ name, period }) => ({ name, period }));
 
 /**
@@ -1535,7 +1514,9 @@ const namedBills = (bills: PartBill[]): UnpaidBill[] =>
  * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
- * of replaced parts are dismissed on each new part, and the bills are returned by name (decision 99).
+ * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills
+ * are returned by name (decisions 99 and 105). A person's own Not this one is kept on the purchase, and each
+ * new part starts with it.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1553,21 +1534,15 @@ export async function saveSplit(
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	const unchanged =
 		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	// The same check with numbered parameters, for the statements that keep a person's Not this one (decision 105).
+	const unchangedNumbered =
+		"EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)";
 	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
 	const payments = await partBills(db, parentId);
 	const { kept, lost } = keepPayments(payments, parts);
-	// The dismissals each new part gets: the bills the replaced parts lost, and the earlier split changes' (decision 99).
-	const dismissals = [
-		...new Map(
-			[...lost, ...(await splitDismissals(db, parentId))].map((bill) => [
-				`${bill.billId}:${bill.period}`,
-				{ billId: bill.billId, period: bill.period },
-			]),
-		).values(),
-	];
 	const linkedPurchase = await db
 		.prepare(
 			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
@@ -1599,19 +1574,6 @@ export async function saveSplit(
 			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
 		)
 		.bind(parentId, total);
-	// Each new part is dismissed for the bills the replaced parts paid, as Not this one records it, so the
-	// matcher does not link one of those bills to a new part by itself (decision 99). Nothing when none.
-	const dismiss =
-		dismissals.length > 0
-			? db
-					.prepare(
-						`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
-						SELECT json_extract(b.value, '$.billId'), json_extract(b.value, '$.period'), part.id, 'auto', 'dismissed'
-						FROM json_each(?1) b JOIN transactions part ON part.parent_id = ?2
-						WHERE EXISTS (SELECT 1 FROM transactions WHERE id = ?2 AND amount_cents = ?3)`,
-					)
-					.bind(JSON.stringify(dismissals), parentId, total)
-			: null;
 	// Each kept payment moves to the new part at its position in the sheet, which the new parts' ids follow.
 	const restore = kept.map((keep) =>
 		db
@@ -1633,13 +1595,14 @@ export async function saveSplit(
 				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
 			)
 			.bind(parentId, parentId, parentId, total),
-		...park,
-		// The replaced parts' bill payments are unlinked by name here, not left to the parts' cascade (decision 99).
+		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105). It runs before
+		// park, since a payment a person linked by hand is parked as a dismissal on the purchase and would hide that one.
 		db
-			.prepare(
-				`DELETE FROM bill_payments WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?) AND ${unchanged}`,
-			)
-			.bind(parentId, parentId, total),
+			.prepare(movePartDismissalsSql("?1", "?1", unchangedNumbered))
+			.bind(parentId, total),
+		...park,
+		// The replaced parts go with their bill payments, which are unlinked with no dismissal left (decision 105).
+		// Kept ones moved above.
 		db
 			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
 			.bind(parentId, parentId, total),
@@ -1664,8 +1627,11 @@ export async function saveSplit(
 					total,
 				),
 		),
-		...(dismiss ? [dismiss] : []),
 		...restore,
+		// Each new part starts with the purchase's own Not this one (decision 105), once the kept payments are restored.
+		db
+			.prepare(purchaseDismissalsToPartsSql("?1", unchangedNumbered))
+			.bind(parentId, total),
 		markParent,
 	];
 	const results = await db.batch(statements);
@@ -1698,18 +1664,20 @@ export type CashSplitPart = {
 /**
  * Change the parts (spec §8.4): saves a split cash entry's new total and its corrected parts in one
  * atomic batch. Saved parts are updated in place by id and new ones are added, so the split and every
- * refund linked to a part stay linked (decision 79: a cash entry's split is never reset). Unlike
- * saveSplit, nothing is deleted or unlinked.
+ * refund linked to a part stay linked (decision 79: a cash entry's split is never reset). Unlike saveSplit,
+ * nothing is deleted or unlinked; a new part starts with the purchase's own Not this one (decision 105).
  *
- * Every statement carries the same gate, so a refusal writes nothing. The gate checks that the entry is
+ * Every statement carries the same gate, so a refusal writes nothing, except the copy of the Not this one
+ * to the new parts, which guards on the parts' count instead (see below). The gate checks that the entry is
  * still the split it was drawn as (`amountWasCents`, or the new total once the parent statement has set
  * it), that every posted saved part is still one of its parts, that the refunds linked to the entry and to
  * its parts together fit the new total, that the refunds linked to each part still fit its new amount
  * (src/db/refunded.ts), and that the entry has no parts but the saved ones. The parent's amount is set
- * first and the new parts are inserted last, in one statement, so nothing the gate reads changes under an
- * earlier statement: a part another save added in the meantime refuses every statement, and no statement
- * can pass after an earlier one refused. Returns `refundTotalCents` (what the refunds linked to the entry
- * and its parts together take) when those are more than the new total, which moving the parts can't fix.
+ * first and the new parts are inserted last among the gated statements, in one statement, so nothing the
+ * gate reads changes under an earlier statement: a part another save added in the meantime refuses every
+ * statement, and no statement can pass after an earlier one refused. Returns `refundTotalCents` (what the
+ * refunds linked to the entry and its parts together take) when those are more than the new total, which
+ * moving the parts can't fix.
  * Returns `refundPart` (the part's 1-based position and what its refunds take) when a part's refunds don't
  * fit; throws when the entry or its parts are no longer as they were drawn, so the save is an error.
  */
@@ -1780,6 +1748,7 @@ export async function correctCashSplit(
 				],
 	);
 	// Every new part in one statement, so the count the gate reads is still the saved parts' count until it runs.
+	// The copy of the purchase's Not this one below is the one statement after it, and it is not gated.
 	const newParts = parts.flatMap((part) =>
 		part.id === null
 			? [{ cents: part.amountCents, categoryId: part.categoryId }]
@@ -1798,11 +1767,29 @@ export async function correctCashSplit(
 						[by, JSON.stringify(newParts), parentId],
 					),
 				];
-	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written.
+	// The copy of the purchase's Not this one to the new parts (decision 105) follows the insert and is not gated: the
+	// gate's last check fails once the new parts exist. It guards on the parts' count instead, which is the posted count
+	// only if the insert ran, so a refused batch still writes nothing.
+	const purchaseDismissals =
+		newParts.length === 0
+			? []
+			: [
+					db
+						.prepare(
+							purchaseDismissalsToPartsSql(
+								"?1",
+								"EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?1 AND cash.is_split = 1 AND cash.amount_cents = ?3) AND (SELECT COUNT(*) FROM transactions WHERE parent_id = ?1) = ?2",
+							),
+						)
+						.bind(parentId, parts.length, totalCents),
+				];
+	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written. The
+	// purchase's Not this one copy runs last, after the insert, and only when a part was added.
 	const results = await db.batch([
 		parentStatement,
 		...partStatements,
 		...insertStatements,
+		...purchaseDismissals,
 	]);
 	if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
 
@@ -1840,10 +1827,11 @@ export async function correctCashSplit(
 }
 
 /**
- * Deletes a split and restores its parent atomically, unlinking refunds of its parts and dismissing the bill
- * payments of its parts on the parent, so the matcher does not link them again (decision 99). Returns the refunds' dates and the bills, by name. A split refund's parent is
- * whole again and counts by its own link, so that link is checked like a new one (src/db/refunded.ts) and
- * dropped if the refund no longer fits; its date is returned too.
+ * Deletes a split and restores its parent atomically, unlinking refunds of its parts and unlinking the bill
+ * payments of its parts with no dismissal left, so the matcher may link them to the purchase again (decisions
+ * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
+ * the bills, by name. A split refund's parent is whole again and counts by its own link, so that link is
+ * checked like a new one (src/db/refunded.ts) and dropped if the refund no longer fits; its date is returned too.
  */
 export async function removeSplit(
 	db: D1Database,
@@ -1862,11 +1850,8 @@ export async function removeSplit(
 				"UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?)",
 			)
 			.bind(parentId),
-		db
-			.prepare(
-				"UPDATE bill_payments SET transaction_id = ?1, status = 'dismissed', matched_by = 'auto' WHERE transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?1) AND (status = 'linked' OR (status = 'dismissed' AND matched_by = 'auto'))",
-			)
-			.bind(parentId),
+		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105).
+		db.prepare(movePartDismissalsSql("?1", "?1", "1")).bind(parentId),
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
 		db
 			.prepare(
