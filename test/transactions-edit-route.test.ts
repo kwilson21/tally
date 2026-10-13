@@ -1767,3 +1767,105 @@ describe("a For person removed while the panel is saving", () => {
 		).toEqual(before);
 	});
 });
+
+describe("linking a refund in the same save and the store's Always rule (#356)", () => {
+	const STORE = "RULE LINK SHOP";
+	const RULE = 2;
+
+	/** A purchase and an unlinked credit from one store, both on the card; the store's rule is `rule`. */
+	async function linkFixture(rule: number | null) {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)",
+		)
+			.bind(STORE, rule)
+			.run();
+		const purchase = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-10',1000,?,?,?,'user') RETURNING id",
+		)
+			.bind(STORE, STORE, RULE)
+			.first<{ id: number }>();
+		const refund = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (1,'2026-09-11',-200,?,?,?,'user') RETURNING id",
+		)
+			.bind(STORE, STORE, RULE)
+			.first<{ id: number }>();
+		return { purchase: Number(purchase?.id), refund: Number(refund?.id) };
+	}
+
+	const ruleOf = () =>
+		env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(STORE)
+			.first();
+
+	const linkedTo = (refund: number) =>
+		env.DB.prepare("SELECT refund_of_id FROM transactions WHERE id = ?")
+			.bind(refund)
+			.first();
+
+	it("keeps the store's rule when Always was ticked and stays ticked in the save that links a refund", async () => {
+		const { purchase, refund } = await linkFixture(RULE);
+		const { res } = await post(`/transactions/${refund}`, {
+			back: "/transactions",
+			category: String(RULE),
+			always: "1",
+			always_was: "1",
+			rule_category_was: String(RULE),
+			merchant: STORE,
+			merchant_was: STORE,
+			refund_of: String(purchase),
+		});
+		expect(res.status).toBe(200);
+		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
+		expect(await ruleOf()).toEqual({ default_category_id: RULE });
+	});
+
+	it("clears the store's rule when Always is unticked in the save that links a refund", async () => {
+		const { purchase, refund } = await linkFixture(RULE);
+		const { res } = await post(`/transactions/${refund}`, {
+			back: "/transactions",
+			category: String(RULE),
+			always_was: "1",
+			rule_category_was: String(RULE),
+			merchant: STORE,
+			merchant_was: STORE,
+			refund_of: String(purchase),
+		});
+		expect(res.status).toBe(200);
+		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
+		expect(await ruleOf()).toEqual({ default_category_id: null });
+	});
+
+	it("creates no rule when a refund is linked and Always was never ticked", async () => {
+		const { purchase, refund } = await linkFixture(null);
+		const { res } = await post(`/transactions/${refund}`, {
+			back: "/transactions",
+			always_was: "0",
+			rule_category_was: "",
+			merchant: STORE,
+			merchant_was: STORE,
+			refund_of: String(purchase),
+		});
+		expect(res.status).toBe(200);
+		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
+		expect(await ruleOf()).toEqual({ default_category_id: null });
+	});
+
+	it("creates no rule when Always is newly ticked in the save that links a refund", async () => {
+		const { purchase, refund } = await linkFixture(null);
+		const { res } = await post(`/transactions/${refund}`, {
+			back: "/transactions",
+			category: String(RULE),
+			always: "1",
+			always_was: "0",
+			rule_category_was: "",
+			merchant: STORE,
+			merchant_was: STORE,
+			refund_of: String(purchase),
+		});
+		expect(res.status).toBe(200);
+		expect(await linkedTo(refund)).toEqual({ refund_of_id: purchase });
+		expect(await ruleOf()).toEqual({ default_category_id: null });
+	});
+});
