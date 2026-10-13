@@ -17,7 +17,10 @@ export function SelectableTransactionRow({
 	row: ListRow;
 	/** Ticked already (coming back from the Set category sheet). */
 	checked?: boolean;
-	/** Takes focus when its list is drawn: the first row's tick after Older or Newer (FOCUS_FIRST_TICK). */
+	/**
+	 * The first row's tick after Older or Newer (FOCUS_FIRST_TICK): the list asks for focus here, and toast.js
+	 * moves it once the load ends (#456), since htmx can't focus a row that is still hidden.
+	 */
 	autofocus?: boolean;
 	/** The household's date. Pages pass it; the catalog, which has no household, takes Eastern's. */
 	today?: string;
