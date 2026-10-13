@@ -88,8 +88,9 @@
 
 	// Takes a toast off the page. Focus on the toast would be lost with it, so the Transactions heading takes it
 	// (every Transactions page has one, the first-visit page too). `lostToo` also counts focus on nothing: a
-	// disabled Undo button drops focus to the body, so an Undo's answer (undoDone: a restore's, or a bill Undo's
-	// refusal) uses it. A timer doesn't, since it would scroll the page to the heading when focus is only on the body.
+	// disabled Undo button drops focus to the body, so an Undo's answer (undoDone: a restore's, or a cash or
+	// bill Undo's refusal) uses it. A timer doesn't, since it would scroll the page to the heading when focus is
+	// only on the body.
 	function takeOffPage(toast, lostToo = false) {
 		const active = document.activeElement;
 		if (
@@ -183,8 +184,8 @@
 				if (!undoToasts.has(old)) old.remove();
 			}
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
-		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a bill Undo's refusal ends its
-		// toast too (#340). The other Undo toasts run their own time.
+		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a
+		// cash entry's (#444) or a bill's (#340). The other Undo toasts run their own time.
 		if (undoDone)
 			for (const old of [...(region?.children ?? [])]) {
 				if (undoToasts.get(old) === undoDone) takeOffPage(old, true);
