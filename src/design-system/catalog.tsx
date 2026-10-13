@@ -1376,7 +1376,7 @@ function Rows() {
 				title="Bill occurrence and payment picker"
 				tier="visual"
 				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid. A payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
 				<State label="Paid occurrence">
 					<div inert>
@@ -1483,6 +1483,29 @@ function Rows() {
 								period="2026-10"
 								label="October 2026"
 								status="due"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Credit-corrected payment (reads unpaid)">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-10"
+								label="October 2026"
+								status="due"
+								payments={[
+									{
+										transactionId: 8,
+										displayName: "Harbor Property",
+										dateLabel: "Oct 1",
+										amountCents: -10000,
+										matchedBy: "user",
+									},
+								]}
+								paidCents={0}
+								amountCents={120000}
 							/>
 						</ul>
 					</div>
