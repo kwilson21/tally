@@ -814,7 +814,7 @@ describe("bill matching and price changes", () => {
 			merchantRawText: 0,
 			period,
 			dueDate: due,
-			paidCents: 0,
+			linked: false,
 		};
 
 		it("is made only for an active bill whose occurrence is due or overdue", async () => {
@@ -825,16 +825,18 @@ describe("bill matching and price changes", () => {
 						?.transactionId,
 				).toBe(1);
 			}
-			// Paid already, still weeks away, an inactive bill, or part paid (decision 101): nothing to ask.
-			for (const [active, status, paidCents] of [
-				[true, "paid", 0],
-				[true, "upcoming", 0],
-				[false, "due", 0],
-				[false, "overdue", 0],
-				[true, "overdue", 5000],
+			// Paid already, still weeks away, an inactive bill, or a payment already linked, part paid or not
+			// (decision 101): nothing to ask.
+			for (const [active, status, linked] of [
+				[true, "paid", false],
+				[true, "upcoming", false],
+				[false, "due", false],
+				[false, "overdue", false],
+				[true, "due", true],
+				[true, "overdue", true],
 			] as const)
 				expect(
-					await findPriceOffer(env.DB, { ...bill, active, status, paidCents }),
+					await findPriceOffer(env.DB, { ...bill, active, status, linked }),
 				).toBeUndefined();
 			const all = await loadPriceOffers(env.DB, [
 				{ ...bill, id: 1, active: true, status: "paid" },
@@ -976,7 +978,7 @@ describe("a weekly bill's price offer", () => {
 		period: "2026-10-09",
 		dueDate: "2026-10-09",
 		frequency: "weekly" as const,
-		paidCents: 0,
+		linked: false,
 	};
 	beforeEach(async () => {
 		await env.DB.batch([

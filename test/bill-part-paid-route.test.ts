@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { loadBillRows } from "../src/routes/bills";
 
 // A bill paid in parts on its page and in its link picker (Phase 5, decision 101, #205): each payment has its
 // own Not this one, a part-paid month says what it has, and the picker sorts by what's still unpaid.
@@ -268,5 +269,116 @@ describe("each Not this one names the payment it unlinks (#205)", () => {
 		).toHaveLength(1);
 		// The visible words stay the same.
 		expect(html).toContain("Not this one</button>");
+	});
+});
+
+describe("two links at once cannot overpay a month (decision 101, #205)", () => {
+	it("the second of two payments linked at once is refused as already paid, and links nothing", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9524,1,?,60000,'SHOP D')",
+			).bind(DUE),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9525,1,?,60000,'SHOP E')",
+			).bind(DUE),
+		]);
+		const answers = await Promise.all(
+			[9524, 9525].map((transaction) =>
+				post(`/bills/${RENT}/link`, {
+					transaction_id: String(transaction),
+					period: PERIOD,
+					opened_period: PERIOD,
+				}),
+			),
+		);
+		const texts = await Promise.all(
+			answers.map(async (answer) => readable(await answer.text())),
+		);
+		expect(
+			texts.filter((text) =>
+				text.includes(`${monthWords(PERIOD)}'s bill is already paid.`),
+			),
+		).toHaveLength(1);
+		const added = (await linkedIds()).filter((id) => id !== 9520);
+		expect(added).toHaveLength(1);
+		const refused = [9524, 9525].find((id) => !added.includes(id));
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=? AND status='linked'",
+			)
+				.bind(refused)
+				.first("n"),
+		).toBe(0);
+	});
+});
+
+describe("a linked payment a bank corrected into a credit counts $0 (decision 101, #205)", () => {
+	/** A $600 payment in the month, linked and then corrected by the bank to a $100 credit. */
+	const creditCorrection = () =>
+		env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9524,1,?,60000,'HARBOR PROPERTY MGMT')",
+			).bind(DUE),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9524,'user','linked')",
+			).bind(RENT, PERIOD),
+			env.DB.prepare(
+				"UPDATE transactions SET amount_cents=-10000 WHERE id=9524",
+			),
+		]);
+
+	it("the Bills row and the bill's page read Part paid: $600 of $1,200, not $500 or a negative", async () => {
+		await creditCorrection();
+		for (const path of ["/bills", `/bills/${RENT}`]) {
+			const html = await get(path);
+			expect(html).toContain("Part paid: $600 of $1,200");
+			expect(html).not.toMatch(/Part paid: (\$500|-)/);
+		}
+	});
+
+	it("the picker has $600 left, so $590 is listed before $650", async () => {
+		await creditCorrection();
+		const html = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
+		const at = (id: number) => html.indexOf(`value="${id}"`);
+		expect(at(9523)).toBeGreaterThan(-1);
+		expect(at(9523)).toBeLessThan(at(9521));
+	});
+
+	it("a month that reaches 90% once the credit counts $0 is Paid, and takes no link", async () => {
+		// $600 and $500 pay $1,100 of $1,200. A third payment corrected to a $100 credit counts $0, so the month
+		// is Paid; counted as -$100 it would be $1,000, which is still part paid.
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9524,1,?,50000,'HARBOR PROPERTY MGMT')",
+			).bind(DUE),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9525,1,?,60000,'HARBOR PROPERTY MGMT')",
+			).bind(DUE),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9524,'user','linked')",
+			).bind(RENT, PERIOD),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9525,'user','linked')",
+			).bind(RENT, PERIOD),
+			env.DB.prepare(
+				"UPDATE transactions SET amount_cents=-10000 WHERE id=9525",
+			),
+		]);
+		const html = await get(`/bills/${RENT}`);
+		expect(html).toContain("Paid in 3 payments");
+		expect(html).not.toContain("Part paid");
+		expect(html).not.toContain("Link another payment");
+		expect(
+			(await loadBillRows(env.DB, today)).rows.find((row) => row.id === RENT),
+		).toMatchObject({ status: "paid" });
+		const answer = await post(`/bills/${RENT}/link`, {
+			transaction_id: "9521",
+			period: PERIOD,
+			opened_period: PERIOD,
+		});
+		expect(readable(await answer.text())).toContain(
+			`${monthWords(PERIOD)}'s bill is already paid.`,
+		);
+		expect(await linkedIds()).toEqual([9520, 9524, 9525]);
 	});
 });

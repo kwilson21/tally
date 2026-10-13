@@ -84,8 +84,8 @@ export type OfferBill = {
 	merchantRawText: number;
 	period: string;
 	dueDate: string;
-	/** What the occurrence's linked payments add up to, in cents: an occurrence with any part payment is not asked about. */
-	paidCents: number;
+	/** Whether any payment is linked to the occurrence, a part payment included: an occurrence with one is not asked about. */
+	linked: boolean;
 };
 
 type Row = {
@@ -145,7 +145,7 @@ function offerFrom(rows: Row[], bill: OfferBill): PriceOffer | undefined {
 const asks = (bill: OfferBill) =>
 	bill.active &&
 	(bill.status === "due" || bill.status === "overdue") &&
-	bill.paidCents === 0;
+	!bill.linked;
 
 /** The offer for one bill's occurrence, or undefined. */
 export async function findPriceOffer(

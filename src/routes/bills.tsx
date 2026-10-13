@@ -32,6 +32,7 @@ import {
 	occurrencePaid,
 } from "../bills/status";
 import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
+import { occurrenceUnpaidSql } from "../bills/unpaid";
 import {
 	activateBill,
 	type BillFields,
@@ -155,6 +156,8 @@ export async function loadBillRows(db: D1Database, today: string) {
 		currentAmountCents: number;
 		frequency: BillTotalFrequency;
 		paidCents: number;
+		/** Whether any payment is linked to the shown occurrence, a credit-corrected one too (a price offer reads it). */
+		linked: boolean;
 		totalOccurrences: {
 			dueDate: string;
 			status: BillStatus;
@@ -202,15 +205,12 @@ export async function loadBillRows(db: D1Database, today: string) {
 			if ((payments.get(row.payment_period) ?? "") < row.payment_date)
 				payments.set(row.payment_period, row.payment_date);
 		}
-		const paymentsByPeriod = new Map<string, number>();
-		for (const row of billRows) {
-			if (!row.payment_period) continue;
-			paymentsByPeriod.set(
-				row.payment_period,
-				(paymentsByPeriod.get(row.payment_period) ?? 0) +
-					Math.max(0, row.payment_amount_cents ?? 0),
-			);
-		}
+		const paymentsByPeriod = paidByPeriodOf(
+			billRows.map((row) => ({
+				period: row.payment_period,
+				amount_cents: row.payment_amount_cents,
+			})),
+		);
 		const paidPeriods = paidPeriodsOf(b, amountHistory, paymentsByPeriod);
 		const occurrence = billOccurrence(
 			{
@@ -295,6 +295,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			dueDay: b.due_day,
 			anchorMonth: b.anchor_month,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			linked: paymentsByPeriod.has(occurrence.period),
 			totalOccurrences,
 			nextOccurrence,
 		});
@@ -1201,6 +1202,20 @@ const periodLabel = (bill: DbBill, period: string, today: string) =>
 	["monthly", "yearly"].includes(bill.frequency)
 		? monthName(billPeriodMonth(countedBill(bill), period), today)
 		: occurrenceLabel(occurrenceDate(bill, period));
+/** The cents each period's linked payments add up to: a linked payment a bank later turned into a credit counts as $0. */
+function paidByPeriodOf(
+	payments: { period?: string | null; amount_cents?: number | null }[],
+) {
+	const paid = new Map<string, number>();
+	for (const payment of payments) {
+		if (!payment.period) continue;
+		paid.set(
+			payment.period,
+			(paid.get(payment.period) ?? 0) + Math.max(0, payment.amount_cents ?? 0),
+		);
+	}
+	return paid;
+}
 /**
  * The periods that are Paid (decision 101): those whose linked cents, `paidByPeriod`, reach 90% of the amount of
  * their own month (occurrencePaid, src/bills/amount.ts). A period with a part payment is left out.
@@ -1329,17 +1344,10 @@ async function billPage(
 	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
 	const amountOn = (dueDate: string) =>
 		amountForMonth(history, dueDate.slice(0, 7), bill.amount_cents);
-	const paidOf = (period: string) =>
-		(byPeriod.get(period) ?? []).reduce(
-			(total, payment) => total + payment.amount_cents,
-			0,
-		);
+	const paidByPeriod = paidByPeriodOf(payments);
+	const paidOf = (period: string) => paidByPeriod.get(period) ?? 0;
 	// Paid once its payments reach 90% of its amount (decision 101); a part-paid period isn't in this set.
-	const paidPeriods = paidPeriodsOf(
-		bill,
-		history,
-		new Map([...byPeriod.keys()].map((period) => [period, paidOf(period)])),
-	);
+	const paidPeriods = paidPeriodsOf(bill, history, paidByPeriod);
 	// A Paid month takes no more payments (decision 101): its picker is never built, and the page says it is paid
 	// (#205). The opened period is then always one of the picker's months, so the picker needs no check of its own.
 	const paidPicker =
@@ -1397,7 +1405,7 @@ async function billPage(
 	const currentCents = amountOn(current.dueDate);
 	const offer = await findPriceOffer(
 		c.env.DB,
-		offerBill(bill, current, currentCents, paidOf(current.period)),
+		offerBill(bill, current, currentCents, byPeriod.has(current.period)),
 	);
 	const change = latestPriceChange(history);
 	const picker = pickerPeriod ? (
@@ -1627,6 +1635,15 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 		/>,
 	);
 });
+/**
+ * SQL that links a payment to a bill occurrence, as one INSERT: `?1` the bill, `?2` the period, `?3` the payment,
+ * `?4` its due date and `?5` the window in days. It takes nothing unless the payment is eligible for the window and
+ * the month is still unpaid, so the INSERT itself refuses a Paid month (decision 101) and two open pickers can't
+ * both link past 90%.
+ */
+export const linkPaymentSql = `INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?1,?2,?3,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=?3 AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?4))<=?5) AND ${occurrenceUnpaidSql("?1", "?2")}`;
+/** Whether an occurrence is still unpaid, as 1 or 0 (`?1` the bill, `?2` the period), in the same terms as linkPaymentSql. */
+const unpaidSelect = `SELECT ${occurrenceUnpaidSql("?1", "?2")} AS unpaid`;
 bills.post("/bills/:id/link", async (c) => {
 	const id = Number(c.req.param("id"));
 	const form = await c.req.parseBody();
@@ -1652,16 +1669,10 @@ bills.post("/bills/:id/link", async (c) => {
 	const manualWindow = manualLinkWindowDays(bill.frequency);
 	const label = periodLabel(bill, period, today);
 	// A Paid month takes no more payments (decision 101): the picker lists none for it, so a request that names one is refused.
-	const paidCents =
-		(
-			await c.env.DB.prepare(
-				"SELECT COALESCE(SUM(t.amount_cents), 0) AS cents FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.period=? AND bp.status='linked'",
-			)
-				.bind(id, period)
-				.first<{ cents: number }>()
-		)?.cents ?? 0;
-	const history = (await amountRowsByBill(c.env.DB, id)).get(id) ?? [];
-	if (paidPeriodsOf(bill, history, new Map([[period, paidCents]])).has(period))
+	const unpaid = await c.env.DB.prepare(unpaidSelect)
+		.bind(id, period)
+		.first<{ unpaid: number }>();
+	if (unpaid?.unpaid === 0)
 		return billPage(
 			c,
 			id,
@@ -1689,20 +1700,29 @@ bills.post("/bills/:id/link", async (c) => {
 	}
 	// An excluded payment can pay a bill: once linked it counts in Spent whatever its exclusion, which
 	// linking never writes (spec §6.1 rule 4, §8.5).
-	// The Not this one a link replaces (decision 99, and decision 105 for a purchase's) is lifted by liftNotThisOneSql, once
-	// the link is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got.
-	const [insert] = await c.env.DB.batch([
-		c.env.DB.prepare(
-			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?,?,?,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?)`,
-		).bind(id, period, transaction, transaction, due, manualWindow),
+	// The INSERT refuses a Paid month itself (decision 101), so two open pickers can't both link past 90%. The Not this
+	// one a link replaces (decision 99, and decision 105 for a purchase's) is lifted by liftNotThisOneSql, once the link
+	// is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got. The last
+	// statement reads the month as the INSERT left it, which says why a link made nothing.
+	const [insert, , state] = await c.env.DB.batch<{ unpaid: number }>([
+		c.env.DB.prepare(linkPaymentSql).bind(
+			id,
+			period,
+			transaction,
+			due,
+			manualWindow,
+		),
 		c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
+		c.env.DB.prepare(unpaidSelect).bind(id, period),
 	]);
 	if (!insert?.meta.changes)
 		return billPage(
 			c,
 			id,
 			opened,
-			"That payment is already linked.",
+			state?.results[0]?.unpaid === 0
+				? `${label}'s bill is already paid.`
+				: "That payment is already linked.",
 			undefined,
 			today,
 		);
@@ -1887,7 +1907,7 @@ function offerBill(
 	bill: DbBill,
 	occurrence: { period: string; dueDate: string; status: BillStatus },
 	amountCents: number,
-	paidCents: number,
+	linked: boolean,
 ) {
 	return {
 		id: bill.id,
@@ -1899,7 +1919,7 @@ function offerBill(
 		merchantRawText: bill.merchant_raw_text,
 		period: occurrence.period,
 		dueDate: occurrence.dueDate,
-		paidCents,
+		linked,
 	};
 }
 async function currentOffer(
@@ -1912,17 +1932,12 @@ async function currentOffer(
 > {
 	const linked = (
 		await c.env.DB.prepare(
-			"SELECT bp.period AS period, t.amount_cents AS cents FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'",
+			"SELECT bp.period AS period, t.amount_cents AS amount_cents FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked'",
 		)
 			.bind(bill.id)
-			.all<{ period: string; cents: number }>()
+			.all<{ period: string; amount_cents: number }>()
 	).results;
-	const paidByPeriod = new Map<string, number>();
-	for (const row of linked)
-		paidByPeriod.set(
-			row.period,
-			(paidByPeriod.get(row.period) ?? 0) + row.cents,
-		);
+	const paidByPeriod = paidByPeriodOf(linked);
 	const history =
 		(await amountRowsByBill(c.env.DB, bill.id)).get(bill.id) ?? [];
 	const current = billOccurrence(
@@ -1944,7 +1959,7 @@ async function currentOffer(
 	);
 	const offer = await findPriceOffer(
 		c.env.DB,
-		offerBill(bill, current, billCents, paidByPeriod.get(current.period) ?? 0),
+		offerBill(bill, current, billCents, paidByPeriod.has(current.period)),
 	);
 	return (
 		offer && {

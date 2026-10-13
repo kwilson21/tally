@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { occurrencePaid, partPaidSentence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
+import { occurrenceUnpaidSql } from "../src/bills/unpaid";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
+import { linkPaymentSql, loadBillRows } from "../src/routes/bills";
 import { type BillRowData, billStatusLine } from "../src/views/bill-row";
 
 // Partial bill payments (Phase 5, decision 101, #205): more than one payment can pay one occurrence, and an
@@ -132,6 +133,54 @@ describe("partial payments on one rent bill", () => {
 		expect(billStatusLine(overdue as BillRowData, "2026-10-09")).toBe(
 			"Part paid: $600 of $1,200",
 		);
+	});
+
+	it("a payment a bank corrected into a credit counts $0 in the Paid check: $1,100 with a $100 credit is Paid", async () => {
+		await addPayment(9601, "2026-10-01", 110000);
+		await addPayment(9602, "2026-10-02", 60000);
+		await link(9601);
+		await link(9602);
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-10000 WHERE id=9602",
+		).run();
+		expect(
+			await env.DB.prepare(
+				`SELECT ${occurrenceUnpaidSql("?1", "?2")} AS unpaid`,
+			)
+				.bind(RENT, MONTH)
+				.first("unpaid"),
+		).toBe(0);
+		expect(await rentRow("2026-10-20")).toMatchObject({
+			status: "paid",
+			paidCents: 110000,
+		});
+	});
+
+	it("the link INSERT refuses a month that is Paid, so a link that raced past the page's check links nothing", async () => {
+		await addPayment(9601, "2026-10-01", 70000);
+		await addPayment(9602, "2026-10-03", 50000);
+		await addPayment(9603, "2026-10-04", 60000);
+		await link(9601);
+		await link(9602);
+		const result = await env.DB.prepare(linkPaymentSql)
+			.bind(RENT, MONTH, 9603, "2026-10-01", 7)
+			.run();
+		expect(result.meta.changes).toBe(0);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9603",
+			).first("n"),
+		).toBe(0);
+	});
+
+	it("the link INSERT still links a payment into a month that is only part paid", async () => {
+		await addPayment(9601, "2026-10-01", 60000);
+		await addPayment(9602, "2026-10-02", 60000);
+		await link(9601);
+		const result = await env.DB.prepare(linkPaymentSql)
+			.bind(RENT, MONTH, 9602, "2026-10-01", 7)
+			.run();
+		expect(result.meta.changes).toBe(1);
 	});
 });
 
