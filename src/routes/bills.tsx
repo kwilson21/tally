@@ -32,7 +32,7 @@ import {
 	occurrencePaid,
 } from "../bills/status";
 import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
-import { occurrenceUnpaidSql } from "../bills/unpaid";
+import { linkPaymentSql, occurrenceUnpaidSql } from "../bills/unpaid";
 import {
 	activateBill,
 	type BillFields,
@@ -1635,13 +1635,6 @@ bills.get("/bills/:id/month-explanation", async (c) => {
 		/>,
 	);
 });
-/**
- * SQL that links a payment to a bill occurrence, as one INSERT: `?1` the bill, `?2` the period, `?3` the payment,
- * `?4` its due date and `?5` the window in days. It takes nothing unless the payment is eligible for the window and
- * the month is still unpaid, so the INSERT itself refuses a Paid month (decision 101) and two open pickers can't
- * both link past 90%.
- */
-export const linkPaymentSql = `INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT ?1,?2,?3,'user','linked' WHERE EXISTS(SELECT 1 FROM transactions WHERE id=?3 AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?4))<=?5) AND ${occurrenceUnpaidSql("?1", "?2")}`;
 /** Whether an occurrence is still unpaid, as 1 or 0 (`?1` the bill, `?2` the period), in the same terms as linkPaymentSql. */
 const unpaidSelect = `SELECT ${occurrenceUnpaidSql("?1", "?2")} AS unpaid`;
 bills.post("/bills/:id/link", async (c) => {

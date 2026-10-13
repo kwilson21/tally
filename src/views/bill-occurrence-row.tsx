@@ -125,7 +125,8 @@ function PriceChanged({
 /**
  * One occurrence on a bill page, with its real link and unlink controls. Its payments are each listed with their
  * own Not this one (decision 101). A part-paid occurrence says what it has, "Part paid: $600 of $1,200", and offers
- * "Link another payment"; a Paid one with several payments says "Paid in 2 payments".
+ * "Link another payment"; a Paid one with several payments says "Paid in 2 payments". A month whose payments count $0,
+ * such as a payment a bank corrected into a credit, reads as unpaid: no part-paid line, and "Link a payment" (#469).
  */
 export function BillOccurrenceRow({
 	billId,
@@ -162,7 +163,8 @@ export function BillOccurrenceRow({
 				<PriceChanged billId={billId} period={period} offer={priceOffer} />
 			</li>
 		);
-	const partPaid = payments.length > 0 && status !== "paid";
+	// The clamped total decides, as the Bills row's does: a month whose payments count $0 reads as unpaid (#469).
+	const partPaid = paidCents > 0 && status !== "paid";
 	return (
 		<li class="py-2">
 			<p class="flex justify-between gap-3">
@@ -206,15 +208,11 @@ export function BillOccurrenceRow({
 					</form>
 				</>
 			))}
-			{payments.length === 0 ? (
+			{status !== "paid" && (
 				<Button kind="text" class="-ml-2" href={link}>
-					Link a payment
+					{partPaid ? "Link another payment" : "Link a payment"}
 				</Button>
-			) : partPaid ? (
-				<Button kind="text" class="-ml-2" href={link}>
-					Link another payment
-				</Button>
-			) : null}
+			)}
 		</li>
 	);
 }
