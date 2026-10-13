@@ -51,8 +51,9 @@ export function refundFitsSql(refund: string, purchase: string) {
 }
 
 /**
- * What is left to refund of a purchase, not counting `refundId`: for the message after a refusal.
- * Zero when there is no such purchase.
+ * What is left to refund of a purchase, not counting `refundId`: for the message after a refusal. A split
+ * refund's own parts on the purchase are left out too, so the amount is for the whole split ("this refund"
+ * in the message). Zero when there is no such purchase.
  */
 export async function refundLeftCents(
 	db: D1Database,
@@ -61,12 +62,37 @@ export async function refundLeftCents(
 ): Promise<number> {
 	const row = await db
 		.prepare(
-			`SELECT amount_cents AS purchaseCents, ${refundedByOthersSql("?1", "?2")} AS refundedCents
+			`SELECT amount_cents AS purchaseCents, ${refundedByOthersSql("?1", "?2")}
+				- COALESCE((SELECT SUM(ABS(part.amount_cents)) FROM transactions part
+					WHERE part.parent_id = ?2 AND part.refund_of_id = ?1 AND ${counts("part")}), 0) AS refundedCents
 			FROM transactions WHERE id = ?1`,
 		)
 		.bind(purchaseId, refundId)
 		.first<{ purchaseCents: number; refundedCents: number }>();
 	return row ? leftToRefundCents(row.purchaseCents, row.refundedCents) : 0;
+}
+
+/**
+ * SQL for a linked part of the split refund `parent` that doesn't fit what is left of its own purchase
+ * once a review as not income makes it count: an unreviewed credit that counts (not income), whose cents,
+ * with the other refunds on that purchase, are more than the purchase has. The part is checked on its own
+ * purchase, so two parts on one purchase are checked together (refundedByOthersSql counts the sibling,
+ * since counts() ignores review).
+ *
+ * `oldLink` is the parent's link before the save, as an SQL bind expression (such as `?2`, or NULL when the
+ * link stays or there was none). Parts on the old link are left out, since they move with the parent: the
+ * link statement's refundFitsSql checks what moves against what is left of the new purchase, counting the
+ * parts already there. Every other part is checked here, including the parts already on the purchase the
+ * parent is being linked to. Before the move, those parts are checked as they stand. The move runs only when
+ * what moves fits what is left, counting those parts, so after it every part there still fits. If the move is
+ * refused, nothing changes. So the answer is the same at every statement of the batch. Used with NOT EXISTS
+ * (the write's gate) and to name the purchase that refused it (saveEdit), so both give the same answer.
+ */
+export function splitPartMisfitSql(parent: string, oldLink: string) {
+	return `kid.parent_id = ${parent} AND kid.refund_of_id IS NOT NULL
+		AND kid.refund_of_id IS NOT ${oldLink}
+		AND kid.amount_cents < 0 AND kid.flag_income = 0 AND COALESCE(kid.credit_reviewed, 0) = 0
+		AND (${refundFitsSql("kid.id", "kid.refund_of_id")}) IS NOT 1`;
 }
 
 /**

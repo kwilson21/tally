@@ -5,6 +5,7 @@
 // The write itself enforces the rule (src/db/refunded.ts, in the UPDATE that links a refund, so two
 // saves at once can't both fit). This is only the arithmetic the message needs, kept pure to test.
 
+import { shortDay } from "../dates";
 import { formatCents } from "../money";
 
 /**
@@ -22,4 +23,26 @@ export function leftToRefundCents(
 /** The field error under "This refunds…" when a refund doesn't fit what's left of its purchase. */
 export function refundTooBigMessage(leftCents: number): string {
 	return `This refund is more than what's left of that purchase (${formatCents(leftCents)} left).`;
+}
+
+/**
+ * The field error under "This refunds…" when a part of a split refund doesn't fit what's left of the
+ * purchase it is linked to, which is not the split's own purchase. `purchaseLabel` is refundPurchaseLabel.
+ */
+export function refundPartTooBigMessage(
+	leftCents: number,
+	purchaseLabel: string,
+): string {
+	return `Part of this refund is for the ${purchaseLabel} purchase and is more than what's left of it (${formatCents(leftCents)} left).`;
+}
+
+/**
+ * A purchase as a refund's "This refunds…" chip names it, and the alerts that refer to it. `refundDate` is
+ * the refund's own date, which the purchase's date is shown beside (shortDay).
+ */
+export function refundPurchaseLabel(
+	purchase: { date: string; amountCents: number; categoryName: string | null },
+	refundDate: string,
+): string {
+	return `${shortDay(purchase.date, refundDate)} · ${formatCents(purchase.amountCents)} · ${purchase.categoryName ?? "No category"}`;
 }
