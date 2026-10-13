@@ -3772,19 +3772,21 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// The restored entry, when this Undo restored it (not an earlier one, nor an expired one).
 	const restoredNow = restored && !restored.alreadyRestored ? restored : null;
+	// Every answer ends the Deleted toast it answers, so undoDone names the posted token on each one (#397, #444).
+	// JSON drops it when the token is missing, since there is no Undo to name.
+	const undoDone = typeof token === "string" ? token : undefined;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify(
 			restoredNow
 				? {
-						// undoDone names the Deleted toast this Undo answers, which ends with this one (#397).
 						toast: {
 							message:
 								restoredNow.lostLinks.length > 0
 									? `Restored ${restoredNow.name}. ${restoredNow.lostLinks.join(", ")} no longer fits and was left off.`
 									: `Restored ${restoredNow.name}.`,
 							type: "success",
-							undoDone: token,
+							undoDone,
 						},
 						announce: `${restoredNow.name} is back.`,
 					}
@@ -3793,6 +3795,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 							toast: {
 								message: "That cash entry is already back.",
 								type: "success",
+								undoDone,
 							},
 							announce: `${restored.name} is already back.`,
 						}
@@ -3800,6 +3803,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 							toast: {
 								message: "Undo expired. The cash entry stays deleted.",
 								type: "error",
+								undoDone,
 							},
 							announce: "Undo expired. The cash entry stays deleted.",
 						},

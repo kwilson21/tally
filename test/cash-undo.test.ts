@@ -332,6 +332,8 @@ describe("cash delete undo", () => {
 		});
 		const feedback = JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}");
 		expect(feedback.toast.message).toBe("That cash entry is already back.");
+		// The answer ends the Undo toast it answers, as a restore's does (#444).
+		expect(feedback.toast.undoDone).toBe(token);
 	});
 
 	it("restores an entry whose For person was removed during the Undo window, with no person", async () => {
@@ -997,12 +999,39 @@ describe("where focus goes after Undo (#397)", () => {
 		expect(feedback.announce).toMatch(/ is back\.$/);
 	});
 
-	it("names no Undo in an expired one, which leaves its Deleted toast alone", async () => {
+	it("names its Undo in an expired one, so the Deleted toast ends with it (#444)", async () => {
 		const id = await todayCash("Expired undo");
 		const token = tokenOf(await deleteRequest(id, env.DB));
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const expired = await undo(token);
-		expect(feedbackOf(expired.res).toast.undoDone).toBeUndefined();
+		expect(feedbackOf(expired.res).toast).toMatchObject({
+			type: "error",
+			undoDone: token,
+		});
+	});
+
+	it("names the posted token even when it is malformed, since it is still a string (#444)", async () => {
+		const refused = await undo("not-a-token");
+		expect(feedbackOf(refused.res).toast).toMatchObject({
+			type: "error",
+			undoDone: "not-a-token",
+		});
+	});
+
+	it("names no Undo when the answer was posted without a token (#444)", async () => {
+		const refused = await request("/transactions/undo-cash-delete", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ back: "/transactions" }),
+		});
+		expect(feedbackOf(refused.res).toast.undoDone).toBeUndefined();
+		expect(feedbackOf(refused.res).toast.message).toBe(
+			"Undo expired. The cash entry stays deleted.",
+		);
 	});
 
 	it("focuses the restored row's link, and nothing else, when the list shows the row", async () => {

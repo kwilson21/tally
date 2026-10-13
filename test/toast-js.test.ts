@@ -909,6 +909,45 @@ describe("a bill's Undo answer ends its toast", () => {
 	);
 });
 
+// #444: a cash entry's refused Undo ends its Deleted toast too, as a restore does (undoDone names the token).
+// Its focus goes to the Transactions heading, since the disabled Undo had dropped it to the page body.
+describe("a cash entry's refused Undo ends its toast", () => {
+	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+	const cashUndoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: TOKEN,
+			undoExpiresInMs: 10000,
+		});
+
+	it.each([
+		["Undo expired. The cash entry stays deleted.", "error"],
+		["That cash entry is already back.", "success"],
+	])(
+		"ends the Undo toast with '%s', and focus goes to the Transactions heading",
+		async (message, type) => {
+			const { body, document, toasts, heading } = await page();
+			const headingFocus = vi.spyOn(heading, "focus");
+			cashUndoToast(body);
+			const undo = toasts.children[0] as FakeNode;
+			const form = undo.all().find((node) => node.tag === "form") as FakeNode;
+			form.dispatchEvent(new Event("submit"));
+			document.activeElement = body;
+			fire(body, "toast", { message, type, undoDone: TOKEN });
+			expect(toasts.children).not.toContain(undo);
+			expect(toasts.children).toHaveLength(1);
+			const answer = toasts.children[0] as FakeNode;
+			expect(answer.words()).toBe(message);
+			expect(answer.attrs.get("role")).toBe(
+				type === "error" ? "alert" : "status",
+			);
+			expect(headingFocus).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).toBe(heading);
+			expect(heading.attrs.get("tabindex")).toBe("-1");
+		},
+	);
+});
+
 describe("an Undo request that fails", () => {
 	const undoToast = (body: EventTarget) =>
 		fire(body, "toast", {
