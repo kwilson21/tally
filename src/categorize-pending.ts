@@ -109,12 +109,11 @@ export async function categorizePending(
 	const { results: categories } = await env.DB.prepare(
 		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
 	).all<{ id: number; name: string }>();
-	// With no categories, details or income can still be asked without a category question.
-	if (categories.length === 0 && !start.details && !start.income) return done;
 	// Sent even when only income is on: the one call asks everything together (spec §7), and a row is
 	// marked as asked by the category confidence the answer carries (decision 27). With no active category,
-	// a credit's income answer (while income is on) or an outgoing purchase's transfer answer (while categories
-	// are on) marks it asked instead.
+	// the run still goes on while any of the three switches is on, because pendingForJev picks only what
+	// those switches can answer: a credit's income answer (income on) or an outgoing purchase's transfer
+	// answer (categories on) marks it asked instead.
 	const names = categories.map((c) => c.name);
 	let people = start.details
 		? await env.DB.prepare(
