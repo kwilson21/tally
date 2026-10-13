@@ -315,6 +315,18 @@
 		clearTimeout(timers.get(ctx));
 		timers.delete(ctx);
 	});
+	// Older and Newer in Select mode (#456): the reply's first tick is autofocus, but htmx hides a list load's rows
+	// until the load ends, so htmx can't focus it during the swap. htmx takes the load's class off the form after this
+	// event, so the tick is focused on the next frame. Only a list that swapped in counts: a count's reply must not
+	// take focus from the person.
+	document.addEventListener("htmx:finally:request", (event) => {
+		const ctx = event.detail?.ctx;
+		if (ctx?.status !== "swapped" || ctx.target?.id !== "results") return;
+		const list = ctx.target;
+		requestAnimationFrame(() => {
+			list.querySelector("input[name=ids][autofocus]")?.focus();
+		});
+	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.

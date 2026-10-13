@@ -730,12 +730,17 @@ assert.equal(
 	`${ticksOnPageTwo + ticksNotOnPage} selected, ${ticksNotOnPage} not on this page`,
 	"the count must match every tick, on this page or not",
 );
+// Focus is on the first row's tick, and the tick is visible: the rows are hidden until a load ends (#456).
+const firstTickHasFocus = () =>
+	page.evaluate(() => {
+		const tick = document.querySelector("#results input[name=ids]");
+		return (
+			document.activeElement === tick &&
+			getComputedStyle(tick).visibility === "visible"
+		);
+	});
 assert.equal(
-	await page.evaluate(
-		() =>
-			document.activeElement ===
-			document.querySelector("#results input[name=ids]"),
-	),
+	await firstTickHasFocus(),
 	true,
 	"focus must move to the first row's tick once the list lands",
 );
@@ -749,6 +754,21 @@ dropReplacedRequestLogs(errorsBefore);
 step(
 	"a tap during a list load does nothing, and focus lands on the first tick",
 );
+
+// Newer's load ends the same way, with focus on the page's first tick, once the rows are shown (#456).
+await page.route("**/transactions?*focus=first-tick*", slowList);
+await page.locator('a[rel="prev"]').click();
+await page.waitForSelector("#selection-form.htmx-request");
+await page.waitForFunction(
+	() => !document.querySelector("#selection-form.htmx-request"),
+);
+await page.unroute("**/transactions?*focus=first-tick*", slowList);
+assert.equal(
+	await firstTickHasFocus(),
+	true,
+	"Newer must move focus to the first row's tick once its list lands",
+);
+step("Newer moves focus to the first row's tick once its list lands");
 
 // A second filter change during a list load keeps the ticks: the newest list carries the ticks still checked (#215).
 errorsBefore = consoleErrors.length;

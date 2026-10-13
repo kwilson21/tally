@@ -26,6 +26,7 @@ class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parent: FakeNode | null = null;
 	attrs = new Map<string, string>();
+	id = "";
 	className = "";
 	method = "";
 	action = "";
@@ -61,6 +62,22 @@ class FakeNode extends EventTarget {
 	/** Every node under this one, this one first. */
 	all(): FakeNode[] {
 		return [this, ...this.children.flatMap((child) => child.all())];
+	}
+	/** The first node under this one that matches a simple selector: a tag, then [attribute] or [attribute=value] parts. */
+	querySelector(selector: string): FakeNode | null {
+		const [, tag = "", conditions = ""] =
+			selector.match(/^(\w+)((?:\[[^\]]+\])*)$/) ?? [];
+		const wanted = [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].map(
+			([, name = "", value]) => ({ name, value }),
+		);
+		const matches = (node: FakeNode) =>
+			node.tag === tag &&
+			wanted.every(
+				({ name, value }) =>
+					node.attrs.has(name) &&
+					(value === undefined || node.attrs.get(name) === value),
+			);
+		return this.children.flatMap((child) => child.all()).find(matches) ?? null;
 	}
 	/** The words a reader would hear: this node's own text and its children's, in order. */
 	words(): string {
@@ -1540,5 +1557,66 @@ describe("a phone sheet's room follows the toasts on screen", () => {
 		toasts.offsetHeight = 66;
 		fire(body, "toast", { message: "Saved" });
 		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
+	});
+});
+
+// #456: Older and Newer in Select mode. The reply's first tick is autofocus, but htmx hides a list load's rows until
+// the load ends, so htmx's own focus during the swap does nothing. htmx takes the load's class off the form after its
+// htmx:finally:request event, so toast.js focuses the tick on the next frame, once it can take focus.
+describe("the first tick after Older or Newer in Select mode (#456)", () => {
+	/** A list reply's results, as the reply to Older or Newer draws them: the first row's tick is autofocus. */
+	const listReply = () => {
+		const results = new FakeNode("section");
+		results.id = "results";
+		const tick = new FakeNode("input");
+		tick.setAttribute("name", "ids");
+		tick.setAttribute("autofocus", "");
+		const row = new FakeNode("li");
+		row.append(tick);
+		results.append(row);
+		return { results, tick };
+	};
+	/** htmx's event once a request has ended: its ctx has the status it ended with and the element it swapped. */
+	const requestEnded = (
+		document: EventTarget,
+		target: FakeNode,
+		status = "swapped",
+	) => fire(document, "htmx:finally:request", { ctx: { status, target } });
+
+	it("focuses the first tick on the next frame, after the load's class is off the form", async () => {
+		const { document } = await page();
+		const frames: Array<() => void> = [];
+		vi.stubGlobal("requestAnimationFrame", (run: () => void) => {
+			frames.push(run);
+			return frames.length;
+		});
+		const { results, tick } = listReply();
+		requestEnded(document, results);
+		// htmx takes the load's class off the form after this event, so the tick is still hidden now.
+		expect(document.activeElement).not.toBe(tick);
+		for (const run of frames.splice(0)) run();
+		expect(document.activeElement).toBe(tick);
+	});
+
+	it("leaves focus where the person put it when a count ends, even with a tick still autofocus", async () => {
+		const { document } = await page();
+		const { results } = listReply();
+		const count = new FakeNode("p");
+		count.id = "selected-count";
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		requestEnded(document, count);
+		expect(document.activeElement).toBe(elsewhere);
+		// The tick belongs to the list, which this request did not swap.
+		expect(results.querySelector("input[name=ids][autofocus]")).not.toBeNull();
+	});
+
+	it("does not move focus when the list request was replaced, cancelled or failed", async () => {
+		const { document } = await page();
+		const { results } = listReply();
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		requestEnded(document, results, "error: AbortError");
+		expect(document.activeElement).toBe(elsewhere);
 	});
 });
