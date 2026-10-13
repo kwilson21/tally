@@ -12,14 +12,13 @@ import {
 	settleSuggestion,
 } from "../db/merchant-names";
 import {
-	addNeverSuggest,
 	NEVER_SUGGEST_KINDS,
 	type NeverSuggestKind,
-	questionStores,
 } from "../db/never-suggest";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
+	neverSuggestAskedSql,
 	type SuggestionItem,
 	suggestionQueue,
 	transferAskedSql,
@@ -333,10 +332,15 @@ suggestions.post(PATH, async (c) => {
 	// The question after a No: Yes writes one line per store, Not now writes nothing (decision 101).
 	if (answer === "ask_yes" || answer === "ask_not_now") {
 		const kind = form.get("kind")?.toString() ?? "";
-		const stores = form
-			.getAll("store")
-			.map((store) => store.toString())
-			.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY);
+		// Each store once, however often the form repeats it (#440).
+		const stores = [
+			...new Set(
+				form
+					.getAll("store")
+					.map((store) => store.toString())
+					.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY),
+			),
+		];
 		if (
 			!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind) ||
 			stores.length === 0
@@ -350,16 +354,23 @@ suggestions.post(PATH, async (c) => {
 				toast: { message, type: "info", announce: `${message} ${left(queue)}` },
 			});
 		}
-		// Only the question's own store can get a line, whatever the form says (decision 101).
-		const asked = await questionStores(db, kind as NeverSuggestKind, id);
-		const known = stores.filter((store) => asked.has(store));
+		// Only the question's own stores get a line, and only while the question is still current (decision 101): the
+		// check sits inside the INSERT, so a No that changes under this write writes nothing (#440). The statement
+		// returns the stores it wrote, so the toast names only those.
+		const found = /^(income|transfer|new)-(\d+)$/.exec(id);
+		if (!found || (found[1] === "new" ? "new_category" : found[1]) !== kind)
+			return stale();
+		const { results } = await db
+			.prepare(
+				`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+				SELECT q.key, ?2, ?3 FROM (${neverSuggestAskedSql(kind as NeverSuggestKind)}) q
+				WHERE q.key IN (SELECT value FROM json_each(?4)) RETURNING merchant_key`,
+			)
+			.bind(Number(found[2]), kind, today, JSON.stringify(stores))
+			.all<{ merchant_key: string }>();
+		const written = new Set(results.map((row) => row.merchant_key));
+		const known = stores.filter((store) => written.has(store));
 		if (known.length === 0) return stale();
-		for (const merchantKey of known)
-			await addNeverSuggest(db, {
-				merchantKey,
-				kind: kind as NeverSuggestKind,
-				decidedOn: today,
-			});
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
 		const labels = joinStores([...(await storeLabels(db, known)).values()]);

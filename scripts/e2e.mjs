@@ -672,7 +672,14 @@ await goto(
 await page.route("**/transactions/select/count*", slowCount);
 await page.locator("#selection-form input[name=ids]").last().focus();
 await page.keyboard.press("Space");
-await page.locator("#select-all-page a").focus();
+// The list's pager (Older) sits between the last row and the bar, so Tab goes through it to Select all.
+await page.keyboard.press("Tab");
+await page.keyboard.press("Tab");
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"select-all-link",
+	"Tab from the last tick must reach Select all, through the pager",
+);
 await page.waitForTimeout(1600);
 await page.waitForLoadState("networkidle");
 const wholeLink = page.locator("#select-all-page a");
@@ -720,7 +727,12 @@ await goto(
 await page.route("**/transactions/select/count*", slowCount);
 await page.locator("#selection-form input[name=ids]").last().focus();
 await page.keyboard.press("Space");
-await page.locator("#select-all-page a").focus();
+await page.keyboard.press("Tab");
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"select-all-link",
+	"Tab from the last tick must reach Select all",
+);
 await page.waitForTimeout(1600);
 await page.waitForLoadState("networkidle");
 assert.equal(
@@ -743,6 +755,81 @@ await page.unroute("**/transactions/select/count*", slowCount);
 dropReplacedRequestLogs(countErrors);
 step(
 	"a tick's slow count that draws no link moves focus to the count, not the body",
+);
+
+// A count that takes the link away while focus is on it leaves focus on the count. Then a count that draws the link
+// again must move focus to the link, not the body (#475). From the keyboard: Space ticks the row (the first count is in
+// flight), Tab goes to the link, Shift+Tab back to the row, and Space unticks it (queued behind the first count). Tab
+// once more puts focus on the link before the first count lands, so that count takes the link away with focus on it.
+const returnErrors = consoleErrors.length;
+await goto(`${BASE}/transactions?q=Local+Bakery&select=1`, {
+	waitUntil: "networkidle",
+});
+await page.route("**/transactions/select/count*", slowCount);
+await page.locator("#selection-form input[name=ids]").last().focus();
+await page.keyboard.press("Space");
+await page.keyboard.press("Tab");
+await page.keyboard.press("Shift+Tab");
+await page.keyboard.press("Space");
+await page.keyboard.press("Tab");
+await page.waitForFunction(() => {
+	const focused = document.activeElement;
+	return focused?.id === "select-all-link" && focused.tagName === "SPAN";
+});
+await page.waitForFunction(
+	() => document.querySelector("#select-all-page a") !== null,
+);
+await page.waitForLoadState("networkidle");
+assert.ok(
+	await page.evaluate(() =>
+		Boolean(document.activeElement?.closest("#select-all-page a")),
+	),
+	"a count that draws the link again must move focus to the link, not the body",
+);
+await page.unroute("**/transactions/select/count*", slowCount);
+dropReplacedRequestLogs(returnErrors);
+step(
+	"a count that draws the link again while focus is on the count moves focus to the link",
+);
+
+// A press held on Select all across a slow count reply still selects the whole set when it is let go (#473's gap).
+const pressErrors = consoleErrors.length;
+await goto(
+	`${BASE}/transactions?month=all&select=1&ids=${monthRows.slice(0, -1).join(",")}`,
+	{ waitUntil: "networkidle" },
+);
+await page.route("**/transactions/select/count*", slowCount);
+await page.locator("#selection-form input[name=ids]").last().focus();
+await page.keyboard.press("Space");
+const pressLink = page.locator("#select-all-page a");
+const pressBox = await pressLink.boundingBox();
+await page.mouse.move(
+	pressBox.x + pressBox.width / 2,
+	pressBox.y + pressBox.height / 2,
+);
+await page.mouse.down();
+await page.waitForTimeout(1600);
+await page.waitForLoadState("networkidle");
+const pressLabel = (await pressLink.textContent())?.trim() ?? "";
+assert.match(
+	pressLabel,
+	/^Select all \d+ in /,
+	"the reply must draw the whole-set link while the press is held",
+);
+const pressTotal = Number(pressLabel.match(/\d+/)?.[0]);
+await page.mouse.up();
+await page.waitForFunction(
+	() => document.activeElement?.id === "set-category-selection",
+);
+assert.match(
+	(await page.locator("#selected-count").textContent())?.trim() ?? "",
+	new RegExp(`^${pressTotal} selected`),
+	"letting go after a slow count must select the whole set",
+);
+await page.unroute("**/transactions/select/count*", slowCount);
+dropReplacedRequestLogs(pressErrors);
+step(
+	"a press held on Select all across a slow count selects the whole set when let go",
 );
 
 // A count still loading when Select all lands must not overwrite the bar with its stale count (#215).

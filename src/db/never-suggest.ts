@@ -66,31 +66,6 @@ export async function neverSuggestRules(
 }
 
 /**
- * The stores a question about one item may write a line for: the item's own store, read from the database
- * by the item's key (`income-12`, `transfer-12` or `new-3`, a suggestion's number). A store the form names
- * that isn't one of these is refused, so an answer can't write a line for text the question never named.
- */
-export async function questionStores(
-	db: D1Database,
-	kind: NeverSuggestKind,
-	id: string,
-): Promise<Set<string>> {
-	const found = /^(income|transfer|new)-(\d+)$/.exec(id);
-	if (!found) return new Set();
-	const [, prefix, number] = found;
-	if (kind !== (prefix === "new" ? "new_category" : prefix)) return new Set();
-	const sql =
-		prefix === "new"
-			? `SELECT DISTINCT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.category_suggestion_id = ?`
-			: `SELECT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.id = ?`;
-	const { results } = await db
-		.prepare(sql)
-		.bind(Number(number))
-		.all<{ key: string }>();
-	return new Set(results.map((row) => row.key));
-}
-
-/**
  * Adds one line when the person said Yes. A line already there stays as it is, so a repeat answer adds
  * nothing and keeps the day of the first. Returns whether a line was added.
  */

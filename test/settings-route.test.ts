@@ -652,6 +652,34 @@ describe("a name taken by someone else at the same moment", () => {
 	});
 });
 
+describe("a name that differs only in accented capitals, saved at the same moment", () => {
+	it("shows the usual error when a create loses to a create", async () => {
+		// The form's check passes (the other save isn't there yet), then the database refuses by the name's key.
+		await env.DB.prepare(
+			"CREATE TRIGGER sneak_accent BEFORE INSERT ON categories WHEN NEW.name = 'CAFÉ' BEGIN INSERT INTO categories (name, name_key, icon, color) VALUES ('Café', 'café', 'tag', 'cat-blue'); END",
+		).run();
+		const { res, html } = await post("/settings/categories", { name: "CAFÉ" });
+		await env.DB.prepare("DROP TRIGGER sneak_accent").run();
+		expect(res.status).toBe(422);
+		expect(html).toContain("That name is taken.");
+	});
+
+	it("shows the usual error when a rename loses to a create", async () => {
+		await env.DB.prepare(
+			"CREATE TRIGGER sneak_rename BEFORE UPDATE OF name ON categories WHEN NEW.name = 'CAFÉ' BEGIN INSERT INTO categories (name, name_key, icon, color) VALUES ('Café', 'café', 'tag', 'cat-blue'); END",
+		).run();
+		const gas = await env.DB.prepare(
+			"SELECT id FROM categories WHERE name = 'Gas'",
+		).first<{ id: number }>();
+		const { res, html } = await post(`/settings/categories/${gas?.id}`, {
+			name: "CAFÉ",
+		});
+		await env.DB.prepare("DROP TRIGGER sneak_rename").run();
+		expect(res.status).toBe(422);
+		expect(html).toContain("That name is taken.");
+	});
+});
+
 describe("adding a category", () => {
 	it("adds it at the end, with no budget yet", async () => {
 		const { res, html } = await post("/settings/categories", {
