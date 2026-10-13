@@ -68,7 +68,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Dialog (basic, form, danger) | Escape and backdrop close, focus trap, focus restored | BottomSheet (not modal; Cancel or backdrop) | Keep BottomSheet; a modal dialog (Escape, focus trap, focus restored) is an Enhancement |
 | Dialog form variants | Hero amount, "optional" divider, compact category grid, rename suggestion chips | MoneyInput, edit panel | Keep; rename chips later (name suggestions, Phase 4) |
 | Toasts (success, error, info, undo) | Auto-dismiss 4s, above the mobile nav | toast.js | Keep; Undo comes with #70 |
-| Keyboard shortcuts modal | `?` opens it | None | Adapt with #72, which needs its own allowed-JS decision (a small `keyboard.js`, as #72 says); the list itself is a `<details>` that reads without it |
+| Keyboard shortcuts modal | `?` opens it | None | Adapt with #72; its `keyboard.js` was approved in decision 109; the list itself is a `<details>` that reads without it |
 | Split modal | Live "Remaining", submit disabled until it balances | None | Later (Phase 3; server-checked) |
 | Category create, edit, delete | Create and edit states | Settings disclosure rows | Keep |
 | Disconnect bank, danger zone | Confirm first | None | Later (Accounts) / Not needed |
@@ -105,7 +105,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 | Filter bar (3) | Transactions filters and result count | Keep |
 | Plaid Link (4) | Link a bank, Fix connection | Later (Phase 2, #16, #21) |
 | Split (3) | Split a transaction | Later (Phase 3) |
-| Keyboard shortcuts (2) | Shortcuts | Adapt with #72 (after its allowed-JS decision) |
+| Keyboard shortcuts (2) | Shortcuts | Adapt with #72 (`keyboard.js` approved in decision 109) |
 | Onboarding (6) | Things to try (demo only) | Adapt with #95 (decision 49): its care and guidance, not its length |
 | CSV import (4) | None | Not needed (Later list: statement upload) |
 | Reorder (2) | Move up/down in Settings | Enhancement: drag to reorder, with Move up/down kept |
