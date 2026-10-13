@@ -48,6 +48,11 @@ class FakeNode extends EventTarget {
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 	}
+	hasAttribute(name: string) {
+		return this.attrs.has(name);
+	}
+	/** Whether the node is on the page; a test sets it false for a node that has left. */
+	isConnected = true;
 	append(...nodes: FakeNode[]) {
 		for (const node of nodes) {
 			node.parent = this;
@@ -1047,6 +1052,136 @@ describe("focus on an Undo button that a failed request turned back on", () => {
 			},
 			error: new TypeError("Failed to fetch"),
 		});
+		expect(document.activeElement).toBe(body);
+	});
+});
+
+// #460: a form with an hx-disable guard turns its buttons off while its request runs, and htmx turns them
+// back on only after the request's finally event. So a failed request gives focus back to the button that
+// was pressed, once it is on again, unless the person has moved focus or the button has left the page.
+describe("focus on a guarded button that a failed request turned back on", () => {
+	const GUARD = "#suggestions-page button[type=submit]";
+	/** A form whose buttons are guarded, and the button pressed in it, disabled while the request runs. */
+	const guarded = (guard: string | null = GUARD) => {
+		const form = new FakeNode("form");
+		if (guard) form.setAttribute("hx-disable", guard);
+		const button = new FakeNode("button");
+		button.type = "submit";
+		button.disabled = true;
+		form.append(button);
+		return { form, button };
+	};
+	/** htmx 4's ctx for the request the button sent, failed with a dropped connection or a 500. */
+	const dropped = (form: FakeNode, button: FakeNode) => ({
+		sourceElement: form,
+		request: { method: "POST", submitter: button },
+	});
+	/** htmx's finally event, which comes before it turns the guarded buttons back on. */
+	const finish = (document: EventTarget, ctx: unknown) =>
+		fire(document, "htmx:finally:request", { ctx });
+
+	it("gives focus back to the pressed button after a dropped connection", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		// A disabled button drops focus to the body in browsers.
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("gives focus back to the pressed button after a 500 reply", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = {
+			...dropped(form, button),
+			response: { status: 500 },
+		};
+		fire(document, "htmx:response:error", { ctx });
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("leaves focus alone when the person moved it somewhere else during the request", async () => {
+		const { document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("does not focus a button that another request still holds disabled", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		finish(document, ctx);
+		// htmx leaves it disabled: another request that disabled it has not finished.
+		await Promise.resolve();
+		expect(button.disabled).toBe(true);
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("does not focus a button that has left the page", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		button.isConnected = false;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("does not focus a button in a form without an hx-disable guard", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded(null);
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("leaves focus alone after a successful request", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
 		expect(document.activeElement).toBe(body);
 	});
 });
