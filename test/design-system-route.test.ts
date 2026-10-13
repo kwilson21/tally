@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
 import dsScript from "../public/js/ds.js?raw";
+import { parseBudgetAmount } from "../src/budgets/amount";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -120,6 +121,37 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain(">Cancel</a>");
 		expect(html).toContain(">Save</button>");
 		expect(design).toMatch(/\| SavingsGoalSheet \|/);
+	});
+
+	it("shows the budget sheet in its three states, each with its own ids, and documents it", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="budget-sheet"'));
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain(
+			'data-ds-components="BudgetSheet MoneyInput TransactionsButton"',
+		);
+		const section =
+			html.split('id="budget-sheet"')[1]?.split("</section>")[0] ?? "";
+		// At rest: the spent line, the transactions link and the two chips.
+		expect(section).toContain("$412.30 spent so far in October");
+		expect(section).toContain("12 transactions");
+		expect(section).toContain("Last month: $571.80");
+		expect(section).toContain("3-month average: $602.45");
+		// With cents: the amount reads $612.45 and Round to offers $613.
+		expect(section).toContain('value="612.45"');
+		expect(section).toContain("Round to $613");
+		// A refused amount: the parser's own words, in role=alert, on a marked field.
+		const refused = parseBudgetAmount("six hundred");
+		expect(refused.ok).toBe(false);
+		if (refused.ok) throw new Error("expected a refusal");
+		expect(section).toMatch(
+			new RegExp(`role="alert"[^>]*>${refused.error.replaceAll(".", "\\.")}<`),
+		);
+		// Three sheets on one page: no id is drawn twice.
+		const ids = [...section.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(design).toMatch(/\| BudgetSheet \|/);
 	});
 
 	it("shows the split correction state and the cash amount error with Change the parts", async () => {

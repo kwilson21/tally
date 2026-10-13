@@ -1,6 +1,7 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import { parseBudgetAmount } from "../budgets/amount";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
@@ -34,6 +35,7 @@ import {
 } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
+import { BudgetSheet } from "../views/budget-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
@@ -921,6 +923,31 @@ const TRANSACTIONS_BUTTON_SPEC: UseSpecText = {
 };
 
 function HomeTopGroup() {
+	// The budget sheet's sample: Groceries at $600.00, as Home opens it. The refused words are the
+	// parser's own, the ones POST /budget/:id shows for an amount it can't read.
+	const groceriesSheet = {
+		category: {
+			id: 1,
+			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
+			archived: false,
+			budgetCents: 60000,
+		},
+		spentCents: 41230,
+		lastMonthCents: 57180,
+		averageCents: 60245,
+		transactionCount: 12,
+		month: "2026-10",
+		closeAttrs: {
+			"hx-get": "/?focus=1",
+			"hx-target": "#page",
+			"hx-select": "#page",
+			"hx-swap": "outerHTML",
+			"hx-push-url": "/",
+		},
+	};
+	const refusal = parseBudgetAmount("six hundred");
 	const forecast = (
 		<HomeForecast
 			month="2026-10"
@@ -1275,6 +1302,51 @@ function HomeTopGroup() {
 					</Picture>
 				</State>
 				<UseSpec spec={BANK_LINE_SPEC} />
+			</Specimen>
+			<Specimen
+				id="budget-sheet"
+				title="BudgetSheet"
+				tier="visual"
+				components={["BudgetSheet", "MoneyInput", "TransactionsButton"]}
+				sentence="A category's budget sheet from Home: its name, what's spent this month (or what was refunded) and its counted transactions, then one labeled amount from this month on, with Round to and the last-month and 3-month average chips. Cancel and the backdrop close it and return focus to the row; a refused amount keeps the sheet open and says why in words."
+			>
+				<State label="At rest: Groceries at $600.00, with last month's and the 3-month average chips">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-rest"
+							value="600.00"
+						/>
+					</div>
+				</State>
+				<State label="With cents: the amount reads $612.45, so Round to offers $613">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-cents"
+							value="612.45"
+						/>
+					</div>
+				</State>
+				<State label="A refused amount: the field is marked, and the words the server gives sit under it">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-refused"
+							value="six hundred"
+							error={refusal.ok ? undefined : refusal.error}
+						/>
+					</div>
+				</State>
 			</Specimen>
 		</Group>
 	);
