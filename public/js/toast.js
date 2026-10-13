@@ -341,6 +341,24 @@
 			});
 		}
 	});
+	// Older and Newer in Select mode (#456): the reply's first tick is autofocus, but the rows stay hidden until the
+	// load ends, so the tick is focused on the next frame. Only a list htmx swapped in counts: a count's reply, or a
+	// 500 that Layout's noSwap keeps out, leaves focus alone. And only when focus went with the replaced page link:
+	// a person who moved to a filter during the load stays there.
+	document.addEventListener("htmx:finally:request", (event) => {
+		const ctx = event.detail?.ctx;
+		if (
+			ctx?.status !== "swapped" ||
+			ctx.swap === "none" ||
+			ctx.target?.id !== "results"
+		)
+			return;
+		const list = ctx.target;
+		requestAnimationFrame(() => {
+			if (!focusLost()) return;
+			list.querySelector("input[name=ids][autofocus]")?.focus();
+		});
+	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.

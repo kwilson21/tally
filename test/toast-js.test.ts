@@ -26,6 +26,7 @@ class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parent: FakeNode | null = null;
 	attrs = new Map<string, string>();
+	id = "";
 	className = "";
 	method = "";
 	action = "";
@@ -66,6 +67,22 @@ class FakeNode extends EventTarget {
 	/** Every node under this one, this one first. */
 	all(): FakeNode[] {
 		return [this, ...this.children.flatMap((child) => child.all())];
+	}
+	/** The first node under this one that matches a simple selector: a tag, then [attribute] or [attribute=value] parts. */
+	querySelector(selector: string): FakeNode | null {
+		const [, tag = "", conditions = ""] =
+			selector.match(/^(\w+)((?:\[[^\]]+\])*)$/) ?? [];
+		const wanted = [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].map(
+			([, name = "", value]) => ({ name, value }),
+		);
+		const matches = (node: FakeNode) =>
+			node.tag === tag &&
+			wanted.every(
+				({ name, value }) =>
+					node.attrs.has(name) &&
+					(value === undefined || node.attrs.get(name) === value),
+			);
+		return this.children.flatMap((child) => child.all()).find(matches) ?? null;
 	}
 	/** The words a reader would hear: this node's own text and its children's, in order. */
 	words(): string {
@@ -1675,5 +1692,119 @@ describe("a phone sheet's room follows the toasts on screen", () => {
 		toasts.offsetHeight = 66;
 		fire(body, "toast", { message: "Saved" });
 		expect(documentElement.style.values.get(TOASTS_HEIGHT)).toBe("66px");
+	});
+});
+
+// #456: Older and Newer in Select mode. The reply's first tick is autofocus, but htmx hides a list load's rows until
+// the load ends, so htmx's own focus during the swap does nothing. htmx takes the load's class off the form after its
+// htmx:finally:request event, so toast.js focuses the tick on the next frame, once it can take focus.
+describe("the first tick after Older or Newer in Select mode (#456)", () => {
+	/** A list reply's results, as the reply to Older or Newer draws them: the first row's tick is autofocus. */
+	const listReply = () => {
+		const results = new FakeNode("section");
+		results.id = "results";
+		const tick = new FakeNode("input");
+		tick.setAttribute("name", "ids");
+		tick.setAttribute("autofocus", "");
+		const row = new FakeNode("li");
+		row.append(tick);
+		results.append(row);
+		return { results, tick };
+	};
+	/** Stubs requestAnimationFrame to queue its frames; the returned function runs the queued ones, as the next frame would. */
+	const stubFrames = () => {
+		const frames: Array<() => void> = [];
+		vi.stubGlobal("requestAnimationFrame", (run: () => void) => {
+			frames.push(run);
+			return frames.length;
+		});
+		return () => {
+			for (const run of frames.splice(0)) run();
+		};
+	};
+	/**
+	 * htmx's event once a request has ended: its ctx has the status it ended with, the element it swapped, and the
+	 * swap and response htmx gave it. A list htmx swapped in is "innerHTML show:top" (the page links' hx-swap). A 500
+	 * is swap "none" (Layout's noSwap), and its status is still "swapped".
+	 */
+	const requestEnded = (
+		document: EventTarget,
+		target: FakeNode,
+		{
+			status = "swapped",
+			swap = "innerHTML show:top",
+			code = 200,
+		}: { status?: string; swap?: string; code?: number } = {},
+	) =>
+		fire(document, "htmx:finally:request", {
+			ctx: { status, target, swap, response: { status: code } },
+		});
+
+	it("focuses the first tick on the next frame, after the load's class is off the form", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		const { results, tick } = listReply();
+		requestEnded(document, results);
+		// htmx takes the load's class off the form after this event, so the tick is still hidden now.
+		expect(document.activeElement).not.toBe(tick);
+		runFrames();
+		expect(document.activeElement).toBe(tick);
+	});
+
+	it("leaves focus where the person put it when a count ends, even with a tick still autofocus", async () => {
+		const { document } = await page();
+		const { results } = listReply();
+		const count = new FakeNode("p");
+		count.id = "selected-count";
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		requestEnded(document, count);
+		expect(document.activeElement).toBe(elsewhere);
+		// The tick belongs to the list, which this request did not swap.
+		expect(results.querySelector("input[name=ids][autofocus]")).not.toBeNull();
+	});
+
+	it("does not move focus when the list request was replaced, cancelled or failed", async () => {
+		const { document } = await page();
+		const { results } = listReply();
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		requestEnded(document, results, { status: "error: AbortError" });
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("leaves focus on a filter the person moved to while the list loaded", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		const { results } = listReply();
+		const filter = new FakeNode("select");
+		document.activeElement = filter;
+		requestEnded(document, results);
+		runFrames();
+		expect(document.activeElement).toBe(filter);
+	});
+
+	it("a failed Older or Newer (500, not swapped) leaves focus on the pressed link", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		// The page's list is still the previous page's, and it still holds its autofocus tick.
+		const { results } = listReply();
+		const older = new FakeNode("a");
+		document.activeElement = older;
+		requestEnded(document, results, { swap: "none", code: 500 });
+		runFrames();
+		expect(document.activeElement).toBe(older);
+	});
+
+	it("a failed Older or Newer does not focus the stale tick when focus is on nothing", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		const { results, tick } = listReply();
+		// Safari leaves focus on the body after a mouse click on a link it doesn't focus.
+		document.activeElement = document.body;
+		requestEnded(document, results, { swap: "none", code: 500 });
+		runFrames();
+		expect(document.activeElement).not.toBe(tick);
+		expect(document.activeElement).toBe(document.body);
 	});
 });
