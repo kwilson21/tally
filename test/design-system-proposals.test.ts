@@ -27,11 +27,24 @@ const VOID = new Set([
 	"wbr",
 ]);
 
+/** The attributes of an opening tag by lowercased name, "" for a bare one. */
+function attributes(tag: string): Map<string, string> {
+	const body = tag.replace(/^<[a-z][a-z0-9-]*/i, "").replace(/\/?>$/, "");
+	const attrs = new Map<string, string>();
+	// A quoted value is consumed by its own attribute, so a word inside it is never read as a name.
+	for (const m of body.matchAll(
+		/\s+([^\s=/>"']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g,
+	))
+		attrs.set((m[1] ?? "").toLowerCase(), m[2] ?? m[3] ?? m[4] ?? "");
+	return attrs;
+}
+
 /**
  * Every element on the page that can post a change or swap a target: a form, an element with an hx-post,
  * hx-get, hx-put, hx-patch or hx-delete, a formaction, and a button or input that submits (type submit or
  * image, or one that names another form). `inert` says whether it sits inside an inert element, itself
- * included. Scripts and styles are skipped, and every tag must close in order, so a wrong nesting fails.
+ * included. It reads attribute names through attributes(), so text inside quotes never counts. Scripts and
+ * styles are skipped, and every tag must close in order, so a wrong nesting fails.
  */
 function actions(html: string) {
 	const open: { tag: string; inert: boolean }[] = [];
@@ -44,11 +57,22 @@ function actions(html: string) {
 			expect(open.pop()?.tag, raw).toBe(tag);
 			continue;
 		}
-		const inert = /\sinert(?=[\s=>/])/.test(raw);
-		const submits = /\stype="(?:submit|image)"|\sform=/.test(raw);
+		const attrs = attributes(raw);
+		const inert = attrs.has("inert");
+		const submits =
+			attrs.get("type") === "submit" ||
+			attrs.get("type") === "image" ||
+			attrs.has("form");
 		const acts =
 			tag === "form" ||
-			/\s(?:hx-(?:post|get|put|patch|delete)|formaction)=/.test(raw) ||
+			[
+				"hx-post",
+				"hx-get",
+				"hx-put",
+				"hx-patch",
+				"hx-delete",
+				"formaction",
+			].some((name) => attrs.has(name)) ||
 			((tag === "button" || tag === "input") && submits);
 		if (acts) found.push({ raw, inert: inert || open.some((o) => o.inert) });
 		if (!raw.endsWith("/>") && !VOID.has(tag)) open.push({ tag, inert });
@@ -56,6 +80,55 @@ function actions(html: string) {
 	expect(open).toEqual([]);
 	return found;
 }
+
+describe("actions()", () => {
+	it("doesn't count the word inert inside a quoted value as an inert attribute", () => {
+		const found = actions(
+			'<form aria-label="An inert preview" hx-post="/example"></form>',
+		);
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("doesn't count a class that is named inert as an inert attribute", () => {
+		const found = actions('<form class="inert" hx-post="/x"></form>');
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("doesn't count inert as one word among several in a quoted value", () => {
+		const found = actions(
+			'<form class="card inert panel" hx-post="/x"></form>',
+		);
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("reads a bare inert attribute", () => {
+		const found = actions('<form inert hx-post="/x"></form>');
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(true);
+	});
+
+	it('reads inert="", the form Hono renders for a boolean inert prop', () => {
+		const found = actions('<form inert="" hx-post="/x"></form>');
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(true);
+	});
+
+	it("counts a wrapper's inert for every action inside it", () => {
+		const found = actions(
+			'<div inert=""><form hx-post="/x"><button type="submit">Go</button></form></div>',
+		);
+		expect(found.map((a) => a.inert)).toEqual([true, true]);
+	});
+
+	it("finds a plain live control with an hx attribute and leaves it live", () => {
+		const found = actions('<div><a hx-get="/y">x</a></div>');
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+});
 
 describe("GET /design-system/proposals", () => {
 	it("draws P63's Accounts top with a net-worth line that ends on the headline above it", async () => {
@@ -509,7 +582,10 @@ describe("GET /design-system/proposals", () => {
 		// covers this page too but doesn't stop htmx's own request. Only inert stops both.
 		for (const action of found) expect(action.inert, action.raw).toBe(true);
 		// A button with no type submits a form it sits in, so every button declares one and the walk above sees it.
-		expect(html.match(/<button\b(?![^>]*\stype=)[^>]*>/g) ?? []).toEqual([]);
+		const buttons = [...html.matchAll(/<button\b[^>]*>/gi)].map(
+			(m) => m[0] ?? "",
+		);
+		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
 	it("is linked from the catalog", async () => {
