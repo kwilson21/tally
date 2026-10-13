@@ -241,6 +241,9 @@ describe("data exports", () => {
 		await env.DB.prepare(
 			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 50000)",
 		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('FAILED SHOP', '2026-10-01 09:20:00')",
+		).run();
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),
 			env.DB.prepare("DELETE FROM bills"),
@@ -295,6 +298,7 @@ describe("data exports", () => {
 			"budget_amounts",
 			"savings_goal_amounts",
 			"merchants",
+			"merchant_name_failures",
 			"accounts",
 			"balance_history",
 			"transactions",
@@ -339,6 +343,7 @@ describe("data exports", () => {
 				"suggestion_status",
 				"not_a_bill",
 			],
+			merchant_name_failures: ["failed_at", "raw_name"],
 			accounts: [
 				"balance_cents",
 				"bank",

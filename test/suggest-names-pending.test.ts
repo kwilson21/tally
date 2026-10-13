@@ -79,6 +79,16 @@ const merchants = async () =>
 			.all<MerchantRow>()
 	).results;
 
+/** The bank texts whose last name call failed, the longest-ago failure first. */
+const failedNames = async () =>
+	(
+		await db
+			.prepare(
+				"SELECT raw_name FROM merchant_name_failures ORDER BY failed_at, raw_name",
+			)
+			.all<{ raw_name: string }>()
+	).results.map((row) => row.raw_name);
+
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
@@ -110,9 +120,9 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
-		// One candidate query, then a switch read and a batch save for every five calls: 1 + 1 + 20 × 2 = 42.
-		// A save per name would be 100 or more.
-		expect(statements).toBeLessThanOrEqual(42);
+		// One candidate query and the names switch read, then for every five calls a switch read and two writes
+		// (the merchants upsert and the failures delete): 1 + 1 + 20 × 3 = 62. A save per name would be 100 or more.
+		expect(statements).toBeLessThanOrEqual(62);
 	});
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
@@ -289,15 +299,190 @@ describe("suggestMerchantNames", () => {
 			suggested: 0,
 		});
 		expect(failing.run).toHaveBeenCalledTimes(3);
+		// A failure makes no merchant row; the three that failed in a row (FOUR, ONE, THREE) are remembered
+		// apart from merchants, and TWO was never tried.
 		expect(await merchants()).toEqual([]);
+		expect((await failedNames()).sort()).toEqual(["FOUR", "ONE", "THREE"]);
 		logged.mockRestore();
 
-		// Back up the next night: everything is asked again.
+		// Back up the next night: everything is asked again, the one never tried first.
 		const working = fakeAi(() => ({ response: "A Name" }));
 		expect(await suggestMerchantNames({ DB: db, AI: working })).toEqual({
 			asked: 4,
 			suggested: 4,
 		});
+		expect(callsFor(working)[0]).toBe("TWO");
+		expect(callsFor(working).slice(1).sort()).toEqual(["FOUR", "ONE", "THREE"]);
+	});
+
+	it("doesn't let three top merchants whose calls keep failing hold up the others: the others are asked by the second night", async () => {
+		await addTransactions([
+			...Array.from({ length: 5 }, () => ({ rawName: "TOP ONE" })),
+			...Array.from({ length: 4 }, () => ({ rawName: "TOP TWO" })),
+			...Array.from({ length: 3 }, () => ({ rawName: "TOP THREE" })),
+			{ rawName: "SMALL A" },
+			{ rawName: "SMALL B" },
+		]);
+		const answer = (text: string) => {
+			if (text.startsWith("TOP")) throw new Error("capacity");
+			return { response: "Small Place" };
+		};
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		// Night one: the three top merchants fail in a row, so the run stops before the two small ones.
+		const night1 = fakeAi(answer);
+		expect(await suggestMerchantNames({ DB: db, AI: night1 })).toEqual({
+			asked: 3,
+			suggested: 0,
+		});
+		expect(callsFor(night1)).toEqual(["TOP ONE", "TOP TWO", "TOP THREE"]);
+
+		// Night two: the two never asked come first; the three that failed come after them.
+		const night2 = fakeAi(answer);
+		expect(await suggestMerchantNames({ DB: db, AI: night2 })).toEqual({
+			asked: 5,
+			suggested: 2,
+		});
+		logged.mockRestore();
+		expect(callsFor(night2)).toEqual([
+			"SMALL A",
+			"SMALL B",
+			"TOP ONE",
+			"TOP TWO",
+			"TOP THREE",
+		]);
+		expect(
+			(await merchants())
+				.filter((m) => m.raw_name.startsWith("SMALL"))
+				.map((m) => m.suggestion_status),
+		).toEqual(["pending", "pending"]);
+	});
+
+	it("asks a merchant whose call failed again on a later night, and a later success clears its failure", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const failing = fakeAi(() => {
+			throw new Error("capacity");
+		});
+		expect(await suggestMerchantNames({ DB: db, AI: failing })).toEqual({
+			asked: 1,
+			suggested: 0,
+		});
+		logged.mockRestore();
+		expect(await failedNames()).toEqual([RAW]);
+
+		const working = fakeAi(() => ({ response: "Blue Bottle Coffee" }));
+		expect(await suggestMerchantNames({ DB: db, AI: working })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(callsFor(working)).toEqual([RAW]);
+		expect(await failedNames()).toEqual([]);
+		expect(await merchants()).toEqual([
+			{
+				raw_name: RAW,
+				suggested_name: "Blue Bottle Coffee",
+				display_name: null,
+				suggestion_status: "pending",
+			},
+		]);
+	});
+
+	it("a failure again on a text that already failed updates its one row's time", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		await db
+			.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2000-01-01 00:00:00')",
+			)
+			.bind(RAW)
+			.run();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const failing = fakeAi(() => {
+			throw new Error("capacity");
+		});
+		await suggestMerchantNames({ DB: db, AI: failing });
+		logged.mockRestore();
+		const failures = await db
+			.prepare("SELECT raw_name, failed_at FROM merchant_name_failures")
+			.all<{ raw_name: string; failed_at: string }>();
+		const [failure] = failures.results;
+		expect(failures.results).toHaveLength(1);
+		expect(failure?.raw_name).toBe(RAW);
+		// Newer than the seeded time (datetime('now') has a one-second resolution, so compare with the seed).
+		expect((failure?.failed_at ?? "") > "2000-01-01 00:00:00").toBe(true);
+		expect(await merchants()).toEqual([]);
+	});
+
+	it("a text that failed and is answered on a later night leaves no failure row", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		await db
+			.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2026-10-01 09:20:00')",
+			)
+			.bind(RAW)
+			.run();
+		const working = fakeAi(() => ({ response: "Blue Bottle Coffee" }));
+		await suggestMerchantNames({ DB: db, AI: working });
+		expect(await failedNames()).toEqual([]);
+		expect(await merchants()).toMatchObject([
+			{ raw_name: RAW, suggestion_status: "pending" },
+		]);
+	});
+
+	it("asks the merchants whose calls failed after the never-tried ones, the longest-ago failure first", async () => {
+		await addTransactions([
+			...Array.from({ length: 3 }, () => ({ rawName: "RECENT FAIL" })),
+			...Array.from({ length: 2 }, () => ({ rawName: "OLD FAIL" })),
+			{ rawName: "NEVER TRIED" },
+		]);
+		await db.batch([
+			db.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('RECENT FAIL', '2026-10-06 09:20:00')",
+			),
+			db.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('OLD FAIL', '2026-10-01 09:20:00')",
+			),
+		]);
+		const ai = fakeAi(() => ({ response: "A Name" }));
+		await suggestMerchantNames({ DB: db, AI: ai });
+		expect(callsFor(ai)).toEqual(["NEVER TRIED", "OLD FAIL", "RECENT FAIL"]);
+	});
+
+	it("records a batch's answers and failed calls in one D1 batch", async () => {
+		await addTransactions(
+			["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((rawName) => ({ rawName })),
+		);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		// Two of the five calls fail and three answer, all in one batch of five.
+		const ai = fakeAi((text) => {
+			if (text === "TWO" || text === "FOUR") throw new Error("capacity");
+			return { response: "A Name" };
+		});
+		expect(
+			await suggestMerchantNames({ DB: counted as D1Database, AI: ai }),
+		).toEqual({ asked: 5, suggested: 3 });
+		logged.mockRestore();
+		// The candidate query, the names switch read at the start and again before the batch, then the batch's
+		// three writes: the merchants upsert, the failures upsert and the failures delete. 1 + 1 + 1 + 3 = 6.
+		expect(statements).toBeLessThanOrEqual(6);
+		expect((await merchants()).map((m) => m.raw_name)).toEqual([
+			"FIVE",
+			"ONE",
+			"THREE",
+		]);
+		expect(await failedNames()).toEqual(["FOUR", "TWO"]);
 	});
 
 	it("asks about the merchants with the most charges first, up to its limit for a night", async () => {
