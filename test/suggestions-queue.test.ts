@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isUnsure } from "../src/ai/maybe";
 import { AI_SWITCHES_ALL_ON, type AiSwitches } from "../src/db/ai-switches";
@@ -10,6 +11,7 @@ import {
 	transferAskedSql,
 } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
+import { suggestions } from "../src/routes/suggestions";
 
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" a person
 // hasn't answered, one item at a time, in the order money first, then categories, new categories, names.
@@ -856,6 +858,140 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 				await counted(transferAskedSql("transactions"), transfer),
 				`transfer at ${confidence}`,
 			).toBe(isUnsure(confidence) ? 1 : 0);
+		}
+	});
+
+	// The review screen's own route, so the Yes and No writes run as they do in the app.
+	const screen = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
+	screen.use("*", async (c, next) => {
+		c.set("actor", "test@example.com");
+		await next();
+	});
+	screen.route("/", suggestions);
+	const BASE = "http://tally.test";
+	const STALE = "That one was already answered.";
+	const answerOn = (fields: Record<string, string>, DB: D1Database) =>
+		screen.request(
+			"/settings/suggestions",
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams(fields).toString(),
+			},
+			{ ...env, DB },
+			{ waitUntil() {}, passThroughOnException() {}, props: {} },
+		);
+	const toastOf = (res: Response) =>
+		(
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+				toast?: { message: string };
+			}
+		).toast?.message;
+
+	/** The four answers the screen writes (src/routes/suggestions.tsx): the statement each starts with, and the column it sets. */
+	const WRITES = [
+		{
+			kind: "income",
+			answer: "yes",
+			amount: -250000,
+			write: "UPDATE transactions SET flag_income = 1",
+			column: "flag_income",
+		},
+		{
+			kind: "income",
+			answer: "no",
+			amount: -250000,
+			write: "UPDATE transactions SET income_maybe_declined = 1",
+			column: "income_maybe_declined",
+		},
+		{
+			kind: "transfer",
+			answer: "yes",
+			amount: 20000,
+			write: "UPDATE transactions SET excluded = 1",
+			column: "excluded",
+		},
+		{
+			kind: "transfer",
+			answer: "no",
+			amount: 20000,
+			write: "UPDATE transactions SET transfer_maybe_declined = 1",
+			column: "transfer_maybe_declined",
+		},
+	] as const;
+
+	/** The DB, with `rival` run just before the write whose SQL starts with `prefix`: the guess moves after the queue read. */
+	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+		let raced = false;
+		const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
+			new Proxy(statement, {
+				get(target, prop) {
+					if (prop === "bind")
+						return (...values: unknown[]) => guard(target.bind(...values));
+					if (prop === "run")
+						return async () => {
+							if (!raced) {
+								raced = true;
+								await rival();
+							}
+							return target.run();
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+		return new Proxy(db, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						return sql.startsWith(prefix) ? guard(statement) : statement;
+					};
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	}
+
+	it("a Yes or No writes an income or transfer guess exactly when isUnsure does, and a guess that has moved out of the range is stale", async () => {
+		for (const confidence of EDGES) {
+			for (const { kind, answer, amount, write, column } of WRITES) {
+				// The queue reads the guess as 0.5, so the item is asked; the edge is set just before the write.
+				const id = await transaction({
+					amount,
+					raw: `EDGE ${kind} ${answer} ${confidence}`,
+					...(kind === "income"
+						? { incomeConfidence: 0.5 }
+						: { transferConfidence: 0.5 }),
+				});
+				const res = await answerOn(
+					{ id: `${kind}-${id}`, answer },
+					racing(write, () =>
+						db
+							.prepare(
+								`UPDATE transactions SET ${kind}_confidence = ? WHERE id = ?`,
+							)
+							.bind(confidence, id)
+							.run(),
+					),
+				);
+				const saved = await db
+					.prepare(`SELECT ${column} AS value FROM transactions WHERE id = ?`)
+					.bind(id)
+					.first<{ value: number }>();
+				const label = `${kind} ${answer} at ${confidence}`;
+				if (isUnsure(confidence)) {
+					expect(toastOf(res), label).not.toBe(STALE);
+					expect(saved?.value, label).toBe(1);
+				} else {
+					expect(toastOf(res), label).toBe(STALE);
+					expect(saved?.value, label).toBe(0);
+				}
+			}
 		}
 	});
 });
