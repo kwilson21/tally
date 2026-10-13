@@ -2,8 +2,8 @@
 // person hasn't answered, in the order the screen asks them. The Band on Settings counts this list and
 // the screen shows it one item at a time, so the two can't drift apart.
 import { JEV_THRESHOLD } from "../ai/categorize";
-import { confidencePercent } from "../ai/confidence";
-import { isUnsure } from "../ai/maybe";
+import { BASIS_POINTS, confidencePercent } from "../ai/confidence";
+import { unsureBounds } from "../ai/maybe";
 import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
@@ -115,12 +115,23 @@ const cardLabel = (row: {
 }) => row.ownName ?? merchantLabel(row.displayName, row.merchantKey);
 
 /**
- * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked.
+ * The Maybe range as SQL over a confidence expression: `isUnsure`'s bounds (`unsureBounds`) in the same basis points
+ * (`confidenceBasisPoints`). CAST truncates, which is the floor for a confidence of 0 or more, and a NULL guess
+ * (no confidence, or one the row hides) is outside the range. `BETWEEN` takes the whole basis points strictly
+ * between the bounds. The bounds are code constants, so they are written in, as `categoryAskedSql` does.
+ */
+const unsureSql = (confidence: string) => {
+	const { above, below } = unsureBounds();
+	return `CAST((${confidence}) * ${BASIS_POINTS} AS INTEGER) BETWEEN ${above + 1} AND ${below - 1}`;
+};
+
+/**
+ * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against.
  */
 export const incomeAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
 		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillSql(alias)})
-		AND ${maybeIncomeConfidenceSql(alias)} IS NOT NULL)`;
+		AND ${unsureSql(maybeIncomeConfidenceSql(alias))})`;
 
 /**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
@@ -137,32 +148,30 @@ async function incomeSuggestions(
 			WHERE ${incomeAskedSql("t")}`,
 		)
 		.all<Candidate & { incomeConfidence: number }>();
-	return results
-		.filter((row) => isUnsure(row.incomeConfidence))
-		.map((row) => ({
-			order: row.id,
-			item: {
-				kind: "income",
-				id: `income-${row.id}`,
-				transactionId: row.id,
-				date: row.date,
-				amountCents: row.amountCents,
-				bankText: row.bankText,
-				merchantKey: row.merchantKey,
-				merchant: merchantLabel(row.displayName, row.merchantKey),
-				label: cardLabel(row),
-				sure: confidencePercent(row.incomeConfidence ?? 0),
-				categoryId: null,
-				category: null,
-			},
-		}));
+	return results.map((row) => ({
+		order: row.id,
+		item: {
+			kind: "income",
+			id: `income-${row.id}`,
+			transactionId: row.id,
+			date: row.date,
+			amountCents: row.amountCents,
+			bankText: row.bankText,
+			merchantKey: row.merchantKey,
+			merchant: merchantLabel(row.displayName, row.merchantKey),
+			label: cardLabel(row),
+			sure: confidencePercent(row.incomeConfidence ?? 0),
+			categoryId: null,
+			category: null,
+		},
+	}));
 }
 
 /**
- * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
+ * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). The guess must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against. A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
  */
 export const transferAskedSql = (alias: string) =>
-	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.transfer_confidence IS NOT NULL
+	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${unsureSql(`${alias}.transfer_confidence`)}
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
@@ -183,25 +192,23 @@ async function transferSuggestions(
 			WHERE ${transferAskedSql("t")}`,
 		)
 		.all<Candidate & { transferConfidence: number }>();
-	return results
-		.filter((row) => isUnsure(row.transferConfidence))
-		.map((row) => ({
-			order: row.id,
-			item: {
-				kind: "transfer",
-				id: `transfer-${row.id}`,
-				transactionId: row.id,
-				date: row.date,
-				amountCents: row.amountCents,
-				bankText: row.bankText,
-				merchantKey: row.merchantKey,
-				merchant: merchantLabel(row.displayName, row.merchantKey),
-				label: cardLabel(row),
-				sure: confidencePercent(row.transferConfidence),
-				categoryId: null,
-				category: null,
-			},
-		}));
+	return results.map((row) => ({
+		order: row.id,
+		item: {
+			kind: "transfer",
+			id: `transfer-${row.id}`,
+			transactionId: row.id,
+			date: row.date,
+			amountCents: row.amountCents,
+			bankText: row.bankText,
+			merchantKey: row.merchantKey,
+			merchant: merchantLabel(row.displayName, row.merchantKey),
+			label: cardLabel(row),
+			sure: confidencePercent(row.transferConfidence),
+			categoryId: null,
+			category: null,
+		},
+	}));
 }
 
 /**
