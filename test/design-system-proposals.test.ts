@@ -10,6 +10,53 @@ const get = async (path: string) => {
 };
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
 
+// Elements HTML never closes, so they don't open a level in actions() below.
+const VOID = new Set([
+	"area",
+	"base",
+	"br",
+	"col",
+	"embed",
+	"hr",
+	"img",
+	"input",
+	"link",
+	"meta",
+	"source",
+	"track",
+	"wbr",
+]);
+
+/**
+ * Every element on the page that can post a change or swap a target: a form, an element with an hx-post,
+ * hx-get, hx-put, hx-patch or hx-delete, a formaction, and a button or input that submits (type submit or
+ * image, or one that names another form). `inert` says whether it sits inside an inert element, itself
+ * included. Scripts and styles are skipped, and every tag must close in order, so a wrong nesting fails.
+ */
+function actions(html: string) {
+	const open: { tag: string; inert: boolean }[] = [];
+	const found: { raw: string; inert: boolean }[] = [];
+	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+	for (const match of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+		const raw = match[0];
+		const tag = (match[1] ?? "").toLowerCase();
+		if (raw.startsWith("</")) {
+			expect(open.pop()?.tag, raw).toBe(tag);
+			continue;
+		}
+		const inert = /\sinert(?=[\s=>/])/.test(raw);
+		const submits = /\stype="(?:submit|image)"|\sform=/.test(raw);
+		const acts =
+			tag === "form" ||
+			/\s(?:hx-(?:post|get|put|patch|delete)|formaction)=/.test(raw) ||
+			((tag === "button" || tag === "input") && submits);
+		if (acts) found.push({ raw, inert: inert || open.some((o) => o.inert) });
+		if (!raw.endsWith("/>") && !VOID.has(tag)) open.push({ tag, inert });
+	}
+	expect(open).toEqual([]);
+	return found;
+}
+
 describe("GET /design-system/proposals", () => {
 	it("draws P63's Accounts top with a net-worth line that ends on the headline above it", async () => {
 		const { html } = await get("/design-system/proposals");
@@ -451,6 +498,18 @@ describe("GET /design-system/proposals", () => {
 		expect(DECIDED.some((d) => d.title.startsWith("P75 "))).toBe(true);
 		expect(p75).not.toContain("when #80 settles");
 		expect(p75).toContain("decision 85");
+	});
+
+	it("keeps every form, hx-post, hx-get, formaction and submit button inside an inert element, so no drawn bill can post an unlink or swap a #page this page lacks (#448)", async () => {
+		const { html } = await get("/design-system/proposals");
+		const found = actions(html);
+		// The bill drawings' Not this one forms (the issue's case) must be among them, so the loop below can't pass by finding none.
+		expect(found.some((a) => a.raw.includes("/unlink"))).toBe(true);
+		// inert, not hx-ignore: a native form post still runs under hx-ignore, and the catalog CSP's form-action 'none'
+		// covers this page too but doesn't stop htmx's own request. Only inert stops both.
+		for (const action of found) expect(action.inert, action.raw).toBe(true);
+		// A button with no type submits a form it sits in, so every button declares one and the walk above sees it.
+		expect(html.match(/<button\b(?![^>]*\stype=)[^>]*>/g) ?? []).toEqual([]);
 	});
 
 	it("is linked from the catalog", async () => {
