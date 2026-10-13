@@ -19,6 +19,7 @@ import {
 	needsCategoryCount,
 	pendingForJev,
 	refundPurchases,
+	type SaveEditResult,
 	saveEdit,
 	saveSplit,
 } from "../src/db/transactions";
@@ -1947,8 +1948,24 @@ describe("refund guards", () => {
 		describe("a linked split credit's parts count against the purchase too", () => {
 			const PART_A = 9031;
 			const PART_B = 9032;
-			// SIX becomes a $20 split credit linked to the $50 purchase and never reviewed, in two $10 parts that follow its link.
-			// Each link can be given to set up another shape: null for unlinked, or another purchase.
+			const OTHER_LABEL = "Sep 2 · $50.00 · Kids";
+			const otherPurchase = {
+				id: OTHER_PURCHASE,
+				date: "2026-09-02",
+				amountCents: 5000,
+				categoryName: "Kids",
+			};
+			type Split = {
+				parent: number | null;
+				partA: number | null;
+				partB: number | null;
+			};
+			// The alert when a part is refused for the purchase it is linked to (not the credit's own purchase).
+			const partTooBig = (left: string, label: string) =>
+				`Part of this refund is for the ${label} purchase and is more than what's left of it (${left} left).`;
+			// SIX becomes a $20 split credit in two $10 parts, never reviewed, so nothing counts yet. Each link is
+			// null for unlinked, or a purchase. An unreviewed part still takes up room on its purchase, so a
+			// purchase is filled before its parts are made (fillUp, linkRefunds).
 			const unreviewedSplitCredit = (
 				links: {
 					parent?: number | null;
@@ -1971,132 +1988,361 @@ describe("refund guards", () => {
 						.bind(partA, partB),
 				]);
 			};
-			// The alert when a part is refused for the purchase it is linked to (not the credit's own purchase).
-			const partTooBig = (left: string, label: string) =>
-				`Part of this refund is for the ${label} purchase and is more than what's left of it (${left} left).`;
-			const OTHER_LABEL = "Sep 2 · $50.00 · Kids";
+			/** Makes a purchase full: BIG_REFUND, the whole $50, is linked to it. */
+			const fillUp = async (purchase: number) => {
+				await db
+					.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
+					.bind(BIG_REFUND)
+					.run();
+				expect((await link(BIG_REFUND, purchase)).res.status).toBe(200);
+			};
+			/** Links refunds to a purchase one at a time, each of which must fit. */
+			const linkRefunds = async (purchase: number, refunds: number[]) => {
+				for (const refund of refunds)
+					expect((await link(refund, purchase)).res.status).toBe(200);
+			};
 			const parts = async () =>
 				(
 					await db
 						.prepare(
-							"SELECT id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+							"SELECT id, refund_of_id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
 						)
 						.bind(SIX)
 						.all()
 				).results;
-
-			it("refuses it when the purchase has nothing left, saying so, and saves nothing", async () => {
-				await db
-					.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
-					.bind(BIG_REFUND)
-					.run();
-				expect((await link(BIG_REFUND, PURCHASE)).res.status).toBe(200);
-				await unreviewedSplitCredit();
-				const before = await spent("2026-08", KIDS);
-				const { res, html, trigger } = await save(SIX, [
-					["refund_of", String(PURCHASE)],
-					...REVIEW_AS_NOT_INCOME,
-					["note", "should not save"],
-				]);
-				expect(res.status).toBe(422);
-				expect(refundAlert(html)).toBe(tooBig("$0.00"));
-				expect(trigger).toBeNull();
-				expect(await row(SIX)).toMatchObject({
-					refund_of_id: PURCHASE,
-					note: null,
-					credit_reviewed: null,
-				});
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
-					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
-				]);
-				expect(await spent("2026-08", KIDS)).toBe(before);
+			/** The parts as a row expects them: linked as `split` says, and reviewed or not. */
+			const partsAs = (split: Split, reviewed: boolean) => [
+				{
+					id: PART_A,
+					refund_of_id: split.partA,
+					credit_reviewed: reviewed ? 1 : null,
+					credit_reviewed_by: reviewed ? "user" : null,
+				},
+				{
+					id: PART_B,
+					refund_of_id: split.partB,
+					credit_reviewed: reviewed ? 1 : null,
+					credit_reviewed_by: reviewed ? "user" : null,
+				},
+			];
+			/** Everything a save can change here: the credit, its parts, and Spent in both months. */
+			const snapshot = async () => ({
+				credit: await row(SIX),
+				parts: await parts(),
+				"2026-08": await spent("2026-08", KIDS),
+				"2026-09": await spent("2026-09", KIDS),
 			});
 
-			it("saves it when the purchase has room, and its parts count", async () => {
-				expect((await link(SECOND_REFUND, PURCHASE)).res.status).toBe(200);
-				await unreviewedSplitCredit();
-				const before = await spent("2026-08", KIDS);
-				const { res, html } = await save(SIX, [
-					["refund_of", String(PURCHASE)],
-					...REVIEW_AS_NOT_INCOME,
-				]);
-				expect(res.status).toBe(200);
-				expect(refundAlert(html)).toBeUndefined();
-				expect(await row(SIX)).toMatchObject({
-					refund_of_id: PURCHASE,
-					credit_reviewed: 1,
-				});
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: 1, credit_reviewed_by: "user" },
-					{ id: PART_B, credit_reviewed: 1, credit_reviewed_by: "user" },
-				]);
-				// Both $10 parts now count in the purchase's month and category, so $20 less is spent there.
-				expect(await spent("2026-08", KIDS)).toBe(before - 2000);
-			});
+			type Outcome =
+				| { alert: string }
+				| { refused: SaveEditResult }
+				| {
+						links: Split;
+						reviewed: boolean;
+						dropped: { "2026-08": number; "2026-09": number };
+				  };
+			type Scenario = {
+				name: string;
+				arrange?: () => Promise<unknown>;
+				split: Split;
+				/** The purchase the refund is linked to after the save; null unlinks it. */
+				linkTo: number | null;
+				/** Whether the panel ticks "Count as not income" on the credit. */
+				review: boolean;
+				outcome: Outcome;
+			};
+			// A save that links the parent to a new purchase goes straight to saveEdit, as the panel offers a
+			// split parent only its current link; every other save goes through the route, which shows the alert.
+			const SCENARIOS: Scenario[] = [
+				{
+					name: "review only, parent and parts on PURCHASE, PURCHASE full",
+					arrange: () => fillUp(PURCHASE),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: PURCHASE,
+					review: true,
+					outcome: { alert: tooBig("$0.00") },
+				},
+				{
+					name: "review only, parent and parts on PURCHASE, SECOND_REFUND on it",
+					arrange: () => linkRefunds(PURCHASE, [SECOND_REFUND]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: PURCHASE,
+					review: true,
+					outcome: {
+						links: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+						reviewed: true,
+						dropped: { "2026-08": 2000, "2026-09": 0 },
+					},
+				},
+				{
+					name: "review only, parent and parts on PURCHASE, $15 left on it",
+					arrange: () => linkRefunds(PURCHASE, [THIRTY_A, SECOND_REFUND]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: PURCHASE,
+					review: true,
+					outcome: { alert: tooBig("$15.00") },
+				},
+				{
+					name: "review only, parent and first part on PURCHASE, second part on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: PURCHASE,
+					review: true,
+					outcome: { alert: partTooBig("$0.00", OTHER_LABEL) },
+				},
+				{
+					name: "review only, parent unlinked, first part on PURCHASE, second part on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: { parent: null, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: null,
+					review: true,
+					outcome: { alert: partTooBig("$0.00", OTHER_LABEL) },
+				},
+				{
+					name: "review only, parent unlinked, first part on PURCHASE, second part on OTHER_PURCHASE with room",
+					split: { parent: null, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: null,
+					review: true,
+					outcome: {
+						links: { parent: null, partA: PURCHASE, partB: OTHER_PURCHASE },
+						reviewed: true,
+						dropped: { "2026-08": 1000, "2026-09": 1000 },
+					},
+				},
+				{
+					name: "link only, parent and parts on PURCHASE, OTHER_PURCHASE with $15 left for this refund",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A, SECOND_REFUND]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: false,
+					outcome: {
+						refused: { saved: false, refundLeftCents: 1500 },
+					},
+				},
+				{
+					name: "link only, parent and parts on PURCHASE, an empty OTHER_PURCHASE",
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: false,
+					outcome: {
+						links: {
+							parent: OTHER_PURCHASE,
+							partA: OTHER_PURCHASE,
+							partB: OTHER_PURCHASE,
+						},
+						reviewed: false,
+						dropped: { "2026-08": 0, "2026-09": 0 },
+					},
+				},
+				{
+					name: "link and review, parent on PURCHASE, both parts on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: {
+						parent: PURCHASE,
+						partA: OTHER_PURCHASE,
+						partB: OTHER_PURCHASE,
+					},
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: {
+							saved: false,
+							refundLeftCents: 0,
+							refundPurchase: otherPurchase,
+						},
+					},
+				},
+				{
+					name: "link and review, parent unlinked, both parts on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: { parent: null, partA: OTHER_PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: {
+							saved: false,
+							refundLeftCents: 0,
+							refundPurchase: otherPurchase,
+						},
+					},
+				},
+				{
+					name: "link and review, parent on PURCHASE, both parts on OTHER_PURCHASE with $15 left for this refund",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A, SECOND_REFUND]),
+					split: {
+						parent: PURCHASE,
+						partA: OTHER_PURCHASE,
+						partB: OTHER_PURCHASE,
+					},
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: {
+							saved: false,
+							refundLeftCents: 1500,
+							refundPurchase: otherPurchase,
+						},
+					},
+				},
+				{
+					name: "link and review, parent on PURCHASE, both parts on OTHER_PURCHASE with $20 left for this refund",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A]),
+					split: {
+						parent: PURCHASE,
+						partA: OTHER_PURCHASE,
+						partB: OTHER_PURCHASE,
+					},
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						links: {
+							parent: OTHER_PURCHASE,
+							partA: OTHER_PURCHASE,
+							partB: OTHER_PURCHASE,
+						},
+						reviewed: true,
+						dropped: { "2026-08": 0, "2026-09": 2000 },
+					},
+				},
+				{
+					name: "link and review, both parts on PURCHASE (they follow the parent), $15 left for this refund on OTHER_PURCHASE",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A, SECOND_REFUND]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: { saved: false, refundLeftCents: 1500 },
+					},
+				},
+				{
+					name: "link and review, both parts on PURCHASE (they follow the parent), $20 left for this refund on OTHER_PURCHASE",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						links: {
+							parent: OTHER_PURCHASE,
+							partA: OTHER_PURCHASE,
+							partB: OTHER_PURCHASE,
+						},
+						reviewed: true,
+						dropped: { "2026-08": 0, "2026-09": 2000 },
+					},
+				},
+				{
+					name: "link and review, first part on PURCHASE (it follows the parent), second part on OTHER_PURCHASE with $15 left for this refund",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A, SECOND_REFUND]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: { saved: false, refundLeftCents: 1500 },
+					},
+				},
+				{
+					name: "link and review, first part on PURCHASE (it follows the parent), second part on OTHER_PURCHASE with $20 left for this refund",
+					arrange: () => linkRefunds(OTHER_PURCHASE, [THIRTY_A]),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						links: {
+							parent: OTHER_PURCHASE,
+							partA: OTHER_PURCHASE,
+							partB: OTHER_PURCHASE,
+						},
+						reviewed: true,
+						dropped: { "2026-08": 0, "2026-09": 2000 },
+					},
+				},
+				{
+					name: "link and review, first part on PURCHASE (it follows the parent), second part on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: OTHER_PURCHASE,
+					review: true,
+					outcome: {
+						refused: {
+							saved: false,
+							refundLeftCents: 0,
+							refundPurchase: otherPurchase,
+						},
+					},
+				},
+				{
+					name: "unlink and review, parent and parts on a full PURCHASE",
+					arrange: () => fillUp(PURCHASE),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: PURCHASE },
+					linkTo: null,
+					review: true,
+					outcome: {
+						links: { parent: null, partA: null, partB: null },
+						reviewed: true,
+						dropped: { "2026-08": 0, "2026-09": 0 },
+					},
+				},
+				{
+					name: "unlink and review, first part on PURCHASE, second part on a full OTHER_PURCHASE",
+					arrange: () => fillUp(OTHER_PURCHASE),
+					split: { parent: PURCHASE, partA: PURCHASE, partB: OTHER_PURCHASE },
+					linkTo: null,
+					review: true,
+					outcome: { alert: partTooBig("$0.00", OTHER_LABEL) },
+				},
+			];
 
-			it("refuses it when a part on another purchase has nothing left there, and saves nothing", async () => {
-				await db
-					.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
-					.bind(BIG_REFUND)
-					.run();
-				expect((await link(BIG_REFUND, OTHER_PURCHASE)).res.status).toBe(200);
-				await unreviewedSplitCredit({ partB: OTHER_PURCHASE });
-				const before = [
-					await spent("2026-08", KIDS),
-					await spent("2026-09", KIDS),
-				];
-				const { res, html, trigger } = await save(SIX, [
-					["refund_of", String(PURCHASE)],
-					...REVIEW_AS_NOT_INCOME,
-					["note", "should not save"],
-				]);
-				expect(res.status).toBe(422);
-				expect(trigger).toBeNull();
-				expect(refundAlert(html)).toBe(partTooBig("$0.00", OTHER_LABEL));
-				expect(await row(SIX)).toMatchObject({
-					refund_of_id: PURCHASE,
-					note: null,
-					credit_reviewed: null,
-				});
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
-					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
-				]);
-				expect([
-					await spent("2026-08", KIDS),
-					await spent("2026-09", KIDS),
-				]).toEqual(before);
-			});
-
-			it("refuses it, unlinked, when a part on another purchase has nothing left there, and saves nothing", async () => {
-				await db
-					.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
-					.bind(BIG_REFUND)
-					.run();
-				expect((await link(BIG_REFUND, OTHER_PURCHASE)).res.status).toBe(200);
-				await unreviewedSplitCredit({
-					parent: null,
-					partA: PURCHASE,
-					partB: OTHER_PURCHASE,
-				});
-				const { res, html, trigger } = await save(SIX, [
-					["refund_of", ""],
-					...REVIEW_AS_NOT_INCOME,
-					["note", "should not save"],
-				]);
-				expect(res.status).toBe(422);
-				expect(trigger).toBeNull();
-				expect(refundAlert(html)).toBe(partTooBig("$0.00", OTHER_LABEL));
-				expect(await row(SIX)).toMatchObject({
-					refund_of_id: null,
-					note: null,
-					credit_reviewed: null,
-				});
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
-					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
-				]);
+			/** Each row saves (or refuses) the split and checks the state it leaves behind. */
+			it.each(SCENARIOS)("$name", async (s) => {
+				await s.arrange?.();
+				await unreviewedSplitCredit(s.split);
+				const before = await snapshot();
+				const note = "links" in s.outcome ? null : "should not save";
+				if (s.linkTo !== null && s.linkTo !== s.split.parent) {
+					const result = await saveEdit(
+						db,
+						SIX,
+						{
+							...EDIT,
+							refundOfId: s.linkTo,
+							note,
+							creditReviewed: s.review,
+							creditReviewedWas: false,
+						},
+						"test",
+					);
+					expect(result).toEqual(
+						"refused" in s.outcome ? s.outcome.refused : { saved: true },
+					);
+				} else {
+					const { res, html, trigger } = await save(SIX, [
+						["refund_of", s.linkTo === null ? "" : String(s.linkTo)],
+						...(s.review ? REVIEW_AS_NOT_INCOME : []),
+						...(note === null ? [] : [["note", note] as [string, string]]),
+					]);
+					if ("alert" in s.outcome) {
+						expect(res.status).toBe(422);
+						expect(refundAlert(html)).toBe(s.outcome.alert);
+						expect(trigger).toBeNull();
+					} else {
+						expect(res.status).toBe(200);
+						expect(refundAlert(html)).toBeUndefined();
+					}
+				}
+				if ("links" in s.outcome) {
+					expect(await refundOf(SIX)).toBe(s.outcome.links.parent);
+					expect(await parts()).toEqual(
+						partsAs(s.outcome.links, s.outcome.reviewed),
+					);
+					expect(await spent("2026-08", KIDS)).toBe(
+						before["2026-08"] - s.outcome.dropped["2026-08"],
+					);
+					expect(await spent("2026-09", KIDS)).toBe(
+						before["2026-09"] - s.outcome.dropped["2026-09"],
+					);
+				} else {
+					expect(await snapshot()).toEqual(before);
+				}
 			});
 
 			// The picker offers no purchase for an unlinked split, so this save is made directly, as the route would hold it.
@@ -2126,12 +2372,7 @@ describe("refund guards", () => {
 				expect(result).toEqual({
 					saved: false,
 					refundLeftCents: 0,
-					refundPurchase: {
-						id: OTHER_PURCHASE,
-						date: "2026-09-02",
-						amountCents: 5000,
-						categoryName: "Kids",
-					},
+					refundPurchase: otherPurchase,
 				});
 				expect(await row(SIX)).toMatchObject({
 					refund_of_id: null,
@@ -2140,49 +2381,18 @@ describe("refund guards", () => {
 				});
 				expect(await refundOf(PART_A)).toBeNull();
 				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
-					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
-				]);
-			});
-
-			it("saves it, unlinked, when the other purchase has room, and its parts count", async () => {
-				await unreviewedSplitCredit({
-					parent: null,
-					partA: PURCHASE,
-					partB: OTHER_PURCHASE,
-				});
-				const { res, html } = await save(SIX, [
-					["refund_of", ""],
-					...REVIEW_AS_NOT_INCOME,
-				]);
-				expect(res.status).toBe(200);
-				expect(refundAlert(html)).toBeUndefined();
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: 1, credit_reviewed_by: "user" },
-					{ id: PART_B, credit_reviewed: 1, credit_reviewed_by: "user" },
-				]);
-			});
-
-			it("refuses the parts together when they fit the purchase one at a time, and says what is left after the split's own parts", async () => {
-				expect((await link(THIRTY_A, PURCHASE)).res.status).toBe(200);
-				expect((await link(SECOND_REFUND, PURCHASE)).res.status).toBe(200);
-				await unreviewedSplitCredit();
-				const { res, html, trigger } = await save(SIX, [
-					["refund_of", String(PURCHASE)],
-					...REVIEW_AS_NOT_INCOME,
-					["note", "should not save"],
-				]);
-				expect(res.status).toBe(422);
-				expect(trigger).toBeNull();
-				expect(refundAlert(html)).toBe(tooBig("$15.00"));
-				expect(await row(SIX)).toMatchObject({
-					refund_of_id: PURCHASE,
-					note: null,
-					credit_reviewed: null,
-				});
-				expect(await parts()).toEqual([
-					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
-					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
+					{
+						id: PART_A,
+						refund_of_id: null,
+						credit_reviewed: null,
+						credit_reviewed_by: null,
+					},
+					{
+						id: PART_B,
+						refund_of_id: OTHER_PURCHASE,
+						credit_reviewed: null,
+						credit_reviewed_by: null,
+					},
 				]);
 			});
 		});

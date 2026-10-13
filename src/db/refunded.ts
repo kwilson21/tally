@@ -79,20 +79,18 @@ export async function refundLeftCents(
  * purchase, so two parts on one purchase are checked together (refundedByOthersSql counts the sibling,
  * since counts() ignores review).
  *
- * `oldLink` and `newLink` are the parent's link before and after the save, as SQL bind expressions (such as
- * `?2` and `?3`, or NULL). Parts on either are left out: parts on the old link move with the parent, and the
- * link statement's own refundFitsSql checks them against the new purchase, along with the parts already on
- * it. Every other part is on a purchase this save moves nothing to or from, so the answer is the same at
- * every statement of the batch. Used with NOT EXISTS (the write's gate) and to name the purchase that
- * refused it (saveEdit), so both give the same answer.
+ * `oldLink` is the parent's link before the save, as an SQL bind expression (such as `?2`, or NULL when the
+ * link stays or there was none). Parts on the old link are left out, since they move with the parent: the
+ * link statement's refundFitsSql checks what moves against what is left of the new purchase, counting the
+ * parts already there. Every other part is checked here, including the parts already on the purchase the
+ * parent is being linked to. Before the move, those parts are checked as they stand. The move runs only when
+ * what moves fits what is left, counting those parts, so after it every part there still fits. If the move is
+ * refused, nothing changes. So the answer is the same at every statement of the batch. Used with NOT EXISTS
+ * (the write's gate) and to name the purchase that refused it (saveEdit), so both give the same answer.
  */
-export function splitPartMisfitSql(
-	parent: string,
-	oldLink: string,
-	newLink: string,
-) {
+export function splitPartMisfitSql(parent: string, oldLink: string) {
 	return `kid.parent_id = ${parent} AND kid.refund_of_id IS NOT NULL
-		AND kid.refund_of_id IS NOT ${oldLink} AND kid.refund_of_id IS NOT ${newLink}
+		AND kid.refund_of_id IS NOT ${oldLink}
 		AND kid.amount_cents < 0 AND kid.flag_income = 0 AND COALESCE(kid.credit_reviewed, 0) = 0
 		AND (${refundFitsSql("kid.id", "kid.refund_of_id")}) IS NOT 1`;
 }

@@ -1050,19 +1050,17 @@ export async function saveEdit(
 					args: [id, edit.cashAmountCents],
 				};
 	// A split credit reviewed as not income makes each of its linked parts count against its own purchase, so
-	// each one is checked (splitPartMisfitSql). The parts on the parent's old and new link are left out: the
-	// old-link parts move with it, and the link statement checks them with the parts already on the new one.
-	// Every other part is on a purchase this save moves nothing to or from.
+	// each one is checked (splitPartMisfitSql). The parts on the parent's old link are left out, since they move
+	// with the parent, and the link statement checks what moves against what is left of the new purchase, counting
+	// the parts already there. The parts already on the new purchase are checked here as they stand. So the gate
+	// gives the same answer at every statement of the batch: the move runs only when it fits what is left,
+	// counting those parts, and if it is refused nothing changes.
 	const splitReview = creditReviewByUser && current.isSplit === 1;
 	const partsGate: { sql: (n: number) => string; args: unknown[] } = splitReview
 		? {
 				sql: (n) =>
-					` AND NOT EXISTS (SELECT 1 FROM transactions kid WHERE ${splitPartMisfitSql(`?${n}`, `?${n + 1}`, `?${n + 2}`)})`,
-				args: [
-					id,
-					newLink === undefined ? null : current.refundOfId,
-					newLink === undefined ? null : newLink,
-				],
+					` AND NOT EXISTS (SELECT 1 FROM transactions kid WHERE ${splitPartMisfitSql(`?${n}`, `?${n + 1}`)})`,
+				args: [id, newLink === undefined ? null : current.refundOfId],
 			}
 		: { sql: () => "", args: [] };
 	// Every write waits on the parts check and the cash check, and on the link's check too (gate).
@@ -1470,7 +1468,7 @@ export async function saveEdit(
 				`SELECT kid.refund_of_id AS id, buy.date AS date, buy.amount_cents AS amountCents, c.name AS categoryName
 				FROM transactions kid JOIN transactions buy ON buy.id = kid.refund_of_id
 				LEFT JOIN categories c ON c.id = buy.category_id
-				WHERE ${splitPartMisfitSql("?1", "?2", "?3")} ORDER BY kid.id LIMIT 1`,
+				WHERE ${splitPartMisfitSql("?1", "?2")} ORDER BY kid.id LIMIT 1`,
 			)
 			.bind(...partsGate.args)
 			.first<{
