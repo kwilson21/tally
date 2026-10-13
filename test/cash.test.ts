@@ -1394,6 +1394,11 @@ describe("cash lifecycle", () => {
 			expect(
 				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast.message,
 			).toBe("Undo expired. The cash entry stays deleted.");
+			// Both an expired and an unknown token name the Undo they answer (#444).
+			expect(
+				JSON.parse(refused.res.headers.get("HX-Trigger") ?? "{}").toast
+					.undoDone,
+			).toBe(value);
 			expect(
 				await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
 					.bind(id)
