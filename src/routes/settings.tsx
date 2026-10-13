@@ -12,7 +12,6 @@ import {
 	addCategory,
 	categoryNames,
 	moveCategory,
-	type SettingsCategory,
 	saveCategory,
 	setArchived,
 	settingsCategories,
@@ -35,7 +34,6 @@ import {
 } from "../db/reconnect";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
-import { formatCents } from "../money";
 import { reconnectRecipients } from "../reconnect/reminders";
 import {
 	type CategoryErrors,
@@ -52,55 +50,26 @@ import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import {
+	AddCategoryRow,
+	CategoryRow,
+	chevron,
+	summaryClass,
+	swap,
+} from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
 import { HouseholdPeople } from "../views/household-people";
-import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import {
 	MERCHANT_RULE_SEARCH_THRESHOLD,
 	MerchantRules,
 } from "../views/merchant-rules";
 import { Switch } from "../views/switch";
-import { TextInput } from "../views/text-input";
 import { TimeZoneRow } from "../views/time-zone-row";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
-
-/** "$600" or "$612.50": a budget as the list shows it. */
-const amount = (cents: number) =>
-	formatCents(cents, { wholeDollars: cents % 100 === 0 });
-
-/**
- * Every form on the page swaps the Categories section in place; without JavaScript it posts normally. The
- * Band above Categories follows the review queue, so each swap also draws it again (`hx-select-oob`).
- */
-const swap = (url: string, indicator: string) => ({
-	method: "post" as const,
-	action: url,
-	"hx-post": url,
-	"hx-disable": "findAll button[type=submit]",
-	"hx-indicator": `#${indicator}`,
-	"hx-target": "#categories",
-	"hx-select": "#categories",
-	"hx-select-oob": "#names-band",
-	"hx-swap": "outerHTML",
-});
-
-/**
- * A second submit button in a form that posts somewhere else (Archive, Move): `formaction` without
- * JavaScript, and its own htmx request with it. htmx 4 doesn't inherit hx-target, so it's repeated.
- */
-const action = (url: string, formId: string) => ({
-	formaction: url,
-	"hx-post": url,
-	"hx-disable": `#${formId} button[type=submit]`,
-	"hx-target": "#categories",
-	"hx-select": "#categories",
-	"hx-select-oob": "#names-band",
-	"hx-swap": "outerHTML",
-});
 
 const ruleFocus = (
 	renderedRules: { merchantKey: string }[],
@@ -120,14 +89,6 @@ const ruleFocus = (
 		focusMerchantHeading: renderedRules.length <= 1,
 	};
 };
-
-const summaryClass =
-	"flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden";
-const chevron = (
-	<span class="shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none">
-		<Icon name="chevron-right" class="size-5" />
-	</span>
-);
 
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
@@ -323,162 +284,6 @@ function AiSuggestions({
 	);
 }
 
-/** The name field, for adding a category or renaming one. Budgets are set on Home (decision 38). */
-function NameField({
-	idPrefix,
-	name,
-	errors = {},
-}: {
-	idPrefix: string;
-	name: string;
-	errors?: CategoryErrors;
-}) {
-	return (
-		<TextInput
-			id={`${idPrefix}-name`}
-			label="Name"
-			name="name"
-			value={name}
-			maxlength={40}
-			autocomplete="off"
-			autofocus={Boolean(errors.name)}
-			error={errors.name}
-			class="sm:max-w-sm"
-		/>
-	);
-}
-
-function CategoryRow({
-	category: c,
-	view,
-	first,
-	last,
-}: {
-	category: SettingsCategory;
-	view: View;
-	first: boolean;
-	last: boolean;
-}) {
-	const isOpen = view.open === c.id;
-	const url = `/settings/categories/${c.id}`;
-	const formId = `cat-${c.id}-form`;
-	// A month-crossing time zone save swaps just the two month-dependent parts of the row, out of
-	// band by their ids, so an edit someone has open, its draft and its focus are left alone.
-	const oob = view.budgetsOob ? "true" : undefined;
-	return (
-		<details class="group border-b border-rule" data-row={c.id} open={isOpen}>
-			<summary
-				data-category={c.id}
-				class={summaryClass}
-				autofocus={view.focus === c.id && !view.errors}
-			>
-				<CategoryIcon icon={c.icon} color={c.color} />
-				<span class="min-w-0 truncate text-lg font-medium">{c.name}</span>
-				<span
-					id={`cat-${c.id}-amount`}
-					class="ml-auto shrink-0 tabular-nums"
-					hx-swap-oob={oob}
-				>
-					{c.budgetCents === null ? (
-						<span class="text-muted">No budget</span>
-					) : (
-						<>
-							{amount(c.budgetCents)}
-							<span class="text-muted"> a month</span>
-						</>
-					)}
-				</span>
-				{chevron}
-			</summary>
-			<div class="flex flex-col gap-4 pb-5 sm:pl-11">
-				<form
-					id={formId}
-					class="flex flex-col gap-4"
-					{...swap(url, `cat-${c.id}-save`)}
-				>
-					<NameField
-						idPrefix={`c${c.id}`}
-						name={isOpen && view.values ? view.values.name : c.name}
-						errors={isOpen ? view.errors : undefined}
-					/>
-					<p
-						id={`cat-${c.id}-budget-note`}
-						class="text-muted"
-						hx-swap-oob={oob}
-					>
-						{c.budgetCents === null ? "No budget yet. " : ""}
-						<a
-							href={`/budget/${c.id}`}
-							id={`cat-${c.id}-budget-link`}
-							class="inline-flex min-h-11 items-center"
-						>
-							{c.budgetCents === null
-								? "Add one on Home"
-								: "Change its budget on Home"}
-						</a>
-					</p>
-					<div class="flex flex-wrap items-center gap-3">
-						<Button id={`cat-${c.id}-save`} type="submit" busyLabel="Saving…">
-							Save
-						</Button>
-						<Button
-							href="/settings"
-							kind="secondary"
-							// Back to the list with focus on this row, so the change is announced.
-							hx-get={`/settings?focus=${c.id}`}
-							hx-target="#categories"
-							hx-select="#categories"
-							hx-swap="outerHTML"
-						>
-							Cancel
-						</Button>
-						<Button
-							type="submit"
-							kind="text"
-							class="ml-auto"
-							busyLabel="Archiving…"
-							id={`cat-${c.id}-archive`}
-							{...action(`${url}/archive`, formId)}
-						>
-							Archive
-						</Button>
-					</div>
-					{!(first && last) && (
-						<div class="flex flex-wrap gap-2">
-							{!first && (
-								<Button
-									type="submit"
-									kind="secondary"
-									class="gap-2"
-									busyLabel="Moving…"
-									id={`cat-${c.id}-move-up`}
-									{...action(`${url}/move/up`, formId)}
-								>
-									<Icon name="arrow-up" class="size-4" />
-									Move up
-								</Button>
-							)}
-							{!last && (
-								<Button
-									type="submit"
-									kind="secondary"
-									class="gap-2"
-									busyLabel="Moving…"
-									id={`cat-${c.id}-move-down`}
-									{...action(`${url}/move/down`, formId)}
-								>
-									<Icon name="arrow-down" class="size-4" />
-									Move down
-								</Button>
-							)}
-						</div>
-					)}
-				</form>
-			</div>
-		</details>
-	);
-}
-
 /** The whole Settings page. Every swap selects #categories from this same page. */
 async function renderSettings(c: Context<App>, view: View = {}) {
 	const timeZone = view.timeZone ?? (await householdTimeZone(c.env.DB));
@@ -553,9 +358,13 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					{active.map((category, i) => (
 						<CategoryRow
 							category={category}
-							view={view}
 							first={i === 0}
 							last={i === active.length - 1}
+							open={view.open === category.id}
+							focus={view.focus === category.id && !view.errors}
+							values={view.values}
+							errors={view.errors}
+							budgetsOob={view.budgetsOob}
 						/>
 					))}
 					{/* A suggestion whose name an active category already has is added to it, not made again (decision 101). */}
@@ -590,36 +399,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							decide these.
 						</p>
 					)}
-					<details
-						class="group border-b border-rule"
-						data-row="new"
+					<AddCategoryRow
 						open={adding}
-					>
-						<summary class={`${summaryClass} text-accent`}>
-							<Icon name="plus" class="size-5" />
-							Add category
-						</summary>
-						<form
-							id="new-category-form"
-							class="flex flex-col gap-4 pb-5"
-							{...swap("/settings/categories", "new-category-save")}
-						>
-							<NameField
-								idPrefix="new"
-								name={adding && view.values ? view.values.name : ""}
-								errors={adding ? view.errors : undefined}
-							/>
-							<div>
-								<Button
-									id="new-category-save"
-									type="submit"
-									busyLabel="Adding…"
-								>
-									Add category
-								</Button>
-							</div>
-						</form>
-					</details>
+						values={view.values}
+						errors={view.errors}
+					/>
 					{archived.length > 0 && (
 						<details
 							class="group border-b border-rule"

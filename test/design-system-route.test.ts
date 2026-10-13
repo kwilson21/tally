@@ -680,6 +680,54 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows Settings' category row closed, open at both ends of the list, with a name error, and Add category open, all inert (as Settings draws it)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="category-row"'));
+		// Visual: a form here posts nowhere, and the specimen is inert to htmx.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain(
+			'data-ds-components="CategoryRow AddCategoryRow TextInput Button"',
+		);
+		expect(tag).toContain("hx-ignore");
+		const section =
+			html.split('id="category-row"')[1]?.split("</section>")[0] ?? "";
+		// One inert box per state: two closed rows, then the first and last rows open, the name error, and Add category.
+		expect(section.match(/<div inert/g)).toHaveLength(5);
+		expect(
+			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
+				/\sopen(\s|>|=)/.test(m[0]),
+			),
+		).toEqual([false, false, true, true, true, true]);
+		// Closed: a budget, then No budget.
+		const closed = section.split('id="cat-21-form"')[0] ?? "";
+		expect(closed).toContain("$700");
+		expect(closed).toContain("No budget");
+		// The first row open: Move up is absent, Move down is there.
+		const first =
+			section.split('id="cat-21-form"')[1]?.split('id="cat-31-form"')[0] ?? "";
+		expect(first).not.toContain("Move up");
+		expect(first).toContain("Move down");
+		// The last row open: Move down is absent, Move up is there.
+		const last =
+			section.split('id="cat-31-form"')[1]?.split('id="cat-41-form"')[0] ?? "";
+		expect(last).toContain("Move up");
+		expect(last).not.toContain("Move down");
+		// The name error, in role=alert, with the server's words for an empty name.
+		const error =
+			section
+				.split('id="cat-41-form"')[1]
+				?.split('id="new-category-form"')[0] ?? "";
+		expect(error).toMatch(/role="alert"[^>]*>Give the category a name\.<\/p>/);
+		// Add category, open, with its own Name field and button.
+		const add = section.split('id="new-category-form"')[1] ?? "";
+		expect(add).toContain('id="new-name"');
+		expect(add).toContain(">Add category</span>");
+		// DESIGN.md says what it is, right after the Bank sign-in emails row.
+		expect(design).toMatch(
+			/\| BankSignInEmails \|[^\n]*\n\| CategoryRow, AddCategoryRow \|/,
+		);
+	});
+
 	it("shows the price-changed offer on the bill's row and page, with its whole use spec (P36 B)", async () => {
 		const { html } = await get("/design-system");
 		// Each specimen up to the next one (the picker inside the first has a section of its own).

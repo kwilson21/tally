@@ -6,6 +6,7 @@ import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
+import { nameForm, parseCategory } from "../settings/category-form";
 import {
 	buildTrends,
 	type ChangeData,
@@ -37,6 +38,7 @@ import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { DetailRow } from "../views/detail-row";
@@ -4577,6 +4579,8 @@ const TRENDS_TOP_STATES = [
 ] as const;
 
 function SettingsGroup() {
+	// The server's own words for an empty name, so the catalog can't drift from what Settings says.
+	const blank = parseCategory(nameForm(""), [], null);
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
@@ -4711,6 +4715,102 @@ function SettingsGroup() {
 							}}
 							switches={{ names: true, categories: true, income: true }}
 						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="category-row"
+				title="CategoryRow"
+				tier="visual"
+				components={["CategoryRow", "AddCategoryRow", "TextInput", "Button"]}
+				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list."
+			>
+				<State label="Closed: one with a budget, one with No budget">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 11,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open={false}
+							focus={false}
+						/>
+						<CategoryRow
+							category={{
+								id: 12,
+								name: "Household",
+								icon: "household",
+								color: "cat-plum",
+								budgetCents: null,
+							}}
+							first={false}
+							last
+							open={false}
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="First row open: no Move up">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 21,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="Last row open: no Move down">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 31,
+								name: "Household",
+								icon: "household",
+								color: "cat-plum",
+								budgetCents: null,
+							}}
+							first={false}
+							last
+							open
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="A name left empty: the row stays open and says why">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 41,
+								name: "Rent",
+								icon: "household",
+								color: "cat-blue",
+								budgetCents: 150000,
+							}}
+							first={false}
+							last={false}
+							open
+							focus={false}
+							values={{ name: "" }}
+							errors={blank.ok ? {} : blank.errors}
+						/>
+					</div>
+				</State>
+				<State label="Add category open">
+					<div inert class="max-w-3xl border-t border-rule">
+						<AddCategoryRow open />
 					</div>
 				</State>
 			</Specimen>
