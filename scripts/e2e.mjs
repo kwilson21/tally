@@ -553,6 +553,95 @@ await page.getByText(/^\d+ selected$/).waitFor();
 step("Select all from the keyboard keeps focus on Set category");
 dropReplacedRequestLogs(keyboardErrors);
 
+// A tick's count reply is held back while focus goes to Select all. The reply swaps the page link for the whole-set
+// link: the link keeps its element and its focus, so Enter still selects the whole set (#455).
+const linkErrors = consoleErrors.length;
+await goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "networkidle",
+});
+const monthRows = await page
+	.locator("#selection-form input[name=ids]")
+	.evaluateAll((inputs) => inputs.map((input) => input.value));
+await goto(
+	`${BASE}/transactions?month=all&select=1&ids=${monthRows.slice(0, -1).join(",")}`,
+	{ waitUntil: "networkidle" },
+);
+await page.route("**/transactions/select/count*", slowCount);
+await page.locator("#selection-form input[name=ids]").last().focus();
+await page.keyboard.press("Space");
+await page.locator("#select-all-page a").focus();
+await page.waitForTimeout(1600);
+await page.waitForLoadState("networkidle");
+const wholeLink = page.locator("#select-all-page a");
+const wholeLabel = (await wholeLink.textContent())?.trim() ?? "";
+assert.match(
+	wholeLabel,
+	/^Select all \d+ in /,
+	"the reply must draw the whole-set link in place of the page link",
+);
+assert.ok(
+	await page.evaluate(() =>
+		Boolean(document.activeElement?.closest("#select-all-page")),
+	),
+	"focus must stay on Select all through the reply",
+);
+const wholeTotal = Number(wholeLabel.match(/\d+/)?.[0]);
+await page.keyboard.press("Enter");
+await page.waitForFunction(
+	() => document.activeElement?.id === "set-category-selection",
+);
+assert.match(
+	(await page.locator("#selected-count").textContent())?.trim() ?? "",
+	new RegExp(`^${wholeTotal} selected`),
+	"Enter must select the whole set",
+);
+await page.unroute("**/transactions/select/count*", slowCount);
+dropReplacedRequestLogs(linkErrors);
+step(
+	"a tick's slow count keeps focus on Select all as it becomes the whole-set link, and Enter selects the whole set",
+);
+
+// A tick's count reply draws no link at all, since every matched row is now ticked: the link had focus, so htmx moves
+// that focus to the count, the bar's focus stop, and never drops it to the body (#455).
+const countErrors = consoleErrors.length;
+await goto(`${BASE}/transactions?q=Local+Bakery&select=1`, {
+	waitUntil: "networkidle",
+});
+const bakeryRows = await page
+	.locator("#selection-form input[name=ids]")
+	.evaluateAll((inputs) => inputs.map((input) => input.value));
+await goto(
+	`${BASE}/transactions?q=Local+Bakery&select=1&ids=${bakeryRows.slice(0, -1).join(",")}`,
+	{ waitUntil: "networkidle" },
+);
+await page.route("**/transactions/select/count*", slowCount);
+await page.locator("#selection-form input[name=ids]").last().focus();
+await page.keyboard.press("Space");
+await page.locator("#select-all-page a").focus();
+await page.waitForTimeout(1600);
+await page.waitForLoadState("networkidle");
+assert.equal(
+	await page.locator("#select-all-page a").count(),
+	0,
+	"a reply that ticks every matched row must draw no link",
+);
+assert.ok(
+	await page.evaluate(() =>
+		Boolean(document.activeElement?.closest("#selected-count")),
+	),
+	"focus must move to the bar's count, not the body",
+);
+assert.equal(
+	(await page.locator("#selected-count").textContent())?.trim(),
+	`${bakeryRows.length} selected`,
+	"the count must say every matched row is ticked",
+);
+await page.unroute("**/transactions/select/count*", slowCount);
+dropReplacedRequestLogs(countErrors);
+step(
+	"a tick's slow count that draws no link moves focus to the count, not the body",
+);
+
 // A count still loading when Select all lands must not overwrite the bar with its stale count (#215).
 let errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?uncategorized=1`, {
