@@ -118,6 +118,10 @@ describe("schema", () => {
 		expect(await columns("plaid_items")).toContain("reconnect_emailed_at");
 	});
 
+	it("keeps the merchant name failure column (migration 0051, #468)", async () => {
+		expect(await columns("merchants")).toContain("name_failed_at");
+	});
+
 	it("rejects duplicate Plaid item ids", async () => {
 		const token = new Uint8Array([1, 2, 3]);
 		await db

@@ -334,6 +334,7 @@ describe("data exports", () => {
 			merchants: [
 				"default_category_id",
 				"display_name",
+				"name_failed_at",
 				"raw_name",
 				"suggested_name",
 				"suggestion_status",

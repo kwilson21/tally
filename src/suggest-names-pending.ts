@@ -90,7 +90,8 @@ export async function suggestTransactionNotes(
  * Asks Workers AI for each bank text that needs it, most charges first, while the household's names
  * switch is on (spec §8.6). The switch is checked after each batch of at most five calls: it can be
  * turned off during a call, in which case the answers from that batch are thrown away.
- * A failed call leaves its merchant to be asked tomorrow; three in a row stop the run. With a `time`, no new
+ * A failed call is recorded and its merchant is asked again on a later night, after the merchants never tried
+ * (#468); three in a row stop the run. With a `time`, no new
  * request starts once its deadline has passed, so slow requests can't hold up the rest of the run; what was
  * answered by then is kept and the rest wait for the next night.
  */
@@ -109,6 +110,7 @@ export async function suggestMerchantNames(
 	const rawNames = await merchantsToAsk(env.DB, limit);
 	for (let i = 0; i < rawNames.length; i += SWITCH_CHECK_BATCH) {
 		const answers: { rawName: string; names: string[] }[] = [];
+		const failed: string[] = [];
 		for (const rawName of rawNames.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) {
 				console.log("workers-ai: names stopped at the time budget");
@@ -117,6 +119,8 @@ export async function suggestMerchantNames(
 			done.asked += 1;
 			const result = await suggestNames(ai, rawName);
 			if (!result.ok) {
+				// Recorded before the stop below, so the failure that ends the run is in this batch's write too.
+				failed.push(rawName);
 				failuresInARow += 1;
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
@@ -127,7 +131,8 @@ export async function suggestMerchantNames(
 		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)
 		// without a D1 read for every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
-		done.suggested += await saveAskedNames(env.DB, answers);
+		// Answers and failed calls share this one write, so a batch costs the same statements either way.
+		done.suggested += await saveAskedNames(env.DB, answers, failed);
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);

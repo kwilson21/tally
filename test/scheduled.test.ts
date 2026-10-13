@@ -848,7 +848,15 @@ describe("scheduled handler: merchant names", () => {
 				fetchImpl as unknown as typeof fetch,
 			),
 		).resolves.toBeUndefined();
-		expect((await pending()).results).toEqual([]);
+		// The failed name is recorded as failed, with no suggestion made from it.
+		expect((await pending()).results).toEqual([
+			{
+				raw_name: "SQ *BLUE BOTTLE COF 0412",
+				suggested_name: null,
+				display_name: null,
+				suggestion_status: "none",
+			},
+		]);
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		logged.mockRestore();
 		vi.restoreAllMocks();

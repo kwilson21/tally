@@ -26,11 +26,13 @@ export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
 	ELSE 'rejected' END`;
 
 /**
- * The bank texts to ask Workers AI about, most charges first, at most `limit` (spec §7): a text Plaid
- * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier
- * answer. A cash entry a person typed (on the Cash account) is never asked about, nor a split part. A
- * Plaid id isn't needed, so the demo's seeded bank texts are asked too. A merchant is asked about
- * once, so an answer with no usable name is kept as an empty suggestion.
+ * The bank texts to ask Workers AI about, at most `limit` (spec §7): a text Plaid sent no `merchant_name`
+ * for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash entry a
+ * person typed (on the Cash account) is never asked about, nor a split part. A Plaid id isn't needed, so
+ * the demo's seeded bank texts are asked too. A merchant is asked about once, so an answer with no usable
+ * name is kept as an empty suggestion. A merchant whose call failed (`name_failed_at`) is still asked, but
+ * after the ones never tried, the longest-ago failure first, so merchants that keep failing can't hold up the
+ * rest (#468). Within each group, most charges first.
  */
 export async function merchantsToAsk(
 	db: D1Database,
@@ -39,13 +41,14 @@ export async function merchantsToAsk(
 	const { results } = await db
 		.prepare(
 			`SELECT t.raw_name AS rawName FROM transactions t
+			 LEFT JOIN merchants f ON f.raw_name = t.raw_name
 			 WHERE t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
 			   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
 			   AND NOT EXISTS (
 				SELECT 1 FROM merchants m WHERE m.raw_name = t.raw_name
 				  AND (m.display_name IS NOT NULL OR m.suggested_name IS NOT NULL OR m.suggestion_status != 'none'))
 			 GROUP BY t.raw_name
-			 ORDER BY COUNT(*) DESC, t.raw_name
+			 ORDER BY f.name_failed_at IS NOT NULL, f.name_failed_at, COUNT(*) DESC, t.raw_name
 			 LIMIT ?`,
 		)
 		.bind(limit)
@@ -54,37 +57,49 @@ export async function merchantsToAsk(
 }
 
 /**
- * Keeps one batch of Workers AI answers in a single JSON-backed upsert: pending when there are any,
- * an empty suggestion when there are none (so it isn't asked again). Only merchants nobody has named,
- * suggested for or decided about take them, so late answers are dropped.
+ * Keeps one batch of Workers AI answers and failed calls in a single JSON-backed upsert: pending when there
+ * are names, an empty suggestion when there are none (so it isn't asked again). A failed call stamps
+ * `name_failed_at` and leaves the merchant unanswered, so it is asked again on a later night (#468); a
+ * later answer clears the stamp. Only merchants nobody has named, suggested for or decided about take them,
+ * so late answers are dropped.
  */
 export async function saveAskedNames(
 	db: D1Database,
 	answers: { rawName: string; names: string[] }[],
+	failed: string[],
 ): Promise<number> {
-	if (answers.length === 0) return 0;
+	if (answers.length === 0 && failed.length === 0) return 0;
 	const result = await db
 		.prepare(
-			`WITH answers AS (
+			`WITH asked AS (
 				SELECT json_extract(value, '$.rawName') AS rawName,
 					json_extract(value, '$.suggestedName') AS suggestedName,
-					json_extract(value, '$.status') AS status
+					json_extract(value, '$.status') AS status,
+					json_extract(value, '$.failed') AS failed
 				FROM json_each(?)
 			)
-			INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-			SELECT rawName, suggestedName, status FROM answers WHERE 1
-			 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = excluded.suggestion_status
+			INSERT INTO merchants (raw_name, suggested_name, suggestion_status, name_failed_at)
+			SELECT rawName, suggestedName, status, CASE WHEN failed THEN datetime('now') END FROM asked WHERE 1
+			 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = excluded.suggestion_status,
+				name_failed_at = excluded.name_failed_at
 			 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.suggested_name IS NULL
 			 RETURNING suggested_name`,
 		)
 		.bind(
-			JSON.stringify(
-				answers.map(({ rawName, names }) => ({
+			JSON.stringify([
+				...answers.map(({ rawName, names }) => ({
 					rawName,
 					suggestedName: storeSuggestedNames(names),
 					status: names.length > 0 ? "pending" : "none",
+					failed: false,
 				})),
-			),
+				...failed.map((rawName) => ({
+					rawName,
+					suggestedName: null,
+					status: "none",
+					failed: true,
+				})),
+			]),
 		)
 		.all<{ suggested_name: string | null }>();
 	return result.results.filter((row) => Boolean(row.suggested_name)).length;
