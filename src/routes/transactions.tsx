@@ -1330,55 +1330,15 @@ transactions.post("/transactions/select/category", async (c) => {
 });
 
 /**
- * Each ticked row, read for Set category (#346): whether it is a refund that follows its purchase, by the counting
- * rule (FOLLOWS_PURCHASE, which names the transaction `t` and the purchase `rp`), and that purchase and its date.
+ * Sets the category on the rows named by id (`?1` the JSON ids, `?2` the category, `?3` the actor): a ticked refund
+ * that follows its purchase sets the purchase instead, and that rule is decided inside this write, so a link that
+ * changes mid-save can't send the category to the wrong row (decision 99, #346).
  */
-const SET_CATEGORY_ROWS = `SELECT t.id AS id, ${FOLLOWS_PURCHASE} AS follows, rp.id AS purchaseId, rp.date AS purchaseDate
-	FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id
-	WHERE t.id IN (SELECT value FROM json_each(?1))`;
-
-/**
- * The rows Set category changes for the ticked `ids` (decision 99, #346). A ticked refund that follows its purchase
- * has no category of its own, so its purchase takes the category and the refund keeps following; every other row
- * takes it itself. `changed` is each row the write changes, once: a purchase reached by two refunds, or ticked with
- * its refund, counts once. `movedDates` are the dates of the purchases that changed only because a ticked refund
- * follows them (a purchase ticked itself is set as a row, so it is not one of these).
- */
-async function categoryTargets(db: D1Database, ids: number[]) {
-	const { results } = await db
-		.prepare(SET_CATEGORY_ROWS)
-		.bind(JSON.stringify(ids))
-		.all<{
-			id: number;
-			follows: number;
-			purchaseId: number | null;
-			purchaseDate: string | null;
-		}>();
-	const following = new Set<number>();
-	const purchases = new Map<number, string>();
-	for (const row of results) {
-		if (
-			row.follows !== 1 ||
-			row.purchaseId === null ||
-			row.purchaseDate === null
-		)
-			continue;
-		following.add(row.id);
-		purchases.set(row.purchaseId, row.purchaseDate);
-	}
-	const ticked = new Set(ids);
-	return {
-		changed: [
-			...new Set([
-				...ids.filter((id) => !following.has(id)),
-				...purchases.keys(),
-			]),
-		],
-		movedDates: [...purchases]
-			.filter(([id]) => !ticked.has(id))
-			.map(([, date]) => date),
-	};
-}
+const SET_CATEGORY = `UPDATE transactions SET category_id=?2, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, split_removed_bills=NULL, updated_by=?3, updated_at=datetime('now')
+		WHERE id IN (SELECT CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.id ELSE t.id END
+			FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id
+			WHERE t.id IN (SELECT value FROM json_each(?1)))
+		RETURNING id, date`;
 
 /** The toast's sentence about purchases that moved with a refund: its date when one moved, "Their" when several did (#346). */
 function movedSentence(dates: string[], today: string): string {
@@ -1434,14 +1394,18 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			error: "Pick a category from the list.",
 			still: true,
 		});
-	// A refund that follows its purchase changes the purchase instead (#346), so the write and the count use `changed`.
-	const { changed, movedDates } = await categoryTargets(c.env.DB, ids);
-	// The same write as the edit panel's category change (saveEdit), once for every row it changes.
-	await c.env.DB.prepare(
-		"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, split_removed_bills=NULL, updated_by=?, updated_at=datetime('now') WHERE id IN (SELECT value FROM json_each(?))",
-	)
-		.bind(cat.id, actor(c), JSON.stringify(changed))
-		.run();
+	// One statement picks the rows and writes them (SET_CATEGORY), the same write as the edit panel's category change
+	// (saveEdit), so the follow rule is read as the write runs. The count, the toast and the rule offer all come from
+	// the rows it returns.
+	const { results } = await c.env.DB.prepare(SET_CATEGORY)
+		.bind(JSON.stringify(ids), cat.id, actor(c))
+		.all<{ id: number; date: string }>();
+	const changed = results.map((row) => row.id);
+	// A returned row that was not ticked is a purchase that moved with a ticked refund (#346).
+	const ticked = new Set(ids);
+	const movedDates = results
+		.filter((row) => !ticked.has(row.id))
+		.map((row) => row.date);
 	const message = `Set ${changed.length} ${changed.length === 1 ? "transaction" : "transactions"} to ${cat.name}.${movedSentence(movedDates, today)}`;
 	// The first merchant in the selection to reach three picks of this category is asked (decision 79). A purchase that
 	// moved with its refund is a pick now, so the offer reads the changed rows (#346).

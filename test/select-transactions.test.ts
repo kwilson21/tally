@@ -1,8 +1,10 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { FOLLOWS_PURCHASE } from "../src/db/counted-month";
 import { resetDemo } from "../src/demo/reset";
+import { transactions } from "../src/routes/transactions";
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);
@@ -330,6 +332,207 @@ describe("Set category on a refund that follows its purchase (#346, decision 99)
 		});
 		const { res } = await setGroceries([9402]);
 		expect(await res.text()).toContain("Always use Groceries for");
+	});
+
+	describe("a link that changes while the save runs", () => {
+		type TestApp = { Bindings: Env; Variables: { actor: string } };
+		const route = new Hono<TestApp>();
+		route.use("*", async (c, next) => {
+			c.set("actor", "test@example.com");
+			await next();
+		});
+		route.route("/", transactions as unknown as Hono<TestApp>);
+
+		/**
+		 * The DB, with `rival` run just before the first statement that starts with `prefix` runs (its run, all or
+		 * first), so a change lands between the save's start and its write. The rival writes through the real
+		 * database, so it is not guarded itself.
+		 */
+		function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+			let raced = false;
+			const fire = async () => {
+				if (raced) return;
+				raced = true;
+				await rival();
+			};
+			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
+				new Proxy(statement, {
+					get(target, prop) {
+						if (prop === "bind")
+							return (...values: unknown[]) => guard(target.bind(...values));
+						if (prop === "run" || prop === "all" || prop === "first")
+							return async (...args: unknown[]) => {
+								await fire();
+								return Reflect.apply(target[prop], target, args);
+							};
+						const value = Reflect.get(target, prop);
+						return typeof value === "function" ? value.bind(target) : value;
+					},
+				});
+			return new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop === "prepare")
+						return (sql: string) => {
+							const statement = target.prepare(sql);
+							return sql.startsWith(prefix) ? guard(statement) : statement;
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+		}
+
+		/** The sheet's Set category save for `ids` (Groceries, not all mode), run through the route on `db`. */
+		async function saveWith(db: D1Database, ids: number[]) {
+			const body = new URLSearchParams({
+				category: String(GROCERIES),
+				back: "/transactions?month=all",
+			});
+			for (const id of ids) body.append("ids", String(id));
+			const res = await route.request(
+				"/transactions/select/category/save",
+				{
+					method: "POST",
+					body,
+					headers: {
+						Origin: "http://tally.test",
+						"HX-Request": "true",
+						"content-type": "application/x-www-form-urlencoded",
+					},
+				},
+				{ ...env, DB: db },
+			);
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+				toast?: { message: string };
+				announce?: string;
+			};
+			return {
+				res,
+				message: trigger.toast?.message,
+				announce: trigger.announce,
+			};
+		}
+
+		/** A purchase (9411, Sep 5), a second purchase (9412, Sep 7) and a refund of the first (9413, Sep 10), all Eating out but the refund. */
+		const seed = async () => {
+			await insertRow(9411, {
+				date: "2026-09-05",
+				amount: 5000,
+				category: EATING_OUT,
+			});
+			await insertRow(9412, {
+				date: "2026-09-07",
+				amount: 4000,
+				category: EATING_OUT,
+			});
+			await insertRow(9413, {
+				date: "2026-09-10",
+				amount: -2000,
+				refundOf: 9411,
+			});
+		};
+
+		it("a refund relinked to the second purchase mid-save moves that purchase, and the first keeps its category", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET refund_of_id=9412 WHERE id=9413",
+				).run(),
+			);
+			const { res, message, announce } = await saveWith(db, [9413]);
+			expect(res.status).toBe(200);
+			expect(message).toBe(
+				"Set 1 transaction to Groceries. Its Sep 7 purchase moved with it.",
+			);
+			expect(announce).toBe(message);
+			expect(await stored(9412)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9413)).toEqual({
+				categoryId: null,
+				source: null,
+				refundOf: 9412,
+			});
+		});
+
+		it("a refund unlinked from its purchase mid-save takes the category itself, with no moved sentence", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET refund_of_id=NULL WHERE id=9413",
+				).run(),
+			);
+			const { message, announce } = await saveWith(db, [9413]);
+			expect(message).toBe("Set 1 transaction to Groceries.");
+			expect(announce).toBe(message);
+			expect(await stored(9413)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+		});
+
+		it("a refund whose purchase is excluded mid-save takes the category itself and stays linked", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET excluded=1 WHERE id=9411",
+				).run(),
+			);
+			const { message, announce } = await saveWith(db, [9413]);
+			expect(message).toBe("Set 1 transaction to Groceries.");
+			expect(announce).toBe(message);
+			expect(await stored(9413)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: 9411,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+		});
+
+		it("a mixed save of three ticks issues one category write, not one per row", async () => {
+			await seed();
+			await insertRow(9406, { date: "2026-09-01", amount: 1000 });
+			await insertRow(9407, { date: "2026-09-12", amount: -500 });
+			const prepared: string[] = [];
+			const db = new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop === "prepare")
+						return (sql: string) => {
+							prepared.push(sql);
+							return target.prepare(sql);
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			const { res, message } = await saveWith(db, [9406, 9407, 9413]);
+			expect(res.status).toBe(200);
+			expect(message).toBe(
+				"Set 3 transactions to Groceries. Its Sep 5 purchase moved with it.",
+			);
+			expect(
+				prepared.filter((sql) =>
+					sql.startsWith("UPDATE transactions SET category_id"),
+				),
+			).toHaveLength(1);
+		});
 	});
 });
 
