@@ -96,6 +96,20 @@ describe("GET /design-system in the demo", () => {
 		for (const name of names) expect(shown).toContain(name);
 	});
 
+	it("aims each Never suggest Remove at the section it sits in, never at #merchant-rules", async () => {
+		const { html } = await get("/design-system");
+		const standalone =
+			html.split('id="never-suggest-list"')[1]?.split("</section>")[0] ?? "";
+		const forms = standalone
+			.split('action="/settings/never-suggest/remove"')
+			.slice(1);
+		expect(forms).toHaveLength(2);
+		for (const form of forms) {
+			expect(form.split(">")[0]).toContain('hx-target="#never-suggest-list"');
+			expect(form.split(">")[0]).not.toContain("#merchant-rules");
+		}
+	});
+
 	it("renders the savings goal sheet specimen and documents it", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('data-ds-components="SavingsGoalSheet"');
@@ -509,6 +523,22 @@ describe("GET /design-system in the demo", () => {
 			}
 		},
 	);
+
+	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="suggestion-cards"')[1]?.split("</section>")[0] ?? "";
+		// Each card's answers sit in the form (or the div inside it) that holds its Yes: none may be a two-column grid.
+		const answered = section
+			.split("<form")
+			.slice(1)
+			.filter((form) => form.includes('name="answer" value="yes"'));
+		expect(answered.length).toBeGreaterThanOrEqual(3);
+		for (const form of answered)
+			expect(form.split('name="answer" value="yes"')[0]).not.toContain(
+				"grid-cols-2",
+			);
+	});
 
 	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
 		const { html } = await get("/design-system");

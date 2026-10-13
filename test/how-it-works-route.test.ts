@@ -132,6 +132,8 @@ describe("GET /how-it-works in the demo", () => {
 		expect(decodeHtml(names)).toContain('says "From your bank"');
 		expect(decodeHtml(names)).toContain("the bank's own names still show");
 		expect(names).not.toMatch(/jev|workers ai/i);
+		expect(decodeHtml(names)).toContain("in Settings under Suggestions");
+		expect(decodeHtml(names)).not.toContain("Merchant names");
 		expect(decodeHtml(names)).toMatch(
 			/In the demo, <\/span>(?:No merchant names are waiting for a choice|\d+ merchant names? (?:are|is) waiting for a choice)\./,
 		);

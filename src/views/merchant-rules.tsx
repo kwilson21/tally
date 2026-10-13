@@ -1,3 +1,8 @@
+import { shortDay } from "../dates";
+import {
+	type NeverSuggestRule,
+	neverSuggestRuleLine,
+} from "../db/never-suggest";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
 import { EmptyState } from "./empty-state";
@@ -24,9 +29,18 @@ export function MerchantRules({
 	focusRuleIndex,
 	focusHeading,
 	error,
+	neverRules = [],
+	neverFocus,
+	today,
 }: {
 	id?: string;
 	rules: MerchantRule[];
+	/** The "Never suggest" lines, under the same heading (issue #195). */
+	neverRules?: NeverSuggestRule[];
+	/** Where focus goes after a "Never suggest" Remove (issue #195). */
+	neverFocus?: NeverSuggestFocus;
+	/** The household's today, for the year on a No's day. */
+	today: string;
 	total: number;
 	search?: string;
 	focusRuleIndex?: number;
@@ -158,6 +172,96 @@ export function MerchantRules({
 					)}
 				</div>
 			</div>
+			<NeverSuggestList
+				rules={neverRules}
+				search={search}
+				today={today}
+				target={id}
+				focus={neverFocus}
+			/>
 		</section>
+	);
+}
+
+/** Where focus goes after a "Never suggest" Remove: a line's Remove by its position, or the heading. */
+export type NeverSuggestFocus = { index?: number; heading?: boolean };
+
+/**
+ * The "Never suggest" list under the same heading (issue #195, decision 101): one line per No the family
+ * said Yes to, the day of it, and a Remove whose name says which line it takes away. `target` is the id of
+ * the section the Remove swaps (the MerchantRules section it sits in), so the swap finds it wherever it is drawn.
+ */
+export function NeverSuggestList({
+	rules,
+	search = "",
+	today,
+	target,
+	focus = {},
+}: {
+	rules: NeverSuggestRule[];
+	/** The Always search, kept through a Remove so the list above still shows it. */
+	search?: string;
+	today: string;
+	/** The id of the section this list is drawn in; a Remove swaps that section. */
+	target: string;
+	focus?: NeverSuggestFocus;
+}) {
+	return (
+		<div class="mt-8">
+			<h3
+				tabindex={focus.heading ? -1 : undefined}
+				autofocus={focus.heading || undefined}
+				class="text-xl font-semibold"
+			>
+				Never suggest
+			</h3>
+			{rules.length === 0 ? (
+				<EmptyState kind="done" sentence="Tally hasn't been told No yet." />
+			) : (
+				<ul class="mt-2 divide-y divide-rule border-y border-rule">
+					{rules.map((rule, index) => {
+						const line = neverSuggestRuleLine(rule);
+						return (
+							<li class="flex min-h-16 items-center gap-4 py-2">
+								<span class="min-w-0 flex-1">
+									<span class="block text-lg leading-6">{line}</span>
+									<span class="block leading-6 text-muted">
+										You said No on {shortDay(rule.decidedOn, today)}
+									</span>
+								</span>
+								<form
+									method="post"
+									action="/settings/never-suggest/remove"
+									hx-post="/settings/never-suggest/remove"
+									hx-target={`#${target}`}
+									hx-select={`#${target}`}
+									// A line back in place can bring a suggestion back to the review, so the Band follows.
+									hx-select-oob="#names-band"
+									hx-swap="outerHTML"
+								>
+									<input type="hidden" name="id" value={String(rule.id)} />
+									<input
+										type="hidden"
+										name="merchant_key"
+										value={rule.merchantKey}
+									/>
+									<input type="hidden" name="kind" value={rule.kind} />
+									{search && (
+										<input type="hidden" name="rules_search" value={search} />
+									)}
+									<Button
+										type="submit"
+										kind="text"
+										autofocus={focus.index === index || undefined}
+									>
+										Remove<span class="sr-only"> {line}</span>
+									</Button>
+								</form>
+							</li>
+						);
+					})}
+				</ul>
+			)}
+		</div>
 	);
 }

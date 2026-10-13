@@ -3,6 +3,7 @@ import { fullMessage, MAX_ACTIVE, sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
 import { merchantKeySql } from "./merchant-key";
+import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
 import type { ListRow } from "./transactions";
 
@@ -16,10 +17,12 @@ export async function noneFitTransactions(
 	db: D1Database,
 ): Promise<NoneFitTransaction[]> {
 	const theme = `COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")})`;
+	// A store with a "Never suggest" line for a new category is never grouped (decision 101).
 	const eligible = `t.jev_none_fit = 1 AND t.category_confidence >= ? AND t.jev_category_id IS NULL
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
-		AND t.is_split = 0 AND t.parent_id IS NULL`;
+		AND t.is_split = 0 AND t.parent_id IS NULL
+		AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}`;
 	const { results: groups } = await db
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
@@ -146,8 +149,12 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
 export type PendingSuggestions = PendingSuggestion[] & { more: number };
+/** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */
+export const SETTINGS_SUGGESTION_LIMIT = 10;
+
 export async function pendingSuggestions(
 	db: D1Database,
+	limit = SETTINGS_SUGGESTION_LIMIT,
 ): Promise<PendingSuggestions> {
 	await db.batch([
 		db.prepare(
@@ -157,17 +164,19 @@ export async function pendingSuggestions(
 			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL)`,
 		),
 	]);
-	// Select the ten busiest eligible pending suggestions before loading ids or purchase rows.
+	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
 	const { results: suggestions } = await db
 		.prepare(
 			`WITH candidates AS (
 				SELECT cs.id, cs.name, COUNT(t.id) n
 				FROM category_suggestions cs JOIN transactions t ON t.category_suggestion_id=cs.id
 				AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL
+				AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
 				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
 			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
-			SELECT id,name,n,total FROM ranked WHERE rank<=10 ORDER BY rank`,
+			SELECT id,name,n,total FROM ranked WHERE rank<=? ORDER BY rank`,
 		)
+		.bind(limit)
 		.all<{ id: number; name: string; n: number; total: number }>();
 	if (!suggestions.length)
 		return Object.defineProperty([], "more", {
@@ -180,6 +189,7 @@ export async function pendingSuggestions(
 			SELECT cs.id, cs.name, COUNT(t.id) AS n
 			FROM pending p JOIN category_suggestions cs ON cs.id = p.id AND cs.status = 'pending'
 			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+				AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
 			GROUP BY cs.id HAVING COUNT(t.id) > 0
 		), ranked AS (
 			SELECT *, COUNT(*) OVER() AS total, ROW_NUMBER() OVER(ORDER BY n DESC, id) AS rank FROM candidates
@@ -189,9 +199,10 @@ export async function pendingSuggestions(
 			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending, ${ownNameSql("t")} AS ownName
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
-		WHERE r.rank <= 10 AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+		WHERE r.rank <= ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+			AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
 		ORDER BY r.rank, t.date DESC, t.id DESC`)
-		.bind(JSON.stringify(suggestions.map((s) => s.id)))
+		.bind(JSON.stringify(suggestions.map((s) => s.id)), limit)
 		.all<
 			Omit<ListRow, "pending" | "id"> & {
 				id: number;
@@ -257,7 +268,8 @@ export async function createFromSuggestion(
 	const attached = (
 		await db
 			.prepare(
-				`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND id IN (${placeholders()})`,
+				`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0
+					AND NOT ${neverSuggestedSql(merchantKeySql("transactions"), "new_category")} AND id IN (${placeholders()})`,
 			)
 			.bind(id, JSON.stringify(input.shown))
 			.all<{ id: number }>()
@@ -397,7 +409,12 @@ export async function createFromSuggestion(
 			error: "Tick at least one transaction, or dismiss this suggestion.",
 		};
 	}
-	const leftOut = (results[5]?.results as { id: number }[]) ?? [];
+	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
+	// arrived after the page was drawn, is still cleared by the write above (its NULL confidence sends it to the
+	// night), but it is not named.
+	const leftOut = ((results[5]?.results as { id: number }[]) ?? []).filter(
+		(row) => attached.includes(row.id),
+	);
 	// The write made no category, so the ticks joined one the family already had (or one made during the write).
 	const joined = (results[1]?.meta.changes ?? 0) === 0;
 	// A joined category is named as the family stored it, whatever capitals the suggestion has. It is read after
