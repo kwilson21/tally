@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { occurrencePaid, partPaidSentence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
-import { occurrenceUnpaidSql } from "../src/bills/unpaid";
+import { linkPaymentSql, occurrenceUnpaidSql } from "../src/bills/unpaid";
 import { resetDemo } from "../src/demo/reset";
-import { linkPaymentSql, loadBillRows } from "../src/routes/bills";
+import { loadBillRows } from "../src/routes/bills";
 import { type BillRowData, billStatusLine } from "../src/views/bill-row";
 
 // Partial bill payments (Phase 5, decision 101, #205): more than one payment can pay one occurrence, and an
@@ -132,6 +132,19 @@ describe("partial payments on one rent bill", () => {
 		);
 		expect(billStatusLine(overdue as BillRowData, "2026-10-09")).toBe(
 			"Part paid: $600 of $1,200",
+		);
+	});
+
+	it("a $1,200 rent whose only payment a bank corrected into a -$100 credit reads unpaid on the Bills row (#469)", async () => {
+		await addPayment(9601, "2026-10-01", 60000);
+		await link(9601);
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-10000 WHERE id=9601",
+		).run();
+		const row = await rentRow("2026-10-05");
+		expect(row).toMatchObject({ paidCents: 0, status: "overdue" });
+		expect(billStatusLine(row as BillRowData, "2026-10-05")).toMatch(
+			/^Was due /,
 		);
 	});
 
