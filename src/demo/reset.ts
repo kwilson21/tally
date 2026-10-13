@@ -5,6 +5,9 @@ import {
 	buildSeed,
 	monthOffset,
 	NETFLIX,
+	RENT_CATEGORY,
+	RENT_CENTS,
+	RENT_PAYEE,
 	type SeedBalance,
 	seedMerchantKey,
 } from "./seed";
@@ -220,6 +223,20 @@ export async function resetDemo(
 				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) SELECT id, ?, amount_cents FROM bills WHERE merchant_raw_name = ?",
 			)
 			.bind(monthOffset(today, 5), seedMerchantKey(NETFLIX.rawName)),
+		// Rent's payments are linked by hand (#205, decision 101): two last month make it Paid, and this month's one
+		// leaves it part paid. The late one dates this month's 1st but pays last month, so two payments share that date
+		// and each is matched on its bank text, date and amount, which the seed's own transactions carry.
+		...[
+			[monthOffset(today, 1), `${monthOffset(today, 1)}-01`, 70000],
+			[monthOffset(today, 1), `${today.slice(0, 7)}-01`, 50000],
+			[today.slice(0, 7), `${today.slice(0, 7)}-01`, 60000],
+		].map(([period, date, cents]) =>
+			db
+				.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT b.id, ?, t.id, 'user', 'linked' FROM bills b, transactions t WHERE b.merchant_raw_name = ? AND t.raw_name = ? AND t.date = ? AND t.amount_cents = ?",
+				)
+				.bind(period, seedMerchantKey(RENT_PAYEE), RENT_PAYEE, date, cents),
+		),
 	]);
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;
@@ -388,6 +405,17 @@ function demoBills(
 			null,
 			6,
 			seedMerchantKey("LITTLE SPROUTS DAYCARE"),
+			1,
+		],
+		[
+			9,
+			"Rent",
+			RENT_CENTS,
+			1,
+			"monthly",
+			null,
+			RENT_CATEGORY,
+			seedMerchantKey(RENT_PAYEE),
 			1,
 		],
 	];

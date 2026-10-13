@@ -368,7 +368,7 @@ describe("GET /transactions", () => {
 			await resetDemo(env.DB, "2026-10-11");
 			const first = (await get("/transactions")).html;
 			expect(first).toMatch(
-				/<p id="result-count"[^>]*>Showing 1–25 of 41 transactions in [A-Z][a-z]+<\/p>/,
+				/<p id="result-count"[^>]*>Showing 1–25 of 42 transactions in [A-Z][a-z]+<\/p>/,
 			);
 			expect(first).toMatch(/<nav aria-label="Pages"/);
 			expect(first).toContain("Page 1 of 2");
@@ -378,8 +378,8 @@ describe("GET /transactions", () => {
 			expect(first).not.toContain(">Newer<");
 
 			const second = (await get("/transactions?page=2")).html;
-			expect(rowCount(second)).toBe(16);
-			expect(second).toMatch(/Showing 26–41 of 41 transactions/);
+			expect(rowCount(second)).toBe(17);
+			expect(second).toMatch(/Showing 26–42 of 42 transactions/);
 			expect(second).toMatch(
 				/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 			);

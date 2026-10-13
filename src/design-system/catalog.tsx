@@ -1376,7 +1376,7 @@ function Rows() {
 				title="Bill occurrence and payment picker"
 				tier="visual"
 				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment. A payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
 				<State label="Paid occurrence">
 					<div inert>
@@ -1386,12 +1386,91 @@ function Rows() {
 								period="2026-09"
 								label="September 2026"
 								status="paid"
-								payment={{
-									displayName: "City Electric",
-									dateLabel: "Sep 24",
-									amountCents: 14200,
-									matchedBy: "auto",
-								}}
+								payments={[
+									{
+										transactionId: 3,
+										displayName: "City Electric",
+										dateLabel: "Sep 24",
+										amountCents: 14200,
+										matchedBy: "auto",
+									},
+								]}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Paid in 2 payments">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-08"
+								label="August 2026"
+								status="paid"
+								payments={[
+									{
+										transactionId: 4,
+										displayName: "Harbor Property",
+										dateLabel: "Aug 1",
+										amountCents: 70000,
+										matchedBy: "user",
+									},
+									{
+										transactionId: 5,
+										displayName: "Harbor Property",
+										dateLabel: "Aug 3",
+										amountCents: 50000,
+										matchedBy: "user",
+									},
+								]}
+								paidCents={120000}
+								amountCents={120000}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Part paid (this month's, still due)">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-10"
+								label="October 2026"
+								status="due"
+								payments={[
+									{
+										transactionId: 6,
+										displayName: "Harbor Property",
+										dateLabel: "Oct 1",
+										amountCents: 60000,
+										matchedBy: "user",
+									},
+								]}
+								paidCents={60000}
+								amountCents={120000}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Part paid, an earlier month (Not paid)">
+					<div inert>
+						<ul>
+							<BillOccurrenceRow
+								billId={1}
+								period="2026-09"
+								label="September 2026"
+								status="not-paid"
+								payments={[
+									{
+										transactionId: 7,
+										displayName: "Harbor Property",
+										dateLabel: "Sep 1",
+										amountCents: 60000,
+										matchedBy: "user",
+									},
+								]}
+								paidCents={60000}
+								amountCents={120000}
 							/>
 						</ul>
 					</div>
@@ -1556,24 +1635,30 @@ function Rows() {
 								period="2026-10"
 								label="October · $17.99"
 								status="paid"
-								payment={{
-									displayName: "Netflix",
-									dateLabel: "Oct 2",
-									amountCents: 1799,
-									matchedBy: "auto",
-								}}
+								payments={[
+									{
+										transactionId: 8,
+										displayName: "Netflix",
+										dateLabel: "Oct 2",
+										amountCents: 1799,
+										matchedBy: "auto",
+									},
+								]}
 							/>
 							<BillOccurrenceRow
 								billId={1}
 								period="2026-09"
 								label="September · $15.49"
 								status="paid"
-								payment={{
-									displayName: "Netflix",
-									dateLabel: "Sep 2",
-									amountCents: 1549,
-									matchedBy: "auto",
-								}}
+								payments={[
+									{
+										transactionId: 9,
+										displayName: "Netflix",
+										dateLabel: "Sep 2",
+										amountCents: 1549,
+										matchedBy: "auto",
+									},
+								]}
 							/>
 						</ul>
 					</div>
@@ -1607,7 +1692,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -1673,6 +1758,48 @@ function Rows() {
 									amountCents: 185000,
 									status: "due",
 									dueDate: "2026-10-05",
+									icon: "household",
+									color: "cat-brown",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Due, part paid (decision 101: the date's group, and what's paid in its place)">
+					<div class="max-w-xl">
+						<BillStatusHeading status="due" />
+						<ul>
+							<BillRow
+								today="2026-10-04"
+								bill={{
+									id: 3,
+									name: "Rent",
+									amountCents: 120000,
+									status: "due",
+									dueDate: "2026-10-05",
+									paidCents: 60000,
+									paidDate: "2026-10-01",
+									icon: "household",
+									color: "cat-brown",
+								}}
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Overdue, part paid, with the same words after its date">
+					<div class="max-w-xl">
+						<BillStatusHeading status="overdue" />
+						<ul>
+							<BillRow
+								today="2026-10-09"
+								bill={{
+									id: 3,
+									name: "Rent",
+									amountCents: 120000,
+									status: "overdue",
+									dueDate: "2026-10-05",
+									paidCents: 60000,
+									paidDate: "2026-10-01",
 									icon: "household",
 									color: "cat-brown",
 								}}

@@ -57,13 +57,20 @@ describe("Bills", () => {
 			const paidBy = await env.DB.prepare(
 				"SELECT id, amount_cents FROM transactions WHERE amount_cents > 0 ORDER BY id LIMIT 1",
 			).first<{ id: number; amount_cents: number }>();
-			const priorPayments = await env.DB.prepare(
-				"SELECT id FROM transactions WHERE amount_cents > 0 AND id != ? ORDER BY id LIMIT 2",
-			)
-				.bind(paidBy?.id ?? 0)
-				.all<{ id: number }>();
 			expect(paidBy).toBeDefined();
-			expect(priorPayments.results).toHaveLength(2);
+			// Each occurrence here is paid at 90% or more (decision 101), so none is part paid. The paid fixture's
+			// $1,000.00 pays a $1,012.34 bill, leaving $12.34 of it.
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9391,id,?,34567,'UPCOMING FIXTURE' FROM accounts WHERE type!='cash' LIMIT 1",
+				).bind(today),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9392,id,?,99900,'YEARLY FIXTURE' FROM accounts WHERE type!='cash' LIMIT 1",
+				).bind(today),
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT 9393,id,?,100000,'PAID FIXTURE' FROM accounts WHERE type!='cash' LIMIT 1",
+				).bind(today),
+			]);
 			await env.DB.batch([
 				env.DB.prepare(
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,category_id,merchant_raw_name) VALUES(9301,'Overdue fixture',12345,3,'yearly',?,5,'OVERDUE FIXTURE')",
@@ -79,26 +86,22 @@ describe("Bills", () => {
 				).bind(3),
 				env.DB.prepare(
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9305,'Paid fixture',? ,3,'monthly',5,'PAID FIXTURE')",
-				).bind((paidBy?.amount_cents ?? 0) + 1234),
+				).bind(101234),
 				env.DB.prepare(
 					"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,active) VALUES(9306,'Inactive fixture',1000,25,'monthly',5,'INACTIVE FIXTURE',0)",
 				),
 			]);
-			await env.DB.prepare(
-				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9305,?,?,'user','linked')",
-			)
-				.bind(month, paidBy?.id ?? 0)
-				.run();
-			await env.DB.batch(
-				[
-					[9303, String(Number(today.slice(0, 4)) - 1)],
-					[9304, today.slice(0, 4)],
-				].map(([billId, period], index) =>
-					env.DB.prepare(
-						"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,? ,?,'user','linked')",
-					).bind(billId, period, priorPayments.results[index]?.id ?? 0),
-				),
-			);
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9305,?,9393,'user','linked')",
+				).bind(month),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9303,?,9391,'user','linked')",
+				).bind(String(Number(today.slice(0, 4)) - 1)),
+				env.DB.prepare(
+					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9304,?,9392,'user','linked')",
+				).bind(today.slice(0, 4)),
+			]);
 			const html = await (
 				await exports.default.fetch("http://tally.test/bills")
 			).text();
@@ -695,7 +698,7 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
-		expect(html).toContain("Inactive (8)");
+		expect(html).toContain("Inactive (9)");
 		expect(html).not.toContain("No bills yet.");
 		// With bills but none due, the count is accurate and stays.
 		expect(html).toContain("0 bills to pay soon, $0.00 in all");
@@ -857,11 +860,15 @@ describe("Bills", () => {
 		expect(lookalike).toBeTruthy();
 		expect(Boolean(lookalike?.date && lookalike.date <= date)).toBe(true);
 		expect(lookalike?.status).toBeNull();
-		// The demo's set-aside stays small enough that Safe to spend stays positive.
+		// The demo's set-aside stays small enough that Safe to spend stays positive. Rent is set aside for what's left of
+		// it (decision 101), and from the 25th, when next month's rent falls due within seven days, all of it (decision 62).
 		const setAside = rows
 			.filter((row) => row.active && ["due", "overdue"].includes(row.status))
-			.reduce((sum, row) => sum + row.amountCents, 0);
-		expect(setAside).toBeLessThan(50_000);
+			.reduce(
+				(sum, row) => sum + Math.max(0, row.amountCents - row.paidCents),
+				0,
+			);
+		expect(setAside).toBeLessThan(170_000);
 	});
 
 	it("shows the demo's weekly Daycare total for its five October Fridays", async () => {
@@ -1895,9 +1902,18 @@ describe("Bills", () => {
 		const linked = await env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
 		).first<{ period: string }>();
+		// A Paid month takes no picker (#205), so the picker opens on a month the page still offers to link. A month
+		// chip asks for it with HX-Request, which keeps the month choices on a month with nothing to link yet.
+		const page = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		const open = /\/bills\/1\/occurrences\/([^/]+)\/link#payment-picker/.exec(
+			page,
+		)?.[1];
 		const html = await (
 			await exports.default.fetch(
-				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
+				`http://tally.test/bills/1/occurrences/${open}/link`,
+				{ headers: { "HX-Request": "true" } },
 			)
 		).text();
 		expect(html).toContain("Which month&#39;s bill does it pay?");
@@ -2301,7 +2317,11 @@ describe("Bills", () => {
 // Spec §8.5, decision 72 (P45 A): no two active bills share a name, and an amount over $100,000
 // is saved only once a "Yes, $X is right" chip for that exact amount is ticked.
 describe("Bill guards", () => {
-	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		// The demo's own Rent bill (decision 101) would already have the name these tests add.
+		await env.DB.prepare("DELETE FROM bills WHERE name='Rent'").run();
+	});
 
 	const fields = (over: Record<string, string> = {}) =>
 		new URLSearchParams({

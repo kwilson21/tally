@@ -46,8 +46,11 @@ describe("Trends with the demo seed", () => {
 			["Eating Out", "Up 4 months running"],
 		]);
 		expect(page.others.map((r) => r.name)).toEqual(
-			// Childcare has last month's Fridays, so it is in the rest from October 1 on.
-			earlyOctober ? ["Kids", "Household", "Childcare"] : ["Kids", "Childcare"],
+			// Childcare has last month's Fridays, so it is in the rest from October 1 on. Rent, with its budget from this
+			// month, is in the rest too (#205).
+			earlyOctober
+				? ["Kids", "Household", "Childcare", "Rent"]
+				: ["Kids", "Childcare", "Rent"],
 		);
 		// Six months drawn, this one still going, and none of them a part month.
 		const months = page.goingWell[0]?.months ?? [];
@@ -68,6 +71,8 @@ describe("Trends with the demo seed", () => {
 			expect(gap).not.toBeNull();
 			const dollars = Number((gap?.[1] ?? "0").replaceAll(",", ""));
 			expect(dollars).toBeGreaterThan(0);
+			// Rent adds $100 in the household's favour: last month's $700 was paid by this time and this month's $600 has been.
+			// Its $500 was paid late, this month, so it isn't in last month's days (the seed dates it this month's 1st).
 			expect(dollars).toBeLessThan(400);
 			// Out of about $1,700 for last month's days.
 			expect(page.sameDaysCents.last).toBeGreaterThan(150000);

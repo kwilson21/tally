@@ -1,9 +1,11 @@
-import type { BillStatus } from "../bills/status";
+import { type BillStatus, partPaidSentence } from "../bills/status";
 import { formatCents } from "../money";
 import { Button } from "./button";
 import { Icon } from "./icons";
 
 export type OccurrencePayment = {
+	/** The payment's transaction id, which its own Not this one sends (a month can hold several). */
+	transactionId: number;
 	displayName: string;
 	dateLabel: string;
 	amountCents: number;
@@ -120,27 +122,37 @@ function PriceChanged({
 	);
 }
 
-/** One occurrence on a bill page, including its real link/unlink controls. */
+/**
+ * One occurrence on a bill page, with its real link and unlink controls. Its payments are each listed with their
+ * own Not this one (decision 101). A part-paid occurrence says what it has, "Part paid: $600 of $1,200", and offers
+ * "Link another payment"; a Paid one with several payments says "Paid in 2 payments".
+ */
 export function BillOccurrenceRow({
 	billId,
 	period,
 	label,
 	status,
-	payment,
+	payments = [],
+	paidCents = 0,
+	amountCents = 0,
 	priceOffer,
-	focus = false,
+	focusTransactionId,
 }: {
 	billId: number;
 	period: string;
 	label: string;
 	status: BillStatus | "not-paid";
-	payment?: OccurrencePayment;
+	payments?: OccurrencePayment[];
+	/** What the payments add up to, and the occurrence's amount: the part-paid line reads both. */
+	paidCents?: number;
+	amountCents?: number;
 	priceOffer?: OccurrencePriceOffer | null;
-	/** Takes focus when the page arrives, as after an Undo that linked this payment again (#340). */
-	focus?: boolean;
+	/** The payment whose Not this one takes focus when the page arrives, as after an Undo that linked it again (#340). */
+	focusTransactionId?: number;
 }) {
 	const unlink = `/bills/${billId}/occurrences/${period}/unlink`;
-	if (priceOffer && !payment)
+	const link = `/bills/${billId}/occurrences/${period}/link#payment-picker`;
+	if (priceOffer && !payments.length)
 		return (
 			<li class="py-2">
 				<p class="flex justify-between gap-3">
@@ -150,39 +162,59 @@ export function BillOccurrenceRow({
 				<PriceChanged billId={billId} period={period} offer={priceOffer} />
 			</li>
 		);
+	const partPaid = payments.length > 0 && status !== "paid";
 	return (
 		<li class="py-2">
 			<p class="flex justify-between gap-3">
 				<span class="text-lg">{label}</span>
 				<StatusTag status={status} />
 			</p>
-			<p class="text-muted">
-				{payment
-					? `${payment.displayName} · ${payment.dateLabel} · ${formatCents(payment.amountCents)}${payment.matchedBy === "user" ? " · by hand" : ""}`
-					: "No payment linked yet"}
-			</p>
-			{payment ? (
-				<form
-					method="post"
-					action={unlink}
-					hx-post={unlink}
-					hx-target="#page"
-					hx-select="#page"
-					hx-swap="outerHTML"
-				>
-					<Button kind="text" type="submit" class="-ml-2" autofocus={focus}>
-						Not this one
-					</Button>
-				</form>
-			) : (
-				<Button
-					kind="text"
-					class="-ml-2"
-					href={`/bills/${billId}/occurrences/${period}/link#payment-picker`}
-				>
+			{partPaid && (
+				<p class="text-lg">{partPaidSentence(paidCents, amountCents)}</p>
+			)}
+			{status === "paid" && payments.length > 1 && (
+				<p class="text-lg">{`Paid in ${payments.length} payments`}</p>
+			)}
+			{payments.length === 0 && <p class="text-muted">No payment linked yet</p>}
+			{payments.map((payment) => (
+				<>
+					<p class="text-muted">
+						{`${payment.displayName} · ${payment.dateLabel} · ${formatCents(payment.amountCents)}${payment.matchedBy === "user" ? " · by hand" : ""}`}
+					</p>
+					<form
+						method="post"
+						action={unlink}
+						hx-post={unlink}
+						hx-target="#page"
+						hx-select="#page"
+						hx-swap="outerHTML"
+					>
+						<input
+							type="hidden"
+							name="transaction_id"
+							value={payment.transactionId}
+						/>
+						<Button
+							kind="text"
+							type="submit"
+							class="-ml-2"
+							autofocus={payment.transactionId === focusTransactionId}
+							aria-label={`Not this one: ${payment.displayName} ${formatCents(payment.amountCents)} on ${payment.dateLabel}`}
+						>
+							Not this one
+						</Button>
+					</form>
+				</>
+			))}
+			{payments.length === 0 ? (
+				<Button kind="text" class="-ml-2" href={link}>
 					Link a payment
 				</Button>
-			)}
+			) : partPaid ? (
+				<Button kind="text" class="-ml-2" href={link}>
+					Link another payment
+				</Button>
+			) : null}
 		</li>
 	);
 }

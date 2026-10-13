@@ -129,11 +129,9 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					FROM source CROSS JOIN maximum
 				)
 				SELECT json_extract(payments.value, '$.bill_name') AS name FROM json_each(?) AS payments
-				WHERE json_extract(payments.value, '$.status') = 'linked' AND (
-					EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(payments.value, '$.bill_id') AND period=json_extract(payments.value, '$.period') AND status='linked')
-					OR EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
-						(SELECT new_id FROM targets WHERE old_id=CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)),
-						CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)) AND status='linked'))`,
+				WHERE json_extract(payments.value, '$.status') = 'linked' AND EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
+					(SELECT new_id FROM targets WHERE old_id=CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)),
+					CAST(json_extract(payments.value, '$.transaction_id') AS INTEGER)) AND status='linked')`,
 			)
 			.bind(
 				JSON.stringify([transaction, ...snapshot.parts]),
@@ -201,11 +199,10 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 										: jsonColumn(column, "payments."),
 								)
 								.join(",")}
-						 FROM json_each(?) AS payments WHERE (json_extract(value, '$.status') != 'linked' OR (
-						 NOT EXISTS (SELECT 1 FROM bill_payments WHERE bill_id=json_extract(value, '$.bill_id') AND period=json_extract(value, '$.period') AND status='linked')
-						 AND NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
+						 FROM json_each(?) AS payments WHERE (json_extract(value, '$.status') != 'linked' OR
+						 NOT EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id=COALESCE(
 							(SELECT new_id FROM targets WHERE old_id=json_extract(payments.value, '$.transaction_id')),
-							json_extract(payments.value, '$.transaction_id')) AND status='linked')))
+							json_extract(payments.value, '$.transaction_id')) AND status='linked'))
 						 AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
 					)
 					.bind(

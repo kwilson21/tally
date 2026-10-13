@@ -3,6 +3,7 @@ import {
 	type BillStatus,
 	billCadenceLabel,
 	billScheduleLabel,
+	partPaidSentence,
 } from "../bills/status";
 import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
@@ -17,6 +18,8 @@ export type BillRowData = {
 	status: BillStatus;
 	dueDate: string;
 	paidDate?: string | null;
+	/** What the occurrence's linked payments add up to (decision 101); above zero, a part-paid row says so. */
+	paidCents?: number;
 	/** A payment from this bill's merchant at another price, offered instead of matched (spec §8.5, P36 B). */
 	priceOffer?: { amountCents: number; date: string } | null;
 	icon: string;
@@ -126,6 +129,9 @@ export function billStatusLine(bill: BillRowData, today: string) {
 		);
 		return `Paid ${day(bill.paidDate)}${late ? `, ${late} ${late === 1 ? "day" : "days"} late` : ""}`;
 	}
+	// A part-paid occurrence keeps its date's status heading and says what has been paid (decision 101).
+	if (bill.status !== "paid" && (bill.paidCents ?? 0) > 0)
+		return partPaidSentence(bill.paidCents ?? 0, bill.amountCents);
 	return `${bill.status === "overdue" ? "Was due" : "Due"} ${day(bill.dueDate)}`;
 }
 

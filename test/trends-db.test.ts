@@ -257,6 +257,7 @@ describe("loadTrends's other rows", () => {
 			"Kids",
 			"Household",
 			"Childcare",
+			"Rent",
 		]);
 		expect(data.categories[0]).toEqual({
 			id: GROCERIES,

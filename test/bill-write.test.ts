@@ -121,6 +121,8 @@ describe("bill writes", () => {
 		])(
 			"%j and %j: duplicates is %s, in both",
 			async (existing, typed, same) => {
+				// Only the bill this case adds: the demo's own Rent bill (decision 101) would take the name first.
+				await env.DB.prepare("DELETE FROM bills").run();
 				await env.DB.prepare(
 					`INSERT INTO bills(name,amount_cents,due_day,frequency,category_id,merchant_raw_name)
 				 VALUES(?,1000,1,'monthly',5,'RIVAL CO')`,

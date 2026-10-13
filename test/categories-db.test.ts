@@ -31,6 +31,7 @@ describe("settingsCategories", () => {
 			["Gas", 20000],
 			["Kids", 30000],
 			["Childcare", 104000],
+			["Rent", 120000],
 		]);
 		expect(archived.map((c) => c.name)).toEqual(["Household"]);
 	});
@@ -42,8 +43,8 @@ describe("addCategory", () => {
 		expect((await settingsCategories(db, MONTH)).active.at(-1)).toMatchObject({
 			name: "Travel",
 			icon: "tag",
-			// With Childcare the demo has six categories, and the colors cycle by count: the next is the second.
-			color: "cat-plum",
+			// With Childcare and Rent the demo has seven categories, and the colors cycle by count: the next is the third.
+			color: "cat-slate",
 			budgetCents: null,
 		});
 	});
@@ -85,6 +86,7 @@ describe("moveCategory", () => {
 			"Kids",
 			"Household",
 			"Childcare",
+			"Rent",
 		]);
 		await moveCategory(db, 3, "down");
 		expect(await names()).toEqual([
@@ -94,9 +96,10 @@ describe("moveCategory", () => {
 			"Kids",
 			"Household",
 			"Childcare",
+			"Rent",
 		]);
 		await moveCategory(db, 1, "up");
-		await moveCategory(db, 6, "down");
+		await moveCategory(db, 7, "down");
 		expect(await names()).toEqual([
 			"Groceries",
 			"Eating Out",
@@ -104,6 +107,7 @@ describe("moveCategory", () => {
 			"Kids",
 			"Household",
 			"Childcare",
+			"Rent",
 		]);
 	});
 });
@@ -119,6 +123,7 @@ describe("restoring after a move", () => {
 			"Household",
 			"Kids",
 			"Childcare",
+			"Rent",
 			"Eating Out",
 		]);
 		const orders = await db
@@ -261,11 +266,11 @@ describe("category archive periods", () => {
 });
 
 describe("the 50-category limit, checked in the same write", () => {
-	// The demo has 6 active (Childcare included); fill up to 50, as if other saves landed first.
+	// The demo has 7 active (Childcare and Rent included); fill up to 50, as if other saves landed first.
 	const fill = () =>
 		db
 			.prepare(
-				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 44)
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 43)
 				 INSERT INTO categories (name, icon, color) SELECT 'Extra ' || i, 'tag', 'cat-blue' FROM n`,
 			)
 			.run();

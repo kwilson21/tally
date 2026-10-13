@@ -6,6 +6,7 @@
 // never offered for that bill and month again. An offer never links anything by itself.
 
 import { daysBefore, householdMonth } from "../dates";
+import { occurrenceAmountSql } from "../db/bill-amounts";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -83,6 +84,8 @@ export type OfferBill = {
 	merchantRawText: number;
 	period: string;
 	dueDate: string;
+	/** Whether any payment is linked to the occurrence, a part payment included: an occurrence with one is not asked about. */
+	linked: boolean;
 };
 
 type Row = {
@@ -135,9 +138,14 @@ function offerFrom(rows: Row[], bill: OfferBill): PriceOffer | undefined {
 		: undefined;
 }
 
-/** Whether an occurrence can be asked about at all: an active bill, due or overdue, so no payment is linked. */
+/**
+ * Whether an occurrence can be asked about at all: an active bill, due or overdue, with no payment linked (a part
+ * payment counts as one, so a part-paid occurrence is not asked about either).
+ */
 const asks = (bill: OfferBill) =>
-	bill.active && (bill.status === "due" || bill.status === "overdue");
+	bill.active &&
+	(bill.status === "due" || bill.status === "overdue") &&
+	!bill.linked;
 
 /** The offer for one bill's occurrence, or undefined. */
 export async function findPriceOffer(
@@ -168,15 +176,6 @@ export async function loadPriceOffers(
 }
 
 /**
- * The amount the occurrence due in ?6 is judged at, as src/bills/amount.ts's `amountForMonth` reads it: the
- * latest row on or before that month, else the earliest row, else the bill's own amount.
- */
-const occurrenceAmountSql = `COALESCE(
-	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 AND effective_month <= ?6 ORDER BY effective_month DESC LIMIT 1),
-	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ?2 ORDER BY effective_month LIMIT 1),
-	(SELECT amount_cents FROM bills WHERE id = ?2))`;
-
-/**
  * What must still be true for an accept to go through, as one condition every statement of it shares:
  * linking the payment to the occurrence would be new (nothing is linked to the payment, and nothing to
  * the occurrence), the payment is still the charge the person saw, the occurrence is still at the amount
@@ -190,7 +189,7 @@ const stillOffered = (charge: string, seen: string) =>
 	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
 	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
-	 AND ${occurrenceAmountSql} IN (${charge}, ${seen})
+	 AND ${occurrenceAmountSql("?2", "?6")} IN (${charge}, ${seen})
 	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ?7))`;
 
 /**

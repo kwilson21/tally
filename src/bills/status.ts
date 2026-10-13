@@ -1,4 +1,5 @@
 import { monthDay, ordinal } from "../dates";
+import { formatCents } from "../money";
 
 export type BillStatus = "paid" | "overdue" | "due" | "upcoming";
 export type BillFrequency =
@@ -40,6 +41,24 @@ export const handledBeforeAdded = (
 	dueDate: string,
 	linked: boolean,
 ) => !linked && !!addedOn && dueDate < addedOn;
+
+/**
+ * Decision 101 (#205): an occurrence is Paid once its linked payments add up to at least 90% of its amount, the
+ * matcher's 10% tolerance (BILL_AMOUNT_TOLERANCE), so $1,080.00 of $1,200 is Paid and $1,079.99 is not. Paying
+ * more is still Paid. Integer cents, so no float rounds the check. Until then the occurrence is part paid.
+ */
+export const occurrencePaid = (paidCents: number, amountCents: number) =>
+	paidCents * 10 >= amountCents * 9;
+
+/**
+ * "Part paid: $600 of $1,200" (decision 101): each amount shows its cents only when it has them, so "$600" and
+ * "$7.75 of $15.49" both read as they are written.
+ */
+export const partPaidSentence = (paidCents: number, amountCents: number) => {
+	const money = (cents: number) =>
+		formatCents(cents, { wholeDollars: cents % 100 === 0 });
+	return `Part paid: ${money(paidCents)} of ${money(amountCents)}`;
+};
 
 const WEEKDAYS = [
 	"Monday",
@@ -198,14 +217,21 @@ function periodicOccurrences(bill: BillSchedule, today: string) {
 	return occurrences;
 }
 
-/** The occurrence a person needs to act on (decision 62). */
+/**
+ * The occurrence a person needs to act on (decision 62). `paid` holds the periods that are Paid (occurrencePaid),
+ * which decide its status. `linked` holds the periods with any payment linked, which keep an occurrence due before
+ * the bill was added in view (decision 99); it defaults to `paid`.
+ */
 export function billOccurrence(
 	bill: BillSchedule,
 	today: string,
-	linked: boolean | ReadonlySet<string>,
+	paid: boolean | ReadonlySet<string>,
+	linked: boolean | ReadonlySet<string> = paid,
 ): { dueDate: string; period: string; status: BillStatus } {
 	const isLinked = (period: string) =>
 		typeof linked === "boolean" ? linked : linked.has(period);
+	const isPaid = (period: string) =>
+		typeof paid === "boolean" ? paid : paid.has(period);
 	// Left out before anything below judges them: an occurrence handled before its bill was added (decision 99).
 	const occurrences = periodicOccurrences(bill, today).filter(
 		(o) => !handledBeforeAdded(bill.addedOn, o.dueDate, isLinked(o.period)),
@@ -223,7 +249,7 @@ export function billOccurrence(
 		let next = occurrences[index + 1];
 		while (
 			next &&
-			(isLinked(current.period) ||
+			(isPaid(current.period) ||
 				current.dueDate.slice(0, 7) < today.slice(0, 7))
 		) {
 			index++;
@@ -231,7 +257,7 @@ export function billOccurrence(
 			next = occurrences[index + 1];
 		}
 		const distance = daysBetween(today, current.dueDate);
-		const status: BillStatus = isLinked(current.period)
+		const status: BillStatus = isPaid(current.period)
 			? "paid"
 			: distance < 0
 				? "overdue"
@@ -247,14 +273,14 @@ export function billOccurrence(
 	if (index > 0) index--;
 	let current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 	if (
-		isLinked(current.period) &&
+		isPaid(current.period) &&
 		current.dueDate.slice(0, 7) < today.slice(0, 7)
 	) {
 		index++;
 		current = occurrences[index] as ReturnType<typeof billOccurrenceForMonth>;
 	}
 	if (
-		isLinked(current.period) ||
+		isPaid(current.period) ||
 		(current.dueDate < today && daysBetween(today, current.dueDate) < -7)
 	) {
 		const next = occurrences[index + 1];
@@ -264,7 +290,7 @@ export function billOccurrence(
 		}
 	}
 	const distance = daysBetween(today, current.dueDate);
-	const status: BillStatus = isLinked(current.period)
+	const status: BillStatus = isPaid(current.period)
 		? "paid"
 		: distance < 0
 			? "overdue"

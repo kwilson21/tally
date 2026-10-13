@@ -692,24 +692,30 @@ const billPage = (
 				period="2026-09"
 				label="September"
 				status="paid"
-				payment={{
-					displayName: "Netflix",
-					dateLabel: "Sep 2",
-					amountCents: 1549,
-					matchedBy: "auto",
-				}}
+				payments={[
+					{
+						transactionId: 0,
+						displayName: "Netflix",
+						dateLabel: "Sep 2",
+						amountCents: 1549,
+						matchedBy: "auto",
+					},
+				]}
 			/>
 			<BillOccurrenceRow
 				billId={1}
 				period="2026-08"
 				label="August"
 				status="paid"
-				payment={{
-					displayName: "Netflix",
-					dateLabel: "Aug 2",
-					amountCents: 1549,
-					matchedBy: "auto",
-				}}
+				payments={[
+					{
+						transactionId: 0,
+						displayName: "Netflix",
+						dateLabel: "Aug 2",
+						amountCents: 1549,
+						matchedBy: "auto",
+					},
+				]}
 			/>
 		</ul>
 	</>
