@@ -336,6 +336,25 @@ describe("a linked payment a bank corrected into a credit counts $0 (decision 10
 		}
 	});
 
+	it("a $1,200 month whose only linked payment became a -$100 credit reads unpaid on the Bills row and the bill's page (#469)", async () => {
+		// The $600 payment is the month's only one, and the bank corrects it to a $100 credit: it counts $0.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-10000 WHERE id=9520",
+		).run();
+		for (const path of ["/bills", `/bills/${RENT}`]) {
+			expect(await get(path)).not.toContain("Part paid");
+		}
+		const html = await get(`/bills/${RENT}`);
+		// Unpaid reads: the month offers Link a payment (not Link another payment), and the credit stays listed with
+		// its own Not this one, so it can still be unlinked.
+		expect(html).toContain("Link a payment");
+		expect(html).not.toContain("Link another payment");
+		expect(html).toContain(
+			`/bills/${RENT}/occurrences/${PERIOD}/link#payment-picker`,
+		);
+		expect(html).toContain('name="transaction_id" value="9520"');
+	});
+
 	it("the picker has $600 left, so $590 is listed before $650", async () => {
 		await creditCorrection();
 		const html = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
