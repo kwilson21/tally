@@ -143,6 +143,7 @@ const STATEMENTS = [
 		note_worth_writing = COALESCE(transactions.note_worth_writing, p.note_worth_writing),
 		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
+		note_failed_at = COALESCE(transactions.note_failed_at, p.note_failed_at),
 		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
 	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
 	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
