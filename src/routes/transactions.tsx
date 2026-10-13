@@ -1050,21 +1050,23 @@ transactions.get("/transactions/select/count", async (c) => {
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
 	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
-	const focusSelectAll =
-		lineGone &&
+	const linkDrawn =
 		selectAllOffer({
 			pageIds,
 			ticked: new Set(selection.ticks),
 			all: selection.all,
 			unselected,
 		}) !== null;
+	const focusSelectAll = lineGone && linkDrawn;
 	const focusCount = lineGone && !focusSelectAll;
 	return c.html(
 		<>
+			{/* With no link drawn, the count is the bar's focus stop: a focus the link had moves here (#455). */}
 			<SelectedCount
 				count={picked.length}
 				notOnPage={notOnPage}
 				focus={focusCount}
+				fallback={!linkDrawn}
 			/>
 			<SelectionActionButtons
 				disabled={picked.length === 0 || selection.ticks.length > MAX_SELECTED}
