@@ -56,6 +56,21 @@ function StoreFields({ stores }: { stores: { merchantKey: string }[] }) {
 }
 
 /**
+ * The attributes every answer form shares: it posts to the screen's address and swaps the whole page. The
+ * guard keeps its buttons disabled while the request runs, so a double click can't queue a second answer
+ * (#460), as Settings' forms do.
+ */
+const answerForm = (action: string) => ({
+	method: "post" as const,
+	action,
+	"hx-post": action,
+	"hx-disable": "findAll button[type=submit]",
+	"hx-target": "#suggestions-page",
+	"hx-select": "#suggestions-page",
+	"hx-swap": "outerHTML",
+});
+
+/**
  * The question after a No on income, a transfer or a new category: one yes-or-no, with Not now and Yes.
  * Only Yes makes the "Never suggest" line (decision 101); Not now moves on with no rule.
  */
@@ -104,15 +119,7 @@ export function AskFirst({
 				Don't suggest {subject} again for {labels}?
 			</h2>
 			<p>Say yes and Tally stops asking this for {labels}.</p>
-			<form
-				method="post"
-				action={action}
-				hx-post={action}
-				hx-target="#suggestions-page"
-				hx-select="#suggestions-page"
-				hx-swap="outerHTML"
-				class="grid grid-cols-2 gap-3"
-			>
+			<form {...answerForm(action)} class="grid grid-cols-2 gap-3">
 				<input type="hidden" name="id" value={id} />
 				<input type="hidden" name="kind" value={kind} />
 				<StoreFields stores={stores} />
@@ -355,15 +362,7 @@ function YesNoForm({
 	no?: string;
 }) {
 	return (
-		<form
-			method="post"
-			action={action}
-			hx-post={action}
-			hx-target="#suggestions-page"
-			hx-select="#suggestions-page"
-			hx-swap="outerHTML"
-			class="flex flex-col gap-3"
-		>
+		<form {...answerForm(action)} class="flex flex-col gap-3">
 			<input type="hidden" name="id" value={item.id} />
 			<Button type="submit" name="answer" value="yes" class="w-full">
 				{yes}
@@ -392,14 +391,7 @@ function YesForm({
 	yes: string;
 }) {
 	return (
-		<form
-			method="post"
-			action={action}
-			hx-post={action}
-			hx-target="#suggestions-page"
-			hx-select="#suggestions-page"
-			hx-swap="outerHTML"
-		>
+		<form {...answerForm(action)}>
 			<input type="hidden" name="id" value={item.id} />
 			<Button type="submit" name="answer" value="yes" class="w-full">
 				{yes}
@@ -439,15 +431,7 @@ function SomethingElse({
 					class="size-5 transition group-open:rotate-90"
 				/>
 			</summary>
-			<form
-				method="post"
-				action={action}
-				hx-post={action}
-				hx-target="#suggestions-page"
-				hx-select="#suggestions-page"
-				hx-swap="outerHTML"
-				class="flex flex-col gap-4 pb-4 pt-2"
-			>
+			<form {...answerForm(action)} class="flex flex-col gap-4 pb-4 pt-2">
 				<input type="hidden" name="id" value={item.id} />
 				{item.kind === "category" && (
 					<fieldset class="flex flex-col gap-2">
@@ -498,15 +482,7 @@ function NewCategoryForm({
 	ticked?: number[];
 }) {
 	return (
-		<form
-			method="post"
-			action={action}
-			hx-post={action}
-			hx-target="#suggestions-page"
-			hx-select="#suggestions-page"
-			hx-swap="outerHTML"
-			class="flex flex-col gap-4"
-		>
+		<form {...answerForm(action)} class="flex flex-col gap-4">
 			<input type="hidden" name="id" value={item.id} />
 			<p class="text-sm text-muted">Untick any that don't belong.</p>
 			<ul class="flex flex-wrap gap-2">
