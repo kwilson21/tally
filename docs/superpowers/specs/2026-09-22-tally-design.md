@@ -420,6 +420,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - A remembered bank-text-to-store-name table, so a store's Never suggest line keeps covering its bank text's older unnamed charges after Plaid drops or renames the only charge linking them (#470). It would change how every store-identity reader decides what one store is (Remove, Settings, merchant rules, bill matching), so it needs its own decision
 - An offline banner the moment the phone loses its connection (#73). Today a failed save already says "Couldn't save. Check your connection and try again." and keeps what was typed (decision 72); a banner needs its own allowed-JS decision
 - A close (×) button on the demo's Things to try block, remembered with a cookie
+- Home showing what's new since the last visit ("3 new transactions since Tuesday"), from the #79 audit's H9 (docs/design-system/audit-2026-09-26.md). It needs Tally to remember each person's last visit
 - Choosing a category's icon and color in Settings (new categories get the tag icon and the next color)
 - Removing a category's budget (for now the budget sheet requires an amount)
 - The raw bank text under a categorized row's tidied name in the Transactions list (#93 shows it under rows that need a category and in the edit panel; categorized rows would need a third line, a TransactionRow shape change for the catalog)
