@@ -848,7 +848,15 @@ describe("scheduled handler: merchant names", () => {
 				fetchImpl as unknown as typeof fetch,
 			),
 		).resolves.toBeUndefined();
+		// The failed name makes no merchant row, and is recorded as failed apart from merchants (#468).
 		expect((await pending()).results).toEqual([]);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT raw_name FROM merchant_name_failures",
+				).all<{ raw_name: string }>()
+			).results,
+		).toEqual([{ raw_name: "SQ *BLUE BOTTLE COF 0412" }]);
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		logged.mockRestore();
 		vi.restoreAllMocks();
@@ -1199,8 +1207,36 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		const ai = aiThatSays("Some Place Name");
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
-		// One candidate query, then a switch read and a batch write for every five calls: 1 + 1 + 20 × 2 = 42.
-		expect(counted.statements()).toBeLessThanOrEqual(42);
+		// One candidate query and the switch read, then for every five calls a switch read and two writes (the
+		// merchants upsert and the failures delete): 1 + 1 + 20 × 3 = 62.
+		expect(counted.statements()).toBeLessThanOrEqual(62);
+	});
+
+	it("the scheduled names pass's worst mixed night, every merchant already failed and calls alternating fail and answer, stays under 82 statements", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await addWaiting(100);
+		await env.DB.prepare(
+			"INSERT INTO merchant_name_failures (raw_name, failed_at) SELECT raw_name, '2026-10-01 09:20:00' FROM transactions",
+		).run();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const counted = countingDb();
+		let calls = 0;
+		const ai = {
+			run: vi.fn(async () => {
+				calls += 1;
+				// Every odd call fails, so three never fail in a row and all 100 are asked: 20 batches, each with both.
+				if (calls % 2 === 1) throw new Error("capacity");
+				return { response: "Some Place Name" };
+			}),
+		} as unknown as Ai;
+		await suggestMerchantNames({ DB: counted.db, AI: ai });
+		expect(ai.run).toHaveBeenCalledTimes(100);
+		// 1 + 1 + 20 × 4 = 82: a switch read, a merchants upsert, a failures upsert and a failures delete per batch.
+		expect(counted.statements()).toBeLessThanOrEqual(82);
+		logged.mockRestore();
+		vi.restoreAllMocks();
 	});
 
 	it("the demo's one run, which resets, sorts and names", async () => {
