@@ -145,6 +145,28 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 		},
 	);
 
+	it("names a bill once when two of the split's parts pay the same occurrence", async () => {
+		const { item, purchase } = await splitPurchase();
+		// A second part, linked by hand to the same membership year (decision 101).
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?, '2026', id, 'user', 'linked' FROM transactions WHERE parent_id = ? AND amount_cents = 1000",
+		)
+			.bind(MEMBERSHIP, purchase)
+			.run();
+
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 60 })] }),
+		);
+
+		expect(
+			unpaidBillsNote(
+				(await getTransaction(env.DB, purchase))?.splitRemovedBills,
+			),
+		).toBe(" The Costco membership bill for 2026 is no longer paid.");
+	});
+
 	it("keeps the bill names when a later correction changes the amount again", async () => {
 		const { item, purchase } = await splitPurchase();
 		await syncItem(
@@ -347,5 +369,109 @@ describe("a bank change that removes a split unlinks the bill its part paid (dec
 				.bind(purchase.id)
 				.first(),
 		).toEqual({ is_split: 0, split_removed_bills: null });
+	});
+
+	const RENT = 9842;
+	const RENT_SENTENCE = " The Rent bill for September 2026 is no longer paid.";
+
+	/** A $1,300.00 purchase split into $1,200.00 of rent, which a Rent payment pays, and $100.00 of groceries. */
+	async function rentSplit() {
+		const item = await addItem();
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ added: [transaction({ amount: 1300 })] }),
+		);
+		const purchase = (await env.DB.prepare(
+			"SELECT id FROM transactions WHERE plaid_transaction_id = 'purchase'",
+		).first<{ id: number }>()) as { id: number };
+		await saveSplit(
+			env.DB,
+			purchase.id,
+			[
+				{ categoryId: 4, amountCents: 120000 },
+				{ categoryId: 1, amountCents: 10000 },
+			],
+			"person@example.com",
+		);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (?, 'Rent', 120000, 1, 'monthly', NULL, NULL, 'LANDLORD', 1)",
+			).bind(RENT),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT ?, '2026-09', id, 'auto', 'linked' FROM transactions WHERE parent_id = ? AND amount_cents = 120000",
+			).bind(RENT, purchase.id),
+		]);
+		return { item, purchase: purchase.id };
+	}
+
+	/** A bank payment a person links to this month's Rent, as the link picker does (decision 74). */
+	async function linkRentPayment(cents: number) {
+		const payment = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) SELECT id, '2026-09-03', ?, 'TRANSFER' FROM accounts LIMIT 1 RETURNING id",
+		)
+			.bind(cents)
+			.first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', ?, 'user', 'linked')",
+		)
+			.bind(RENT, payment?.id)
+			.run();
+	}
+
+	async function rentNote(purchase: number) {
+		return unpaidBillsNote(
+			(await getTransaction(env.DB, purchase))?.splitRemovedBills,
+		);
+	}
+
+	it("says the Rent bill is no longer paid when the bank change removes the split, and keeps saying it while part paid", async () => {
+		const { item, purchase } = await rentSplit();
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 1400 })] }),
+		);
+		expect(await rentNote(purchase)).toBe(RENT_SENTENCE);
+
+		// $600 of $1,200 is half the bill, so it is still unpaid and the note still names it.
+		await linkRentPayment(60000);
+		expect(await rentNote(purchase)).toBe(RENT_SENTENCE);
+	});
+
+	it("drops the note once the occurrence is Paid at 90% of its amount", async () => {
+		const { item, purchase } = await rentSplit();
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 1400 })] }),
+		);
+		await linkRentPayment(60000);
+		// $1,080 of $1,200 is 90%, which is Paid (decision 74), so the sentence goes.
+		await linkRentPayment(48000);
+
+		expect(await rentNote(purchase)).toBe("");
+	});
+
+	it("judges Paid against the month's own amount, not the bill's current one", async () => {
+		const { item, purchase } = await rentSplit();
+		// The bill now costs $1,300, but September's occurrence was $1,200 (decision 101).
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE bills SET amount_cents = 130000 WHERE id = ?",
+			).bind(RENT),
+			env.DB.prepare(
+				"INSERT INTO bill_amounts (bill_id, effective_month, amount_cents) VALUES (?, '2026-09', 120000)",
+			).bind(RENT),
+		]);
+		await syncItem(
+			opts,
+			item,
+			plaidFetch({ modified: [transaction({ amount: 1400 })] }),
+		);
+		await linkRentPayment(60000);
+		await linkRentPayment(48000);
+
+		expect(await rentNote(purchase)).toBe("");
 	});
 });

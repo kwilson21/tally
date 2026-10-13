@@ -329,17 +329,27 @@ describe("bill matching and price changes", () => {
 					period,
 					opened_period: period,
 				});
-			// The month already has another payment: the link is refused, and the payment stays out.
+			// The month already has a $500 part payment: another part payment links too (decision 101), and the
+			// exclusion stays. A month already Paid would refuse it.
 			await env.DB.batch([
 				env.DB.prepare(
-					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,185000,'ZELLE LANDLORD')",
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(2,1,?,50000,'ZELLE LANDLORD')",
 				).bind(paidOn),
 				env.DB.prepare(
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,2,'user','linked')",
 				).bind(period),
 			]);
-			expect(await (await link()).text()).toContain("already linked");
+			await link();
+			expect(
+				await rows(
+					"bill_payments",
+					`bill_id=1 AND period='${period}' AND transaction_id=1 AND status='linked'`,
+				),
+			).toHaveLength(1);
 			expect(await stillExcluded()).toHaveLength(1);
+			await env.DB.prepare(
+				"DELETE FROM bill_payments WHERE transaction_id=1",
+			).run();
 
 			// The payment is already linked to the bill, and someone excluded it again: a second link
 			// is refused too, and doesn't undo that.
@@ -349,7 +359,8 @@ describe("bill matching and price changes", () => {
 					"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(1,?,1,'user','linked')",
 				).bind(period),
 			]);
-			expect(await (await link()).text()).toContain("already linked");
+			// This payment alone makes the month Paid, so the month's refusal comes before the duplicate check.
+			expect(await (await link()).text()).toContain("is already paid");
 			expect(await stillExcluded()).toHaveLength(1);
 		});
 	});
@@ -803,6 +814,7 @@ describe("bill matching and price changes", () => {
 			merchantRawText: 0,
 			period,
 			dueDate: due,
+			linked: false,
 		};
 
 		it("is made only for an active bill whose occurrence is due or overdue", async () => {
@@ -813,15 +825,18 @@ describe("bill matching and price changes", () => {
 						?.transactionId,
 				).toBe(1);
 			}
-			// Paid already, still weeks away, or an inactive bill: nothing to ask.
-			for (const [active, status] of [
-				[true, "paid"],
-				[true, "upcoming"],
-				[false, "due"],
-				[false, "overdue"],
+			// Paid already, still weeks away, an inactive bill, or a payment already linked, part paid or not
+			// (decision 101): nothing to ask.
+			for (const [active, status, linked] of [
+				[true, "paid", false],
+				[true, "upcoming", false],
+				[false, "due", false],
+				[false, "overdue", false],
+				[true, "due", true],
+				[true, "overdue", true],
 			] as const)
 				expect(
-					await findPriceOffer(env.DB, { ...bill, active, status }),
+					await findPriceOffer(env.DB, { ...bill, active, status, linked }),
 				).toBeUndefined();
 			const all = await loadPriceOffers(env.DB, [
 				{ ...bill, id: 1, active: true, status: "paid" },
@@ -963,6 +978,7 @@ describe("a weekly bill's price offer", () => {
 		period: "2026-10-09",
 		dueDate: "2026-10-09",
 		frequency: "weekly" as const,
+		linked: false,
 	};
 	beforeEach(async () => {
 		await env.DB.batch([

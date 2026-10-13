@@ -25,10 +25,13 @@ const countWhere = async (where: string) =>
 	(
 		await db
 			.prepare(
-				// The demo's linked Target refund counts in its purchase's month (last month), not its own.
-				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND refund_of_id IS NULL AND (${where})`,
+				// The demo's linked Target refund counts in its purchase's month (last month), not its own. So does a
+				// monthly bill payment dated this month for an earlier month (the demo's late Rent part, #205).
+				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND refund_of_id IS NULL
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = transactions.id AND bp.status = 'linked'
+				   AND bp.period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND bp.period < ?) AND (${where})`,
 			)
-			.bind(MONTH)
+			.bind(MONTH, MONTH)
 			.first<{ n: number }>()
 	)?.n ?? 0;
 
@@ -75,8 +78,8 @@ describe("monthCounts", () => {
 				.prepare("SELECT category_source FROM transactions WHERE id=904")
 				.first(),
 		).toEqual({ category_source: "bill" });
-		// The demo's three Daycare Fridays this month are linked to bills too, so they add to the two others.
-		expect(await monthCounts(db, MONTH)).toMatchObject({ bill: 6 });
+		// The demo's three Daycare Fridays and its Rent payment this month are linked to bills too, so they add to the two others.
+		expect(await monthCounts(db, MONTH)).toMatchObject({ bill: 7 });
 	});
 	it("counts the month's transactions and who categorized them, matching Home", async () => {
 		const counts = await monthCounts(db, MONTH);
@@ -86,8 +89,8 @@ describe("monthCounts", () => {
 			// The Farmers market cash row and the Costco split's two parts are the person's own picks.
 			user: 3,
 			merchantRule: 0,
-			// Two seeded bill payments, and the three Daycare Fridays this month.
-			bill: 5,
+			// Two seeded bill payments, the three Daycare Fridays this month, and Rent's payment this month.
+			bill: 6,
 			jev: await countWhere("category_source = 'jev'"),
 			unsure: 0,
 			noneFit: 0,

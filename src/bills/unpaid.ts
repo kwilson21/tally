@@ -1,3 +1,6 @@
+import { occurrenceAmountSql } from "../db/bill-amounts";
+import { occurrenceMonthSql } from "../db/counted-month";
+
 /**
  * A bill whose payment a split change unlinked (decision 99): the bill's name and the occurrence its payment
  * paid, keyed as bill_payments keys it: `2026`, `2026-09`, `2026-Q3`, or a due date `2026-09-14`.
@@ -61,21 +64,35 @@ export function unpaidBillsNote(stored: string | null | undefined): string {
 
 /**
  * SQL for the bills the linked payments of a purchase's parts pay, as the JSON that
- * transactions.split_removed_bills stores, or NULL when none. `parent` is the SQL for the purchase's id.
+ * transactions.split_removed_bills stores, or NULL when none. One entry per bill occurrence, however many of its
+ * parts' payments pay it (decision 101). `parent` is the SQL for the purchase's id.
  * It must run before those parts are deleted, since their payments go with them.
  */
 export const UNPAID_BILLS_SQL = (parent: string) =>
 	`NULLIF((SELECT json_group_array(json_object('billId', billId, 'name', name, 'period', period)) FROM (
 		SELECT b.id AS billId, b.name AS name, bp.period AS period FROM bill_payments bp
 		JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
-		WHERE part.parent_id = ${parent} AND bp.status = 'linked' ORDER BY bp.id)), '[]')`;
+		WHERE part.parent_id = ${parent} AND bp.status = 'linked' GROUP BY b.id, bp.period ORDER BY MIN(bp.id))), '[]')`;
 
 /**
- * SQL for the bills in a stored split_removed_bills value (`column`) that are still unpaid: the entries whose
- * occurrence has no linked payment now, as the same JSON, or NULL when none. An entry without a billId can't
- * be checked, so it stays. A bill paid again drops out of the purchase's note (decision 99).
+ * SQL that is true while a bill occurrence is still unpaid: its linked payments add up to less than 90% of its
+ * amount (decision 74), which is occurrencePaid (src/bills/status.ts) negated, in integer cents. It counts every
+ * linked payment, not only a purchase's parts, and judges against the amount the month had (occurrenceAmountSql).
+ * A linked payment a bank later turned into a credit counts as $0 (MAX(0, amount)), as the JS sums do.
+ * `billId` and `period` are SQL expressions. A bill row that is gone reads as unpaid, so its entry stays.
+ */
+export const occurrenceUnpaidSql = (billId: string, period: string) =>
+	`COALESCE((SELECT (SELECT COALESCE(SUM(MAX(0, pt.amount_cents)), 0) FROM bill_payments paid
+			JOIN transactions pt ON pt.id = paid.transaction_id
+			WHERE paid.bill_id = ub.id AND paid.period = ${period} AND paid.status = 'linked') * 10
+		< ${occurrenceAmountSql("ub.id", occurrenceMonthSql(period, "ub"))} * 9
+	FROM bills ub WHERE ub.id = ${billId}), 1)`;
+
+/**
+ * SQL for the bills in a stored split_removed_bills value (`column`) that are still unpaid, as the same JSON, or
+ * NULL when none. An entry drops once its occurrence is Paid again (decision 105, decision 74's 90%, occurrenceUnpaidSql).
+ * An entry without a billId can't be checked, so it stays.
  */
 export const STILL_UNPAID_BILLS_SQL = (column: string) =>
 	`(SELECT NULLIF(json_group_array(json(e.value)), '[]') FROM json_each(${column}) e
-		WHERE NOT EXISTS (SELECT 1 FROM bill_payments bp
-			WHERE bp.bill_id = json_extract(e.value, '$.billId') AND bp.period = json_extract(e.value, '$.period') AND bp.status = 'linked'))`;
+		WHERE json_extract(e.value, '$.billId') IS NULL OR ${occurrenceUnpaidSql("json_extract(e.value, '$.billId')", "json_extract(e.value, '$.period')")})`;

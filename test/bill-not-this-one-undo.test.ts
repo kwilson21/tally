@@ -209,7 +209,7 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(await dismissedOn(9402)).toEqual([9402]);
 	});
 
-	it("says the month already has a payment when another took it, and leaves the Not this one as it was", async () => {
+	it("relinks the payment beside another payment in its month, since a month can hold several (decision 101)", async () => {
 		const unlinked = await unlink();
 		await env.DB.prepare(
 			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9402,'user','linked')",
@@ -219,12 +219,20 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 
 		const res = await undo(token(unlinked));
 		expect(trigger(res).toast).toEqual({
-			message: "That month already has a payment linked.",
+			message: "Payment linked again",
 			type: "success",
 			undoDone: token(unlinked),
 		});
-		expect(await linkedTo()).toEqual({ transactionId: 9402 });
-		expect(await dismissedOn(9401)).toEqual([9401]);
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id AS transactionId FROM bill_payments WHERE bill_id=? AND period=? AND status='linked' ORDER BY transaction_id",
+				)
+					.bind(BILL, PERIOD)
+					.all<{ transactionId: number }>()
+			).results.map(({ transactionId }) => transactionId),
+		).toEqual([9401, 9402]);
+		expect(await dismissedOn(9401)).toEqual([]);
 	});
 
 	it("lists the turned-away payment last under 'You said not this one', and linking it links it and lifts the Not this one", async () => {

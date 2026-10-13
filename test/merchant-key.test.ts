@@ -945,10 +945,9 @@ describe("bills saved under the bank's raw text", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/bills/8702/occurrences/2026-09/link`)
 		).text();
-		const picker = html.slice(html.indexOf('<section id="payment-picker"'));
-		expect(picker.indexOf('value="8712"')).toBeLessThan(
-			picker.indexOf('value="8711"'),
-		);
+		// September is Paid by 8712, so it takes no picker (#205) and the page says so instead.
+		expect(html).toContain("bill is already paid.");
+		expect(html).not.toContain('id="payment-picker"');
 	});
 
 	it("does not let a bill saved under a key claim another merchant's charge, even with the same bank text", async () => {

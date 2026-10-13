@@ -46,7 +46,7 @@ export type SeedTransaction = {
 	/** Plaid's cleaned merchant name; null for a hand-entered cash transaction and most of the demo. */
 	merchantName?: string | null;
 	categoryId: number | null;
-	categorySource: "jev" | "user" | null;
+	categorySource: "jev" | "user" | "bill" | null;
 	categoryConfidence: number | null;
 	flagTransfer: boolean;
 	flagReimbursement: boolean;
@@ -81,6 +81,10 @@ const SAVINGS = 2;
 const CARD = 3;
 const CASH = 4;
 const CHILDCARE = 6;
+/** Rent (#205): its own budget category, and the rent bill it pays in parts, by hand (decision 101). */
+export const RENT_CATEGORY = 7;
+export const RENT_PAYEE = "HARBOR PROPERTY MGMT";
+export const RENT_CENTS = 120000;
 
 const CATEGORIES: SeedCategory[] = [
 	{
@@ -112,6 +116,13 @@ const CATEGORIES: SeedCategory[] = [
 		icon: "kids",
 		color: "cat-blue",
 		sortOrder: 6,
+	},
+	{
+		id: RENT_CATEGORY,
+		name: "Rent",
+		icon: "household",
+		color: "cat-ochre",
+		sortOrder: 7,
 	},
 ];
 
@@ -542,6 +553,22 @@ export function buildSeed(today: string): Seed {
 		transactions.push(
 			spend(CHECKING, friday, "LITTLE SPROUTS DAYCARE", CHILDCARE, 24000),
 		);
+	// Rent is paid in parts (#205, decision 101): $700 and $500 last month make it Paid, and $600 this month so far
+	// leaves it part paid. The $500 came late: it dates this month's 1st but reset links it to last month, so it counts
+	// in last month and not in this month's days, and Trends' same-days comparison keeps Rent $100 in the household's
+	// favour on every day. Reset links each one to the rent bill by hand. Its category is the bill's (Rent, its own
+	// $1,200 budget), as a payment linked to a bill takes its category (spec §7). Added before Netflix, so Netflix stays last.
+	const rentPayment = (date: string, cents: number): SeedTransaction => ({
+		...spend(CHECKING, date, RENT_PAYEE, RENT_CATEGORY, cents),
+		categorySource: "bill",
+		categoryConfidence: null,
+	});
+	const lastMonth = monthOffset(today, 1);
+	transactions.push(
+		rentPayment(day(lastMonth, 1), 70000),
+		rentPayment(day(thisMonth, 1), 50000),
+		rentPayment(day(thisMonth, 1), 60000),
+	);
 	// P36 B (decision 72): a subscription whose price went up, so the demo shows "Price changed?" on
 	// one bill. Netflix charged $17.99 yesterday (today, on the 1st, to stay in this month). Its bill,
 	// $15.49, is due the day before the charge (see demoBills): the charge is inside the matcher's date
@@ -571,6 +598,12 @@ export function buildSeed(today: string): Seed {
 			amountCents: 25000,
 		},
 		{ categoryId: GAS, effectiveMonth: startMonth, amountCents: 20000 },
+		// Rent's budget starts this month, so earlier months have no budget to be under (Trends' story is unchanged).
+		{
+			categoryId: RENT_CATEGORY,
+			effectiveMonth: thisMonth,
+			amountCents: RENT_CENTS,
+		},
 		{ categoryId: KIDS, effectiveMonth: startMonth, amountCents: 30000 },
 		{ categoryId: HOUSEHOLD, effectiveMonth: startMonth, amountCents: 25000 },
 		// $1,040 is $240 a week for 52 weeks, spread over 12 months: about four Fridays of Daycare a month.
@@ -637,6 +670,12 @@ export function buildSeed(today: string): Seed {
 						: "City Gym",
 			defaultCategoryId: HOUSEHOLD,
 		})),
+		// Rent's payee, last so the rows before it keep their ids (#205).
+		{
+			key: seedMerchantKey(RENT_PAYEE),
+			displayName: "Harbor Property",
+			defaultCategoryId: null,
+		},
 	];
 	// One row per merchant key. Raw names that share a key (the two Amazons) share its row, the first one's name winning.
 	const merchants = merchantRows.filter(
