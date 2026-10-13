@@ -483,6 +483,39 @@ describe("saveSuggestion", () => {
 		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
 	});
 
+	it("refuses a name that differs only in accented capitals and was taken during the write", async () => {
+		const made = [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+			await add({ rawName: "MAX" }),
+		];
+		// tidyName reads "École" as it is, so the suggestion keeps its capital; the other save files "école".
+		const id = (await saveSuggestion(db, "École", made)) as number;
+		// The other save files "école" (its key is "école"), after the form's check and before this one.
+		await db
+			.prepare(
+				`CREATE TRIGGER take_accent_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,name_key,icon,color,sort_order) VALUES('école','école','tag','cat-blue',99); END`,
+			)
+			.run();
+		let result: Awaited<ReturnType<typeof createFromSuggestion>>;
+		try {
+			result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+		} finally {
+			await db.prepare("DROP TRIGGER take_accent_during_create").run();
+		}
+		expect(result).toEqual({
+			ok: false,
+			reason: "invalid",
+			error: "That name is taken.",
+		});
+	});
+
 	it("handles a category name taken after validation without making a duplicate", async () => {
 		const made = [
 			await add(),
