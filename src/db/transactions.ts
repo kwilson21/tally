@@ -67,6 +67,7 @@ import {
 	refundedByOthersSql,
 	refundFitsSql,
 	refundLeftCents,
+	splitPartMisfitSql,
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
 
@@ -889,13 +890,25 @@ WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') !=
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
- * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left. A cash
- * amount is refused when it breaks its parts (`amountCents` is the parts' total) or its linked
- * refunds (`refundCents` is their total, the smallest amount that would fit).
+ * refused (spec §8.5) with nothing saved, and `refundLeftCents` is what the purchase has left. A split
+ * refund with a part that doesn't fit its own purchase (a review as not income makes it count) is refused
+ * the same way: `refundPurchase` is the purchase of the first such part, and `refundLeftCents` is what that
+ * purchase has left for the whole split. A cash amount is refused when it breaks its parts (`amountCents`
+ * is the parts' total) or its linked refunds (`refundCents` is their total, the smallest amount that would
+ * fit).
  */
 export type SaveEditResult =
 	| { saved: true }
-	| { saved: false; refundLeftCents: number }
+	| {
+			saved: false;
+			refundLeftCents: number;
+			refundPurchase?: {
+				id: number;
+				date: string;
+				amountCents: number;
+				categoryName: string | null;
+			};
+	  }
 	| { saved: false; personMissing: true }
 	| { saved: false; cashError: "split"; amountCents: number }
 	| { saved: false; cashError: "refund"; refundCents: number };
@@ -907,10 +920,12 @@ export type SaveEditResult =
  *
  * Linking a refund to a purchase (spec §6, §8.5) is the one write that can be refused, and so is
  * turning off "Count as income", or reviewing the credit as not income, on a credit that stays linked,
- * which makes it count against its purchase. The check is an UPDATE that changes nothing unless what moves with the refund fits what's
- * left of the purchase (src/db/refunded.ts), so two saves at once can't both fit; every other write
- * in the batch applies only once it has, so a refusal saves nothing, and an error anywhere rolls the
- * link back too. A person linking a refund includes it in the budget, even when it was excluded
+ * which makes it count against its purchase. The check is an UPDATE that changes nothing unless what moves
+ * with the refund fits what's left of the purchase (src/db/refunded.ts), so two saves at once can't both
+ * fit. A split credit reviewed as not income is checked part by part, each linked part against its own
+ * purchase (splitPartMisfitSql), since each part counts there. Every other write in the batch applies only
+ * once that has, so a refusal saves nothing, and an error anywhere rolls the link back too. A person
+ * linking a refund includes it in the budget, even when it was excluded
  * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone. A For person
  * removed since the panel loaded the household list is refused the same way (`personMissing`).
  */
@@ -1004,10 +1019,10 @@ export async function saveEdit(
 			? current.refundOfId
 			: null;
 
-	// Every other write waits on that check, so a refusal writes nothing at all, and an error anywhere
-	// in the batch rolls everything back, link included. For a link, once it has taken the refund's
-	// `refund_of_id` is the new purchase, and when it was refused it is not. For a credit that
-	// counts again, the same amount check is made by each write. The check's two parameters are
+	// Every other write waits on that check and on the parts check below (baseGate), so a refusal writes
+	// nothing at all, and an error anywhere in the batch rolls everything back, link included. For a link, once
+	// it has taken the refund's `refund_of_id` is the new purchase, and when it was refused it is not. For a
+	// credit that counts again, the same amount check is made by each write. The check's two parameters are
 	// numbered from `n`, after the statement's own.
 	const linkGate: { sql: (n: number) => string; args: unknown[] } = linking
 		? {
@@ -1022,9 +1037,10 @@ export async function saveEdit(
 				}
 			: { sql: () => "", args: [] };
 	// The cash check on its own: the entry is still a cash entry at the amount it's given, its parts add up
-	// to it, and its refunds fit within it. The two linking writes wait on this check alone, because the
-	// link check reads the link they set, so it can't gate them. The cash check's answer is the same
-	// before or after they run, since it counts refunds of this entry, not of the purchase it links to.
+	// to it, and its refunds fit within it. The two linking writes wait on this check and the parts check
+	// (baseGate), but not on the link check, because the link check reads the link they set. The cash check's
+	// answer is the same before or after they run, since it counts refunds of this entry, not of the purchase
+	// it links to.
 	const cashGate: { sql: (n: number) => string; args: unknown[] } =
 		edit.cashAmountCents === undefined
 			? { sql: () => "", args: [] }
@@ -1033,21 +1049,41 @@ export async function saveEdit(
 						` AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + 1})`,
 					args: [id, edit.cashAmountCents],
 				};
+	// A split credit reviewed as not income makes each of its linked parts count against its own purchase, so
+	// each one is checked (splitPartMisfitSql). The parts on the parent's old link are left out, since they move
+	// with the parent, and the link statement checks what moves against what is left of the new purchase, counting
+	// the parts already there. The parts already on the new purchase are checked here as they stand. So the gate
+	// gives the same answer at every statement of the batch: the move runs only when it fits what is left,
+	// counting those parts, and if it is refused nothing changes.
+	const splitReview = creditReviewByUser && current.isSplit === 1;
+	const partsGate: { sql: (n: number) => string; args: unknown[] } = splitReview
+		? {
+				sql: (n) =>
+					` AND NOT EXISTS (SELECT 1 FROM transactions kid WHERE ${splitPartMisfitSql(`?${n}`, `?${n + 1}`)})`,
+				args: [id, newLink === undefined ? null : current.refundOfId],
+			}
+		: { sql: () => "", args: [] };
+	// Every write waits on the parts check and the cash check, and on the link's check too (gate).
+	const baseGate = {
+		sql: (n: number) =>
+			`${partsGate.sql(n)}${cashGate.sql(n + partsGate.args.length)}`,
+		args: [...partsGate.args, ...cashGate.args],
+	};
 	const gate = {
 		sql: (n: number) =>
-			`${linkGate.sql(n)}${cashGate.sql(n + linkGate.args.length)}`,
-		args: [...linkGate.args, ...cashGate.args],
+			`${linkGate.sql(n)}${baseGate.sql(n + linkGate.args.length)}`,
+		args: [...linkGate.args, ...baseGate.args],
 	};
 	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
 	const gated = (sql: string, args: unknown[], tail = "") =>
 		db
 			.prepare(`${sql}${gate.sql(args.length + 1)}${tail}`)
 			.bind(...args, ...gate.args);
-	/** A statement with only the cash check on its WHERE, binding `args` and then the check's. */
+	/** A statement with the parts and cash checks on its WHERE, binding `args` and then their own. */
 	const cashGated = (sql: string, args: unknown[]) =>
 		db
-			.prepare(`${sql}${cashGate.sql(args.length + 1)}`)
-			.bind(...args, ...cashGate.args);
+			.prepare(`${sql}${baseGate.sql(args.length + 1)}`)
+			.bind(...args, ...baseGate.args);
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
@@ -1423,6 +1459,31 @@ export async function saveEdit(
 		throw error;
 	});
 	if (!results) return { saved: false, personMissing: true };
+	// A split review with a part that doesn't fit its own purchase is refused by the parts check, which leaves
+	// the statement that decides unchanged (the link's, for a link; the panel's otherwise). The first such part
+	// names its purchase; with none, the cash and link checks below say why.
+	if (splitReview && !results[linking ? 1 : 0]?.meta.changes) {
+		const part = await db
+			.prepare(
+				`SELECT kid.refund_of_id AS id, buy.date AS date, buy.amount_cents AS amountCents, c.name AS categoryName
+				FROM transactions kid JOIN transactions buy ON buy.id = kid.refund_of_id
+				LEFT JOIN categories c ON c.id = buy.category_id
+				WHERE ${splitPartMisfitSql("?1", "?2")} ORDER BY kid.id LIMIT 1`,
+			)
+			.bind(...partsGate.args)
+			.first<{
+				id: number;
+				date: string;
+				amountCents: number;
+				categoryName: string | null;
+			}>();
+		if (part)
+			return {
+				saved: false,
+				refundLeftCents: await refundLeftCents(db, part.id, id),
+				refundPurchase: part,
+			};
+	}
 	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
 		const state = await db
 			.prepare(
