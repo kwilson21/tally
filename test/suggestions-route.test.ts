@@ -1581,6 +1581,145 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			),
 		).toMatchObject({ transfer_maybe_declined: 0 });
 	});
+
+	// Tally's guess moved after the queue was read: to a sure value, or below the Maybe range. Either way the
+	// answer is stale, and its write changes nothing, since the write checks the same range the queue shows.
+	const GUESS_MOVED = [
+		{ moved: "became sure", confidence: 0.95 },
+		{ moved: "fell below the Maybe range", confidence: 0.1 },
+	];
+
+	const moveGuess = (
+		column: "income_confidence" | "transfer_confidence",
+		id: number,
+		confidence: number,
+	) =>
+		db
+			.prepare(`UPDATE transactions SET ${column} = ? WHERE id = ?`)
+			.bind(confidence, id)
+			.run();
+
+	it.each(GUESS_MOVED)(
+		"an income Yes after Tally's guess $moved changes nothing",
+		async ({ confidence }) => {
+			const credit = await insertTx({
+				raw: VENMO,
+				amount: -250000,
+				incomeConfidence: 0.6,
+			});
+			expect((await get("/settings/suggestions")).html).toContain(
+				`value="income-${credit}"`,
+			);
+			const res = await answer(
+				{ id: `income-${credit}`, answer: "yes" },
+				racing("UPDATE transactions SET flag_income = 1", () =>
+					moveGuess("income_confidence", credit, confidence),
+				),
+			);
+			expect(trigger(res).toast?.message).toBe(STALE);
+			expect(
+				await row(
+					"SELECT flag_income, income_source, income_confidence FROM transactions WHERE id = ?",
+					credit,
+				),
+			).toMatchObject({
+				flag_income: 0,
+				income_source: null,
+				income_confidence: confidence,
+			});
+		},
+	);
+
+	it.each(GUESS_MOVED)(
+		"an income No after Tally's guess $moved changes nothing",
+		async ({ confidence }) => {
+			const credit = await insertTx({
+				raw: VENMO,
+				amount: -250000,
+				incomeConfidence: 0.6,
+			});
+			expect((await get("/settings/suggestions")).html).toContain(
+				`value="income-${credit}"`,
+			);
+			const res = await answer(
+				{ id: `income-${credit}`, answer: "no" },
+				racing("UPDATE transactions SET income_maybe_declined = 1", () =>
+					moveGuess("income_confidence", credit, confidence),
+				),
+			);
+			expect(trigger(res).toast?.message).toBe(STALE);
+			expect(
+				await row(
+					"SELECT income_maybe_declined, income_confidence FROM transactions WHERE id = ?",
+					credit,
+				),
+			).toMatchObject({
+				income_maybe_declined: 0,
+				income_confidence: confidence,
+			});
+		},
+	);
+
+	it.each(GUESS_MOVED)(
+		"a transfer Yes after Tally's guess $moved changes nothing",
+		async ({ confidence }) => {
+			const transfer = await insertTx({
+				raw: CHASE,
+				amount: 20000,
+				transferConfidence: 0.6,
+			});
+			expect((await get("/settings/suggestions")).html).toContain(
+				`value="transfer-${transfer}"`,
+			);
+			const res = await answer(
+				{ id: `transfer-${transfer}`, answer: "yes" },
+				racing("UPDATE transactions SET excluded = 1", () =>
+					moveGuess("transfer_confidence", transfer, confidence),
+				),
+			);
+			expect(trigger(res).toast?.message).toBe(STALE);
+			expect(
+				await row(
+					"SELECT excluded, excluded_source, transfer_confidence FROM transactions WHERE id = ?",
+					transfer,
+				),
+			).toMatchObject({
+				excluded: 0,
+				excluded_source: null,
+				transfer_confidence: confidence,
+			});
+		},
+	);
+
+	it.each(GUESS_MOVED)(
+		"a transfer No after Tally's guess $moved changes nothing",
+		async ({ confidence }) => {
+			const transfer = await insertTx({
+				raw: CHASE,
+				amount: 20000,
+				transferConfidence: 0.6,
+			});
+			expect((await get("/settings/suggestions")).html).toContain(
+				`value="transfer-${transfer}"`,
+			);
+			const res = await answer(
+				{ id: `transfer-${transfer}`, answer: "no" },
+				racing("UPDATE transactions SET transfer_maybe_declined = 1", () =>
+					moveGuess("transfer_confidence", transfer, confidence),
+				),
+			);
+			expect(trigger(res).toast?.message).toBe(STALE);
+			expect(
+				await row(
+					"SELECT transfer_maybe_declined, transfer_confidence FROM transactions WHERE id = ?",
+					transfer,
+				),
+			).toMatchObject({
+				transfer_maybe_declined: 0,
+				transfer_confidence: confidence,
+			});
+		},
+	);
 });
 
 describe("a card calls a transaction by its own name, else by its store's (spec §5)", () => {
