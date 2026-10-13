@@ -1,3 +1,6 @@
+import { merchantKeySql } from "./merchant-key";
+import { neverSuggestedSql } from "./never-suggest";
+
 /**
  * Who set a transaction's income flag (spec §5, §8.5, decisions 67 and 70), read off the row, with no
  * column of its own: `income_source` only allows `user`, `jev` or null, so a flag Plaid set keeps it
@@ -23,6 +26,16 @@ export function plaidSetIncomeSql(alias: string): string {
 /** A settled income answer from a person, Jev, or Plaid. */
 export function hasIncomeAnswerSql(alias: string): string {
 	return `COALESCE((${personChoseIncomeSql(alias)} OR ${alias}.income_source = 'jev' OR ${plaidSetIncomeSql(alias)}), 0)`;
+}
+
+/**
+ * The income guess a row shows: `income_confidence`, unless the income is settled, the person said No to
+ * the Maybe, or the store has a "Never suggest" income line (decision 101). Only the shown value is hidden,
+ * so the stored guess stays and Remove brings the Maybe back. The rows, the panel and the review queue all
+ * read it from here, so they can't drift apart.
+ */
+export function maybeIncomeConfidenceSql(alias: string): string {
+	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${alias}.income_maybe_declined = 1 OR ${neverSuggestedSql(merchantKeySql(alias), "income")} THEN NULL ELSE ${alias}.income_confidence END`;
 }
 
 /**

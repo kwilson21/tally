@@ -10,6 +10,7 @@ import {
 	pendingSuggestions,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
+import { addNeverSuggest } from "../src/db/never-suggest";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -425,10 +426,8 @@ describe("saveSuggestion", () => {
 			{ ticked: made.slice(0, 2), shown: made.slice(0, 3), notes: {} },
 			"person",
 		);
-		expect(result).toMatchObject({
-			ok: true,
-			leftOut: expect.arrayContaining([made[2], made[3]]),
-		});
+		// Only the shown row the person unticked is named; the row that wasn't shown is cleared but not counted.
+		expect(result).toMatchObject({ ok: true, leftOut: [made[2]] });
 		for (const tx of [made[2] as number, made[3] as number])
 			expect((await row(tx))?.category_suggestion_id).toBeNull();
 	});
@@ -910,7 +909,43 @@ describe("createFromSuggestion", () => {
 			{ ticked: made, shown: made, notes: {} },
 			"person",
 		);
-		expect(result).toMatchObject({ ok: true, leftOut: [late] });
+		expect(result).toMatchObject({ ok: true, leftOut: [] });
+		expect(await row(late)).toMatchObject({
+			category_suggestion_id: null,
+			category_confidence: null,
+		});
+	});
+
+	it("doesn't count a row a Never suggest line hides as one the person unticked, and clears it for the night", async () => {
+		const shown = [
+			await add({ rawName: "SHOP 0" }),
+			await add({ rawName: "SHOP 1" }),
+		];
+		const hidden = await add({ rawName: "CHEWY.COM" });
+		const id = (await saveSuggestion(db, "Subscriptions", [
+			...shown,
+			hidden,
+		])) as number;
+		await addNeverSuggest(db, {
+			merchantKey: "CHEWY.COM",
+			kind: "new_category",
+			decidedOn: "2026-10-03",
+		});
+		const result = await createFromSuggestion(
+			db,
+			id,
+			{
+				ticked: [shown[0] as number],
+				shown: [...shown, hidden],
+				notes: {},
+			},
+			"person",
+		);
+		expect(result).toMatchObject({ ok: true, leftOut: [shown[1]] });
+		expect(await row(hidden)).toMatchObject({
+			category_suggestion_id: null,
+			category_confidence: null,
+		});
 	});
 
 	it("refuses a name only an archived category has, and creates nothing", async () => {
