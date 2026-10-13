@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
@@ -138,9 +138,18 @@ describe("cash delete undo", () => {
 		)
 			.bind(bill.id, oldParentId)
 			.run();
+		// A real Undo token is a random UUID, and sometimes it holds the old id's digits (#487). Make this one do so.
+		const tokenSpy = vi
+			.spyOn(crypto, "randomUUID")
+			.mockReturnValueOnce(
+				`${String(oldParentId).padStart(8, "0")}-0000-4000-8000-000000000000`,
+			);
 		const deleted = await deleteRequest(oldParentId, env.DB);
+		tokenSpy.mockRestore();
 		const token = JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}").toast
 			.undo as string;
+		// Guard: the stub took, so the Undo token really holds the old id's digits.
+		expect(token).toContain(String(oldParentId));
 		const replacements = await env.DB.batch(
 			["Reuse parent id", "Reuse part id"].map((raw_name) =>
 				env.DB.prepare(
@@ -182,12 +191,10 @@ describe("cash delete undo", () => {
 				.bind(bill.id)
 				.first(),
 		).toEqual({ transaction_id: parent?.id, status: "linked" });
-		expect(
-			JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}").toast.message,
-		).toBe("Restored Collision parent.");
-		expect(response.res.headers.get("HX-Trigger")).not.toContain(
-			String(oldParentId),
-		);
+		// The words a person sees, not the raw header: its undoDone token is random and can hold the old id's digits.
+		const trigger = JSON.parse(response.res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Restored Collision parent.");
+		expect(trigger.announce).toBe("Collision parent is back.");
 	});
 
 	it.each([
