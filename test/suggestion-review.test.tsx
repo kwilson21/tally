@@ -5,10 +5,14 @@ import type { SuggestionItem } from "../src/db/suggestions-queue";
 import { NeverSuggestList } from "../src/views/merchant-rules";
 import { AskFirst, SuggestionCard } from "../src/views/suggestion-review";
 
-// #460: each answer form on the review screen, and each Never suggest Remove on Settings, disables its
-// submit buttons while its request runs, so a double click can't queue a second answer.
+// #460: while an answer on the review screen runs, every answer button on the screen is disabled, and a
+// second answer sent meanwhile is dropped by the screen's one request queue, so a double click or a
+// second key press can't queue a second answer. Each Never suggest Remove on Settings disables only its
+// own line's button while its request runs.
 
-const GUARD = 'hx-disable="findAll button[type=submit]"';
+const ANSWER_GUARD = 'hx-disable="#suggestions-page button[type=submit]"';
+const ANSWER_SYNC = 'hx-sync="#suggestions-page:drop"';
+const REMOVE_GUARD = 'hx-disable="findAll button[type=submit]"';
 const PATH = "/settings/suggestions";
 const TODAY = "2026-10-11";
 
@@ -122,12 +126,13 @@ const neverLine: NeverSuggestRule = {
 };
 
 describe("the answer forms disable their submit buttons while a request runs (#460)", () => {
-	it.each<[string, string, number]>([
-		["an income question", card(income), 1],
-		["a transfer question", card(transfer), 1],
-		["a category guess", card(category), 2],
-		["a new category", card(newCategory), 1],
-		["a name", card(name), 2],
+	const answers = [ANSWER_GUARD, ANSWER_SYNC];
+	it.each<[string, string, number, string[]]>([
+		["an income question", card(income), 1, answers],
+		["a transfer question", card(transfer), 1, answers],
+		["a category guess", card(category), 2, answers],
+		["a new category", card(newCategory), 1, answers],
+		["a name", card(name), 2, answers],
 		[
 			"the question after a No",
 			String(
@@ -140,6 +145,7 @@ describe("the answer forms disable their submit buttons while a request runs (#4
 				}),
 			),
 			1,
+			answers,
 		],
 		[
 			"a Never suggest Remove on Settings",
@@ -151,12 +157,17 @@ describe("the answer forms disable their submit buttons while a request runs (#4
 				}),
 			),
 			1,
+			[REMOVE_GUARD],
 		],
-	])("%s: every form that posts carries the guard", (_label, html, count) => {
-		const forms = postingForms(html);
-		expect(forms).toHaveLength(count);
-		for (const form of forms) expect(form).toContain(GUARD);
-	});
+	])(
+		"%s: every form that posts carries its guards",
+		(_label, html, count, guards) => {
+			const forms = postingForms(html);
+			expect(forms).toHaveLength(count);
+			for (const form of forms)
+				for (const guard of guards) expect(form).toContain(guard);
+		},
+	);
 
 	it("leaves Skip a plain link, with no guard", () => {
 		const skip = card(category).match(/<a\b[^>]*>\s*Skip\s*<\/a>/)?.[0];

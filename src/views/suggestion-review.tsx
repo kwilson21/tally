@@ -56,15 +56,17 @@ function StoreFields({ stores }: { stores: { merchantKey: string }[] }) {
 }
 
 /**
- * The attributes every answer form shares: it posts to the screen's address and swaps the whole page. The
- * guard keeps its buttons disabled while the request runs, so a double click can't queue a second answer
- * (#460), as Settings' forms do.
+ * The attributes every answer form shares: it posts to the screen's address and swaps the whole page.
+ * hx-disable turns every answer button on the screen off while a request runs, so a double click can't
+ * queue a second answer (#460). hx-sync puts every answer form on the screen in one request queue, and that
+ * queue drops an answer sent while another is running, so a second press can't queue one either.
  */
 const answerForm = (action: string) => ({
 	method: "post" as const,
 	action,
 	"hx-post": action,
-	"hx-disable": "findAll button[type=submit]",
+	"hx-disable": "#suggestions-page button[type=submit]",
+	"hx-sync": "#suggestions-page:drop",
 	"hx-target": "#suggestions-page",
 	"hx-select": "#suggestions-page",
 	"hx-swap": "outerHTML",
