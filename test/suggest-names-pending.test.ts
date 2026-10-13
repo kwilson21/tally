@@ -436,4 +436,53 @@ describe("suggestTransactionNotes", () => {
 			suggested: 0,
 		});
 	});
+
+	it("asks a note whose call failed after the untried ones, so three failures in a row can't hold up older notes", async () => {
+		for (const [rawName, date] of [
+			["FAILS ONE", "2026-09-21"],
+			["FAILS TWO", "2026-09-20"],
+			["FAILS THREE", "2026-09-19"],
+			["OLDER ONE", "2026-09-05"],
+			["OLDER TWO", "2026-09-04"],
+		] as const)
+			await db
+				.prepare(
+					`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing)
+					 VALUES (?, 1, ?, 650, ?, 'Note Shop', 1, 1)`,
+				)
+				.bind(`plaid-note-${rawName}`, date, rawName)
+				.run();
+		// Every call for a FAILS text throws; the others answer empty.
+		const answer = (text: string) => {
+			if (text.includes("FAILS")) throw new Error("capacity");
+			return { response: "" };
+		};
+
+		// Night one: the three newest fail in a row, so the run stops before the older two.
+		const night1 = fakeAi(answer);
+		expect(await suggestTransactionNotes({ DB: db, AI: night1 })).toEqual({
+			asked: 3,
+			suggested: 0,
+		});
+		expect(callsFor(night1)).toEqual(["FAILS ONE", "FAILS TWO", "FAILS THREE"]);
+
+		// Night two: the older notes, never asked, come before any note that failed.
+		const night2 = fakeAi(answer);
+		expect(await suggestTransactionNotes({ DB: db, AI: night2 })).toEqual({
+			asked: 5,
+			suggested: 0,
+		});
+		const sent = callsFor(night2);
+		expect(sent.slice(0, 2)).toEqual(["OLDER ONE", "OLDER TWO"]);
+		expect(sent.slice(2).every((text) => text?.startsWith("FAILS"))).toBe(true);
+
+		// The failed notes stay untried, so a later night asks them again.
+		expect(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM transactions WHERE raw_name LIKE 'FAILS%' AND note_tried_at IS NULL AND note_failed_at IS NOT NULL",
+				)
+				.first<{ n: number }>(),
+		).toEqual({ n: 3 });
+	});
 });

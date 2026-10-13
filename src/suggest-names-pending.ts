@@ -46,6 +46,7 @@ export async function suggestTransactionNotes(
 	let failuresInARow = 0;
 	for (let i = 0; i < transactions.length; i += SWITCH_CHECK_BATCH) {
 		const answered: number[] = [];
+		const failed: number[] = [];
 		const guesses: { id: number; note: string }[] = [];
 		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) break;
@@ -61,6 +62,7 @@ export async function suggestTransactionNotes(
 				}),
 			]);
 			if (!result.ok) {
+				failed.push(transaction.id);
 				failuresInARow += 1;
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
@@ -73,8 +75,8 @@ export async function suggestTransactionNotes(
 		// Keep or discard this small batch together if the details switch changed during an AI call.
 		const detailsOn = (await readAiSwitches(env.DB)).details;
 		if (!detailsOn) break;
-		// Only answered calls are remembered as tried; a failed one is asked again tomorrow.
-		await saveNoteAttempts(env.DB, answered, guesses);
+		// Answered calls are remembered as tried; a failed one stays untried and is asked again tomorrow, after the rest.
+		await saveNoteAttempts(env.DB, answered, guesses, failed);
 		done.suggested += guesses.length;
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}

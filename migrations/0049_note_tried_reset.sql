@@ -4,4 +4,8 @@
 --   more try here. Only note_tried_at changes: updated_by and updated_at stay as they were, since this is a data fix,
 --   not an edit. A note a person emptied themselves is asked once more too, and a guess stays dashed until it is
 --   kept or dismissed. A row Jev answered with NULL or 0 is not touched, so no note is written for it.
+--   The same migration adds note_failed_at (#450, #457): when Workers AI last failed to answer a note. The notes pass
+--   asks a row that failed after the untried ones, like jev_failed_at, so one that keeps failing can't hold up older
+--   notes. Every row starts NULL, so nothing changes until a call fails.
+ALTER TABLE transactions ADD COLUMN note_failed_at TEXT;
 UPDATE transactions SET note_tried_at = NULL WHERE note_tried_at IS NOT NULL AND details_asked = 1 AND note_worth_writing = 1 AND note_dismissed = 0 AND (note IS NULL OR trim(note) = '');

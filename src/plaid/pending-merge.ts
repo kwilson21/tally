@@ -235,8 +235,13 @@ const STATEMENTS = [
 		income_source = CASE WHEN ${OWN_INCOME} THEN transactions.income_source ELSE ne.income_source END,
 		credit_reviewed = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
 		credit_reviewed_by = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
-	 FROM transactions AS pe, transactions AS ne
-	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
+	 -- Only the columns read come from the pending and posted rows: three whole copies of transactions in one
+	 -- UPDATE ... FROM go past the statement's column limit ("too many columns in result set").
+	 FROM (SELECT id, is_split, amount_cents, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by
+	       FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1) AS pe,
+	      (SELECT id, is_split, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by
+	       FROM transactions WHERE plaid_transaction_id = ?2) AS ne
+	 WHERE transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
 	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL

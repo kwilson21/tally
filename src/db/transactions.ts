@@ -2162,7 +2162,8 @@ export async function saveJevDetails(
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
  * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent. A row with `note_tried_at`
- * set is left out: Workers AI answered it, even with no note, or a person saved its note empty.
+ * set is left out: Workers AI answered it, even with no note, or a person saved its note empty. A row whose call failed
+ * (`note_failed_at`) stays in, but after the rows that never failed.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -2184,7 +2185,8 @@ export async function transactionsNeedingNoteGuess(
 				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
-			 ORDER BY t.date DESC, t.id DESC LIMIT ?`,
+			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
+			 ORDER BY t.note_failed_at IS NOT NULL, t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<{
@@ -2201,27 +2203,35 @@ export async function transactionsNeedingNoteGuess(
 
 /**
  * Stores successful note guesses, and marks each call Workers AI answered as tried, even when its answer
- * was empty, so it isn't asked again. The caller leaves out a failed call, which is asked again tomorrow.
- * One JSON parameter for each stays below D1's bind limit.
+ * was empty, so it isn't asked again. A failed call is stamped in `note_failed_at` and stays untried, so it is
+ * asked again, after the untried notes (`transactionsNeedingNoteGuess`). One JSON parameter for each stays below
+ * D1's bind limit, and the whole save is one statement.
  */
 export async function saveNoteAttempts(
 	db: D1Database,
 	attempted: number[],
 	notes: { id: number; note: string }[],
+	failed: number[],
 ): Promise<void> {
-	if (attempted.length === 0) return;
+	if (attempted.length === 0 && failed.length === 0) return;
 	await db
 		.prepare(
-			`WITH attempted AS (SELECT value AS id FROM json_each(?)), guesses AS (
-				SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?)
-			)
+			`WITH attempted AS (SELECT value AS id FROM json_each(?)),
+				failed AS (SELECT value AS id FROM json_each(?)),
+				guesses AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?))
 			UPDATE transactions AS t SET
 				note = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
 				note_guessed = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
-				note_tried_at = datetime('now'), updated_at = datetime('now')
-			WHERE t.id IN (SELECT id FROM attempted)`,
+				note_tried_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE note_tried_at END,
+				note_failed_at = CASE WHEN t.id IN (SELECT id FROM failed) THEN datetime('now') ELSE note_failed_at END,
+				updated_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE updated_at END
+			WHERE t.id IN (SELECT id FROM attempted) OR t.id IN (SELECT id FROM failed)`,
 		)
-		.bind(JSON.stringify(attempted), JSON.stringify(notes))
+		.bind(
+			JSON.stringify(attempted),
+			JSON.stringify(failed),
+			JSON.stringify(notes),
+		)
 		.run();
 }
 
