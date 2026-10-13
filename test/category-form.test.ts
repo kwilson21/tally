@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	MAX_ACTIVE,
+	nameKey,
 	parseCategory,
 	restoreProblem,
 } from "../src/settings/category-form";
@@ -98,6 +99,18 @@ describe("parseCategory", () => {
 		expect(parseCategory(form({ name: "C0" }), full, 1)).toMatchObject({
 			ok: true,
 		});
+	});
+});
+
+describe("nameKey", () => {
+	it("folds capitals outside A to Z too, so the stored key and the form's check agree", () => {
+		expect(nameKey("CAFÉ")).toBe(nameKey("Café"));
+		expect(nameKey("École")).toBe("école");
+		expect(nameKey("  Pet   Care ")).toBe("pet care");
+	});
+
+	it("keeps accents, so Café and Cafe stay different names", () => {
+		expect(nameKey("Café")).not.toBe(nameKey("Cafe"));
 	});
 });
 

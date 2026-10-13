@@ -28,13 +28,20 @@ export function hasIncomeAnswerSql(alias: string): string {
 }
 
 /**
- * The income guess a row shows: `income_confidence`, unless the income is settled, the person said No to
- * the Maybe, or the store has a "Never suggest" income line (decision 101). Only the shown value is hidden,
- * so the stored guess stays and Remove brings the Maybe back. The rows, the panel and the review queue all
- * read it from here, so they can't drift apart.
+ * The income guess before the No is read: `income_confidence`, unless the income is settled or the store has a
+ * "Never suggest" income line (decision 101). The review queue reads it after a No too, to ask the Yes that follows.
+ */
+export function incomeGuessSql(alias: string): string {
+	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${neverSuggestedSql(alias, "income")} THEN NULL ELSE ${alias}.income_confidence END`;
+}
+
+/**
+ * The income guess a row shows: `income_confidence`, unless the person said No to the Maybe as well (`income_maybe_declined`,
+ * decision 101). Only the shown value is hidden, so the stored guess stays and Remove brings the Maybe back. The rows, the
+ * panel and the review queue all read it from here, so they can't drift apart.
  */
 export function maybeIncomeConfidenceSql(alias: string): string {
-	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${alias}.income_maybe_declined = 1 OR ${neverSuggestedSql(alias, "income")} THEN NULL ELSE ${alias}.income_confidence END`;
+	return `CASE WHEN ${alias}.income_maybe_declined = 1 THEN NULL ELSE ${incomeGuessSql(alias)} END`;
 }
 
 /**

@@ -145,11 +145,14 @@ const load = Object.values(import.meta.glob("../public/js/toast.js"))[0] as
 async function page({
 	listed = true,
 	bar,
+	selectAll,
 	resizeObserver = true,
 	billPage = false,
 }: {
 	listed?: boolean;
 	bar?: FakeNode;
+	/** The Select all control on the page: the link, or the count's stand-in for it (both have the id select-all-link). */
+	selectAll?: FakeNode;
 	resizeObserver?: boolean;
 	/** A bill's page: no Transactions title, but its own page-title, which takes focus instead. */
 	billPage?: boolean;
@@ -185,15 +188,17 @@ async function page({
 					? announcer
 					: id === "selection-bar"
 						? (bar ?? null)
-						: id === "transactions-title"
-							? billPage
-								? null
-								: heading
-							: id === "page-title" && billPage
-								? heading
-								: id === "result-count" && listed
-									? resultCount
-									: null,
+						: id === "select-all-link"
+							? (selectAll ?? null)
+							: id === "transactions-title"
+								? billPage
+									? null
+									: heading
+								: id === "page-title" && billPage
+									? heading
+									: id === "result-count" && listed
+										? resultCount
+										: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -1806,5 +1811,70 @@ describe("the first tick after Older or Newer in Select mode (#456)", () => {
 		runFrames();
 		expect(document.activeElement).not.toBe(tick);
 		expect(document.activeElement).toBe(document.body);
+	});
+});
+
+// #475: Select all's focus across a count reply. The link and the count's stand-in for it (drawn when no link is) share
+// the id select-all-link. htmx restores focus by that id as each task of a swap lands, and the count's own swap lands
+// before the link's wrapper does, so a count that draws the link again finds nothing to carry focus and leaves it on the
+// body. toast.js moves focus to the Select all control once the swap ends, when the swap began with focus on it.
+describe("Select all's focus when a count reply swaps it (#475)", () => {
+	const control = (tag: string) => {
+		const node = new FakeNode(tag);
+		node.id = "select-all-link";
+		return node;
+	};
+	/** The events htmx sends around one swap: before it swaps (focus as it was), then once every task has landed. */
+	const swapEvents = (document: EventTarget) => {
+		const ctx = { target: new FakeNode("p") };
+		return {
+			before: () => fire(document, "htmx:before:swap", { ctx, tasks: [] }),
+			after: () => fire(document, "htmx:after:swap", { ctx }),
+		};
+	};
+
+	it("moves focus to the link when a count draws it again while focus was on the count's stand-in", async () => {
+		const link = control("a");
+		const { document } = await page({ selectAll: link });
+		document.activeElement = control("span");
+		const swap = swapEvents(document);
+		swap.before();
+		// The swap's first task removes the stand-in, and htmx has no link yet to put focus on: focus is on the body.
+		document.activeElement = document.body;
+		swap.after();
+		expect(document.activeElement).toBe(link);
+	});
+
+	it("moves focus to the control the reply draws when focus was on the link and htmx's restore missed it", async () => {
+		const stand = control("span");
+		const { document } = await page({ selectAll: stand });
+		document.activeElement = control("a");
+		const swap = swapEvents(document);
+		swap.before();
+		document.activeElement = document.body;
+		swap.after();
+		expect(document.activeElement).toBe(stand);
+	});
+
+	it("leaves focus alone when the swap began with focus on the body, as after a mouse click on a checkbox", async () => {
+		const link = control("a");
+		const { document } = await page({ selectAll: link });
+		document.activeElement = document.body;
+		const swap = swapEvents(document);
+		swap.before();
+		swap.after();
+		expect(document.activeElement).toBe(document.body);
+	});
+
+	it("leaves focus where the person moved it during the reply", async () => {
+		const link = control("a");
+		const { document } = await page({ selectAll: link });
+		document.activeElement = control("span");
+		const swap = swapEvents(document);
+		swap.before();
+		const filter = new FakeNode("select");
+		document.activeElement = filter;
+		swap.after();
+		expect(document.activeElement).toBe(filter);
 	});
 });

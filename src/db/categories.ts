@@ -4,6 +4,8 @@ import {
 	type CategoryValue,
 	fullMessage,
 	MAX_ACTIVE,
+	nameKey,
+	sameName,
 } from "../settings/category-form";
 
 export type SettingsCategory = {
@@ -80,10 +82,11 @@ export async function addCategory(
 		.first<{ n: number; last: number }>();
 	const inserted = await db
 		.prepare(
-			`INSERT INTO categories (name, icon, color, sort_order) SELECT ?, 'tag', ?, ? WHERE ${ROOM}`,
+			`INSERT INTO categories (name, name_key, icon, color, sort_order) SELECT ?, ?, 'tag', ?, ? WHERE ${ROOM}`,
 		)
 		.bind(
 			value.name,
+			nameKey(value.name),
 			COLORS[(count?.n ?? 0) % COLORS.length],
 			(count?.last ?? 0) + 1,
 		)
@@ -103,11 +106,11 @@ export async function makeCategory(
 		const id = await addCategory(db, value);
 		if (id !== null) return { ok: true, id };
 	} catch (error) {
-		// The unique name index settles two saves at once (migration 0005).
+		// The unique name indexes settle two saves at once (migrations 0005 and 0052).
 		if (!(error instanceof Error && /UNIQUE/i.test(error.message))) throw error;
 	}
-	const taken = (await categoryNames(db)).some(
-		(category) => category.name.toLowerCase() === value.name.toLowerCase(),
+	const taken = (await categoryNames(db)).some((category) =>
+		sameName(category.name, value.name),
 	);
 	return {
 		ok: false,
@@ -136,15 +139,15 @@ export async function unmakeCategory(
 		.run();
 }
 
-/** Renames a category. */
+/** Renames a category. Throws a UNIQUE error when another category already has the name's key. */
 export async function saveCategory(
 	db: D1Database,
 	id: number,
 	value: CategoryValue,
 ): Promise<void> {
 	await db
-		.prepare("UPDATE categories SET name = ? WHERE id = ?")
-		.bind(value.name, id)
+		.prepare("UPDATE categories SET name = ?, name_key = ? WHERE id = ?")
+		.bind(value.name, nameKey(value.name), id)
 		.run();
 }
 
