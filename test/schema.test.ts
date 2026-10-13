@@ -67,6 +67,7 @@ describe("schema", () => {
 			"household_members",
 			"household_people",
 			"household_settings",
+			"merchant_name_failures",
 			"merchants",
 			"never_suggest_rules",
 			"plaid_items",
@@ -118,8 +119,17 @@ describe("schema", () => {
 		expect(await columns("plaid_items")).toContain("reconnect_emailed_at");
 	});
 
-	it("keeps the merchant name failure column (migration 0051, #468)", async () => {
-		expect(await columns("merchants")).toContain("name_failed_at");
+	it("keeps failed name calls in merchant_name_failures apart from merchants (migration 0051, #468)", async () => {
+		const { results } = await db
+			.prepare("PRAGMA table_info(merchant_name_failures)")
+			.all<{ name: string; notnull: number; pk: number }>();
+		expect(results.find((column) => column.name === "raw_name")).toMatchObject({
+			pk: 1,
+		});
+		expect(results.find((column) => column.name === "failed_at")).toMatchObject(
+			{ notnull: 1 },
+		);
+		expect(await columns("merchants")).not.toContain("name_failed_at");
 	});
 
 	it("rejects duplicate Plaid item ids", async () => {

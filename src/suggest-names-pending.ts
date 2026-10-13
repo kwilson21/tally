@@ -131,7 +131,7 @@ export async function suggestMerchantNames(
 		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)
 		// without a D1 read for every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
-		// Answers and failed calls share this one write, so a batch costs the same statements either way.
+		// A batch's answers and failed calls are saved in one D1 batch.
 		done.suggested += await saveAskedNames(env.DB, answers, failed);
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}

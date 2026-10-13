@@ -34,6 +34,7 @@ const TABLES_CHILD_FIRST = [
 	"budget_amounts",
 	"category_archive_periods",
 	"savings_goal_amounts",
+	"merchant_name_failures",
 	"merchants",
 	"categories",
 	"accounts",

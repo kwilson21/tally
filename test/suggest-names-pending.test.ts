@@ -79,12 +79,12 @@ const merchants = async () =>
 			.all<MerchantRow>()
 	).results;
 
-/** The merchants whose last name call failed, the longest-ago failure first. */
+/** The bank texts whose last name call failed, the longest-ago failure first. */
 const failedNames = async () =>
 	(
 		await db
 			.prepare(
-				"SELECT raw_name FROM merchants WHERE name_failed_at IS NOT NULL ORDER BY name_failed_at, raw_name",
+				"SELECT raw_name FROM merchant_name_failures ORDER BY failed_at, raw_name",
 			)
 			.all<{ raw_name: string }>()
 	).results.map((row) => row.raw_name);
@@ -120,9 +120,9 @@ describe("suggestMerchantNames", () => {
 		const ai = fakeAi(() => ({ response: "Unique Shop" }));
 		await suggestMerchantNames({ DB: counted as D1Database, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(nameCallLimit);
-		// One candidate query, then a switch read and a batch save for every five calls: 1 + 1 + 20 × 2 = 42.
-		// A save per name would be 100 or more.
-		expect(statements).toBeLessThanOrEqual(42);
+		// One candidate query and the names switch read, then for every five calls a switch read and two writes
+		// (the merchants upsert and the failures delete): 1 + 1 + 20 × 3 = 62. A save per name would be 100 or more.
+		expect(statements).toBeLessThanOrEqual(62);
 	});
 
 	it("asks once for a merchant Plaid didn't name and keeps the names, pending, without renaming it", async () => {
@@ -299,27 +299,9 @@ describe("suggestMerchantNames", () => {
 			suggested: 0,
 		});
 		expect(failing.run).toHaveBeenCalledTimes(3);
-		// The three that failed in a row (FOUR, ONE, THREE in name order) are remembered; TWO was never tried.
-		expect(await merchants()).toEqual([
-			{
-				raw_name: "FOUR",
-				suggested_name: null,
-				display_name: null,
-				suggestion_status: "none",
-			},
-			{
-				raw_name: "ONE",
-				suggested_name: null,
-				display_name: null,
-				suggestion_status: "none",
-			},
-			{
-				raw_name: "THREE",
-				suggested_name: null,
-				display_name: null,
-				suggestion_status: "none",
-			},
-		]);
+		// A failure makes no merchant row; the three that failed in a row (FOUR, ONE, THREE) are remembered
+		// apart from merchants, and TWO was never tried.
+		expect(await merchants()).toEqual([]);
 		expect((await failedNames()).sort()).toEqual(["FOUR", "ONE", "THREE"]);
 		logged.mockRestore();
 
@@ -406,6 +388,47 @@ describe("suggestMerchantNames", () => {
 		]);
 	});
 
+	it("a failure again on a text that already failed updates its one row's time", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		await db
+			.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2000-01-01 00:00:00')",
+			)
+			.bind(RAW)
+			.run();
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const failing = fakeAi(() => {
+			throw new Error("capacity");
+		});
+		await suggestMerchantNames({ DB: db, AI: failing });
+		logged.mockRestore();
+		const failures = await db
+			.prepare("SELECT raw_name, failed_at FROM merchant_name_failures")
+			.all<{ raw_name: string; failed_at: string }>();
+		const [failure] = failures.results;
+		expect(failures.results).toHaveLength(1);
+		expect(failure?.raw_name).toBe(RAW);
+		// Newer than the seeded time (datetime('now') has a one-second resolution, so compare with the seed).
+		expect((failure?.failed_at ?? "") > "2000-01-01 00:00:00").toBe(true);
+		expect(await merchants()).toEqual([]);
+	});
+
+	it("a text that failed and is answered on a later night leaves no failure row", async () => {
+		await addTransactions([{ rawName: RAW }]);
+		await db
+			.prepare(
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2026-10-01 09:20:00')",
+			)
+			.bind(RAW)
+			.run();
+		const working = fakeAi(() => ({ response: "Blue Bottle Coffee" }));
+		await suggestMerchantNames({ DB: db, AI: working });
+		expect(await failedNames()).toEqual([]);
+		expect(await merchants()).toMatchObject([
+			{ raw_name: RAW, suggestion_status: "pending" },
+		]);
+	});
+
 	it("asks the merchants whose calls failed after the never-tried ones, the longest-ago failure first", async () => {
 		await addTransactions([
 			...Array.from({ length: 3 }, () => ({ rawName: "RECENT FAIL" })),
@@ -414,10 +437,10 @@ describe("suggestMerchantNames", () => {
 		]);
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchants (raw_name, name_failed_at) VALUES ('RECENT FAIL', '2026-10-06 09:20:00')",
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('RECENT FAIL', '2026-10-06 09:20:00')",
 			),
 			db.prepare(
-				"INSERT INTO merchants (raw_name, name_failed_at) VALUES ('OLD FAIL', '2026-10-01 09:20:00')",
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('OLD FAIL', '2026-10-01 09:20:00')",
 			),
 		]);
 		const ai = fakeAi(() => ({ response: "A Name" }));
@@ -425,7 +448,7 @@ describe("suggestMerchantNames", () => {
 		expect(callsFor(ai)).toEqual(["NEVER TRIED", "OLD FAIL", "RECENT FAIL"]);
 	});
 
-	it("records a batch's failed calls in the same write as its answers, so failures add no statement", async () => {
+	it("records a batch's answers and failed calls in one D1 batch", async () => {
 		await addTransactions(
 			["ONE", "TWO", "THREE", "FOUR", "FIVE"].map((rawName) => ({ rawName })),
 		);
@@ -451,8 +474,14 @@ describe("suggestMerchantNames", () => {
 			await suggestMerchantNames({ DB: counted as D1Database, AI: ai }),
 		).toEqual({ asked: 5, suggested: 3 });
 		logged.mockRestore();
-		// The candidate query, a switch read before and after the batch, and one write for the batch.
-		expect(statements).toBeLessThanOrEqual(4);
+		// The candidate query, the names switch read at the start and again before the batch, then the batch's
+		// three writes: the merchants upsert, the failures upsert and the failures delete. 1 + 1 + 1 + 3 = 6.
+		expect(statements).toBeLessThanOrEqual(6);
+		expect((await merchants()).map((m) => m.raw_name)).toEqual([
+			"FIVE",
+			"ONE",
+			"THREE",
+		]);
 		expect(await failedNames()).toEqual(["FOUR", "TWO"]);
 	});
 

@@ -8,7 +8,8 @@ const EXPORT_COLUMNS = {
 	budget_amounts: "category_id, effective_month, amount_cents",
 	savings_goal_amounts: "effective_month, amount_cents",
 	merchants:
-		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill, name_failed_at",
+		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill",
+	merchant_name_failures: "raw_name, failed_at",
 	// Each account names its bank and says whether it's disconnected, since bank rows carry no id.
 	accounts: `id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at,
 		(SELECT institution_name FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank,

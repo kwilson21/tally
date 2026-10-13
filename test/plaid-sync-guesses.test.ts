@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { saveAskedNames } from "../src/db/merchant-names";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -162,6 +163,36 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		// T1 comes first and has no row; T2's is the first there is, so its name carries over.
 		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
 		expect(await row(PLAID)).toMatchObject({ display_name: "My coffee" });
+	});
+
+	it("copies the configured row of the second text when the first text's name call failed, so a failure leaves no row to copy", async () => {
+		const id = await addItem();
+		const category = await env.DB.prepare(
+			"INSERT INTO categories (name, icon, color) VALUES ('Coffee', 'tag', 'cat-blue') RETURNING id",
+		).first<{ id: number }>();
+		// T1's name call failed. The failure is kept apart from merchants (#468), so T1 gets no row here.
+		await saveAskedNames(env.DB, [], [T1]);
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name, default_category_id, not_a_bill) VALUES (?, 'My coffee', ?, 1)",
+		)
+			.bind(T2, category?.id)
+			.run();
+		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
+		expect(await row(PLAID)).toMatchObject({ display_name: "My coffee" });
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id, not_a_bill FROM merchants WHERE raw_name = ?",
+			)
+				.bind(PLAID)
+				.first(),
+		).toEqual({ default_category_id: category?.id, not_a_bill: 1 });
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM merchants WHERE raw_name = ?",
+			)
+				.bind(T1)
+				.first(),
+		).toEqual({ n: 0 });
 	});
 
 	it("never changes a suggestion a person already decided, or a name a person chose", async () => {
