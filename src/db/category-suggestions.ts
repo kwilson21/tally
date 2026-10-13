@@ -152,16 +152,25 @@ export type PendingSuggestions = PendingSuggestion[] & { more: number };
 /** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */
 export const SETTINGS_SUGGESTION_LIMIT = 10;
 
+/**
+ * The per-row checks a purchase in a new-category suggestion passes to be filed under it (pendingSuggestions), without the
+ * "Never suggest" line. `alias` is the transactions table's name or alias, as for `merchantKeySql`. The rest of the queue
+ * reads the same checks through this, so they can't drift apart (#440).
+ */
+export const suggestedRowSql = (alias: string) =>
+	`${alias}.category_id IS NULL AND ${alias}.category_source IS NULL AND ${alias}.pending = 0 AND ${alias}.amount_cents > 0
+		AND ${alias}.excluded = 0 AND ${alias}.flag_income = 0 AND ${alias}.is_split = 0 AND ${alias}.parent_id IS NULL`;
+
 export async function pendingSuggestions(
 	db: D1Database,
 	limit = SETTINGS_SUGGESTION_LIMIT,
 ): Promise<PendingSuggestions> {
 	await db.batch([
 		db.prepare(
-			`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id IN (SELECT cs.id FROM category_suggestions cs WHERE cs.status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL))`,
+			`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id IN (SELECT cs.id FROM category_suggestions cs WHERE cs.status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=cs.id AND ${suggestedRowSql("t")}))`,
 		),
 		db.prepare(
-			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL)`,
+			`UPDATE category_suggestions SET status='none' WHERE status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=category_suggestions.id AND ${suggestedRowSql("t")})`,
 		),
 	]);
 	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
@@ -170,7 +179,7 @@ export async function pendingSuggestions(
 			`WITH candidates AS (
 				SELECT cs.id, cs.name, COUNT(t.id) n
 				FROM category_suggestions cs JOIN transactions t ON t.category_suggestion_id=cs.id
-				AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL
+				AND ${suggestedRowSql("t")}
 				AND NOT ${neverSuggestedSql("t", "new_category")}
 				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
 			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
@@ -188,7 +197,7 @@ export async function pendingSuggestions(
 		), candidates AS (
 			SELECT cs.id, cs.name, COUNT(t.id) AS n
 			FROM pending p JOIN category_suggestions cs ON cs.id = p.id AND cs.status = 'pending'
-			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+			JOIN transactions t ON t.category_suggestion_id = cs.id AND ${suggestedRowSql("t")}
 				AND NOT ${neverSuggestedSql("t", "new_category")}
 			GROUP BY cs.id HAVING COUNT(t.id) > 0
 		), ranked AS (
@@ -199,7 +208,7 @@ export async function pendingSuggestions(
 			t.category_id categoryId, c.name categoryName, c.icon categoryIcon, c.color categoryColor, t.pending, ${ownNameSql("t")} AS ownName
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
-		WHERE r.rank <= ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
+		WHERE r.rank <= ? AND ${suggestedRowSql("t")}
 			AND NOT ${neverSuggestedSql("t", "new_category")}
 		ORDER BY r.rank, t.date DESC, t.id DESC`)
 		.bind(JSON.stringify(suggestions.map((s) => s.id)), limit)
