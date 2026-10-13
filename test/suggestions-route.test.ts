@@ -2483,8 +2483,8 @@ async function nameId() {
 	return `name-${r?.id}`;
 }
 
-describe("a Yes on the question covers every key the store goes by (decision 101, #459)", () => {
-	/** The income Maybes the queue still asks about, by their suggestion ids. */
+describe("a Yes on a Maybe keeps one line under the store it was asked about (decision 101, #459)", () => {
+	/** The income Maybes the queue still asks, by their suggestion ids. */
 	const incomeAsked = async () =>
 		(await suggestionQueue(db))
 			.filter((item) => item.kind === "income")
@@ -2503,7 +2503,7 @@ describe("a Yes on the question covers every key the store goes by (decision 101
 			.map((line) => `${line.key}:${line.kind}`)
 			.sort();
 
-	it("a Yes on the store's name also covers its bank text's older charges, which leave the queue", async () => {
+	it("a Yes on the store's name keeps one line, which also covers its bank text's older charge, and one Remove takes it", async () => {
 		const named = await insertTx({
 			raw: VENMO,
 			merchantName: "Venmo",
@@ -2537,12 +2537,12 @@ describe("a Yes on the question covers every key the store goes by (decision 101
 		expect(trigger(res).toast?.message).toBe(
 			"Got it. Tally won't suggest income for Venmo again. Change it in Settings.",
 		);
-		expect(await stored()).toEqual([`Venmo:income`, `${VENMO}:income`].sort());
+		expect(await stored()).toEqual(["Venmo:income"]);
 		expect(await incomeAsked()).toEqual([]);
-		// Settings shows the store once, under its name, and not its bank text.
+		// Settings shows the store's one line, under its name.
 		const { html } = await get("/settings");
 		expect(neverLineForms(html)).toBe(1);
-		expect(textOf(html)).not.toContain(`Never suggest income for ${VENMO}`);
+		expect(textOf(html)).toContain("Never suggest income for Venmo");
 		const line = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
 		);
@@ -2552,7 +2552,7 @@ describe("a Yes on the question covers every key the store goes by (decision 101
 		expect(await incomeAsked()).toEqual([`income-${older}`]);
 	});
 
-	it("a Yes on a bank text's Maybe also covers the store's name, and one Remove of that line takes both", async () => {
+	it("a Yes on a bank text's Maybe keeps one line under the bank text, and one Remove takes it", async () => {
 		// The store's own charge has no Maybe, so only the bank text's older charge is asked.
 		await insertTx({ raw: VENMO, merchantName: "Venmo", amount: -250000 });
 		const bank = await insertTx({
@@ -2576,11 +2576,12 @@ describe("a Yes on the question covers every key the store goes by (decision 101
 			},
 			true,
 		);
-		expect(await stored()).toEqual([`Venmo:income`, `${VENMO}:income`].sort());
+		expect(await stored()).toEqual([`${VENMO}:income`]);
 		expect(await incomeAsked()).toEqual([]);
 		expect(neverLineForms((await get("/settings")).html)).toBe(1);
 		const line = await row(
-			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = ?",
+			VENMO,
 		);
 		await post("/settings/never-suggest/remove", removal(line), true);
 		expect(await stored()).toEqual([]);

@@ -91,19 +91,8 @@ export async function questionStores(
 }
 
 /**
- * The keys a store goes by, for the key `?1` (a merchant key): the key itself, the Plaid names of the charges
- * whose bank text it is, and the bank texts of the charges with those names (decision 101). Each row of `keys`
- * is one key of the store. A Yes writes a line under each of them and a Remove takes each away, so a Yes and a
- * Remove always cover the same keys (#459).
- */
-const STORE_KEYS_SQL = `WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
-	keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))`;
-
-/**
- * Adds the store's lines when the person said Yes: one under the key and one under each key the store goes by
- * (its Plaid name and its bank text), so the bank text's older charges with no Plaid name are covered too (#459).
- * It is one statement. A line already there stays as it is, so a repeat answer adds nothing and keeps the day
- * of the first. Returns whether any line was added.
+ * Adds one line when the person said Yes. A line already there stays as it is, so a repeat answer adds
+ * nothing and keeps the day of the first. Returns whether a line was added.
  */
 export async function addNeverSuggest(
 	db: D1Database,
@@ -119,9 +108,8 @@ export async function addNeverSuggest(
 ): Promise<boolean> {
 	const result = await db
 		.prepare(
-			`${STORE_KEYS_SQL}
-			INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-			SELECT k, ?2, ?3 FROM keys`,
+			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			VALUES (?, ?, ?)`,
 		)
 		.bind(merchantKey, kind, decidedOn)
 		.run();
@@ -149,7 +137,8 @@ export async function removeNeverSuggest(
 	if (!rule) return null;
 	const result = await db
 		.prepare(
-			`${STORE_KEYS_SQL}
+			`WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
+				keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))
 			DELETE FROM never_suggest_rules WHERE kind = ?2 AND merchant_key IN (SELECT k FROM keys)`,
 		)
 		.bind(rule.merchantKey, rule.kind)
@@ -172,12 +161,21 @@ export function neverSuggestRuleLine(rule: NeverSuggestRule): string {
 }
 
 /**
- * SQL that is true when the store (`merchantKeySql`, an expression for the merchant key) has a "Never
- * suggest" line of `kind`. Used by the Maybe rows, the review queue and the new-category grouping, so a
- * refused suggestion never comes back. `kind` is one of the typed kinds, never user input.
+ * SQL that is true when the row `alias` names has a "Never suggest" line of `kind`, so a refused suggestion
+ * never comes back. The row's store has the line either under its own key, or, for a charge with no Plaid name,
+ * under the Plaid name of a charge with the same bank text (sameMerchantSql's relation, read here rather than
+ * copied on Yes). So a named charge is hidden only by its own key's line, and two stores that share a bank text
+ * never hide each other (#459). The subquery needs no check that its charge is named: an unnamed one has the bank
+ * text's own key, which the first check already reads. Used by the Maybe rows, the review queue and the
+ * new-category grouping.
+ * `alias` is the transactions table's name or alias, as for `merchantKeySql`. `kind` is one of the typed kinds,
+ * never user input.
  */
 export const neverSuggestedSql = (
-	merchantKeySql: string,
+	alias: string,
 	kind: NeverSuggestKind,
 ): string =>
-	`EXISTS (SELECT 1 FROM never_suggest_rules n WHERE n.merchant_key = ${merchantKeySql} AND n.kind = '${kind}')`;
+	`(EXISTS (SELECT 1 FROM never_suggest_rules n WHERE n.merchant_key = ${merchantKeySql(alias)} AND n.kind = '${kind}')
+		OR (NULLIF(${alias}.merchant_name, '') IS NULL AND EXISTS (SELECT 1 FROM transactions u
+			JOIN never_suggest_rules n ON n.merchant_key = ${merchantKeySql("u")} AND n.kind = '${kind}'
+			WHERE u.raw_name = ${alias}.raw_name)))`;
