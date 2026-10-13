@@ -932,8 +932,9 @@ describe("select several transactions", () => {
 	it("brings the link back when a row is unticked, and hides it once every row is ticked", async () => {
 		const ids = rowIds(await pageHtml("month=all&select=1"));
 		const all = await countFragment(ids, ids);
+		// Every page row is ticked but more rows match, so the whole-set link is drawn and the wrapper morphs it (#455).
 		expect(all).toMatch(
-			/<span id="select-all-page"[^>]*hx-swap-oob="outerHTML settle:0"/,
+			/<span id="select-all-page"[^>]*hx-swap-oob="outerMorph"/,
 		);
 		expect(selectAllLabel(all)).toBeUndefined();
 		const oneOff = await countFragment(ids.slice(1), ids);
@@ -1033,19 +1034,57 @@ describe("select several transactions", () => {
 		);
 	});
 
-	it("keeps focus on Select all across a tick's count reply: the link has an id, and its swap skips htmx's settle wait (#438)", async () => {
+	/** The bar's wrapper, as a count reply swaps it: its own out-of-band swap style. */
+	const wrapperSwap = (html: string) =>
+		attribute(
+			html.match(/<span id="select-all-page"[^>]*>/)?.[0] ?? "",
+			"hx-swap-oob",
+		);
+
+	it("keeps one id on the Select all link whichever link a count draws, and morphs the wrapper so the link survives (#455)", async () => {
 		const page = await pageHtml("month=all&select=1");
 		const ids = rowIds(page);
+		// The list's own reply keeps its settle:0 swap (#438); its link has the same id as a count's.
 		expect(page).toContain("#select-all-page:outerHTML settle:0");
-		expect(attribute(selectAllTag(page), "id")).toBe("select-all-page-link");
-		// A tick's count reply swaps the link out with its wrapper. The new link keeps the id, so focus returns to it.
-		const counted = await countFragment(ids.slice(0, 1), ids);
-		expect(attribute(selectAllTag(counted), "id")).toBe("select-all-page-link");
-		// Ticking the whole page offers the whole set under its own id, so Select all's reply can't refocus the link it removes.
+		expect(attribute(selectAllTag(page), "id")).toBe("select-all-link");
+		// The page link: some rows on the page are still unticked.
+		const pageLink = await countFragment(ids.slice(0, 1), ids);
+		expect(attribute(selectAllTag(pageLink), "id")).toBe("select-all-link");
+		expect(pageLink.match(/id="select-all-link"/g)).toHaveLength(1);
+		expect(wrapperSwap(pageLink)).toBe("outerMorph");
+		// The whole-set link: every row on the page is ticked and more rows match.
 		const whole = await countFragment(ids, ids);
 		const wholeLink =
 			whole.match(/<a [^>]*>Select all \d+ in [^<]*<\/a>/)?.[0] ?? "";
-		expect(attribute(wholeLink, "id")).toBe("select-all-whole-link");
+		expect(attribute(wholeLink, "id")).toBe("select-all-link");
+		expect(whole.match(/id="select-all-link"/g)).toHaveLength(1);
+		expect(wrapperSwap(whole)).toBe("outerMorph");
+	});
+
+	it("draws no link once every matched row is ticked: the wrapper swaps whole, and the count takes the link's id without autofocus (#455)", async () => {
+		const ids = rowIds(await pageHtml("month=all&select=1"));
+		// In all mode a page row whose box isn't posted is unticked, so every page row is posted as checked.
+		const reply = await (
+			await request(
+				`/transactions/select/count?${new URLSearchParams([
+					["all", "1"],
+					["page-ids", ids.join(",")],
+					["back", "/transactions?month=all"],
+					...ids.map((id) => ["ids", String(id)]),
+				])}`,
+			)
+		).text();
+		// Every matched row is ticked, so neither link (page's or whole set's) is drawn.
+		expect(reply).not.toMatch(/<a [^>]*>Select all /);
+		expect(wrapperSwap(reply)).toBe("outerHTML settle:0");
+		// htmx restores focus to the element with the removed link's id, and only when the link had focus. So the count
+		// carries the id as a focus stop, and nothing takes focus on its own (no autofocus).
+		const count = reply.match(/<span [^>]*id="select-all-link"[^>]*>/)?.[0];
+		expect(count).toBeDefined();
+		expect(count).toContain('tabindex="-1"');
+		expect(count).not.toContain("autofocus");
+		expect(reply.match(/id="select-all-link"/g)).toHaveLength(1);
+		expect(setCategoryFocused(reply)).toBe(false);
 	});
 
 	it("never focuses Set category for a tick, a filter change, a plain reload or a Select all with nothing ticked", async () => {
@@ -2000,8 +2039,13 @@ describe("select several transactions", () => {
 			await seedMatches();
 			const search = (q: string) =>
 				wholeCount([], [], `/transactions?month=all&q=${q}`);
-			expect(await search("ZQ+TEST+BAKERY")).toMatch(/^101 selected</);
-			expect(await search("zz-no-such-words-zz")).toMatch(/^0 selected</);
+			// With no link drawn, the words sit in the count's focus stop (SelectedCount's fallback, #455).
+			expect(await search("ZQ+TEST+BAKERY")).toMatch(
+				/^(?:<span [^>]*>)?101 selected</,
+			);
+			expect(await search("zz-no-such-words-zz")).toMatch(
+				/^(?:<span [^>]*>)?0 selected</,
+			);
 		});
 
 		it("excludes every row the whole set holds past 100, and leaves a split parent and the rows the filters miss alone", async () => {
@@ -2041,7 +2085,9 @@ describe("select several transactions", () => {
 			);
 			const before = (await snapshot()) as SnapshotRow[];
 			const counted = Number(
-				(await wholeCount([], [], back)).match(/^(\d+) selected/)?.[1],
+				(await wholeCount([], [], back)).match(
+					/^(?:<span [^>]*>)?(\d+) selected/,
+				)?.[1],
 			);
 			expect(counted).toBe(matched.size);
 			const res = await post(
@@ -2129,7 +2175,9 @@ describe("select several transactions", () => {
 				),
 			]);
 			const back = "/transactions?month=all&q=ZQ+TEST+BAKERY";
-			expect(await wholeCount([], [], back)).toMatch(/^101 selected</);
+			expect(await wholeCount([], [], back)).toMatch(
+				/^(?:<span [^>]*>)?101 selected</,
+			);
 			const before = (await snapshot()) as SnapshotRow[];
 			const res = await post(
 				"/transactions/select/exclude",
@@ -2184,7 +2232,7 @@ describe("select several transactions", () => {
 		it("follows the month the address names, so a month with no rows has nothing to select", async () => {
 			await seedMatches();
 			const text = await wholeCount([], [], "/transactions?month=2000-01");
-			expect(text).toMatch(/^0 selected/);
+			expect(text).toMatch(/^(?:<span [^>]*>)?0 selected/);
 			expect(text).not.toContain("Select all");
 		});
 

@@ -1051,21 +1051,23 @@ transactions.get("/transactions/select/count", async (c) => {
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
 	const lineGone = params.has(NOT_ON_PAGE_FIELD) && notOnPage === 0;
-	const focusSelectAll =
-		lineGone &&
+	const linkDrawn =
 		selectAllOffer({
 			pageIds,
 			ticked: new Set(selection.ticks),
 			all: selection.all,
 			unselected,
 		}) !== null;
+	const focusSelectAll = lineGone && linkDrawn;
 	const focusCount = lineGone && !focusSelectAll;
 	return c.html(
 		<>
+			{/* With no link drawn, the count is the bar's focus stop: a focus the link had moves here (#455). */}
 			<SelectedCount
 				count={picked.length}
 				notOnPage={notOnPage}
 				focus={focusCount}
+				fallback={!linkDrawn}
 			/>
 			<SelectionActionButtons
 				disabled={picked.length === 0 || selection.ticks.length > MAX_SELECTED}
@@ -3179,6 +3181,8 @@ async function savePanel(
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
 	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
 	// merchant rule made from it) is ignored. It follows by the counting rule on what this save will hold.
+	// Only a new tick of Always is dropped: a kept one (always_was) leaves the store's rule as it is, and an
+	// untick still clears it (merchantRuleChange). Linking never sets or touches a rule (decision 101).
 	const linkedPurchase = refunds.find(
 		(p) => p.id === refundOfId && !p.excluded,
 	);
@@ -3188,7 +3192,7 @@ async function savePanel(
 	) {
 		form.delete("category");
 		form.delete("new_category_name");
-		form.delete("always");
+		if (form.get("always_was") !== "1") form.delete("always");
 	}
 	// A name choice counts only while it is still offered: the panel may have been opened before "Suggest store
 	// names" went off or before the suggestion was settled elsewhere, and a person's save must not accept or

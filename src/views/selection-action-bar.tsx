@@ -13,6 +13,13 @@ export const MAX_SELECTED = 100;
 export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
 
 /**
+ * The id of the Select all link, whichever link the bar draws (the page's or the whole set's). A count reply that
+ * draws a link morphs its wrapper, so the same element stays with its focus and any press on it. A count reply that
+ * draws none swaps the wrapper, and the count takes this id (SelectedCount), so htmx moves a focus the link had there.
+ */
+export const SELECT_ALL_LINK_ID = "select-all-link";
+
+/**
  * What a reply refreshes in the bar: the live count and both actions, the Select all link (its wrapper
  * stays in place, so a count can bring the link back), the limit and the line for ticks not on this
  * page. Out of band, a list change adds the list's own parts to this (LIST_OOB in the transactions route).
@@ -29,7 +36,8 @@ export const FOCUS_SET_CATEGORY = "set-category-selection";
 
 /**
  * The `focus` value Older and Newer ask their reply for: the reply focuses the first row's tick, since
- * the page link that had focus leaves with the old list.
+ * the page link that had focus leaves with the old list. The rows are hidden until the load ends, so toast.js
+ * moves the focus to that tick then (#456).
  */
 export const FOCUS_FIRST_TICK = "first-tick";
 
@@ -231,16 +239,20 @@ export function SelectAllOnPage({
 	return (
 		<span
 			id="select-all-page"
-			// settle:0: a link with an id inside would make htmx wait a tick before this swap, and this swap has no transition to settle (#438).
-			hx-swap-oob={oob ? "outerHTML settle:0" : undefined}
+			// A count that draws a link morphs the wrapper, so the link's element survives (a focus or press on it, #455). A count
+			// that draws none swaps the wrapper whole: htmx then restores a focus the link had to the count (SELECT_ALL_LINK_ID).
+			// settle:0 keeps that swap at once, as the list's swap does (#438).
+			hx-swap-oob={
+				oob ? (offer ? "outerMorph" : "outerHTML settle:0") : undefined
+			}
 		>
 			<input type="hidden" name="page-ids" value={pageIds.join(",")} />
 			<SelectionFields selection={selection} />
 			{offer === "page" && (
 				<Button
 					kind="text"
-					// The id lets htmx 4 put focus back on this link when a tick's count reply swaps it out (#438).
-					id="select-all-page-link"
+					// One id whichever link is drawn: a count reply morphs this element, so focus and a press stay on it (#455).
+					id={SELECT_ALL_LINK_ID}
 					// Without JavaScript the link carries the ticks and ticks this page's rows.
 					href={pageAddress}
 					class="-mr-2"
@@ -264,8 +276,8 @@ export function SelectAllOnPage({
 			{offer === "whole" && (
 				<Button
 					kind="text"
-					// Its own id, not the page link's: when Select all's reply swaps the page link out, focus must go to Set category, not here (#438).
-					id="select-all-whole-link"
+					// The same id as the page link (SELECT_ALL_LINK_ID): a count reply morphs the element, so focus stays on it (#455).
+					id={SELECT_ALL_LINK_ID}
 					href={wholeAddress}
 					class="-mr-2"
 					// As the page link: the all-mode flag rides in the request, and the ticks and the fields come as parameters.
@@ -295,6 +307,7 @@ export function SelectedCount({
 	count,
 	notOnPage,
 	focus = false,
+	fallback = false,
 }: {
 	count: number;
 	notOnPage: number;
@@ -303,6 +316,12 @@ export function SelectedCount({
 	 * unticked in its disclosure (#350). The live region's own element can't carry it, so this span does.
 	 */
 	focus?: boolean;
+	/**
+	 * Drawn by a count reply that draws no Select all link: the count takes the link's id and becomes a focus
+	 * stop, so htmx moves a focus the link had here when the link leaves (SELECT_ALL_LINK_ID, #455). Never
+	 * focused by itself.
+	 */
+	fallback?: boolean;
 }) {
 	const words = (
 		<>
@@ -313,8 +332,13 @@ export function SelectedCount({
 		</>
 	);
 	// As the result count and the title do: no ring around text that is only there to be read.
-	return focus ? (
-		<span tabindex={-1} autofocus class="outline-none">
+	return focus || fallback ? (
+		<span
+			id={fallback ? SELECT_ALL_LINK_ID : undefined}
+			tabindex={-1}
+			autofocus={focus}
+			class="outline-none"
+		>
 			{words}
 		</span>
 	) : (
