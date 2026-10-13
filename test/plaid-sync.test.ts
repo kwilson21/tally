@@ -6,7 +6,11 @@ import { householdToday } from "../src/dates";
 import { readAiTally } from "../src/db/ai-log";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
-import { removeNeverSuggest } from "../src/db/never-suggest";
+import {
+	addNeverSuggest,
+	neverSuggestRules,
+	removeNeverSuggest,
+} from "../src/db/never-suggest";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import {
 	getTransaction,
@@ -893,6 +897,30 @@ describe("syncItem", () => {
 			);
 			expect(asked).toHaveLength(1);
 			expect(asked[0]).toMatchObject({ merchantKey: "Venmo" });
+		});
+
+		it("a Yes on a bank text Plaid hasn't named yet is one store line once the charges are named, and a Remove takes both", async () => {
+			const id = await addItem();
+			await addNeverSuggest(env.DB, {
+				merchantKey: "VENMO 123",
+				kind: "income",
+				decidedOn: "2026-10-03",
+			});
+			await syncVenmo(id, "venmo-1", -25);
+			expect(await lines()).toEqual([
+				{ merchant_key: "VENMO 123", kind: "income", decided_on: "2026-10-03" },
+				{ merchant_key: "Venmo", kind: "income", decided_on: "2026-10-03" },
+			]);
+			expect(
+				(await neverSuggestRules(env.DB)).map((rule) => rule.merchantKey),
+			).toEqual(["Venmo"]);
+			const named = (await neverSuggestRules(env.DB))[0];
+			await removeNeverSuggest(env.DB, {
+				id: named?.id ?? 0,
+				merchantKey: named?.merchantKey ?? "",
+				kind: named?.kind ?? "",
+			});
+			expect(await lines()).toEqual([]);
 		});
 
 		it("stops suggesting income for the new charge's Plaid name, as it does for the bank text", async () => {

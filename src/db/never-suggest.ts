@@ -91,8 +91,19 @@ export async function questionStores(
 }
 
 /**
- * Adds one line when the person said Yes. A line already there stays as it is, so a repeat answer adds
- * nothing and keeps the day of the first. Returns whether a line was added.
+ * The keys a store goes by, for the key `?1` (a merchant key): the key itself, the Plaid names of the charges
+ * whose bank text it is, and the bank texts of the charges with those names (decision 101). Each row of `keys`
+ * is one key of the store. A Yes writes a line under each of them and a Remove takes each away, so a Yes and a
+ * Remove always cover the same keys (#459).
+ */
+const STORE_KEYS_SQL = `WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
+	keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))`;
+
+/**
+ * Adds the store's lines when the person said Yes: one under the key and one under each key the store goes by
+ * (its Plaid name and its bank text), so the bank text's older charges with no Plaid name are covered too (#459).
+ * It is one statement. A line already there stays as it is, so a repeat answer adds nothing and keeps the day
+ * of the first. Returns whether any line was added.
  */
 export async function addNeverSuggest(
 	db: D1Database,
@@ -108,8 +119,9 @@ export async function addNeverSuggest(
 ): Promise<boolean> {
 	const result = await db
 		.prepare(
-			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-			VALUES (?, ?, ?)`,
+			`${STORE_KEYS_SQL}
+			INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			SELECT k, ?2, ?3 FROM keys`,
 		)
 		.bind(merchantKey, kind, decidedOn)
 		.run();
@@ -137,8 +149,7 @@ export async function removeNeverSuggest(
 	if (!rule) return null;
 	const result = await db
 		.prepare(
-			`WITH names(n) AS (SELECT ?1 UNION SELECT merchant_name FROM transactions WHERE raw_name = ?1 AND NULLIF(merchant_name, '') IS NOT NULL),
-				keys(k) AS (SELECT n FROM names UNION SELECT raw_name FROM transactions WHERE merchant_name IN (SELECT n FROM names))
+			`${STORE_KEYS_SQL}
 			DELETE FROM never_suggest_rules WHERE kind = ?2 AND merchant_key IN (SELECT k FROM keys)`,
 		)
 		.bind(rule.merchantKey, rule.kind)

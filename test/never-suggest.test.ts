@@ -271,6 +271,16 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 			.map((row) => `${row.merchantKey}:${row.kind}`)
 			.sort();
 
+	// The lines are planted as they are stored, so these tests check Remove alone: a Yes now writes the other
+	// keys of its store too (see the next describe), which would change the state these tests set up.
+	const plant = (merchantKey: string, kind: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, ?, '2026-10-03')",
+			)
+			.bind(merchantKey, kind)
+			.run();
+
 	beforeEach(async () => {
 		await db
 			.prepare(
@@ -279,26 +289,10 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 			)
 			.bind(`plaid-${crypto.randomUUID()}`)
 			.run();
-		await addNeverSuggest(db, {
-			merchantKey: "VENMO 123",
-			kind: "income",
-			decidedOn: "2026-10-03",
-		});
-		await addNeverSuggest(db, {
-			merchantKey: "Venmo",
-			kind: "income",
-			decidedOn: "2026-10-03",
-		});
-		await addNeverSuggest(db, {
-			merchantKey: "Venmo",
-			kind: "transfer",
-			decidedOn: "2026-10-03",
-		});
-		await addNeverSuggest(db, {
-			merchantKey: "CHEWY",
-			kind: "income",
-			decidedOn: "2026-10-03",
-		});
+		await plant("VENMO 123", "income");
+		await plant("Venmo", "income");
+		await plant("Venmo", "transfer");
+		await plant("CHEWY", "income");
 	});
 
 	it("lists a bank-text line copied to the store's name once, as the store's name", async () => {
@@ -310,11 +304,7 @@ describe("Remove takes the store's linked lines away with the one clicked (decis
 	});
 
 	it("still lists a bank-text line with no store-name line of its kind", async () => {
-		await addNeverSuggest(db, {
-			merchantKey: "VENMO 123",
-			kind: "new_category",
-			decidedOn: "2026-10-03",
-		});
+		await plant("VENMO 123", "new_category");
 		expect(
 			(await neverSuggestRules(db)).map(
 				(rule) => `${rule.merchantKey}:${rule.kind}`,
@@ -362,5 +352,142 @@ describe("new-category grouping", () => {
 			decidedOn: "2026-10-03",
 		});
 		expect(await noneFitTransactions(db)).toHaveLength(0);
+	});
+});
+
+describe("a Yes writes a line for every key the store goes by (decision 101, #459)", () => {
+	const insertCharge = async (fields: {
+		raw: string;
+		merchant?: string;
+		date?: string;
+		incomeConfidence?: number;
+	}): Promise<number> => {
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name,
+					income_confidence)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), ?, -2500, ?, ?, ?) RETURNING id`,
+			)
+			.bind(
+				`plaid-${crypto.randomUUID()}`,
+				fields.date ?? "2026-10-03",
+				fields.raw,
+				fields.merchant ?? null,
+				fields.incomeConfidence ?? 0.5,
+			)
+			.first<{ id: number }>();
+		return row?.id ?? 0;
+	};
+	/** What is stored under each key, not what Settings shows, as "key:kind" in order. */
+	const stored = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT merchant_key AS merchantKey, kind FROM never_suggest_rules",
+				)
+				.all<{ merchantKey: string; kind: string }>()
+		).results
+			.map((row) => `${row.merchantKey}:${row.kind}`)
+			.sort();
+	/** The Settings list's lines, as store names. */
+	const listed = async () =>
+		(await neverSuggestRules(db)).map((rule) => rule.merchantKey);
+
+	it("a Yes on the store's name also writes its bank text, so the bank text's older charges are covered", async () => {
+		const named = await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({
+			raw: "VENMO 123",
+			date: "2025-12-01",
+		});
+		const chewy = await insertCharge({ raw: "CHEWY 9", merchant: "Chewy" });
+		expect(
+			await addNeverSuggest(db, {
+				merchantKey: "Venmo",
+				kind: "income",
+				decidedOn: "2026-10-03",
+			}),
+		).toBe(true);
+		expect(await stored()).toEqual(["VENMO 123:income", "Venmo:income"]);
+		expect(await listed()).toEqual(["Venmo"]);
+		expect((await getTransaction(db, named))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, older))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, chewy))?.incomeConfidence).toBe(0.5);
+		const [line] = await neverSuggestRules(db);
+		const removed = await removeNeverSuggest(db, lineKey(line));
+		expect(removed?.removedCount).toBe(2);
+		expect(await stored()).toEqual([]);
+	});
+
+	it("a Yes on the bank text also writes the store's name, and one Remove of the store's line takes both", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		expect(
+			await addNeverSuggest(db, {
+				merchantKey: "VENMO 123",
+				kind: "income",
+				decidedOn: "2026-10-03",
+			}),
+		).toBe(true);
+		expect(await stored()).toEqual(["VENMO 123:income", "Venmo:income"]);
+		expect(await listed()).toEqual(["Venmo"]);
+		const [line] = await neverSuggestRules(db);
+		expect(line?.merchantKey).toBe("Venmo");
+		const removed = await removeNeverSuggest(db, lineKey(line));
+		expect(removed?.removedCount).toBe(2);
+		expect(await stored()).toEqual([]);
+	});
+
+	it("a Remove of the bank-text row, which Settings hides, takes both lines too", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		const bank = await db
+			.prepare(
+				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key = 'VENMO 123'",
+			)
+			.first<{ id: number; merchantKey: string; kind: string }>();
+		const removed = await removeNeverSuggest(db, lineKey(bank));
+		expect(removed?.removedCount).toBe(2);
+		expect(await stored()).toEqual([]);
+	});
+
+	it("a repeat Yes through either key adds nothing and keeps the first day on every line", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		expect(
+			await addNeverSuggest(db, {
+				merchantKey: "VENMO 123",
+				kind: "income",
+				decidedOn: "2026-10-04",
+			}),
+		).toBe(false);
+		const days = await db
+			.prepare(
+				"SELECT DISTINCT decided_on AS decidedOn FROM never_suggest_rules",
+			)
+			.all<{ decidedOn: string }>();
+		expect(days.results).toEqual([{ decidedOn: "2026-10-03" }]);
+		expect(await stored()).toEqual(["VENMO 123:income", "Venmo:income"]);
+	});
+
+	it("a Yes writes nothing for another store", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		await insertCharge({ raw: "CHEWY 9", merchant: "Chewy" });
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		expect(await stored()).toEqual(["VENMO 123:transfer", "Venmo:transfer"]);
+		expect(await listed()).toEqual(["Venmo"]);
 	});
 });

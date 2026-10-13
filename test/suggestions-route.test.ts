@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
 
@@ -2342,3 +2343,107 @@ async function nameId() {
 	);
 	return `name-${r?.id}`;
 }
+
+describe("a Yes on the question covers every key the store goes by (decision 101, #459)", () => {
+	/** The income Maybes the queue still asks about, by their suggestion ids. */
+	const incomeAsked = async () =>
+		(await suggestionQueue(db))
+			.filter((item) => item.kind === "income")
+			.map((item) => item.id)
+			.sort();
+	/** How many "Never suggest" lines Settings draws: one Remove form per line. */
+	const neverLineForms = (html: string) =>
+		(html.match(/action="\/settings\/never-suggest\/remove"/g) ?? []).length;
+	/** The stored lines, as "key:kind", whatever Settings hides. */
+	const stored = async () =>
+		(
+			await db
+				.prepare("SELECT merchant_key AS key, kind FROM never_suggest_rules")
+				.all<{ key: string; kind: string }>()
+		).results
+			.map((line) => `${line.key}:${line.kind}`)
+			.sort();
+
+	it("a Yes on the store's name also covers its bank text's older charges, which leave the queue", async () => {
+		const named = await insertTx({
+			raw: VENMO,
+			merchantName: "Venmo",
+			amount: -250000,
+			incomeConfidence: 0.5,
+		});
+		const older = await insertTx({
+			raw: VENMO,
+			amount: -2500,
+			date: "2026-09-01",
+			incomeConfidence: 0.5,
+		});
+		expect(await incomeAsked()).toEqual(
+			[`income-${named}`, `income-${older}`].sort(),
+		);
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${named}`, answer: "no" },
+			true,
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `income-${named}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: "Venmo",
+			},
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe(
+			"Got it. Tally won't suggest income for Venmo again. Change it in Settings.",
+		);
+		expect(await stored()).toEqual([`Venmo:income`, `${VENMO}:income`].sort());
+		expect(await incomeAsked()).toEqual([]);
+		// Settings shows the store once, under its name, and not its bank text.
+		const { html } = await get("/settings");
+		expect(neverLineForms(html)).toBe(1);
+		expect(textOf(html)).not.toContain(`Never suggest income for ${VENMO}`);
+		const line = await row(
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+		);
+		await post("/settings/never-suggest/remove", removal(line), true);
+		expect(await stored()).toEqual([]);
+		// The No already took the named charge out of the queue, so only the bank text's charge comes back.
+		expect(await incomeAsked()).toEqual([`income-${older}`]);
+	});
+
+	it("a Yes on a bank text's Maybe also covers the store's name, and one Remove of that line takes both", async () => {
+		// The store's own charge has no Maybe, so only the bank text's older charge is asked.
+		await insertTx({ raw: VENMO, merchantName: "Venmo", amount: -250000 });
+		const bank = await insertTx({
+			raw: VENMO,
+			amount: -2500,
+			date: "2026-09-01",
+			incomeConfidence: 0.5,
+		});
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${bank}`, answer: "no" },
+			true,
+		);
+		await post(
+			"/settings/suggestions",
+			{
+				id: `income-${bank}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: VENMO,
+			},
+			true,
+		);
+		expect(await stored()).toEqual([`Venmo:income`, `${VENMO}:income`].sort());
+		expect(await incomeAsked()).toEqual([]);
+		expect(neverLineForms((await get("/settings")).html)).toBe(1);
+		const line = await row(
+			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+		);
+		await post("/settings/never-suggest/remove", removal(line), true);
+		expect(await stored()).toEqual([]);
+	});
+});
