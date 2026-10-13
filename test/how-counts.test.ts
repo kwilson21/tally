@@ -25,10 +25,13 @@ const countWhere = async (where: string) =>
 	(
 		await db
 			.prepare(
-				// The demo's linked Target refund counts in its purchase's month (last month), not its own.
-				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND refund_of_id IS NULL AND (${where})`,
+				// The demo's linked Target refund counts in its purchase's month (last month), not its own. So does a
+				// monthly bill payment dated this month for an earlier month (the demo's late Rent part, #205).
+				`SELECT COUNT(*) AS n FROM transactions WHERE substr(date, 1, 7) = ? AND excluded = 0 AND is_split = 0 AND refund_of_id IS NULL
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = transactions.id AND bp.status = 'linked'
+				   AND bp.period GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND bp.period < ?) AND (${where})`,
 			)
-			.bind(MONTH)
+			.bind(MONTH, MONTH)
 			.first<{ n: number }>()
 	)?.n ?? 0;
 

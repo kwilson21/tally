@@ -554,7 +554,9 @@ export function buildSeed(today: string): Seed {
 			spend(CHECKING, friday, "LITTLE SPROUTS DAYCARE", CHILDCARE, 24000),
 		);
 	// Rent is paid in parts (#205, decision 101): $700 and $500 last month make it Paid, and $600 this month so far
-	// leaves it part paid. Reset links each one to the rent bill by hand. Its category is the bill's (Rent, its own
+	// leaves it part paid. The $500 came late: it dates this month's 1st but reset links it to last month, so it counts
+	// in last month and not in this month's days, and Trends' same-days comparison keeps Rent $100 in the household's
+	// favour on every day. Reset links each one to the rent bill by hand. Its category is the bill's (Rent, its own
 	// $1,200 budget), as a payment linked to a bill takes its category (spec §7). Added before Netflix, so Netflix stays last.
 	const rentPayment = (date: string, cents: number): SeedTransaction => ({
 		...spend(CHECKING, date, RENT_PAYEE, RENT_CATEGORY, cents),
@@ -564,7 +566,7 @@ export function buildSeed(today: string): Seed {
 	const lastMonth = monthOffset(today, 1);
 	transactions.push(
 		rentPayment(day(lastMonth, 1), 70000),
-		rentPayment(day(lastMonth, 3), 50000),
+		rentPayment(day(thisMonth, 1), 50000),
 		rentPayment(day(thisMonth, 1), 60000),
 	);
 	// P36 B (decision 72): a subscription whose price went up, so the demo shows "Price changed?" on

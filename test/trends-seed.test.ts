@@ -71,8 +71,9 @@ describe("Trends with the demo seed", () => {
 			expect(gap).not.toBeNull();
 			const dollars = Number((gap?.[1] ?? "0").replaceAll(",", ""));
 			expect(dollars).toBeGreaterThan(0);
-			// Rent's $600 more this month than by this time last month (its $1,200 came in two payments then, #205) adds to it.
-			expect(dollars).toBeLessThan(1000);
+			// Rent adds $100 in the household's favour: last month's $700 was paid by this time and this month's $600 has been.
+			// Its $500 was paid late, this month, so it isn't in last month's days (the seed dates it this month's 1st).
+			expect(dollars).toBeLessThan(400);
 			// Out of about $1,700 for last month's days.
 			expect(page.sameDaysCents.last).toBeGreaterThan(150000);
 		},

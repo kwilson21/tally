@@ -5,7 +5,7 @@ import { daysBefore } from "../src/dates";
 import { merchantKeySql } from "../src/db/merchant-key";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
-import { buildSeed, monthOffset } from "../src/demo/seed";
+import { buildSeed, monthOffset, RENT_PAYEE } from "../src/demo/seed";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 
 describe("buildSeed", () => {
@@ -18,9 +18,17 @@ describe("buildSeed", () => {
 	])("designed totals hold on %s", (today, childcareCents) => {
 		const seed = buildSeed(today);
 		const month = today.slice(0, 7);
-		// A linked refund counts in its purchase's month (spec §6).
+		// A linked refund counts in its purchase's month (spec §6). The late Rent part is dated this month's 1st but
+		// reset links it to last month's bill, so it counts in last month (spec §6), not this one.
+		const lateRent = (t: (typeof seed.transactions)[number]) =>
+			t.rawName === RENT_PAYEE &&
+			t.amountCents === 50000 &&
+			t.date === `${month}-01`;
 		const countedDate = (t: (typeof seed.transactions)[number]) =>
-			seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
+			lateRent(t)
+				? `${monthOffset(today, 1)}-01`
+				: (seed.transactions.find((p) => p.id === t.refundOfId)?.date ??
+					t.date);
 		const counted = seed.transactions.filter(
 			(t) => countedDate(t).startsWith(month) && !t.excluded && !t.isSplit,
 		);

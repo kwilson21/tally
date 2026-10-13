@@ -75,7 +75,7 @@ beforeEach(async () => {
 });
 
 describe("the list, straight from the bank (?raw=1, in the demo)", () => {
-	it("counts the split purchase parent once: 41 transactions, not 40, with October's two Daycare Fridays and Rent's", async () => {
+	it("counts the split purchase parent once: 42 transactions in the bank's list, with October's two Daycare Fridays and Rent's two", async () => {
 		// Pinned, since the demo's Friday charges depend on the day of the month.
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-11T15:00:00Z"));
@@ -83,11 +83,12 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 			await resetDemo(env.DB, "2026-10-11");
 			const { html: raw } = await demo("/transactions?raw=1");
 			expect(countOf(raw)).toMatch(
-				/^Showing 1–25 of 41 transactions in [A-Z][a-z]+, as the bank sends them$/,
+				/^Showing 1–25 of 42 transactions in [A-Z][a-z]+, as the bank sends them$/,
 			);
 			const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 			const { html: normal } = await demo(`/transactions?month=${month}`);
-			// Tally's own list shows the split's two parts in place of its parent, so it counts one more than the bank's list.
+			// Tally's own list shows the split's two parts in place of its parent (one more), and counts the late Rent part, dated
+			// this October 1st, in September, its bill's month (one less): the bank's list is by date, so it has the late part here.
 			expect(countOf(normal)).toMatch(/^Showing 1–25 of 42 transactions in /);
 		} finally {
 			vi.useRealTimers();

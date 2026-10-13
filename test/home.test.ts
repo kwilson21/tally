@@ -528,6 +528,8 @@ describe("GET / with the demo seed", () => {
 			);
 		};
 		const withBills = dollars((await home()).html);
+		// Safe to spend stays positive with the bills counted, so the difference below is the bills' own, not a floor's.
+		expect(withBills).toBeGreaterThan(0);
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const withoutBills = dollars((await home()).html);
 		// Electric $142, Netflix $15.49, Internet $65 and Daycare's next Friday $240 (the paid ones are spent), and Rent's
