@@ -30,3 +30,13 @@ export async function amountRowsByBill(
 	}
 	return byBill;
 }
+
+/**
+ * The amount a bill occurrence is judged at, as SQL, the rule src/bills/amount.ts's `amountForMonth` reads: the
+ * latest row on or before `month`, else the earliest row, else the bill's own amount. `billId` and `month` are
+ * SQL expressions (numbered parameters or columns), so a statement names the bill and month it checks.
+ */
+export const occurrenceAmountSql = (billId: string, month: string) => `COALESCE(
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ${billId} AND effective_month <= ${month} ORDER BY effective_month DESC LIMIT 1),
+	(SELECT amount_cents FROM bill_amounts WHERE bill_id = ${billId} ORDER BY effective_month LIMIT 1),
+	(SELECT amount_cents FROM bills WHERE id = ${billId}))`;

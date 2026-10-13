@@ -810,3 +810,153 @@ describe("a person's own Not this one survives a split change (decision 105)", (
 		]);
 	});
 });
+
+// Decision 105 and decision 74's 90%: a split change names only the bills still unpaid after it, judged on what
+// is linked to the occurrence then. The occurrence is a $100.00 monthly bill this month.
+const INTERNET = 9802;
+const PART_INTERNET = 9814;
+const PART_INTERNET_ALSO = 9817;
+let separateId = 9820;
+
+/** Links a payment that is not part of the purchase to this month's Internet bill, as a person would. */
+async function linkSeparatePayment(cents: number) {
+	const id = separateId++;
+	await db.batch([
+		db
+			.prepare(
+				"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (?, 3, '2026-09-10', ?, 'ISP')",
+			)
+			.bind(id, cents),
+		db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', ?, 'user', 'linked')",
+			)
+			.bind(INTERNET, id),
+	]);
+}
+
+const internetPart = (id: number, cents: number, categoryId: number) => ({
+	id,
+	cents,
+	categoryId,
+	bill: { id: INTERNET, period: "2026-09" },
+});
+const INTERNET_NAMED = [{ name: "Internet", period: "2026-09" }];
+
+describe("a split change names only the bill still unpaid after it (decisions 74 and 105)", () => {
+	beforeEach(async () => {
+		separateId = 9820;
+		await db
+			.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, anchor_month, category_id, merchant_raw_name, active) VALUES (?, 'Internet', 10000, 5, 'monthly', NULL, NULL, 'ISP', 1)",
+			)
+			.bind(INTERNET)
+			.run();
+	});
+
+	const replaceWith = (parts: { categoryId: number; amountCents: number }[]) =>
+		saveSplit(db, PURCHASE, parts, "test").then((result) => result.bills);
+
+	it.each([
+		{
+			name: "removing the split, whose part was the only $100 payment",
+			seed: [internetPart(PART_INTERNET, 10000, KIDS)],
+			before: undefined,
+			act: () => removeSplit(db, PURCHASE, "test").then((r) => r.bills),
+			bills: INTERNET_NAMED,
+		},
+		{
+			name: "removing the split, whose $10 part paid it, with a separate $95 payment also linked",
+			seed: [
+				internetPart(PART_INTERNET, 1000, KIDS),
+				{ ...groceriesPart, cents: 9000 },
+			],
+			before: () => linkSeparatePayment(9500),
+			act: () => removeSplit(db, PURCHASE, "test").then((r) => r.bills),
+			bills: [],
+		},
+		{
+			name: "replacing the split with parts of other categories, losing the only payment",
+			seed: [internetPart(PART_INTERNET, 10000, KIDS)],
+			before: undefined,
+			act: () =>
+				replaceWith([
+					{ categoryId: GROCERIES, amountCents: 6000 },
+					{ categoryId: EATING_OUT, amountCents: 4000 },
+				]),
+			bills: INTERNET_NAMED,
+		},
+		{
+			name: "editing the part's amount from $100 to $80",
+			seed: [internetPart(PART_INTERNET, 10000, KIDS)],
+			before: undefined,
+			act: () =>
+				replaceWith([
+					{ categoryId: KIDS, amountCents: 8000 },
+					{ categoryId: GROCERIES, amountCents: 2000 },
+				]),
+			bills: INTERNET_NAMED,
+		},
+		{
+			name: "one of two parts lost, with $90 kept and $10 replaced",
+			seed: [
+				internetPart(PART_INTERNET, 9000, KIDS),
+				internetPart(PART_INTERNET_ALSO, 1000, GROCERIES),
+			],
+			before: undefined,
+			act: () =>
+				replaceWith([
+					{ categoryId: KIDS, amountCents: 9000 },
+					{ categoryId: EATING_OUT, amountCents: 1000 },
+				]),
+			bills: [],
+		},
+		{
+			name: "$50 kept and $50 replaced, which names the bill once",
+			seed: [
+				internetPart(PART_INTERNET, 5000, KIDS),
+				internetPart(PART_INTERNET_ALSO, 5000, GROCERIES),
+			],
+			before: undefined,
+			act: () =>
+				replaceWith([
+					{ categoryId: KIDS, amountCents: 5000 },
+					{ categoryId: EATING_OUT, amountCents: 5000 },
+				]),
+			bills: INTERNET_NAMED,
+		},
+		{
+			name: "two parts paying the same occurrence, both lost, which names the bill once",
+			seed: [
+				internetPart(PART_INTERNET, 5000, KIDS),
+				internetPart(PART_INTERNET_ALSO, 5000, GROCERIES),
+			],
+			before: undefined,
+			act: () =>
+				replaceWith([
+					{ categoryId: EATING_OUT, amountCents: 6000 },
+					{ categoryId: EATING_OUT, amountCents: 4000 },
+				]),
+			bills: INTERNET_NAMED,
+		},
+		{
+			name: "removing a $10 part while a $90.00 payment stays linked",
+			seed: [internetPart(PART_INTERNET, 1000, KIDS)],
+			before: () => linkSeparatePayment(9000),
+			act: () => removeSplit(db, PURCHASE, "test").then((r) => r.bills),
+			bills: [],
+		},
+		{
+			name: "removing a $10 part while a $89.99 payment stays linked",
+			seed: [internetPart(PART_INTERNET, 1000, KIDS)],
+			before: () => linkSeparatePayment(8999),
+			act: () => removeSplit(db, PURCHASE, "test").then((r) => r.bills),
+			bills: INTERNET_NAMED,
+		},
+	])("$name", async ({ seed, before, act, bills }) => {
+		await seedSplit(seed);
+		await before?.();
+
+		expect(await act()).toEqual(bills);
+	});
+});

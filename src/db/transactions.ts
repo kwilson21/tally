@@ -5,7 +5,11 @@ import {
 	movePartDismissalsSql,
 	purchaseDismissalsToPartsSql,
 } from "../bills/split-dismissals";
-import { STILL_UNPAID_BILLS_SQL, type UnpaidBill } from "../bills/unpaid";
+import {
+	parseUnpaidBills,
+	STILL_UNPAID_BILLS_SQL,
+	type UnpaidBill,
+} from "../bills/unpaid";
 import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import {
@@ -1508,25 +1512,44 @@ function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
 }
 
 /**
- * The bills as the toast names them: a name and an occurrence, without the id, once per occurrence. Two parts'
- * payments can pay one occurrence (decision 101), and that is still one bill.
+ * The occurrences a change's lost payments paid, once each: two parts' payments can pay one occurrence (decision
+ * 101), and that is still one bill. Bound as the JSON stillUnpaidStatement reads.
  */
-const namedBills = (bills: PartPayment[]): UnpaidBill[] => [
+const lostOccurrences = (bills: PartPayment[]) => [
 	...new Map(
 		bills.map(({ billId, name, period }) => [
 			`${billId}:${period}`,
-			{ name, period },
+			{ billId, name, period },
 		]),
 	).values(),
 ];
+
+/**
+ * The last statement of a split change's batch: which of the lost occurrences are still unpaid once the batch's
+ * writes are in (STILL_UNPAID_BILLS_SQL), so a payment the change kept, or one the rest of the payments still
+ * covers, names nothing (decisions 74 and 105). It must follow every write it reads.
+ */
+const stillUnpaidStatement = (db: D1Database, lost: PartPayment[]) =>
+	db
+		.prepare(`SELECT ${STILL_UNPAID_BILLS_SQL("?")} AS bills`)
+		.bind(JSON.stringify(lostOccurrences(lost)));
+
+/** The bills a batch's stillUnpaidStatement returned, as the toast names them: a name and an occurrence. */
+function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
+	const row = result?.results[0] as { bills: string | null } | undefined;
+	return parseUnpaidBills(row?.bills).map(({ name, period }) => ({
+		name,
+		period,
+	}));
+}
 
 /**
  * Creates every child and marks its parent in one D1 batch. A human-confirmed refund link follows
  * each new part, if the whole refund still fits its purchase (src/db/refunded.ts), and is dropped if
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
- * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills
- * are returned by name (decisions 99 and 105). A person's own Not this one is kept on the purchase, and each
+ * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills still
+ * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the purchase, and each
  * new part starts with it.
  */
 export async function saveSplit(
@@ -1599,6 +1622,7 @@ export async function saveSplit(
 			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 		)
 		.bind(by, parentId, total);
+	const stillUnpaid = stillUnpaidStatement(db, lost);
 	const statements = [
 		db
 			.prepare(
@@ -1644,6 +1668,7 @@ export async function saveSplit(
 			.prepare(purchaseDismissalsToPartsSql("?1", unchangedNumbered))
 			.bind(parentId, total),
 		markParent,
+		stillUnpaid,
 	];
 	const results = await db.batch(statements);
 	const saved =
@@ -1660,8 +1685,10 @@ export async function saveSplit(
 				: refundUnlinked
 					? [linkedPurchase.date]
 					: [],
-		// Only the bills a person's split change unlinked are named; a payment a new part kept says nothing (decision 99).
-		bills: saved ? namedBills(lost) : [],
+		// Only the bills a person's split change unlinked and that are still unpaid are named (decisions 99 and 105).
+		bills: saved
+			? unpaidBillsFrom(results[statements.indexOf(stillUnpaid)])
+			: [],
 	};
 }
 
@@ -1841,8 +1868,9 @@ export async function correctCashSplit(
  * Deletes a split and restores its parent atomically, unlinking refunds of its parts and unlinking the bill
  * payments of its parts with no dismissal left, so the matcher may link them to the purchase again (decisions
  * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
- * the bills, by name. A split refund's parent is whole again and counts by its own link, so that link is
- * checked like a new one (src/db/refunded.ts) and dropped if the refund no longer fits; its date is returned too.
+ * the bills still unpaid after it, by name (decision 105). A split refund's parent is whole again and counts by
+ * its own link, so that link is checked like a new one (src/db/refunded.ts) and dropped if the refund no longer
+ * fits; its date is returned too.
  */
 export async function removeSplit(
 	db: D1Database,
@@ -1855,7 +1883,11 @@ export async function removeSplit(
 		.prepare("SELECT date FROM transactions WHERE id = ?")
 		.bind(parentId)
 		.first<{ date: string }>();
-	const results = await db.batch([
+	const unlinkRefund = db
+		.prepare(unlinkSplitOverRefundedSql("?1"))
+		.bind(parentId);
+	const stillUnpaid = stillUnpaidStatement(db, bills);
+	const statements = [
 		db
 			.prepare(
 				"UPDATE transactions SET refund_of_id=NULL WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id=?)",
@@ -1869,12 +1901,15 @@ export async function removeSplit(
 				"UPDATE transactions SET is_split = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
 			)
 			.bind(by, parentId),
-		db.prepare(unlinkSplitOverRefundedSql("?1")).bind(parentId),
-	]);
-	const refundUnlinked = (results.at(-1)?.meta.changes ?? 0) > 0;
+		unlinkRefund,
+		stillUnpaid,
+	];
+	const results = await db.batch(statements);
+	const refundUnlinked =
+		(results[statements.indexOf(unlinkRefund)]?.meta.changes ?? 0) > 0;
 	return {
 		unlinked: parent && refundUnlinked ? [...unlinked, parent.date] : unlinked,
-		bills: namedBills(bills),
+		bills: unpaidBillsFrom(results[statements.indexOf(stillUnpaid)]),
 	};
 }
 

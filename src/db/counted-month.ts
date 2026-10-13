@@ -82,11 +82,20 @@ export const COUNTED_SPENDING = `${INCLUDED} AND t.is_split = 0 AND t.flag_incom
 export const COUNTED_TRANSACTION = `${INCLUDED} AND t.is_split = 0
 	AND (t.amount_cents >= 0 OR t.credit_reviewed = 1 OR t.flag_income = 1 OR ${FOLLOWS_PURCHASE})`;
 
+/**
+ * The month a bill occurrence is for, as SQL (billPeriodMonth is the TypeScript twin): a yearly bill's anchor
+ * month, a quarter's first month, a week's or fortnight's month (its period is the date), else the period itself.
+ * `period` is the SQL for the payment's period and `bill` the alias of its bill row.
+ */
+export function occurrenceMonthSql(period: string, bill: string) {
+	const quarterMonth = `printf('%s-%02d',substr(${period},1,4),(((${bill}.anchor_month-1+(((CAST(substr(${period},7,1) AS INTEGER)-(((${bill}.anchor_month-1)/3)+1)+4)%4)*3))%12)+1))`;
+	return `CASE WHEN ${bill}.frequency='yearly' THEN ${period} || '-' || printf('%02d',${bill}.anchor_month) WHEN ${bill}.frequency IN ('weekly','biweekly') THEN substr(${period},1,7) WHEN ${bill}.frequency='quarterly' THEN ${quarterMonth} ELSE ${period} END`;
+}
+
 /** The month a transaction's own date and bill payment put it in. */
 function billMonthSql(transaction: string, payment: string, bill: string) {
 	const bankMonth = `substr(${transaction}.date,1,7)`;
-	const quarterMonth = `printf('%s-%02d',substr(${payment}.period,1,4),(((${bill}.anchor_month-1+(((CAST(substr(${payment}.period,7,1) AS INTEGER)-(((${bill}.anchor_month-1)/3)+1)+4)%4)*3))%12)+1))`;
-	const occurrenceMonth = `CASE WHEN ${bill}.frequency='yearly' THEN ${payment}.period || '-' || printf('%02d',${bill}.anchor_month) WHEN ${bill}.frequency IN ('weekly','biweekly') THEN substr(${payment}.period,1,7) WHEN ${bill}.frequency='quarterly' THEN ${quarterMonth} ELSE ${payment}.period END`;
+	const occurrenceMonth = occurrenceMonthSql(`${payment}.period`, bill);
 	return `CASE WHEN ${payment}.period IS NOT NULL AND (${occurrenceMonth}) < ${bankMonth} THEN (${occurrenceMonth}) ELSE ${bankMonth} END`;
 }
 
@@ -124,10 +133,10 @@ export type CountedBill = {
 };
 
 /**
- * The month a bill's period is for, in TypeScript, as billMonthSql reads it: a yearly bill's anchor month, a
- * quarter's first month, a week's or fortnight's month (its period is the date), else the period itself. The
- * bills page works this out before a payment is linked. Keep it in step with billMonthSql; the refunds test
- * checks that they agree for every frequency.
+ * The month a bill's period is for, in TypeScript, as occurrenceMonthSql reads it (the SQL that billMonthSql and
+ * occurrenceUnpaidSql use): a yearly bill's anchor month, a quarter's first month, a week's or fortnight's month
+ * (its period is the date), else the period itself. The bills page works this out before a payment is linked.
+ * Keep it in step with occurrenceMonthSql; the refunds test checks that they agree for every frequency.
  */
 export function billPeriodMonth(bill: CountedBill, period: string): string {
 	if (bill.frequency === "yearly")
