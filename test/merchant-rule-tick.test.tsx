@@ -48,4 +48,19 @@ describe("MerchantRuleTick (#353)", () => {
 		expect(html).toMatch(/name="always" value="1" checked/);
 		expect(html).toContain("Leave it unticked to change just this one.");
 	});
+
+	it("a matching rule drawn unticked on a redraw still says that saving removes it", async () => {
+		const html = await (
+			<MerchantRuleTick
+				merchant="Local Bakery"
+				checked={false}
+				ruleCategory="Groceries"
+			/>
+		).toString();
+		expect(html).not.toMatch(/name="always" value="1" checked/);
+		expect(html).toContain(
+			"Local Bakery is always Groceries. Untick it and save to remove the rule.",
+		);
+		expect(html).not.toContain("Leave it unticked");
+	});
 });

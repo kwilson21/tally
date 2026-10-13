@@ -663,6 +663,9 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).not.toMatch(/name="always" value="1" checked/);
+		// The rule is for another category, so it doesn't match this transaction and the hint says nothing of it (#353).
+		expect(sheet).toContain("Leave it unticked to change just this one.");
+		expect(sheet).not.toContain("Untick it and save to remove the rule.");
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			always: "1",

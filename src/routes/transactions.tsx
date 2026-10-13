@@ -2247,7 +2247,7 @@ function EditSheet({
 						<MerchantRuleTick
 							merchant={tx.displayName}
 							checked={values.alwaysForMerchant}
-							ruleCategory={ruleCategory?.name}
+							ruleCategory={values.alwaysWas ? ruleCategory?.name : undefined}
 						/>
 					</div>
 				)}

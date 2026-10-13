@@ -356,6 +356,7 @@ organize.post("/transactions/organize/rule", async (c) => {
 			}),
 		);
 	}
-	c.header("HX-Push-Url", next);
+	// The Save before it pushed this same address, so the answer replaces it rather than adding an entry.
+	c.header("HX-Replace-Url", next);
 	return renderOrganize(c, undefined, 200, true);
 });

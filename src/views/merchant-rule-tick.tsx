@@ -2,10 +2,10 @@ import { Icon } from "./icons";
 
 /**
  * The edit panel's merchant rule tick (#353, decision 101): a plain row above Save, with Select mode's round
- * mark, in place of the "Always for this merchant" pill. Unticked by default; ticked when a rule already
- * matches this transaction, and then its hint says what unticking does. The input keeps the name `always`
- * the form has always posted, so the save (parseEdit) and the re-guess note's hooks (name-choices.tsx) read
- * it unchanged.
+ * mark, in place of the "Always for this merchant" pill. Unticked by default. Its hint says what the rule is
+ * when one matches this transaction (`ruleCategory`, given only then), and otherwise that unticking changes
+ * just this one. The input keeps the name `always` the form has always posted, so the save (parseEdit) and
+ * the re-guess note's hooks (name-choices.tsx) read it unchanged.
  */
 export function MerchantRuleTick({
 	merchant,
@@ -17,15 +17,14 @@ export function MerchantRuleTick({
 	merchant: string;
 	/** Ticked when a rule already matches this transaction, or when a person ticks it. */
 	checked: boolean;
-	/** The rule's category name, when one matches this transaction; the ticked hint names it. */
+	/** The rule's category name, when a rule matches this transaction as the panel opened (or as a redraw kept it). */
 	ruleCategory?: string;
 	/** Unique on the page: the hint's id is the checkbox's accessible description. */
 	id?: string;
 }) {
-	const hint =
-		checked && ruleCategory
-			? `${merchant} is always ${ruleCategory}. Untick it and save to remove the rule.`
-			: "Leave it unticked to change just this one.";
+	const hint = ruleCategory
+		? `${merchant} is always ${ruleCategory}. Untick it and save to remove the rule.`
+		: "Leave it unticked to change just this one.";
 	return (
 		<label class="group flex min-h-11 cursor-pointer items-start gap-3 py-2 text-base text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 			<input

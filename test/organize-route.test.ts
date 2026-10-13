@@ -451,6 +451,8 @@ describe("POST /transactions/organize", () => {
 		);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toBeNull();
+		// The save before it pushed this address, so the answer replaces it: one history entry, not two.
+		expect(res.headers.get("HX-Replace-Url")).toBe("/transactions/organize");
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 		expect(html).not.toContain("rule-offer-title");
 	});
