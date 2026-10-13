@@ -1,5 +1,6 @@
 import { matchBillPayments } from "../bills/match";
 import { DEFAULT_TIME_ZONE, daysBefore } from "../dates";
+import { nameKey } from "../settings/category-form";
 import { storeSuggestedNames } from "../transactions/name-suggestions";
 import {
 	buildSeed,
@@ -115,9 +116,9 @@ export async function resetDemo(
 		...seed.categories.map((c) =>
 			db
 				.prepare(
-					"INSERT INTO categories (id, name, icon, color, sort_order) VALUES (?, ?, ?, ?, ?)",
+					"INSERT INTO categories (id, name, name_key, icon, color, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
 				)
-				.bind(c.id, c.name, c.icon, c.color, c.sortOrder),
+				.bind(c.id, c.name, nameKey(c.name), c.icon, c.color, c.sortOrder),
 		),
 		// An empty token: the demo has no Plaid credentials, so nothing ever tries to use it.
 		...seed.banks.map((bank) =>

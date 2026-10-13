@@ -1,5 +1,10 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
-import { fullMessage, MAX_ACTIVE, sameName } from "../settings/category-form";
+import {
+	fullMessage,
+	MAX_ACTIVE,
+	nameKey,
+	sameName,
+} from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { categoryNames } from "./categories";
 import { merchantKeySql } from "./merchant-key";
@@ -326,10 +331,11 @@ export async function createFromSuggestion(
 				.bind(token, id),
 			db
 				.prepare(
-					`INSERT INTO categories (name,icon,color,sort_order) SELECT ?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE name=? COLLATE NOCASE) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
+					`INSERT INTO categories (name,name_key,icon,color,sort_order) SELECT ?,?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE name=? COLLATE NOCASE) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 				)
 				.bind(
 					target,
+					nameKey(target),
 					["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"][
 						categories.length % 5
 					],

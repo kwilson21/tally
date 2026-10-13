@@ -18,9 +18,13 @@ export type CategoryErrors = Partial<Record<"name", string>>;
 
 const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
+/**
+ * A category name as the form compares it: ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. It is stored
+ * as `name_key`, which the unique index checks, so the database refuses the second of two saves at once (migration 0052).
+ */
+export const nameKey = (name: string) => normalizeName(name).toLowerCase();
 /** Whether two category names are the same, ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. */
-export const sameName = (a: string, b: string) =>
-	normalizeName(a).toLowerCase() === normalizeName(b).toLowerCase();
+export const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 
