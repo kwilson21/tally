@@ -86,25 +86,31 @@
 			? new ResizeObserver(measureToasts)
 			: null;
 
-	// Takes a toast off the page. Focus on the toast would be lost with it, so the Transactions heading takes it
-	// (every Transactions page has one, the first-visit page too). `lostToo` also counts focus on nothing: a
-	// disabled Undo button drops focus to the body, so an Undo's answer (undoDone: a restore's, or a bill Undo's
-	// refusal) uses it. A timer doesn't, since it would scroll the page to the heading when focus is only on the body.
-	function takeOffPage(toast, lostToo = false) {
-		const active = document.activeElement;
-		if (
-			toast.contains(active) ||
-			(lostToo && (!active || active === document.body))
-		) {
-			// A page without the Transactions title (a bill's page) takes focus on its own page-title.
-			const heading =
-				document.getElementById("transactions-title") ??
-				document.getElementById("page-title");
-			if (heading) {
-				heading.setAttribute("tabindex", "-1");
-				heading.focus();
-			}
+	// The Transactions heading takes focus (every Transactions page has one, the first-visit page too). A page
+	// without it, a bill's page, takes focus on its own page-title.
+	function focusHeading() {
+		const heading =
+			document.getElementById("transactions-title") ??
+			document.getElementById("page-title");
+		if (heading) {
+			heading.setAttribute("tabindex", "-1");
+			heading.focus();
 		}
+	}
+	// Focus is on nothing: a disabled Undo button drops it to the body.
+	function focusLost() {
+		const active = document.activeElement;
+		return !active || active === document.body;
+	}
+
+	// Takes a toast off the page. Focus on the toast would be lost with it, so the heading takes it. `lostToo` also
+	// counts focus on nothing: an Undo's answer (undoDone: a restore's, or a cash or bill Undo's refusal) uses it.
+	// A timer doesn't, since it would scroll the page to the heading when focus is only on the body. An answer or a
+	// failure that arrives after the time has run out still moves focus left on nothing to the heading (onToast's
+	// undoDone block and failed()).
+	function takeOffPage(toast, lostToo = false) {
+		if (toast.contains(document.activeElement) || (lostToo && focusLost()))
+			focusHeading();
 		toast.remove();
 		measureToasts();
 	}
@@ -183,12 +189,16 @@
 				if (!undoToasts.has(old)) old.remove();
 			}
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
-		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a bill Undo's refusal ends its
-		// toast too (#340). The other Undo toasts run their own time.
-		if (undoDone)
-			for (const old of [...(region?.children ?? [])]) {
-				if (undoToasts.get(old) === undoDone) takeOffPage(old, true);
-			}
+		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a
+		// cash entry's (#444) or a bill's (#340). The other Undo toasts run their own time. If the Undo toast's time
+		// has already run out, focus left on nothing still moves to the heading (#444).
+		if (undoDone) {
+			const ended = [...(region?.children ?? [])].filter(
+				(old) => undoToasts.get(old) === undoDone,
+			);
+			if (ended.length) for (const old of ended) takeOffPage(old, true);
+			else if (focusLost()) focusHeading();
+		}
 		measureSelectionBar();
 		region?.append(toast);
 		// Measured after the append, so the older toasts just replaced are gone and this one is in.
@@ -256,9 +266,11 @@
 			undo.button.disabled = false;
 			// Focus was on Undo when it was pressed, and a disabled button dropped it, so it comes back to Undo (#397).
 			// Not when the person has moved it somewhere else during the request.
-			const active = document.activeElement;
-			if (!active || active === document.body || undo.toast.contains(active))
+			if (focusLost() || undo.toast.contains(document.activeElement))
 				undo.button.focus();
+		} else if (undo && focusLost()) {
+			// The toast's time ran out while this Undo was being answered (#444): focus left on nothing goes to the heading.
+			focusHeading();
 		}
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
