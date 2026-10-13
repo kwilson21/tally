@@ -1943,6 +1943,83 @@ describe("refund guards", () => {
 				note: "note only",
 			});
 		});
+
+		describe("a linked split credit's parts count against the purchase too", () => {
+			const PART_A = 9031;
+			const PART_B = 9032;
+			// SIX becomes a $20 split credit linked to the $50 purchase and never reviewed, in two $10 parts that follow its link.
+			const unreviewedSplitCredit = () =>
+				db.batch([
+					db
+						.prepare(
+							"UPDATE transactions SET amount_cents = -2000, category_id = NULL, category_source = NULL, is_split = 1, refund_of_id = ? WHERE id = ?",
+						)
+						.bind(PURCHASE, SIX),
+					db.prepare(`INSERT INTO transactions
+						(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id) VALUES
+						(${PART_A}, 3, '2026-09-16', -1000, 'REFUND SHOP', ${GROCERIES}, 'user', 0, ${SIX}, ${PURCHASE}),
+						(${PART_B}, 3, '2026-09-16', -1000, 'REFUND SHOP', ${GROCERIES}, 'user', 0, ${SIX}, ${PURCHASE})`),
+				]);
+			const parts = async () =>
+				(
+					await db
+						.prepare(
+							"SELECT id, credit_reviewed, credit_reviewed_by FROM transactions WHERE parent_id = ? ORDER BY id",
+						)
+						.bind(SIX)
+						.all()
+				).results;
+
+			it("refuses it when the purchase has nothing left, saying so, and saves nothing", async () => {
+				await db
+					.prepare("UPDATE transactions SET amount_cents = -5000 WHERE id = ?")
+					.bind(BIG_REFUND)
+					.run();
+				expect((await link(BIG_REFUND, PURCHASE)).res.status).toBe(200);
+				await unreviewedSplitCredit();
+				const before = await spent("2026-08", KIDS);
+				const { res, html, trigger } = await save(SIX, [
+					["refund_of", String(PURCHASE)],
+					...REVIEW_AS_NOT_INCOME,
+					["note", "should not save"],
+				]);
+				expect(res.status).toBe(422);
+				expect(refundAlert(html)).toBe(tooBig("$0.00"));
+				expect(trigger).toBeNull();
+				expect(await row(SIX)).toMatchObject({
+					refund_of_id: PURCHASE,
+					note: null,
+					credit_reviewed: null,
+				});
+				expect(await parts()).toEqual([
+					{ id: PART_A, credit_reviewed: null, credit_reviewed_by: null },
+					{ id: PART_B, credit_reviewed: null, credit_reviewed_by: null },
+				]);
+				expect(await spent("2026-08", KIDS)).toBe(before);
+			});
+
+			it("saves it when the purchase has room, and its parts count", async () => {
+				expect((await link(SECOND_REFUND, PURCHASE)).res.status).toBe(200);
+				await unreviewedSplitCredit();
+				const before = await spent("2026-08", KIDS);
+				const { res, html } = await save(SIX, [
+					["refund_of", String(PURCHASE)],
+					...REVIEW_AS_NOT_INCOME,
+				]);
+				expect(res.status).toBe(200);
+				expect(refundAlert(html)).toBeUndefined();
+				expect(await row(SIX)).toMatchObject({
+					refund_of_id: PURCHASE,
+					credit_reviewed: 1,
+				});
+				expect(await parts()).toEqual([
+					{ id: PART_A, credit_reviewed: 1, credit_reviewed_by: "user" },
+					{ id: PART_B, credit_reviewed: 1, credit_reviewed_by: "user" },
+				]);
+				// Both $10 parts now count in the purchase's month and category, so $20 less is spent there.
+				expect(await spent("2026-08", KIDS)).toBe(before - 2000);
+			});
+		});
 	});
 
 	describe("a refund of a split part is checked against the part", () => {

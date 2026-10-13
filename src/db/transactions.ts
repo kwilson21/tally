@@ -992,14 +992,18 @@ export async function saveEdit(
 	const startsCounting =
 		!followsPurchase(storedCredit) &&
 		followsPurchaseAfterSave(storedCredit, edit);
+	// A split parent never counts, so its own amount is not checked. A review as not income is what makes its
+	// parts count (the split's creditReviewByUser statement below), so for a split parent only that review is
+	// checked, against its parts (linkGate).
 	const recounting =
 		newLink === undefined &&
 		current.refundOfId !== null &&
-		current.isSplit === 0 &&
-		(startsCounting ||
-			(current.income === 1 &&
-				(incomeChanged || creditReviewByUser) &&
-				!edit.income))
+		(current.isSplit === 1
+			? creditReviewByUser
+			: startsCounting ||
+				(current.income === 1 &&
+					(incomeChanged || creditReviewByUser) &&
+					!edit.income))
 			? current.refundOfId
 			: null;
 
@@ -1016,7 +1020,14 @@ export async function saveEdit(
 			}
 		: recounting !== null
 			? {
-					sql: (n) => ` AND ${refundFitsSql(`?${n}`, `?${n + 1}`)}`,
+					// A split parent's parts are checked, not its amount: refundedByOthersSql already counts the linked
+					// parts, so the parent's own sum would be counted twice. Each linked part not yet reviewed is checked
+					// against the purchase with its own id left out of the others, as a plain refund is. A reviewed part
+					// already counts, so it is not checked.
+					sql: (n) =>
+						current.isSplit === 1
+							? ` AND NOT EXISTS (SELECT 1 FROM transactions kid WHERE kid.parent_id = ?${n} AND kid.refund_of_id = ?${n + 1} AND kid.amount_cents < 0 AND kid.flag_income = 0 AND COALESCE(kid.credit_reviewed, 0) = 0 AND (${refundFitsSql("kid.id", `?${n + 1}`)}) IS NOT 1)`
+							: ` AND ${refundFitsSql(`?${n}`, `?${n + 1}`)}`,
 					args: [id, recounting],
 				}
 			: { sql: () => "", args: [] };
