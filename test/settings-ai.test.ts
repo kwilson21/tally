@@ -214,7 +214,7 @@ describe("POST /settings/ai", () => {
 			announce:
 				// The demo has four merchant names waiting. The names switch hides Tally's three guesses but not the
 				// bank's own CVS Pharmacy, so the Band stays, saying one.
-				"Saved AI suggestions. Suggest store names off, filling in transaction details off, categories and exclusions off, income on, sorting new transactions as they arrive off. 1 merchant name to check.",
+				"Saved AI suggestions. Suggest store names off, filling in transaction details off, categories and exclusions off, income on, sorting new transactions as they arrive off. 1 suggestion to check.",
 		});
 	});
 
@@ -253,7 +253,7 @@ describe("POST /settings/ai", () => {
 		expect(await readAiSwitches(env.DB)).toEqual(AI_SWITCHES_ALL_ON);
 		// Four merchant names come back with the switch, and the Band says so.
 		expect(trigger(res).announce).toBe(
-			"Saved AI suggestions. Suggest store names on, filling in transaction details on, categories and exclusions on, income on, sorting new transactions as they arrive on. 4 merchant names to check.",
+			"Saved AI suggestions. Suggest store names on, filling in transaction details on, categories and exclusions on, income on, sorting new transactions as they arrive on. 4 suggestions to check.",
 		);
 	});
 
@@ -518,12 +518,12 @@ describe("the names Band after a save from the AI group", () => {
 			sortOnArrivalGreyed: "1",
 		});
 		expect(on.html).toContain('<div id="names-band">');
-		expect(on.html).toContain('href="/settings/names"');
-		expect(textOf(on.html)).toContain("4 merchant names to check");
+		expect(on.html).toContain('href="/settings/suggestions"');
+		expect(textOf(on.html)).toContain("4 suggestions to check");
 		// With the names switch off Tally's three guesses are hidden; the bank's own CVS Pharmacy stays.
 		const off = await post("/settings/ai", { sortOnArrivalGreyed: "1" });
 		expect(off.html).toContain('<div id="names-band">');
-		expect(textOf(off.html)).toContain("1 merchant name to check");
-		expect(trigger(off.res).announce).toContain("1 merchant name to check.");
+		expect(textOf(off.html)).toContain("1 suggestion to check");
+		expect(trigger(off.res).announce).toContain("1 suggestion to check.");
 	});
 });

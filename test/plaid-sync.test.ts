@@ -4,8 +4,10 @@ import { summarizeMonth } from "../src/budget";
 import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { readAiTally } from "../src/db/ai-log";
-import { saveAiSwitches } from "../src/db/ai-switches";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { loadMonth } from "../src/db/month";
+import { removeNeverSuggest } from "../src/db/never-suggest";
+import { suggestionQueue } from "../src/db/suggestions-queue";
 import {
 	getTransaction,
 	pendingForJev,
@@ -125,6 +127,7 @@ describe("syncItem", () => {
 			env.DB.prepare("DELETE FROM accounts"),
 			env.DB.prepare("DELETE FROM plaid_items"),
 			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM never_suggest_rules"),
 		]);
 		await saveAiSwitches(env.DB, { details: false });
 	});
@@ -806,6 +809,106 @@ describe("syncItem", () => {
 				"SELECT bp.period FROM bill_payments bp WHERE bp.status = 'linked'",
 			).first(),
 		).toEqual({ period: "2026-09" });
+	});
+
+	describe("Never suggest lines follow the key Plaid names a store by (decision 101)", () => {
+		const syncVenmo = (id: number, transactionId: string, amount: number) =>
+			syncItem(
+				{ ...env, TOKEN_ENCRYPTION_KEY: KEY },
+				id,
+				plaidFetch(() =>
+					response(
+						page({
+							added: [
+								transaction({
+									transaction_id: transactionId,
+									name: "VENMO 123",
+									merchant_name: "Venmo",
+									amount,
+								}),
+							],
+						}),
+					),
+				),
+			);
+		const lines = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT merchant_key, kind, decided_on FROM never_suggest_rules ORDER BY merchant_key, kind",
+				).all()
+			).results;
+
+		it("gives the Plaid name each line of the bank text, with its day, and adds each once", async () => {
+			const id = await addItem();
+			await env.DB.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
+			).run();
+			await syncVenmo(id, "venmo-1", -25);
+			expect(await lines()).toEqual([
+				{ merchant_key: "VENMO 123", kind: "income", decided_on: "2026-10-03" },
+				{ merchant_key: "Venmo", kind: "income", decided_on: "2026-10-03" },
+			]);
+			await syncVenmo(id, "venmo-2", -10);
+			expect(await lines()).toHaveLength(2);
+		});
+
+		it("keeps the day of a line the Plaid name already had", async () => {
+			const id = await addItem();
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
+				),
+				env.DB.prepare(
+					"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('Venmo', 'income', '2026-09-01')",
+				),
+			]);
+			await syncVenmo(id, "venmo-1", -25);
+			expect(await lines()).toEqual([
+				{ merchant_key: "VENMO 123", kind: "income", decided_on: "2026-10-03" },
+				{ merchant_key: "Venmo", kind: "income", decided_on: "2026-09-01" },
+			]);
+		});
+
+		it("a Remove of the Plaid name's line takes the bank-text line too, so a later sync can't copy it back", async () => {
+			const id = await addItem();
+			await env.DB.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
+			).run();
+			await syncVenmo(id, "venmo-1", -25);
+			const named = await env.DB.prepare(
+				"SELECT id, merchant_key AS merchantKey, kind FROM never_suggest_rules WHERE merchant_key = 'Venmo'",
+			).first<{ id: number; merchantKey: string; kind: string }>();
+			await removeNeverSuggest(env.DB, {
+				id: named?.id ?? 0,
+				merchantKey: named?.merchantKey ?? "",
+				kind: named?.kind ?? "",
+			});
+			await syncVenmo(id, "venmo-2", -10);
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-2'",
+			).run();
+			expect(await lines()).toEqual([]);
+			const asked = (await suggestionQueue(env.DB, AI_SWITCHES_ALL_ON)).filter(
+				(item) => item.kind === "income",
+			);
+			expect(asked).toHaveLength(1);
+			expect(asked[0]).toMatchObject({ merchantKey: "Venmo" });
+		});
+
+		it("stops suggesting income for the new charge's Plaid name, as it does for the bank text", async () => {
+			const id = await addItem();
+			await env.DB.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('VENMO 123', 'income', '2026-10-03')",
+			).run();
+			await syncVenmo(id, "venmo-1", -25);
+			await env.DB.prepare(
+				"UPDATE transactions SET income_confidence = 0.5 WHERE plaid_transaction_id = 'venmo-1'",
+			).run();
+			const asked = (await suggestionQueue(env.DB, AI_SWITCHES_ALL_ON)).filter(
+				(item) => item.kind === "income",
+			);
+			expect(asked).toEqual([]);
+		});
 	});
 
 	it("copies on a modified transaction too, only the first time, and never again from the old row", async () => {

@@ -145,26 +145,30 @@ step("phone shell controls stay clear of simulated safe areas");
 
 for (const width of [390, 1280]) {
 	await page.setViewportSize({ width, height: 844 });
-	await goto(`${BASE}/settings/names`, { waitUntil: "networkidle" });
+	await goto(`${BASE}/settings/suggestions`, { waitUntil: "networkidle" });
+	await page.evaluate(() => {
+		for (const box of document.querySelectorAll('input[name="ticked"]'))
+			box.checked = false;
+	});
 	const failedSave = page.waitForResponse(
 		(response) =>
 			response.status() === 422 && response.request().method() === "POST",
 	);
-	await page.getByRole("button", { name: "Save and next" }).click();
+	await page.getByRole("button", { name: /Yes, create Pet Care/ }).click();
 	const response = await failedSave;
 	expected422.push({
 		status: response.status(),
 		method: response.request().method(),
 		url: response.url(),
 	});
-	await page.locator("#names-page [role=alert]").waitFor();
+	await page.locator("#suggestions-page [role=alert]").waitFor();
 	assert.equal(
-		await page.evaluate(() => document.activeElement?.name),
-		"name_pick",
+		await page.evaluate(() => document.activeElement?.id),
+		"suggestion-title",
 	);
 }
 step(
-	"a failed merchant-name review focuses the first choice on phone and desktop",
+	"a failed suggestion answer explains itself and focuses the question on phone and desktop",
 );
 
 await page.setViewportSize({ width: 390, height: 844 });

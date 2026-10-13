@@ -128,6 +128,19 @@ const copyMerchantRowSql = (ownsLock: string) =>
 	   AND ${ownsLock}`;
 
 /**
+ * Gives each Plaid name the "Never suggest" lines of the bank text it came with (decision 101), with each line's
+ * day. It runs on every page that names the store, not only the first time: lines are a set, and a line the name
+ * already has keeps its own day. A Remove takes a line away under every key the store goes by at once
+ * (removeNeverSuggest), so this copy never brings a removed line back. The bank-text line stays, since charges with
+ * no Plaid name still key on it. One `?`: the same pairs as copyMerchantRowSql.
+ */
+const copyNeverSuggestSql = (ownsLock: string) =>
+	`WITH pair(k, t) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
+	 INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+	 SELECT p.k, r.kind, r.decided_on FROM pair p JOIN never_suggest_rules r ON r.merchant_key = p.t
+	 WHERE ${ownsLock}`;
+
+/**
  * Suggests each Plaid name for its merchant, `pending`. One `?`: the names, a JSON array. A merchant a
  * person named, or whose suggestion they decided, is never touched; a guess still waiting gives way.
  */
@@ -840,6 +853,11 @@ export async function syncItem(
 			if (pairs.size > 0) {
 				statements.push(
 					env.DB.prepare(copyMerchantRowSql(OWNS_LOCK)).bind(
+						JSON.stringify([...pairs.values()]),
+						itemRowId,
+						lockId,
+					),
+					env.DB.prepare(copyNeverSuggestSql(OWNS_LOCK)).bind(
 						JSON.stringify([...pairs.values()]),
 						itemRowId,
 						lockId,

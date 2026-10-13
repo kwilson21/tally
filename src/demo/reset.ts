@@ -23,6 +23,7 @@ const TABLES_CHILD_FIRST = [
 	"ai_log",
 	"cash_delete_holds",
 	"bill_payments",
+	"never_suggest_rules",
 	"bill_amounts",
 	"documents",
 	"balance_history",

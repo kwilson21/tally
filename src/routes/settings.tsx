@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { AFTER_SYNC_BATCH, askAgainMany } from "../categorize-pending";
+import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import { type AiTallyCounts, readAiTally } from "../db/ai-log";
 import {
@@ -22,13 +22,18 @@ import {
 	dismissSuggestion,
 	pendingSuggestions,
 } from "../db/category-suggestions";
-import { namesToReview } from "../db/merchant-names";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
+import {
+	neverSuggestRuleLine,
+	neverSuggestRules,
+	removeNeverSuggest,
+} from "../db/never-suggest";
 import {
 	readBankSignInEmails,
 	removeHouseholdMember,
 	saveBankSignInEmails,
 } from "../db/reconnect";
+import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { formatCents } from "../money";
 import { reconnectRecipients } from "../reconnect/reminders";
@@ -67,7 +72,10 @@ export const settings = new Hono<App>();
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
-/** Every form on the page swaps the Categories section in place; without JavaScript it posts normally. */
+/**
+ * Every form on the page swaps the Categories section in place; without JavaScript it posts normally. The
+ * Band above Categories follows the review queue, so each swap also draws it again (`hx-select-oob`).
+ */
 const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
 	action: url,
@@ -76,6 +84,7 @@ const swap = (url: string, indicator: string) => ({
 	"hx-indicator": `#${indicator}`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
+	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -89,6 +98,7 @@ const action = (url: string, formId: string) => ({
 	"hx-disable": `#${formId} button[type=submit]`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
+	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -137,6 +147,8 @@ type View = {
 	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
+	/** Focus the "Never suggest" line at this position after a Remove, or its heading when none is left. */
+	focusNever?: { index?: number; heading?: boolean };
 	merchantRuleError?: string;
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
@@ -480,7 +492,8 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	const people = await c.env.DB.prepare(
 		"SELECT id, name FROM household_people ORDER BY id",
 	).all<{ id: number; name: string }>();
-	const namesWaiting = (await namesToReview(c.env.DB, aiSwitches)).length;
+	const waiting = (await suggestionQueue(c.env.DB, aiSwitches)).length;
+	const neverRules = await neverSuggestRules(c.env.DB);
 	const categorySuggestions = await pendingSuggestions(c.env.DB);
 	const rulesSearch =
 		view.rulesSearch ??
@@ -498,14 +511,16 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
-			{/* Suggested merchant names waiting for a person (P29 A): a Band to the one-at-a-time review. It is
-			    always in the page, empty when nothing waits, so saving the names switch can draw it again. */}
+			{/* Every "Maybe …" waiting for a person (issue #195): a Band to the one review screen. It is always in
+			    the page, empty when nothing waits, so saving the AI switches can draw it again. */}
 			<div id="names-band">
-				{namesWaiting > 0 && (
+				{waiting > 0 && (
 					<div class="mt-4 lg:max-w-3xl">
-						<Band href="/settings/names" detail="Suggested names; you choose">
-							{namesWaiting} merchant {namesWaiting === 1 ? "name" : "names"} to
-							check
+						<Band
+							href="/settings/suggestions"
+							detail="Tally's guesses; you decide"
+						>
+							{waiting} {waiting === 1 ? "suggestion" : "suggestions"} to check
 						</Band>
 					</div>
 				)}
@@ -660,6 +675,9 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 				focusRuleIndex={view.focusRuleIndex}
 				focusHeading={view.focusMerchantHeading}
 				error={view.merchantRuleError}
+				neverRules={neverRules}
+				neverFocus={view.focusNever}
+				today={today}
 				search={
 					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
 				}
@@ -730,6 +748,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 	);
 }
 
+/** Settings' rules, with the Always search kept in the address (a Remove without script returns here). */
+function rulesAddress(search: string): string {
+	return `/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`;
+}
+
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
 	const merchantKey = String(form.get("merchant") ?? "");
@@ -771,10 +794,60 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 			...ruleFocus(focusRules.rules, merchantKey),
 		});
 	}
-	return c.redirect(
-		`/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`,
-		303,
-	);
+	return c.redirect(rulesAddress(search), 303);
+});
+
+// Remove takes one "Never suggest" line away and says so; the suggestion may come back as a fresh guess.
+// The store's linked lines go with it (decision 101). Focus goes to the line that took the clicked line's place,
+// counting only the lines left above it, or to the heading when none is left.
+settings.post("/settings/never-suggest/remove", async (c) => {
+	const form = await c.req.formData();
+	const id = Number(form.get("id")?.toString() ?? "");
+	const merchantKey = String(form.get("merchant_key") ?? "");
+	const kind = String(form.get("kind") ?? "");
+	const search = String(form.get("rules_search") ?? "");
+	const lines = await neverSuggestRules(c.env.DB);
+	const removed =
+		Number.isInteger(id) && id > 0
+			? await removeNeverSuggest(c.env.DB, { id, merchantKey, kind })
+			: null;
+	if (!removed) {
+		// A line that is already gone: a plain form goes back to the rules, as a Remove that worked does.
+		if (!c.req.header("HX-Request"))
+			return c.redirect(rulesAddress(search), 303);
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({ announce: "Tally's rules list updated." }),
+		);
+		return renderSettings(c, {
+			rulesSearch: search,
+			focusNever: lines.length === 0 ? { heading: true } : { index: 0 },
+		});
+	}
+	const message = "Removed. Tally can suggest that again.";
+	if (c.req.header("HX-Request")) {
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: `${message} ${neverSuggestRuleLine(removed.rule)} is gone.`,
+			}),
+		);
+		const after = await neverSuggestRules(c.env.DB);
+		const keep = new Set(after.map((line) => line.id));
+		const index = lines.findIndex((line) => line.id === removed.rule.id);
+		const above = lines
+			.slice(0, Math.max(index, 0))
+			.filter((line) => keep.has(line.id)).length;
+		return renderSettings(c, {
+			rulesSearch: search,
+			focusNever:
+				after.length === 0
+					? { heading: true }
+					: { index: Math.min(above, after.length - 1) },
+		});
+	}
+	return c.redirect(rulesAddress(search), 303);
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
@@ -814,30 +887,20 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		);
 		return current;
 	}
-	const env = c.env as Env & { JEV_API_KEY?: string };
-	if (
-		result.leftOut.length &&
-		env.JEV_API_KEY &&
-		(await readAiSwitches(c.env.DB)).categories
-	)
-		// waitUntil starts a promise at once; yield this turn so the page can answer first.
-		c.executionCtx.waitUntil(
-			new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
-				askAgainMany(env, result.leftOut, AFTER_SYNC_BATCH),
-			),
-		);
-	const out = result.leftOut.length;
+	await askAgainLeftOut(
+		c.env as Env & { JEV_API_KEY?: string },
+		result.leftOut,
+		(work) => c.executionCtx.waitUntil(work),
+	);
 	const count = result.moved;
 	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
 	const message = result.attached
 		? `Added ${transactions} to ${result.name}`
 		: `Created ${result.name} with ${transactions}`;
-	return done(
-		c,
-		message,
-		`${message}.${out ? ` The ${out} you left out ${out === 1 ? "goes" : "go"} back to Tally to sort again.` : ""}`,
-		{ hash: "categories" },
-	);
+	const left = leftOutSentence(result.leftOut.length);
+	return done(c, message, `${message}.${left ? ` ${left}` : ""}`, {
+		hash: "categories",
+	});
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
@@ -954,21 +1017,21 @@ settings.post("/settings/ai", async (c) => {
 		AI_FEATURES.map((f) => [f.key, form.get(f.key) === "on"]),
 	) as Partial<AiSwitches>;
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
-	const waitingBefore = (await namesToReview(c.env.DB)).length;
+	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
-	const waitingAfter = (await namesToReview(c.env.DB, now)).length;
+	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
 	).join(", ");
 	const spoken = states.charAt(0).toUpperCase() + states.slice(1);
-	// The Band above Categories changes with the names switch, so a change in what it says is announced too.
+	// The Band above Categories changes with the switches, so a change in what it says is announced too.
 	const band =
 		waitingAfter === waitingBefore
 			? ""
 			: waitingAfter === 0
-				? " No merchant names to check."
-				: ` ${waitingAfter} merchant ${waitingAfter === 1 ? "name" : "names"} to check.`;
+				? " Nothing to check."
+				: ` ${waitingAfter} ${waitingAfter === 1 ? "suggestion" : "suggestions"} to check.`;
 	return done(
 		c,
 		"Saved AI suggestions",

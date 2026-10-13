@@ -1,38 +1,7 @@
-import { JEV_THRESHOLD } from "../ai/categorize";
-import { confidenceBasisPoints } from "../ai/confidence";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 
-/** A low-confidence credit is a visible income guess only until someone decides what it is. */
-export function maybeIncomeVisible({
-	amountCents,
-	income,
-	incomeConfidence,
-	creditReviewed,
-	excluded,
-	paysBill,
-}: {
-	amountCents: number;
-	income: boolean;
-	incomeConfidence?: number | null;
-	creditReviewed: boolean;
-	excluded?: boolean;
-	paysBill?: boolean;
-}) {
-	const confidence =
-		incomeConfidence == null ? null : confidenceBasisPoints(incomeConfidence);
-	const threshold = confidenceBasisPoints(JEV_THRESHOLD);
-	return (
-		amountCents < 0 &&
-		!income &&
-		!creditReviewed &&
-		!(excluded && !paysBill) &&
-		incomeConfidence != null &&
-		confidence !== null &&
-		confidence < threshold &&
-		confidence > 10_000 - threshold
-	);
-}
+export { maybeIncomeVisible } from "../ai/maybe";
 
 function MaybeTag({
 	word,
