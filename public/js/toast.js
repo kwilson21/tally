@@ -86,25 +86,31 @@
 			? new ResizeObserver(measureToasts)
 			: null;
 
-	// Takes a toast off the page. Focus on the toast would be lost with it, so the Transactions heading takes it
-	// (every Transactions page has one, the first-visit page too). `lostToo` also counts focus on nothing: a
-	// disabled Undo button drops focus to the body, so an Undo's answer (undoDone: a restore's, or a bill Undo's
-	// refusal) uses it. A timer doesn't, since it would scroll the page to the heading when focus is only on the body.
-	function takeOffPage(toast, lostToo = false) {
-		const active = document.activeElement;
-		if (
-			toast.contains(active) ||
-			(lostToo && (!active || active === document.body))
-		) {
-			// A page without the Transactions title (a bill's page) takes focus on its own page-title.
-			const heading =
-				document.getElementById("transactions-title") ??
-				document.getElementById("page-title");
-			if (heading) {
-				heading.setAttribute("tabindex", "-1");
-				heading.focus();
-			}
+	// The Transactions heading takes focus (every Transactions page has one, the first-visit page too). A page
+	// without it, a bill's page, takes focus on its own page-title.
+	function focusHeading() {
+		const heading =
+			document.getElementById("transactions-title") ??
+			document.getElementById("page-title");
+		if (heading) {
+			heading.setAttribute("tabindex", "-1");
+			heading.focus();
 		}
+	}
+	// Focus is on nothing: a disabled Undo button drops it to the body.
+	function focusLost() {
+		const active = document.activeElement;
+		return !active || active === document.body;
+	}
+
+	// Takes a toast off the page. Focus on the toast would be lost with it, so the heading takes it. `lostToo` also
+	// counts focus on nothing: an Undo's answer (undoDone: a restore's, or a cash or bill Undo's refusal) uses it.
+	// A timer doesn't, since it would scroll the page to the heading when focus is only on the body. An answer or a
+	// failure that arrives after the time has run out still moves focus left on nothing to the heading (onToast's
+	// undoDone block and failed()).
+	function takeOffPage(toast, lostToo = false) {
+		if (toast.contains(document.activeElement) || (lostToo && focusLost()))
+			focusHeading();
 		toast.remove();
 		measureToasts();
 	}
@@ -183,12 +189,16 @@
 				if (!undoToasts.has(old)) old.remove();
 			}
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
-		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a bill Undo's refusal ends its
-		// toast too (#340). The other Undo toasts run their own time.
-		if (undoDone)
-			for (const old of [...(region?.children ?? [])]) {
-				if (undoToasts.get(old) === undoDone) takeOffPage(old, true);
-			}
+		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a
+		// cash entry's (#444) or a bill's (#340). The other Undo toasts run their own time. If the Undo toast's time
+		// has already run out, focus left on nothing still moves to the heading (#444).
+		if (undoDone) {
+			const ended = [...(region?.children ?? [])].filter(
+				(old) => undoToasts.get(old) === undoDone,
+			);
+			if (ended.length) for (const old of ended) takeOffPage(old, true);
+			else if (focusLost()) focusHeading();
+		}
 		measureSelectionBar();
 		region?.append(toast);
 		// Measured after the append, so the older toasts just replaced are gone and this one is in.
@@ -244,11 +254,20 @@
 	// another toast has replaced it, or a body swap has removed it, the failure is said again. So a
 	// retry that fails a couple of seconds later is a new failure too: it replaces the toast with a
 	// fresh alert (a screen reader hears it again) and a fresh 4 seconds.
+	// A button that a form's hx-disable turned off for the request is focused again once htmx turns it back
+	// on (see htmx:finally:request), so a keyboard user keeps their place after a failure (#460).
 	const BURST_MS = 1000;
 	// The newest failure: its words, when it was said, and its toast. One record is enough, since only
 	// the newest plain or error toast is ever on screen.
 	let lastFailure = null;
+	// The guarded button each failed request sent, keyed by the request's ctx.
+	const guardedButtons = new WeakMap();
 	function failed(ctx) {
+		if (
+			ctx?.sourceElement?.hasAttribute?.("hx-disable") &&
+			ctx.request?.submitter
+		)
+			guardedButtons.set(ctx, ctx.request.submitter);
 		// An Undo request that failed turns its button back on while its toast is still up: the error toast
 		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
 		const undo = undoButtons.get(ctx?.sourceElement);
@@ -256,9 +275,11 @@
 			undo.button.disabled = false;
 			// Focus was on Undo when it was pressed, and a disabled button dropped it, so it comes back to Undo (#397).
 			// Not when the person has moved it somewhere else during the request.
-			const active = document.activeElement;
-			if (!active || active === document.body || undo.toast.contains(active))
+			if (focusLost() || undo.toast.contains(document.activeElement))
 				undo.button.focus();
+		} else if (undo && focusLost()) {
+			// The toast's time ran out while this Undo was being answered (#444): focus left on nothing goes to the heading.
+			focusHeading();
 		}
 		const message =
 			String(ctx?.request?.method).toUpperCase() === "GET"
@@ -302,6 +323,23 @@
 		if (!ctx) return;
 		clearTimeout(timers.get(ctx));
 		timers.delete(ctx);
+		const button = guardedButtons.get(ctx);
+		if (button) {
+			guardedButtons.delete(ctx);
+			// htmx turns the guarded buttons back on right after this event, in the same turn, so the focus waits
+			// for that turn to end. It checks the button then: a button another request still holds disabled stays
+			// disabled (htmx counts its disables) and is not focused, nor one that has left the page, nor one the
+			// person has moved focus away from.
+			queueMicrotask(() => {
+				const active = document.activeElement;
+				if (
+					button.isConnected &&
+					!button.disabled &&
+					(!active || active === document.body)
+				)
+					button.focus();
+			});
+		}
 	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};

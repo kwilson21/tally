@@ -48,6 +48,11 @@ class FakeNode extends EventTarget {
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 	}
+	hasAttribute(name: string) {
+		return this.attrs.has(name);
+	}
+	/** Whether the node is on the page; a test sets it false for a node that has left. */
+	isConnected = true;
 	append(...nodes: FakeNode[]) {
 		for (const node of nodes) {
 			node.parent = this;
@@ -909,6 +914,232 @@ describe("a bill's Undo answer ends its toast", () => {
 	);
 });
 
+// #444: a cash entry's refused Undo ends its Deleted toast too, as a restore does (undoDone names the token).
+// Its focus goes to the Transactions heading, since the disabled Undo had dropped it to the page body.
+describe("a cash entry's refused Undo ends its toast", () => {
+	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+	const cashUndoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: TOKEN,
+			undoExpiresInMs: 10000,
+		});
+
+	it.each([
+		["Undo expired. The cash entry stays deleted.", "error"],
+		["That cash entry is already back.", "success"],
+	])(
+		"ends the Undo toast with '%s', and focus goes to the Transactions heading",
+		async (message, type) => {
+			const { body, document, toasts, heading } = await page();
+			const headingFocus = vi.spyOn(heading, "focus");
+			cashUndoToast(body);
+			const undo = toasts.children[0] as FakeNode;
+			const form = undo.all().find((node) => node.tag === "form") as FakeNode;
+			form.dispatchEvent(new Event("submit"));
+			document.activeElement = body;
+			fire(body, "toast", { message, type, undoDone: TOKEN });
+			expect(toasts.children).not.toContain(undo);
+			expect(toasts.children).toHaveLength(1);
+			const answer = toasts.children[0] as FakeNode;
+			expect(answer.words()).toBe(message);
+			expect(answer.attrs.get("role")).toBe(
+				type === "error" ? "alert" : "status",
+			);
+			expect(headingFocus).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).toBe(heading);
+			expect(heading.attrs.get("tabindex")).toBe("-1");
+		},
+	);
+});
+
+// #444: an Undo whose ten seconds run out before its answer arrives. The disabled Undo had dropped focus to the
+// page body, and the timer leaves focus there, so the late answer (or a failed request) moves it to the heading.
+describe("an Undo answered after its toast's time ran out (#444)", () => {
+	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+	const BILL_TOKEN = "12.9401.1791234567";
+	const cashUndoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: TOKEN,
+			undoExpiresInMs: 10000,
+		});
+	const billUndoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Payment unlinked. Undo for 10 seconds.",
+			undo: BILL_TOKEN,
+			undoExpiresInMs: 10000,
+			undoAction: "/bills/1/undo-unlink",
+		});
+	const undoButton = (form: FakeNode) =>
+		form.children.find((node) => node.tag === "button") as FakeNode;
+	/** Presses the toast's Undo, then lets its ten seconds run out with no answer: focus is left on the body. */
+	function undoTimedOut(
+		body: EventTarget,
+		document: { activeElement: unknown },
+		toasts: FakeNode,
+	) {
+		const undo = toasts.children[0] as FakeNode;
+		const form = undo.all().find((node) => node.tag === "form") as FakeNode;
+		form.dispatchEvent(new Event("submit"));
+		document.activeElement = body;
+		vi.advanceTimersByTime(10000);
+		expect(toasts.children).not.toContain(undo);
+		return form;
+	}
+
+	it.each([
+		["Undo expired. The cash entry stays deleted.", "error"],
+		["That cash entry is already back.", "success"],
+	])(
+		"moves focus to the Transactions heading when '%s' answers an Undo whose time ran out",
+		async (message, type) => {
+			const { body, document, toasts, heading } = await page();
+			const headingFocus = vi.spyOn(heading, "focus");
+			cashUndoToast(body);
+			undoTimedOut(body, document, toasts);
+			expect(headingFocus).not.toHaveBeenCalled();
+			fire(body, "toast", { message, type, undoDone: TOKEN });
+			expect(toasts.children).toHaveLength(1);
+			const answer = toasts.children[0] as FakeNode;
+			expect(answer.words()).toBe(message);
+			expect(answer.attrs.get("role")).toBe(
+				type === "error" ? "alert" : "status",
+			);
+			expect(headingFocus).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).toBe(heading);
+			expect(heading.attrs.get("tabindex")).toBe("-1");
+		},
+	);
+
+	it.each([
+		["Undo expired. The payment stays unlinked.", "error"],
+		["That month already has a payment linked.", "success"],
+	])(
+		"moves focus to a bill page's title when '%s' answers an Undo whose time ran out",
+		async (message, type) => {
+			const { body, document, toasts, heading } = await page({
+				billPage: true,
+			});
+			const titleFocus = vi.spyOn(heading, "focus");
+			billUndoToast(body);
+			undoTimedOut(body, document, toasts);
+			expect(titleFocus).not.toHaveBeenCalled();
+			fire(body, "toast", { message, type, undoDone: BILL_TOKEN });
+			expect(toasts.children).toHaveLength(1);
+			const answer = toasts.children[0] as FakeNode;
+			expect(answer.words()).toBe(message);
+			expect(answer.attrs.get("role")).toBe(
+				type === "error" ? "alert" : "status",
+			);
+			expect(titleFocus).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).toBe(heading);
+			expect(heading.attrs.get("tabindex")).toBe("-1");
+		},
+	);
+
+	it("moves focus to the heading when a restore's answer comes after the time ran out", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		undoTimedOut(body, document, toasts);
+		fire(body, "toast", {
+			message: "Restored Coffee.",
+			type: "success",
+			undoDone: TOKEN,
+		});
+		expect(toasts.children).toHaveLength(1);
+		expect((toasts.children[0] as FakeNode).words()).toBe("Restored Coffee.");
+		expect(headingFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
+	});
+
+	it("leaves focus on the restored row when the list shows it and the answer comes after the time ran out", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		undoTimedOut(body, document, toasts);
+		// The swap's autofocus put focus on the restored row before the answer's toast came.
+		const row = new FakeNode("a");
+		document.activeElement = row;
+		fire(body, "toast", {
+			message: "Restored Coffee.",
+			type: "success",
+			undoDone: TOKEN,
+		});
+		expect(headingFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(row);
+	});
+
+	it("moves focus to the heading when a request with no answer fails after the time ran out", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		const form = undoTimedOut(body, document, toasts);
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(headingFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
+		expect(undoButton(form).disabled).toBe(true);
+		expect(toasts.children).toHaveLength(1);
+		const error = toasts.children[0] as FakeNode;
+		expect(error.attrs.get("role")).toBe("alert");
+		expect(error.words()).toBe(COULDNT_SAVE);
+	});
+
+	it("moves focus to the heading when a server error reply comes after the time ran out", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		const form = undoTimedOut(body, document, toasts);
+		fire(document, "htmx:response:error", {
+			ctx: {
+				sourceElement: form,
+				request: { method: "POST" },
+				response: { status: 500 },
+			},
+		});
+		expect(headingFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
+		expect(undoButton(form).disabled).toBe(true);
+		expect(toasts.children).toHaveLength(1);
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+	});
+
+	it("leaves focus where the person put it when the late answer comes", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		undoTimedOut(body, document, toasts);
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		fire(body, "toast", {
+			message: "Restored Coffee.",
+			type: "success",
+			undoDone: TOKEN,
+		});
+		expect(headingFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("leaves focus where the person put it when a late failure comes", async () => {
+		const { body, document, toasts, heading } = await page();
+		const headingFocus = vi.spyOn(heading, "focus");
+		cashUndoToast(body);
+		const form = undoTimedOut(body, document, toasts);
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(headingFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(elsewhere);
+	});
+});
+
 describe("an Undo request that fails", () => {
 	const undoToast = (body: EventTarget) =>
 		fire(body, "toast", {
@@ -973,7 +1204,7 @@ describe("an Undo request that fails", () => {
 		expect(button.disabled).toBe(true);
 	});
 
-	it("does nothing once the Undo toast has gone", async () => {
+	it("keeps the Undo button off once the Undo toast has gone", async () => {
 		const { body, document, toasts } = await page();
 		undoToast(body);
 		const form = undoForm(toasts);
@@ -1047,6 +1278,136 @@ describe("focus on an Undo button that a failed request turned back on", () => {
 			},
 			error: new TypeError("Failed to fetch"),
 		});
+		expect(document.activeElement).toBe(body);
+	});
+});
+
+// #460: a form with an hx-disable guard turns its buttons off while its request runs, and htmx turns them
+// back on only after the request's finally event. So a failed request gives focus back to the button that
+// was pressed, once it is on again, unless the person has moved focus or the button has left the page.
+describe("focus on a guarded button that a failed request turned back on", () => {
+	const GUARD = "#suggestions-page button[type=submit]";
+	/** A form whose buttons are guarded, and the button pressed in it, disabled while the request runs. */
+	const guarded = (guard: string | null = GUARD) => {
+		const form = new FakeNode("form");
+		if (guard) form.setAttribute("hx-disable", guard);
+		const button = new FakeNode("button");
+		button.type = "submit";
+		button.disabled = true;
+		form.append(button);
+		return { form, button };
+	};
+	/** htmx 4's ctx for the request the button sent, failed with a dropped connection or a 500. */
+	const dropped = (form: FakeNode, button: FakeNode) => ({
+		sourceElement: form,
+		request: { method: "POST", submitter: button },
+	});
+	/** htmx's finally event, which comes before it turns the guarded buttons back on. */
+	const finish = (document: EventTarget, ctx: unknown) =>
+		fire(document, "htmx:finally:request", { ctx });
+
+	it("gives focus back to the pressed button after a dropped connection", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		// A disabled button drops focus to the body in browsers.
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("gives focus back to the pressed button after a 500 reply", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = {
+			...dropped(form, button),
+			response: { status: 500 },
+		};
+		fire(document, "htmx:response:error", { ctx });
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("leaves focus alone when the person moved it somewhere else during the request", async () => {
+		const { document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		const elsewhere = new FakeNode("input");
+		document.activeElement = elsewhere;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("does not focus a button that another request still holds disabled", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		finish(document, ctx);
+		// htmx leaves it disabled: another request that disabled it has not finished.
+		await Promise.resolve();
+		expect(button.disabled).toBe(true);
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("does not focus a button that has left the page", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		button.isConnected = false;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("does not focus a button in a form without an hx-disable guard", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded(null);
+		const ctx = dropped(form, button);
+		fire(document, "htmx:error", {
+			ctx,
+			error: new TypeError("Failed to fetch"),
+		});
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("leaves focus alone after a successful request", async () => {
+		const { body, document } = await page();
+		const { form, button } = guarded();
+		const ctx = dropped(form, button);
+		document.activeElement = body;
+		finish(document, ctx);
+		button.disabled = false;
+		await Promise.resolve();
 		expect(document.activeElement).toBe(body);
 	});
 });
