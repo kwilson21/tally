@@ -3,7 +3,12 @@ import { actor } from "../actor";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
-import { organizeGroups, saveOrganizeGroup } from "../transactions/organize";
+import {
+	groupHasRule,
+	organizeGroups,
+	saveOrganizeGroup,
+	setOrganizeRule,
+} from "../transactions/organize";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -14,6 +19,7 @@ import {
 	NewCategoryChip,
 	NewCategoryName,
 } from "../views/new-category-choice";
+import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -37,6 +43,8 @@ async function renderOrganize(
 	values?: Values,
 	status: 200 | 422 = 200,
 	focus = false,
+	/** After a save, the question about the rule in place of the store (#353). */
+	rule?: GroupRuleOfferValue,
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
@@ -64,6 +72,8 @@ async function renderOrganize(
 	const sources = group
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
+	// The question's answers go to the same skips, and Not now or Yes then moves on from them.
+	const ruleAction = `/transactions/organize/rule${new URL(c.req.url).search}`;
 
 	return c.html(
 		<Layout
@@ -75,7 +85,9 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
-				{group ? (
+				{rule ? (
+					<GroupRuleOffer value={rule} action={ruleAction} focus />
+				) : group ? (
 					<>
 						<p class="mt-2 text-muted">
 							{skipped.length + 1} of {allGroups.length} · {remaining} left, all
@@ -163,10 +175,6 @@ async function renderOrganize(
 									Skip
 								</Button>
 							</div>
-							<p class="text-sm text-muted">
-								Future {values?.name || group.name} transactions get this
-								category too.
-							</p>
 						</form>
 					</>
 				) : allGroups.length > 0 ? (
@@ -273,10 +281,81 @@ organize.post("/transactions/organize", async (c) => {
 		return alreadyCategorized();
 	}
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
-	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	// The save makes no rule. Organize asks #209's question after it (#353), unless every merchant of the group
+	// has this rule already; then it moves on as it always did.
+	const asks = !(await groupHasRule(
+		c.env.DB,
+		currentGroup.merchantKeys,
+		chosen.id,
+	));
+	const rule: GroupRuleOfferValue | undefined = asks
+		? {
+				merchantKeys: currentGroup.merchantKeys,
+				merchant: name || currentGroup.name,
+				categoryId: chosen.id,
+				category: chosen.name,
+			}
+		: undefined;
+	if (!c.req.header("HX-Request"))
+		return rule
+			? renderOrganize(c, undefined, 200, true, rule)
+			: c.redirect(next, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
+	return renderOrganize(c, undefined, 200, true, rule);
+});
+
+/** The merchant keys the question posts back: a JSON array of strings, and anything else posts none. */
+function merchantKeysFrom(value: unknown): string[] {
+	// JSON.parse throws on anything but JSON, and a file upload reads as "[object File]": both post no keys.
+	try {
+		const keys: unknown = JSON.parse(String(value ?? "[]"));
+		return Array.isArray(keys)
+			? keys.filter(
+					(key): key is string => typeof key === "string" && key.length > 0,
+				)
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the group, and
+ * names the store in the toast; either answer moves on to the next store, with focus on its name.
+ */
+organize.post("/transactions/organize/rule", async (c) => {
+	const form = await c.req.formData();
+	const url = new URL(c.req.url);
+	const next = `/transactions/organize${url.search}`;
+	const keys = merchantKeysFrom(form.get("merchant_keys"));
+	const categoryId = Number(form.get("category"));
+	const category =
+		Number.isInteger(categoryId) && categoryId > 0
+			? await c.env.DB.prepare(
+					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+				)
+					.bind(categoryId)
+					.first<{ id: number; name: string }>()
+			: null;
+	const ruled =
+		form.get("answer") === "yes" && category && keys.length > 0
+			? category
+			: null;
+	if (ruled) await setOrganizeRule(c.env.DB, keys, ruled.id);
+	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	if (ruled) {
+		const message = `${form.get("merchant")?.toString().trim() || keys[0]} is always ${ruled.name} now.`;
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				toast: { message, type: "success" },
+				announce: message,
+			}),
+		);
+	}
+	c.header("HX-Push-Url", next);
 	return renderOrganize(c, undefined, 200, true);
 });

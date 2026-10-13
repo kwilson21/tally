@@ -117,7 +117,10 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	);
 }
 
-/** Categorizes a current merchant group and creates rules for future transactions. */
+/**
+ * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
+ * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
+ */
 export async function saveOrganizeGroup(
 	db: D1Database,
 	merchantKeys: string[],
@@ -156,8 +159,8 @@ export async function saveOrganizeGroup(
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A merchant gets its rule only while one of its charges still needs a category when this batch starts, so a group
-	// another save filed first keeps its rule. The checks run ahead of the updates that file the charges.
+	// A merchant's row is written only while one of its charges still needs a category when this batch starts, so a
+	// group another save filed first keeps its name. The checks run ahead of the updates that file the charges.
 	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
 	// upsert (spec §8.6). The log reads each merchant as its upsert finds it, so it must come first. It has the
 	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
@@ -180,13 +183,13 @@ export async function saveOrganizeGroup(
 		settles.push(
 			db
 				.prepare(
-					`INSERT INTO merchants (raw_name, display_name, default_category_id)
-					SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
-					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
+					`INSERT INTO merchants (raw_name, display_name)
+					SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
+					ON CONFLICT(raw_name) DO UPDATE SET
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
 						${SETTLE_SUGGESTION_SQL}`,
 				)
-				.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
+				.bind(merchantKey, displayName, merchantKey, displayName),
 		);
 	}
 	const results = await db.batch([...settles, ...updates]);
@@ -194,4 +197,52 @@ export async function saveOrganizeGroup(
 	return results
 		.slice(settles.length)
 		.reduce((changed, result) => changed + result.meta.changes, 0);
+}
+
+/**
+ * Whether every merchant key of a group already has `categoryId` as its rule, so Organize has no question to
+ * ask after the group is saved (#353). A key with no `merchants` row has no rule.
+ */
+export async function groupHasRule(
+	db: D1Database,
+	merchantKeys: string[],
+	categoryId: number,
+): Promise<boolean> {
+	const names = [...new Set(merchantKeys)];
+	let ruled = 0;
+	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
+		const chunk = names.slice(offset, offset + CHUNK_SIZE);
+		const marks = chunk.map(() => "?").join(", ");
+		const row = await db
+			.prepare(
+				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
+			)
+			.bind(categoryId, ...chunk)
+			.first<{ n: number }>();
+		ruled += row?.n ?? 0;
+	}
+	return ruled === names.length;
+}
+
+/**
+ * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key, creating the
+ * `merchants` rows that don't exist yet, so later charges follow. A key gets the rule only where a charge a person
+ * filed in `categoryId` carries it, so a posted key that has no such charge sets nothing. Like the save that filed
+ * the group, it changes no charge: the rule reaches the next ones.
+ */
+export async function setOrganizeRule(
+	db: D1Database,
+	merchantKeys: string[],
+	categoryId: number,
+): Promise<void> {
+	const statements = [...new Set(merchantKeys)].map((merchantKey) =>
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, default_category_id)
+				SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${KEY_UPDATE} = ? AND category_id = ? AND category_source = 'user')
+				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
+			)
+			.bind(merchantKey, categoryId, merchantKey, categoryId),
+	);
+	if (statements.length > 0) await db.batch(statements);
 }

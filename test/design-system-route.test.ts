@@ -851,12 +851,12 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
-	it("keeps the RuleOffer specimen's two forms inside an inert wrapper, so Yes cannot post", async () => {
+	it("keeps the RuleOffer specimen's forms inside an inert wrapper, so Yes cannot post", async () => {
 		const { html } = await get("/design-system");
 		const section =
 			html.split('id="rule-offer"')[1]?.split("</section>")[0] ?? "";
-		// Both forms are present, so the loop below cannot pass by finding none.
-		expect(section.match(/<form\b/g)).toHaveLength(2);
+		// The RuleOffer's two forms and the Organize question's one form are present, so the loop below cannot pass by finding none (#353).
+		expect(section.match(/<form\b/g)).toHaveLength(3);
 		const openDivs: boolean[] = [];
 		for (const match of section.matchAll(
 			/<div\b[^>]*>|<\/div>|<form\b[^>]*>/g,

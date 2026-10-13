@@ -571,7 +571,10 @@ describe("GET /transactions/:id", () => {
 		expect(
 			(html.match(/<input type="radio" name="category"/g) ?? []).length,
 		).toBe(8);
-		expect(html).toContain("Always for this merchant");
+		// The rule is a plain tick row above Save, unticked for a store with no rule (#353).
+		expect(html).toContain("Use this category for Local Bakery from now on");
+		expect(html).toContain("Leave it unticked to change just this one.");
+		expect(html).not.toContain("Always for this merchant");
 		expect(html).toContain("Count as income");
 		// "Type your own" starts empty; the store's own name is the choice that shows what it is.
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value=""/);
@@ -606,7 +609,14 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(/name="always" value="1" checked/);
-		expect(sheet).toContain("Local Bakery is always");
+		const savedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		expect(sheet).toContain(
+			`Local Bakery is always ${savedName}. Untick it and save to remove the rule.`,
+		);
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			merchant: "Local Bakery",
@@ -671,6 +681,38 @@ describe("GET /transactions/:id", () => {
 				.bind(merchantKey)
 				.first(),
 		).toEqual({ default_category_id: 2 });
+	});
+
+	it("an unticked save makes no rule, and a ticked one makes it (#353)", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		const rule = () =>
+			env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first<{ default_category_id: number | null }>();
+		const fields = {
+			category: "2",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		};
+		await post(`/transactions/${bakery}`, fields);
+		expect((await rule())?.default_category_id ?? null).toBeNull();
+		const ticked = await post(`/transactions/${bakery}`, {
+			...fields,
+			always: "1",
+		});
+		expect(ticked.res.status).toBe(200);
+		expect((await rule())?.default_category_id).toBe(2);
 	});
 
 	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {

@@ -1240,7 +1240,7 @@ export async function saveEdit(
 	}
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
 	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
-	// place, unless the same save ticks Always for this merchant, which settles the category (oneOffGuessesAgain).
+	// place, unless the same save ticks the merchant rule, which settles the category (oneOffGuessesAgain).
 	// A pending new-category suggestion the row is behind is released with it, so the row leaves the
 	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
 	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
@@ -1451,7 +1451,7 @@ export async function saveEdit(
 }
 
 /**
- * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * Sets a merchant's category rule the way the edit panel's tick does, for a save that has no
  * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
  */
 export async function setMerchantRule(

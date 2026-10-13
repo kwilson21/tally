@@ -113,6 +113,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
@@ -2169,19 +2170,8 @@ function EditSheet({
 						</div>
 					</details>
 				)}
-				{/* The two things people change most after the category, one tap each (owner's pick C). */}
+				{/* Exclude is a pill; the merchant rule is the tick row above Save (#353). */}
 				<div class="flex flex-wrap gap-2">
-					{/* A linked refund has no category of its own to make a rule from. */}
-					{tx.refundOfId == null && (
-						<Chip
-							type="checkbox"
-							name="always"
-							value="1"
-							checked={values.alwaysForMerchant}
-						>
-							Always for this merchant
-						</Chip>
-					)}
 					<Chip
 						type="checkbox"
 						name="excluded"
@@ -2191,24 +2181,13 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
-				{tx.refundOfId == null && (
-					<p class="text-sm text-muted">
-						Ticking this for a transaction that doesn't match the rule changes
-						it for this merchant. To change a rule this transaction already
-						matches, remove it in Settings first.
-					</p>
-				)}
-				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
+				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
+				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null && (
 					<p class="text-sm text-muted">
 						Remove it in Settings, under{" "}
 						<a href="/settings#merchant-rules">Tally's rules</a>.
 					</p>
-				) : ruleCategory && values.alwaysForMerchant ? (
-					<p class="text-sm text-muted">
-						{tx.displayName} is always {ruleCategory.name}. Untick it and save
-						to remove the rule.
-					</p>
-				) : null}
+				)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -2261,6 +2240,15 @@ function EditSheet({
 						>
 							Reviewed as a refund or other non-income credit
 						</Chip>
+					</div>
+				)}
+				{tx.refundOfId == null && (
+					<div class="border-t border-rule pt-3">
+						<MerchantRuleTick
+							merchant={tx.displayName}
+							checked={values.alwaysForMerchant}
+							ruleCategory={ruleCategory?.name}
+						/>
 					</div>
 				)}
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
