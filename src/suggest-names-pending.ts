@@ -19,9 +19,9 @@ import { usableSuggestedNames } from "./transactions/name-suggestions";
  * its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
-const SWITCH_CHECK_BATCH = 25;
-// Details are the only work here whose raw text goes to a second model after Jev; cap switch lag at five calls.
-const DETAIL_SWITCH_CHECK_BATCH = 5;
+// The switches are read after every five calls, so one turned off mid-run stops within five; a batch's
+// answers are kept or dropped together.
+const SWITCH_CHECK_BATCH = 5;
 
 /** Failures in a row that point at every call (the service is down) rather than one bank text. */
 const MAX_FAILURES_IN_A_ROW = 3;
@@ -44,16 +44,13 @@ export async function suggestTransactionNotes(
 	if (!switches.details) return done;
 	const transactions = await transactionsNeedingNoteGuess(env.DB, limit);
 	let failuresInARow = 0;
-	for (let i = 0; i < transactions.length; i += DETAIL_SWITCH_CHECK_BATCH) {
-		const attempted: number[] = [];
+	for (let i = 0; i < transactions.length; i += SWITCH_CHECK_BATCH) {
+		const answered: number[] = [];
+		const failed: number[] = [];
 		const guesses: { id: number; note: string }[] = [];
-		for (const transaction of transactions.slice(
-			i,
-			i + DETAIL_SWITCH_CHECK_BATCH,
-		)) {
+		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) break;
 			done.asked += 1;
-			attempted.push(transaction.id);
 			const result = await suggestNote(env.AI, transaction.rawName, [
 				transaction.merchantName,
 				transaction.displayName,
@@ -65,18 +62,21 @@ export async function suggestTransactionNotes(
 				}),
 			]);
 			if (!result.ok) {
+				failed.push(transaction.id);
 				failuresInARow += 1;
 				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) break;
 				continue;
 			}
 			failuresInARow = 0;
+			answered.push(transaction.id);
 			if (result.note !== null)
 				guesses.push({ id: transaction.id, note: result.note });
 		}
 		// Keep or discard this small batch together if the details switch changed during an AI call.
 		const detailsOn = (await readAiSwitches(env.DB)).details;
-		await saveNoteAttempts(env.DB, attempted, detailsOn ? guesses : []);
 		if (!detailsOn) break;
+		// Answered calls are remembered as tried; a failed one stays untried and is asked again tomorrow, after the rest.
+		await saveNoteAttempts(env.DB, answered, guesses, failed);
 		done.suggested += guesses.length;
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
@@ -88,7 +88,7 @@ export async function suggestTransactionNotes(
 
 /**
  * Asks Workers AI for each bank text that needs it, most charges first, while the household's names
- * switch is on (spec §8.6). The switch is checked once after each batch of at most 25 calls: it can be
+ * switch is on (spec §8.6). The switch is checked after each batch of at most five calls: it can be
  * turned off during a call, in which case the answers from that batch are thrown away.
  * A failed call leaves its merchant to be asked tomorrow; three in a row stop the run. With a `time`, no new
  * request starts once its deadline has passed, so slow requests can't hold up the rest of the run; what was
@@ -124,8 +124,8 @@ export async function suggestMerchantNames(
 			failuresInARow = 0;
 			answers.push({ rawName, names: result.names });
 		}
-		// The old per-answer read protected against a switch turned off mid-run. One read per batch
-		// preserves that boundary without spending two D1 queries on every merchant.
+		// One read per batch of five keeps the switch boundary (a switch turned off mid-run stops it)
+		// without a D1 read for every merchant.
 		if (!(await readAiSwitches(env.DB)).names) break;
 		done.suggested += await saveAskedNames(env.DB, answers);
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;

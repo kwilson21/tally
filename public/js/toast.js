@@ -254,11 +254,20 @@
 	// another toast has replaced it, or a body swap has removed it, the failure is said again. So a
 	// retry that fails a couple of seconds later is a new failure too: it replaces the toast with a
 	// fresh alert (a screen reader hears it again) and a fresh 4 seconds.
+	// A button that a form's hx-disable turned off for the request is focused again once htmx turns it back
+	// on (see htmx:finally:request), so a keyboard user keeps their place after a failure (#460).
 	const BURST_MS = 1000;
 	// The newest failure: its words, when it was said, and its toast. One record is enough, since only
 	// the newest plain or error toast is ever on screen.
 	let lastFailure = null;
+	// The guarded button each failed request sent, keyed by the request's ctx.
+	const guardedButtons = new WeakMap();
 	function failed(ctx) {
+		if (
+			ctx?.sourceElement?.hasAttribute?.("hx-disable") &&
+			ctx.request?.submitter
+		)
+			guardedButtons.set(ctx, ctx.request.submitter);
 		// An Undo request that failed turns its button back on while its toast is still up: the error toast
 		// says to try again. The request's source element is the Undo form (htmx 4's ctx.sourceElement).
 		const undo = undoButtons.get(ctx?.sourceElement);
@@ -314,6 +323,23 @@
 		if (!ctx) return;
 		clearTimeout(timers.get(ctx));
 		timers.delete(ctx);
+		const button = guardedButtons.get(ctx);
+		if (button) {
+			guardedButtons.delete(ctx);
+			// htmx turns the guarded buttons back on right after this event, in the same turn, so the focus waits
+			// for that turn to end. It checks the button then: a button another request still holds disabled stays
+			// disabled (htmx counts its disables) and is not focused, nor one that has left the page, nor one the
+			// person has moved focus away from.
+			queueMicrotask(() => {
+				const active = document.activeElement;
+				if (
+					button.isConnected &&
+					!button.disabled &&
+					(!active || active === document.body)
+				)
+					button.focus();
+			});
+		}
 	});
 	// Older and Newer in Select mode (#456): the reply's first tick is autofocus, but htmx hides a list load's rows
 	// until the load ends, so htmx can't focus it during the swap. htmx takes the load's class off the form after this

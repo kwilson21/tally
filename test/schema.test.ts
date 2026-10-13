@@ -98,6 +98,7 @@ describe("schema", () => {
 				"for_person_cleared",
 				"details_asked",
 				"note_tried_at",
+				"note_failed_at",
 				"note_dismissed",
 				"own_name",
 			]),

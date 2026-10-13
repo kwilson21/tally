@@ -175,7 +175,7 @@ export const transferAskedSql = (alias: string) =>
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
-		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(merchantKeySql(alias), "transfer")})`;
+		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(alias, "transfer")})`;
 
 /**
  * Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`).

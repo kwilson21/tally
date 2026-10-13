@@ -1,4 +1,3 @@
-import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 
 /**
@@ -35,7 +34,7 @@ export function hasIncomeAnswerSql(alias: string): string {
  * read it from here, so they can't drift apart.
  */
 export function maybeIncomeConfidenceSql(alias: string): string {
-	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${alias}.income_maybe_declined = 1 OR ${neverSuggestedSql(merchantKeySql(alias), "income")} THEN NULL ELSE ${alias}.income_confidence END`;
+	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${alias}.income_maybe_declined = 1 OR ${neverSuggestedSql(alias, "income")} THEN NULL ELSE ${alias}.income_confidence END`;
 }
 
 /**

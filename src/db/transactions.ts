@@ -133,7 +133,7 @@ type NameSuggestionColumns = {
 // transactions panel all draw rows from these, so a row looks the same in each (src/views/transaction-row.tsx).
 /** The joins behind the Maybe chip: Tally's category guess, and the pending suggestion a new category came from. */
 export const MAYBE_CATEGORY_JOINS = `LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
-	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}`;
+	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql("t", "new_category")}`;
 /** The Maybe chip's category name (a new one as "new:name"), and whether it is a new one; needs MAYBE_CATEGORY_JOINS. */
 export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
@@ -1905,6 +1905,15 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * bill counts, so it is asked about too, and likewise for its category only. A stored confidence means Jev
  * already looked and wasn't sure (decision 27).
  *
+ * `categoryAsked` is false when no category is active. Then a category question isn't asked, so its category
+ * confidence is never stored. A credit is asked for its income answer while the income switch is on, and not a credit a person reviewed for its
+ * category alone, which would also have no category question to answer. An outgoing purchase (more than zero) is
+ * asked once for its transfer and reimbursement flags, while the categories switch is on, and its answer marks it
+ * asked: a low one is stored as its `transfer_confidence`, and a confident one sets the flag and excludes it, so it
+ * leaves the queue. A purchase a person put back into the budget (`excluded_source = 'user'`) is not asked. Credits
+ * come first, so newest purchases can't crowd out older credits. Once a category is active, a row is pending again for
+ * its category question.
+ *
  * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
  * values in a statement and a bank's first sync brings in thousands.
@@ -1916,11 +1925,13 @@ export async function pendingForJev(
 		categories = true,
 		income = true,
 		details = false,
+		categoryAsked = true,
 		ids,
 	}: {
 		categories?: boolean;
 		income?: boolean;
 		details?: boolean;
+		categoryAsked?: boolean;
 		ids?: number[];
 	} = {},
 ): Promise<
@@ -1948,20 +1959,26 @@ export async function pendingForJev(
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
-				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL)
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ((? = 1 AND t.amount_cents < 0 AND t.income_confidence IS NULL) OR (? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))))
 				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 				${ids ? "AND t.id IN (SELECT value FROM json_each(?))" : ""}
-			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
-			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at, t.date DESC, t.id DESC
+			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest. With no active
+			-- category, credits come before purchases, so the newest purchases can't crowd out older credits.
+			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at,
+				CASE WHEN ? = 0 THEN t.amount_cents > 0 ELSE 0 END, t.date DESC, t.id DESC
 			LIMIT ?`,
 		)
 		.bind(
 			categories || income ? 1 : 0,
+			categoryAsked ? 1 : 0,
+			income ? 1 : 0,
+			categories ? 1 : 0,
 			details ? 1 : 0,
 			categories || details ? 1 : 0,
 			...(ids ? [JSON.stringify(ids)] : []),
+			categoryAsked ? 1 : 0,
 			limit,
 		)
 		.all<
@@ -2146,7 +2163,9 @@ export async function saveJevDetails(
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent.
+ * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent. A row with `note_tried_at`
+ * set is left out: Workers AI answered it, even with no note, or a person saved its note empty. A row whose call failed
+ * (`note_failed_at`) stays in, but after the rows that never failed.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -2167,8 +2186,9 @@ export async function transactionsNeedingNoteGuess(
 			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
 				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
-			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND ${EMPTY_NOTE}
-			 ORDER BY t.note_tried_at IS NOT NULL, t.note_tried_at, t.date DESC, t.id DESC LIMIT ?`,
+			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
+			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
+			 ORDER BY t.note_failed_at IS NOT NULL, t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
 		.all<{
@@ -2183,25 +2203,37 @@ export async function transactionsNeedingNoteGuess(
 	return results;
 }
 
-/** Stores successful note guesses together; one JSON parameter stays below D1's bind limit. */
+/**
+ * Stores successful note guesses, and marks each call Workers AI answered as tried, even when its answer
+ * was empty, so it isn't asked again. A failed call is stamped in `note_failed_at` and stays untried, so it is
+ * asked again, after the untried notes (`transactionsNeedingNoteGuess`). One JSON parameter for each stays below
+ * D1's bind limit, and the whole save is one statement.
+ */
 export async function saveNoteAttempts(
 	db: D1Database,
 	attempted: number[],
 	notes: { id: number; note: string }[],
+	failed: number[],
 ): Promise<void> {
-	if (attempted.length === 0) return;
+	if (attempted.length === 0 && failed.length === 0) return;
 	await db
 		.prepare(
-			`WITH attempted AS (SELECT value AS id FROM json_each(?)), guesses AS (
-				SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?)
-			)
+			`WITH attempted AS (SELECT value AS id FROM json_each(?)),
+				failed AS (SELECT value AS id FROM json_each(?)),
+				guesses AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.note') AS note FROM json_each(?))
 			UPDATE transactions AS t SET
 				note = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN (SELECT note FROM guesses WHERE guesses.id = t.id) ELSE note END,
 				note_guessed = CASE WHEN t.note_dismissed = 0 AND t.details_asked = 1 AND ${EMPTY_NOTE} AND EXISTS (SELECT 1 FROM guesses WHERE guesses.id = t.id) THEN 1 ELSE note_guessed END,
-				note_tried_at = datetime('now'), updated_at = datetime('now')
-			WHERE t.id IN (SELECT id FROM attempted)`,
+				note_tried_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE note_tried_at END,
+				note_failed_at = CASE WHEN t.id IN (SELECT id FROM failed) THEN datetime('now') ELSE note_failed_at END,
+				updated_at = CASE WHEN t.id IN (SELECT id FROM attempted) THEN datetime('now') ELSE updated_at END
+			WHERE t.id IN (SELECT id FROM attempted) OR t.id IN (SELECT id FROM failed)`,
 		)
-		.bind(JSON.stringify(attempted), JSON.stringify(notes))
+		.bind(
+			JSON.stringify(attempted),
+			JSON.stringify(failed),
+			JSON.stringify(notes),
+		)
 		.run();
 }
 

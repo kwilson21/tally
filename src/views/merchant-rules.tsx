@@ -233,6 +233,7 @@ export function NeverSuggestList({
 									method="post"
 									action="/settings/never-suggest/remove"
 									hx-post="/settings/never-suggest/remove"
+									hx-disable="findAll button[type=submit]"
 									hx-target={`#${target}`}
 									hx-select={`#${target}`}
 									// A line back in place can bring a suggestion back to the review, so the Band follows.

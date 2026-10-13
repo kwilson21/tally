@@ -18,6 +18,7 @@ const page = await browser.newPage({
 const consoleErrors = [];
 const pageErrors = [];
 const expected422 = [];
+const expected500 = [];
 page.on(
 	"console",
 	(m) =>
@@ -169,6 +170,108 @@ for (const width of [390, 1280]) {
 }
 step(
 	"a failed suggestion answer explains itself and focuses the question on phone and desktop",
+);
+
+// #460: an answer disables every answer button on the screen while it is sent, so a second press (a double
+// click, or Enter twice) sends nothing more, and a failed answer gives focus back to the button pressed. Each
+// answer is held here until the test releases it, then answered 500 (what an unhandled error sends, which
+// Layout keeps out of the page), so nothing is saved and the steps after this still see 10 to categorize.
+await page.setViewportSize({ width: 390, height: 844 });
+const answers = [];
+const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
+const until = async (check, what) => {
+	for (let i = 0; i < 200 && !check(); i++)
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	assert(check(), `timed out waiting for ${what}`);
+};
+const answerStates = () =>
+	page.$$eval("#suggestions-page button[type=submit]", (buttons) =>
+		buttons.map((button) => ({
+			value: button.value,
+			disabled: button.disabled,
+		})),
+	);
+const allAnswersEnabled = () =>
+	page.waitForFunction(() =>
+		[
+			...document.querySelectorAll("#suggestions-page button[type=submit]"),
+		].every((button) => !button.disabled),
+	);
+await page.route("**/settings/suggestions*", async (route) => {
+	if (route.request().method() !== "POST") return route.continue();
+	const answer = {
+		body: route.request().postData(),
+		url: route.request().url(),
+	};
+	answers.push(answer);
+	await new Promise((release) => {
+		answer.release = release;
+	});
+	await route.fulfill({ status: 500, body: "" });
+	expected500.push({ status: 500, method: "POST", url: answer.url });
+});
+await goto(`${BASE}/settings/suggestions`, { waitUntil: "networkidle" });
+const somethingElse = page.locator("summary", { hasText: "Something else" });
+for (let skips = 0; !(await somethingElse.isVisible()); skips++) {
+	assert(skips < 10, "no suggestion offered Something else within 10 skips");
+	const before = page.url();
+	await page.getByRole("link", { name: "Skip", exact: true }).click();
+	await page.waitForURL((url) => url.href !== before);
+	await page.waitForLoadState("networkidle");
+}
+await somethingElse.click();
+const yes = page.locator(
+	'#suggestions-page button[name="answer"][value="yes"]',
+);
+const save = page.locator(
+	'#suggestions-page button[name="answer"][value="else"]',
+);
+await save.waitFor();
+await yes.focus();
+await page.keyboard.press("Enter");
+await page.keyboard.press("Enter");
+await until(() => answers.length >= 1, "the answer to reach the server");
+await settle();
+assert.equal(answers.length, 1, "a second press sends no second answer");
+const held = await answerStates();
+assert(
+	held.length > 1 && held.every((button) => button.disabled),
+	`every answer button is disabled while an answer is sent: ${JSON.stringify(held)}`,
+);
+await save.click({ force: true });
+await settle();
+assert.equal(answers.length, 1, "a disabled Save and next sends no answer");
+answers[0].release();
+await page.locator("#toasts").getByText("Couldn't save.").waitFor();
+await allAnswersEnabled();
+assert.equal(
+	await page.evaluate(
+		() =>
+			document.activeElement?.matches(
+				'#suggestions-page button[name="answer"][value="yes"]',
+			) === true,
+	),
+	true,
+	"a failed answer gives focus back to the Yes button that was pressed",
+);
+assert.deepEqual(new URLSearchParams(answers[0].body).getAll("answer"), [
+	"yes",
+]);
+await yes.dblclick();
+await until(
+	() => answers.length >= 2,
+	"the double click's answer to reach the server",
+);
+await settle();
+assert.equal(answers.length, 2, "a double click sends one answer");
+assert.deepEqual(new URLSearchParams(answers[1].body).getAll("answer"), [
+	"yes",
+]);
+answers[1].release();
+await allAnswersEnabled();
+await page.unroute("**/settings/suggestions*");
+step(
+	"an answer disables every answer button while it is sent, a double click sends one answer, and a failed answer gives focus back",
 );
 
 await page.setViewportSize({ width: 390, height: 844 });
@@ -897,16 +1000,28 @@ await browser.close();
 const expected422Errors = consoleErrors.filter((error) =>
 	error.text.includes("status of 422"),
 );
+const expected500Errors = consoleErrors.filter((error) =>
+	error.text.includes("status of 500"),
+);
 const otherErrors = consoleErrors.filter(
-	(error) => !error.text.includes("status of 422"),
+	(error) =>
+		!error.text.includes("status of 422") &&
+		!error.text.includes("status of 500"),
 );
 const expected422Urls = expected422.map(({ url }) => url).sort();
 const logged422Urls = expected422Errors.map(({ url }) => url).sort();
-const diagnostics = `expected 422 responses (method + URL): ${JSON.stringify(expected422)}\n422 console errors (text + URL): ${JSON.stringify(expected422Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`;
+const expected500Urls = expected500.map(({ url }) => url).sort();
+const logged500Urls = expected500Errors.map(({ url }) => url).sort();
+const diagnostics = `expected 422 responses (method + URL): ${JSON.stringify(expected422)}\n422 console errors (text + URL): ${JSON.stringify(expected422Errors)}\nexpected 500 replies (method + URL): ${JSON.stringify(expected500)}\n500 console errors (text + URL): ${JSON.stringify(expected500Errors)}\nother console errors: ${JSON.stringify(otherErrors)}\npage errors: ${JSON.stringify(pageErrors)}`;
 assert.deepEqual(
 	logged422Urls,
 	expected422Urls,
 	`each deliberate 422 response must have exactly one matching console error by URL; missing messages may indicate Chromium folded duplicates\n${diagnostics}`,
+);
+assert.deepEqual(
+	logged500Urls,
+	expected500Urls,
+	`each deliberate 500 reply must have exactly one matching console error by URL; missing messages may indicate Chromium folded duplicates\n${diagnostics}`,
 );
 assert.deepEqual(
 	{ console: otherErrors, page: pageErrors },

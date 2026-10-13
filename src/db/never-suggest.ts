@@ -161,12 +161,21 @@ export function neverSuggestRuleLine(rule: NeverSuggestRule): string {
 }
 
 /**
- * SQL that is true when the store (`merchantKeySql`, an expression for the merchant key) has a "Never
- * suggest" line of `kind`. Used by the Maybe rows, the review queue and the new-category grouping, so a
- * refused suggestion never comes back. `kind` is one of the typed kinds, never user input.
+ * SQL that is true when the row `alias` names has a "Never suggest" line of `kind`, so a refused suggestion
+ * never comes back. The row's store has the line either under its own key, or, for a charge with no Plaid name,
+ * under the Plaid name of a charge with the same bank text (sameMerchantSql's relation, read here rather than
+ * copied on Yes). So a named charge is hidden only by its own key's line, and two stores that share a bank text
+ * never hide each other (#459). The subquery needs no check that its charge is named: an unnamed one has the bank
+ * text's own key, which the first check already reads. Used by the Maybe rows, the review queue and the
+ * new-category grouping.
+ * `alias` is the transactions table's name or alias, as for `merchantKeySql`. `kind` is one of the typed kinds,
+ * never user input.
  */
 export const neverSuggestedSql = (
-	merchantKeySql: string,
+	alias: string,
 	kind: NeverSuggestKind,
 ): string =>
-	`EXISTS (SELECT 1 FROM never_suggest_rules n WHERE n.merchant_key = ${merchantKeySql} AND n.kind = '${kind}')`;
+	`(EXISTS (SELECT 1 FROM never_suggest_rules n WHERE n.merchant_key = ${merchantKeySql(alias)} AND n.kind = '${kind}')
+		OR (NULLIF(${alias}.merchant_name, '') IS NULL AND EXISTS (SELECT 1 FROM transactions u
+			JOIN never_suggest_rules n ON n.merchant_key = ${merchantKeySql("u")} AND n.kind = '${kind}'
+			WHERE u.raw_name = ${alias}.raw_name)))`;
