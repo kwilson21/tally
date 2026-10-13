@@ -1156,6 +1156,140 @@ describe("a Never suggest Yes writes each store once, in one statement (#440)", 
 		expect(trigger(res).toast?.message).toBe("That one was already answered.");
 		expect(await lines()).toEqual([]);
 	});
+
+	it("a Yes after the edit panel counts the credit as income writes no line", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${ids.income}`, answer: "no" },
+			true,
+		);
+		await post(`/transactions/${ids.income}`, {
+			merchant: "Venmo",
+			back: "/transactions",
+			income: "1",
+			income_was: "0",
+			creditReviewedVisible: "1",
+		});
+		expect(
+			await row(
+				"SELECT flag_income FROM transactions WHERE id = ?",
+				ids.income,
+			),
+		).toMatchObject({ flag_income: 1 });
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `income-${ids.income}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: VENMO,
+			},
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([]);
+	});
+
+	it("a Yes after the edit panel leaves the transfer out of the budget writes no line", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "no" },
+			true,
+		);
+		await post(`/transactions/${ids.transfer}`, {
+			merchant: "Chase card payment",
+			back: "/transactions",
+			excluded: "1",
+		});
+		expect(
+			await row(
+				"SELECT excluded, transfer_maybe_declined FROM transactions WHERE id = ?",
+				ids.transfer,
+			),
+		).toMatchObject({ excluded: 1, transfer_maybe_declined: 1 });
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `transfer-${ids.transfer}`,
+				answer: "ask_yes",
+				kind: "transfer",
+				store: CHASE,
+			},
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([]);
+	});
+
+	/** Files the Chewy purchase under a category by hand, so Chewy is no longer in the question. */
+	async function fileChewy(chewy: number) {
+		const eatingOut = await categoryId("Eating Out");
+		await post(`/transactions/${chewy}`, {
+			merchant: "Chewy",
+			back: "/transactions",
+			category: String(eatingOut),
+		});
+		expect(
+			await row("SELECT category_id FROM transactions WHERE id = ?", chewy),
+		).toMatchObject({ category_id: eatingOut });
+	}
+
+	it("a Yes writes a line only for the stores that still have a purchase in the question", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		await fileChewy(ids.pets[0] ?? 0);
+		const { res } = await post(
+			"/settings/suggestions",
+			yesFor(ids.suggestion, [CHEWY, PETSMART]),
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe(
+			"Got it. Tally won't suggest a new category for Petsmart again. Change it in Settings.",
+		);
+		expect(await lines()).toEqual([PETSMART]);
+	});
+
+	it("a Yes naming only a store whose purchases are all filed is refused", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		await fileChewy(ids.pets[0] ?? 0);
+		const { res } = await post(
+			"/settings/suggestions",
+			yesFor(ids.suggestion, CHEWY),
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([]);
+	});
+
+	it("a repeat Yes on the same question says it was already answered and keeps one line", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `income-${ids.income}`, answer: "no" },
+			true,
+		);
+		const yes = {
+			id: `income-${ids.income}`,
+			answer: "ask_yes",
+			kind: "income",
+			store: VENMO,
+		};
+		await post("/settings/suggestions", yes, true);
+		const { res } = await post("/settings/suggestions", yes, true);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([VENMO]);
+	});
 });
 
 /** The purchases a new-category form ticks: the checkbox values that carry `checked`. */
@@ -1434,13 +1568,13 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 				get(target, prop) {
 					if (prop === "bind")
 						return (...values: unknown[]) => guard(target.bind(...values));
-					if (prop === "run")
+					if (prop === "run" || prop === "all")
 						return async () => {
 							if (!raced) {
 								raced = true;
 								await rival();
 							}
-							return target.run();
+							return prop === "run" ? target.run() : target.all();
 						};
 					const value = Reflect.get(target, prop);
 					return typeof value === "function" ? value.bind(target) : value;
@@ -1855,6 +1989,41 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			});
 		},
 	);
+
+	it("a Yes whose income is counted by a rival write as its line is written adds no line (#440)", async () => {
+		const credit = await insertTx({
+			raw: VENMO,
+			amount: -250000,
+			incomeConfidence: 0.6,
+		});
+		await answer({ id: `income-${credit}`, answer: "no" }, db);
+		expect(
+			await row(
+				"SELECT income_maybe_declined FROM transactions WHERE id = ?",
+				credit,
+			),
+		).toMatchObject({ income_maybe_declined: 1 });
+		const res = await answer(
+			{
+				id: `income-${credit}`,
+				answer: "ask_yes",
+				kind: "income",
+				store: VENMO,
+			},
+			racing("INSERT OR IGNORE INTO never_suggest_rules", () =>
+				db
+					.prepare(
+						"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+					)
+					.bind(credit)
+					.run(),
+			),
+		);
+		expect(trigger(res).toast?.message).toBe(STALE);
+		expect(
+			await row("SELECT COUNT(*) AS n FROM never_suggest_rules"),
+		).toMatchObject({ n: 0 });
+	});
 });
 
 describe("a card calls a transaction by its own name, else by its store's (spec §5)", () => {

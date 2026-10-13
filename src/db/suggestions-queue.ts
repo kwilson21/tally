@@ -8,12 +8,12 @@ import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
-import { pendingSuggestions } from "./category-suggestions";
+import { pendingSuggestions, suggestedRowSql } from "./category-suggestions";
 import { jevAsksAboutSql, paysBillSql } from "./counted-month";
-import { maybeIncomeConfidenceSql } from "./income";
+import { incomeGuessSql, maybeIncomeConfidenceSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
-import { neverSuggestedSql } from "./never-suggest";
+import { type NeverSuggestKind, neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
 
 /** A transaction a person is asked about: income, a transfer, or a category guess. */
@@ -127,11 +127,12 @@ const unsureSql = (confidence: string) => {
 
 /**
  * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against.
+ * `afterNo` is the question after a No: the same check, but the No is set (`income_maybe_declined = 1`), so the guess is read without it (`incomeGuessSql`) (#440).
  */
-export const incomeAskedSql = (alias: string) =>
+export const incomeAskedSql = (alias: string, afterNo = false) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
 		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillSql(alias)})
-		AND ${unsureSql(maybeIncomeConfidenceSql(alias))})`;
+		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${unsureSql(incomeGuessSql(alias))})`;
 
 /**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
@@ -169,13 +170,31 @@ async function incomeSuggestions(
 
 /**
  * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). The guess must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against. A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
+ * `afterNo` is the question after a No: the same check, with the No set (`transfer_maybe_declined = 1`) (#440).
  */
-export const transferAskedSql = (alias: string) =>
+export const transferAskedSql = (alias: string, afterNo = false) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${unsureSql(`${alias}.transfer_confidence`)}
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
-		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = 0
+		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = ${afterNo ? 1 : 0}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
 		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(alias, "transfer")})`;
+
+/**
+ * SQL selecting `key`, each store the Never suggest question about item ?1 still asks about: the queue's own check for that kind,
+ * except the row (or the new category) carries the No instead of lacking it (#440).
+ */
+export const neverSuggestAskedSql = (kind: NeverSuggestKind): string => {
+	switch (kind) {
+		case "income":
+			return `SELECT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.id = ?1 AND ${incomeAskedSql("t", true)}`;
+		case "transfer":
+			return `SELECT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.id = ?1 AND ${transferAskedSql("t", true)}`;
+		case "new_category":
+			return `SELECT DISTINCT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.category_suggestion_id = ?1
+				AND ${suggestedRowSql("t")} AND NOT ${neverSuggestedSql("t", "new_category")}
+				AND EXISTS (SELECT 1 FROM category_suggestions cs WHERE cs.id = ?1 AND cs.status = 'dismissed')`;
+	}
+};
 
 /**
  * Transfer: money out or in Tally is unsure is a transfer and nobody has decided, or said No to (`transfer_maybe_declined`).
