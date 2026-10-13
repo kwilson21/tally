@@ -111,14 +111,18 @@ The owner picked each open question's answer from a picture (decision 82, P91–
 | Edit a cash entry's date and amount (P71 A) | [#216](https://github.com/kwilson21/tally/issues/216) |
 | A store that sells many kinds of things (P90, decision 89) | [#233](https://github.com/kwilson21/tally/issues/233) |
 
-## Design system: what's next (decisions 75, 76; the design session builds these)
+## Design system: what's next (decisions 75, 76, 108; the design track session builds these)
 
-| Part | Issue |
-|---|---|
-| The quiet ledger form, catalog first, then Add a bill and Add cash (P72 A) | [#217](https://github.com/kwilson21/tally/issues/217) |
-| Quiet motion in CSS, with View Transitions between pages (P74 A) | [#218](https://github.com/kwilson21/tally/issues/218) |
-| Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) |
-| MoneyInput sign-off, the budget, categorize and Settings flows, the component review | [#80](https://github.com/kwilson21/tally/issues/80), [#83](https://github.com/kwilson21/tally/issues/83)–[#86](https://github.com/kwilson21/tally/issues/86) |
+| Part | Issue | State |
+|---|---|---|
+| The design language: scenery, signage and use, and the audit | [#79](https://github.com/kwilson21/tally/issues/79) | Done (PR [#91](https://github.com/kwilson21/tally/pull/91), decisions 46–50) |
+| Quiet motion in CSS, with View Transitions between pages (P74 A) | [#218](https://github.com/kwilson21/tally/issues/218) | Merged ([#259](https://github.com/kwilson21/tally/pull/259)) |
+| Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) | Merged ([#257](https://github.com/kwilson21/tally/pull/257)) |
+| The quiet ledger form, catalog first, then Add a bill and Add cash (P72 A) | [#217](https://github.com/kwilson21/tally/issues/217) | Open: step 1, the catalog, is being built |
+| MoneyInput sign-off | [#80](https://github.com/kwilson21/tally/issues/80) | Open |
+| The budget, categorize and Settings flows | [#83](https://github.com/kwilson21/tally/issues/83)–[#85](https://github.com/kwilson21/tally/issues/85) | Open: the budget sheet and category row move into `src/views` first |
+| The component review, one issue per component | [#86](https://github.com/kwilson21/tally/issues/86) | Open |
+| Undo in toasts, the changed-row highlight, keyboard shortcuts, sheets as modals, swipe and drag | [#70](https://github.com/kwilson21/tally/issues/70)–[#72](https://github.com/kwilson21/tally/issues/72), [#87](https://github.com/kwilson21/tally/issues/87)–[#90](https://github.com/kwilson21/tally/issues/90) | Open; keyboard.js and the sheet script approved (decision 109) |
 
 The owner answered the 53 open questions on these issues by seeing a picture of each answer (decisions 79–81, [docs/reviews/open-questions-2026-10-05.md](docs/reviews/open-questions-2026-10-05.md)), and the picked drawings now say which rules are settled. Some issues still list smaller points under "Open (ask the owner)"; each goes to the owner, with a picture, before that issue is briefed. #74's pace line is covered by #199 and closed.
 
