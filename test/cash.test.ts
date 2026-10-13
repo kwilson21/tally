@@ -760,6 +760,90 @@ describe("cash lifecycle", () => {
 		).toEqual([{ date: moved }]);
 	});
 
+	describe("linking a split cash entry in the same save as its amount", () => {
+		type LinkRow = { amountCents: number; refundOfId: number | null };
+		const linkState = async (id: number) => ({
+			parent: await env.DB.prepare(
+				"SELECT amount_cents AS amountCents, refund_of_id AS refundOfId FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first<LinkRow>(),
+			parts: (
+				await env.DB.prepare(
+					"SELECT amount_cents AS amountCents, refund_of_id AS refundOfId FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(id)
+					.all<LinkRow>()
+			).results,
+		});
+		/** A $90.00 cash entry split into $60.00 and $30.00, and a $100.00 cash purchase to link it to. */
+		const splitAndPurchase = async () => {
+			const id = await createCash("Link split cash", "90.00");
+			await saveSplit(
+				env.DB,
+				id,
+				[
+					{ amountCents: 6000, categoryId: 1 },
+					{ amountCents: 3000, categoryId: 5 },
+				],
+				"demo",
+			);
+			return { id, purchase: await createCash("Link purchase cash", "100.00") };
+		};
+		/** The panel's save that links the entry to the purchase and sets its amount to `cashAmountCents`. */
+		const linkAndSetAmount = (
+			id: number,
+			purchase: number,
+			cashAmountCents: number,
+		) =>
+			saveEdit(
+				env.DB,
+				id,
+				{
+					categoryId: null,
+					alwaysForMerchant: false,
+					displayName: null,
+					nameChanged: false,
+					note: null,
+					excluded: false,
+					income: false,
+					creditReviewed: false,
+					refundOfId: purchase,
+					cashDate: todayIn(DEFAULT_TIME_ZONE),
+					cashAmountCents,
+				},
+				"demo",
+			);
+
+		it("saves nothing when the parts don't add up to the new amount: the refund stays unlinked and the parts keep theirs", async () => {
+			const { id, purchase } = await splitAndPurchase();
+			const before = await linkState(id);
+			// $100.00 is not what the parts add up to ($90.00); the route answers that with "The parts add up to $90.00. Change them to match $100.00."
+			expect(await linkAndSetAmount(id, purchase, 10000)).toEqual({
+				saved: false,
+				cashError: "split",
+				amountCents: 9000,
+			});
+			expect(await linkState(id)).toEqual(before);
+			expect(before.parent?.refundOfId).toBeNull();
+			expect(before.parts.map((part) => part.refundOfId)).toEqual([null, null]);
+		});
+
+		it("links the entry and its parts to the purchase when the parts add up to the new amount", async () => {
+			const { id, purchase } = await splitAndPurchase();
+			expect(await linkAndSetAmount(id, purchase, 9000)).toEqual({
+				saved: true,
+			});
+			expect(await linkState(id)).toEqual({
+				parent: { amountCents: 9000, refundOfId: purchase },
+				parts: [
+					{ amountCents: 6000, refundOfId: purchase },
+					{ amountCents: 3000, refundOfId: purchase },
+				],
+			});
+		});
+	});
+
 	it("a split cash part's panel has no cash fields, and a category save on it keeps the entry", async () => {
 		await request("/transactions/cash", {
 			method: "POST",

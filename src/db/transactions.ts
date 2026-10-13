@@ -1008,7 +1008,7 @@ export async function saveEdit(
 	// `refund_of_id` is the new purchase, and when it was refused it is not. For a credit that
 	// counts again, the same amount check is made by each write. The check's two parameters are
 	// numbered from `n`, after the statement's own.
-	const gate: { sql: (n: number) => string; args: unknown[] } = linking
+	const linkGate: { sql: (n: number) => string; args: unknown[] } = linking
 		? {
 				sql: (n) =>
 					` AND EXISTS (SELECT 1 FROM transactions WHERE id = ?${n} AND refund_of_id = ?${n + 1})`,
@@ -1020,18 +1020,33 @@ export async function saveEdit(
 					args: [id, recounting],
 				}
 			: { sql: () => "", args: [] };
-	if (edit.cashAmountCents !== undefined) {
-		const priorSql = gate.sql;
-		const priorArgs = gate.args;
-		gate.sql = (n) =>
-			`${priorSql(n)} AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n + priorArgs.length} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + priorArgs.length + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + priorArgs.length + 1})`;
-		gate.args = [...priorArgs, id, edit.cashAmountCents];
-	}
+	// The cash check on its own: the entry is still a cash entry at the amount it's given, its parts add up
+	// to it, and its refunds fit within it. The two linking writes wait on this check alone, because the
+	// link check reads the link they set, so it can't gate them. The cash check's answer is the same
+	// before or after they run, since it counts refunds of this entry, not of the purchase it links to.
+	const cashGate: { sql: (n: number) => string; args: unknown[] } =
+		edit.cashAmountCents === undefined
+			? { sql: () => "", args: [] }
+			: {
+					sql: (n) =>
+						` AND EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?${n} AND cash.parent_id IS NULL AND cash.account_id IN (SELECT id FROM accounts WHERE type='cash') AND (cash.is_split = 0 OR (SELECT COALESCE(SUM(amount_cents), 0) FROM transactions part WHERE part.parent_id = cash.id) = ?${n + 1}) AND COALESCE((SELECT SUM(ABS(refund.amount_cents)) FROM transactions refund WHERE refund.refund_of_id = cash.id AND refund.is_split = 0 AND refund.amount_cents < 0 AND refund.flag_income = 0), 0) <= ?${n + 1})`,
+					args: [id, edit.cashAmountCents],
+				};
+	const gate = {
+		sql: (n: number) =>
+			`${linkGate.sql(n)}${cashGate.sql(n + linkGate.args.length)}`,
+		args: [...linkGate.args, ...cashGate.args],
+	};
 	/** A statement with the gate on its WHERE (before `tail`), binding `args` and then the gate's. */
 	const gated = (sql: string, args: unknown[], tail = "") =>
 		db
 			.prepare(`${sql}${gate.sql(args.length + 1)}${tail}`)
 			.bind(...args, ...gate.args);
+	/** A statement with only the cash check on its WHERE, binding `args` and then the check's. */
+	const cashGated = (sql: string, args: unknown[]) =>
+		db
+			.prepare(`${sql}${cashGate.sql(args.length + 1)}`)
+			.bind(...args, ...cashGate.args);
 
 	const changed =
 		edit.categoryId !== null && edit.categoryId !== current.categoryId;
@@ -1063,27 +1078,26 @@ export async function saveEdit(
 		// First, so what follows can depend on it. The parts of a split refund move with it, only while
 		// they still follow its old link; one a person linked to another purchase keeps its own choice.
 		// That runs before the refund's own update, which changes the link they are compared with. Both
-		// check that what moves fits what is left of the purchase.
+		// check that what moves fits what is left of the purchase, and both wait on the cash check like
+		// the panel's other writes, so a refused save links nothing.
 		statements.push(
-			db
-				.prepare(
-					`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL
+			cashGated(
+				`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL
 					WHERE parent_id = ?2 AND refund_of_id IS (SELECT refund_of_id FROM transactions WHERE id = ?2)
 						AND ${refundFitsSql("?2", "?1")}`,
-				)
-				.bind(newLink, id),
+				[newLink, id],
+			),
 			// A person linking it makes it a reviewed refund that counts, as their choice. This is the
 			// statement whose result says whether the link was refused.
-			db
-				.prepare(
-					`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL,
+			cashGated(
+				`UPDATE transactions SET refund_of_id = ?1, refund_unlinked_purchase_date = NULL,
 						credit_reviewed = CASE WHEN amount_cents < 0 THEN 1 ELSE credit_reviewed END,
 						credit_reviewed_by = CASE WHEN amount_cents < 0 THEN 'user' ELSE credit_reviewed_by END,
 						excluded_source = CASE WHEN excluded = 1 THEN 'user' ELSE excluded_source END,
 						excluded = 0
 					WHERE id = ?2 AND ${refundFitsSql("?2", "?1")}`,
-				)
-				.bind(newLink, id),
+				[newLink, id],
+			),
 		);
 	}
 	// The panel's own update comes next, so for a credit that counts again its result says whether it
