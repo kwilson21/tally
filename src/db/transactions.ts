@@ -1,6 +1,7 @@
 import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
+import { unsureBounds } from "../ai/maybe";
 import {
 	movePartDismissalsSql,
 	purchaseDismissalsToPartsSql,
@@ -2393,6 +2394,8 @@ export async function saveJevResult(
 	const incomeConfidence = incomeOn
 		? (d.flagConfidence?.income ?? (income ? 1 : null))
 		: null;
+	// The Maybe range's edges (src/ai/maybe.ts), so this save and the review queue read the same bounds.
+	const { above, below } = unsureBounds();
 	const update = db
 		.prepare(
 			`UPDATE transactions SET
@@ -2427,20 +2430,20 @@ export async function saveJevResult(
 			options.categoryAsked === false ? null : d.confidence,
 			incomeOn ? 1 : 0,
 			confidenceBasisPoints(incomeConfidence ?? 0),
-			confidenceBasisPoints(JEV_THRESHOLD),
+			below,
 			incomeConfidence ?? 0,
 			options.switches?.categories === false ? 0 : 1,
 			confidenceBasisPoints(
 				d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
 			),
-			confidenceBasisPoints(JEV_THRESHOLD),
+			below,
 			d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
 			d.categoryId !== null ? 1 : 0,
 			confidenceBasisPoints(d.confidence),
-			confidenceBasisPoints(JEV_THRESHOLD),
+			below,
 			incomeConfidence,
 			confidenceBasisPoints(incomeConfidence ?? 0),
-			10_000 - confidenceBasisPoints(JEV_THRESHOLD),
+			above,
 			income ? 1 : 0,
 			options.categoryAsked === false ? null : d.suggestedCategoryId,
 			options.categoryAsked === false || !d.noneFit ? 0 : 1,

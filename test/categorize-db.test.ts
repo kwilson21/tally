@@ -833,3 +833,72 @@ describe("saveJevResult", () => {
 		});
 	});
 });
+
+describe("the Maybe edges Jev's answer is saved at (spec §8.6)", () => {
+	// Sure is 0.8 and up for a yes and 0.2 and down for a no; 0.7999 and 0.2001 are the first unsure values.
+	// A guess is kept as a Maybe only below 0.8, and a credit counts once its category is sure (0.8 or more)
+	// or its income guess is a sure no (0.2 or less).
+	it.each([
+		[0.7999, 0.7999],
+		[0.8, null],
+	])(
+		"stores an income and a transfer guess of %s as %s",
+		async (guess, kept) => {
+			const id = await idOf("SQ *LOCAL BAKERY 4432");
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -1200 WHERE id = ?")
+				.bind(id)
+				.run();
+
+			await saveJevResult(
+				db,
+				id,
+				decision({
+					flagConfidence: { transfer: guess, reimbursement: 0, income: guess },
+				}),
+			);
+
+			expect(await row(id)).toMatchObject({
+				income_confidence: kept,
+				transfer_confidence: kept,
+			});
+		},
+	);
+
+	it.each([
+		[0.8, null, true],
+		[0.7999, null, false],
+		[0.95, 0.2, true],
+		[0.95, 0.2001, false],
+	])(
+		"with a category of %s and an income guess of %s, counted: %s",
+		async (category, income, counted) => {
+			const id = await idOf("SQ *LOCAL BAKERY 4432");
+			await db
+				.prepare(
+					"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+				)
+				.bind(id)
+				.run();
+
+			await saveJevResult(
+				db,
+				id,
+				decision({
+					categoryId: GROCERIES,
+					suggestedCategoryId: GROCERIES,
+					confidence: category,
+					flagConfidence:
+						income === null
+							? undefined
+							: { transfer: 0, reimbursement: 0, income },
+				}),
+			);
+
+			expect(await row(id)).toMatchObject({
+				credit_reviewed: counted ? 1 : 0,
+				flag_income: 0,
+			});
+		},
+	);
+});
