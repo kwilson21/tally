@@ -41,14 +41,12 @@ export async function merchantsToAsk(
 	const { results } = await db
 		.prepare(
 			`SELECT t.raw_name AS rawName FROM transactions t
-			 LEFT JOIN merchants f ON f.raw_name = t.raw_name
+			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			 WHERE t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
 			   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
-			   AND NOT EXISTS (
-				SELECT 1 FROM merchants m WHERE m.raw_name = t.raw_name
-				  AND (m.display_name IS NOT NULL OR m.suggested_name IS NOT NULL OR m.suggestion_status != 'none'))
+			   AND m.display_name IS NULL AND m.suggested_name IS NULL AND COALESCE(m.suggestion_status, 'none') = 'none'
 			 GROUP BY t.raw_name
-			 ORDER BY f.name_failed_at IS NOT NULL, f.name_failed_at, COUNT(*) DESC, t.raw_name
+			 ORDER BY m.name_failed_at IS NOT NULL, m.name_failed_at, COUNT(*) DESC, t.raw_name
 			 LIMIT ?`,
 		)
 		.bind(limit)
