@@ -159,7 +159,7 @@ describe("a part-paid rent on its page and in its picker", () => {
 		expect(await linkedIds()).toEqual([9520]);
 	});
 
-	it("the picker's month choices keep a part-paid month, and drop a paid one", async () => {
+	it("the picker's month choices keep a part-paid month, and a Paid month has no month choices at all", async () => {
 		const part = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
 		expect(part).toContain(`value="${PERIOD}"`);
 		await env.DB.prepare(
@@ -167,8 +167,9 @@ describe("a part-paid rent on its page and in its picker", () => {
 		)
 			.bind(RENT, PERIOD)
 			.run();
+		// Paid, the month takes no picker (#205), so no month choice is rendered for it.
 		const paid = await get(`/bills/${RENT}/occurrences/${PERIOD}/link`);
-		expect(paid).not.toContain(`name="period" value="${PERIOD}"`);
+		expect(paid).not.toContain('name="period"');
 	});
 });
 
