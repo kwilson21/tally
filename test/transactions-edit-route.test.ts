@@ -1903,3 +1903,204 @@ describe("linking a refund in the same save and the store's Always rule (#356)",
 		expect(await ruleOf()).toEqual({ default_category_id: null });
 	});
 });
+
+describe("a failed save that links a refund keeps what the panel posted (#476)", () => {
+	const STORE = "REDRAW LINK SHOP";
+	const CHECKING = 1;
+	const CASH = 4;
+	const GROCERIES = 1;
+	const EATING_OUT = 2;
+	const NEW_NAME = "Returns";
+
+	/** A Groceries purchase on checking, and an unlinked refund from the same store filed in Eating Out. */
+	async function linkFixture(refundAccount = CHECKING) {
+		const purchase = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (?,'2026-09-10',1000,?,?,?,'user') RETURNING id",
+		)
+			.bind(CHECKING, STORE, STORE, GROCERIES)
+			.first<{ id: number }>();
+		const refund = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source) VALUES (?,'2026-09-11',-200,?,?,?,'user') RETURNING id",
+		)
+			.bind(refundAccount, STORE, STORE, EATING_OUT)
+			.first<{ id: number }>();
+		return { purchase: Number(purchase?.id), refund: Number(refund?.id) };
+	}
+
+	/** The panel's posted fields for a save that links the refund to `purchase`, with a new category typed in. */
+	const linkingSave = (
+		purchase: number,
+		fields: Record<string, string> = {},
+	): Record<string, string> => ({
+		back: "/transactions",
+		category: "new",
+		new_category_name: NEW_NAME,
+		merchant: STORE,
+		merchant_was: STORE,
+		always_was: "0",
+		rule_category_was: "",
+		refund_of: String(purchase),
+		...fields,
+	});
+
+	const storedRow = (id: number) =>
+		env.DB.prepare(
+			"SELECT category_id AS categoryId, refund_of_id AS refundOfId FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first();
+
+	/** The new category name input as a 422 draws it. */
+	const nameInput = (html: string) =>
+		html.match(/<input[^>]*name="new_category_name"[^>]*>/)?.[0] ?? "";
+
+	it("keeps the typed new category name when a 501-character note sends the panel back, saving nothing", async () => {
+		const { purchase, refund } = await linkFixture();
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase, { note: "x".repeat(501) }),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Keep the note under 500 characters.");
+		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: null,
+		});
+	});
+
+	it("keeps the typed new category name when a cash refund's amount is not a sum of money", async () => {
+		const { purchase, refund } = await linkFixture(CASH);
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase, { date: "2026-09-11", amount: "abc" }),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Enter an amount in dollars and cents.");
+		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: null,
+		});
+	});
+
+	it("keeps the typed new category name when the refund is more than what is left of its purchase", async () => {
+		const { purchase, refund } = await linkFixture();
+		// Another refund already takes $9.00 of the $10.00 purchase, so this $2.00 refund doesn't fit.
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,merchant_name,category_id,category_source,refund_of_id) VALUES (?,'2026-09-11',-900,?,?,?,'user',?)",
+		)
+			.bind(CHECKING, STORE, STORE, EATING_OUT, purchase)
+			.run();
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain("more than what");
+		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: null,
+		});
+	});
+
+	it("keeps the typed new category name when the For person is removed during the save", async () => {
+		const { purchase, refund } = await linkFixture();
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people (name) VALUES ('Sam')",
+		).run();
+		const personId = Number(person.meta.last_row_id);
+		// Sam is removed just before the save's batch writes, as settings removes a person mid-save.
+		let removed = false;
+		const removingDb = new Proxy(env.DB, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (!removed) {
+							removed = true;
+							await env.DB.batch([
+								env.DB.prepare(
+									"UPDATE transactions SET for_person_id = NULL, for_person_guessed = 0 WHERE for_person_id = ?",
+								).bind(personId),
+								env.DB.prepare(
+									"DELETE FROM household_people WHERE id = ?",
+								).bind(personId),
+							]);
+						}
+						return target.batch(statements);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+		const editRoute = new Hono<TestApp>();
+		editRoute.use("*", async (c, next) => {
+			c.set("actor", "demo");
+			await next();
+		});
+		editRoute.route("/", transactions as unknown as Hono<TestApp>);
+
+		const res = await editRoute.request(
+			`/transactions/${refund}`,
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams(
+					linkingSave(purchase, {
+						for_person_id: String(personId),
+						for_person_id_was: "",
+					}),
+				).toString(),
+			},
+			{ ...env, DB: removingDb },
+		);
+		const html = await res.text();
+
+		expect(removed).toBe(true);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Pick a person from the household list.");
+		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: null,
+		});
+	});
+
+	it("keeps the typed new category name when a save keeps a link that already follows its purchase", async () => {
+		const { purchase, refund } = await linkFixture();
+		await env.DB.prepare(
+			"UPDATE transactions SET refund_of_id = ?, credit_reviewed = 1 WHERE id = ?",
+		)
+			.bind(purchase, refund)
+			.run();
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase, { note: "x".repeat(501) }),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Keep the note under 500 characters.");
+		expect(nameInput(html)).toContain(`value="${NEW_NAME}"`);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: purchase,
+		});
+	});
+
+	it("draws the category as the purchase's, locked, which is what the refund counts in", async () => {
+		const { purchase, refund } = await linkFixture();
+		const { html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase, { note: "x".repeat(501) }),
+		);
+		expect(html).toMatch(/<fieldset[^>]*disabled/);
+		expect(html).toMatch(/<input[^>]*name="category" value="1"[^>]*checked/);
+		expect(html).not.toMatch(
+			/<input[^>]*name="category" value="2"[^>]*checked/,
+		);
+	});
+});
