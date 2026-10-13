@@ -101,7 +101,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 		).toEqual({ category_id: 2 });
 	});
 
-	it("changes the rule to the picked category when a matching rule's tick stays checked (decision 101)", async () => {
+	it("changes only this transaction when a different category is picked and Always stays checked", async () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('RULE ROUTE', 1)",
 		).run();
@@ -123,13 +123,11 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			creditReviewedVisible: "1",
 		});
 		expect(res.status).toBe(200);
-		// The ticked row says "Use this category ... from now on", so the picked category becomes the rule, and the
-		// store's other transactions that a person hasn't chosen follow it, as a fresh tick does.
 		expect(
 			await env.DB.prepare(
 				"SELECT default_category_id FROM merchants WHERE raw_name = 'RULE ROUTE'",
 			).first(),
-		).toEqual({ default_category_id: 3 });
+		).toEqual({ default_category_id: 1 });
 		expect(
 			await env.DB.prepare(
 				"SELECT category_id, category_source FROM transactions WHERE id = 99001",
@@ -139,7 +137,7 @@ describe("saving a transaction whose category matches its merchant rule", () => 
 			await env.DB.prepare(
 				"SELECT category_id, category_source FROM transactions WHERE id = 99002",
 			).first(),
-		).toEqual({ category_id: 3, category_source: "merchant_rule" });
+		).toEqual({ category_id: 1, category_source: "merchant_rule" });
 	});
 
 	it("saves unrelated changes when a paused rule has no posted category", async () => {

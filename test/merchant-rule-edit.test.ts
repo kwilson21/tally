@@ -14,13 +14,13 @@ describe("merchantRuleChange", () => {
 		],
 		["matching rule stays unchanged", true, true, 1, 1, "keep", false],
 		[
-			"a ticked row saved with a different category changes the rule to it and recategorizes",
+			"different picked category stays transaction-only",
 			true,
 			true,
 			1,
 			3,
-			"set",
-			true,
+			"keep",
+			false,
 		],
 		["explicitly unchecked clears", true, false, 1, 3, "clear", false],
 		[

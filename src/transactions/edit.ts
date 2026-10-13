@@ -74,7 +74,7 @@ export type Edit = {
 	cashAmountCents?: number;
 };
 
-/** The edit panel changes a merchant rule only when the person changes the tick, or saves a ticked row with another category. */
+/** The edit panel changes a merchant rule only when the person changes the tick. */
 export function merchantRuleChange(
 	alwaysWas: boolean,
 	alwaysNow: boolean,
@@ -85,15 +85,6 @@ export function merchantRuleChange(
 		return { action: "set", recategorize: categoryId !== null };
 	if (alwaysWas && !alwaysNow && ruleCategoryWas != null)
 		return { action: "clear", recategorize: false };
-	// A ticked row saved with another category changes the rule to it, as a new tick does (spec §7, decision 101).
-	if (
-		alwaysWas &&
-		alwaysNow &&
-		categoryId !== null &&
-		ruleCategoryWas != null &&
-		categoryId !== ruleCategoryWas
-	)
-		return { action: "set", recategorize: true };
 	return { action: "keep", recategorize: false };
 }
 
