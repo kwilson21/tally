@@ -1199,8 +1199,8 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		const ai = aiThatSays("Some Place Name");
 		await suggestMerchantNames({ DB: counted.db, AI: ai });
 		expect(ai.run).toHaveBeenCalledTimes(100);
-		// One candidate query, one batch write and a fixed number of switch reads.
-		expect(counted.statements()).toBeLessThanOrEqual(10);
+		// One candidate query, then a switch read and a batch write for every five calls: 1 + 1 + 20 × 2 = 42.
+		expect(counted.statements()).toBeLessThanOrEqual(42);
 	});
 
 	it("the demo's one run, which resets, sorts and names", async () => {

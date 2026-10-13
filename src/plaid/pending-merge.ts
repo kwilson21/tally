@@ -143,6 +143,7 @@ const STATEMENTS = [
 		note_worth_writing = COALESCE(transactions.note_worth_writing, p.note_worth_writing),
 		note_guessed = CASE WHEN COALESCE(transactions.note, '') = '' AND COALESCE(p.note, '') != '' THEN p.note_guessed ELSE transactions.note_guessed END,
 		note_tried_at = COALESCE(transactions.note_tried_at, p.note_tried_at),
+		note_failed_at = COALESCE(transactions.note_failed_at, p.note_failed_at),
 		note_dismissed = MAX(transactions.note_dismissed, p.note_dismissed)
 	 ${FROM_PENDING} AND (p.kind IS NOT NULL OR p.for_person_id IS NOT NULL OR p.details_asked = 1 OR p.kind_cleared = 1 OR p.for_person_cleared = 1 OR p.note_tried_at IS NOT NULL OR p.note_dismissed = 1)`,
 	// Jev's unsure transfer score goes before the exclusions below: a copied exclusion would otherwise look like
@@ -245,8 +246,11 @@ const STATEMENTS = [
 		income_source = CASE WHEN ${OWN_INCOME} THEN transactions.income_source ELSE ne.income_source END,
 		credit_reviewed = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
 		credit_reviewed_by = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
-	 FROM transactions AS pe, ne
-	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
+	 -- Only the columns read come from the pending row, and the posted row is the narrow CTE above: whole copies
+	 -- of transactions in one UPDATE ... FROM go past D1's 100-column limit ("too many columns in result set").
+	 FROM (SELECT id, is_split, amount_cents, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by
+	       FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1) AS pe, ne
+	 WHERE ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
 	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL

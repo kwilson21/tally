@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
 import { loadMonth } from "../src/db/month";
-import { pendingForJev } from "../src/db/transactions";
+import {
+	pendingForJev,
+	transactionsNeedingNoteGuess,
+} from "../src/db/transactions";
 import { syncItem } from "../src/plaid/sync";
 import { encryptToken } from "../src/plaid/token-crypto";
 
@@ -815,6 +818,47 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(await row("posted-1")).toMatchObject({
 			kind: "subscription",
 			kind_guessed: 0,
+		});
+	});
+
+	it("copies a failed note's time onto the posted row, and keeps the posted row's own time when it has one", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await env.DB.prepare(
+			"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-06 09:20:00' WHERE id = ?",
+		)
+			.bind(ids.pending)
+			.run();
+		await post(item, {});
+		expect(await row("posted-1")).toMatchObject({
+			note_failed_at: "2026-10-06 09:20:00",
+			note_tried_at: null,
+			details_asked: 1,
+			note_worth_writing: 1,
+		});
+		// A note that never failed is asked before the posted one, which failed on the last run.
+		await env.DB.prepare(
+			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,details_asked,note_worth_writing) SELECT account_id,'2026-09-01',-1000,'NEVER FAILED',1,1 FROM transactions WHERE plaid_transaction_id = 'posted-1'",
+		).run();
+		const older = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name = 'NEVER FAILED'",
+		).first<{ id: number }>();
+		expect(
+			(await transactionsNeedingNoteGuess(env.DB, 10)).map((tx) => tx.id),
+		).toEqual([older?.id, (await row("posted-1"))?.id]);
+		const secondItem = await addItem();
+		const own = await bothStored(secondItem);
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-07 08:00:00' WHERE id = ?",
+			).bind(own.pending),
+			env.DB.prepare(
+				"UPDATE transactions SET note_failed_at = '2026-10-05 07:00:00' WHERE id = ?",
+			).bind(own.posted),
+		]);
+		await post(secondItem, {});
+		expect(await row("posted-1")).toMatchObject({
+			note_failed_at: "2026-10-05 07:00:00",
 		});
 	});
 
