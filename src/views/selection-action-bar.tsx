@@ -16,6 +16,8 @@ export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
  * The id of the Select all link, whichever link the bar draws (the page's or the whole set's). A count reply that
  * draws a link morphs its wrapper, so the same element stays with its focus and any press on it. A count reply that
  * draws none swaps the wrapper, and the count takes this id (SelectedCount), so htmx moves a focus the link had there.
+ * A count that draws the link again finds no element for htmx to restore to (its wrapper lands after the count), so
+ * toast.js moves focus back to the id once the swap ends, when the swap began with focus on it (#475).
  */
 export const SELECT_ALL_LINK_ID = "select-all-link";
 

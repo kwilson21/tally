@@ -359,6 +359,23 @@
 			list.querySelector("input[name=ids][autofocus]")?.focus();
 		});
 	});
+	// Select all's focus across a count reply (#475). The link and the count's stand-in for it (drawn when no link is)
+	// share the id select-all-link. htmx puts focus back by that id as each task of a swap lands, and the count's own
+	// swap lands before the link's wrapper, so a link the count draws again finds nothing and focus falls to the body.
+	// So a swap that began with focus on Select all gives it back to Select all once the swap has ended: the link, or
+	// the stand-in if that is what the reply drew. A swap that began with focus anywhere else (a mouse click that left
+	// it on the body, or a person who moves it during the reply) leaves focus alone.
+	const selectAllSwaps = new WeakSet();
+	document.addEventListener("htmx:before:swap", (event) => {
+		const ctx = event.detail?.ctx;
+		if (ctx && document.activeElement?.id === "select-all-link")
+			selectAllSwaps.add(ctx);
+	});
+	document.addEventListener("htmx:after:swap", (event) => {
+		const ctx = event.detail?.ctx;
+		if (!ctx || !selectAllSwaps.has(ctx) || !focusLost()) return;
+		document.getElementById("select-all-link")?.focus({ preventScroll: true });
+	});
 	document.addEventListener("htmx:error", (event) => {
 		const { ctx, error } = event.detail ?? {};
 		// Only a request has a ctx; htmx also reports a bug in someone's hx-on handler this way.
