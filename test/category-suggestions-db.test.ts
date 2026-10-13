@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JEV_THRESHOLD } from "../src/ai/categorize";
+import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { saveCategory, setArchived } from "../src/db/categories";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -981,27 +983,261 @@ describe("createFromSuggestion", () => {
 		});
 	});
 
-	it("refuses a name only an archived category has, and creates nothing", async () => {
-		const { id, made } = await pending();
-		await db
-			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
-			.run();
-		await db
-			.prepare("UPDATE category_suggestions SET name = 'GAS' WHERE id = ?")
-			.bind(id)
-			.run();
-		const result = await createFromSuggestion(
-			db,
-			id,
-			{ ticked: made, shown: made, notes: {} },
-			"person",
-		);
-		expect(result).toMatchObject({
-			ok: false,
-			reason: "invalid",
-			error: "An archived category has that name. Restore it instead.",
+	describe("an archived category with the suggested name comes back with the ticks (decision 110)", () => {
+		/** Purchases behind a suggestion named Pet Care, saved before any Pet Care exists (namesToAvoid keeps archived names out). */
+		async function petCare() {
+			const made: number[] = [];
+			for (let i = 0; i < 3; i++)
+				made.push(
+					await add({ rawName: `CHEWY ${i}`, date: `2026-09-${10 + i}` }),
+				);
+			const id = (await saveSuggestion(db, "Pet Care", made)) as number;
+			return { id, made };
+		}
+		/** Pet Care as the family had it: its own icon, colour and a budget, archived on July 15. */
+		async function archivedPetCare(): Promise<number> {
+			const id = (
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 40) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id as number;
+			await db
+				.prepare(
+					"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, '2026-01', 12000)",
+				)
+				.bind(id)
+				.run();
+			await setArchived(db, id, true, "2026-07-15");
+			return id;
+		}
+		const periods = async (categoryId: number) =>
+			(
+				await db
+					.prepare(
+						"SELECT archived_on, restored_on FROM category_archive_periods WHERE category_id = ? ORDER BY archived_on",
+					)
+					.bind(categoryId)
+					.all<{ archived_on: string; restored_on: string | null }>()
+			).results;
+		/** Fills Tally up to its 50 active categories, optionally leaving room for `less` more. */
+		async function fillTo(limit: number) {
+			const have = (await categories()).filter((c) => !c.archived).length;
+			for (let i = have; i < limit; i++)
+				await db
+					.prepare(
+						"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+					)
+					.bind(`Filler ${i}`, 100 + i)
+					.run();
+		}
+
+		it("brings it back with its own icon, colour and budget, at the end of the list, and files the ticked ones in it", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			const today = await householdToday(db);
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person@example.com",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "Pet Care",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: false,
+				restored: true,
+			});
+			expect((await categories()).find((c) => c.id === archived)).toEqual({
+				id: archived,
+				name: "Pet Care",
+				icon: "home",
+				color: "cat-plum",
+				archived: 0,
+			});
+			const budget = await db
+				.prepare(
+					"SELECT amount_cents AS n FROM budget_amounts WHERE category_id = ?",
+				)
+				.bind(archived)
+				.first<{ n: number }>();
+			expect(budget?.n).toBe(12000);
+			const top = await db
+				.prepare(
+					"SELECT MAX(sort_order) AS top FROM categories WHERE archived = 0 AND id != ?",
+				)
+				.bind(archived)
+				.first<{ top: number }>();
+			const restored = await db
+				.prepare("SELECT sort_order AS n FROM categories WHERE id = ?")
+				.bind(archived)
+				.first<{ n: number }>();
+			expect(restored?.n).toBeGreaterThan(top?.top ?? 0);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: today },
+			]);
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({
+					category_id: archived,
+					category_source: "user",
+					updated_by: "person@example.com",
+				});
+			expect(await row(made[2] as number)).toMatchObject({ category_id: null });
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
 		});
-		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+
+		it("refuses to restore while 50 categories are active, and leaves it archived", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await fillTo(50);
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: false,
+				reason: "invalid",
+				error:
+					"Tally has room for 50 categories. Archive one to restore another.",
+			});
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		});
+
+		it("says the list is full when a category fills it during the write, and restores nothing", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await fillTo(49);
+			await db
+				.prepare(
+					`CREATE TRIGGER fill_limit_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,icon,color,sort_order) VALUES('Concurrent category','tag','cat-blue',999); END`,
+				)
+				.run();
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+			await db.prepare("DROP TRIGGER fill_limit_during_restore").run();
+
+			expect(result).toEqual({
+				ok: false,
+				reason: "invalid",
+				error:
+					"Tally has room for 50 categories. Archive one to restore another.",
+			});
+			expect(
+				(await categories()).find((c) => c.id === archived)?.archived,
+			).toBe(1);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		});
+
+		it("restores nothing when the ticks are taken away during the write, so no category is left restored", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await db
+				.prepare(
+					`CREATE TRIGGER untick_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_suggestion_id = NULL WHERE category_suggestion_id = NEW.id; END`,
+				)
+				.run();
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+			await db.prepare("DROP TRIGGER untick_during_restore").run();
+
+			expect(result).toEqual({
+				ok: false,
+				reason: "invalid",
+				error: "Tick at least one transaction, or dismiss this suggestion.",
+			});
+			expect(
+				(await categories()).find((c) => c.id === archived)?.archived,
+			).toBe(1);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		});
+
+		it("files the ticks into it without a second restore when someone restored it after the page was drawn", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await setArchived(db, archived, false, "2026-09-01");
+			const count = (await categories()).length;
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "Pet Care",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: true,
+				restored: false,
+			});
+			expect((await categories()).length).toBe(count);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+			]);
+			expect(await row(made[0] as number)).toMatchObject({
+				category_id: archived,
+			});
+		});
+
+		it("makes a new Pet Care when the archived one was renamed after the page was drawn, as Create would", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await saveCategory(db, archived, { name: "Pets" });
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toMatchObject({
+				ok: true,
+				name: "Pet Care",
+				moved: 3,
+				attached: false,
+				restored: false,
+			});
+			const made2 = (await categories()).find((c) => c.name === "Pet Care");
+			expect(made2).toBeDefined();
+			expect(made2?.id).not.toBe(archived);
+			expect(await row(made[0] as number)).toMatchObject({
+				category_id: made2?.id,
+			});
+			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
+				{ name: "Pets", archived: 1 },
+			);
+		});
 	});
 
 	it("adds the ticked ones to the active category with that name, in any capitals, instead of making one", async () => {
@@ -1129,7 +1365,8 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toMatchObject({ ok: true, moved: 1 });
-		expect(statements).toBeLessThanOrEqual(12);
+		// 13 counts the archive-period close a restore needs (decision 110); it is one statement either way.
+		expect(statements).toBeLessThanOrEqual(13);
 		expect((await row(made[300] as number))?.note).toBe(
 			`Note for ${made[300]}`,
 		);
@@ -1246,14 +1483,16 @@ describe("createFromSuggestion", () => {
 		expect(await suggestion(id)).toMatchObject({ status: "created" });
 	});
 
-	it("refuses a name an archived category has in other accented capitals, and creates nothing", async () => {
+	it("restores the archived category with the name in other accented capitals, as stored, instead of making a second", async () => {
 		const { id, made } = await pending();
-		await db
-			.prepare(
-				"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES (?, 'tag', 'cat-blue', 102, 1)",
-			)
-			.bind("École")
-			.run();
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES (?, 'tag', 'cat-blue', 102, 1) RETURNING id",
+				)
+				.bind("École")
+				.first<{ id: number }>()
+		)?.id as number;
 		await db
 			.prepare("UPDATE category_suggestions SET name = ? WHERE id = ?")
 			.bind("école", id)
@@ -1268,12 +1507,20 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toEqual({
-			ok: false,
-			reason: "invalid",
-			error: "An archived category has that name. Restore it instead.",
+			ok: true,
+			name: "École",
+			moved: 4,
+			leftOut: [],
+			attached: false,
+			restored: true,
 		});
 		expect((await categories()).length).toBe(count);
-		expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		expect((await categories()).find((c) => c.id === archived)?.archived).toBe(
+			0,
+		);
+		expect(await row(made[0] as number)).toMatchObject({
+			category_id: archived,
+		});
 	});
 });
 

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
@@ -1321,6 +1322,18 @@ describe("new category answers that are refused keep the ticks", () => {
 				"INSERT INTO categories (name, icon, color, sort_order, archived) VALUES ('Pet Care', 'tag', 'cat-blue', 99, 1)",
 			)
 			.run();
+		const active = (
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
+				.first<{ n: number }>()
+		)?.n as number;
+		for (let i = active; i < 50; i++)
+			await db
+				.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+				)
+				.bind(`Filler ${i}`, 200 + i)
+				.run();
 		const { res, html } = await post(
 			"/settings/suggestions",
 			{
@@ -1333,7 +1346,7 @@ describe("new category answers that are refused keep the ticks", () => {
 		);
 		expect(res.status).toBe(422);
 		expect(textOf(html)).toContain(
-			"An archived category has that name. Restore it instead.",
+			"Tally has room for 50 categories. Archive one to restore another.",
 		);
 		expect(checkedTicks(html)).toEqual([ids.pets[0]]);
 	});
@@ -1369,6 +1382,60 @@ describe("a new category the family already has is added to, and the button says
 		expect(textOf(html)).toContain("Maybe new: Pet Care");
 		expect(textOf(html)).toContain("Yes, create Pet Care");
 		expect(textOf(html)).not.toContain("Yes, add to");
+	});
+
+	it("reads 'Yes, restore' with the family's name for an archived category (decision 110)", async () => {
+		const ids = await oneOfEach();
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		await setArchived(db, archived, true, "2026-07-15");
+		const { html } = await newCategoryPage(ids);
+		expect(textOf(html)).toContain("Maybe new: Pet Care");
+		expect(textOf(html)).toContain("Yes, restore pet care");
+		expect(textOf(html)).not.toContain("Yes, add to");
+		expect(textOf(html)).not.toContain("Yes, create");
+	});
+});
+
+describe("Yes on an archived category restores it, with the ticked purchases (decision 110)", () => {
+	it("brings it back with the ticked purchases in it, and says how many", async () => {
+		const ids = await oneOfEach();
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('pet care', 'tag', 'cat-blue', 99) RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		await setArchived(db, archived, true, "2026-07-15");
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				id: `new-${ids.suggestion}`,
+				answer: "yes",
+				shown: ids.pets.map(String),
+				ticked: ids.pets.map(String),
+			},
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toBe(
+			"Restored pet care with 3 transactions.",
+		);
+		expect(
+			await row("SELECT archived FROM categories WHERE id = ?", archived),
+		).toMatchObject({ archived: 0 });
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.pets[0],
+			),
+		).toMatchObject({ category_id: archived });
 	});
 });
 

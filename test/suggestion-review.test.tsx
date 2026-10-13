@@ -73,6 +73,7 @@ const newCategory: SuggestionItem = {
 	suggestionId: 4,
 	name: "Pet Care",
 	existing: null,
+	archived: false,
 	date: "2026-10-02",
 	rows: [
 		{
