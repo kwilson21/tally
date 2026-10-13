@@ -3,7 +3,20 @@
 // review queue and the tests read one definition.
 
 import { JEV_THRESHOLD } from "./categorize";
-import { confidenceBasisPoints } from "./confidence";
+import { BASIS_POINTS, confidenceBasisPoints } from "./confidence";
+
+/**
+ * The Maybe range's bounds in whole basis points: a guess is unsure when its basis points are above `above`
+ * and below `below`, both excluded, so the threshold itself is sure. The review queue's SQL is built from these
+ * same bounds (src/db/suggestions-queue.ts), so the queue and the answer writes can't disagree with this.
+ */
+export function unsureBounds(threshold = JEV_THRESHOLD): {
+	above: number;
+	below: number;
+} {
+	const below = confidenceBasisPoints(threshold);
+	return { above: BASIS_POINTS - below, below };
+}
 
 /** Unsure: neither a sure yes nor a sure no, between 1 − threshold and threshold (spec §8.6). */
 export function isUnsure(
@@ -11,8 +24,8 @@ export function isUnsure(
 	threshold = JEV_THRESHOLD,
 ): boolean {
 	const basis = confidenceBasisPoints(confidence);
-	const limit = confidenceBasisPoints(threshold);
-	return basis < limit && basis > 10_000 - limit;
+	const { above, below } = unsureBounds(threshold);
+	return basis < below && basis > above;
 }
 
 /** A low-confidence credit is a visible income guess only until someone decides what it is. */

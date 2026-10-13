@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { isUnsure } from "../src/ai/maybe";
 import { AI_SWITCHES_ALL_ON, type AiSwitches } from "../src/db/ai-switches";
 import { addNeverSuggest } from "../src/db/never-suggest";
 import {
@@ -818,6 +819,44 @@ describe("incomeAskedSql", () => {
 			refund: 0,
 			paysBill: 1,
 		});
+	});
+});
+
+describe("the Maybe range: the queue's SQL and the Yes and No writes agree with isUnsure at every edge", () => {
+	// Each edge with the values either side of it: 0.2 and 0.8 are sure (the basis points floor to 2000 and 8000),
+	// 0.20005 floors to 2000 too, and 0.2001 and 0.7999 are the first unsure values on each side.
+	const EDGES = [0.1, 0.2, 0.20005, 0.2001, 0.5, 0.7999, 0.8, 0.95];
+
+	it("asks an income or a transfer guess exactly when isUnsure does", async () => {
+		for (const confidence of EDGES) {
+			const credit = await transaction({
+				amount: -250000,
+				raw: `EDGE CREDIT ${confidence}`,
+				incomeConfidence: confidence,
+			});
+			const transfer = await transaction({
+				amount: 20000,
+				raw: `EDGE TRANSFER ${confidence}`,
+				transferConfidence: confidence,
+			});
+			const counted = async (sql: string, id: number) =>
+				(
+					await db
+						.prepare(
+							`SELECT COUNT(*) AS n FROM transactions WHERE id = ? AND ${sql}`,
+						)
+						.bind(id)
+						.first<{ n: number }>()
+				)?.n;
+			expect(
+				await counted(incomeAskedSql("transactions"), credit),
+				`income at ${confidence}`,
+			).toBe(isUnsure(confidence) ? 1 : 0);
+			expect(
+				await counted(transferAskedSql("transactions"), transfer),
+				`transfer at ${confidence}`,
+			).toBe(isUnsure(confidence) ? 1 : 0);
+		}
 	});
 });
 
