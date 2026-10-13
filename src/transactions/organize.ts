@@ -142,7 +142,7 @@ export async function saveOrganizeGroup(
 			.first<{ n: number }>();
 		saved += count?.n ?? 0;
 	}
-	// A stale form must not alter rules after another request categorized the group.
+	// A stale form files nothing after another request categorized the group.
 	if (saved === 0) return 0;
 
 	const updates: D1PreparedStatement[] = [];
@@ -228,13 +228,14 @@ export async function groupHasRule(
  * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key, creating the
  * `merchants` rows that don't exist yet, so later charges follow. A key gets the rule only where a charge a person
  * filed in `categoryId` carries it, so a posted key that has no such charge sets nothing. Like the save that filed
- * the group, it changes no charge: the rule reaches the next ones.
+ * the group, it changes no charge: the rule reaches the next ones. Returns how many rules were written, so a
+ * caller can tell whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
 	merchantKeys: string[],
 	categoryId: number,
-): Promise<void> {
+): Promise<number> {
 	const statements = [...new Set(merchantKeys)].map((merchantKey) =>
 		db
 			.prepare(
@@ -244,5 +245,7 @@ export async function setOrganizeRule(
 			)
 			.bind(merchantKey, categoryId, merchantKey, categoryId),
 	);
-	if (statements.length > 0) await db.batch(statements);
+	if (statements.length === 0) return 0;
+	const results = await db.batch(statements);
+	return results.reduce((written, result) => written + result.meta.changes, 0);
 }

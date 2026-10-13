@@ -97,7 +97,15 @@ beforeEach(async () => {
 describe("merchantKeySql", () => {
 	it.each([
 		["new check sets and applies rule", false, true, 1, 4, 4, 4],
-		["checked category change is transaction-only", true, true, 1, 3, 1, 1],
+		[
+			"checked category change makes that category the rule",
+			true,
+			true,
+			1,
+			3,
+			3,
+			3,
+		],
 		["explicit uncheck clears rule", true, false, 1, null, null, 1],
 		["unchecked note save keeps rule", false, false, 1, null, 1, 1],
 		["paused checked rule keeps category and rule", true, true, 1, null, 1, 1],

@@ -11,7 +11,7 @@ export function MerchantRuleTick({
 	merchant,
 	checked,
 	ruleCategory,
-	id = "merchant-rule-hint",
+	id = "merchant-rule",
 }: {
 	/** The store's name as the panel shows it. */
 	merchant: string;
@@ -19,7 +19,7 @@ export function MerchantRuleTick({
 	checked: boolean;
 	/** The rule's category name, when a rule matches this transaction as the panel opened (or as a redraw kept it). */
 	ruleCategory?: string;
-	/** Unique on the page: the hint's id is the checkbox's accessible description. */
+	/** Unique on the page: the title and the hint take `${id}-title` and `${id}-hint`, and the checkbox is named by the title and described by the hint. */
 	id?: string;
 }) {
 	const hint = ruleCategory
@@ -33,7 +33,8 @@ export function MerchantRuleTick({
 				name="always"
 				value="1"
 				checked={checked}
-				aria-describedby={id}
+				aria-labelledby={`${id}-title`}
+				aria-describedby={`${id}-hint`}
 			/>
 			<span class="selection-mark mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band">
 				<span class="hidden group-has-[:checked]:flex">
@@ -41,8 +42,10 @@ export function MerchantRuleTick({
 				</span>
 			</span>
 			<span class="flex min-w-0 flex-col wrap-anywhere">
-				<span>Use this category for {merchant} from now on</span>
-				<span id={id} class="text-sm text-muted">
+				<span id={`${id}-title`}>
+					Use this category for {merchant} from now on
+				</span>
+				<span id={`${id}-hint`} class="text-sm text-muted">
 					{hint}
 				</span>
 			</span>

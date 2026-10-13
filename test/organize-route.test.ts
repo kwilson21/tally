@@ -326,6 +326,30 @@ describe("POST /transactions/organize", () => {
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 	});
 
+	it("a Yes after the group's charges were filed elsewhere makes no rule and says no rule was made (htmx)", async () => {
+		await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 3 WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND category_id = 2",
+		).run();
+		const { res } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+	});
+
 	it("skips the question when every merchant of the group already has that rule, and moves on as before (JavaScript off)", async () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = 2 WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",

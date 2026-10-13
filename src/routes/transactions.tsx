@@ -1846,8 +1846,8 @@ function EditSheet({
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
 								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks Always for this
-								// merchant, keeps the category (rename.ts).
+								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
+								// tick, keeps the category (rename.ts).
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
 									values.newCategory !== true &&

@@ -575,6 +575,7 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain("Use this category for Local Bakery from now on");
 		expect(html).toContain("Leave it unticked to change just this one.");
 		expect(html).not.toContain("Always for this merchant");
+		expect(html).not.toContain("remove it in Settings first");
 		expect(html).toContain("Count as income");
 		// "Type your own" starts empty; the store's own name is the choice that shows what it is.
 		expect(html).toMatch(/<input[^>]*name="merchant"[^>]*value=""/);
@@ -617,6 +618,7 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).toContain(
 			`Local Bakery is always ${savedName}. Untick it and save to remove the rule.`,
 		);
+		expect(sheet).not.toContain("remove it in Settings first");
 		const { res } = await post(`/transactions/${bakery}`, {
 			category: "2",
 			merchant: "Local Bakery",
@@ -640,6 +642,50 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first(),
 		).toEqual({ category_id: 2 });
+	});
+
+	it("a ticked row saved with another category changes the rule to that category (decision 101)", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: "3",
+			always: "1",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+			always_was: "1",
+			rule_category_was: "2",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first(),
+		).toEqual({ default_category_id: 3 });
+		expect(
+			await env.DB.prepare("SELECT category_id FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first(),
+		).toEqual({ category_id: 3 });
 	});
 
 	it("unticks the toggle for another selected category and ticking saves that category as the rule", async () => {

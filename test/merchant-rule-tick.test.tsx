@@ -11,10 +11,25 @@ describe("MerchantRuleTick (#353)", () => {
 			/<label[^>]*class="[^"]*\bmin-h-11\b[^"]*"[^>]*>[\s\S]*<\/label>/,
 		);
 		expect(html).toMatch(
-			/<input class="peer sr-only" type="checkbox" name="always" value="1"( checked)? aria-describedby="merchant-rule-hint"/,
+			/<input class="peer sr-only" type="checkbox" name="always" value="1"( checked)? aria-labelledby="merchant-rule-title" aria-describedby="merchant-rule-hint"/,
 		);
 		expect(html).toContain("selection-mark");
 		expect(html).toContain("rounded-full");
+	});
+
+	it("names the checkbox by its title alone, so the hint is only its description (not read twice)", async () => {
+		const html = await (
+			<MerchantRuleTick merchant="Local Bakery" checked={false} />
+		).toString();
+		expect(html).toContain(
+			'aria-labelledby="merchant-rule-title" aria-describedby="merchant-rule-hint"',
+		);
+		expect(html).toContain(
+			'<span id="merchant-rule-title">Use this category for Local Bakery from now on</span>',
+		);
+		expect(html).toContain(
+			'<span id="merchant-rule-hint" class="text-sm text-muted">Leave it unticked to change just this one.</span>',
+		);
 	});
 
 	it("is unticked by default, says Use this category for the store from now on, and hints it's optional", async () => {

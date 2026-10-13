@@ -344,9 +344,10 @@ organize.post("/transactions/organize/rule", async (c) => {
 		form.get("answer") === "yes" && category && keys.length > 0
 			? category
 			: null;
-	if (ruled) await setOrganizeRule(c.env.DB, keys, ruled.id);
+	const written = ruled ? await setOrganizeRule(c.env.DB, keys, ruled.id) : 0;
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
-	if (ruled) {
+	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
+	if (ruled && written > 0) {
 		const message = `${form.get("merchant")?.toString().trim() || keys[0]} is always ${ruled.name} now.`;
 		c.header(
 			"HX-Trigger",
