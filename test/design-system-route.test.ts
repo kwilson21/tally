@@ -754,6 +754,17 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows this month's part-paid occurrence as Due, not Overdue, with its part-paid sentence (#205)", async () => {
+		const { html } = await get("/design-system");
+		// The state runs from its label (the apostrophe may be escaped) to the next state's label.
+		const start = html.search(/Part paid \(this month(&#39;|')s, still due\)/);
+		const end = html.indexOf("Part paid, an earlier month", start);
+		const state = start > -1 && end > start ? html.slice(start, end) : "";
+		expect(state).toMatch(/>Due<\/span>/);
+		expect(state).toContain("Part paid: $600 of $1,200");
+		expect(state).not.toContain("Overdue");
+	});
+
 	it("shows Adjust mode with its whole use spec, for sign-off (#94)", async () => {
 		const { html } = await get("/design-system");
 		const section =

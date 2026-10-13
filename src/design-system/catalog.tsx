@@ -1436,7 +1436,7 @@ function Rows() {
 								billId={1}
 								period="2026-10"
 								label="October 2026"
-								status="overdue"
+								status="due"
 								payments={[
 									{
 										transactionId: 6,
