@@ -865,6 +865,40 @@ describe("POST /transactions/:id", () => {
 		});
 	});
 
+	it("a Kind and For picked as the hidden guesses are the person's choices (#377)", async () => {
+		const person = await env.DB.prepare(
+			"INSERT INTO household_people(name) VALUES ('Person A') RETURNING id",
+		).first<{ id: number }>();
+		await env.DB.prepare(
+			"UPDATE transactions SET note='', note_guessed=0, kind='subscription', kind_guessed=1, for_person_id=?, for_person_guessed=1 WHERE id=?",
+		)
+			.bind(person?.id, bakery)
+			.run();
+		// Details are off, so both guesses are drawn as Not known and No one: the picks post against those.
+		await post(`/transactions/${bakery}`, {
+			...save,
+			details_visible: "0",
+			note: "",
+			note_was: "",
+			kind: "subscription",
+			kind_was: "",
+			for_person_id: String(person?.id),
+			for_person_id_was: "",
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT kind,kind_guessed,for_person_id,for_person_guessed FROM transactions WHERE id=?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({
+			kind: "subscription",
+			kind_guessed: 0,
+			for_person_id: person?.id,
+			for_person_guessed: 0,
+		});
+	});
+
 	it("keeps a Jev income credit unchanged on a note-only save", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET amount_cents = -500, category_id = NULL, category_source = NULL, category_confidence = 0.95, flag_income = 1, income_source = 'jev', credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",

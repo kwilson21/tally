@@ -464,6 +464,120 @@ describe("saveEdit", () => {
 		});
 	});
 
+	it("a Kind picked with Details hidden is the person's, even when it is the hidden guess (#377)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// The guess is drawn as Not known, so picking Subscription posts against an empty kind_was.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "0",
+			kind_was: "",
+			kind: "subscription",
+			for_person_id_was: "",
+			for_person_id: "",
+			note_was: "",
+			note: "",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			kind: "subscription",
+			kind_guessed: 0,
+			for_person_id: 1,
+			for_person_guessed: 1,
+		});
+	});
+
+	it("a For picked with Details hidden is the person's, even when it is the hidden guess (#377)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// The guess is drawn as No one, so picking Person 1 posts against an empty for_person_id_was.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "0",
+			kind_was: "",
+			kind: "",
+			for_person_id_was: "",
+			for_person_id: "1",
+			note_was: "",
+			note: "",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			kind: "subscription",
+			kind_guessed: 1,
+			for_person_id: 1,
+			for_person_guessed: 0,
+		});
+	});
+
+	it("a save with Details shown that leaves a guessed Kind and For alone keeps them guesses (#377)", async () => {
+		const id = await idOf("SQ *LOCAL BAKERY 4432");
+		await db
+			.prepare(
+				"UPDATE transactions SET kind = 'subscription', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1, details_asked = 1 WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+		// Details shown: the guesses are drawn as they are, so an untouched save re-posts them unchanged.
+		const posted = new FormData();
+		for (const [key, value] of Object.entries({
+			details_visible: "1",
+			kind_was: "subscription",
+			kind: "subscription",
+			for_person_id_was: "1",
+			for_person_id: "1",
+			note_was: "",
+			note: "",
+		}))
+			posted.set(key, value);
+		const parsed = parseEdit(posted, [EATING_OUT, GAS]);
+		if (!parsed.ok) throw new Error("expected the form to parse");
+		await saveEdit(db, id, parsed.value, "demo");
+		expect(
+			await db
+				.prepare(
+					"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({
+			kind: "subscription",
+			kind_guessed: 1,
+			for_person_id: 1,
+			for_person_guessed: 1,
+		});
+	});
+
 	it("a Kind a person chooses after clearing it is no longer a clear", async () => {
 		const id = await idOf("SQ *LOCAL BAKERY 4432");
 		await db
