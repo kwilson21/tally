@@ -129,9 +129,9 @@ describe("a group another save files while this one saves", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const trigger = res.headers.get("HX-Trigger") ?? "";
-		expect(trigger).toContain("That merchant already has a category.");
-		expect(trigger).not.toContain("set to");
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("That merchant already has a category.");
+		expect(trigger.announce).toBe("That merchant already has a category.");
 		expect(
 			await env.DB.prepare(
 				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",
@@ -312,9 +312,11 @@ describe("New category in Organize", () => {
 			});
 
 			expect(res.status).toBe(200);
-			const trigger = res.headers.get("HX-Trigger") ?? "";
-			expect(trigger).toContain("That merchant already has a category.");
-			expect(trigger).not.toContain("set to");
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+			expect(trigger.toast.message).toBe(
+				"That merchant already has a category.",
+			);
+			expect(trigger.announce).toBe("That merchant already has a category.");
 			expect(
 				await env.DB.prepare(
 					"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pets'",

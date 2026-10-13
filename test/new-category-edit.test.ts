@@ -499,10 +499,13 @@ describe("the likely transactions after a new category", () => {
 			ids: String(first),
 		});
 
-		expect(res.headers.get("HX-Trigger")).toContain(
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe(
 			"Nothing moved: those transactions changed since the panel opened.",
 		);
-		expect(res.headers.get("HX-Trigger")).not.toContain("Set 0");
+		expect(trigger.announce).toBe(
+			"Nothing moved: those transactions changed since the panel opened.",
+		);
 		expect(await filedAs(first)).toEqual({
 			categoryId: GROCERIES,
 			source: "user",
