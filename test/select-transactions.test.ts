@@ -624,7 +624,7 @@ describe("select several transactions", () => {
 		const ids = rowIds(await pageHtml("month=all&select=1"));
 		const all = await countFragment(ids, ids);
 		expect(all).toMatch(
-			/<span id="select-all-page"[^>]*hx-swap-oob="outerHTML"/,
+			/<span id="select-all-page"[^>]*hx-swap-oob="outerHTML settle:0"/,
 		);
 		expect(selectAllLabel(all)).toBeUndefined();
 		const oneOff = await countFragment(ids.slice(1), ids);
@@ -722,6 +722,21 @@ describe("select several transactions", () => {
 		expect(attribute(link, "hx-get")).toBe(
 			"/transactions?month=all&select=1&focus=set-category-selection",
 		);
+	});
+
+	it("keeps focus on Select all across a tick's count reply: the link has an id, and its swap skips htmx's settle wait (#438)", async () => {
+		const page = await pageHtml("month=all&select=1");
+		const ids = rowIds(page);
+		expect(page).toContain("#select-all-page:outerHTML settle:0");
+		expect(attribute(selectAllTag(page), "id")).toBe("select-all-page-link");
+		// A tick's count reply swaps the link out with its wrapper. The new link keeps the id, so focus returns to it.
+		const counted = await countFragment(ids.slice(0, 1), ids);
+		expect(attribute(selectAllTag(counted), "id")).toBe("select-all-page-link");
+		// Ticking the whole page offers the whole set under its own id, so Select all's reply can't refocus the link it removes.
+		const whole = await countFragment(ids, ids);
+		const wholeLink =
+			whole.match(/<a [^>]*>Select all \d+ in [^<]*<\/a>/)?.[0] ?? "";
+		expect(attribute(wholeLink, "id")).toBe("select-all-whole-link");
 	});
 
 	it("never focuses Set category for a tick, a filter change, a plain reload or a Select all with nothing ticked", async () => {

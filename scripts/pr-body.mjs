@@ -36,11 +36,8 @@ export const PAGES = [
 	{ name: "settings", path: "/settings" },
 	// Gas's row open for editing, as in the round 5 study.
 	{ name: "settings-edit", path: "/settings?open=3" },
-	// The one-at-a-time review of the names Tally guessed that a Band on Settings leads to (P29 A).
-	{ name: "settings-names", path: "/settings/names" },
-	// The same review for a name Tally guessed: 24 is CVS Pharmacy's row, the bank's own name that comes first.
-	// Skip names a merchant by its row number, never its bank text; test/seed.test.ts keeps 24 true.
-	{ name: "settings-names-guess", path: "/settings/names?skip=24" },
+	// The one review screen for every "Maybe …" (issue #195) that Settings' Band leads to; /settings/names redirects here.
+	{ name: "settings-suggestions", path: "/settings/suggestions" },
 	{ name: "more", path: "/more" },
 	{ name: "how-it-works", path: "/how-it-works" },
 	{ name: "feedback", path: "/feedback" },

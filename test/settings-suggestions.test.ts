@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { saveSuggestion } from "../src/db/category-suggestions";
+import {
+	pendingSuggestions,
+	saveSuggestion,
+} from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
 
@@ -199,6 +202,7 @@ beforeEach(async () => {
 		db.prepare("DELETE FROM transactions"),
 		db.prepare("DELETE FROM merchants"),
 		db.prepare("DELETE FROM category_suggestions"),
+		db.prepare("DELETE FROM never_suggest_rules"),
 		db.prepare("DELETE FROM household_settings WHERE key GLOB 'jev_calls_*'"),
 	]);
 	await saveAiSwitches(db, { details: false });
@@ -325,7 +329,9 @@ describe("GET /settings with a suggestion", () => {
 		expect(textOf(html)).toContain(
 			"20 more suggestions will show once you decide these.",
 		);
-		expect(counted.statements()).toBeLessThan(20);
+		// Settings reads the one review queue as well (#195): its income, transfer, category and name reads add
+		// a fixed handful of statements, none of them per suggestion.
+		expect(counted.statements()).toBeLessThan(30);
 	});
 
 	it("keeps a partly reviewed suggestion visible while one eligible transaction remains, then retires it at zero", async () => {
@@ -687,6 +693,291 @@ describe("creating the category", () => {
 	it("is a stale-safe form: a suggestion that doesn't exist is the same current-list answer", async () => {
 		const { res } = await create(9999, [1], [1]);
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("Never suggest lines in the card (decision 101)", () => {
+	/** Two purchases at one store and one at another, under one pending suggestion (three make one). */
+	async function twoStores() {
+		const a1 = await addTx("CHEWY.COM", 6412);
+		const a2 = await addTx("CHEWY.COM", 4100);
+		const b = await addTx("PETSMART 0412", 2399);
+		const id = (await saveSuggestion(db, "Pet Care", [a1, a2, b])) as number;
+		return { id, a: [a1, a2], b };
+	}
+	const neverLine = (merchantKey: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-03')",
+			)
+			.bind(merchantKey)
+			.run();
+
+	it("leaves a store with a line out of the card, and shows the others", async () => {
+		const { a, b } = await twoStores();
+		await neverLine("PETSMART 0412");
+		const [suggestion] = await pendingSuggestions(db);
+		const kept = suggestion?.rows.map((r) => r.id) ?? [];
+		expect(kept).toHaveLength(2);
+		expect(kept).toEqual(expect.arrayContaining(a));
+		const { html } = await get();
+		for (const id of a) expect(html).toContain(`name="shown" value="${id}"`);
+		expect(html).not.toContain(`name="shown" value="${b}"`);
+	});
+
+	it("drops the card when every store has a line, without counting it as more, and keeps it pending for Remove", async () => {
+		const { id } = await twoStores();
+		await neverLine("CHEWY.COM");
+		await neverLine("PETSMART 0412");
+		const pending = await pendingSuggestions(db);
+		expect(pending).toEqual([]);
+		expect(pending.more).toBe(0);
+		const { html } = await get();
+		expect(html).not.toContain("data-suggestion=");
+		expect(await status(id)).toBe("pending");
+		await db
+			.prepare("DELETE FROM never_suggest_rules WHERE merchant_key = ?")
+			.bind("CHEWY.COM")
+			.run();
+		expect((await pendingSuggestions(db)).map((s) => s.id)).toEqual([id]);
+	});
+
+	it("files nothing for a store with a line, even when a stale form ticks its row", async () => {
+		const { id, ids } = await petCare();
+		await neverLine("PETSMART 0412");
+		const { res } = await create(id, ids, ids);
+		expect(res.status).toBe(200);
+		const [chewy, , petsmart] = ids;
+		expect(await row(petsmart as number)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(await row(chewy as number)).toMatchObject({
+			category_source: "user",
+		});
+	});
+});
+
+describe("Remove takes a store's linked Never suggest lines away together (decision 101)", () => {
+	const neverLine = (merchantKey: string, kind: string, decidedOn: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, ?, ?)",
+			)
+			.bind(merchantKey, kind, decidedOn)
+			.run();
+	const lineId = async (merchantKey: string) =>
+		(
+			await db
+				.prepare(
+					"SELECT id FROM never_suggest_rules WHERE merchant_key = ? AND kind = 'income'",
+				)
+				.bind(merchantKey)
+				.first<{ id: number }>()
+		)?.id ?? 0;
+	/** The Never suggest line whose Remove takes focus after a swap: the one drawn with autofocus. */
+	const focusedLine = (html: string) =>
+		html
+			.split("<li ")
+			.find(
+				(item) =>
+					item.includes("autofocus") && item.includes("never-suggest/remove"),
+			) ?? "";
+	/** A charge whose bank text is `raw` and whose Plaid name is Venmo: the link a pair of lines goes by (decision 101). */
+	const charge = (raw: string) =>
+		db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name) VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', -2500, ?, 'Venmo')",
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, raw)
+			.run();
+	const linked = async () => {
+		await charge("VENMO 123");
+		await neverLine("VENMO 123", "income", "2026-10-04");
+		await neverLine("Venmo", "income", "2026-10-03");
+	};
+
+	it("draws a linked pair as one line, under the store's name", async () => {
+		await linked();
+		const { html } = await get();
+		expect(
+			html
+				.split("<li ")
+				.filter((item) => item.includes("never-suggest/remove")),
+		).toHaveLength(1);
+		expect(html).toContain(`name="id" value="${await lineId("Venmo")}"`);
+		expect(html).not.toContain(
+			`name="id" value="${await lineId("VENMO 123")}"`,
+		);
+	});
+
+	it("between two stores, focuses the line that took the clicked one's place", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-10-05");
+		await neverLine("Petco", "income", "2026-09-01");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
+		]);
+		expect(focusedLine(html)).toContain("for Petco");
+	});
+
+	it("with a visible line above the clicked one, focuses that line once the pair has gone", async () => {
+		await charge("VENMO 123");
+		await charge("VENMO 456");
+		await neverLine("VENMO 456", "income", "2026-10-05");
+		await neverLine("VENMO 123", "income", "2026-10-04");
+		await neverLine("Chewy", "income", "2026-10-03");
+		await neverLine("Petco", "income", "2026-10-02");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("VENMO 123"))],
+			["merchant_key", "VENMO 123"],
+			["kind", "income"],
+		]);
+		const stored = await db
+			.prepare(
+				"SELECT merchant_key AS key FROM never_suggest_rules ORDER BY key",
+			)
+			.all<{ key: string }>();
+		expect(stored.results.map((line) => line.key)).toEqual(["Chewy", "Petco"]);
+		expect(focusedLine(html)).toContain("for Chewy");
+	});
+
+	it("with a line of another store left, lists only that line and focuses its Remove", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-09-01");
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
+		]);
+		expect(
+			html
+				.split("<li ")
+				.filter((item) => item.includes("never-suggest/remove")),
+		).toHaveLength(1);
+		expect(focusedLine(html)).toContain("for Chewy");
+	});
+
+	it("with no other line left, focuses the heading and says Tally hasn't been told No yet", async () => {
+		await linked();
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
+		]);
+		expect(html).toMatch(
+			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
+		);
+		expect(textOf(html)).toContain("Tally hasn't been told No yet.");
+	});
+
+	it("the toast and announcement name the line clicked, though other lines went with it", async () => {
+		await linked();
+		await neverLine("Chewy", "income", "2026-09-01");
+		const { res } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "income"],
+		]);
+		expect(trigger(res).toast?.message).toBe(
+			"Removed. Tally can suggest that again.",
+		);
+		expect(trigger(res).announce).toContain(
+			"Never suggest income for Venmo is gone.",
+		);
+	});
+
+	it("a Remove with a live id but another kind changes nothing, and answers as stale", async () => {
+		await linked();
+		const { res, html } = await post("/settings/never-suggest/remove", [
+			["id", String(await lineId("Venmo"))],
+			["merchant_key", "Venmo"],
+			["kind", "transfer"],
+		]);
+		expect(trigger(res).toast).toBeUndefined();
+		expect(trigger(res).announce).toBe("Tally's rules list updated.");
+		expect(textOf(html)).toContain("Never suggest income for Venmo");
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM never_suggest_rules")
+				.first<{ n: number }>(),
+		).toEqual({ n: 2 });
+	});
+});
+
+describe("the Band follows the Settings swaps that change the queue (#195)", () => {
+	const BAND_OOB = 'hx-select-oob="#names-band"';
+	const tagOf = (html: string, pattern: RegExp) =>
+		pattern.exec(html)?.[0] ?? "";
+	const neverLine = (merchantKey: string) =>
+		db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-03')",
+			)
+			.bind(merchantKey)
+			.run();
+
+	it("swaps the Band with the create form and the Dismiss button of a suggestion card", async () => {
+		const { id } = await petCare();
+		const { html } = await get();
+		expect(
+			tagOf(
+				html,
+				new RegExp(
+					`<form[^>]*action="/settings/suggestions/${id}/create"[^>]*>`,
+				),
+			),
+		).toContain(BAND_OOB);
+		expect(
+			tagOf(
+				html,
+				new RegExp(
+					`<button[^>]*formaction="/settings/suggestions/${id}/dismiss"[^>]*>`,
+				),
+			),
+		).toContain(BAND_OOB);
+	});
+
+	it("swaps the Band with a Never suggest Remove, and with a Categories form built by swap()", async () => {
+		await neverLine("CHEWY.COM");
+		const { html } = await get();
+		expect(
+			tagOf(html, /<form[^>]*action="\/settings\/never-suggest\/remove"[^>]*>/),
+		).toContain(BAND_OOB);
+		expect(
+			tagOf(html, /<form[^>]*action="\/settings\/categories"[^>]*>/),
+		).toContain(BAND_OOB);
+	});
+
+	it("draws the Band empty when a Dismiss takes the only waiting suggestion away", async () => {
+		const { id } = await petCare();
+		const { html } = await post(`/settings/suggestions/${id}/dismiss`);
+		expect(html).toContain('<div id="names-band"></div>');
+	});
+
+	it("draws the Band with its count when a Never suggest Remove brings a hidden suggestion back", async () => {
+		await petCare();
+		for (const store of [
+			"CHEWY.COM",
+			"BANFIELD PET HOSPITAL",
+			"PETSMART 0412",
+			"AMAZON GIFT",
+		])
+			await neverLine(store);
+		expect(textOf((await get()).html)).not.toContain("Suggested: Pet Care");
+		const line = await db
+			.prepare(
+				"SELECT id FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM'",
+			)
+			.first<{ id: number }>();
+		const { html } = await post("/settings/never-suggest/remove", [
+			["id", String(line?.id)],
+			["merchant_key", "CHEWY.COM"],
+			["kind", "new_category"],
+		]);
+		expect(html).toMatch(/<div id="names-band">[\s\S]*?1 suggestion to check/);
 	});
 });
 

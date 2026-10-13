@@ -209,6 +209,11 @@ const STATEMENTS = [
 	 AND COALESCE(transactions.credit_reviewed, 0) = 0 AND transactions.credit_reviewed_by IS NULL`,
 	`UPDATE transactions SET updated_by = p.updated_by
 	 ${FROM_PENDING} AND p.updated_by IS NOT NULL AND transactions.updated_by IS NULL`,
+	// A No on a Maybe income or transfer (decision 101) is the person's choice, so it moves with their other choices
+	// whatever the amount, as the same-row sync keeps it when the amount changes: the posted row isn't asked again.
+	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),
+		transfer_maybe_declined = MAX(transactions.transfer_maybe_declined, p.transfer_maybe_declined)
+	 ${FROM_PENDING} AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
 	// A bill payment (and a dismissal) moves, unless the posted row is already linked to a bill.
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
 	 WHERE transaction_id = ${PENDING} AND ${READY}
@@ -229,13 +234,18 @@ const STATEMENTS = [
 	// posted would have neither it nor its parts counted. A part keeps a choice of its own (above), per group:
 	// exclusion with its source, income source, credit review with who made it. The pending row is still
 	// unchanged here.
-	`UPDATE transactions SET parent_id = ne.id, date = ?6, raw_name = ?7, merchant_name = ?8,
+	// The posted row is a narrow CTE, not a second copy of transactions: D1 refuses an UPDATE ... FROM whose tables
+	// add up to more than 100 columns, and transactions has 50.
+	`WITH ne(id, is_split, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by) AS (
+		SELECT id, is_split, excluded, excluded_source, income_source, credit_reviewed, credit_reviewed_by
+		FROM transactions WHERE id = ${POSTED})
+	 UPDATE transactions SET parent_id = ne.id, date = ?6, raw_name = ?7, merchant_name = ?8,
 		excluded = CASE WHEN ${OWN_EXCLUSION} THEN transactions.excluded ELSE ne.excluded END,
 		excluded_source = CASE WHEN ${OWN_EXCLUSION} THEN transactions.excluded_source ELSE ne.excluded_source END,
 		income_source = CASE WHEN ${OWN_INCOME} THEN transactions.income_source ELSE ne.income_source END,
 		credit_reviewed = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed ELSE ne.credit_reviewed END,
 		credit_reviewed_by = CASE WHEN ${OWN_REVIEW} THEN transactions.credit_reviewed_by ELSE ne.credit_reviewed_by END
-	 FROM transactions AS pe, transactions AS ne
+	 FROM transactions AS pe, ne
 	 WHERE pe.id = ${PENDING} AND ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
