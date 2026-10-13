@@ -11,6 +11,7 @@ import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import { FOLLOWS_PURCHASE } from "../db/counted-month";
 import {
 	addLikely,
 	type LikelyRow,
@@ -1328,6 +1329,25 @@ transactions.post("/transactions/select/category", async (c) => {
 	return categorySheet(c, today, back, { ids, selection, error });
 });
 
+/**
+ * Sets the category on the rows named by id (`?1` the JSON ids, `?2` the category, `?3` the actor): a ticked refund
+ * that follows its purchase sets the purchase instead, and that rule is decided inside this write, so a link that
+ * changes mid-save can't send the category to the wrong row (decision 99, #346).
+ */
+const SET_CATEGORY = `UPDATE transactions SET category_id=?2, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, split_removed_bills=NULL, updated_by=?3, updated_at=datetime('now')
+		WHERE id IN (SELECT CASE WHEN ${FOLLOWS_PURCHASE} THEN rp.id ELSE t.id END
+			FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id
+			WHERE t.id IN (SELECT value FROM json_each(?1)))
+		RETURNING id, date`;
+
+/** The toast's sentence about purchases that moved with a refund: its date when one moved, "Their" when several did (#346). */
+function movedSentence(dates: string[], today: string): string {
+	const [date] = dates;
+	if (dates.length === 1 && date)
+		return ` Its ${shortDay(date, today)} purchase moved with it.`;
+	return dates.length > 1 ? " Their purchases moved with them." : "";
+}
+
 async function finishSelection(
 	c: Context<App>,
 	today: string,
@@ -1374,15 +1394,22 @@ transactions.post("/transactions/select/category/save", async (c) => {
 			error: "Pick a category from the list.",
 			still: true,
 		});
-	// The same write as the edit panel's category change (saveEdit), once for every row the selection holds.
-	await c.env.DB.prepare(
-		"UPDATE transactions SET category_id=?, category_source='user', category_confidence=NULL, split_removed_from_cents=NULL, split_removed_bills=NULL, updated_by=?, updated_at=datetime('now') WHERE id IN (SELECT value FROM json_each(?))",
-	)
-		.bind(cat.id, actor(c), JSON.stringify(ids))
-		.run();
-	const message = `Set ${ids.length} ${ids.length === 1 ? "transaction" : "transactions"} to ${cat.name}.`;
-	// The first merchant in the selection to reach three picks of this category is asked (decision 79).
-	const found = await firstRuleOfferAmong(c.env.DB, ids, cat.id);
+	// One statement picks the rows and writes them (SET_CATEGORY), the same write as the edit panel's category change
+	// (saveEdit), so the follow rule is read as the write runs. The count, the toast and the rule offer all come from
+	// the rows it returns.
+	const { results } = await c.env.DB.prepare(SET_CATEGORY)
+		.bind(JSON.stringify(ids), cat.id, actor(c))
+		.all<{ id: number; date: string }>();
+	const changed = results.map((row) => row.id);
+	// A returned row that was not ticked is a purchase that moved with a ticked refund (#346).
+	const ticked = new Set(ids);
+	const movedDates = results
+		.filter((row) => !ticked.has(row.id))
+		.map((row) => row.date);
+	const message = `Set ${changed.length} ${changed.length === 1 ? "transaction" : "transactions"} to ${cat.name}.${movedSentence(movedDates, today)}`;
+	// The first merchant in the selection to reach three picks of this category is asked (decision 79). A purchase that
+	// moved with its refund is a pick now, so the offer reads the changed rows (#346).
+	const found = await firstRuleOfferAmong(c.env.DB, changed, cat.id);
 	const tx = found ? await getTransaction(c.env.DB, found.transactionId) : null;
 	if (!found || !tx) return finishSelection(c, today, back, message);
 	// The rule offer's address leaves this month out, as the list's does (listAddress).

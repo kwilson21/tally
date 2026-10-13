@@ -1,7 +1,10 @@
 import { env, exports } from "cloudflare:workers";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
+import { FOLLOWS_PURCHASE } from "../src/db/counted-month";
 import { resetDemo } from "../src/demo/reset";
+import { transactions } from "../src/routes/transactions";
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);
@@ -23,6 +26,515 @@ const firstPageIds = async () => {
 		Number(m[1]),
 	);
 };
+
+describe("Set category on a refund that follows its purchase (#346, decision 99)", () => {
+	const GROCERIES = 1;
+	const EATING_OUT = 2;
+
+	type Row = {
+		date: string;
+		amount: number;
+		rawName?: string;
+		category?: number | null;
+		refundOf?: number | null;
+		parent?: number | null;
+		isSplit?: 0 | 1;
+		/** A refund's review: 1 is a person's reviewed refund (the default for money back). */
+		reviewed?: 0 | 1;
+		income?: 0 | 1;
+		excluded?: 0 | 1;
+	};
+
+	/** Inserts one bank row. Money out is positive; a refund (money back) is negative and reviewed by default. */
+	const insertRow = (id: number, row: Row) =>
+		env.DB.prepare(
+			"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, category_id, category_source, refund_of_id, parent_id, is_split, credit_reviewed, flag_income, excluded) VALUES (?, 3, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		)
+			.bind(
+				id,
+				row.date,
+				row.amount,
+				row.rawName ?? "SHOP 346",
+				row.category ?? null,
+				row.category ? "user" : null,
+				row.refundOf ?? null,
+				row.parent ?? null,
+				row.isSplit ?? 0,
+				row.reviewed ?? (row.amount < 0 ? 1 : null),
+				row.income ?? 0,
+				row.excluded ?? 0,
+			)
+			.run();
+
+	/** The Set category save the sheet posts for these ticks (not all mode), setting Groceries. */
+	async function setGroceries(ids: number[]) {
+		const body = new URLSearchParams({
+			category: String(GROCERIES),
+			back: "/transactions?month=all",
+		});
+		for (const id of ids) body.append("ids", String(id));
+		const res = await request("/transactions/select/category/save", {
+			method: "POST",
+			body,
+			headers: { "HX-Request": "true" },
+		});
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast?: { message: string };
+			announce?: string;
+		};
+		return {
+			res,
+			message: trigger.toast?.message,
+			announce: trigger.announce,
+		};
+	}
+
+	/** A row's own category, its source and its refund link, as stored. */
+	const stored = (id: number) =>
+		env.DB.prepare(
+			"SELECT category_id AS categoryId, category_source AS source, refund_of_id AS refundOf FROM transactions WHERE id = ?",
+		)
+			.bind(id)
+			.first<{
+				categoryId: number | null;
+				source: string | null;
+				refundOf: number | null;
+			}>();
+
+	beforeEach(() => {
+		// The toast names the purchase's date without a year, so the clock is pinned to the year the fixtures use.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-13T16:00:00Z"));
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("a ticked linked refund sets its purchase's category, and the refund keeps following with none of its own", async () => {
+		await insertRow(9401, {
+			date: "2026-09-05",
+			amount: 5000,
+			category: EATING_OUT,
+		});
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9401,
+		});
+		const { res, message, announce } = await setGroceries([9402]);
+		expect(res.status).toBe(200);
+		expect(message).toBe(
+			"Set 1 transaction to Groceries. Its Sep 5 purchase moved with it.",
+		);
+		expect(announce).toBe(message);
+		expect(await stored(9401)).toEqual({
+			categoryId: GROCERIES,
+			source: "user",
+			refundOf: null,
+		});
+		expect(await stored(9402)).toEqual({
+			categoryId: null,
+			source: null,
+			refundOf: 9401,
+		});
+	});
+
+	it("a refund and its own purchase ticked together change the purchase once, with no moved sentence", async () => {
+		await insertRow(9401, {
+			date: "2026-09-05",
+			amount: 5000,
+			category: EATING_OUT,
+		});
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9401,
+		});
+		const { message } = await setGroceries([9401, 9402]);
+		expect(message).toBe("Set 1 transaction to Groceries.");
+		expect(await stored(9401)).toMatchObject({
+			categoryId: GROCERIES,
+			source: "user",
+		});
+		expect(await stored(9402)).toMatchObject({
+			categoryId: null,
+			refundOf: 9401,
+		});
+	});
+
+	it("two refunds of one purchase change it once, and the sentence names its date", async () => {
+		await insertRow(9401, { date: "2026-08-20", amount: 3000 });
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -1000,
+			refundOf: 9401,
+		});
+		await insertRow(9403, {
+			date: "2026-09-12",
+			amount: -500,
+			refundOf: 9401,
+		});
+		const { message } = await setGroceries([9402, 9403]);
+		expect(message).toBe(
+			"Set 1 transaction to Groceries. Its Aug 20 purchase moved with it.",
+		);
+		expect(await stored(9401)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9402)).toMatchObject({ categoryId: null });
+		expect(await stored(9403)).toMatchObject({ categoryId: null });
+	});
+
+	it("refunds of different purchases move each purchase, and the sentence says so for several", async () => {
+		await insertRow(9401, { date: "2026-09-05", amount: 5000 });
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9401,
+		});
+		await insertRow(9404, { date: "2026-08-20", amount: 3000 });
+		await insertRow(9405, {
+			date: "2026-09-14",
+			amount: -1500,
+			refundOf: 9404,
+		});
+		const { message } = await setGroceries([9402, 9405]);
+		expect(message).toBe(
+			"Set 2 transactions to Groceries. Their purchases moved with them.",
+		);
+		expect(await stored(9401)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9404)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9402)).toMatchObject({ categoryId: null });
+		expect(await stored(9405)).toMatchObject({ categoryId: null });
+	});
+
+	it("an unlinked refund gets the category itself, as before", async () => {
+		await insertRow(9402, { date: "2026-09-10", amount: -2000 });
+		const { message } = await setGroceries([9402]);
+		expect(message).toBe("Set 1 transaction to Groceries.");
+		expect(await stored(9402)).toEqual({
+			categoryId: GROCERIES,
+			source: "user",
+			refundOf: null,
+		});
+	});
+
+	it("a mix of ordinary rows, an unlinked refund and a linked refund counts the purchase as one changed row", async () => {
+		await insertRow(9401, { date: "2026-09-05", amount: 5000 });
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9401,
+		});
+		await insertRow(9406, { date: "2026-09-01", amount: 1000 });
+		await insertRow(9407, { date: "2026-09-12", amount: -500 });
+		const { message } = await setGroceries([9406, 9407, 9402]);
+		expect(message).toBe(
+			"Set 3 transactions to Groceries. Its Sep 5 purchase moved with it.",
+		);
+		expect(await stored(9406)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9407)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9401)).toMatchObject({ categoryId: GROCERIES });
+		expect(await stored(9402)).toMatchObject({ categoryId: null });
+	});
+
+	it("a refund of a split part moves that part, not the split parent", async () => {
+		await insertRow(9410, { date: "2026-09-05", amount: 5000, isSplit: 1 });
+		await insertRow(9411, {
+			date: "2026-09-05",
+			amount: 5000,
+			parent: 9410,
+			category: EATING_OUT,
+		});
+		await insertRow(9412, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9411,
+		});
+		const { message } = await setGroceries([9412]);
+		expect(message).toBe(
+			"Set 1 transaction to Groceries. Its Sep 5 purchase moved with it.",
+		);
+		expect(await stored(9411)).toEqual({
+			categoryId: GROCERIES,
+			source: "user",
+			refundOf: null,
+		});
+		expect(await stored(9410)).toMatchObject({ categoryId: null });
+		expect(await stored(9412)).toMatchObject({
+			categoryId: null,
+			refundOf: 9411,
+		});
+	});
+
+	it.each([
+		{
+			why: "its purchase is excluded",
+			purchase: { excluded: 1 as const },
+			refund: {},
+		},
+		{
+			why: "the refund is not reviewed",
+			purchase: {},
+			refund: { reviewed: 0 as const },
+		},
+		{
+			why: "the refund is income",
+			purchase: {},
+			refund: { income: 1 as const },
+		},
+	])(
+		"a linked refund that doesn't follow, because $why, takes the category itself and leaves its purchase alone",
+		async ({ purchase, refund }) => {
+			await insertRow(9401, {
+				date: "2026-09-05",
+				amount: 5000,
+				category: EATING_OUT,
+				...purchase,
+			});
+			await insertRow(9402, {
+				date: "2026-09-10",
+				amount: -2000,
+				refundOf: 9401,
+				...refund,
+			});
+			const { message } = await setGroceries([9402]);
+			expect(message).toBe("Set 1 transaction to Groceries.");
+			expect(await stored(9402)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: 9401,
+			});
+			expect(await stored(9401)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+		},
+	);
+
+	it("a linked refund whose purchase becomes the third Groceries pick gets Tally's rule question", async () => {
+		// Two Groceries picks already, so the purchase that moves with its refund is the third.
+		await insertRow(9420, {
+			date: "2026-09-01",
+			amount: 1000,
+			category: GROCERIES,
+		});
+		await insertRow(9421, {
+			date: "2026-09-02",
+			amount: 1200,
+			category: GROCERIES,
+		});
+		await insertRow(9401, { date: "2026-09-05", amount: 5000 });
+		await insertRow(9402, {
+			date: "2026-09-10",
+			amount: -2000,
+			refundOf: 9401,
+		});
+		const { res } = await setGroceries([9402]);
+		expect(await res.text()).toContain("Always use Groceries for");
+	});
+
+	describe("a link that changes while the save runs", () => {
+		type TestApp = { Bindings: Env; Variables: { actor: string } };
+		const route = new Hono<TestApp>();
+		route.use("*", async (c, next) => {
+			c.set("actor", "test@example.com");
+			await next();
+		});
+		route.route("/", transactions as unknown as Hono<TestApp>);
+
+		/**
+		 * The DB, with `rival` run just before the first statement that starts with `prefix` runs (its run, all or
+		 * first), so a change lands between the save's start and its write. The rival writes through the real
+		 * database, so it is not guarded itself.
+		 */
+		function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
+			let raced = false;
+			const fire = async () => {
+				if (raced) return;
+				raced = true;
+				await rival();
+			};
+			const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
+				new Proxy(statement, {
+					get(target, prop) {
+						if (prop === "bind")
+							return (...values: unknown[]) => guard(target.bind(...values));
+						if (prop === "run" || prop === "all" || prop === "first")
+							return async (...args: unknown[]) => {
+								await fire();
+								return Reflect.apply(target[prop], target, args);
+							};
+						const value = Reflect.get(target, prop);
+						return typeof value === "function" ? value.bind(target) : value;
+					},
+				});
+			return new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop === "prepare")
+						return (sql: string) => {
+							const statement = target.prepare(sql);
+							return sql.startsWith(prefix) ? guard(statement) : statement;
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+		}
+
+		/** The sheet's Set category save for `ids` (Groceries, not all mode), run through the route on `db`. */
+		async function saveWith(db: D1Database, ids: number[]) {
+			const body = new URLSearchParams({
+				category: String(GROCERIES),
+				back: "/transactions?month=all",
+			});
+			for (const id of ids) body.append("ids", String(id));
+			const res = await route.request(
+				"/transactions/select/category/save",
+				{
+					method: "POST",
+					body,
+					headers: {
+						Origin: "http://tally.test",
+						"HX-Request": "true",
+						"content-type": "application/x-www-form-urlencoded",
+					},
+				},
+				{ ...env, DB: db },
+			);
+			const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+				toast?: { message: string };
+				announce?: string;
+			};
+			return {
+				res,
+				message: trigger.toast?.message,
+				announce: trigger.announce,
+			};
+		}
+
+		/** A purchase (9411, Sep 5), a second purchase (9412, Sep 7) and a refund of the first (9413, Sep 10), all Eating out but the refund. */
+		const seed = async () => {
+			await insertRow(9411, {
+				date: "2026-09-05",
+				amount: 5000,
+				category: EATING_OUT,
+			});
+			await insertRow(9412, {
+				date: "2026-09-07",
+				amount: 4000,
+				category: EATING_OUT,
+			});
+			await insertRow(9413, {
+				date: "2026-09-10",
+				amount: -2000,
+				refundOf: 9411,
+			});
+		};
+
+		it("a refund relinked to the second purchase mid-save moves that purchase, and the first keeps its category", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET refund_of_id=9412 WHERE id=9413",
+				).run(),
+			);
+			const { res, message, announce } = await saveWith(db, [9413]);
+			expect(res.status).toBe(200);
+			expect(message).toBe(
+				"Set 1 transaction to Groceries. Its Sep 7 purchase moved with it.",
+			);
+			expect(announce).toBe(message);
+			expect(await stored(9412)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9413)).toEqual({
+				categoryId: null,
+				source: null,
+				refundOf: 9412,
+			});
+		});
+
+		it("a refund unlinked from its purchase mid-save takes the category itself, with no moved sentence", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET refund_of_id=NULL WHERE id=9413",
+				).run(),
+			);
+			const { message, announce } = await saveWith(db, [9413]);
+			expect(message).toBe("Set 1 transaction to Groceries.");
+			expect(announce).toBe(message);
+			expect(await stored(9413)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: null,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+		});
+
+		it("a refund whose purchase is excluded mid-save takes the category itself and stays linked", async () => {
+			await seed();
+			const db = racing("UPDATE transactions SET category_id", () =>
+				env.DB.prepare(
+					"UPDATE transactions SET excluded=1 WHERE id=9411",
+				).run(),
+			);
+			const { message, announce } = await saveWith(db, [9413]);
+			expect(message).toBe("Set 1 transaction to Groceries.");
+			expect(announce).toBe(message);
+			expect(await stored(9413)).toEqual({
+				categoryId: GROCERIES,
+				source: "user",
+				refundOf: 9411,
+			});
+			expect(await stored(9411)).toEqual({
+				categoryId: EATING_OUT,
+				source: "user",
+				refundOf: null,
+			});
+		});
+
+		it("a mixed save of three ticks issues one category write, not one per row", async () => {
+			await seed();
+			await insertRow(9406, { date: "2026-09-01", amount: 1000 });
+			await insertRow(9407, { date: "2026-09-12", amount: -500 });
+			const prepared: string[] = [];
+			const db = new Proxy(env.DB, {
+				get(target, prop) {
+					if (prop === "prepare")
+						return (sql: string) => {
+							prepared.push(sql);
+							return target.prepare(sql);
+						};
+					const value = Reflect.get(target, prop);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			const { res, message } = await saveWith(db, [9406, 9407, 9413]);
+			expect(res.status).toBe(200);
+			expect(message).toBe(
+				"Set 3 transactions to Groceries. Its Sep 5 purchase moved with it.",
+			);
+			expect(
+				prepared.filter((sql) =>
+					sql.startsWith("UPDATE transactions SET category_id"),
+				),
+			).toHaveLength(1);
+		});
+	});
+});
 
 describe("select several transactions", () => {
 	it("keeps every list parameter in Select and Done drops only select", async () => {
@@ -1587,6 +2099,31 @@ describe("select several transactions", () => {
 					"SELECT COUNT(*) AS n FROM transactions WHERE is_split = 0",
 				).first<{ n: number }>()
 			)?.n ?? 0;
+		const selectableIds = async () =>
+			(
+				await env.DB.prepare(
+					"SELECT id FROM transactions WHERE is_split = 0",
+				).all<{ id: number }>()
+			).results.map((row) => row.id);
+
+		/**
+		 * How many rows a Set category on these ids changes (#346): each purchase once, and a ticked refund that
+		 * follows its purchase changes that purchase instead of itself, so its row is not counted.
+		 */
+		const changedCount = async (ids: number[]) =>
+			(
+				await env.DB.prepare(
+					`SELECT COUNT(*) AS n FROM (
+						SELECT t.id AS id FROM transactions t LEFT JOIN transactions rp ON rp.id = t.refund_of_id
+						WHERE t.id IN (SELECT value FROM json_each(?1)) AND NOT ${FOLLOWS_PURCHASE}
+						UNION
+						SELECT rp.id AS id FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id
+						WHERE t.id IN (SELECT value FROM json_each(?1)) AND ${FOLLOWS_PURCHASE}
+					)`,
+				)
+					.bind(JSON.stringify(ids))
+					.first<{ n: number }>()
+			)?.n ?? 0;
 
 		/** The count's reply for an all-mode selection on this page's rows: `ticked` are the boxes that are checked. */
 		const wholeCount = async (
@@ -1675,14 +2212,28 @@ describe("select several transactions", () => {
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
-			).toBe(`Set ${total - 1} transactions to Groceries.`);
+			).toBe(
+				`Set ${await changedCount((await selectableIds()).filter((id) => id !== first))} transactions to Groceries.`,
+			);
 			const after = (
 				await env.DB.prepare(
 					"SELECT id, is_split, category_id FROM transactions",
 				).all<{ id: number; is_split: number; category_id: number | null }>()
 			).results;
+			// A refund that follows its purchase keeps its own category: its purchase took the category (#346).
+			const followers = new Set(
+				(
+					await env.DB.prepare(
+						`SELECT t.id AS id FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE ${FOLLOWS_PURCHASE}`,
+					).all<{ id: number }>()
+				).results.map((row) => row.id),
+			);
 			for (const row of after) {
 				if (row.id === first) expect(row.category_id).toBe(firstBefore);
+				else if (followers.has(row.id))
+					expect(row.category_id).toBe(
+						before.find((b) => b.id === row.id)?.category_id,
+					);
 				else if (row.is_split === 0) expect(row.category_id).toBe(1);
 			}
 		});
@@ -2228,7 +2779,9 @@ describe("select several transactions", () => {
 			expect(res.status).toBe(200);
 			expect(
 				JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
-			).toBe(`Set ${total - 1} transactions to Groceries.`);
+			).toBe(
+				`Set ${await changedCount((await selectableIds()).filter((id) => id !== x))} transactions to Groceries.`,
+			);
 			expect(
 				await env.DB.prepare("SELECT category_id FROM transactions WHERE id=?")
 					.bind(x)
