@@ -1115,9 +1115,9 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
-				<State label="A $1,000,000 result at 320px: the stamp wraps under the amount">
-					<Picture label="A seven-figure finished amount at 320px, with its Under stamp dropping beneath it">
-						<div class="w-[320px] max-w-full">
+				<State label="A $1,000,000 result on a phone under 640px: one size smaller, and the stamp wraps under the amount">
+					<Picture label="A seven-figure finished amount in the 280px column of a 320px phone, one size smaller, with its Under stamp dropping beneath it">
+						<div class="w-[320px] max-w-full px-5">
 							<MonthEnd
 								chartId="catalog-large-result"
 								monthName="September"
