@@ -5,6 +5,7 @@ import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
+import { headlineAmountClass } from "./headline-amount";
 import { HowLink } from "./how-link";
 import { LedgerIllustration } from "./illustration";
 import { WhyLink } from "./why-link";
@@ -58,7 +59,7 @@ export function HomeTop({
 						Safe to spend · <WhyLink section="budget" topic="safe to spend" />
 					</p>
 					<p
-						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""}`}
+						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 					>
 						{amount}
 						{currentMonth && bankDate && (
