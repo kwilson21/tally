@@ -1265,21 +1265,33 @@ export async function saveEdit(
 		);
 	// A split is one bank transaction: excluding any part of it excludes the purchase and
 	// all its parts. Child audit fields change only when the choice does.
+	// A Kind or For that differs from the stored one changes it and clears Jev's category confidence
+	// (kindChanged, personChanged). A pick is the person's choice even when it is the stored guess (kindTaken,
+	// personTaken, #377): with Details hidden the panel drew the guess as Not known, so a posted value that
+	// differs from what was drawn (detailsFieldChanged) is a pick, whatever the stored value is.
 	const kindChanged =
 		edit.kind !== undefined &&
 		edit.kind !== current.kind &&
-		(edit.kind !== undefined || edit.detailsFieldChanged === true) &&
 		(current.kindGuessed === 0 ||
 			edit.detailsVisible !== false ||
+			edit.detailsFieldChanged === true);
+	const kindTaken =
+		kindChanged ||
+		(edit.kind !== undefined &&
+			current.kindGuessed === 1 &&
 			edit.detailsFieldChanged === true);
 	const personChanged =
 		edit.forPersonId !== undefined &&
 		edit.forPersonId !== current.forPersonId &&
-		(edit.forPersonId !== undefined || edit.detailsFieldChanged === true) &&
 		(current.forPersonGuessed === 0 ||
 			edit.detailsVisible !== false ||
 			edit.detailsFieldChanged === true);
-	if (noteChanged || kindChanged || personChanged || edit.keepDetails) {
+	const personTaken =
+		personChanged ||
+		(edit.forPersonId !== undefined &&
+			current.forPersonGuessed === 1 &&
+			edit.detailsFieldChanged === true);
+	if (noteChanged || kindTaken || personTaken || edit.keepDetails) {
 		statements.push(
 			gated(
 				`UPDATE transactions SET
@@ -1298,13 +1310,13 @@ export async function saveEdit(
 				[
 					kindChanged ? 1 : 0,
 					edit.kind ?? null,
-					kindChanged ? 1 : 0,
+					kindTaken ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
 					kindChanged ? 1 : 0,
 					edit.kind === null ? 1 : 0,
 					personChanged ? 1 : 0,
 					edit.forPersonId ?? null,
-					personChanged ? 1 : 0,
+					personTaken ? 1 : 0,
 					edit.keepDetails ? 1 : 0,
 					personChanged ? 1 : 0,
 					edit.forPersonId === null ? 1 : 0,
