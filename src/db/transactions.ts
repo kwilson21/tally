@@ -1549,8 +1549,8 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
  * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills still
- * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the purchase, and each
- * new part starts with it.
+ * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the
+ * purchase, and each new part starts with it.
  */
 export async function saveSplit(
 	db: D1Database,
