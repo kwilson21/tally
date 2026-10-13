@@ -1023,6 +1023,141 @@ describe("new categories", () => {
 	});
 });
 
+describe("a Never suggest Yes writes each store once, in one statement (#440)", () => {
+	const CHEWY = "CHEWY.COM 1";
+	const PETSMART = "PETSMART 22";
+
+	/** The D1 statements one request prepares, counted on the database the route reads. */
+	async function statementsFor(
+		fields: Record<string, string | string[]>,
+	): Promise<number> {
+		const prepare = vi.spyOn(db, "prepare");
+		try {
+			await post("/settings/suggestions", fields, true);
+			return prepare.mock.calls.length;
+		} finally {
+			prepare.mockRestore();
+		}
+	}
+
+	const yesFor = (suggestion: number, store: string | string[]) => ({
+		id: `new-${suggestion}`,
+		answer: "ask_yes",
+		kind: "new_category",
+		store,
+	});
+
+	const lines = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT merchant_key AS key FROM never_suggest_rules ORDER BY merchant_key",
+				)
+				.all<{ key: string }>()
+		).results.map((line) => line.key);
+
+	it("a form repeating one store 1,200 times writes one line, in as many statements as one store", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		const one = await statementsFor(yesFor(ids.suggestion, CHEWY));
+		await db.prepare("DELETE FROM never_suggest_rules").run();
+		const copies = await statementsFor(
+			yesFor(ids.suggestion, Array(1200).fill(CHEWY)),
+		);
+		expect(copies).toBe(one);
+		expect(await lines()).toEqual([CHEWY]);
+	});
+
+	it("two distinct stores of a multi-store question write two lines, in the statements one store takes", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		const one = await statementsFor(yesFor(ids.suggestion, CHEWY));
+		await db.prepare("DELETE FROM never_suggest_rules").run();
+		const two = await statementsFor(
+			yesFor(ids.suggestion, [CHEWY, PETSMART, CHEWY]),
+		);
+		expect(two).toBe(one);
+		expect(await lines()).toEqual([CHEWY, PETSMART]);
+	});
+
+	it("a Yes with no No before it writes no line, whatever stores it names", async () => {
+		const ids = await oneOfEach();
+		const { res } = await post(
+			"/settings/suggestions",
+			yesFor(ids.suggestion, CHEWY),
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([]);
+	});
+
+	it("a Yes on an income or transfer question writes its line once the No stands, and none before it", async () => {
+		const ids = await oneOfEach();
+		const answer = (id: string, kind: string, store: string) => ({
+			id,
+			answer: "ask_yes",
+			kind,
+			store,
+		});
+		await post(
+			"/settings/suggestions",
+			answer(`transfer-${ids.transfer}`, "transfer", CHASE),
+			true,
+		);
+		expect(await lines()).toEqual([]);
+		await post(
+			"/settings/suggestions",
+			{ id: `transfer-${ids.transfer}`, answer: "no" },
+			true,
+		);
+		await post(
+			"/settings/suggestions",
+			answer(`transfer-${ids.transfer}`, "transfer", CHASE),
+			true,
+		);
+		expect(
+			await row("SELECT merchant_key, kind FROM never_suggest_rules"),
+		).toMatchObject({ merchant_key: CHASE, kind: "transfer" });
+		await db.prepare("DELETE FROM never_suggest_rules").run();
+		await post(
+			"/settings/suggestions",
+			answer(`income-${ids.income}`, "income", VENMO),
+			true,
+		);
+		expect(await lines()).toEqual([]);
+	});
+
+	it("a Yes is refused once the No that asked it no longer stands", async () => {
+		const ids = await oneOfEach();
+		await post(
+			"/settings/suggestions",
+			{ id: `new-${ids.suggestion}`, answer: "no" },
+			true,
+		);
+		await db
+			.prepare(
+				"UPDATE category_suggestions SET status = 'pending' WHERE id = ?",
+			)
+			.bind(ids.suggestion)
+			.run();
+		const { res } = await post(
+			"/settings/suggestions",
+			yesFor(ids.suggestion, CHEWY),
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await lines()).toEqual([]);
+	});
+});
+
 /** The purchases a new-category form ticks: the checkbox values that carry `checked`. */
 const checkedTicks = (html: string) =>
 	[...html.matchAll(/<input[^>]*name="ticked"[^>]*>/g)]

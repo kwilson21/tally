@@ -12,7 +12,7 @@ import {
 	settleSuggestion,
 } from "../db/merchant-names";
 import {
-	addNeverSuggest,
+	addNeverSuggests,
 	NEVER_SUGGEST_KINDS,
 	type NeverSuggestKind,
 	questionStores,
@@ -333,10 +333,15 @@ suggestions.post(PATH, async (c) => {
 	// The question after a No: Yes writes one line per store, Not now writes nothing (decision 101).
 	if (answer === "ask_yes" || answer === "ask_not_now") {
 		const kind = form.get("kind")?.toString() ?? "";
-		const stores = form
-			.getAll("store")
-			.map((store) => store.toString())
-			.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY);
+		// Each store once, however often the form repeats it (#440).
+		const stores = [
+			...new Set(
+				form
+					.getAll("store")
+					.map((store) => store.toString())
+					.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY),
+			),
+		];
 		if (
 			!NEVER_SUGGEST_KINDS.includes(kind as NeverSuggestKind) ||
 			stores.length === 0
@@ -350,16 +355,16 @@ suggestions.post(PATH, async (c) => {
 				toast: { message, type: "info", announce: `${message} ${left(queue)}` },
 			});
 		}
-		// Only the question's own store can get a line, whatever the form says (decision 101).
+		// Only the question's own store can get a line, whatever the form says, and only while its No stands
+		// (decision 101). Each store is unique, so the write is at most one line per store the question has.
 		const asked = await questionStores(db, kind as NeverSuggestKind, id);
 		const known = stores.filter((store) => asked.has(store));
 		if (known.length === 0) return stale();
-		for (const merchantKey of known)
-			await addNeverSuggest(db, {
-				merchantKey,
-				kind: kind as NeverSuggestKind,
-				decidedOn: today,
-			});
+		await addNeverSuggests(db, {
+			merchantKeys: known,
+			kind: kind as NeverSuggestKind,
+			decidedOn: today,
+		});
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
 		const labels = joinStores([...(await storeLabels(db, known)).values()]);

@@ -69,6 +69,8 @@ export async function neverSuggestRules(
  * The stores a question about one item may write a line for: the item's own store, read from the database
  * by the item's key (`income-12`, `transfer-12` or `new-3`, a suggestion's number). A store the form names
  * that isn't one of these is refused, so an answer can't write a line for text the question never named.
+ * The question is current only while the No that asked it stands: income or a transfer said No, or the new
+ * category was dismissed. Otherwise no store comes back, so a Yes with no No before it writes nothing (#440).
  */
 export async function questionStores(
 	db: D1Database,
@@ -81,13 +83,43 @@ export async function questionStores(
 	if (kind !== (prefix === "new" ? "new_category" : prefix)) return new Set();
 	const sql =
 		prefix === "new"
-			? `SELECT DISTINCT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.category_suggestion_id = ?`
-			: `SELECT ${merchantKeySql("t")} AS key FROM transactions t WHERE t.id = ?`;
+			? `SELECT DISTINCT ${merchantKeySql("t")} AS key FROM transactions t
+				WHERE t.category_suggestion_id = ?1
+				AND EXISTS (SELECT 1 FROM category_suggestions cs WHERE cs.id = ?1 AND cs.status = 'dismissed')`
+			: `SELECT ${merchantKeySql("t")} AS key FROM transactions t
+				WHERE t.id = ?1 AND t.${prefix}_maybe_declined = 1`;
 	const { results } = await db
 		.prepare(sql)
 		.bind(Number(number))
 		.all<{ key: string }>();
 	return new Set(results.map((row) => row.key));
+}
+
+/**
+ * Adds one line for each store when the person said Yes, in one statement, so the number of stores never sets
+ * the number of writes (#440). A line already there stays as it is, so a repeat answer adds nothing and keeps
+ * the day of the first. Returns how many lines were added.
+ */
+export async function addNeverSuggests(
+	db: D1Database,
+	{
+		merchantKeys,
+		kind,
+		decidedOn,
+	}: {
+		merchantKeys: string[];
+		kind: NeverSuggestKind;
+		decidedOn: string;
+	},
+): Promise<number> {
+	const result = await db
+		.prepare(
+			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			SELECT value, ?, ? FROM json_each(?)`,
+		)
+		.bind(kind, decidedOn, JSON.stringify(merchantKeys))
+		.run();
+	return result.meta.changes;
 }
 
 /**
@@ -106,14 +138,12 @@ export async function addNeverSuggest(
 		decidedOn: string;
 	},
 ): Promise<boolean> {
-	const result = await db
-		.prepare(
-			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-			VALUES (?, ?, ?)`,
-		)
-		.bind(merchantKey, kind, decidedOn)
-		.run();
-	return result.meta.changes > 0;
+	const added = await addNeverSuggests(db, {
+		merchantKeys: [merchantKey],
+		kind,
+		decidedOn,
+	});
+	return added > 0;
 }
 
 /**
