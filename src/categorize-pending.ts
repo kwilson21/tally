@@ -113,7 +113,8 @@ export async function categorizePending(
 	if (categories.length === 0 && !start.details && !start.income) return done;
 	// Sent even when only income is on: the one call asks everything together (spec §7), and a row is
 	// marked as asked by the category confidence the answer carries (decision 27). With no active category,
-	// a credit's income answer or an outgoing purchase's transfer answer marks it asked instead.
+	// a credit's income answer (while income is on) or an outgoing purchase's transfer answer (while categories
+	// are on) marks it asked instead.
 	const names = categories.map((c) => c.name);
 	let people = start.details
 		? await env.DB.prepare(

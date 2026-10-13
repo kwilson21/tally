@@ -514,6 +514,56 @@ describe("categorizePending", () => {
 		expect(sent).toHaveLength(1);
 	});
 
+	it("asks about an outgoing purchase whose details were asked before, with categories on, income off and no active category, and never about a credit", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await db.prepare("UPDATE categories SET archived=1").run();
+		await switchTo({ categories: true, income: false, details: true });
+		// The demo's pending rows are set aside, so only the two rows this test adds can be asked about.
+		await db
+			.prepare(
+				"UPDATE transactions SET category_confidence = 0.5, details_asked = 1",
+			)
+			.run();
+		for (const [date, amount, rawName] of [
+			[`${MONTH}-21`, 700, "DETAILS ASKED PURCHASE"],
+			[`${MONTH}-05`, -2000, "OLDER CREDIT"],
+		] as const)
+			await db
+				.prepare(
+					"INSERT INTO transactions(account_id,date,amount_cents,raw_name,plaid_category,excluded,details_asked) VALUES(1,?,?,?,NULL,0,1)",
+				)
+				.bind(date, amount, rawName)
+				.run();
+		const sent: string[] = [];
+		const fetchImpl = async (_url: string, init?: RequestInit) => {
+			sent.push(String(init?.body));
+			return Response.json({
+				answers: {
+					transfer: { noul: 0.99 },
+					reimbursement: { noul: 0.01 },
+					income: { noul: 0.01 },
+				},
+			});
+		};
+		// Only the purchase is asked: the income switch is off, so the credit is never sent.
+		expect(
+			await categorizePending(withKey, fetchImpl, { rulesApplied: true }),
+		).toEqual({ asked: 1, applied: 0 });
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toContain("DETAILS ASKED PURCHASE");
+		expect(
+			await db
+				.prepare(
+					"SELECT flag_transfer, excluded, excluded_source FROM transactions WHERE raw_name = 'DETAILS ASKED PURCHASE'",
+				)
+				.first(),
+		).toEqual({ flag_transfer: 1, excluded: 1, excluded_source: "jev" });
+		expect(
+			await categorizePending(withKey, fetchImpl, { rulesApplied: true }),
+		).toEqual({ asked: 0, applied: 0 });
+		expect(sent).toHaveLength(1);
+	});
+
 	it("does not read or send history when category guessing is off, but does when it is on", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const target = await db

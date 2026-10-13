@@ -1906,7 +1906,7 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * already looked and wasn't sure (decision 27).
  *
  * `categoryAsked` is false when no category is active. Then a category question isn't asked, so its category
- * confidence is never stored. A credit is asked for its income answer, and not a credit a person reviewed for its
+ * confidence is never stored. A credit is asked for its income answer while the income switch is on, and not a credit a person reviewed for its
  * category alone, which would also have no category question to answer. An outgoing purchase (more than zero) is
  * asked once for its transfer and reimbursement flags, while the categories switch is on, and its answer marks it
  * asked: a low one is stored as its `transfer_confidence`, and a confident one sets the flag and excludes it, so it
@@ -1959,7 +1959,7 @@ export async function pendingForJev(
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
-				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ((t.amount_cents < 0 AND t.income_confidence IS NULL) OR (? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))))
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ((? = 1 AND t.amount_cents < 0 AND t.income_confidence IS NULL) OR (? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))))
 				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
@@ -1971,8 +1971,9 @@ export async function pendingForJev(
 			LIMIT ?`,
 		)
 		.bind(
-			(categories && categoryAsked) || income ? 1 : 0,
+			categories || income ? 1 : 0,
 			categoryAsked ? 1 : 0,
+			income ? 1 : 0,
 			categories ? 1 : 0,
 			details ? 1 : 0,
 			categories || details ? 1 : 0,
