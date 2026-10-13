@@ -1,4 +1,5 @@
 import { env, exports } from "cloudflare:workers";
+import htmxSource from "htmx.org/dist/htmx.js?raw";
 import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
@@ -39,12 +40,41 @@ function attributes(tag: string): Map<string, string> {
 	return attrs;
 }
 
+/** htmx's #prefixes: a name, and the same name with the prefix in place of hx-. */
+const spellings = (name: string, prefix: string) => [
+	name,
+	name.replaceAll("hx-", prefix),
+];
+
 /**
- * Every element on the page that can post a change or swap a target: a form, an element with an hx-post,
- * hx-get, hx-put, hx-patch or hx-delete, a formaction, and a button or input that submits (type submit or
- * image, or one that names another form). `inert` says whether it sits inside an inert element, itself
- * included. It reads attribute names through attributes(), so text inside quotes never counts. Scripts and
- * styles are skipped, and every tag must close in order, so a wrong nesting fails.
+ * htmx 4's request attributes and its prefix, read from the installed htmx so an upgrade can't leave this list
+ * behind. #actionSelector (htmx.js:152) names the attributes htmx sets up, and config.prefix (htmx.js:187) is the
+ * spelling each one also answers to. A changed shape throws here, loudly, instead of returning an empty list.
+ */
+function readHtmx(source: string) {
+	const selector = source.match(
+		/#actionSelector = this\.#prefixSelector\('([^']+)'\)/,
+	)?.[1];
+	const prefix = source.match(/prefix: "([^"]+)"/)?.[1];
+	if (!selector || !prefix)
+		throw new Error(
+			"htmx.js changed shape: update readHtmx() in test/design-system-proposals.test.ts (#448)",
+		);
+	const names = [...selector.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1] ?? "");
+	return {
+		prefix,
+		request: names.flatMap((name) => spellings(name, prefix)),
+	};
+}
+const HTMX = readHtmx(htmxSource);
+
+/**
+ * Every element on the page that can post a change or swap a target: a form, an element with a request
+ * attribute htmx 4 sets up (HTMX.request), hx-boost (which boosts a link or form into a request), a formaction,
+ * and a button or input that submits (type submit or image, or one that names another form). `inert` says
+ * whether it sits inside an inert element, itself included. It reads attribute names through attributes(), so
+ * text inside quotes never counts. Scripts and styles are skipped, and every tag must close in order, so a
+ * wrong nesting fails.
  */
 function actions(html: string) {
 	const open: { tag: string; inert: boolean }[] = [];
@@ -65,20 +95,38 @@ function actions(html: string) {
 			attrs.has("form");
 		const acts =
 			tag === "form" ||
-			[
-				"hx-post",
-				"hx-get",
-				"hx-put",
-				"hx-patch",
-				"hx-delete",
-				"formaction",
-			].some((name) => attrs.has(name)) ||
+			[...attrs.keys()].some(
+				(name) =>
+					HTMX.request.includes(name) ||
+					name === "formaction" ||
+					spellings("hx-boost", HTMX.prefix).some((p) => name.startsWith(p)),
+			) ||
 			((tag === "button" || tag === "input") && submits);
 		if (acts) found.push({ raw, inert: inert || open.some((o) => o.inert) });
 		if (!raw.endsWith("/>") && !VOID.has(tag)) open.push({ tag, inert });
 	}
 	expect(open).toEqual([]);
 	return found;
+}
+
+/**
+ * The opening tags that htmx can fire without a press: any hx-trigger or hx-on attribute, bare, with a ":..."
+ * suffix, or in htmx's prefixed spelling. inert doesn't stop them (load, every N, revealed and from: fire on
+ * their own, and hx-on runs code on htmx's events), so the route test requires none. Scripts and styles are
+ * skipped, as in actions().
+ */
+function firesByItself(html: string): string[] {
+	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+	const names = ["hx-trigger", "hx-on"].flatMap((name) =>
+		spellings(name, HTMX.prefix),
+	);
+	return [...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
+		.map((m) => m[0])
+		.filter((raw) =>
+			[...attributes(raw).keys()].some((name) =>
+				names.some((p) => name.startsWith(p)),
+			),
+		);
 }
 
 describe("actions()", () => {
@@ -127,6 +175,98 @@ describe("actions()", () => {
 		const found = actions('<div><a hx-get="/y">x</a></div>');
 		expect(found.length).toBe(1);
 		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("finds an hx-action button, a request attribute htmx 4 sets up, and leaves it live", () => {
+		const found = actions(
+			'<button type="button" hx-action="/x" hx-method="POST">Go</button>',
+		);
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("finds an hx-query element, a request attribute htmx 4 sets up, and leaves it live", () => {
+		const found = actions('<div hx-query="/x"></div>');
+		expect(found.length).toBe(1);
+		expect(found[0]?.inert).toBe(false);
+	});
+
+	it("reads an hx-action button and an hx-query element inside an inert wrapper as inert", () => {
+		const found = actions(
+			'<div inert=""><button type="button" hx-action="/x" hx-method="POST">Go</button><div hx-query="/x"></div></div>',
+		);
+		expect(found.map((a) => a.inert)).toEqual([true, true]);
+	});
+
+	it("finds the data-hx- prefixed request attributes, which htmx 4 reads too, and reads them inert inside a wrapper", () => {
+		for (const html of [
+			'<a data-hx-post="/x">x</a>',
+			'<button type="button" data-hx-action="/x">x</button>',
+		]) {
+			const found = actions(html);
+			expect(found.length, html).toBe(1);
+			expect(found[0]?.inert, html).toBe(false);
+			const wrapped = actions(`<div inert="">${html}</div>`);
+			expect(
+				wrapped.map((a) => a.inert),
+				html,
+			).toEqual([true]);
+		}
+	});
+
+	it("finds hx-boost, which boosts a link or form into a request, bare, inherited and prefixed", () => {
+		const boosted = actions('<a hx-boost="true" href="/x">x</a>');
+		expect(boosted.length).toBe(1);
+		expect(boosted[0]?.inert).toBe(false);
+		const inherited = actions(
+			'<div hx-boost:inherited="true"><a href="/x">x</a></div>',
+		);
+		expect(inherited.length).toBe(1);
+		expect(inherited[0]?.raw).toContain("hx-boost:inherited");
+		expect(inherited[0]?.inert).toBe(false);
+		expect(actions('<div data-hx-boost="true"></div>').length).toBe(1);
+	});
+
+	it("doesn't count hx-trigger or hx-method alone, since htmx 4 makes no request from either", () => {
+		expect(actions('<div hx-trigger="click"></div>')).toEqual([]);
+		expect(actions('<div hx-method="POST"></div>')).toEqual([]);
+	});
+
+	it("lists every opening tag that can fire without a press, inert or not, and no plain request", () => {
+		expect(
+			firesByItself(
+				'<div inert=""><div hx-get="/x" hx-trigger="load"></div></div>',
+			),
+		).toHaveLength(1);
+		expect(
+			firesByItself(
+				'<div hx-trigger:inherited="every 1s"><a hx-get="/y">y</a></div>',
+			),
+		).toHaveLength(1);
+		expect(
+			firesByItself('<div data-hx-trigger="revealed"></div>'),
+		).toHaveLength(1);
+		expect(
+			firesByItself('<button type="button" hx-on:click="x()">x</button>'),
+		).toHaveLength(1);
+		expect(
+			firesByItself('<div data-hx-on::after:init="x()"></div>'),
+		).toHaveLength(1);
+		expect(firesByItself('<div hx-get="/x"></div>')).toEqual([]);
+	});
+
+	it("reads the request names and the prefix from the installed htmx, and fails loudly if its source changes shape", () => {
+		expect(HTMX.request).toEqual(
+			expect.arrayContaining([
+				"hx-get",
+				"hx-post",
+				"hx-action",
+				"hx-query",
+				"data-hx-get",
+				"data-hx-action",
+			]),
+		);
+		expect(HTMX.prefix).toBe("data-hx-");
 	});
 });
 
@@ -573,14 +713,24 @@ describe("GET /design-system/proposals", () => {
 		expect(p75).toContain("decision 85");
 	});
 
-	it("keeps every form, hx-post, hx-get, formaction and submit button inside an inert element, so no drawn bill can post an unlink or swap a #page this page lacks (#448)", async () => {
+	it("keeps every form, htmx request (as htmx 4 lists them), hx-boost, formaction and submit button inside an inert element, and draws no hx-trigger or hx-on that could fire without a press, so no drawn bill can post an unlink or swap a #page this page lacks (#448)", async () => {
 		const { html } = await get("/design-system/proposals");
 		const found = actions(html);
 		// The bill drawings' Not this one forms (the issue's case) must be among them, so the loop below can't pass by finding none.
 		expect(found.some((a) => a.raw.includes("/unlink"))).toBe(true);
 		// inert, not hx-ignore: a native form post still runs under hx-ignore, and the catalog CSP's form-action 'none'
-		// covers this page too but doesn't stop htmx's own request. Only inert stops both.
+		// covers this page too but doesn't stop htmx's own request. Only inert stops both. inert stops a press or a submit,
+		// both native and htmx; it doesn't stop a trigger that fires by itself or an hx-on handler, so the page has none of those.
 		for (const action of found) expect(action.inert, action.raw).toBe(true);
+		expect(firesByItself(html)).toEqual([]);
+		// The prefix the test assumes is htmx's own default, so the page's htmx-config meta must not override it.
+		const config = [...html.matchAll(/<meta\b[^>]*>/gi)]
+			.map((m) => m[0])
+			.find((raw) => attributes(raw).get("name") === "htmx-config");
+		expect(config).toBeDefined();
+		const content = config ? attributes(config).get("content") : undefined;
+		expect(content).toBeDefined();
+		expect(content).not.toContain("prefix");
 		// A button with no type submits a form it sits in, so every button declares one and the walk above sees it.
 		const buttons = [...html.matchAll(/<button\b[^>]*>/gi)].map(
 			(m) => m[0] ?? "",
