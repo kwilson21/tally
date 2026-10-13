@@ -318,6 +318,33 @@ export async function askAgainMany(
 	}
 }
 
+/**
+ * Asks Jev again about the transactions a create left out (decision 79), right after the page has answered, so
+ * the save never waits for it. Nothing is asked without a Jev key or while Guess categories is off; then they wait
+ * for the night. `waitUntil` is the request's, passed in so a request that asks nothing never reads it.
+ */
+export async function askAgainLeftOut(
+	env: CategorizeEnv,
+	ids: number[],
+	waitUntil: (work: Promise<void>) => void,
+): Promise<void> {
+	if (!ids.length || !env.JEV_API_KEY) return;
+	if (!(await readAiSwitches(env.DB)).categories) return;
+	// waitUntil starts a promise at once; yield this turn so the page can answer first.
+	waitUntil(
+		new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
+			askAgainMany(env, ids, AFTER_SYNC_BATCH),
+		),
+	);
+}
+
+/** "The 2 you left out go back to Tally to sort again.", or nothing when none were left out. */
+export function leftOutSentence(count: number): string {
+	return count
+		? `The ${count} you left out ${count === 1 ? "goes" : "go"} back to Tally to sort again.`
+		: "";
+}
+
 /** Failures that would hit every call, not just this transaction's. */
 function serviceWide(status: number | null): boolean {
 	return (
