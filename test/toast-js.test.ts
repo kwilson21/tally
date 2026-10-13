@@ -1711,25 +1711,43 @@ describe("the first tick after Older or Newer in Select mode (#456)", () => {
 		results.append(row);
 		return { results, tick };
 	};
-	/** htmx's event once a request has ended: its ctx has the status it ended with and the element it swapped. */
-	const requestEnded = (
-		document: EventTarget,
-		target: FakeNode,
-		status = "swapped",
-	) => fire(document, "htmx:finally:request", { ctx: { status, target } });
-
-	it("focuses the first tick on the next frame, after the load's class is off the form", async () => {
-		const { document } = await page();
+	/** Stubs requestAnimationFrame to queue its frames; the returned function runs the queued ones, as the next frame would. */
+	const stubFrames = () => {
 		const frames: Array<() => void> = [];
 		vi.stubGlobal("requestAnimationFrame", (run: () => void) => {
 			frames.push(run);
 			return frames.length;
 		});
+		return () => {
+			for (const run of frames.splice(0)) run();
+		};
+	};
+	/**
+	 * htmx's event once a request has ended: its ctx has the status it ended with, the element it swapped, and the
+	 * swap and response htmx gave it. A list htmx swapped in is "innerHTML show:top" (the page links' hx-swap). A 500
+	 * is swap "none" (Layout's noSwap), and its status is still "swapped".
+	 */
+	const requestEnded = (
+		document: EventTarget,
+		target: FakeNode,
+		{
+			status = "swapped",
+			swap = "innerHTML show:top",
+			code = 200,
+		}: { status?: string; swap?: string; code?: number } = {},
+	) =>
+		fire(document, "htmx:finally:request", {
+			ctx: { status, target, swap, response: { status: code } },
+		});
+
+	it("focuses the first tick on the next frame, after the load's class is off the form", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
 		const { results, tick } = listReply();
 		requestEnded(document, results);
 		// htmx takes the load's class off the form after this event, so the tick is still hidden now.
 		expect(document.activeElement).not.toBe(tick);
-		for (const run of frames.splice(0)) run();
+		runFrames();
 		expect(document.activeElement).toBe(tick);
 	});
 
@@ -1751,7 +1769,42 @@ describe("the first tick after Older or Newer in Select mode (#456)", () => {
 		const { results } = listReply();
 		const elsewhere = new FakeNode("input");
 		document.activeElement = elsewhere;
-		requestEnded(document, results, "error: AbortError");
+		requestEnded(document, results, { status: "error: AbortError" });
 		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it("leaves focus on a filter the person moved to while the list loaded", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		const { results } = listReply();
+		const filter = new FakeNode("select");
+		document.activeElement = filter;
+		requestEnded(document, results);
+		runFrames();
+		expect(document.activeElement).toBe(filter);
+	});
+
+	it("a failed Older or Newer (500, not swapped) leaves focus on the pressed link", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		// The page's list is still the previous page's, and it still holds its autofocus tick.
+		const { results } = listReply();
+		const older = new FakeNode("a");
+		document.activeElement = older;
+		requestEnded(document, results, { swap: "none", code: 500 });
+		runFrames();
+		expect(document.activeElement).toBe(older);
+	});
+
+	it("a failed Older or Newer does not focus the stale tick when focus is on nothing", async () => {
+		const { document } = await page();
+		const runFrames = stubFrames();
+		const { results, tick } = listReply();
+		// Safari leaves focus on the body after a mouse click on a link it doesn't focus.
+		document.activeElement = document.body;
+		requestEnded(document, results, { swap: "none", code: 500 });
+		runFrames();
+		expect(document.activeElement).not.toBe(tick);
+		expect(document.activeElement).toBe(document.body);
 	});
 });
