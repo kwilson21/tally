@@ -11,7 +11,9 @@
  * named a merchant is under its bank text, which is the key of the charges that have no merchant name,
  * and sync copies it to the merchant's key when Plaid first names the merchant (src/plaid/sync.ts). When Plaid
  * first names a store, its "Never suggest" lines carry over to the new key with its other settings (decision 101),
- * and a Remove takes the store-name line and its bank-text lines away together.
+ * and a Remove takes the store-name line and its bank-text lines away together. A Never-suggest line under a store's
+ * name also covers its bank text's charges that have no Plaid name, matched when read (neverSuggestedSql), as
+ * sameMerchantSql does (#459).
  *
  * Bills keep a flag instead (`bills.merchant_raw_text`): a bill saved before the key existed (1) holds
  * the bank's raw text and matches by raw name, and a bill saved since (0) holds a key and matches by key.

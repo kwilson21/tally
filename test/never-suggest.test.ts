@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { noneFitTransactions } from "../src/db/category-suggestions";
 import {
 	addNeverSuggest,
+	neverSuggestedSql,
 	neverSuggestRuleLine,
 	neverSuggestRules,
 	removeNeverSuggest,
 } from "../src/db/never-suggest";
+import {
+	incomeAskedSql,
+	suggestionQueue,
+	transferAskedSql,
+} from "../src/db/suggestions-queue";
 import { getTransaction, listTransactions } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseFilters } from "../src/transactions/filters";
@@ -362,5 +368,356 @@ describe("new-category grouping", () => {
 			decidedOn: "2026-10-03",
 		});
 		expect(await noneFitTransactions(db)).toHaveLength(0);
+	});
+
+	it("leaves out a bank text's charges with no Plaid name when their store has a new-category line", async () => {
+		const charges = [
+			await insertCharge({
+				raw: "VENMO 123",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+			}),
+			await insertCharge({
+				raw: "VENMO 123",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+				date: "2025-12-01",
+			}),
+			await insertCharge({
+				raw: "VENMO 123",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+				date: "2025-11-01",
+			}),
+		];
+		const named = await insertCharge({
+			raw: "VENMO 123",
+			merchant: "Venmo",
+			amount: 4500,
+			plaidCategory: "SHOPPING",
+			noneFit: true,
+		});
+		// Chewy has three charges too, so its group still reaches the three a group needs once Venmo's are left out.
+		const chewy = [
+			await insertCharge({
+				raw: "CHEWY 9",
+				merchant: "Chewy",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+			}),
+			await insertCharge({
+				raw: "CHEWY 9",
+				merchant: "Chewy",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+				date: "2025-12-01",
+			}),
+			await insertCharge({
+				raw: "CHEWY 9",
+				merchant: "Chewy",
+				amount: 4500,
+				plaidCategory: "SHOPPING",
+				noneFit: true,
+				date: "2025-11-01",
+			}),
+		];
+		expect(
+			(await noneFitTransactions(db)).map((item) => item.id).sort(),
+		).toEqual([...charges, named, ...chewy].sort());
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "new_category",
+			decidedOn: "2026-10-03",
+		});
+		expect(
+			(await noneFitTransactions(db)).map((item) => item.id).sort(),
+		).toEqual([...chewy].sort());
+	});
+});
+
+/** A charge the Maybe rows, the review queue and the new-category grouping read. Money in unless `amount` says otherwise. */
+const insertCharge = async ({
+	raw,
+	merchant = null,
+	amount = -2500,
+	date = "2026-10-03",
+	incomeConfidence = 0.5,
+	transferConfidence = null,
+	plaidCategory = null,
+	noneFit = false,
+	suggestionId = null,
+}: {
+	raw: string;
+	merchant?: string | null;
+	amount?: number;
+	date?: string;
+	incomeConfidence?: number | null;
+	transferConfidence?: number | null;
+	plaidCategory?: string | null;
+	noneFit?: boolean;
+	suggestionId?: number | null;
+}): Promise<number> => {
+	const row = await db
+		.prepare(
+			`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name,
+				income_confidence, transfer_confidence, plaid_category, jev_none_fit, category_confidence, category_suggestion_id)
+			VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+		)
+		.bind(
+			`plaid-${crypto.randomUUID()}`,
+			date,
+			amount,
+			raw,
+			merchant,
+			incomeConfidence,
+			transferConfidence,
+			plaidCategory,
+			noneFit ? 1 : 0,
+			noneFit ? 0.9 : null,
+			suggestionId,
+		)
+		.first<{ id: number }>();
+	return row?.id ?? 0;
+};
+
+/** The review queue's Maybes of one kind, by the charge each asks about, oldest first. */
+const askedCharges = async (kind: "income" | "transfer") =>
+	(await suggestionQueue(db))
+		.flatMap((item) =>
+			item.kind === kind && "transactionId" in item ? [item.transactionId] : [],
+		)
+		.sort((a, b) => a - b);
+
+describe("a Never suggest line on a store covers the bank text's charges with no Plaid name (#459)", () => {
+	/** What is stored, as "key:kind", whatever Settings hides. */
+	const stored = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT merchant_key AS merchantKey, kind FROM never_suggest_rules",
+				)
+				.all<{ merchantKey: string; kind: string }>()
+		).results
+			.map((row) => `${row.merchantKey}:${row.kind}`)
+			.sort();
+	/** The store names Settings lists. */
+	const listed = async () =>
+		(await neverSuggestRules(db)).map((rule) => rule.merchantKey);
+	const yesOnVenmo = () =>
+		addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+
+	it("a Yes on the store's name keeps one line, and hides the bank text's older charge with no Plaid name", async () => {
+		const named = await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		expect(await askedCharges("income")).toEqual([named, older]);
+		expect(await yesOnVenmo()).toBe(true);
+		expect(await stored()).toEqual(["Venmo:income"]);
+		expect(await listed()).toEqual(["Venmo"]);
+		expect(await askedCharges("income")).toEqual([]);
+		expect((await getTransaction(db, named))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, older))?.incomeConfidence).toBeNull();
+	});
+
+	it("a line saved before this change hides the same older charge, with no backfill", async () => {
+		const named = await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('Venmo', 'income', '2026-10-03')",
+			)
+			.run();
+		expect(await stored()).toEqual(["Venmo:income"]);
+		expect((await getTransaction(db, named))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, older))?.incomeConfidence).toBeNull();
+	});
+
+	it("a bank text's charge is hidden once a later charge of that text gets the store's name", async () => {
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await yesOnVenmo();
+		expect(await askedCharges("income")).toEqual([older]);
+		expect((await getTransaction(db, older))?.incomeConfidence).toBe(0.5);
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		expect(await askedCharges("income")).toEqual([]);
+		expect((await getTransaction(db, older))?.incomeConfidence).toBeNull();
+		expect(await stored()).toEqual(["Venmo:income"]);
+	});
+
+	it("a Remove takes the store's one line, and the bank text's older charge is asked again", async () => {
+		const named = await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await yesOnVenmo();
+		const [line] = await neverSuggestRules(db);
+		const removed = await removeNeverSuggest(db, lineKey(line));
+		expect(removed?.removedCount).toBe(1);
+		expect(await stored()).toEqual([]);
+		expect(await askedCharges("income")).toEqual([named, older]);
+	});
+
+	it("a Remove still takes the store's line once its named charge is gone, with no orphan line left", async () => {
+		const named = await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		await yesOnVenmo();
+		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(named).run();
+		const [line] = await neverSuggestRules(db);
+		const removed = await removeNeverSuggest(db, lineKey(line));
+		expect(removed?.removedCount).toBe(1);
+		expect(await stored()).toEqual([]);
+		expect(await askedCharges("income")).toEqual([older]);
+	});
+
+	it("two names on one bank text stay apart: the unnamed charge goes with the name it matches, and the other name's charge stays asked", async () => {
+		const n1 = await insertCharge({ raw: "SHARED", merchant: "N1" });
+		const n2 = await insertCharge({ raw: "SHARED", merchant: "N2" });
+		const unnamed = await insertCharge({ raw: "SHARED" });
+		await addNeverSuggest(db, {
+			merchantKey: "N1",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		expect((await getTransaction(db, n1))?.incomeConfidence).toBeNull();
+		expect((await getTransaction(db, n2))?.incomeConfidence).toBe(0.5);
+		expect((await getTransaction(db, unnamed))?.incomeConfidence).toBeNull();
+		expect(await askedCharges("income")).toEqual([n2]);
+	});
+
+	it("a line on one store leaves another store's charges asked", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const chewy = await insertCharge({ raw: "CHEWY 9", merchant: "Chewy" });
+		await yesOnVenmo();
+		expect(await askedCharges("income")).toEqual([chewy]);
+	});
+});
+
+describe("every reader of a Never suggest line honors the bank text's match (#459)", () => {
+	it("the transfer Maybes leave out the bank text's charge with no Plaid name", async () => {
+		const named = await insertCharge({
+			raw: "VENMO 123",
+			merchant: "Venmo",
+			amount: 2500,
+			transferConfidence: 0.5,
+		});
+		const older = await insertCharge({
+			raw: "VENMO 123",
+			amount: 2500,
+			transferConfidence: 0.5,
+			date: "2025-12-01",
+		});
+		expect(await askedCharges("transfer")).toEqual([named, older]);
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		expect(await askedCharges("transfer")).toEqual([]);
+	});
+
+	it("the new-category chip leaves out a bank text's charge with no Plaid name when its store has the line", async () => {
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const older = await insertCharge({
+			raw: "VENMO 123",
+			amount: 4500,
+			suggestionId: suggestion?.id ?? 0,
+		});
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		expect((await getTransaction(db, older))?.maybeCategoryName).toBe(
+			"new:Pet Care",
+		);
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "new_category",
+			decidedOn: "2026-10-03",
+		});
+		expect((await getTransaction(db, older))?.maybeCategoryName).toBeNull();
+	});
+});
+
+describe("the review's Yes and No writes skip a charge the match hides (#459)", () => {
+	it("a No or Yes on a bank text's charge with no Plaid name changes nothing while its store has the line, and a visible charge does change", async () => {
+		await insertCharge({ raw: "VENMO 123", merchant: "Venmo" });
+		const older = await insertCharge({ raw: "VENMO 123", date: "2025-12-01" });
+		const visible = await insertCharge({ raw: "CHEWY 9", date: "2025-12-01" });
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "income",
+			decidedOn: "2026-10-03",
+		});
+		const declineIncome = (id: number) =>
+			db
+				.prepare(
+					`UPDATE transactions SET income_maybe_declined = 1 WHERE id = ? AND ${incomeAskedSql("transactions")}`,
+				)
+				.bind(id)
+				.run();
+		const yesIncome = (id: number) =>
+			db
+				.prepare(
+					`UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ? AND ${incomeAskedSql("transactions")}`,
+				)
+				.bind(id)
+				.run();
+		expect((await declineIncome(older)).meta.changes).toBe(0);
+		expect((await yesIncome(older)).meta.changes).toBe(0);
+		// The same statement changes a charge the line does not cover, so the zeros above come from the match.
+		expect((await yesIncome(visible)).meta.changes).toBe(1);
+	});
+
+	it("a transfer answer on a bank text's charge with no Plaid name changes nothing while its store has the line", async () => {
+		await insertCharge({
+			raw: "VENMO 123",
+			merchant: "Venmo",
+			amount: 2500,
+			transferConfidence: 0.5,
+		});
+		const older = await insertCharge({
+			raw: "VENMO 123",
+			amount: 2500,
+			transferConfidence: 0.5,
+			date: "2025-12-01",
+		});
+		const visible = await insertCharge({
+			raw: "CHEWY 9",
+			amount: 2500,
+			transferConfidence: 0.5,
+		});
+		await addNeverSuggest(db, {
+			merchantKey: "Venmo",
+			kind: "transfer",
+			decidedOn: "2026-10-03",
+		});
+		const leaveOut = (id: number) =>
+			db
+				.prepare(
+					`UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ? AND ${transferAskedSql("transactions")}`,
+				)
+				.bind(id)
+				.run();
+		expect((await leaveOut(older)).meta.changes).toBe(0);
+		expect((await leaveOut(visible)).meta.changes).toBe(1);
+	});
+});
+
+describe("the Never suggest match is indexed by raw name (#459)", () => {
+	it("reads the bank text's charges through transactions_raw_name, not a scan", async () => {
+		const { results } = await db
+			.prepare(
+				`EXPLAIN QUERY PLAN SELECT t.id FROM transactions t WHERE ${neverSuggestedSql("t", "income")}`,
+			)
+			.all<{ detail: string }>();
+		const plan = results.map((row) => row.detail).join("\n");
+		expect(plan).toContain("transactions_raw_name");
+		expect(plan).not.toContain("SCAN u");
 	});
 });

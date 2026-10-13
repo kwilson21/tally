@@ -22,7 +22,7 @@ export async function noneFitTransactions(
 		AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_suggestion_id IS NULL
 		AND t.amount_cents > 0 AND t.pending = 0 AND t.excluded = 0 AND t.flag_income = 0
 		AND t.is_split = 0 AND t.parent_id IS NULL
-		AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}`;
+		AND NOT ${neverSuggestedSql("t", "new_category")}`;
 	const { results: groups } = await db
 		.prepare(`SELECT COALESCE(NULLIF(t.plaid_category,''), 'merchant:' || ${merchantKeySql("t")}) theme,
 			COUNT(*) count FROM transactions t WHERE ${eligible} GROUP BY theme HAVING COUNT(*) >= 3
@@ -171,7 +171,7 @@ export async function pendingSuggestions(
 				SELECT cs.id, cs.name, COUNT(t.id) n
 				FROM category_suggestions cs JOIN transactions t ON t.category_suggestion_id=cs.id
 				AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending=0 AND t.amount_cents>0 AND t.excluded=0 AND t.flag_income=0 AND t.is_split=0 AND t.parent_id IS NULL
-				AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
+				AND NOT ${neverSuggestedSql("t", "new_category")}
 				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
 			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
 			SELECT id,name,n,total FROM ranked WHERE rank<=? ORDER BY rank`,
@@ -189,7 +189,7 @@ export async function pendingSuggestions(
 			SELECT cs.id, cs.name, COUNT(t.id) AS n
 			FROM pending p JOIN category_suggestions cs ON cs.id = p.id AND cs.status = 'pending'
 			JOIN transactions t ON t.category_suggestion_id = cs.id AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
-				AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
+				AND NOT ${neverSuggestedSql("t", "new_category")}
 			GROUP BY cs.id HAVING COUNT(t.id) > 0
 		), ranked AS (
 			SELECT *, COUNT(*) OVER() AS total, ROW_NUMBER() OVER(ORDER BY n DESC, id) AS rank FROM candidates
@@ -200,7 +200,7 @@ export async function pendingSuggestions(
 		FROM ranked r JOIN transactions t ON t.category_suggestion_id = r.id
 		LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")} LEFT JOIN categories c ON c.id = t.category_id
 		WHERE r.rank <= ? AND t.category_id IS NULL AND t.category_source IS NULL AND t.pending = 0 AND t.amount_cents > 0 AND t.excluded = 0 AND t.flag_income = 0 AND t.is_split=0 AND t.parent_id IS NULL
-			AND NOT ${neverSuggestedSql(merchantKeySql("t"), "new_category")}
+			AND NOT ${neverSuggestedSql("t", "new_category")}
 		ORDER BY r.rank, t.date DESC, t.id DESC`)
 		.bind(JSON.stringify(suggestions.map((s) => s.id)), limit)
 		.all<
@@ -269,7 +269,7 @@ export async function createFromSuggestion(
 		await db
 			.prepare(
 				`SELECT id FROM transactions WHERE category_suggestion_id = ? AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0
-					AND NOT ${neverSuggestedSql(merchantKeySql("transactions"), "new_category")} AND id IN (${placeholders()})`,
+					AND NOT ${neverSuggestedSql("transactions", "new_category")} AND id IN (${placeholders()})`,
 			)
 			.bind(id, JSON.stringify(input.shown))
 			.all<{ id: number }>()
