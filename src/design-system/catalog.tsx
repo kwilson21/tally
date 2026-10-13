@@ -2971,7 +2971,7 @@ const DUE_ROW_SPEC: UseSpecText = {
 		"Touch: each picker is at least 44px tall and opens the phone's own wheel or calendar. Keyboard: Tab goes through the shown pickers in reading order; hidden ones are out of the Tab order. Screen reader: a group named “When it's due”, and each picker named by what it picks.",
 	motion: "None: the pickers swap at once.",
 	edges:
-		"On a narrow phone the sentence wraps between pickers, never inside one. Hidden pickers still post, and the server reads only the chosen frequency's. It uses no JavaScript, so nothing changes without it. Where :has() isn't supported every picker shows, and each still posts.",
+		"On a narrow phone the sentence wraps between pickers, never inside one. Hidden pickers still post, and the server reads only the chosen frequency's. It uses no JavaScript, so nothing changes without it.",
 	words:
 		"“Due on the”, ordinal days (1st, 22nd), weekdays as plurals (Fridays), “every month”, “every week”, “every two weeks”, “every quarter”, “every year”, “starting in”, “in”.",
 };
@@ -3003,7 +3003,7 @@ const SHEET_FOOTER_SPEC: UseSpecText = {
 	affordance:
 		"Cancel (secondary) and the primary side by side, each half the width and 44px tall, under a rule at the bottom of the sheet. The form above it scrolls; the footer doesn't.",
 	states:
-		"Rest. Busy: the primary shows its busy label while the form posts; the form's hx-indicator names the primary by its id, as the savings sheet's Save does. Focus: each button's ring. Hover: the buttons' own.",
+		"Rest. Busy: the primary shows its busy label while the form posts, because the form's hx-indicator names it by id, as the savings sheet's Save does. It is not turned off while the form posts yet; that wiring comes with the first form that uses the footer. Focus: each button's ring. Hover: the buttons' own.",
 	feedback:
 		"Cancel closes the sheet the way the backdrop does, with focus back on the row it came from. The primary posts the form, and the sheet answers as it does today (a toast and an announcement, or the error in the form).",
 	input:
@@ -5020,7 +5020,6 @@ function TrendsGroup() {
 	);
 }
 
-/** The whole catalog page body. */
 // The ledger form's sample data, specimen-only (kept here, not in mock.ts): 50 categories, as the
 // Add a bill sheet lists them, each with a line icon and a category color.
 const LEDGER_CATEGORY_NAMES = [
@@ -5306,6 +5305,7 @@ function LedgerForm() {
 	);
 }
 
+/** The whole catalog page body. */
 export function Catalog() {
 	return (
 		<>
