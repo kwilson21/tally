@@ -1969,7 +1969,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		});
 	});
 
-	it("keeps the purchase's category chip and the Always hint when a 501-character note sends a linked refund back", async () => {
+	it("keeps the purchase's category chip and the Always hint when a save that links a refund fails on a 501-character note", async () => {
 		const { purchase, refund } = await linkFixture();
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)",
@@ -1990,7 +1990,7 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		expect(html).toMatch(/<input[^>]*name="category" value="1"[^>]*checked/);
 		expect(html).toMatch(/<input[^>]*name="always" value="1"[^>]*checked/);
 		expect(html).toContain(
-			"is always Eating Out. Untick it and save to remove the rule.",
+			"Redraw link shop is always Eating Out. Untick it and save to remove the rule.",
 		);
 		expect(await storedRow(refund)).toEqual({
 			categoryId: EATING_OUT,
