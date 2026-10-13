@@ -171,3 +171,101 @@ describe("a part-paid rent on its page and in its picker", () => {
 		expect(paid).not.toContain(`name="period" value="${PERIOD}"`);
 	});
 });
+
+/** The month a period is in, in words, as the picker and the refusal name it (this year, so no year). */
+const monthWords = (period: string) =>
+	new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(
+		new Date(`${period}-01T00:00:00Z`),
+	);
+/** The HTML with its apostrophes read as written, so a sentence is matched as the person sees it. */
+const readable = (html: string) => html.replaceAll("&#39;", "'");
+const PAID_BY_SHOP_B = `INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9522,'user','linked')`;
+
+describe("a month that is already Paid takes no picker (decision 101, #205)", () => {
+	it("a plain request for a Paid month says it is paid, with no picker and no candidates", async () => {
+		await env.DB.prepare(PAID_BY_SHOP_B).bind(RENT, PERIOD).run();
+		const html = readable(
+			await get(`/bills/${RENT}/occurrences/${PERIOD}/link`),
+		);
+		expect(html).toMatch(
+			new RegExp(
+				`role="alert"[^>]*>${monthWords(PERIOD)}'s bill is already paid\\.`,
+			),
+		);
+		expect(html).not.toContain('id="payment-picker"');
+		expect(html).not.toContain('value="9521"');
+		expect(html).not.toContain('value="9523"');
+	});
+
+	it("a month chip's request for a Paid month swaps the whole page, with the same refusal", async () => {
+		await env.DB.prepare(PAID_BY_SHOP_B).bind(RENT, PERIOD).run();
+		const res = await exports.default.fetch(
+			`${BASE}/bills/${RENT}/occurrences/${PERIOD}/link`,
+			{ headers: { "HX-Request": "true" } },
+		);
+		expect(res.headers.get("HX-Retarget")).toBe("body");
+		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		const html = readable(await res.text());
+		expect(html).toMatch(
+			new RegExp(
+				`role="alert"[^>]*>${monthWords(PERIOD)}'s bill is already paid\\.`,
+			),
+		);
+		expect(html).not.toContain('id="payment-picker"');
+		expect(html).not.toContain('value="9521"');
+		expect(html).not.toContain('value="9523"');
+	});
+
+	it("a part-paid month's picker names its month, checks its chip, and lists no Paid month", async () => {
+		// The month before is Paid by one payment of its own, so it leaves the month choices.
+		const before = new Date(`${PERIOD}-01T00:00:00Z`);
+		before.setUTCMonth(before.getUTCMonth() - 1);
+		const previous = before.toISOString().slice(0, 7);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(9530,1,?,120000,'HARBOR PROPERTY MGMT')",
+			).bind(`${previous}-01`),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9530,'user','linked')",
+			).bind(RENT, previous),
+		]);
+		const html = readable(
+			await get(`/bills/${RENT}/occurrences/${PERIOD}/link`),
+		);
+		expect(html).toContain(`To ${monthWords(PERIOD)}'s Rent,`);
+		expect(html).not.toContain(`name="period" value="${previous}"`);
+		expect(html).toMatch(
+			new RegExp(
+				`<input[^>]*value="${PERIOD}"[^>]*checked|checked[^>]*value="${PERIOD}"`,
+			),
+		);
+	});
+});
+
+describe("each Not this one names the payment it unlinks (#205)", () => {
+	it("gives each Not this one an accessible name with its payment's name, amount and date", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,9521,'user','linked')",
+		)
+			.bind(RENT, PERIOD)
+			.run();
+		const html = readable(await get(`/bills/${RENT}`));
+		const names = [...html.matchAll(/aria-label="(Not this one: [^"]*)"/g)].map(
+			(match) => match[1],
+		);
+		expect(names).toHaveLength(2);
+		expect(
+			names.filter((name) =>
+				/^Not this one: .+ \$600\.00 on [A-Z][a-z]{2} 1$/.test(name ?? ""),
+			),
+		).toHaveLength(1);
+		expect(
+			names.filter((name) =>
+				/^Not this one: .+ \$650\.00 on [A-Z][a-z]{2} 1$/.test(name ?? ""),
+			),
+		).toHaveLength(1);
+		// The visible words stay the same.
+		expect(html).toContain("Not this one</button>");
+	});
+});

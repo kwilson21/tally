@@ -1902,9 +1902,18 @@ describe("Bills", () => {
 		const linked = await env.DB.prepare(
 			"SELECT period FROM bill_payments WHERE bill_id=1 AND status='linked' LIMIT 1",
 		).first<{ period: string }>();
+		// A Paid month takes no picker (#205), so the picker opens on a month the page still offers to link. A month
+		// chip asks for it with HX-Request, which keeps the month choices on a month with nothing to link yet.
+		const page = await (
+			await exports.default.fetch("http://tally.test/bills/1")
+		).text();
+		const open = /\/bills\/1\/occurrences\/([^/]+)\/link#payment-picker/.exec(
+			page,
+		)?.[1];
 		const html = await (
 			await exports.default.fetch(
-				`http://tally.test/bills/1/occurrences/${linked?.period}/link`,
+				`http://tally.test/bills/1/occurrences/${open}/link`,
+				{ headers: { "HX-Request": "true" } },
 			)
 		).text();
 		expect(html).toContain("Which month&#39;s bill does it pay?");

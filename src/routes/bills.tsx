@@ -1194,6 +1194,14 @@ const countedBill = (bill: DbBill): CountedBill => ({
 	anchorMonth: bill.anchor_month,
 });
 /**
+ * A period in words, as the picker's month choices and the link messages name it: the month a monthly or yearly
+ * bill's period is for, else the occurrence's due date (#205, decision 101).
+ */
+const periodLabel = (bill: DbBill, period: string, today: string) =>
+	["monthly", "yearly"].includes(bill.frequency)
+		? monthName(billPeriodMonth(countedBill(bill), period), today)
+		: occurrenceLabel(occurrenceDate(bill, period));
+/**
  * The periods that are Paid (decision 101): those whose linked cents, `paidByPeriod`, reach 90% of the amount of
  * their own month (occurrencePaid, src/bills/amount.ts). A period with a part payment is left out.
  */
@@ -1278,7 +1286,7 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 async function billPage(
 	c: Context<App>,
 	id: number,
-	pickerPeriod?: string,
+	requestedPeriod?: string,
 	error?: string,
 	selectedTransactionId?: number,
 	given?: string,
@@ -1290,7 +1298,8 @@ async function billPage(
 	if (!bill) return c.notFound();
 	const today = given ?? (await householdToday(c.env.DB));
 	const periods = await billPeriods(c.env.DB, bill, today);
-	if (pickerPeriod && !periods.includes(pickerPeriod)) return c.notFound();
+	if (requestedPeriod && !periods.includes(requestedPeriod))
+		return c.notFound();
 	const payments = (
 		await c.env.DB.prepare(
 			`SELECT bp.period,bp.transaction_id,bp.matched_by,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name FROM bill_payments bp JOIN transactions t ON t.id=bp.transaction_id WHERE bp.bill_id=? AND bp.status='linked' AND bp.period IN (SELECT value FROM json_each(?)) ORDER BY t.date,bp.id`,
@@ -1331,6 +1340,17 @@ async function billPage(
 		history,
 		new Map([...byPeriod.keys()].map((period) => [period, paidOf(period)])),
 	);
+	// A Paid month takes no more payments (decision 101): its picker is never built, and the page says it is paid
+	// (#205). The opened period is then always one of the picker's months, so the picker needs no check of its own.
+	const paidPicker =
+		requestedPeriod && paidPeriods.has(requestedPeriod)
+			? requestedPeriod
+			: undefined;
+	const pickerPeriod = paidPicker ? undefined : requestedPeriod;
+	const refusal = paidPicker
+		? `${periodLabel(bill, paidPicker, today)}'s bill is already paid.`
+		: undefined;
+	const shownError = error ?? refusal;
 	const pickerAmount = pickerPeriod
 		? amountOn(occurrenceDate(bill, pickerPeriod))
 		: bill.amount_cents;
@@ -1404,9 +1424,7 @@ async function billPage(
 				.filter((period) => !paidPeriods.has(period))
 				.map((period) => ({
 					value: period,
-					label: ["monthly", "yearly"].includes(bill.frequency)
-						? monthName(billPeriodMonth(countedBill(bill), period), today)
-						: occurrenceLabel(occurrenceDate(bill, period)),
+					label: periodLabel(bill, period, today),
 				}))}
 		/>
 	) : null;
@@ -1417,6 +1435,12 @@ async function billPage(
 			JSON.stringify({ announce: paymentCountSentence(candidates.length) }),
 		);
 		return c.html(picker);
+	}
+	if (paidPicker && rerender) {
+		// A month chip asked for a Paid month: its reply is the whole page, which replaces the body (as transactions.tsx's
+		// swapWholePage does), since the chip's own target, the picker, is gone.
+		c.header("HX-Retarget", "body");
+		c.header("HX-Reswap", "outerHTML");
 	}
 	return c.html(
 		<Layout
@@ -1454,9 +1478,9 @@ async function billPage(
 						month={monthLabel(change.effectiveMonth, today)}
 					/>
 				)}
-				{error && (
+				{shownError && (
 					<p role="alert" class="mt-3 text-over">
-						{error}
+						{shownError}
 					</p>
 				)}
 				<h2 class="mt-6 text-sm text-muted">Payments</h2>
@@ -1626,14 +1650,7 @@ bills.post("/bills/:id/link", async (c) => {
 		);
 	const due = occurrenceDate(bill, period);
 	const manualWindow = manualLinkWindowDays(bill.frequency);
-	const label = ["monthly", "yearly"].includes(bill.frequency)
-		? monthName(
-				bill.frequency === "yearly"
-					? `${period}-${String(bill.anchor_month).padStart(2, "0")}`
-					: period,
-				today,
-			)
-		: occurrenceLabel(due);
+	const label = periodLabel(bill, period, today);
 	// A Paid month takes no more payments (decision 101): the picker lists none for it, so a request that names one is refused.
 	const paidCents =
 		(

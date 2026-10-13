@@ -199,6 +199,7 @@ export function BillOccurrenceRow({
 							type="submit"
 							class="-ml-2"
 							autofocus={payment.transactionId === focusTransactionId}
+							aria-label={`Not this one: ${payment.displayName} ${formatCents(payment.amountCents)} on ${payment.dateLabel}`}
 						>
 							Not this one
 						</Button>
