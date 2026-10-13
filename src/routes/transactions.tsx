@@ -3150,6 +3150,10 @@ async function savePanel(
 	const linkedPurchase = refunds.find(
 		(p) => p.id === refundOfId && !p.excluded,
 	);
+	// The category the panel posted, kept for a 422's redraw: the linking branch below empties the form of it, and
+	// the redraw must still draw what the person chose (a validation error keeps the panel as it was left).
+	const postedCategory = form.get("category");
+	const postedNewCategoryName = form.get("new_category_name")?.toString() ?? "";
 	if (
 		linkedPurchase &&
 		followsPurchaseAfterSave(tx, { refundOfId, ...postedCredit(form) })
@@ -3219,9 +3223,9 @@ async function savePanel(
 		shownPeople: HouseholdPerson[] = people,
 	) => {
 		const values: Edit = {
-			categoryId: Number(form.get("category")) || null,
-			newCategory: form.get("category") === "new",
-			newCategoryName: form.get("new_category_name")?.toString() ?? "",
+			categoryId: Number(postedCategory) || null,
+			newCategory: postedCategory === "new",
+			newCategoryName: postedNewCategoryName,
 			alwaysForMerchant: form.get("always") === "1",
 			alwaysWas: form.get("always_was") === "1",
 			merchantRuleWas: Number(form.get("rule_category_was")) || null,
