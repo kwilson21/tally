@@ -16,9 +16,10 @@ export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
  * What a reply refreshes in the bar: the live count and both actions, the Select all link (its wrapper
  * stays in place, so a count can bring the link back), the limit and the line for ticks not on this
  * page. Out of band, a list change adds the list's own parts to this (LIST_OOB in the transactions route).
+ * The Select all wrapper says settle:0, since its link's id inside would make htmx wait a tick before the swap (#438).
  */
 export const SELECTION_BAR_OOB =
-	"#selected-count:innerHTML, #set-category-selection:outerHTML, #exclude-selection:outerHTML, #select-all-page:outerHTML, #selection-limit:outerHTML, #not-on-page:outerHTML";
+	"#selected-count:innerHTML, #set-category-selection:outerHTML, #exclude-selection:outerHTML, #select-all-page:outerHTML settle:0, #selection-limit:outerHTML, #not-on-page:outerHTML";
 
 /**
  * The `focus` value the Select all link asks its reply for: the reply focuses Set category, since
@@ -228,12 +229,18 @@ export function SelectAllOnPage({
 		unticked: [],
 	});
 	return (
-		<span id="select-all-page" hx-swap-oob={oob ? "outerHTML" : undefined}>
+		<span
+			id="select-all-page"
+			// settle:0: a link with an id inside would make htmx wait a tick before this swap, and this swap has no transition to settle (#438).
+			hx-swap-oob={oob ? "outerHTML settle:0" : undefined}
+		>
 			<input type="hidden" name="page-ids" value={pageIds.join(",")} />
 			<SelectionFields selection={selection} />
 			{offer === "page" && (
 				<Button
 					kind="text"
+					// The id lets htmx 4 put focus back on this link when a tick's count reply swaps it out (#438).
+					id="select-all-page-link"
 					// Without JavaScript the link carries the ticks and ticks this page's rows.
 					href={pageAddress}
 					class="-mr-2"
@@ -257,6 +264,8 @@ export function SelectAllOnPage({
 			{offer === "whole" && (
 				<Button
 					kind="text"
+					// Its own id, not the page link's: when Select all's reply swaps the page link out, focus must go to Set category, not here (#438).
+					id="select-all-whole-link"
 					href={wholeAddress}
 					class="-mr-2"
 					// As the page link: the all-mode flag rides in the request, and the ticks and the fields come as parameters.
