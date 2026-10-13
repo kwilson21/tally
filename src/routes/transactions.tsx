@@ -75,7 +75,11 @@ import {
 	SHOW_LABELS,
 	SHOWS,
 } from "../transactions/filters";
-import { refundTooBigMessage } from "../transactions/refund-guards";
+import {
+	refundPartTooBigMessage,
+	refundPurchaseLabel,
+	refundTooBigMessage,
+} from "../transactions/refund-guards";
 import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import {
@@ -2157,8 +2161,7 @@ function EditSheet({
 										value={String(p.id)}
 										checked={values.refundOfId === p.id}
 									>
-										{shortDay(p.date, tx.date)} · {formatCents(p.amountCents)} ·{" "}
-										{p.categoryName ?? "No category"}
+										{refundPurchaseLabel(p, tx.date)}
 									</Chip>
 								))}
 							</fieldset>
@@ -3358,8 +3361,18 @@ async function savePanel(
 					).all<HouseholdPerson>()
 				).results,
 			);
+		// A part of a split refund that doesn't fit names its own purchase, unless that is the purchase the
+		// refund is linked to (the field then names it as it always has).
 		return "refundLeftCents" in result
-			? showErrors({ refund: refundTooBigMessage(result.refundLeftCents) })
+			? showErrors({
+					refund:
+						result.refundPurchase && result.refundPurchase.id !== refundOfId
+							? refundPartTooBigMessage(
+									result.refundLeftCents,
+									refundPurchaseLabel(result.refundPurchase, tx.date),
+								)
+							: refundTooBigMessage(result.refundLeftCents),
+				})
 			: result.cashError === "split"
 				? partsBroken(cashParsed?.amountCents ?? 0, result.amountCents)
 				: showErrors({

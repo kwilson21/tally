@@ -11,7 +11,7 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 ## Rules
 - Every part must be explainable in one plain sentence. If you can't explain it that way, don't add it.
 - Prefer the smallest tool. No new dependency without a decision entry.
-- Server owns all state. Hono JSX + HTMX. No client-side framework. Only custom JS: Plaid Link, the toast listener, the money input's money.js (decision 39), and the catalog-only ds.js (decision 44).
+- Server owns all state. Hono JSX + HTMX. No client-side framework. Only custom JS: Plaid Link, the toast listener, the money input's money.js (decision 39), the catalog-only ds.js (decision 44), the feedback form's feedback-privacy.js and feedback-diagnostics.js (decision 61), and keyboard.js and the sheet script sheet.js (decision 109).
 - Money is integer cents. Never floats. Format to dollars only for display.
 - Plaid sign convention: positive = money out. Dates are Plaid's YYYY-MM-DD strings, never converted; only "today" uses the household's time zone (decision 67).
 - AI suggests, code calculates, people decide. Jev only via src/ai/categorize.ts; Workers AI only via src/ai/suggest-name.ts.
