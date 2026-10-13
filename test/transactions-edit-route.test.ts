@@ -1969,6 +1969,35 @@ describe("a failed save that links a refund keeps what the panel posted (#476)",
 		});
 	});
 
+	it("keeps the purchase's category chip and the Always hint when a 501-character note sends a linked refund back", async () => {
+		const { purchase, refund } = await linkFixture();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?)",
+		)
+			.bind(STORE, EATING_OUT)
+			.run();
+		const { res, html } = await post(
+			`/transactions/${refund}`,
+			linkingSave(purchase, {
+				note: "x".repeat(501),
+				always: "1",
+				always_was: "1",
+				rule_category_was: String(EATING_OUT),
+			}),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain("Keep the note under 500 characters.");
+		expect(html).toMatch(/<input[^>]*name="category" value="1"[^>]*checked/);
+		expect(html).toMatch(/<input[^>]*name="always" value="1"[^>]*checked/);
+		expect(html).toContain(
+			"is always Eating Out. Untick it and save to remove the rule.",
+		);
+		expect(await storedRow(refund)).toEqual({
+			categoryId: EATING_OUT,
+			refundOfId: null,
+		});
+	});
+
 	it("keeps the typed new category name when a cash refund's amount is not a sum of money", async () => {
 		const { purchase, refund } = await linkFixture(CASH);
 		const { res, html } = await post(
