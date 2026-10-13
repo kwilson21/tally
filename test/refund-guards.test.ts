@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	leftToRefundCents,
+	refundPartTooBigMessage,
 	refundTooBigMessage,
 } from "../src/transactions/refund-guards";
 
@@ -45,6 +46,20 @@ describe("refundTooBigMessage", () => {
 	it("says $0.00 left when the purchase is fully refunded", () => {
 		expect(refundTooBigMessage(0)).toBe(
 			"This refund is more than what's left of that purchase ($0.00 left).",
+		);
+	});
+});
+
+describe("refundPartTooBigMessage", () => {
+	it("names the purchase the part is for and what's left of it", () => {
+		expect(refundPartTooBigMessage(1500, "Sep 2 · $50.00 · Kids")).toBe(
+			"Part of this refund is for the Sep 2 · $50.00 · Kids purchase and is more than what's left of it ($15.00 left).",
+		);
+	});
+
+	it("says $0.00 left when that purchase is fully refunded", () => {
+		expect(refundPartTooBigMessage(0, "Sep 2 · $50.00 · Kids")).toBe(
+			"Part of this refund is for the Sep 2 · $50.00 · Kids purchase and is more than what's left of it ($0.00 left).",
 		);
 	});
 });
