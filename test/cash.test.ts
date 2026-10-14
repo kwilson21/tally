@@ -2702,7 +2702,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		]);
 	});
 
-	it("a pending edit the panel then refuses reopens the panel with its error and the posted values", async () => {
+	it("a pending edit the panel refuses saves nothing, and reopens the panel with its error and the posted values", async () => {
 		const { id, a, b } = await splitCash("Refused panel");
 		const tomorrow = shiftDay(today(), 1);
 		const pending = new URLSearchParams([
@@ -2718,17 +2718,17 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		const { res, html } = await correction(id, savedParts(a, b), {
 			extra: [["pending_edit", pending]],
 		});
-		// The correction saved the amount and the parts; the panel refused the future date.
+		// The panel refused the future date before anything was saved: the amount and the parts stay as they were.
 		expect(
 			await env.DB.prepare(
 				"SELECT amount_cents AS amountCents FROM transactions WHERE id = ?",
 			)
 				.bind(id)
 				.first(),
-		).toEqual({ amountCents: 10000 });
+		).toEqual({ amountCents: 9000 });
 		expect(await partsOf(id)).toEqual([
 			{ id: a, categoryId: 1, amountCents: 6000 },
-			{ id: b, categoryId: 5, amountCents: 4000 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
 		]);
 		expect(res.status).toBe(422);
 		expect(html).toContain("Choose today or an earlier date.");
@@ -2736,12 +2736,43 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain("Farmers market\nand bakery");
 		expect(html).toMatch(/name="merchant"[^>]*value="Corner Market"/);
 		expect(await parentOf(id)).toMatchObject({
+			amountCents: 9000,
 			date: today(),
 			excluded: 0,
 		});
 	});
 
-	it("a pending edit's rule tick comes back ticked, with its rule's hint, when the panel refuses it after the parts are saved", async () => {
+	it("saves the pending edit and the corrected parts in one batch, so a failure in the panel's half saves neither", async () => {
+		const { id, a, b } = await splitCash("One batch");
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", today()],
+			["amount", "100.00"],
+			["name_pick", "own"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market\nand bakery"],
+			["excluded", "1"],
+		]).toString();
+		const before = await parentOf(id);
+		const partsBefore = await partsOf(id);
+		// Every panel save writes a merchants row (saveEdit), and the correction's statements never do, so this
+		// trigger fails the panel's half after the correction's statements have run in the same batch.
+		await env.DB.prepare(
+			"CREATE TRIGGER fail_panel_merchant BEFORE INSERT ON merchants BEGIN SELECT RAISE(ABORT, 'forced panel failure'); END",
+		).run();
+		try {
+			const { res } = await correction(id, savedParts(a, b), {
+				extra: [["pending_edit", pending]],
+			});
+			expect(res.status).toBe(500);
+		} finally {
+			await env.DB.prepare("DROP TRIGGER fail_panel_merchant").run();
+		}
+		expect(await parentOf(id)).toEqual(before);
+		expect(await partsOf(id)).toEqual(partsBefore);
+	});
+
+	it("a pending edit's rule tick comes back ticked, with its rule's hint, when the panel refuses it, and nothing is saved", async () => {
 		const { id, a, b } = await splitCash("Rule split");
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Rule split', 1)",
@@ -2771,9 +2802,14 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain(
 			`Rule split is always ${groceries}. Untick it and save to remove the rule.`,
 		);
+		expect(await parentOf(id)).toMatchObject({ amountCents: 9000 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 1, amountCents: 6000 },
+			{ id: b, categoryId: 5, amountCents: 3000 },
+		]);
 	});
 
-	it("a pending edit's rule tick names an archived rule category in its hint when the panel refuses it after the parts are saved", async () => {
+	it("a pending edit's rule tick names an archived rule category in its hint when the panel refuses it, and nothing is saved", async () => {
 		const { id, a, b } = await splitCash("Archived rule split");
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Archived rule split', 2)",
@@ -2805,6 +2841,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain(
 			`Archived rule split is always ${archivedName}. Untick it and save to remove the rule.`,
 		);
+		expect(await parentOf(id)).toMatchObject({ amountCents: 9000 });
 	});
 
 	it("redirects a plain browser save back to the list", async () => {

@@ -911,7 +911,7 @@ export const APPLY_MERCHANT_RULE_SQL = applyMerchantRuleSql("= ?");
  * the same way: `refundPurchase` is the purchase of the first such part, and `refundLeftCents` is what that
  * purchase has left for the whole split. A cash amount is refused when it breaks its parts (`amountCents`
  * is the parts' total) or its linked refunds (`refundCents` is their total, the smallest amount that would
- * fit).
+ * fit). With a split correction (saveEdit's splitEdit), a refused correction is `split`, and nothing was saved.
  */
 export type SaveEditResult =
 	| { saved: true }
@@ -927,7 +927,8 @@ export type SaveEditResult =
 	  }
 	| { saved: false; personMissing: true }
 	| { saved: false; cashError: "split"; amountCents: number }
-	| { saved: false; cashError: "refund"; refundCents: number };
+	| { saved: false; cashError: "refund"; refundCents: number }
+	| { saved: false; split: CashSplitRefusal };
 
 /**
  * Saves the edit panel in one atomic batch: the category (marked as a person's choice when it
@@ -944,12 +945,17 @@ export type SaveEditResult =
  * linking a refund includes it in the budget, even when it was excluded
  * (`excluded = 0`, `excluded_source = 'user'`); a link that isn't changing is left alone. A For person
  * removed since the panel loaded the household list is refused the same way (`personMissing`).
+ *
+ * With `splitEdit` (Change the parts, #365), the split's correction runs first in the same batch, so the edit's
+ * cash gate reads the parts it sets. A refused correction saves nothing of the edit either, since that gate
+ * waits on the parts' sum; it is returned as `split`. An error anywhere in the batch rolls both back.
  */
 export async function saveEdit(
 	db: D1Database,
 	id: number,
 	edit: Edit,
 	actor: string,
+	splitEdit?: CashSplitEdit,
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
@@ -1129,6 +1135,10 @@ export async function saveEdit(
 		id,
 	];
 
+	// The split's correction, when there is one, is the first statements of the batch (see the doc above).
+	const splitPrepared = splitEdit
+		? await prepareCashSplitCorrection(db, id, splitEdit, actor)
+		: null;
 	const statements: D1PreparedStatement[] = [];
 	if (linking) {
 		// First, so what follows can depend on it. The parts of a split refund move with it, only while
@@ -1468,23 +1478,37 @@ export async function saveEdit(
 	}
 	// A For person removed after the panel's household list loaded fails the details write on its foreign
 	// key. The batch is atomic, so that failure saved nothing: it is a refusal, and the person is named.
-	const results = await db.batch(statements).catch(async (error: unknown) => {
-		if (
-			personChanged &&
-			typeof edit.forPersonId === "number" &&
-			!(await db
-				.prepare("SELECT 1 FROM household_people WHERE id = ?")
-				.bind(edit.forPersonId)
-				.first())
-		)
-			return null;
-		throw error;
-	});
+	const correctionCount = splitPrepared?.statements.length ?? 0;
+	const results = await db
+		.batch([...(splitPrepared?.statements ?? []), ...statements])
+		.catch(async (error: unknown) => {
+			if (
+				personChanged &&
+				typeof edit.forPersonId === "number" &&
+				!(await db
+					.prepare("SELECT 1 FROM household_people WHERE id = ?")
+					.bind(edit.forPersonId)
+					.first())
+			)
+				return null;
+			throw error;
+		});
 	if (!results) return { saved: false, personMissing: true };
+	if (splitPrepared) {
+		const correction = await splitPrepared.finish(
+			results.slice(0, correctionCount),
+		);
+		if (!correction.saved) return { saved: false, split: correction };
+	}
+	// Once the correction has saved, the edit's own gates all pass for a split cash entry (its cash gate reads the
+	// corrected parts, and no link can be made to a split), except the split review's (splitReview), which reads the
+	// corrected parts' refunds. A refusal there leaves the correction saved: the batch can't undo a statement's refusal.
+	// The edit's own results, after the correction's.
+	const own = results.slice(correctionCount);
 	// A split review with a part that doesn't fit its own purchase is refused by the parts check, which leaves
 	// the statement that decides unchanged (the link's, for a link; the panel's otherwise). The first such part
 	// names its purchase; with none, the cash and link checks below say why.
-	if (splitReview && !results[linking ? 1 : 0]?.meta.changes) {
+	if (splitReview && !own[linking ? 1 : 0]?.meta.changes) {
 		const part = await db
 			.prepare(
 				`SELECT kid.refund_of_id AS id, buy.date AS date, buy.amount_cents AS amountCents, c.name AS categoryName
@@ -1506,7 +1530,7 @@ export async function saveEdit(
 				refundPurchase: part,
 			};
 	}
-	if (cashChangeIndex !== null && !results[cashChangeIndex]?.meta.changes) {
+	if (cashChangeIndex !== null && !own[cashChangeIndex]?.meta.changes) {
 		const state = await db
 			.prepare(
 				`SELECT COALESCE((SELECT SUM(amount_cents) FROM transactions part WHERE part.parent_id = cash.id), 0) AS parts,
@@ -1525,7 +1549,7 @@ export async function saveEdit(
 	// credit that counts again it is the panel's own update, the first. No change means the amount
 	// didn't fit, and then none of the others applied either.
 	const purchase = linking ? newLink : recounting;
-	if (typeof purchase === "number" && !results[linking ? 1 : 0]?.meta.changes)
+	if (typeof purchase === "number" && !own[linking ? 1 : 0]?.meta.changes)
 		return {
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
@@ -1960,6 +1984,21 @@ export type CashSplitPart = {
 	amountCents: number;
 };
 
+/** A split cash entry's corrected total, the amount its saved parts were drawn with, and its parts (correctCashSplit). */
+export type CashSplitEdit = {
+	totalCents: number;
+	amountWasCents: number;
+	parts: CashSplitPart[];
+};
+
+export type CashSplitResult =
+	| { saved: true }
+	| { saved: false; refundTotalCents: number }
+	| { saved: false; refundPart: { part: number; refundCents: number } };
+
+/** A refused correction: what correctCashSplit returns when nothing was saved. */
+export type CashSplitRefusal = Exclude<CashSplitResult, { saved: true }>;
+
 /**
  * Change the parts (spec §8.4): saves a split cash entry's new total and its corrected parts in one
  * atomic batch. Saved parts are updated in place by id and new ones are added, so the split and every
@@ -1983,13 +2022,26 @@ export type CashSplitPart = {
 export async function correctCashSplit(
 	db: D1Database,
 	parentId: number,
-	edit: { totalCents: number; amountWasCents: number; parts: CashSplitPart[] },
+	edit: CashSplitEdit,
 	by: string,
-): Promise<
-	| { saved: true }
-	| { saved: false; refundTotalCents: number }
-	| { saved: false; refundPart: { part: number; refundCents: number } }
-> {
+): Promise<CashSplitResult> {
+	const prepared = await prepareCashSplitCorrection(db, parentId, edit, by);
+	return prepared.finish(await db.batch(prepared.statements));
+}
+
+/**
+ * correctCashSplit's statements, not yet run, so the edit panel's pending save can share their batch (saveEdit).
+ * `finish` takes their results in order and says what was saved, or why not.
+ */
+export async function prepareCashSplitCorrection(
+	db: D1Database,
+	parentId: number,
+	edit: CashSplitEdit,
+	by: string,
+): Promise<{
+	statements: D1PreparedStatement[];
+	finish(results: D1Result[]): Promise<CashSplitResult>;
+}> {
 	const { totalCents, amountWasCents, parts } = edit;
 	const partsTotal = parts.reduce((sum, part) => sum + part.amountCents, 0);
 	if (partsTotal !== totalCents)
@@ -2084,45 +2136,50 @@ export async function correctCashSplit(
 				];
 	// The parent's amount is set first, so a refusal by any statement leaves the batch with nothing written. The
 	// purchase's Not this one copy runs last, after the insert, and only when a part was added.
-	const results = await db.batch([
+	const statements = [
 		parentStatement,
 		...partStatements,
 		...insertStatements,
 		...purchaseDismissals,
-	]);
-	if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
+	];
+	return {
+		statements,
+		finish: async (results) => {
+			if ((results[0]?.meta.changes ?? 0) > 0) return { saved: true };
 
-	// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry and to its
-	// parts together come first, since moving its parts can't make them fit; then the first part whose
-	// refunds no longer fit (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
-	const linked = await db
-		.prepare(
-			`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?2) AS saved), 0) AS refundCents
+			// Nothing changed. If the entry is still as it was drawn, the refunds linked to the entry and to its
+			// parts together come first, since moving its parts can't make them fit; then the first part whose
+			// refunds no longer fit (in the sheet's order) is the reason. Otherwise the entry changed, which is an error.
+			const linked = await db
+				.prepare(
+					`SELECT ${refundedByOthersSql("?1", "0")} + COALESCE((SELECT SUM(${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")}) FROM json_each(?2) AS saved), 0) AS refundCents
 			FROM transactions cash
 			WHERE cash.id = ?1 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?3`,
-		)
-		.bind(parentId, savedJson, amountWasCents)
-		.first<{ refundCents: number }>();
-	if (linked && linked.refundCents > totalCents)
-		return { saved: false, refundTotalCents: linked.refundCents };
-	const misfit = `${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents')`;
-	const refused = await db
-		.prepare(
-			`SELECT json_extract(saved.value, '$.position') AS part,
+				)
+				.bind(parentId, savedJson, amountWasCents)
+				.first<{ refundCents: number }>();
+			if (linked && linked.refundCents > totalCents)
+				return { saved: false, refundTotalCents: linked.refundCents };
+			const misfit = `${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} > json_extract(saved.value, '$.cents')`;
+			const refused = await db
+				.prepare(
+					`SELECT json_extract(saved.value, '$.position') AS part,
 				${refundedByOthersSql("json_extract(saved.value, '$.id')", "0")} AS refundCents
 			FROM json_each(?1) AS saved
 			WHERE EXISTS (SELECT 1 FROM transactions cash WHERE cash.id = ?2 AND cash.parent_id IS NULL AND cash.is_split = 1 AND cash.amount_cents = ?3)
 				AND ${misfit}
 			ORDER BY json_extract(saved.value, '$.position') LIMIT 1`,
-		)
-		.bind(savedJson, parentId, amountWasCents)
-		.first<{ part: number; refundCents: number }>();
-	if (refused)
-		return {
-			saved: false,
-			refundPart: { part: refused.part, refundCents: refused.refundCents },
-		};
-	throw new Error(`Split ${parentId} changed while it was being corrected`);
+				)
+				.bind(savedJson, parentId, amountWasCents)
+				.first<{ part: number; refundCents: number }>();
+			if (refused)
+				return {
+					saved: false,
+					refundPart: { part: refused.part, refundCents: refused.refundCents },
+				};
+			throw new Error(`Split ${parentId} changed while it was being corrected`);
+		},
+	};
 }
 
 /**
