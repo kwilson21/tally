@@ -329,7 +329,9 @@ function Tick() {
 /**
  * The notebook of LedgerIllustration, with its tally strokes drawn one at a time: `strokes` of the five,
  * in pencil (muted) until `ink`. `replay` draws the fifth across the four and turns all five to ink, with
- * proposal-only classes in app.css. The strokes are the illustration's own, in the same places.
+ * proposal-only classes in app.css. The strokes are the illustration's own, in the same places: they copy the
+ * five `<line>`s at src/views/illustration.tsx lines 18 to 22. LedgerIllustration takes no props, so if that
+ * drawing changes, these lines change with it by hand.
  */
 const STROKE_LINES = [
 	[46, 38, 46, 60],
@@ -585,7 +587,7 @@ const aFirstBudget = (
 		</div>
 		<p class="mt-2 text-sm text-muted">
 			Each line is what that category spent in a typical month, August and
-			September, raised to the next $10. ·{" "}
+			September, rounded up to the next $10. ·{" "}
 			<WhyLink section="budget" topic="a first budget" />
 		</p>
 		<ul class="mt-3 divide-y divide-rule border-y border-rule">
@@ -797,8 +799,8 @@ const bInkSheet = (
 			<p class="text-muted">a month</p>
 		</div>
 		<p class="text-sm text-muted">
-			What each category spent in a typical month, August and September, raised
-			to the next $10. · <WhyLink section="budget" topic="a first budget" />
+			What each category spent in a typical month, August and September, rounded
+			up to the next $10. · <WhyLink section="budget" topic="a first budget" />
 		</p>
 		<ul class="divide-y divide-rule border-y border-rule">
 			<li>
@@ -1052,8 +1054,8 @@ const dQuestion = (
 			Make it the Groceries budget, from October on?
 		</h2>
 		<p class="mt-2 text-sm text-muted">
-			Tally's suggestion: what Groceries spent in a typical month, raised to the
-			next $10.
+			Tally's suggestion: what Groceries spent in a typical month, rounded up to
+			the next $10.
 		</p>
 		<div class="mt-4">
 			<Button type="button" class="w-full">

@@ -888,22 +888,22 @@ html:not(.js) [data-money-js] {
 	animation-delay: calc(var(--loop) * -0.5);
 }
 .proposal-first-ink-text {
-	--loop: calc(var(--duration-toast) * 1.25);
+	--loop: calc(var(--duration-rising) * 25);
 	animation: replay-first-ink-text var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);
 }
 .proposal-first-pencil-off {
-	--loop: calc(var(--duration-toast) * 1.25);
+	--loop: calc(var(--duration-rising) * 25);
 	animation: replay-first-pencil-off var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);
 }
 .proposal-first-ink-on {
-	--loop: calc(var(--duration-toast) * 1.25);
+	--loop: calc(var(--duration-rising) * 25);
 	animation: replay-first-ink-on var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);
 }
 .proposal-first-bar {
-	--loop: calc(var(--duration-toast) * 1.25);
+	--loop: calc(var(--duration-rising) * 25);
 	transform-origin: left;
 	animation: replay-first-bar var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);

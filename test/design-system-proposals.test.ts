@@ -1722,6 +1722,29 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			).toHaveLength(1);
 		});
 		expect(chunk.match(/Replay, every (5|6) seconds/g)?.length).toBe(4);
+		// Every phone is 390 by 844 inside its 1px border: 392 by 846 drawn, as the Phone frame in proposals-polish-4 draws it.
+		expect(chunk.match(/h-\[846px\] w-\[392px\]/g)?.length).toBe(25);
+	});
+
+	it("loops each replay on its own clock: 5 s for B, 6 s for A, C and D, all set from the rising token", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		// --duration-rising is 200 ms: a loop of 30 steps is 6 s and of 25 steps is 5 s.
+		const rising = Number(/--duration-rising: (\d+)ms/.exec(css)?.[1]);
+		expect(rising).toBe(200);
+		OPTIONS.forEach((name, i) => {
+			const classes = [
+				...new Set(option(chunk, name).match(/proposal-first-[a-z-]+/g) ?? []),
+			];
+			expect(classes.length, name).toBeGreaterThan(0);
+			for (const cls of classes) {
+				const loop = new RegExp(
+					`\\.${cls}\\s*\\{\\s*--loop: calc\\(var\\(--duration-rising\\) \\* (\\d+)\\);`,
+				).exec(css);
+				expect(loop, cls).not.toBeNull();
+				expect((rising * Number(loop?.[1])) / 1000, cls).toBe(i === 1 ? 5 : 6);
+			}
+		});
 	});
 
 	it("keeps one sample household in every option: $1,411 safe to spend, and the same 86 that need a category", async () => {
@@ -1736,6 +1759,29 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		expect(chunk).toContain("$2,486");
 		expect(chunk).toContain("Harbor Property");
 		expect(chunk).toContain("Acme Corp");
+	});
+
+	it("draws the rest of the brief's sample household as its figures, in the same words", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const figure of [
+			"Chase · 412 lines · Jul 16 to Oct 13",
+			"Tally sorted 362 overnight",
+			"50 of 412 sorted",
+			"$4,900 came in and about $4,310 went out",
+			"6 moves between your own accounts",
+			"31 stores, from your bank&#39;s text",
+			"38 stores have cleaner names",
+			"Aug $610 · Sep $674",
+			"Aug $296 · Sep $340",
+			"8 charges, about $2,062",
+			"about $2,062 a month",
+			"7 paychecks since Jul 17",
+			"Bills still due this week",
+			"−$153",
+		]) {
+			expect(chunk, figure).toContain(figure);
+		}
 	});
 
 	it("says in words what each pencil state is, for a screen reader, as well as drawing it", async () => {
@@ -1766,11 +1812,11 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		expect(css).toContain("Proposals only (P125)");
 	});
 
-	it("words the first budget as raised to the next $10, and says in words each pencil state (a dashed amount, a dashed tag, a dashed tick)", async () => {
+	it("words the first budget as rounded up to the next $10, and says in words each pencil state (a dashed amount, a dashed tag, a dashed tick)", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
-		expect(chunk).not.toContain("rounded up to the next $10");
-		expect(chunk.match(/raised to the next \$10/g)?.length).toBe(3);
+		expect(chunk).not.toContain("raised to the next $10");
+		expect(chunk.match(/rounded up to the next \$10/g)?.length).toBe(3);
 		// Option B's pencilled budget rows: each row says it is pencilled in, not kept yet.
 		expect(
 			option(chunk, OPTIONS[1] ?? "").match(/Pencilled in, not kept yet: /g)

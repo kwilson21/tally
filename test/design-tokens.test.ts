@@ -58,6 +58,9 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
+	// The word "rounded" in three lines of visible prose ("rounded up to the next $10", the brief's words), not a
+	// class: no class in proposals-polish-5.tsx is a bare "rounded".
+	"../src/design-system/proposals-polish-5.tsx": ["rounded"],
 	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
 	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
 	"../src/design-system/proposals-polish.tsx": [
