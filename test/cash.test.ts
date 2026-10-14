@@ -1255,6 +1255,99 @@ describe("cash lifecycle", () => {
 		).toBe(2);
 	});
 
+	it("asks about a delete with the rule tick ticked and its rule's hint, only when the store's rule matches the entry's category", async () => {
+		const cashPost = (fields: Record<string, string>) =>
+			request("/transactions/cash", {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams(fields),
+			});
+		await cashPost({
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "12.00",
+			merchant: "Rule cash shop",
+			category: "1",
+		});
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name='Rule cash shop' ORDER BY id DESC LIMIT 1",
+			).first<{ id: number }>()
+		)?.id as number;
+		const key = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first<{ key: string }>()
+		)?.key;
+		const categoryName = async (categoryId: number) =>
+			(
+				await env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+					.bind(categoryId)
+					.first<{ name: string }>()
+			)?.name;
+		const setRule = (categoryId: number) =>
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+			)
+				.bind(key, categoryId)
+				.run();
+		const askAboutDelete = () =>
+			request(`/transactions/${id}/delete`, {
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"HX-Request": "true",
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: "back=%2Ftransactions",
+			});
+
+		// The store's rule is for the entry's own category (1): the tick opens ticked and says what the rule is.
+		await setRule(1);
+		const matching = await askAboutDelete();
+		const matchingSheet = matching.html.slice(
+			matching.html.indexOf('role="dialog"'),
+		);
+		expect(matching.res.status).toBe(200);
+		expect(matchingSheet).toContain("Delete Rule cash shop, $12.00?");
+		expect(matchingSheet).toMatch(/name="always" value="1" checked/);
+		expect(matchingSheet).toMatch(/name="always_was" value="1"/);
+		expect(matchingSheet).toContain(
+			`Rule cash shop is always ${await categoryName(1)}. Untick it and save to remove the rule.`,
+		);
+		expect(matchingSheet).not.toContain(
+			"Leave it unticked to change just this one.",
+		);
+
+		// A rule for another category doesn't match this entry: the tick is unticked and says nothing of a rule.
+		await setRule(2);
+		const other = await askAboutDelete();
+		const otherSheet = other.html.slice(other.html.indexOf('role="dialog"'));
+		expect(otherSheet).not.toMatch(/name="always" value="1" checked/);
+		expect(otherSheet).toMatch(/name="always_was" value="0"/);
+		expect(otherSheet).toContain("Leave it unticked to change just this one.");
+		expect(otherSheet).not.toContain("Untick it and save to remove the rule.");
+
+		// The rule's category is archived since: the entry still matches it, so the tick stays ticked and names it.
+		await setRule(1);
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		const archived = await askAboutDelete();
+		const archivedSheet = archived.html.slice(
+			archived.html.indexOf('role="dialog"'),
+		);
+		expect(archivedSheet).toMatch(/name="always" value="1" checked/);
+		expect(archivedSheet).toContain(
+			`Rule cash shop is always ${await categoryName(1)}. Untick it and save to remove the rule.`,
+		);
+	});
+
 	it("hides and rejects delete for a split part, then confirms and cascades a parent delete", async () => {
 		const cash = await env.DB.prepare(
 			"SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' LIMIT 1",
@@ -2554,6 +2647,72 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			date: today(),
 			excluded: 0,
 		});
+	});
+
+	it("a pending edit's rule tick comes back ticked, with its rule's hint, when the panel refuses it after the parts are saved", async () => {
+		const { id, a, b } = await splitCash("Rule split");
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Rule split', 1)",
+		).run();
+		const tomorrow = shiftDay(today(), 1);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", tomorrow],
+			["amount", "100.00"],
+			["merchant", "Rule split"],
+			["always", "1"],
+			["always_was", "1"],
+			["rule_category_was", "1"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		const groceries = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 1").first<{
+				name: string;
+			}>()
+		)?.name;
+		expect(res.status).toBe(422);
+		expect(html).toContain("Choose today or an earlier date.");
+		expect(html).toMatch(/name="always" value="1" checked/);
+		expect(html).toContain(
+			`Rule split is always ${groceries}. Untick it and save to remove the rule.`,
+		);
+	});
+
+	it("a pending edit's rule tick names an archived rule category in its hint when the panel refuses it after the parts are saved", async () => {
+		const { id, a, b } = await splitCash("Archived rule split");
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Archived rule split', 2)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const archivedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", shiftDay(today(), 1)],
+			["amount", "100.00"],
+			["merchant", "Archived rule split"],
+			["always", "1"],
+			["always_was", "1"],
+			["rule_category_was", "2"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain("Choose today or an earlier date.");
+		expect(html).toMatch(/name="always" value="1" checked/);
+		expect(html).toContain(
+			`Archived rule split is always ${archivedName}. Untick it and save to remove the rule.`,
+		);
 	});
 
 	it("redirects a plain browser save back to the list", async () => {

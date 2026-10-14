@@ -120,6 +120,8 @@ export function LikelyPanel({
 			>
 				<input type="hidden" name="back" value={back} />
 				<input type="hidden" name="category" value={String(categoryId)} />
+				{/* The name the rows were matched by, which Add checks the category still has. */}
+				<input type="hidden" name="category_name" value={categoryName} />
 				{/* A tick redraws the Add count only; the rows stay as the person left them. */}
 				<div
 					hx-post={`/transactions/${savedId}/likely/count`}

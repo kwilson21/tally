@@ -99,7 +99,7 @@ Every component and flow in the original app's catalog (`kwilson21/superhuman-pe
 ## Flows
 | Original (steps) | Tally flow | Verdict |
 |---|---|---|
-| Categorization (4) | Edit a transaction: chips, "Always for this merchant", Exclude, rename | Keep: first flow |
+| Categorization (4) | Edit a transaction: chips, the rule tick ("Use this category for … from now on"), Exclude, rename | Keep: first flow |
 | Budget setup (4) | Change a budget on Home: row → sheet → MoneyInput → save → toast | Keep: first flow |
 | Settings (9 tabs) | Settings categories: rename, archive, restore, move, add | Keep |
 | Filter bar (3) | Transactions filters and result count | Keep |

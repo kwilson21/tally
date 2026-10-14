@@ -117,6 +117,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
@@ -1551,6 +1552,11 @@ type SheetProps = {
 	/** Jev answers categories now, so a one-off name's Rename list says Tally guesses again (decision 101). */
 	jevCategories?: boolean;
 	/**
+	 * The rule's category name as the posted panel showed it, passed only on a refused save's redraw; a first
+	 * draw uses tx.merchantRuleCategoryName. For display only: the save never reads it.
+	 */
+	ruleCategoryName?: string;
+	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
 	 */
@@ -1607,6 +1613,7 @@ function EditSheet({
 	nameWas = null,
 	nameScope = "one",
 	jevCategories = false,
+	ruleCategoryName,
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
@@ -1628,9 +1635,6 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	const ruleCategory = categories.find(
-		(cat) => cat.id === tx.merchantRuleCategoryId,
-	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1874,8 +1878,8 @@ function EditSheet({
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
 								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks Always for this
-								// merchant, keeps the category (rename.ts).
+								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
+								// tick, keeps the category (rename.ts).
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
 									values.newCategory !== true &&
@@ -2197,19 +2201,8 @@ function EditSheet({
 						</div>
 					</details>
 				)}
-				{/* The two things people change most after the category, one tap each (owner's pick C). */}
+				{/* Exclude is a pill; the merchant rule is the tick row above Save (#353). */}
 				<div class="flex flex-wrap gap-2">
-					{/* A linked refund has no category of its own to make a rule from. */}
-					{tx.refundOfId == null && (
-						<Chip
-							type="checkbox"
-							name="always"
-							value="1"
-							checked={values.alwaysForMerchant}
-						>
-							Always for this merchant
-						</Chip>
-					)}
 					<Chip
 						type="checkbox"
 						name="excluded"
@@ -2219,24 +2212,15 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
-				{tx.refundOfId == null && (
-					<p class="text-sm text-muted">
-						Ticking this for a transaction that doesn't match the rule changes
-						it for this merchant. To change a rule this transaction already
-						matches, remove it in Settings first.
-					</p>
-				)}
-				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
-					<p class="text-sm text-muted">
-						Remove it in Settings, under{" "}
-						<a href="/settings#merchant-rules">Tally's rules</a>.
-					</p>
-				) : ruleCategory && values.alwaysForMerchant ? (
-					<p class="text-sm text-muted">
-						{tx.displayName} is always {ruleCategory.name}. Untick it and save
-						to remove the rule.
-					</p>
-				) : null}
+				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
+				{tx.merchantRuleCategoryName &&
+					values.alwaysForMerchant &&
+					tx.refundOfId != null && (
+						<p class="text-sm text-muted">
+							Remove it in Settings, under{" "}
+							<a href="/settings#merchant-rules">Tally's rules</a>.
+						</p>
+					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -2289,6 +2273,21 @@ function EditSheet({
 						>
 							Reviewed as a refund or other non-income credit
 						</Chip>
+					</div>
+				)}
+				{tx.refundOfId == null && (
+					<div class="border-t border-rule pt-3">
+						<MerchantRuleTick
+							merchant={tx.storeName}
+							checked={values.alwaysForMerchant}
+							ruleCategory={
+								values.alwaysWas
+									? (ruleCategoryName ??
+										tx.merchantRuleCategoryName ??
+										undefined)
+									: undefined
+							}
+						/>
 					</div>
 				)}
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
@@ -2590,6 +2589,17 @@ function asksFromThisPage(c: Context<App>) {
 	}
 }
 
+/**
+ * The store's merchant rule matches this entry as it's saved: its category is the rule's. The panel's rule tick
+ * opens ticked then, and its hint names the rule (MerchantRuleTick), so every panel literal sets both fields from it.
+ */
+function ruleMatches(tx: TransactionDetail) {
+	return (
+		tx.merchantRuleCategoryId !== null &&
+		tx.merchantRuleCategoryId === tx.categoryId
+	);
+}
+
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -2604,12 +2614,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
-		alwaysWas:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysForMerchant: ruleMatches(tx),
+		alwaysWas: ruleMatches(tx),
 		merchantRuleWas: tx.merchantRuleCategoryId,
 		// Nothing is typed yet: "Type your own" starts empty (decision 101).
 		displayName: null,
@@ -3259,7 +3265,7 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
-	const showErrors = (
+	const showErrors = async (
 		errors: EditErrors,
 		changePartsTotalCents?: number,
 		shownPeople: HouseholdPerson[] = people,
@@ -3291,6 +3297,14 @@ async function savePanel(
 				: tx.forPersonId,
 			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
+		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
+		// save clears only the rule posted (saveEdit), so the hint must not name the rule the store has now.
+		const postedRule =
+			values.alwaysWas && values.merchantRuleWas
+				? await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+						.bind(values.merchantRuleWas)
+						.first<{ name: string }>()
+				: null;
 		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
@@ -3307,6 +3321,7 @@ async function savePanel(
 					nameWas={form.get("merchant_was")?.toString() ?? null}
 					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
 					jevCategories={jevCategories}
+					ruleCategoryName={postedRule?.name}
 					cashValues={cashValues}
 					changePartsTotalCents={changePartsTotalCents}
 				/>
@@ -3625,28 +3640,28 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const category = await liveCategory(c.env.DB, form.get("category"));
-	// A category archived since the panel opened moves nothing, as when every ticked row has changed.
-	const moved = category
+	// A category archived or renamed since the panel opened moves nothing, as when every ticked row has changed.
+	const filed = category
 		? await addLikely(c.env.DB, {
 				savedId: tx.id,
 				categoryId: category.id,
-				categoryName: category.name,
+				categoryName: form.get("category_name")?.toString() ?? "",
 				ticked: form.getAll("ids").map(Number),
 				today,
 				actor: actor(c),
 			})
-		: 0;
+		: { moved: 0, name: null };
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
-	// the panel's rules still allow).
+	// the panel's rules still allow). The toast names the category as it is stored, not as the panel showed it.
 	const message =
-		moved === 0 || !category
+		filed.name === null
 			? "Nothing moved: those transactions changed since the panel opened."
-			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+			: `Set ${filed.moved} ${filed.moved === 1 ? "transaction" : "transactions"} to ${filed.name}.`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message, type: moved === 0 ? "info" : "success" },
+			toast: { message, type: filed.name === null ? "info" : "success" },
 			announce: message,
 		}),
 	);
@@ -3666,7 +3681,8 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const count = (
 		await likelyStill(c.env.DB, {
 			savedId: tx.id,
-			categoryName: category.name,
+			categoryId: category.id,
+			categoryName: form.get("category_name")?.toString() ?? "",
 			today,
 			ticked: form.getAll("ids").map(Number),
 		})
@@ -3808,9 +3824,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewedByUser,
-			alwaysForMerchant:
-				tx.merchantRuleCategoryId !== null &&
-				tx.merchantRuleCategoryId === tx.categoryId,
+			alwaysForMerchant: ruleMatches(tx),
+			alwaysWas: ruleMatches(tx),
 			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: null,
 			note: tx.note,

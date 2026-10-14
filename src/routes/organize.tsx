@@ -3,7 +3,13 @@ import { actor } from "../actor";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
-import { organizeGroups, saveOrganizeGroup } from "../transactions/organize";
+import {
+	groupHasRule,
+	organizeGroups,
+	organizeOffer,
+	saveOrganizeGroup,
+	setOrganizeRule,
+} from "../transactions/organize";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -14,6 +20,7 @@ import {
 	NewCategoryChip,
 	NewCategoryName,
 } from "../views/new-category-choice";
+import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -30,6 +37,12 @@ type Values = {
 	nameError?: string;
 };
 
+/** An answer's reply (#353): the toast and the announcement, sent as one HX-Trigger header. */
+type Trigger = {
+	toast?: { message: string; type: "success" };
+	announce?: string;
+};
+
 export const organize = new Hono<App>();
 
 async function renderOrganize(
@@ -37,6 +50,13 @@ async function renderOrganize(
 	values?: Values,
 	status: 200 | 422 = 200,
 	focus = false,
+	/** After a save, the question about the rule in place of the store (#353). */
+	rule?: GroupRuleOfferValue,
+	/**
+	 * A rule answer's reply (#353). When it is given, the one HX-Trigger header is set here, and the empty state's sentence
+	 * joins the announcement when the list ends on it. Without it, the caller's own header stands.
+	 */
+	trigger?: Trigger,
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
@@ -55,6 +75,10 @@ async function renderOrganize(
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
+	const doneSentence =
+		allGroups.length > 0
+			? "You skipped the rest."
+			: "Every transaction has a category.";
 	const query = new URLSearchParams();
 	for (const name of skipped) query.append("skip", name);
 	const action = `/transactions/organize${query.size ? `?${query}` : ""}`;
@@ -64,6 +88,24 @@ async function renderOrganize(
 	const sources = group
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
+	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
+	// question's own address also carries its category and saved ids, which an answer must not repeat.
+	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
+	if (trigger) {
+		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
+		const ends = focus && !rule && !group;
+		const announce = [trigger.announce, ends && doneSentence]
+			.filter(Boolean)
+			.join(" ");
+		if (trigger.toast || announce)
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: trigger.toast,
+					announce: announce || undefined,
+				}),
+			);
+	}
 
 	return c.html(
 		<Layout
@@ -75,7 +117,9 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
-				{group ? (
+				{rule ? (
+					<GroupRuleOffer value={rule} action={ruleAction} focus />
+				) : group ? (
 					<>
 						<p class="mt-2 text-muted">
 							{skipped.length + 1} of {allGroups.length} · {remaining} left, all
@@ -163,22 +207,18 @@ async function renderOrganize(
 									Skip
 								</Button>
 							</div>
-							<p class="text-sm text-muted">
-								Future {values?.name || group.name} transactions get this
-								category too.
-							</p>
 						</form>
 					</>
-				) : allGroups.length > 0 ? (
-					<EmptyState
-						kind="done"
-						sentence="You skipped the rest."
-						action={{ href: "/transactions/organize", label: "Start over" }}
-					/>
 				) : (
 					<EmptyState
 						kind="done"
-						sentence="Every transaction has a category."
+						sentence={doneSentence}
+						focus={focus}
+						action={
+							allGroups.length > 0
+								? { href: "/transactions/organize", label: "Start over" }
+								: undefined
+						}
 					/>
 				)}
 			</div>
@@ -187,7 +227,43 @@ async function renderOrganize(
 	);
 }
 
-organize.get("/transactions/organize", (c) => renderOrganize(c));
+/**
+ * The address of Organize's question for a saved group (#353): the skips the page carries, then the category and the
+ * saved charges' ids joined by dots. The question has an address of its own, so a reload asks it again.
+ */
+function questionAddress(
+	skips: string[],
+	categoryId: number,
+	savedIds: number[],
+): string {
+	const params = new URLSearchParams([
+		...skips.map((name): [string, string] => ["skip", name]),
+		["category", String(categoryId)],
+		["saved", savedIds.join(".")],
+	]);
+	return `/transactions/organize?${params}`;
+}
+
+/**
+ * Organize's page. A Save that asks the question lands on the question's own address both ways (#353): by a 303
+ * redirect with JavaScript off, and by the reply's HX-Push-Url with it. Anything else in those parameters, or a
+ * question the charges no longer hold, shows the ordinary page.
+ */
+organize.get("/transactions/organize", async (c) => {
+	const params = new URL(c.req.url).searchParams;
+	const categoryId = Number(params.get("category"));
+	const savedIds = (params.get("saved") ?? "")
+		.split(".")
+		.map(Number)
+		.filter((id) => Number.isSafeInteger(id) && id > 0);
+	const offer =
+		Number.isSafeInteger(categoryId) && categoryId > 0 && savedIds.length > 0
+			? await organizeOffer(c.env.DB, savedIds, categoryId)
+			: null;
+	return offer
+		? renderOrganize(c, undefined, 200, true, offer)
+		: renderOrganize(c);
+});
 
 organize.post("/transactions/organize", async (c) => {
 	const form = await c.req.formData();
@@ -259,24 +335,116 @@ organize.post("/transactions/organize", async (c) => {
 	if (!chosen) return renderOrganize(c, values, 422);
 
 	const currentGroup = group;
-	const count = await saveOrganizeGroup(
+	const filed = await saveOrganizeGroup(
 		c.env.DB,
 		currentGroup.merchantKeys,
 		chosen.id,
 		name && name !== currentGroup.name ? name : null,
 		actor(c),
 	);
-	if (count === 0) {
+	if (filed.length === 0) {
 		// Another request categorized this group after it was read, so nothing was filed: a category made
 		// here goes too, and the answer is the one for a merchant that already has a category.
 		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
 		return alreadyCategorized();
 	}
+	const count = filed.length;
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
-	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	// The save makes no rule. Organize asks #209's question after it (#353), unless every merchant of the group
+	// has this rule already; then it moves on as it always did.
+	const asks = !(await groupHasRule(
+		c.env.DB,
+		currentGroup.merchantKeys,
+		chosen.id,
+	));
+	const rule: GroupRuleOfferValue | undefined = asks
+		? {
+				savedIds: filed,
+				merchant: name || currentGroup.name,
+				categoryId: chosen.id,
+				category: chosen.name,
+			}
+		: undefined;
+	// The question has an address of its own (#353), so a reload asks it again.
+	const asked = rule
+		? questionAddress(url.searchParams.getAll("skip"), chosen.id, filed)
+		: null;
+	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
-	return renderOrganize(c, undefined, 200, true);
+	if (asked) c.header("HX-Push-Url", asked);
+	return renderOrganize(c, undefined, 200, true, rule);
+});
+
+/**
+ * The items a question posts back as a JSON array, keeping only the ones `keep` accepts. Anything else posts none:
+ * JSON.parse throws on what is not JSON, and a file upload reads as "[object File]".
+ */
+function postedItems<T>(
+	value: unknown,
+	keep: (item: unknown) => item is T,
+): T[] {
+	try {
+		const items: unknown = JSON.parse(String(value ?? "[]"));
+		return Array.isArray(items) ? items.filter(keep) : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the charges the save
+ * filed (read from the database, never from the request), and names the store in the toast; either answer moves on
+ * to the next store, with focus on its name.
+ */
+organize.post("/transactions/organize/rule", async (c) => {
+	const form = await c.req.formData();
+	const url = new URL(c.req.url);
+	// The skips only: an answer to the question must not carry its category or saved ids back into the question.
+	const skips = new URLSearchParams(
+		url.searchParams.getAll("skip").map((name) => ["skip", name]),
+	);
+	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
+	const savedIds = postedItems(
+		form.get("saved"),
+		(id): id is number =>
+			typeof id === "number" && Number.isInteger(id) && id > 0,
+	);
+	const categoryId = Number(form.get("category"));
+	const category =
+		Number.isInteger(categoryId) && categoryId > 0
+			? await c.env.DB.prepare(
+					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+				)
+					.bind(categoryId)
+					.first<{ id: number; name: string }>()
+			: null;
+	const ruled =
+		form.get("answer") === "yes" && category && savedIds.length > 0
+			? category
+			: null;
+	const merchant = form.get("merchant")?.toString().trim() ?? "";
+	const written = ruled
+		? await setOrganizeRule(
+				c.env.DB,
+				ruled.id,
+				JSON.stringify(savedIds),
+				merchant,
+				actor(c),
+			)
+		: [];
+	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
+	const trigger: Trigger = {};
+	if (ruled && written.length > 0) {
+		const message = `${merchant || written[0]} is always ${ruled.name} now.`;
+		trigger.toast = { message, type: "success" };
+		trigger.announce = message;
+	}
+	// The Save before it pushed the question's address, so the answer replaces it with the skips-only address, giving
+	// one history entry, not two.
+	c.header("HX-Replace-Url", next);
+	return renderOrganize(c, undefined, 200, true, undefined, trigger);
 });
