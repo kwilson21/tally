@@ -5,6 +5,7 @@ import {
 	getTransaction,
 	listTransactions,
 	saveEdit,
+	selectableMatchIds,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { parseEdit } from "../src/transactions/edit";
@@ -334,6 +335,49 @@ describe("searching the Transactions list", () => {
 		expect(await found("%")).toEqual([]);
 		expect(await found("Blue_Bottle")).toEqual([]);
 		expect(await found("Blue Bottle")).toEqual([id]);
+	});
+
+	it("finds nothing by a suggestion the row hides behind its own name, and still finds that row by its bank text", async () => {
+		const named = await charge();
+		const plain = await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(named)
+			.run();
+		expect(await found("Blue Bottle Coffee")).toEqual([plain]);
+		expect(await found("dog bed")).toEqual([named]);
+		expect((await found("0412")).sort()).toEqual([named, plain].sort());
+	});
+
+	it("finds nothing by a suggestion a split part hides behind its purchase's own name", async () => {
+		const part = await splitPart();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await db
+			.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE is_split = 1",
+			)
+			.run();
+		expect(await rowOf(part)).toMatchObject({ displayName: "Dog bed" });
+		expect(await found("Blue Bottle Coffee")).toEqual([]);
+	});
+
+	it("Select all's whole set is the rows the list finds for the same search", async () => {
+		const named = await charge();
+		const plain = await charge();
+		await suggest(RAW, "Blue Bottle Coffee");
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(named)
+			.run();
+		const search = parseFilters(
+			new URLSearchParams({ month: "all", q: "Blue Bottle Coffee" }),
+			"2026-09",
+		);
+		const listed = await listTransactions(db, search);
+		expect(listed.total).toBe(1);
+		expect(listed.rows.map((r) => r.id)).toEqual([plain]);
+		expect(await selectableMatchIds(db, search)).toEqual([plain]);
 	});
 });
 

@@ -257,7 +257,8 @@ export function filterMatch(
 			// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
 			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
-			// row says can be searched for.
+			// row says can be searched for. A row with its own name shows that instead (shownName), so its
+			// suggestion does not match (#414).
 			// A search also finds a category by its name (#211), and an amount (decision 79). A plain whole
 			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
 			// with a "$" or a decimal point the search is the amount alone.
@@ -268,7 +269,7 @@ export function filterMatch(
 			if (amount === null || amount.plain) {
 				categoryPattern = pattern;
 				alternatives.push(
-					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR ${ownNameSql("t")} LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
+					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR (${ownNameSql("t")} IS NULL AND ${suggestedNameMatch(namesOn)}) OR ${ownNameSql("t")} LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
 				);
 				args.push(
 					pattern,
