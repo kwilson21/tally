@@ -20,6 +20,8 @@ import { usableSuggestedNames } from "./transactions/name-suggestions";
  * its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
+// While a name waits, notes take at most half the night's calls, so the names always get the other half (#458).
+const noteCallLimitWhileNamesWait = Math.floor(nameCallLimit / 2);
 // The switches are read after every five calls, so one turned off mid-run stops within five; a batch's
 // answers are kept or dropped together.
 const SWITCH_CHECK_BATCH = 5;
@@ -175,4 +177,30 @@ export async function suggestMerchantNames(
 	}
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);
 	return done;
+}
+
+/**
+ * The night's notes, then its names (spec §7), sharing `nameCallLimit` Workers AI calls. While a name waits, notes
+ * take at most `noteCallLimitWhileNamesWait` and the names get the rest, so untried notes can't leave them no calls
+ * (#458). With none waiting, notes may use the whole limit, and the names get what the notes didn't ask.
+ */
+export async function suggestNightlyNames(
+	env: NamesEnv,
+	time?: Deadline,
+): Promise<void> {
+	const notesLimit = (await namesWaiting(env))
+		? noteCallLimitWhileNamesWait
+		: nameCallLimit;
+	const notes = await suggestTransactionNotes(env, notesLimit, time);
+	await suggestMerchantNames(env, nameCallLimit - notes.asked, time);
+}
+
+/**
+ * Whether the names step has a merchant to ask about tonight: the names switch is on and one is waiting. It is the
+ * names' own query for one row, plus the switch read (#458).
+ */
+async function namesWaiting(env: NamesEnv): Promise<boolean> {
+	if (!env.AI) return false;
+	if (!(await readAiSwitches(env.DB)).names) return false;
+	return (await merchantsToAsk(env.DB, 1)).length > 0;
 }
