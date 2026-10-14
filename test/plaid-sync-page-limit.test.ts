@@ -280,7 +280,6 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 	// 9 modified, 1 removed (a removed split costs the same as a removed row), 10 pending rekey, 42 pending merge,
 	// 9 split removal, 42 merge onto a split. A ceiling is its per-row cost times 100 plus PAGE_STATEMENTS. The 42nd
 	// statement of a merge is the planned expense that follows its payment to the posted row (#202, spec §5).
-
 	it.each([
 		{
 			shape: "added",

@@ -1585,19 +1585,23 @@ async function partBills(
 	return results;
 }
 
+/** A planned expense on a part, with the part's amount and category: what a replacement can keep it by. */
+type PartPlan = { id: number; amountCents: number; categoryId: number | null };
+
 /** The planned expenses paid by a part of a split, read before a change deletes the parts (decision 82). */
-async function partPlanIds(
+async function partPlans(
 	db: D1Database,
 	parentId: number,
-): Promise<number[]> {
+): Promise<PartPlan[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT pe.id FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
+			`SELECT pe.id AS id, part.amount_cents AS amountCents, part.category_id AS categoryId
+			FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
 			WHERE part.parent_id = ? ORDER BY part.id`,
 		)
 		.bind(parentId)
-		.all<{ id: number }>();
-	return results.map((row) => row.id);
+		.all<PartPlan>();
+	return results;
 }
 
 /** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
@@ -1609,25 +1613,27 @@ type PartPayment = UnpaidBill & {
 };
 
 /**
- * Pairs each linked payment with the first unused new part of the same amount and category, oldest payment
- * first (decision 99). A payment with no such part is lost: its bill is unpaid, and it is named.
+ * Pairs each linked payment or planned expense with the first unused new part of the same amount and category, oldest
+ * first (decision 99). `used` holds the parts already taken, so a bill and a plan never share one. An item with no such
+ * part is lost: a bill's is unpaid and named, a plan's is set aside.
  */
-function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
-	const used = new Set<number>();
-	const kept: { paymentId: number; index: number }[] = [];
-	const lost: PartPayment[] = [];
-	for (const payment of payments) {
+function keepParts<
+	T extends { amountCents: number; categoryId: number | null },
+>(items: T[], parts: SplitPart[], used: Set<number>) {
+	const kept: { item: T; index: number }[] = [];
+	const lost: T[] = [];
+	for (const item of items) {
 		const index = parts.findIndex(
 			(part, i) =>
 				!used.has(i) &&
-				part.amountCents === payment.amountCents &&
-				part.categoryId === payment.categoryId,
+				part.amountCents === item.amountCents &&
+				part.categoryId === item.categoryId,
 		);
 		if (index === -1) {
-			lost.push(payment);
+			lost.push(item);
 		} else {
 			used.add(index);
-			kept.push({ paymentId: payment.paymentId, index });
+			kept.push({ item, index });
 		}
 	}
 	return { kept, lost };
@@ -1671,8 +1677,9 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
  * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills still
- * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the
- * purchase, and each new part starts with it.
+ * unpaid after the change are returned by name (decisions 99 and 105). A planned expense on a replaced part moves to a
+ * new part of its amount and category, as a bill's payment does, and is set aside otherwise (decision 99). A person's
+ * own Not this one is kept on the purchase, and each new part starts with it.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1698,13 +1705,15 @@ export async function saveSplit(
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
 	const unlinked = await linkedRefundDates(db, parentId, true);
 	const payments = await partBills(db, parentId);
-	const { kept, lost } = keepPayments(payments, parts);
-	// A plan on a part is unlinked when the part goes (ON DELETE SET NULL), so each one moves to the next part no kept bill
-	// took, in order: the first free part, as a bill keeps its own (decision 82). With no free part left, it stays unlinked.
-	const planIds = await partPlanIds(db, parentId);
-	const freeParts = parts
-		.map((_, index) => index)
-		.filter((index) => !kept.some((keep) => keep.index === index));
+	// Bills are paired first. A plan on a part is paired the same way (decision 99): with a new part of its amount and
+	// category that no bill took. A plan with no such part is unlinked when its part goes (ON DELETE SET NULL), and set aside.
+	const used = new Set<number>();
+	const { kept, lost } = keepParts(payments, parts, used);
+	const { kept: keptPlans } = keepParts(
+		await partPlans(db, parentId),
+		parts,
+		used,
+	);
 	const linkedPurchase = await db
 		.prepare(
 			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
@@ -1725,7 +1734,7 @@ export async function saveSplit(
 						)
 						.bind(
 							parentId,
-							JSON.stringify(kept.map((keep) => keep.paymentId)),
+							JSON.stringify(kept.map((keep) => keep.item.paymentId)),
 							parentId,
 							total,
 						),
@@ -1743,21 +1752,25 @@ export async function saveSplit(
 				`UPDATE bill_payments SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1 OFFSET ?), status = 'linked'
 				WHERE id = ? AND transaction_id = ? AND status = 'dismissed' AND ${unchanged}`,
 			)
-			.bind(parentId, keep.index, keep.paymentId, parentId, parentId, total),
+			.bind(
+				parentId,
+				keep.index,
+				keep.item.paymentId,
+				parentId,
+				parentId,
+				total,
+			),
 	);
-	const restorePlans = planIds.flatMap((planId, i) => {
-		const index = freeParts[i];
-		if (index === undefined) return [];
-		return [
-			db
-				.prepare(
-					`UPDATE planned_expenses SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2)
+	// Each kept plan moves to the new part it was paired with, as a kept payment does (decision 99).
+	const restorePlans = keptPlans.map((keep) =>
+		db
+			.prepare(
+				`UPDATE planned_expenses SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2)
 				WHERE id = ?3 AND transaction_id IS NULL
 				AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?4)`,
-				)
-				.bind(parentId, index, planId, total),
-		];
-	});
+			)
+			.bind(parentId, keep.index, keep.item.id, total),
+	);
 	const markParent = db
 		.prepare(
 			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
@@ -2008,8 +2021,9 @@ export async function correctCashSplit(
 
 /**
  * Deletes a split and restores its parent atomically, unlinking refunds of its parts and unlinking the bill
- * payments of its parts with no dismissal left, so the matcher may link them to the purchase again (decisions
- * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
+ * payments of its parts with no dismissal left, so the matcher may link them to the purchase again. The planned
+ * expenses its parts pay are set aside, as the bills are unlinked (decisions 99 and 105). A person's own Not this one
+ * on a part is kept on the purchase. Returns the refunds' dates and
  * the bills still unpaid after it, by name (decision 105). A split refund's parent is whole again and counts by
  * its own link, so that link is checked like a new one (src/db/refunded.ts) and dropped if the refund no longer
  * fits; its date is returned too.
@@ -2021,7 +2035,6 @@ export async function removeSplit(
 ): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
 	const unlinked = await linkedRefundDates(db, parentId, false);
 	const bills = await partBills(db, parentId);
-	const planIds = await partPlanIds(db, parentId);
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")
 		.bind(parentId)
@@ -2038,14 +2051,8 @@ export async function removeSplit(
 			.bind(parentId),
 		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105).
 		db.prepare(movePartDismissalsSql("?1", "?1", "1")).bind(parentId),
+		// The parts go with their bill payments; a plan on a part is set aside by ON DELETE SET NULL, as a bill's is unlinked.
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
-		// A plan on a part goes back to the whole payment, which the part's delete would otherwise unlink (decision 82). One
-		// payment pays one plan, so the first plan by part takes it; a second one stays unlinked with its part (ON DELETE SET NULL).
-		db
-			.prepare(
-				"UPDATE planned_expenses SET transaction_id = ?1 WHERE id = ?2 AND transaction_id IS NULL",
-			)
-			.bind(parentId, planIds[0] ?? 0),
 		db
 			.prepare(
 				"UPDATE transactions SET is_split = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?",

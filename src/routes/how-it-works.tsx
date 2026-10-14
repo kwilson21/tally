@@ -17,7 +17,6 @@ import { readAiTally } from "../db/ai-log";
 import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
 import { plansSetAsideCents } from "../db/planned-expenses";
-
 import {
 	bankDatedCount,
 	excludedBreakdown,
@@ -306,7 +305,6 @@ howItWorks.get("/how-it-works", async (c) => {
 							that are due or overdue and not yet paid, minus the full monthly
 							savings goal from the 1st, and minus planned one-time expenses.
 						</li>
-
 						<li>
 							A planned one-time expense is set aside for its whole month, and
 							one from an earlier month stays set aside until it is paid, moved
@@ -337,7 +335,6 @@ howItWorks.get("/how-it-works", async (c) => {
 								{budgetExample({
 									...summary,
 									unbudgetedCents,
-
 									billsDueCents: unpaidDueBillsCents,
 									plannedCents: unpaidPlansCents,
 								})}

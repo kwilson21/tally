@@ -3,14 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
-
 import {
 	DEFAULT_TIME_ZONE,
 	monthsBefore,
 	shortMonthName,
 	todayIn,
 } from "../src/dates";
-
 import { homeForecastDays } from "../src/db/home-forecast";
 import { loadMonth } from "../src/db/month";
 import {
@@ -28,13 +26,11 @@ const BASE = "http://tally.test";
 const post = (path: string, form: Record<string, string>) =>
 	exports.default.fetch(BASE + path, {
 		method: "POST",
-
 		headers: {
 			Origin: BASE,
 			"HX-Request": "true",
 			"content-type": "application/x-www-form-urlencoded",
 		},
-
 		body: new URLSearchParams(form),
 	});
 
@@ -731,7 +727,7 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 	});
 });
 
-describe("a split keeps a plan and a bill on parts, and Undo or Remove split leaves neither unpaid", () => {
+describe("a split keeps a plan on a part only as it keeps a bill's payment (decision 99)", () => {
 	const splitInTwo = (tx: number, first: number, second: number) =>
 		saveSplit(
 			env.DB,
@@ -795,29 +791,51 @@ describe("a split keeps a plan and a bill on parts, and Undo or Remove split lea
 		expect(await paidBy(planId)).toBe(newSecond);
 	});
 
-	it("a re-split with new amounts keeps a plan on a part on the first part, still paid", async () => {
+	it("a re-split with no part of the plan's amount unlinks it and sets it aside, as a bill's payment is unlinked", async () => {
 		const tx = await payment(9805, 30000);
 		await splitInTwo(tx, 12000, 18000);
 		const [, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
 
 		await splitInTwo(tx, 10000, 20000);
-		const [newFirst] = await partIds(tx);
-		expect(await paidBy(planId)).toBe(newFirst);
-		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+		expect(await paidBy(planId)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
 	});
 
-	it("Remove split puts a plan on a part back on the whole payment, still paid", async () => {
+	it("a re-split keeps two plans of one amount each on a part of that amount, one part apiece", async () => {
+		const tx = await payment(9816, 36000);
+		await splitInTwo(tx, 18000, 18000);
+		const [first, second] = await partIds(tx);
+		const one = await plan("Lawn service", 18000, MONTH, first ?? 0);
+		const two = await plan("Car registration", 18000, MONTH, second ?? 0);
+
+		await splitInTwo(tx, 18000, 18000);
+		const [newFirst, newSecond] = await partIds(tx);
+		expect(await paidBy(one)).toBe(newFirst);
+		expect(await paidBy(two)).toBe(newSecond);
+	});
+
+	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {
 		const tx = await payment(9808, 30000);
 		await splitInTwo(tx, 12000, 18000);
 		const [, second] = await partIds(tx);
 		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
 
 		await removeSplit(env.DB, tx, "demo");
+		expect(await paidBy(planId)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
+	});
+
+	it("Remove split keeps a plan on the whole payment, which the split never held, so it stays paid", async () => {
+		const tx = await payment(9814, 30000);
+		const planId = await plan("Lawn service", 18000, MONTH, tx);
+		await splitInTwo(tx, 12000, 18000);
+
+		await removeSplit(env.DB, tx, "demo");
 		expect(await paidBy(planId)).toBe(tx);
 	});
 
-	it("Remove split with a plan on each part resolves: one plan takes the whole payment, and the other is unlinked", async () => {
+	it("Remove split unlinks a plan on each part and sets both aside, as it does bills on parts", async () => {
 		const tx = await payment(9812, 30000);
 		await splitInTwo(tx, 12000, 18000);
 		const [first, second] = await partIds(tx);
@@ -825,9 +843,9 @@ describe("a split keeps a plan and a bill on parts, and Undo or Remove split lea
 		const two = await plan("Car registration", 18000, MONTH, second ?? 0);
 
 		await expect(removeSplit(env.DB, tx, "demo")).resolves.toBeDefined();
-		const payers = [await paidBy(one), await paidBy(two)];
-		expect(payers.filter((t) => t === tx)).toHaveLength(1);
-		expect(payers).toContain(null);
+		expect(await paidBy(one)).toBeNull();
+		expect(await paidBy(two)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(30000);
 	});
 
 	it("an Undo after a split with a bill on a part brings the plan back unpaid, never on the bill's money", async () => {

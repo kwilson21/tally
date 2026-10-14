@@ -18,7 +18,6 @@ import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
-
 import { loadBillRows } from "../src/routes/bills";
 import { home as homeRoute } from "../src/routes/home";
 

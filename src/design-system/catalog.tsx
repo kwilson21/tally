@@ -2221,7 +2221,6 @@ function Rows() {
 								id: 3,
 								name: "Car registration",
 								amountCents: 18000,
-
 								month: "2026-10",
 								paidDate: "2026-10-03",
 							}}
@@ -2245,7 +2244,6 @@ function Rows() {
 								id: 1,
 								name: "Car registration",
 								amountCents: 18000,
-
 								month: "2026-10",
 							}}
 							values={{

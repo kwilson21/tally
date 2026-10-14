@@ -391,7 +391,8 @@ export function PlanPaymentPicker({
 				To {name}, {formatCents(amountCents)}.
 			</p>
 			<p class="mt-1 text-muted">
-				Money out in the plan's month and the next, closest amount first.
+				Money out in the planned expense's month and the next, closest amount
+				first.
 			</p>
 			{error && (
 				<p role="alert" class="mt-2 text-over">
