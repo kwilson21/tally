@@ -866,8 +866,12 @@ describe("GET /design-system/proposals", () => {
 			const today = optionOf(p119, "Today (current)");
 			expect(today).toContain("outline-accent");
 			expect(today).not.toContain("proposal-saved");
+			expect(today).not.toContain("bg-press");
+			expect(today).not.toContain("self-center");
 			// The tick: a filled, tapered mark (no stroke), drawn from the left, short at 0 s, in a box turned −8°.
 			const tick = optionOf(p119, "A · Auditor&#39;s tick");
+			expect(tick).not.toContain("bg-press");
+			expect(tick).not.toContain("self-center");
 			expect(tick).toContain("proposal-saved-tick");
 			expect(tick).toContain("proposal-saved-chevron");
 			expect(tick).toContain("proposal-saved-toast");
@@ -926,6 +930,37 @@ describe("GET /design-system/proposals", () => {
 			// Each option says why, and only A is recommended.
 			expect(p119.match(/>Recommended</g)?.length).toBe(1);
 			expect(p119.match(/text-muted">Why: /g)?.length).toBe(2);
+		});
+
+		it("draws the real tab bar in every P119 still, with the toast 12px above it and the crops sized so no drawn row sits under a toast (decision 101)", async () => {
+			const { html } = await get("/design-system/proposals");
+			const p119 = block(html, "p119-saved");
+			// Fifteen stills (three options of four crops, and three Home stills), each with BottomTabs drawn inert.
+			expect(p119.match(/<nav /g)?.length).toBe(15);
+			expect(
+				p119.match(
+					/<div inert="" class="absolute inset-x-0 bottom-0 \[&amp;_nav\]:static \[&amp;_nav\]:block"><nav /g,
+				)?.length,
+			).toBe(15);
+			// The toast sits 12px (0.75rem) above that bar. Twelve stills have one: nine crops and the three Home stills.
+			expect(
+				p119.match(/bottom-\[calc\(var\(--tabs-height\)\+0\.75rem\)\]/g)
+					?.length,
+			).toBe(12);
+			expect(p119.match(/role="status"/g)?.length).toBe(12);
+			// The 4 s still has no toast: each of the three ends a crop without one.
+			const stills = p119.split('role="img" aria-label="').slice(1);
+			const ends = stills.filter((s) =>
+				(s.split('"')[0] ?? "").endsWith("4 seconds, the toast gone"),
+			);
+			expect(ends.length).toBe(3);
+			for (const end of ends) expect(end).not.toContain('role="status"');
+			// The 0 s toast is drawn whole: no fade or nudge on any still.
+			expect(p119).not.toContain("translate-y-[2px]");
+			expect(p119).not.toContain("opacity-75");
+			// The Transactions crop is 438px and the Home crop 608px, so no drawn row sits under a toast.
+			expect(p119.match(/h-\[438px\]/g)?.length).toBe(12);
+			expect(p119.match(/h-\[608px\]/g)?.length).toBe(3);
 		});
 
 		it("draws the demo's water bill as City Water, paid Water bill, so the caption never says the word twice", async () => {
