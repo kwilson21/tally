@@ -2,9 +2,7 @@ import { Button } from "./button";
 import { Icon } from "./icons";
 
 export type GroupRuleOfferValue = {
-	/** The group's merchant keys: Yes makes the rule on each of them. */
-	merchantKeys: string[];
-	/** The charges the save filed: Yes applies the rule only while they still hold the category (a person's choice). */
+	/** The charges the save filed: Yes makes the rule on their merchant keys, only while they still hold the category (a person's choice). */
 	savedIds: number[];
 	/** The store's name as Organize shows it after the save. */
 	merchant: string;
@@ -56,11 +54,6 @@ export function GroupRuleOffer({
 				hx-swap="outerHTML"
 				class="grid grid-cols-2 gap-3"
 			>
-				<input
-					type="hidden"
-					name="merchant_keys"
-					value={JSON.stringify(value.merchantKeys)}
-				/>
 				<input
 					type="hidden"
 					name="saved"

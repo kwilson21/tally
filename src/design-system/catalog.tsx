@@ -3008,7 +3008,6 @@ function Categorization() {
 						<GroupRuleOffer
 							id="group-rule-offer-sample-title"
 							value={{
-								merchantKeys: ["COSTCO WHSE #0431", "COSTCO GAS"],
 								savedIds: [1, 2],
 								merchant: "Costco",
 								categoryId: 1,

@@ -9,7 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
-import { APPLY_MERCHANT_RULE_SQL } from "../db/transactions";
+import { applyMerchantRuleSql } from "../db/transactions";
 import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
@@ -241,58 +241,58 @@ export async function groupHasRule(
 }
 
 /**
- * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key, creating the
- * `merchants` rows that don't exist yet, and applies it to the store's transactions a person hasn't chosen, as
- * setMerchantRule (#209's Yes) does, so later ones follow. It acts only while every row that Save filed (`savedIds`,
- * a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or recategorized row makes the Yes
- * stale (no rule, no charge changed, no toast). A pending charge that sync merges into its posted row
- * (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit panel's tick
- * can still make the rule. A key gets the rule only where one of those rows carries it, so a posted key with no such
- * row sets nothing. Returns how many rules were written, so a caller can tell whether there is a rule to name.
+ * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key of the charges
+ * Save filed, creating the `merchants` rows that don't exist yet, and applies it to the store's transactions a person
+ * hasn't chosen, as setMerchantRule (#209's Yes) does, so later ones follow. Keys come from the saved rows, never from
+ * the request, and a key gets the rule only where a saved row carries it as a person's choice. It acts only while every
+ * row that Save filed (`savedIds`, a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or
+ * recategorized row makes the Yes stale (no rule, no charge changed, no toast). A pending charge that sync merges into
+ * its posted row (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit
+ * panel's tick can still make the rule. Returns the keys whose rule was written, so a caller can tell whether there is
+ * a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
-	merchantKeys: string[],
 	categoryId: number,
 	savedIds: string,
 	actor: string,
-): Promise<number> {
-	const statements = [...new Set(merchantKeys)].flatMap((merchantKey) => {
-		// Both statements of a key carry this guard, so the rule and its charges move together or not at all.
-		const stillFiled = `EXISTS (SELECT 1 FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("s")} = ? AND s.category_id = ? AND s.category_source = 'user')
-			AND ${SAVED_STILL_HOLD_SQL}`;
-		const guard = [
+): Promise<string[]> {
+	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
+	// Two statements whatever the group's size, and both carry the guard, so the rules and the charges they name
+	// move together or not at all.
+	const rule = db
+		.prepare(
+			`INSERT INTO merchants (raw_name, default_category_id)
+			SELECT DISTINCT ${merchantKeySql("s")}, ? FROM ${savedRows} AND ${SAVED_STILL_HOLD_SQL}
+			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id
+			RETURNING raw_name`,
+		)
+		.bind(
+			categoryId,
 			savedIds,
-			merchantKey,
 			categoryId,
 			...savedStillHoldArgs(savedIds, categoryId),
-		];
-		return [
-			db
-				.prepare(
-					`INSERT INTO merchants (raw_name, default_category_id)
-				SELECT ?, ? WHERE ${stillFiled}
-				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
-				)
-				.bind(merchantKey, categoryId, ...guard),
-			db
-				.prepare(`${APPLY_MERCHANT_RULE_SQL} AND ${stillFiled}`)
-				.bind(categoryId, actor, merchantKey, ...guard),
-		];
-	});
-	if (statements.length === 0) return 0;
-	const results = await db.batch(statements);
-	// Each key's rule write is the statement at an even index, and its apply the one after it.
-	return results.reduce(
-		(written, result, index) =>
-			index % 2 === 0 ? written + result.meta.changes : written,
-		0,
+		);
+	const apply = db
+		.prepare(
+			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL}`,
+		)
+		.bind(
+			categoryId,
+			actor,
+			savedIds,
+			categoryId,
+			...savedStillHoldArgs(savedIds, categoryId),
+		);
+	// Only the rule's statement returns rows: the keys it wrote.
+	const [written] = await db.batch([rule, apply]);
+	return ((written?.results ?? []) as { raw_name: string }[]).map(
+		(row) => row.raw_name,
 	);
 }
 
 /** Organize's question for a saved group, as `organizeOffer` rebuilds it; the view draws it (#353). */
 export type GroupOffer = {
-	merchantKeys: string[];
 	savedIds: number[];
 	merchant: string;
 	categoryId: number;
@@ -339,7 +339,6 @@ export async function organizeOffer(
 	const merchantKeys = results.map((row) => row.merchantKey);
 	if (await groupHasRule(db, merchantKeys, categoryId)) return null;
 	return {
-		merchantKeys,
 		savedIds: ids,
 		merchant,
 		categoryId,

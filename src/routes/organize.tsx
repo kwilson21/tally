@@ -198,9 +198,26 @@ async function renderOrganize(
 }
 
 /**
- * Organize's page. A save with JavaScript off redirects to the question's own address (#353): the skips, then the
- * category and the saved charges' ids joined by dots. Anything else in those parameters, or a question the charges
- * no longer hold, shows the ordinary page.
+ * The address of Organize's question for a saved group (#353): the skips the page carries, then the category and the
+ * saved charges' ids joined by dots. The question has an address of its own, so a reload asks it again.
+ */
+function questionAddress(
+	skips: string[],
+	categoryId: number,
+	savedIds: number[],
+): string {
+	const params = new URLSearchParams([
+		...skips.map((name): [string, string] => ["skip", name]),
+		["category", String(categoryId)],
+		["saved", savedIds.join(".")],
+	]);
+	return `/transactions/organize?${params}`;
+}
+
+/**
+ * Organize's page. A Save that asks the question lands on the question's own address both ways (#353): by a 303
+ * redirect with JavaScript off, and by the reply's HX-Push-Url with it. Anything else in those parameters, or a
+ * question the charges no longer hold, shows the ordinary page.
  */
 organize.get("/transactions/organize", async (c) => {
 	const params = new URL(c.req.url).searchParams;
@@ -312,28 +329,22 @@ organize.post("/transactions/organize", async (c) => {
 	));
 	const rule: GroupRuleOfferValue | undefined = asks
 		? {
-				merchantKeys: currentGroup.merchantKeys,
 				savedIds: filed,
 				merchant: name || currentGroup.name,
 				categoryId: chosen.id,
 				category: chosen.name,
 			}
 		: undefined;
-	if (!c.req.header("HX-Request")) {
-		if (!rule) return c.redirect(next, 303);
-		// The question has an address of its own (#353), so a reload asks it again. It keeps the skips, and the
-		// category and saved ids that the question is rebuilt from.
-		const question = new URLSearchParams(
-			url.searchParams.getAll("skip").map((name) => ["skip", name]),
-		);
-		question.set("category", String(chosen.id));
-		question.set("saved", filed.join("."));
-		return c.redirect(`/transactions/organize?${question}`, 303);
-	}
+	// The question has an address of its own (#353), so a reload asks it again.
+	const asked = rule
+		? questionAddress(url.searchParams.getAll("skip"), chosen.id, filed)
+		: null;
+	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
+	if (asked) c.header("HX-Push-Url", asked);
 	return renderOrganize(c, undefined, 200, true, rule);
 });
 
@@ -354,8 +365,9 @@ function postedItems<T>(
 }
 
 /**
- * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the group, and
- * names the store in the toast; either answer moves on to the next store, with focus on its name.
+ * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the charges the save
+ * filed (read from the database, never from the request), and names the store in the toast; either answer moves on
+ * to the next store, with focus on its name.
  */
 organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
@@ -365,10 +377,6 @@ organize.post("/transactions/organize/rule", async (c) => {
 		url.searchParams.getAll("skip").map((name) => ["skip", name]),
 	);
 	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
-	const keys = postedItems(
-		form.get("merchant_keys"),
-		(key): key is string => typeof key === "string" && key.length > 0,
-	);
 	const savedIds = postedItems(
 		form.get("saved"),
 		(id): id is number =>
@@ -384,25 +392,21 @@ organize.post("/transactions/organize/rule", async (c) => {
 					.first<{ id: number; name: string }>()
 			: null;
 	const ruled =
-		form.get("answer") === "yes" &&
-		category &&
-		keys.length > 0 &&
-		savedIds.length > 0
+		form.get("answer") === "yes" && category && savedIds.length > 0
 			? category
 			: null;
 	const written = ruled
 		? await setOrganizeRule(
 				c.env.DB,
-				keys,
 				ruled.id,
 				JSON.stringify(savedIds),
 				actor(c),
 			)
-		: 0;
+		: [];
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
-	if (ruled && written > 0) {
-		const message = `${form.get("merchant")?.toString().trim() || keys[0]} is always ${ruled.name} now.`;
+	if (ruled && written.length > 0) {
+		const message = `${form.get("merchant")?.toString().trim() || written[0]} is always ${ruled.name} now.`;
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({
@@ -411,7 +415,8 @@ organize.post("/transactions/organize/rule", async (c) => {
 			}),
 		);
 	}
-	// The Save before it pushed this same address, so the answer replaces it rather than adding an entry.
+	// The Save before it pushed the question's address, so the answer replaces it with the skips-only address, giving
+	// one history entry, not two.
 	c.header("HX-Replace-Url", next);
 	return renderOrganize(c, undefined, 200, true);
 });

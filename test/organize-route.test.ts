@@ -397,6 +397,7 @@ describe("POST /transactions/organize", () => {
 			true,
 		);
 		expect(htmx.html).not.toContain("rule-offer-title");
+		expect(htmx.res.headers.get("HX-Push-Url")).toBeNull();
 		expect(
 			JSON.parse(htmx.res.headers.get("HX-Trigger") ?? "{}"),
 		).toMatchObject({
@@ -422,6 +423,34 @@ describe("POST /transactions/organize", () => {
 			`Always use ${await categoryName(2)} for Local Bakery?`,
 		);
 		expect(html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
+	});
+
+	it("an htmx Save that asks the question pushes the question's own address, so a reload asks it again (#353)", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Other store')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			"/transactions/organize?skip=Other%20store",
+			true,
+		);
+		const ids = JSON.parse(savedIdsIn(save.html)) as number[];
+		expect(ids.length).toBeGreaterThan(0);
+		expect(save.res.headers.get("HX-Push-Url")).toBe(
+			`/transactions/organize?skip=Other+store&category=2&saved=${ids.join(".")}`,
+		);
+		const reload = await get(save.res.headers.get("HX-Push-Url") ?? "");
+		expect(reload.res.status).toBe(200);
+		expect(reload.html).toContain("rule-offer-title");
+		expect(reload.html).toContain(
+			`Always use ${await categoryName(2)} for Local Bakery?`,
+		);
+		expect(JSON.parse(savedIdsIn(reload.html))).toEqual(ids);
 	});
 
 	it("the question's Yes sets the rule for 150 merchant keys in one request", async () => {
@@ -461,6 +490,36 @@ describe("POST /transactions/organize", () => {
 			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'BULK MERCHANT%' AND default_category_id = 2",
 		).first<{ n: number }>();
 		expect(count?.n).toBe(150);
+	});
+
+	it("a Yes makes the rule from the charges Save filed, never from the merchant keys the request posts (#353)", async () => {
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const { html: question } = await followRedirect(save);
+		const merchantCount = () =>
+			env.DB.prepare("SELECT COUNT(*) AS n FROM merchants").first<{
+				n: number;
+			}>();
+		const before = await merchantCount();
+		const madeUp = Array.from({ length: 3000 }, (_, i) => `MADE UP KEY ${i}`);
+		const { res } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(madeUp),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(question),
+			},
+			"/transactions/organize/rule",
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/transactions/organize");
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'MADE UP KEY %'",
+			).first<{ n: number }>(),
+		).toEqual({ n: 0 });
+		expect(await merchantCount()).toEqual(before);
 	});
 
 	it("a Yes after the charges Save filed were changed makes no rule, even with an older charge filed in that category (#353)", async () => {
@@ -720,7 +779,8 @@ describe("POST /transactions/organize", () => {
 		);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toBeNull();
-		// The save before it pushed this address, so the answer replaces it: one history entry, not two.
+		// The Save before it pushed the question's address, so the answer replaces it with the skips-only address,
+		// giving one history entry, not two.
 		expect(res.headers.get("HX-Replace-Url")).toBe("/transactions/organize");
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 		expect(html).not.toContain("rule-offer-title");
@@ -736,6 +796,7 @@ describe("POST /transactions/organize", () => {
 		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
 			toast: { type: "info" },
 		});
+		expect(res.headers.get("HX-Push-Url")).toBeNull();
 		expect(html).not.toContain("Stale name");
 		expect(html).not.toMatch(/value="2"[^>]*checked|checked[^>]*value="2"/);
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
