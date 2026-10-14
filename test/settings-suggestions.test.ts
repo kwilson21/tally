@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
 import { categorizePending } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { saveCategory, setArchived } from "../src/db/categories";
 import {
 	pendingSuggestions,
 	saveSuggestion,
@@ -435,6 +436,59 @@ describe("creating the category", () => {
 			"Created Pet Care with 4 transactions",
 		);
 		expect(trigger(res).announce).toBe("Created Pet Care with 4 transactions.");
+	});
+
+	it("makes a new Pet Care, not an error, when another member restores and renames the archived one before the write (decision 110)", async () => {
+		const { id, ids } = await petCare();
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 40) RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		await setArchived(db, archived, true, "2026-07-15");
+		// Another member restores and renames it once, between this save's read and its write.
+		let raced = false;
+		const racing = new Proxy(db, {
+			get(target, property) {
+				if (property === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (!raced) {
+							raced = true;
+							await setArchived(db, archived, false, "2026-09-01");
+							await saveCategory(db, archived, { name: "Pets" });
+						}
+						return db.batch(statements);
+					};
+				const value = Reflect.get(target, property);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as D1Database;
+
+		const { res, html } = await post(
+			`/settings/suggestions/${id}/create`,
+			[
+				...ids.map((n): [string, string] => ["shown", String(n)]),
+				...ids.slice(0, 2).map((n): [string, string] => ["ids", String(n)]),
+			],
+			{ bindings: { DB: racing } },
+		);
+
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toBe(
+			"Created Pet Care with 2 transactions",
+		);
+		expect(html).not.toContain("Tick at least one");
+		expect(html).not.toContain("Restored");
+		const made = await categoryNamed("Pet Care");
+		expect(made).toMatchObject({ archived: 0 });
+		expect(made?.id).not.toBe(archived);
+		expect(await row(ids[0] as number)).toMatchObject({
+			category_id: made?.id,
+			category_source: "user",
+		});
+		expect(await status(id)).toBe("created");
 	});
 
 	it("saves a note written for an unticked transaction and asks Jev about it again right away, after the page has answered, telling it the note", async () => {

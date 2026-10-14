@@ -1238,6 +1238,132 @@ describe("createFromSuggestion", () => {
 				{ name: "Pets", archived: 1 },
 			);
 		});
+
+		/** Another member's writes land between this save's read and its batch; only this save runs against the proxy. */
+		function racing(...between: (() => Promise<unknown>)[]) {
+			return new Proxy(db, {
+				get(target, property) {
+					if (property === "batch")
+						return async (statements: D1PreparedStatement[]) => {
+							for (const write of between) await write();
+							return db.batch(statements);
+						};
+					const value = Reflect.get(target, property);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			}) as D1Database;
+		}
+
+		it("makes a new Pet Care and files the ticks there when it was restored and renamed between the read and the write", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+
+			const result = await createFromSuggestion(
+				racing(
+					() => setArchived(db, archived, false, "2026-09-01"),
+					() => saveCategory(db, archived, { name: "Pets" }),
+				),
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person@example.com",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "Pet Care",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: false,
+				restored: false,
+			});
+			const madeNew = (await categories()).find((c) => c.name === "Pet Care");
+			expect(madeNew).toMatchObject({ archived: 0 });
+			expect(madeNew?.id).not.toBe(archived);
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({
+					category_id: madeNew?.id,
+					category_source: "user",
+				});
+			expect((await categories()).find((c) => c.id === archived)).toEqual({
+				id: archived,
+				name: "Pets",
+				icon: "home",
+				color: "cat-plum",
+				archived: 0,
+			});
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+			]);
+			expect(await periods(madeNew?.id ?? 0)).toEqual([]);
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("files the ticks into it, as Add to does, when another member only restored it between the read and the write", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			const count = (await categories()).length;
+
+			const result = await createFromSuggestion(
+				racing(() => setArchived(db, archived, false, "2026-09-01")),
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "Pet Care",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: true,
+				restored: false,
+			});
+			expect((await categories()).length).toBe(count);
+			expect(await row(made[0] as number)).toMatchObject({
+				category_id: archived,
+			});
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("makes a new Pet Care, and leaves Pets archived, when it was renamed while archived and archived again between the read and the write", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+
+			const result = await createFromSuggestion(
+				racing(
+					() => setArchived(db, archived, false, "2026-09-01"),
+					() => saveCategory(db, archived, { name: "Pets" }),
+					() => setArchived(db, archived, true, "2026-09-02"),
+				),
+				id,
+				{ ticked: made, shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toMatchObject({
+				ok: true,
+				name: "Pet Care",
+				moved: 3,
+				attached: false,
+				restored: false,
+			});
+			const madeNew = (await categories()).find((c) => c.name === "Pet Care");
+			expect(madeNew?.id).not.toBe(archived);
+			expect(await row(made[0] as number)).toMatchObject({
+				category_id: madeNew?.id,
+			});
+			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
+				{ name: "Pets", archived: 1 },
+			);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+				{ archived_on: "2026-09-02", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
 	});
 
 	it("adds the ticked ones to the active category with that name, in any capitals, instead of making one", async () => {
@@ -1365,8 +1491,9 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toMatchObject({ ok: true, moved: 1 });
-		// 13 counts the archive-period close a restore needs (decision 110); it is one statement either way.
-		expect(statements).toBeLessThanOrEqual(13);
+		// 14 counts the restore and the create, both always in the write so the path is decided at write time
+		// (decision 110); the archive-period close is one statement either way.
+		expect(statements).toBeLessThanOrEqual(14);
 		expect((await row(made[300] as number))?.note).toBe(
 			`Note for ${made[300]}`,
 		);
