@@ -21,6 +21,7 @@ import {
 } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, loadMonth } from "../db/month";
+import { plansSetAsideCents } from "../db/planned-expenses";
 import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
@@ -144,12 +145,19 @@ async function renderHome(
 		: [];
 	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
 	const unpaidBillsCents = billTotals?.soonCents ?? 0;
+
+	// Planned expenses set aside this month (decision 74): only the current month's Safe to spend sets them aside.
+	const unpaidPlansCents = current
+		? await plansSetAsideCents(c.env.DB, month)
+		: 0;
 	const summary = summarizeMonth({
 		month,
 		...data,
 		unpaidDueBillsCents: unpaidBillsCents,
 		savingsGoalCents: data.savingsGoalCents,
+		unpaidPlansCents,
 	});
+
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const storedFirstMonth =
 		firstMonthOption ?? (await firstCountedMonth(c.env.DB));

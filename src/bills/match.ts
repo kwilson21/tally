@@ -45,7 +45,8 @@ async function candidatesBetween(
 			`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
 				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
 				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
-				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`,
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
+				 AND NOT EXISTS (SELECT 1 FROM planned_expenses plan WHERE plan.transaction_id=t.id)`,
 		)
 		.bind(...merchantTextArgs(bill), start, finish)
 		.all<MatchCandidate>();

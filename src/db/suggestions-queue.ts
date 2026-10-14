@@ -9,7 +9,7 @@ import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
 import { pendingSuggestions, suggestedRowSql } from "./category-suggestions";
-import { jevAsksAboutSql, paysBillSql } from "./counted-month";
+import { jevAsksAboutSql, paysBillOrPlanSql } from "./counted-month";
 import { incomeGuessSql, maybeIncomeConfidenceSql } from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
@@ -131,7 +131,7 @@ const unsureSql = (confidence: string) => {
  */
 export const incomeAskedSql = (alias: string, afterNo = false) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
-		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillSql(alias)})
+		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillOrPlanSql(alias)})
 		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${unsureSql(incomeGuessSql(alias))})`;
 
 /**
@@ -177,7 +177,7 @@ export const transferAskedSql = (alias: string, afterNo = false) =>
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = ${afterNo ? 1 : 0}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
-		AND NOT ${paysBillSql(alias)} AND NOT ${neverSuggestedSql(alias, "transfer")})`;
+		AND NOT ${paysBillOrPlanSql(alias)} AND NOT ${neverSuggestedSql(alias, "transfer")})`;
 
 /**
  * SQL selecting `key`, each store the Never suggest question about item ?1 still asks about: the queue's own check for that kind,

@@ -71,6 +71,8 @@ describe("schema", () => {
 			"merchants",
 			"never_suggest_rules",
 			"plaid_items",
+			"planned_delete_holds",
+			"planned_expenses",
 			"savings_goal_amounts",
 			"transactions",
 		]);

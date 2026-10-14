@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import {
 	type AmountRow,
 	amountForMonth,
@@ -45,7 +46,9 @@ import {
 	monthLabel,
 	ordinal,
 	shortDay,
+	shortMonthName,
 } from "../dates";
+
 import { amountRowsByBill } from "../db/bill-amounts";
 import { billPeriodMonth, type CountedBill } from "../db/counted-month";
 import {
@@ -55,6 +58,9 @@ import {
 	merchantTextArgs,
 } from "../db/merchant-key";
 import { ownNameSql } from "../db/own-name";
+
+import { loadPlans } from "../db/planned-expenses";
+
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
@@ -80,6 +86,7 @@ import { HowLink } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
+import { PlanBand, PlannedHeading, PlannedRow } from "../views/planned-expense";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -312,13 +319,16 @@ const sheetAttrs = (href: string) => ({
 });
 
 // `given` is the household's date when the handler already read it, so a request reads it once.
-async function page(
+
+/** Bills' page, with an optional sheet over it: a bill's, or a planned expense's (`plan`, drawn by plans.tsx). */
+export async function page(
 	c: Context<App>,
 	sheet?: {
 		bill?: DbBill;
 		values?: Values;
 		errors?: Record<string, string>;
 		bigAmount?: BigAmount;
+		plan?: Child;
 	},
 	given?: string,
 ) {
@@ -339,7 +349,44 @@ async function page(
 	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
+
 	const totals = billTotalsForRows(today.slice(0, 7), active);
+	const month = today.slice(0, 7);
+	// Planned one-time expenses (decision 101): the unpaid ones are Planned, whatever their month; a paid one shows with
+	// the bills paid this month. The Band asks about one plan from an earlier month at a time, before the repeat-charge Band.
+	const plans = await loadPlans(c.env.DB);
+	const unpaidPlans = plans.filter((plan) => plan.transactionId === null);
+	const earlierPlans = unpaidPlans.filter((plan) => plan.month < month);
+	const plansPaidThisMonth = plans.filter(
+		(plan) => plan.paidDate && plan.paidDate.slice(0, 7) === month,
+	);
+	const plannedThisMonthCents = unpaidPlans
+		.filter((plan) => plan.month === month)
+		.reduce((sum, plan) => sum + plan.amountCents, 0);
+
+	const statusGroup = (status: BillStatus, extraRows: Child[] = []) => {
+		const group = active.filter((b) => b.status === status);
+		if (!group.length && !extraRows.length) return null;
+
+		return (
+			<section class="mt-4">
+				<BillStatusHeading
+					status={status}
+					totalCents={
+						totals.groups[`${status === "paid" ? "paid" : status}Cents`]
+					}
+				/>
+				<ul class="divide-y divide-rule">
+					{group.map((bill) => (
+						<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
+					))}
+
+					{extraRows}
+				</ul>
+			</section>
+		);
+	};
+
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -362,8 +409,17 @@ async function page(
 						month={today.slice(0, 7)}
 					/>
 				)}
+
 				<HowLink section="bills" />
-				<div class="mt-3">
+				{earlierPlans[0] && (
+					<PlanBand
+						planId={earlierPlans[0].id}
+						name={earlierPlans[0].name}
+						moveLabel={`Move to ${shortMonthName(month)}`}
+						waiting={earlierPlans.length}
+					/>
+				)}
+				<div class="mt-3 flex flex-wrap gap-3">
 					<Button
 						kind="secondary"
 						href="/bills/new"
@@ -371,43 +427,57 @@ async function page(
 					>
 						Add a bill
 					</Button>
+					<Button
+						kind="secondary"
+						href="/plans/new"
+						{...sheetAttrs("/plans/new")}
+					>
+						Plan an expense
+					</Button>
 				</div>
-				<BillFindingBand count={suggestions.length} />
-				{rows.length === 0 ? (
+				{/* One Band at a time: a plan waiting for its answer comes before the repeat-charge Band. */}
+				<BillFindingBand count={earlierPlans.length ? 0 : suggestions.length} />
+				{rows.length === 0 && plans.length === 0 ? (
 					<EmptyState
 						kind="add"
 						sentence="No bills yet."
 						hint="Add a bill to see what needs paying."
 					/>
 				) : (
-					(["overdue", "due", "upcoming", "paid"] as BillStatus[]).map(
-						(status) => {
-							const group = active.filter((b) => b.status === status);
-							if (!group.length) return null;
-							return (
-								<section class="mt-4">
-									<BillStatusHeading
-										status={status}
-										totalCents={
-											totals.groups[
-												`${status === "paid" ? "paid" : status}Cents`
-											]
-										}
-									/>
-									<ul class="divide-y divide-rule">
-										{group.map((bill) => (
-											<BillRow
-												bill={bill}
-												today={today}
-												href={`/bills/${bill.id}`}
-											/>
-										))}
-									</ul>
-								</section>
-							);
-						},
-					)
+					<>
+						{statusGroup("overdue")}
+						{statusGroup("due")}
+						{statusGroup("upcoming")}
+						{unpaidPlans.length > 0 && (
+							<section class="mt-4">
+								<PlannedHeading totalCents={plannedThisMonthCents} />
+								<ul class="divide-y divide-rule">
+									{unpaidPlans.map((plan) => (
+										<PlannedRow
+											plan={plan}
+											month={month}
+											today={today}
+											href={`/plans/${plan.id}/edit`}
+										/>
+									))}
+								</ul>
+							</section>
+						)}
+
+						{statusGroup(
+							"paid",
+							plansPaidThisMonth.map((plan) => (
+								<PlannedRow
+									plan={plan}
+									month={month}
+									today={today}
+									href={`/plans/${plan.id}/edit`}
+								/>
+							)),
+						)}
+					</>
 				)}
+
 				{inactive.length > 0 && (
 					<details class="group mt-2 border-t border-rule">
 						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
@@ -424,19 +494,21 @@ async function page(
 					</details>
 				)}
 			</div>
+
 			<div id="sheet">
-				{sheet && (
-					<BillSheet
-						{...sheet}
-						categories={await categories(c)}
-						today={today}
-						keptCents={
-							sheet.bill
-								? await earlierPrice(c.env.DB, sheet.bill.id, today)
-								: undefined
-						}
-					/>
-				)}
+				{sheet?.plan ??
+					(sheet && (
+						<BillSheet
+							{...sheet}
+							categories={await categories(c)}
+							today={today}
+							keptCents={
+								sheet.bill
+									? await earlierPrice(c.env.DB, sheet.bill.id, today)
+									: undefined
+							}
+						/>
+					))}
 			</div>
 		</Layout>,
 	);
@@ -1375,7 +1447,7 @@ async function billPage(
 		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM planned_expenses pe WHERE pe.transaction_id=t.id) ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),

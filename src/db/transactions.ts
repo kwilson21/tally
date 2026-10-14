@@ -50,7 +50,8 @@ import {
 	includedSql,
 	jevAsksAboutSql,
 	markedTransferSql,
-	PAYS_A_BILL,
+	PAYS_A_BILL_OR_PLAN,
+	paysBillOrPlanSql,
 	paysBillSql,
 } from "./counted-month";
 import { maybeIncomeConfidenceSql, plaidSetIncomeSql } from "./income";
@@ -198,7 +199,7 @@ const SHOW_SQL: Record<Show, string | null> = {
 	spending: `(${COUNTED_SPENDING})`,
 	income: "t.flag_income = 1",
 	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(p.flag_income, 0) = 0 AND t.is_split = 0
-		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
+		AND (${paysBillOrPlanSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
 	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
 const RAW_SHOW_SQL: Record<Show, string | null> = {
@@ -2028,7 +2029,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 // something a person left out: Jev may suggest its category, and its flags are never written, since they
 // could only change what it is excluded as or take it out of Spent (income).
 const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
-	OR (t.excluded = 1 AND ${paysBillSql("t")}))`;
+	OR (t.excluded = 1 AND ${paysBillOrPlanSql("t")}))`;
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
@@ -2429,7 +2430,7 @@ export async function saveJevResult(
 					updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
-						OR (excluded = 1 AND ${PAYS_A_BILL}))
+						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
 			)

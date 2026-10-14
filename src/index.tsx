@@ -27,6 +27,7 @@ import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
 import { organize } from "./routes/organize";
 import { plaid, enabled as plaidEnabled } from "./routes/plaid";
+import { plans } from "./routes/plans";
 import { settings } from "./routes/settings";
 import { suggestions } from "./routes/suggestions";
 import { transactions } from "./routes/transactions";
@@ -344,6 +345,8 @@ app.route("/", suggestions);
 app.route("/", settings);
 app.route("/", accounts);
 app.route("/", bills);
+app.route("/", plans);
+
 app.route("/", destinations);
 app.route("/", feedback);
 app.route("/", designSystem);

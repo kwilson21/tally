@@ -3,6 +3,7 @@ import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
 	countedMonthSql,
+	paysPlanSql,
 } from "./counted-month";
 
 export type HomeForecastDay = {
@@ -10,6 +11,8 @@ export type HomeForecastDay = {
 	spentCents: number;
 	everydayCents: number;
 	billPaymentsCents: number;
+	/** Money out that pays a planned expense: in spending so far, never projected forward (decision 82). */
+	planPaymentsCents: number;
 	refundsCents: number;
 };
 
@@ -25,6 +28,7 @@ export async function homeForecastDays(
 			`WITH classified AS (
 				SELECT CAST(substr(t.date, 9, 2) AS INTEGER) AS day, t.amount_cents,
 					CASE WHEN bp.id IS NOT NULL THEN 'bill'
+						WHEN ${paysPlanSql("t")} THEN 'plan'
 						WHEN t.amount_cents < 0 THEN 'refund' ELSE 'spending' END AS role
 				FROM transactions t ${COUNTED_JOINS}
 				WHERE t.date >= ? AND t.date < ? AND t.date <= ?
@@ -33,6 +37,7 @@ export async function homeForecastDays(
 			SELECT day, SUM(amount_cents) AS spentCents,
 				SUM(CASE WHEN role = 'spending' THEN amount_cents ELSE 0 END) AS everydayCents,
 				SUM(CASE WHEN role = 'bill' THEN amount_cents ELSE 0 END) AS billPaymentsCents,
+				SUM(CASE WHEN role = 'plan' THEN amount_cents ELSE 0 END) AS planPaymentsCents,
 				SUM(CASE WHEN role = 'refund' THEN -amount_cents ELSE 0 END) AS refundsCents
 			FROM classified GROUP BY day ORDER BY day`,
 		)

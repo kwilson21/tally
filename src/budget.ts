@@ -82,6 +82,11 @@ type MonthInput = {
 	unpaidDueBillsCents: number;
 	/** The full monthly savings goal, set aside from the first day of the month. */
 	savingsGoalCents?: number | null;
+	/**
+	 * Planned one-time expenses set aside (spec §6, decision 74): this month's, and any from an earlier month not yet
+	 * moved, dropped or paid, whose payment isn't linked. The plan's own payment is never counted here, only its set-aside.
+	 */
+	unpaidPlansCents?: number;
 };
 
 export function summarizeMonth(input: MonthInput): MonthSummary {
@@ -143,7 +148,8 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 			totalBudgetCents -
 			totalSpentCents -
 			input.unpaidDueBillsCents -
-			(input.savingsGoalCents ?? 0),
+			(input.savingsGoalCents ?? 0) -
+			(input.unpaidPlansCents ?? 0),
 	};
 }
 

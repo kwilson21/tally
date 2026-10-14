@@ -107,6 +107,7 @@ function candidates(db: D1Database, bill: OfferBill): D1PreparedStatement {
 			 WHERE ${isMerchantTextSql("t")} AND t.is_split = 0 AND t.flag_income = 0
 			   AND t.date BETWEEN ? AND ?
 			   AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id = t.id AND claimed.status = 'linked')
+			   AND NOT EXISTS (SELECT 1 FROM planned_expenses plan WHERE plan.transaction_id = t.id)
 			   AND NOT EXISTS (SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id = ? AND dismissed.period = ? AND dismissed.transaction_id = t.id AND dismissed.status = 'dismissed')`,
 		)
 		.bind(
@@ -188,6 +189,7 @@ export async function loadPriceOffers(
 const stillOffered = (charge: string, seen: string) =>
 	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
+	 AND NOT EXISTS (SELECT 1 FROM planned_expenses plan WHERE plan.transaction_id = ?1)
 	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
 	 AND ${occurrenceAmountSql("?2", "?6")} IN (${charge}, ${seen})
 	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ?7))`;
