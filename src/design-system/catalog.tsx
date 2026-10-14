@@ -4731,10 +4731,11 @@ function Diagrams() {
 				sentence="Drawn from the same numbers as each worked example. A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
 				<State label="BudgetDiagram">
-					<BudgetDiagram {...BUDGET_EXAMPLE} />
+					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
 				</State>
 				<State label="BudgetDiagram with a savings goal">
 					<BudgetDiagram
+						id="budget-diagram-savings"
 						totalBudgetCents={140000}
 						totalSpentCents={46000}
 						savingsGoalCents={50000}
@@ -4743,6 +4744,7 @@ function Diagrams() {
 				</State>
 				<State label="BudgetDiagram with a planned expense">
 					<BudgetDiagram
+						id="budget-diagram-planned"
 						totalBudgetCents={140000}
 						totalSpentCents={46000}
 						plannedCents={18000}
@@ -4751,6 +4753,7 @@ function Diagrams() {
 				</State>
 				<State label="BudgetDiagram with a savings goal and a planned expense">
 					<BudgetDiagram
+						id="budget-diagram-savings-planned"
 						totalBudgetCents={140000}
 						totalSpentCents={46000}
 						savingsGoalCents={10000}

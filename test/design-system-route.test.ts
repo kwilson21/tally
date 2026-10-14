@@ -265,7 +265,7 @@ describe("GET /design-system in the demo", () => {
 			ThingsToTry(),
 			HowLink({ section: "budget" }),
 			SystemDiagram(),
-			BudgetDiagram(BUDGET_EXAMPLE),
+			BudgetDiagram({ ...BUDGET_EXAMPLE, id: "budget-diagram-plain" }),
 			BillsDiagram({
 				amount: "$142.00",
 				due: "Sep 21",

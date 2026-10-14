@@ -249,7 +249,9 @@ describe("GET /how-it-works in the demo", () => {
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
 		const descOf = (id: string) =>
-			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
+			page.match(
+				new RegExp(`<(?:desc|span) id="${id}-desc"[^>]*>([^<]+)<`),
+			)?.[1] ?? "";
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
 		const [budgetsLeft, less] = example(
