@@ -13,7 +13,8 @@
  *   clears the posted row's Jev answer, since that answer was for the old name, so the night run asks again
  *   with the name; it clears only where Jev can be asked about the row (jevAsksAboutSql), so a row a person or
  *   Plaid took out of the budget keeps its answer. A merchant rule's pick doesn't move: rules run on the posted
- *   row as on any new one.
+ *   row as on any new one. Jev's pick, none-fit and mixed-trip reading also move onto a posted row that keeps a category of its
+ *   own (a rule's or a person's) but has no Jev answer.
  *   An exclusion Plaid put on the posted row is not an answer of its own (spec section 8.5): Jev's exclusion
  *   of the pending row moves over it and
  *   keeps its source, as it does when the pending row simply takes the posted id, so it still holds
@@ -187,6 +188,14 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,
+	// Jev's pick, none-fit and mixed-trip reading move onto a posted row with a category of its own and no Jev answer, which
+	// the category statement above leaves alone. It moves no category, so it needs no ai_log arm.
+	`UPDATE transactions SET jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
+		jev_also_category_id = p.jev_also_category_id
+	 ${FROM_PENDING} AND p.amount_cents = ?3
+	 AND (p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
+	 AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL
+	 AND transactions.category_confidence IS NULL`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
@@ -253,7 +262,7 @@ const STATEMENTS = [
 	 WHERE ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
-	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL
+	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL, jev_mixed = NULL, jev_also_category_id = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
 	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),

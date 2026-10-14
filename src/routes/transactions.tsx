@@ -166,7 +166,6 @@ import {
 	TOO_MANY,
 } from "../views/selection-action-bar";
 import {
-	GuessLine,
 	isGuessedPart,
 	PartCategory,
 	SplitForm,
@@ -1447,6 +1446,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		merchant: tx.storeName,
 		category: cat.name,
 		back: address,
+		transactionId: found.transactionId,
 	};
 	const announce = ruleOfferAnnouncement(value, message);
 	c.header(
@@ -2557,6 +2557,7 @@ transactions.post("/transactions/cash", async (c) => {
 					merchant: savedTx?.displayName || tidyName(saved.merchant),
 					category: categoryName,
 					back: address,
+					transactionId: saved.id,
 				}
 			: null;
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
@@ -2955,10 +2956,16 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const partIds = partIdsOf(form.getAll("part_id").map(String));
 	if (partIds === null) return c.notFound();
 	const guess = guessLabelOf(tx);
-	// A trip that looks mixed draws its parts and guess line again out of band, so a part turns solid as a person
-	// types or picks (#233). Its parts are never saved ones, so none has a kept category.
+	// A trip that looks mixed draws the parts a person has touched again out of band: one that was Tally's guess when the
+	// sheet last drew it and is not one now turns solid, once, and its guess marker is cleared with it (#233). A part still
+	// a guess, or already solid, is left as it is. Its parts are never saved ones, so none has a kept category.
 	const values =
 		guess === undefined ? [] : postedSplitValues(tx, form, partIds, new Map());
+	const touched = values.flatMap((value, index) =>
+		value.guess !== undefined && !isGuessedPart(value)
+			? [{ value, index }]
+			: [],
+	);
 	return c.html(
 		<>
 			<div id="split-line">
@@ -2967,19 +2974,9 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 					amounts={form.getAll("part_amount").map(String)}
 				/>
 			</div>
-			{guess !== undefined && (
-				<>
-					{values.map((value, index) => (
-						<PartCategory
-							index={index}
-							value={value}
-							categories={categories}
-							oob
-						/>
-					))}
-					<GuessLine label={guess} guessing={values.some(isGuessedPart)} oob />
-				</>
-			)}
+			{touched.map(({ value, index }) => (
+				<PartCategory index={index} value={value} categories={categories} oob />
+			))}
 		</>,
 	);
 });
@@ -3562,6 +3559,7 @@ async function savePanel(
 					merchant: storeName,
 					category: offerCategory.name,
 					back,
+					transactionId: tx.id,
 				}
 			: undefined;
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
@@ -3784,6 +3782,9 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
 	const saved = Number(form.get("saved"));
 	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
+	// The trip the question was asked about (decision 113): Yes makes the rule only while it still counts as this store's
+	// pick of this category and doesn't look mixed, the test that asked the question.
+	const trip = Number(form.get("trip"));
 	const today = await householdToday(c.env.DB);
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
@@ -3799,16 +3800,17 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				.first<{ displayName: string | null }>()
 		: null;
 	const offer =
-		validCategory && merchantKey
-			? await categoryRuleOffer(c.env.DB, merchantKey, categoryId)
+		yes && validCategory && merchantKey && Number.isInteger(trip) && trip > 0
+			? await ruleOfferForTransaction(c.env.DB, trip, categoryId)
 			: null;
+	const rule = offer !== null && offer.merchantKey === merchantKey;
 	const message =
-		yes && offer && validCategory
+		yes && rule && validCategory
 			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
 			: validCategory
 				? `Saved as ${validCategory.name}.`
 				: "Saved.";
-	if (yes && offer && validCategory)
+	if (yes && rule && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
 	if (!c.req.header("HX-Request"))
 		return c.redirect(

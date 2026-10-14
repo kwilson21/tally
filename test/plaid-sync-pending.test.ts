@@ -1304,6 +1304,105 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		describe("a mixed-trip answer on a posted row that has a category of its own (#233)", () => {
+			const mixedAnswerOf = (plaidId: string) =>
+				env.DB.prepare(
+					"SELECT category_id, category_source, category_confidence, jev_category_id, jev_mixed, jev_also_category_id FROM transactions WHERE plaid_transaction_id = ?",
+				)
+					.bind(plaidId)
+					.first();
+
+			/** The pending row's Jev answer that says the trip looks mixed, Jev's pick first. */
+			async function pendingMixed(pendingId: number) {
+				const [pick, other] = (
+					await env.DB.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id);
+				await env.DB.prepare(
+					"UPDATE transactions SET category_confidence = 0.95, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
+				)
+					.bind(pick, other, pendingId)
+					.run();
+				return { pick, other };
+			}
+
+			it("moves the answer onto a posted row that keeps a merchant rule's category, and keeps that category", async () => {
+				const item = await addItem();
+				const ids = await bothStored(item);
+				await env.DB.prepare(
+					"UPDATE transactions SET category_id = 4, category_source = 'merchant_rule' WHERE id = ?",
+				)
+					.bind(ids.posted)
+					.run();
+				const { pick, other } = await pendingMixed(ids.pending);
+				await post(item);
+				expect(await mixedAnswerOf("posted-1")).toEqual({
+					category_id: 4,
+					category_source: "merchant_rule",
+					category_confidence: null,
+					jev_category_id: pick,
+					jev_mixed: 0.9,
+					jev_also_category_id: other,
+				});
+			});
+
+			it("moves the answer onto a posted row with a person's pick, which keeps its category", async () => {
+				const item = await addItem();
+				const ids = await bothStored(item);
+				const [pick, other] = (
+					await env.DB.prepare(
+						"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+					).all<{ id: number }>()
+				).results.map((row) => row.id);
+				await env.DB.prepare(
+					"UPDATE transactions SET category_id = 3, category_source = 'user', category_confidence = NULL, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
+				)
+					.bind(pick, other, ids.pending)
+					.run();
+				await post(item);
+				expect(await mixedAnswerOf("posted-1")).toEqual({
+					category_id: 3,
+					category_source: "user",
+					category_confidence: null,
+					jev_category_id: pick,
+					jev_mixed: 0.9,
+					jev_also_category_id: other,
+				});
+			});
+
+			it("moves nothing when the amount changed", async () => {
+				const item = await addItem();
+				const ids = await bothStored(item);
+				await pendingMixed(ids.pending);
+				await post(item, { amount: 20 });
+				expect(await mixedAnswerOf("posted-1")).toMatchObject({
+					jev_mixed: null,
+					jev_also_category_id: null,
+				});
+			});
+
+			it("leaves the posted row's own Jev answer as it is", async () => {
+				const item = await addItem();
+				const ids = await bothStored(item);
+				await env.DB.prepare(
+					"UPDATE transactions SET category_id = 2, category_source = 'jev', category_confidence = 0.5, jev_category_id = 2 WHERE id = ?",
+				)
+					.bind(ids.posted)
+					.run();
+				await pendingMixed(ids.pending);
+				await post(item);
+				expect(await mixedAnswerOf("posted-1")).toEqual({
+					category_id: 2,
+					category_source: "jev",
+					category_confidence: 0.5,
+					jev_category_id: 2,
+					jev_mixed: null,
+					jev_also_category_id: null,
+				});
+			});
+		});
+
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item);
@@ -2432,6 +2531,23 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			).toBe(2);
 			expect(await spent()).toBe(0);
 			expect(ids.parts).toHaveLength(2);
+		});
+
+		it("a split purchase never keeps the mixed-trip reading, even one the posted row had (#233)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			await splitInto(ids.pending, 600, 634);
+			await env.DB.prepare(
+				"UPDATE transactions SET jev_mixed = 0.9, jev_also_category_id = 2 WHERE id = ?",
+			)
+				.bind(ids.posted)
+				.run();
+			await post(item);
+			expect(await row("posted-1")).toMatchObject({
+				is_split: 1,
+				jev_mixed: null,
+				jev_also_category_id: null,
+			});
 		});
 
 		const partState = async (id: number) =>

@@ -1719,7 +1719,7 @@ export async function saveSplit(
 	);
 	const markParent = db
 		.prepare(
-			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, jev_mixed=NULL, jev_also_category_id=NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 		)
 		.bind(by, parentId, total);
 	const stillUnpaid = stillUnpaidStatement(db, lost);

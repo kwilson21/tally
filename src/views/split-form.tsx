@@ -49,9 +49,10 @@ export function SplitLine({
 }
 
 /**
- * A part's label and category select (#233). The live line draws both again out of band (`oob`) as a person
- * types or picks, so the part turns solid at once. A redraw never carries autofocus: focus must not move while
- * a person types in another part.
+ * A part's label, category select and Tally's-guess marker (#233). The live line draws them again out of band (`oob`)
+ * for a part a person has touched, so it turns solid once and its marker is cleared. The marker is posted back, empty
+ * unless the part is still a guess, so a full redraw never carries the guess of a touched part. A redraw never carries
+ * autofocus: focus must not move while a person types in another part.
  */
 export function PartCategory({
 	index,
@@ -93,28 +94,25 @@ export function PartCategory({
 					</option>
 				))}
 			</select>
+			<input
+				type="hidden"
+				id={`part-guess-${index}`}
+				name="part_guess"
+				value={guessed ? (value.guess ?? "") : ""}
+				hx-swap-oob={swap}
+			/>
 		</>
 	);
 }
 
 /**
- * Tally's guess above the parts (#233): shown while a part is still Tally's guess. It is hidden, not removed, once
- * none is, so the live line can draw it again out of band (`oob`) when a person types or picks.
+ * Tally's guess above the parts (#233, decision 113): shown for the whole of a split that opened with Tally's guessed
+ * parts, whatever the parts hold now. The live line never redraws it.
  */
-export function GuessLine({
-	label,
-	guessing,
-	oob = false,
-}: {
-	label: string;
-	guessing: boolean;
-	oob?: boolean;
-}) {
+export function GuessLine({ label }: { label: string }) {
 	return (
 		<p
 			id="split-guess"
-			hidden={!guessing}
-			hx-swap-oob={oob ? "outerHTML" : undefined}
 			class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
 		>
 			{`Tally's guess: ${label} · `}
@@ -154,11 +152,10 @@ export function SplitForm({
 	/** Where Cancel goes, when it is not the list the form returns to (a sheet's close asks for focus). */
 	cancelHref?: string;
 	error?: string;
-	/** Jev's two categories, as "Groceries and Household", when the trip looks mixed (#233); shown while a part is still a guess. */
+	/** Jev's two categories, as "Groceries and Household", when the trip looks mixed (#233): the guess line, for the whole split. */
 	guessLabel?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
-	const guessing = values.some(isGuessedPart);
 	return (
 		<form
 			method="post"
@@ -201,7 +198,7 @@ export function SplitForm({
 					{error}
 				</p>
 			)}
-			{guessLabel && <GuessLine label={guessLabel} guessing={guessing} />}
+			{guessLabel && <GuessLine label={guessLabel} />}
 			{values.map((value, index) => (
 				<div
 					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
@@ -224,8 +221,6 @@ export function SplitForm({
 							value={value.partId === undefined ? "" : String(value.partId)}
 						/>
 					)}
-					{/* Posted back so a redraw knows which categories were Tally's guess (#233). */}
-					<input type="hidden" name="part_guess" value={value.guess ?? ""} />
 					<PartCategory
 						index={index}
 						value={value}

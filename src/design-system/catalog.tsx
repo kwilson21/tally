@@ -3002,6 +3002,7 @@ function Categorization() {
 								category: "Groceries",
 								count: 3,
 								back: "/transactions",
+								transactionId: 1,
 							}}
 						/>
 					</div>

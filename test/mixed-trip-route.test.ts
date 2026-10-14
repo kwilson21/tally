@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { jevSaysMixedAmong } from "../src/db/mixed-trip";
 import { resetDemo } from "../src/demo/reset";
 
 // The mixed-trip screens (#233, decision 113): the edit panel's quiet line, and the split that opens with Tally's
@@ -185,9 +186,14 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			["part_amount", ""],
 		]);
 		expect(typed.res.status).toBe(422);
-		// The typed part is solid; the untyped one is still Tally's guess, so the guess line stays.
+		// The typed part is solid, and its guess marker is empty for good; the untyped one is still Tally's guess, and the
+		// guess line stays for the whole split.
 		expect(typed.html).toMatch(GUESS_LINE);
 		expect(typed.html).not.toMatch(/id="part-category-0"[^>]*border-dashed/);
+		expect(openingTagWithId(typed.html, "part-guess-0")).toContain('value=""');
+		expect(openingTagWithId(typed.html, "part-guess-1")).toContain(
+			`value="${household}"`,
+		);
 		expect(typed.html).toMatch(/id="part-category-1"[^>]*border-dashed/);
 		const still = await db
 			.prepare("SELECT is_split FROM transactions WHERE id = ?")
@@ -219,6 +225,30 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 			[groceries, 14436],
 			[household, 7000],
 		]);
+	});
+
+	it("a split purchase never keeps the mixed reading, so no rule offer or split line follows its parts (#233)", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const saved = await postSplit(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", "70.00"],
+		]);
+		expect(saved.res.status).toBe(200);
+		expect(
+			await db
+				.prepare(
+					"SELECT jev_mixed, jev_also_category_id FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ jev_mixed: null, jev_also_category_id: null });
+		expect(await jevSaysMixedAmong(db, [id])).toBe(false);
 	});
 
 	it("ignores a posted guess on a trip that doesn't look mixed", async () => {
@@ -257,7 +287,7 @@ function openingTagWithId(html: string, id: string): string {
 }
 
 describe("the live line redraws the parts as a person types or picks (#233)", () => {
-	it("turns a part solid once its amount is typed, and the other part stays Tally's guess", async () => {
+	it("turns a part solid once its amount is typed, and leaves the untouched part out of the reply", async () => {
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
@@ -274,9 +304,16 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		expect(first).toContain('hx-swap-oob="outerHTML"');
 		expect(first).not.toContain("border-dashed");
 		expect(first).not.toContain("autofocus");
-		expect(elementWithId(html, "part-category-1", "select")).toContain(
-			"border-dashed",
+		expect(elementWithId(html, "part-label-0", "label")).not.toContain(
+			"Tally's guess",
 		);
+		// Its guess marker is cleared, so a later reply that is queued behind this one can't dash it again.
+		expect(openingTagWithId(html, "part-guess-0")).toContain('value=""');
+		expect(openingTagWithId(html, "part-guess-0")).toContain(
+			'hx-swap-oob="outerHTML"',
+		);
+		// The untouched part is still Tally's guess, so the reply doesn't draw it.
+		expect(html).not.toContain('id="part-category-1"');
 		expect(html).toContain("$70.00 left to assign");
 	});
 
@@ -295,28 +332,17 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		const first = elementWithId(html, "part-category-0", "select");
 		expect(first).not.toContain("border-dashed");
 		expect(first).toMatch(new RegExp(`<option value="${household}" selected`));
-		expect(elementWithId(html, "part-category-1", "select")).toContain(
-			"border-dashed",
-		);
+		expect(html).not.toContain('id="part-category-1"');
 		// The label a screen reader hears follows the same state.
 		const label = elementWithId(html, "part-label-0", "label");
 		expect(label).toContain("Part 1 category");
 		expect(label).not.toContain("Tally's guess");
 	});
 
-	it("takes the guess line away once no part is a guess, and keeps it while one is", async () => {
+	it("never draws the guess line, which stays on the split whatever the parts hold", async () => {
 		const groceries = await categoryId("Groceries");
 		const household = await categoryId("Household");
 		const id = await mixedTrip();
-		const one = await postLine(id, [
-			["part_category", String(groceries)],
-			["part_category", String(household)],
-			["part_guess", String(groceries)],
-			["part_guess", String(household)],
-			["part_amount", "144.36"],
-			["part_amount", ""],
-		]);
-		expect(openingTagWithId(one.html, "split-guess")).not.toContain("hidden");
 		const both = await postLine(id, [
 			["part_category", String(groceries)],
 			["part_category", String(household)],
@@ -325,7 +351,107 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 			["part_amount", "144.36"],
 			["part_amount", "70.00"],
 		]);
-		expect(openingTagWithId(both.html, "split-guess")).toContain("hidden");
+		expect(both.html).not.toContain('id="split-guess"');
+	});
+
+	it("keeps the guess line on a refused save with both parts typed", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const refused = await postSplit(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", "10.00"],
+		]);
+		expect(refused.res.status).toBe(422);
+		expect(refused.html).toMatch(GUESS_LINE);
+	});
+
+	it("keeps a part solid once its amount is cleared again, since its guess marker was emptied", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", ""],
+		]);
+		// The browser now posts part 0's cleared marker, with its amount empty again.
+		const cleared = await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", ""],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+		]);
+		expect(cleared.html).not.toContain("border-dashed");
+		const added = await postSplit(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", ""],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+			["add", "1"],
+		]);
+		expect(
+			elementWithId(added.html, "part-category-0", "select"),
+		).not.toContain("border-dashed");
+		expect(openingTagWithId(added.html, "part-guess-0")).toContain('value=""');
+	});
+
+	it("a part picked away from Tally's guess and back again is solid for good", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const away = await postLine(id, [
+			["part_category", String(household)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+		]);
+		expect(elementWithId(away.html, "part-category-0", "select")).not.toContain(
+			"border-dashed",
+		);
+		expect(openingTagWithId(away.html, "part-guess-0")).toContain('value=""');
+		const back = [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", ""],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+		] as [string, string][];
+		const again = await postLine(id, back);
+		expect(again.html).not.toContain("border-dashed");
+		const full = await postSplit(id, back);
+		expect(elementWithId(full.html, "part-category-0", "select")).not.toContain(
+			"border-dashed",
+		);
+	});
+
+	it("a queued reply whose guess marker is stale draws no part at all", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const stale = await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+		]);
+		expect(stale.html).not.toContain("hx-swap-oob");
 	});
 
 	it("draws no out-of-band parts on a trip that doesn't look mixed", async () => {
