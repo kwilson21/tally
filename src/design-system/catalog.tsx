@@ -4193,7 +4193,7 @@ function Controls() {
 				title="SplitForm"
 				tier="visual"
 				components={["SplitForm"]}
-				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total."
+				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total. A split of a purchase with a linked refund asks which part each refund goes with, or Not linked; the chooser's chips follow each part's category and amount, and Save split waits until every refund has an answer that fits."
 			>
 				<State label="A new split, with $25.42 left to assign">
 					<div inert>
@@ -4208,6 +4208,7 @@ function Controls() {
 								{ category: "1", amount: "150.00" },
 								{ category: "5", amount: "12.00" },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4227,6 +4228,7 @@ function Controls() {
 								{ category: "1", amount: "60.00", partId: 201 },
 								{ category: "5", amount: "30.00", partId: 202 },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4248,6 +4250,7 @@ function Controls() {
 									kept: { id: 5, name: "Household" },
 								},
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4267,6 +4270,7 @@ function Controls() {
 								{ category: "1", amount: "50.00", partId: 201 },
 								{ category: "5", amount: "30.00", partId: 202 },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 							error="Linked refunds add up to $85.00, so the amount can't be less than that."
 						/>
@@ -4285,6 +4289,7 @@ function Controls() {
 								{ category: "1", amount: "", guess: "1" },
 								{ category: "5", amount: "", guess: "5" },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 							guessLabel="Groceries and Household"
 						/>
@@ -4303,8 +4308,53 @@ function Controls() {
 								{ category: "1", amount: "", guess: "1" },
 								{ category: "5", amount: "70.00" },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 							guessLabel="Groceries and Household"
+						/>
+					</div>
+				</State>
+				<State label="A split with two linked refunds: the first is answered, Kids; the second is still open">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={10000}
+							categories={[
+								{ id: 4, name: "Kids" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "4", amount: "60.00" },
+								{ category: "5", amount: "40.00" },
+							]}
+							refunds={[
+								{ id: 1, date: "2026-10-05", amountCents: -4500 },
+								{ id: 2, date: "2026-10-06", amountCents: -2000 },
+							]}
+							choices={{ 1: "0" }}
+							today="2026-10-14"
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="A refund too big for its part: the refund is $45.00, and Household is only $40.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={10000}
+							categories={[
+								{ id: 4, name: "Kids" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "4", amount: "60.00" },
+								{ category: "5", amount: "40.00" },
+							]}
+							refunds={[{ id: 1, date: "2026-10-05", amountCents: -4500 }]}
+							choices={{ 1: "1" }}
+							today="2026-10-14"
+							back="/transactions"
+							error="The refund is $45.00, and Household is only $40.00."
 						/>
 					</div>
 				</State>

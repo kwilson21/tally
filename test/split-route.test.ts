@@ -343,6 +343,7 @@ describe("transaction splits", () => {
 			saved: false,
 			unlinked: [],
 			bills: [],
+			moved: [],
 		});
 		expect(
 			await env.DB.prepare(

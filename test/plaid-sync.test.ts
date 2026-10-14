@@ -2017,6 +2017,7 @@ describe("syncItem", () => {
 				expect(result).toEqual({
 					saved: true,
 					unlinked: ["2026-09-10"],
+					moved: [],
 					bills: [],
 				});
 				expect(await refundedCents()).toBe(0);
