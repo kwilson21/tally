@@ -51,6 +51,18 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("are 25–35 days apart");
 	});
 
+	it("names planned expenses in the budget section: its list, the diagram's Planned box and the worked example", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		const budget =
+			html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(budget).toContain(
+			"A planned one-time expense is set aside for its whole month",
+		);
+		// The demo's two plans: Lawn service ($90, this month) and Car registration ($180, last month, unpaid).
+		expect(budget).toContain("minus $270.00 for planned expenses");
+		expect(budget).toContain("$270 is set aside for planned expenses");
+	});
+
 	it("gives a linked refund its exception in the spec's words, when its purchase is excluded", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain(

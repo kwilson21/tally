@@ -1,6 +1,6 @@
 import { monthName, shortDay } from "../dates";
 import { formatCents } from "../money";
-import { BottomSheet } from "./bottom-sheet";
+import { BottomSheet, sheetAttrs } from "./bottom-sheet";
 import { Button } from "./button";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
@@ -27,7 +27,8 @@ export function plannedLine(plan: PlannedRowData, month: string) {
 
 /**
  * One planned expense, shaped like a bill row: the tag icon, its name, a muted line and its amount. Unpaid, it says what
- * it is set aside for; paid, it says when its payment came (P103). It is a link to its sheet when `href` is given.
+ * it is set aside for; paid, it says when its payment came (P103). It is a link to its sheet when `href` is given, and
+ * opens that sheet over Bills in place (as Plan an expense does), with `href` as the way in without script.
  */
 export function PlannedRow({
 	plan,
@@ -61,7 +62,11 @@ export function PlannedRow({
 	return (
 		<li>
 			{href ? (
-				<a href={href} class={`${look} text-ink no-underline`}>
+				<a
+					href={href}
+					class={`${look} text-ink no-underline`}
+					{...sheetAttrs(href)}
+				>
 					{content}
 				</a>
 			) : (
@@ -200,9 +205,14 @@ export function PlanSheet({
 				tabindex={-1}
 				autofocus
 			>
-				{deleteConfirm
-					? `Delete ${title}, ${formatCents(amountCents ?? 0)}?`
-					: title}
+				{deleteConfirm ? (
+					`Delete ${title}, ${formatCents(amountCents ?? 0)}?`
+				) : (
+					<>
+						{plan && <span class="sr-only">Edit planned expense: </span>}
+						{title}
+					</>
+				)}
 			</h2>
 			{deleteConfirm ? (
 				<div class="flex flex-wrap gap-3">
@@ -221,7 +231,11 @@ export function PlanSheet({
 							Delete
 						</Button>
 					</form>
-					<Button href={action} kind="text">
+					<Button
+						href={`${action}/edit`}
+						kind="text"
+						{...sheetAttrs(`${action}/edit`, false)}
+					>
 						Cancel
 					</Button>
 				</div>
@@ -272,6 +286,11 @@ export function PlanSheet({
 							))}
 						</select>
 					</label>
+					{errors.month && (
+						<p role="alert" class="text-over">
+							{errors.month}
+						</p>
+					)}
 					{paidBy && (
 						<div class="flex items-center justify-between gap-3 border-t border-rule pt-3">
 							<p class="min-w-0">
@@ -282,8 +301,7 @@ export function PlanSheet({
 							<Button
 								kind="secondary"
 								type="submit"
-								formaction={`${action}/unlink`}
-								hx-post={`${action}/unlink`}
+								form="plan-unlink"
 								class="shrink-0 px-4"
 							>
 								Unlink
@@ -299,11 +317,7 @@ export function PlanSheet({
 							<Button
 								kind="secondary"
 								href={`${action}/delete`}
-								hx-get={`${action}/delete`}
-								hx-target="#sheet"
-								hx-select="#sheet"
-								hx-swap="outerHTML"
-								hx-push-url="false"
+								{...sheetAttrs(`${action}/delete`, false)}
 								class="border-over text-over"
 							>
 								Delete
@@ -324,6 +338,17 @@ export function PlanSheet({
 						</p>
 					)}
 				</form>
+			)}
+			{/* Unlink's own form, outside the edit form (the Unlink button names it with `form`), so Enter in a field saves. */}
+			{!deleteConfirm && paidBy && (
+				<form
+					id="plan-unlink"
+					method="post"
+					action={`${action}/unlink`}
+					hx-post={`${action}/unlink`}
+					hx-target="body"
+					hx-swap="outerHTML"
+				/>
 			)}
 		</BottomSheet>
 	);

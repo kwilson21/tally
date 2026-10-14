@@ -17,6 +17,7 @@ import {
 } from "../db/planned-expenses";
 import { formatCents, toCents } from "../money";
 
+import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
 import {
@@ -102,8 +103,12 @@ async function sheetPage(
 	);
 }
 
-/** The fields a plan's sheet sends, checked before the write: a name, an amount above $0, and a month on offer. */
-function planForm(form: Record<string, unknown>, month: string) {
+/**
+ * The fields a plan's sheet sends, checked before the write: a name, an amount above $0, and a month on offer. `own` is
+ * the plan's own month when it is being saved: an earlier one stays on offer, as it is on its sheet. A new plan has none,
+ * so only this month to the next eleven can be chosen.
+ */
+function planForm(form: Record<string, unknown>, month: string, own?: string) {
 	const values: PlanValues = {
 		name: String(form.name ?? "").trim(),
 		amount: String(form.amount ?? "").trim(),
@@ -118,7 +123,7 @@ function planForm(form: Record<string, unknown>, month: string) {
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
-	const offered = monthOptions(month, values.month).some(
+	const offered = monthOptions(month, own).some(
 		(option) => option.value === values.month,
 	);
 	if (!offered) errors.month = "Choose a month.";
@@ -262,6 +267,16 @@ async function planPage(c: Context<App>, id: number, error?: string) {
 						}))}
 					/>
 				)}
+				<div class="mt-3">
+					<Button
+						kind="secondary"
+						href={`/plans/${plan.id}/edit`}
+						{...sheetAttrs(`/plans/${plan.id}/edit`)}
+					>
+						Edit planned expense
+					</Button>
+				</div>
+				<div id="sheet" />
 			</div>
 		</Layout>,
 	);
@@ -279,11 +294,12 @@ plans.post("/plans/:id/link", async (c) => {
 		transaction > 0 &&
 		(await linkPlanPayment(c.env.DB, id, transaction));
 	if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
+	// Linking stays on the plan's page, which now shows it paid (decision 101), as the bill page's link does.
 	if (linked)
-		return withToast(
-			await billsPage(c, undefined, await householdToday(c.env.DB)),
-			{ message: "Payment linked", type: "success" },
-		);
+		return withToast(await planPage(c, id), {
+			message: "Payment linked",
+			type: "success",
+		});
 	return planPage(
 		c,
 		id,
@@ -370,6 +386,7 @@ plans.post("/plans/:id", async (c) => {
 	const { values, errors, fields } = planForm(
 		await c.req.parseBody(),
 		today.slice(0, 7),
+		plan.month,
 	);
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { plan, values, errors }, today);

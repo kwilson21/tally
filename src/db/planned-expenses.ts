@@ -200,6 +200,7 @@ export async function holdPlanDelete(
 	now: number = Date.now(),
 ): Promise<string | null> {
 	const token = crypto.randomUUID();
+	// One batch, so the hold and the delete land together or not at all; the hold reads the plan before it goes.
 	const [, held] = await db.batch([
 		db
 			.prepare("DELETE FROM planned_delete_holds WHERE created_ms <= ?")
@@ -210,12 +211,9 @@ export async function holdPlanDelete(
 				 SELECT ?1, ?2, name, amount_cents, month, transaction_id, created_by FROM planned_expenses WHERE id = ?3`,
 			)
 			.bind(token, now, planId),
+		db.prepare("DELETE FROM planned_expenses WHERE id = ?").bind(planId),
 	]);
 	if (!held?.meta.changes) return null;
-	await db
-		.prepare("DELETE FROM planned_expenses WHERE id = ?")
-		.bind(planId)
-		.run();
 	return token;
 }
 

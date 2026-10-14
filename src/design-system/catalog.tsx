@@ -4626,6 +4626,23 @@ function Diagrams() {
 						safeToSpendCents={29800}
 					/>
 				</State>
+				<State label="BudgetDiagram with a planned expense">
+					<BudgetDiagram
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						plannedCents={18000}
+						safeToSpendCents={61800}
+					/>
+				</State>
+				<State label="BudgetDiagram with a savings goal and a planned expense">
+					<BudgetDiagram
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						savingsGoalCents={10000}
+						plannedCents={18000}
+						safeToSpendCents={51800}
+					/>
+				</State>
 				<State label="BillsDiagram">
 					<BillsDiagram
 						amount="$142.00"

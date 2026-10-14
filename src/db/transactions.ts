@@ -152,10 +152,10 @@ export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.categor
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
-/** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
 /** The name of the planned expense whose payment this transaction is, on its own link or its split parent's (`paysPlanSql`). */
 export const PLAN_NAME_COLUMN = `(SELECT pe.name FROM planned_expenses pe WHERE pe.transaction_id IN (t.id, t.parent_id) LIMIT 1) AS planName`;
 
+/** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
 export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
 /** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */
 export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth`;
@@ -2539,36 +2539,24 @@ export async function saveJevResult(
 	return saveJevAnswer(db, update, id, options.log);
 }
 
-/** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
-
-/** How many of these transactions pay a planned expense, on their own link or their split parent's (`paysPlanSql`). */
-export async function payingPlansCount(
+/**
+ * How many of these transactions pay a bill or a planned expense, each row once, and how many pay each kind, on their
+ * own link or their split parent's (`paysBillSql`, `paysPlanSql`). The exclude toast's sentence reads it.
+ */
+export async function payingCounts(
 	db: D1Database,
 	ids: number[],
-): Promise<number> {
-	if (ids.length === 0) return 0;
-	const row = await db
-		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysPlanSql("t")}`,
-		)
-		.bind(JSON.stringify(ids))
-		.first<{ n: number }>();
-	return row?.n ?? 0;
-}
-
-export async function payingBillsCount(
-	db: D1Database,
-	ids: number[],
-): Promise<number> {
-	if (ids.length === 0) return 0;
+): Promise<{ paying: number; bills: number; plans: number }> {
+	if (ids.length === 0) return { paying: 0, bills: 0, plans: 0 };
 	// One bind for the whole list (D1 takes 100 binds at most), so Select all can count past 100 (#321).
 	const row = await db
 		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysBillSql("t")}`,
+			`SELECT COUNT(*) AS paying, COALESCE(SUM(${paysBillSql("t")}), 0) AS bills, COALESCE(SUM(${paysPlanSql("t")}), 0) AS plans
+			 FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysBillOrPlanSql("t")}`,
 		)
 		.bind(JSON.stringify(ids))
-		.first<{ n: number }>();
-	return row?.n ?? 0;
+		.first<{ paying: number; bills: number; plans: number }>();
+	return row ?? { paying: 0, bills: 0, plans: 0 };
 }
 
 /**

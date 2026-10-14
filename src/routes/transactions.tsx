@@ -30,8 +30,7 @@ import {
 	monthsWithTransactions,
 	needsCategoryCount,
 	PAGE_SIZE,
-	payingBillsCount,
-	payingPlansCount,
+	payingCounts,
 	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
@@ -1506,11 +1505,17 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
 
-	const paying = await payingBillsCount(c.env.DB, excluded);
-	const payingPlans = await payingPlansCount(c.env.DB, excluded);
-	const stillCounts =
-		stillCountsSentence(excluded.length, paying, "bill") ||
-		stillCountsSentence(excluded.length, payingPlans, "planned expense");
+	// Bills and planned expenses share one count and one sentence; the noun names the kinds that are there.
+	const { paying, bills, plans } = await payingCounts(c.env.DB, excluded);
+	const stillCounts = stillCountsSentence(
+		excluded.length,
+		paying,
+		bills && plans
+			? "bill or a planned expense"
+			: plans
+				? "planned expense"
+				: "bill",
+	);
 
 	return finishSelection(
 		c,

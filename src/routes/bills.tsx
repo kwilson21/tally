@@ -77,7 +77,7 @@ import {
 	type BillRowData,
 	BillStatusHeading,
 } from "../views/bill-row";
-import { BottomSheet } from "../views/bottom-sheet";
+import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
@@ -310,14 +310,6 @@ export async function loadBillRows(db: D1Database, today: string) {
 	return { today, rows: result };
 }
 
-const sheetAttrs = (href: string) => ({
-	"hx-get": href,
-	"hx-target": "#sheet",
-	"hx-select": "#sheet",
-	"hx-swap": "outerHTML",
-	"hx-push-url": "true",
-});
-
 // `given` is the household's date when the handler already read it, so a request reads it once.
 
 /** Bills' page, with an optional sheet over it: a bill's, or a planned expense's (`plan`, drawn by plans.tsx). */
@@ -363,6 +355,11 @@ export async function page(
 	const plannedThisMonthCents = unpaidPlans
 		.filter((plan) => plan.month === month)
 		.reduce((sum, plan) => sum + plan.amountCents, 0);
+	// Paid this month's total sums every row it lists, the bills and the plans paid this month.
+	const plansPaidCents = plansPaidThisMonth.reduce(
+		(sum, plan) => sum + plan.amountCents,
+		0,
+	);
 
 	const statusGroup = (status: BillStatus, extraRows: Child[] = []) => {
 		const group = active.filter((b) => b.status === status);
@@ -373,7 +370,8 @@ export async function page(
 				<BillStatusHeading
 					status={status}
 					totalCents={
-						totals.groups[`${status === "paid" ? "paid" : status}Cents`]
+						totals.groups[`${status === "paid" ? "paid" : status}Cents`] +
+						(status === "paid" ? plansPaidCents : 0)
 					}
 				/>
 				<ul class="divide-y divide-rule">
@@ -394,7 +392,8 @@ export async function page(
 			demo={c.env.DEMO === "true"}
 			currentPath={c.req.path}
 		>
-			<div class="max-w-2xl">
+			{/* #page is the swap target of a toast's Undo (toast.js), as on Home and the transactions list. */}
+			<div id="page" class="max-w-2xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>
 				{rows.length > 0 && (
 					<p class="mt-2 font-serif text-lg italic">

@@ -80,9 +80,7 @@ export function rowCaption(row: ListRow): Caption {
 			? { kind: "needs", caption: note, tag: true }
 			: {
 					kind: "category",
-					caption: [row.categoryName, note, paidBill]
-						.filter(Boolean)
-						.join(" · "),
+					caption: [row.categoryName, note, paid].filter(Boolean).join(" · "),
 					tag: false,
 				};
 	}
@@ -96,13 +94,13 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.categoryName)
 		return {
 			kind: "category",
-			caption: [row.categoryName, pair, paidBill].filter(Boolean).join(" · "),
+			caption: [row.categoryName, pair, paid].filter(Boolean).join(" · "),
 			tag: false,
 		};
 	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
 	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	// A refund and the bill it paid both say so ahead of the note, in the same order as a categorized row (#313).
-	const facts = [pair, paidBill].filter(Boolean).join(" · ");
+	const facts = [pair, paid].filter(Boolean).join(" · ");
 	return {
 		kind: "needs",
 		caption:

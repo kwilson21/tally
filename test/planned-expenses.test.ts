@@ -1,14 +1,27 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
 
-import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
+import {
+	DEFAULT_TIME_ZONE,
+	monthsBefore,
+	shortMonthName,
+	todayIn,
+} from "../src/dates";
 
 import { homeForecastDays } from "../src/db/home-forecast";
 import { loadMonth } from "../src/db/month";
-import { plansSetAsideCents } from "../src/db/planned-expenses";
+import {
+	holdPlanDelete,
+	PLAN_UNDO_MS,
+	plansSetAsideCents,
+	restorePlanDelete,
+} from "../src/db/planned-expenses";
 import { resetDemo } from "../src/demo/reset";
+import { formatCents } from "../src/money";
+import { loadBillRows } from "../src/routes/bills";
 
 const BASE = "http://tally.test";
 const post = (path: string, form: Record<string, string>) =>
@@ -31,6 +44,11 @@ const MONTH = TODAY.slice(0, 7);
 const LAST_MONTH = monthsBefore(MONTH, 1);
 
 const dateIn = (month: string) => `${month}-05`;
+
+const daysBefore = (days: number) =>
+	new Date(Date.parse(`${TODAY}T00:00:00Z`) - days * 86_400_000)
+		.toISOString()
+		.slice(0, 10);
 
 // The demo seed plans its own two; each test here plans what it needs, so it starts with none.
 beforeEach(async () => {
@@ -62,8 +80,22 @@ async function plan(
 	return row?.id ?? 0;
 }
 
+/** Two money-out charges at one merchant 30 days apart and unlinked: Bills finds a possible bill from them. */
+async function insertRepeatCharges() {
+	await env.DB.prepare(
+		"INSERT INTO merchants(raw_name,display_name,default_category_id,not_a_bill) VALUES('GYM REPEAT FIXTURE','Gym',4,0)",
+	).run();
+	for (const days of [40, 10]) {
+		await env.DB.prepare(
+			"INSERT INTO transactions(account_id,date,amount_cents,raw_name,category_id) SELECT id,?,1000,'GYM REPEAT FIXTURE',4 FROM accounts LIMIT 1",
+		)
+			.bind(daysBefore(days))
+			.run();
+	}
+}
+
 describe("Safe to spend with planned expenses", () => {
-	it("sets a plan aside with the savings goal, and not a plan for a later month", () => {
+	it("takes the plans' set-aside out alongside the savings goal", () => {
 		const summary = summarizeMonth({
 			month: MONTH,
 			categories: [{ id: 1, name: "Groceries" }],
@@ -109,18 +141,20 @@ describe("planned payments in the budget", () => {
 		expect(spentAfter - spentBefore).toBe(18000);
 	});
 
-	it("the forecast counts a plan's payment in spending, and never projects it forward", async () => {
+	it("the forecast moves a plan's payment out of everyday spending into its own role, so it is never projected forward", async () => {
 		await payment(9703, 18000);
-		await plan("Car registration", 18000, MONTH, 9703);
-		const days = await homeForecastDays(env.DB, MONTH, `${MONTH}-20`);
+		const unlinked = await homeForecastDays(env.DB, MONTH, `${MONTH}-20`);
+		const before = unlinked.find((row) => row.day === 5);
 
-		const day = days.find((row) => row.day === 5);
-		// In spending so far (spentCents), in its own role, and so not in the everyday pace that is projected forward.
-		expect(day?.planPaymentsCents).toBe(18000);
-		expect(day?.spentCents).toBeGreaterThanOrEqual(18000);
-		expect(day?.everydayCents ?? 0).toBeLessThan(
-			(day?.spentCents ?? 0) - 17999,
-		);
+		await plan("Car registration", 18000, MONTH, 9703);
+		const linked = await homeForecastDays(env.DB, MONTH, `${MONTH}-20`);
+		const after = linked.find((row) => row.day === 5);
+
+		// Still in spending so far, but no longer in the everyday pace that is projected forward.
+		expect(before?.planPaymentsCents).toBe(0);
+		expect(after?.planPaymentsCents).toBe(18000);
+		expect(after?.spentCents).toBe(before?.spentCents);
+		expect(after?.everydayCents).toBe((before?.everydayCents ?? 0) - 18000);
 	});
 
 	it("the bill matcher never links a payment a plan already pays", async () => {
@@ -192,7 +226,23 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(back).not.toBeNull();
 	});
 
-	it("an Undo after its ten seconds, or a second Undo, restores nothing", async () => {
+	it("an Undo after its ten seconds restores nothing", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const now = Date.now();
+		const token = await holdPlanDelete(env.DB, id, now);
+		expect(token).not.toBeNull();
+		expect(
+			await restorePlanDelete(env.DB, token ?? "", now + PLAN_UNDO_MS + 1),
+		).toBeNull();
+		const gone = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ n: number }>();
+		expect(gone?.n).toBe(0);
+	});
+
+	it("a second Undo restores nothing", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const deleted = await post(`/plans/${id}/delete`, {});
 		const token = (
@@ -203,6 +253,166 @@ describe("Bills' Planned group, Band and sheet", () => {
 		await post("/plans/undo-delete", { token });
 		const again = await post("/plans/undo-delete", { token });
 		expect(again.headers.get("HX-Trigger")).toContain("Undo expired");
+	});
+
+	it("answers an Undo with the Bills page's #page root, where the toast's Undo swaps it in", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const deleted = await post(`/plans/${id}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		const restored = await post("/plans/undo-delete", { token });
+		const body = await restored.text();
+		expect(body).toContain('id="page"');
+		expect(body).toContain("Car registration");
+	});
+
+	it("says the plan's Band on Bills: the repeat-charge Band waits behind it, with Move to and Drop and a dot for each plan", async () => {
+		await insertRepeatCharges();
+		const before = await (await exports.default.fetch(`${BASE}/bills`)).text();
+		// The control: with no plan waiting, the repeat charges are offered as a possible bill.
+		expect(before).toContain("possible bill");
+
+		const id = await plan("Car registration", 18000, LAST_MONTH);
+		await plan("Lawn service", 9000, LAST_MONTH);
+		const html = await (await exports.default.fetch(`${BASE}/bills`)).text();
+		expect(html).not.toContain("possible bill");
+
+		const band =
+			html.match(
+				/<section[^>]*aria-labelledby="plan-band-title"[\s\S]*?<\/section>/,
+			)?.[0] ?? "";
+		expect(band).toContain(`action="/plans/${id}/move"`);
+		expect(band).toContain(`Move to ${shortMonthName(MONTH)}`);
+		expect(band).toContain(`action="/plans/${id}/drop"`);
+		expect(band.match(/size-2\.5 rounded-full/g)).toHaveLength(2);
+	});
+
+	it("a planned row opens its sheet in place, as Plan an expense does", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const html = await (await exports.default.fetch(`${BASE}/bills`)).text();
+		expect(html).toMatch(
+			new RegExp(
+				`<a\\b[^>]*href="/plans/${id}/edit"[^>]*hx-get="/plans/${id}/edit"`,
+			),
+		);
+	});
+
+	it("Cancel in the delete question goes back to the plan's sheet, not to its payment page", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}/delete`)
+		).text();
+		const cancel = html.match(/<a\b[^>]*>\s*Cancel\s*<\/a>/)?.[0] ?? "";
+		expect(cancel).toContain(`href="/plans/${id}/edit"`);
+		expect(cancel).toContain(`hx-get="/plans/${id}/edit"`);
+		expect(cancel).toContain('hx-target="#sheet"');
+	});
+
+	it("names the edited plan in the sheet's heading for a screen reader, as Edit planned expense", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
+		).text();
+		expect(html).toMatch(
+			/id="plan-sheet-title"[^>]*>\s*<span class="sr-only">Edit planned expense: <\/span>Car registration/,
+		);
+	});
+
+	it("refuses a new plan in a month before this one, and still keeps a plan's own earlier month when it is saved", async () => {
+		const past = await post("/plans", {
+			name: "Old",
+			amount: "20",
+			month: "2020-01",
+		});
+		expect(await past.text()).toContain("Choose a month.");
+		const old = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name='Old'",
+		).first<{ n: number }>();
+		expect(old?.n).toBe(0);
+
+		const id = await plan("Car registration", 18000, LAST_MONTH);
+		const kept = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: LAST_MONTH,
+		});
+		expect(kept.headers.get("HX-Trigger")).toContain("Saved Car registration.");
+	});
+
+	it("opens the plan's sheet from its own page with Edit planned expense, as a bill's page does", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}`)
+		).text();
+		expect(html).toContain('id="sheet"');
+		expect(html).toMatch(
+			new RegExp(
+				`<a\\b(?=[^>]*hx-get="/plans/${id}/edit")(?=[^>]*hx-target="#sheet")[^>]*>\\s*Edit planned expense\\s*</a>`,
+			),
+		);
+	});
+
+	it("asks Delete Car registration, $180.00? before the plan is deleted", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}/delete`)
+		).text();
+		expect(html).toContain("Delete Car registration, $180.00?");
+	});
+
+	it("keeps Unlink out of the paid sheet's edit form, so Enter in a field saves, not unlinks", async () => {
+		const id = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9750, 18000),
+		);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
+		).text();
+		const edit =
+			html.match(
+				new RegExp(`<form[^>]*action="/plans/${id}"[\\s\\S]*?</form>`),
+			)?.[0] ?? "";
+		expect(edit).not.toBe("");
+		const buttons = [
+			...edit.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g),
+		].map((match) => ({ attrs: match[1] ?? "", text: match[2] ?? "" }));
+		// Unlink belongs to its own form (its `form` attribute), so it isn't the edit form's default button.
+		const unlink = buttons.find((button) => button.text.includes("Unlink"));
+		expect(unlink?.attrs).toContain('form="plan-unlink"');
+		expect(unlink?.attrs).not.toContain("formaction");
+		const owned = buttons.filter(
+			(button) =>
+				/type="submit"/.test(button.attrs) && !/\sform="/.test(button.attrs),
+		);
+		expect(owned[0]?.text).toContain("Save");
+
+		const unlinkForm =
+			html.match(/<form[^>]*id="plan-unlink"[^>]*>/)?.[0] ?? "";
+		expect(unlinkForm).toContain(`action="/plans/${id}/unlink"`);
+		expect(unlinkForm).toContain(`hx-post="/plans/${id}/unlink"`);
+		// The unlink form comes after the edit form's close, not inside it.
+		expect(html.indexOf('id="plan-unlink"')).toBeGreaterThan(
+			html.indexOf("</form>", html.indexOf(`action="/plans/${id}"`)),
+		);
+	});
+
+	it("totals Paid this month with the plans it lists, as the bills' paid total does", async () => {
+		await plan("Car registration", 18000, MONTH, await payment(9740, 18000));
+		const html = await (await exports.default.fetch(`${BASE}/bills`)).text();
+		const billData = await loadBillRows(env.DB, TODAY);
+		const bills = billTotalsForRows(
+			MONTH,
+			billData.rows.filter((bill) => bill.active),
+		).groups.paidCents;
+		const total = html.match(
+			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0">([^<]*)<\/span>/,
+		)?.[1];
+		expect(total).toBe(formatCents(bills + 18000));
 	});
 
 	it("creates a plan from the sheet, and refuses an empty name with a field error", async () => {
@@ -227,6 +437,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		await payment(9706, 18000);
 		const ok = await post(`/plans/${id}/link`, { transaction_id: "9706" });
 		expect(ok.headers.get("HX-Trigger")).toContain("Payment linked");
+		// Decision 101: linking stays on the plan's page, which now shows the plan paid, not Bills.
+		const linkedPage = await ok.text();
+		expect(linkedPage).toContain("Paid by");
+		expect(linkedPage).toContain("Car registration");
+		expect(linkedPage).not.toContain("Add a bill");
 
 		// 9706 now pays Car registration, so a second plan can't take it: the picker never lists it, and a forced link says why.
 		const other = await plan("Lawn service", 9000, MONTH);
@@ -268,5 +483,92 @@ describe("a bill can't take a payment a plan pays", () => {
 			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9710",
 		).first<{ n: number }>();
 		expect(linked?.n).toBe(0);
+	});
+});
+
+describe("a payment that pays a planned expense, on its own page and in the lists", () => {
+	it("says in the edit panel that an excluded payment counts while it pays a planned expense", async () => {
+		const tx = await payment(9760, 18000, 1);
+		await plan("Car registration", 18000, MONTH, tx);
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions/${tx}`)
+		).text();
+		expect(html).toContain(
+			"It pays a planned expense, so it counts in the budget.",
+		);
+	});
+
+	it("names the plan on its payment's row: paid Car registration", async () => {
+		const tx = await payment(9761, 18000);
+		// The list shows 25 rows, newest first, so the payment is dated today to sit on the first page.
+		await env.DB.prepare("UPDATE transactions SET date = ? WHERE id = ?")
+			.bind(TODAY, tx)
+			.run();
+		await plan("Car registration", 18000, MONTH, tx);
+		const html = await (
+			await exports.default.fetch(`${BASE}/transactions`)
+		).text();
+		expect(html).toContain("paid Car registration");
+	});
+
+	it("holds nothing when the plan to delete is already gone", async () => {
+		const before = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_delete_holds",
+		).first<{ n: number }>();
+		expect(await holdPlanDelete(env.DB, 987654)).toBeNull();
+		const after = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_delete_holds",
+		).first<{ n: number }>();
+		expect(after?.n).toBe(before?.n);
+	});
+});
+
+describe("excluding a payment that a bill or a plan pays", () => {
+	const exclude = (ids: number[]) =>
+		exports.default.fetch(`${BASE}/transactions/select/exclude`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams([
+				...ids.map((id) => ["ids", String(id)] as [string, string]),
+				["back", "/transactions"],
+			]),
+		});
+
+	const announced = async (ids: number[]) => {
+		const trigger = JSON.parse(
+			(await exclude(ids)).headers.get("HX-Trigger") ?? "{}",
+		);
+		expect(trigger.toast.message).toBe(trigger.announce);
+		return trigger.announce as string;
+	};
+
+	it("says a plan's payment still counts, and counts bills and plans together in one sentence", async () => {
+		const billPaid = await payment(9770, 1200);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9770, 'Club', 1200, 1, 'monthly', 1, 'CLUB')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9770, ?, ?, 'user', 'linked')",
+			).bind(MONTH, billPaid),
+		]);
+		const planPaid = await payment(9771, 18000);
+		await plan("Car registration", 18000, MONTH, planPaid);
+		const unlinked = await payment(9772, 500);
+
+		expect(await announced([planPaid])).toBe(
+			"Excluded 1 transaction. It still counts while it pays a planned expense.",
+		);
+		expect(await announced([billPaid, planPaid])).toBe(
+			"Excluded 2 transactions. 2 still count while they pay a bill or a planned expense.",
+		);
+		// The unlinked payment is excluded but doesn't count toward the sentence.
+		expect(await announced([billPaid, planPaid, unlinked])).toBe(
+			"Excluded 3 transactions. 2 still count while they pay a bill or a planned expense.",
+		);
 	});
 });
