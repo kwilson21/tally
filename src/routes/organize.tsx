@@ -6,6 +6,7 @@ import { nameForm, parseCategory } from "../settings/category-form";
 import {
 	groupHasRule,
 	organizeGroups,
+	organizeOffer,
 	saveOrganizeGroup,
 	setOrganizeRule,
 } from "../transactions/organize";
@@ -72,8 +73,9 @@ async function renderOrganize(
 	const sources = group
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
-	// The question's answers go to the same skips, and Not now or Yes then moves on from them.
-	const ruleAction = `/transactions/organize/rule${new URL(c.req.url).search}`;
+	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
+	// question's own address also carries its category and saved ids, which an answer must not repeat.
+	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
 
 	return c.html(
 		<Layout
@@ -195,7 +197,26 @@ async function renderOrganize(
 	);
 }
 
-organize.get("/transactions/organize", (c) => renderOrganize(c));
+/**
+ * Organize's page. A save with JavaScript off redirects to the question's own address (#353): the skips, then the
+ * category and the saved charges' ids joined by dots. Anything else in those parameters, or a question the charges
+ * no longer hold, shows the ordinary page.
+ */
+organize.get("/transactions/organize", async (c) => {
+	const params = new URL(c.req.url).searchParams;
+	const categoryId = Number(params.get("category"));
+	const savedIds = (params.get("saved") ?? "")
+		.split(".")
+		.map(Number)
+		.filter((id) => Number.isSafeInteger(id) && id > 0);
+	const offer =
+		Number.isSafeInteger(categoryId) && categoryId > 0 && savedIds.length > 0
+			? await organizeOffer(c.env.DB, savedIds, categoryId)
+			: null;
+	return offer
+		? renderOrganize(c, undefined, 200, true, offer)
+		: renderOrganize(c);
+});
 
 organize.post("/transactions/organize", async (c) => {
 	const form = await c.req.formData();
@@ -298,10 +319,17 @@ organize.post("/transactions/organize", async (c) => {
 				category: chosen.name,
 			}
 		: undefined;
-	if (!c.req.header("HX-Request"))
-		return rule
-			? renderOrganize(c, undefined, 200, true, rule)
-			: c.redirect(next, 303);
+	if (!c.req.header("HX-Request")) {
+		if (!rule) return c.redirect(next, 303);
+		// The question has an address of its own (#353), so a reload asks it again. It keeps the skips, and the
+		// category and saved ids that the question is rebuilt from.
+		const question = new URLSearchParams(
+			url.searchParams.getAll("skip").map((name) => ["skip", name]),
+		);
+		question.set("category", String(chosen.id));
+		question.set("saved", filed.join("."));
+		return c.redirect(`/transactions/organize?${question}`, 303);
+	}
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
@@ -332,7 +360,11 @@ function postedItems<T>(
 organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
 	const url = new URL(c.req.url);
-	const next = `/transactions/organize${url.search}`;
+	// The skips only: an answer to the question must not carry its category or saved ids back into the question.
+	const skips = new URLSearchParams(
+		url.searchParams.getAll("skip").map((name) => ["skip", name]),
+	);
+	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
 	const keys = postedItems(
 		form.get("merchant_keys"),
 		(key): key is string => typeof key === "string" && key.length > 0,

@@ -53,6 +53,10 @@ async function post(
 	return { res, html: await res.text() };
 }
 
+/** The page a no-JS save redirects to: the question, at its own address (#353). */
+const followRedirect = (save: { res: Response }) =>
+	get(save.res.headers.get("Location") ?? "");
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
@@ -178,14 +182,15 @@ describe("POST /transactions/organize", () => {
 		)
 			.bind(rawNames[0])
 			.first<{ n: number }>();
-		const { res, html } = await post({
+		const save = await post({
 			category: "2",
 			name: "The Bakery",
 			group: "Local Bakery",
 			raw_name: ["FORGED MERCHANT", ...rawNames],
 		});
-		// With JavaScript off the question is a page of its own, so the save answers 200, not a redirect.
-		expect(res.status).toBe(200);
+		// With JavaScript off the save redirects to the question's own address, which asks it.
+		expect(save.res.status).toBe(303);
+		const { html } = await followRedirect(save);
 		expect(html).toContain(
 			`Always use ${await categoryName(2)} for The Bakery?`,
 		);
@@ -212,13 +217,14 @@ describe("POST /transactions/organize", () => {
 			name: "The Bakery",
 			group: "Local Bakery",
 		});
+		const { html: question } = await followRedirect(save);
 		const { res } = await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(rawNames),
 				merchant: "The Bakery",
 				category: "2",
-				saved: savedIdsIn(save.html),
+				saved: savedIdsIn(question),
 			},
 			"/transactions/organize/rule",
 		);
@@ -298,20 +304,22 @@ describe("POST /transactions/organize", () => {
 		);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe(
-			"/transactions/organize?skip=Other%20store",
+			"/transactions/organize?skip=Other+store",
 		);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 	});
 
 	it("a Yes for a merchant with no charge filed in that category makes no rule for it", async () => {
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const { html: question } = await followRedirect(save);
+		expect(question).toContain("rule-offer-title");
 		await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(["FORGED MERCHANT"]),
 				merchant: "Forged",
 				category: "2",
-				saved: savedIdsIn(save.html),
+				saved: savedIdsIn(question),
 			},
 			"/transactions/organize/rule",
 		);
@@ -437,13 +445,14 @@ describe("POST /transactions/organize", () => {
 			name: "",
 			group: "Bulk merchant",
 		});
+		const { html: question } = await followRedirect(save);
 		const { res } = await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(keys),
 				merchant: "Bulk merchant",
 				category: "2",
-				saved: savedIdsIn(save.html),
+				saved: savedIdsIn(question),
 			},
 			"/transactions/organize/rule",
 		);
@@ -533,6 +542,79 @@ describe("POST /transactions/organize", () => {
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 		expect(res.headers.get("HX-Trigger")).toBeNull();
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+	});
+
+	/** Files Local Bakery's charges under category 2, with one more charge to file so Save files two or more. */
+	async function saveTwoBakeryCharges() {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'SQ *LOCAL BAKERY 4432')",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.run();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const saved = JSON.parse(savedIdsIn(save.html)) as number[];
+		expect(saved.length).toBeGreaterThan(1);
+		return saved;
+	}
+	/** Yes on the question for Local Bakery, with the saved list it carries. */
+	const yesForBakery = (saved: number[]) =>
+		post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: JSON.stringify(saved),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+
+	it("a Yes makes no rule once a charge Save filed was deleted, even while the others hold the category (#353)", async () => {
+		const saved = await saveTwoBakeryCharges();
+		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(saved[0])
+			.run();
+		const jev = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 700, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.first<{ id: number }>();
+		const { res, html } = await yesForBakery(saved);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(html).not.toContain("rule-offer-title");
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+		expect(html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
+		// A stale Yes applies nothing, so the store's charge a person did not choose keeps its category.
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+			)
+				.bind(jev?.id)
+				.first(),
+		).toEqual({ category_id: 3, category_source: "jev" });
+	});
+
+	it("a Yes makes the rule while every charge Save filed still holds the category, with several of them (#353)", async () => {
+		const saved = await saveTwoBakeryCharges();
+		const { res } = await yesForBakery(saved);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: { type: "success" },
+		});
+	});
+
+	it("a Yes whose saved list repeats an id still makes the rule (#353)", async () => {
+		const saved = await saveTwoBakeryCharges();
+		await yesForBakery([...saved, saved[0] ?? 0]);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 	});
 
 	it("a Yes applies the rule to the store's charges a person hasn't chosen, and leaves a person's choice alone (#353)", async () => {
@@ -681,11 +763,11 @@ describe("POST /transactions/organize", () => {
 		await env.DB.batch(statements);
 		const page = await get();
 		expect(page.html).toMatch(/From BULK MERCHANT[^<]+ and 147 more/);
-		const { res } = await post({
-			category: "2",
-			name: "",
-			group: "Bulk merchant",
-		});
+		const { res } = await post(
+			{ category: "2", name: "", group: "Bulk merchant" },
+			"/transactions/organize",
+			true,
+		);
 		// The save files all 150 charges, then asks the question (no rule yet).
 		expect(res.status).toBe(200);
 		const count = await env.DB.prepare(
@@ -735,7 +817,13 @@ describe("POST /transactions/organize", () => {
 			{ category: "2", name: "", group: second },
 			`/transactions/organize?skip=${encodeURIComponent(first)}`,
 		);
-		expect(saved.status).toBe(200);
+		// The save redirects to the question, and the question's address keeps the skip.
+		expect(saved.status).toBe(303);
+		expect(
+			new URL(BASE + (saved.headers.get("Location") ?? "")).searchParams.getAll(
+				"skip",
+			),
+		).toEqual([first]);
 		// Not now carries the skips on to the next store.
 		const { res: moved } = await post(
 			{
@@ -746,11 +834,173 @@ describe("POST /transactions/organize", () => {
 			},
 			`/transactions/organize/rule?skip=${encodeURIComponent(first)}`,
 		);
-		expect(moved.headers.get("Location")).toContain(
-			`skip=${encodeURIComponent(first)}`,
-		);
+		expect(
+			new URL(BASE + (moved.headers.get("Location") ?? "")).searchParams.getAll(
+				"skip",
+			),
+		).toEqual([first]);
 		const after = await get(moved.headers.get("Location") ?? "");
 		expect(after.html).not.toMatch(new RegExp(`<h2[^>]*>${first}</h2>`));
+	});
+});
+
+describe("Organize's question with JavaScript off (#353)", () => {
+	it("a Save redirects to the question's own address, where a reload asks the same question", async () => {
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		expect(save.res.status).toBe(303);
+		const location = save.res.headers.get("Location") ?? "";
+		const url = new URL(BASE + location);
+		expect(url.pathname).toBe("/transactions/organize");
+		expect(url.searchParams.get("category")).toBe("2");
+		const filed = (url.searchParams.get("saved") ?? "").split(".").map(Number);
+		expect(filed.length).toBeGreaterThan(0);
+
+		const first = await get(location);
+		expect(first.res.status).toBe(200);
+		expect(first.html).toMatch(
+			/<h2[^>]*id="rule-offer-title"[^>]*tabindex="-1"[^>]*autofocus/,
+		);
+		expect(first.html).toContain(
+			`Always use ${await categoryName(2)} for Local Bakery?`,
+		);
+		expect(JSON.parse(savedIdsIn(first.html))).toEqual(filed);
+
+		const reload = await get(location);
+		expect(reload.html).toContain(
+			`Always use ${await categoryName(2)} for Local Bakery?`,
+		);
+	});
+
+	it("the question names the store as the save typed it", async () => {
+		const save = await post({
+			category: "2",
+			name: "The Bakery",
+			group: "Local Bakery",
+		});
+		const { html } = await followRedirect(save);
+		expect(html).toContain(
+			`Always use ${await categoryName(2)} for The Bakery?`,
+		);
+	});
+
+	it("the question's form posts to the rule route with the skips only, and Not now moves on with the skips", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Other store')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			"/transactions/organize?skip=Other%20store",
+		);
+		const { html } = await followRedirect(save);
+		expect(html).toContain(
+			'action="/transactions/organize/rule?skip=Other+store"',
+		);
+		const notNow = await post(
+			{
+				answer: "no",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(html),
+			},
+			"/transactions/organize/rule?skip=Other+store",
+		);
+		expect(notNow.res.status).toBe(303);
+		const next = new URL(BASE + (notNow.res.headers.get("Location") ?? ""));
+		expect(next.pathname).toBe("/transactions/organize");
+		expect(next.searchParams.getAll("skip")).toEqual(["Other store"]);
+		expect(next.searchParams.has("category")).toBe(false);
+		expect(next.searchParams.has("saved")).toBe(false);
+		const page = await get(next.pathname + next.search);
+		expect(page.html).not.toContain("rule-offer-title");
+		expect(page.html).not.toMatch(/<h2[^>]*>Other store<\/h2>/);
+	});
+
+	it("after Yes, the question's address asks nothing more and shows the next store", async () => {
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const questionPath = save.res.headers.get("Location") ?? "";
+		const { html } = await get(questionPath);
+		const yes = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(html),
+			},
+			"/transactions/organize/rule",
+		);
+		expect(yes.res.status).toBe(303);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+		const back = await get(questionPath);
+		expect(back.res.status).toBe(200);
+		expect(back.html).not.toContain("rule-offer-title");
+		expect(back.html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
+	});
+
+	it("an address whose charges no longer hold the category shows no question, and never an error", async () => {
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const saved =
+			new URL(BASE + (save.res.headers.get("Location") ?? "")).searchParams.get(
+				"saved",
+			) ?? "";
+		const crafted: Record<string, string> = {
+			"another category": `/transactions/organize?category=3&saved=${saved}`,
+			"a charge that does not exist": `/transactions/organize?category=2&saved=${saved}.999999`,
+			junk: "/transactions/organize?category=x&saved=abc",
+			"a missing category": `/transactions/organize?category=999&saved=${saved}`,
+			"no charges": "/transactions/organize?category=2&saved=",
+		};
+		for (const [name, path] of Object.entries(crafted)) {
+			const { res, html } = await get(path);
+			expect(res.status, name).toBe(200);
+			expect(html, name).not.toContain("rule-offer-title");
+		}
+		// The same address with its own charges asks, so the checks above fail for the reason they name.
+		const { html } = await get(
+			`/transactions/organize?category=2&saved=${saved}`,
+		);
+		expect(html).toContain("rule-offer-title");
+	});
+
+	it("an archived category shows no question", async () => {
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const path = save.res.headers.get("Location") ?? "";
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const { res, html } = await get(path);
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("rule-offer-title");
+	});
+
+	it("ids from two differently named stores show no question, though both hold the category", async () => {
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('STORE TWO RAW', 'Store two')",
+		).run();
+		const other = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 500, 'STORE TWO RAW', 2, 'user') RETURNING id",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.first<{ id: number }>();
+		expect(other?.id).toBeDefined();
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
+		const saved =
+			new URL(BASE + (save.res.headers.get("Location") ?? "")).searchParams.get(
+				"saved",
+			) ?? "";
+		const alone = await get(`/transactions/organize?category=2&saved=${saved}`);
+		expect(alone.html).toContain("rule-offer-title");
+		const both = await get(
+			`/transactions/organize?category=2&saved=${saved}.${other?.id}`,
+		);
+		expect(both.res.status).toBe(200);
+		expect(both.html).not.toContain("rule-offer-title");
 	});
 });
 

@@ -20,6 +20,17 @@ const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_sp
 const KEY = merchantKeySql("t");
 const KEY_UPDATE = merchantKeySql("transactions");
 const CHUNK_SIZE = 90;
+/**
+ * Every charge in a saved list (a JSON array of ids) still exists and holds the category as a person's choice
+ * (#353). Its binds, in order, are `savedStillHoldArgs`.
+ */
+export const SAVED_STILL_HOLD_SQL = `(SELECT COUNT(DISTINCT value) FROM json_each(?)) = (SELECT COUNT(*) FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user')`;
+/** The binds for SAVED_STILL_HOLD_SQL's `?`s: the saved list, the saved list again, then the category. */
+export const savedStillHoldArgs = (savedIds: string, categoryId: number) => [
+	savedIds,
+	savedIds,
+	categoryId,
+];
 
 export type OrganizeGroup = {
 	name: string;
@@ -232,10 +243,12 @@ export async function groupHasRule(
 /**
  * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key, creating the
  * `merchants` rows that don't exist yet, and applies it to the store's transactions a person hasn't chosen, as
- * setMerchantRule (#209's Yes) does, so later ones follow. It acts only while the rows that Save filed (`savedIds`,
- * a JSON array) still hold `categoryId` as a person's choice: a stale Yes makes no rule and changes no charge. A key
- * gets the rule only where one of those rows carries it, so a posted key with no such row sets nothing. Returns how
- * many rules were written, so a caller can tell whether there is a rule to name.
+ * setMerchantRule (#209's Yes) does, so later ones follow. It acts only while every row that Save filed (`savedIds`,
+ * a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or recategorized row makes the Yes
+ * stale (no rule, no charge changed, no toast). A pending charge that sync merges into its posted row
+ * (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit panel's tick
+ * can still make the rule. A key gets the rule only where one of those rows carries it, so a posted key with no such
+ * row sets nothing. Returns how many rules were written, so a caller can tell whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
@@ -247,8 +260,13 @@ export async function setOrganizeRule(
 	const statements = [...new Set(merchantKeys)].flatMap((merchantKey) => {
 		// Both statements of a key carry this guard, so the rule and its charges move together or not at all.
 		const stillFiled = `EXISTS (SELECT 1 FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("s")} = ? AND s.category_id = ? AND s.category_source = 'user')
-			AND NOT EXISTS (SELECT 1 FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND (s.category_id IS NOT ? OR s.category_source IS NOT 'user'))`;
-		const guard = [savedIds, merchantKey, categoryId, savedIds, categoryId];
+			AND ${SAVED_STILL_HOLD_SQL}`;
+		const guard = [
+			savedIds,
+			merchantKey,
+			categoryId,
+			...savedStillHoldArgs(savedIds, categoryId),
+		];
 		return [
 			db
 				.prepare(
@@ -270,4 +288,61 @@ export async function setOrganizeRule(
 			index % 2 === 0 ? written + result.meta.changes : written,
 		0,
 	);
+}
+
+/** Organize's question for a saved group, as `organizeOffer` rebuilds it; the view draws it (#353). */
+export type GroupOffer = {
+	merchantKeys: string[];
+	savedIds: number[];
+	merchant: string;
+	categoryId: number;
+	category: string;
+};
+
+/**
+ * Rebuilds Organize's question from the charges a save filed, or returns nothing when they no longer hold the
+ * category (#353). The question's address carries only the saved ids and the category, so every key and name here
+ * comes from the database: a crafted address can show a question that is true of the data, or none. It returns
+ * nothing unless those charges are one store's, so ids from two stores can't name one of them, and nothing once
+ * every key already has the rule, so Back after Yes shows no question.
+ */
+export async function organizeOffer(
+	db: D1Database,
+	savedIds: number[],
+	categoryId: number,
+): Promise<GroupOffer | null> {
+	const ids = [...new Set(savedIds)];
+	if (ids.length === 0) return null;
+	const category = await db
+		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
+		.bind(categoryId)
+		.first<{ id: number; name: string }>();
+	if (!category) return null;
+	const savedJson = JSON.stringify(ids);
+	// No rows come back unless every saved charge still holds the category, so one query decides both.
+	const { results } = await db
+		.prepare(
+			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
+			FROM transactions t
+			WHERE t.id IN (SELECT value FROM json_each(?)) AND ${SAVED_STILL_HOLD_SQL}`,
+		)
+		.bind(savedJson, ...savedStillHoldArgs(savedJson, categoryId))
+		.all<{ merchantKey: string; shownName: string | null }>();
+	// Named as organizeGroups names a group: the store's display name, else its tidied key.
+	const names = [
+		...new Set(
+			results.map((row) => row.shownName || tidyName(row.merchantKey)),
+		),
+	];
+	const merchant = names[0];
+	if (names.length !== 1 || merchant === undefined) return null;
+	const merchantKeys = results.map((row) => row.merchantKey);
+	if (await groupHasRule(db, merchantKeys, categoryId)) return null;
+	return {
+		merchantKeys,
+		savedIds: ids,
+		merchant,
+		categoryId,
+		category: category.name,
+	};
 }
