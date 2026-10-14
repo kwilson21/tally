@@ -500,6 +500,37 @@ export async function listRowsByIds(
 	return rows;
 }
 
+/** Transaction 110 is Local Bakery after a reset (test/seed.test.ts keeps that true); the demo's Start here and Things to try use it. */
+export const DEMO_BAKERY_ID = 110;
+
+/**
+ * The demo's Start here lines (spec §8.8), in the order the page shows them: this month's latest paycheck, its
+ * latest transfer, then DEMO_BAKERY_ID. Each is Tally's own row, as the list draws it. A line the month doesn't
+ * have is left out, so the page never shows a made-up row.
+ */
+export async function startHereRows(
+	db: D1Database,
+	month: string,
+): Promise<ListRow[]> {
+	const latest = (flag: "flag_income" | "flag_transfer") =>
+		db
+			.prepare(
+				`SELECT id FROM transactions WHERE ${flag} = 1 AND parent_id IS NULL AND substr(date, 1, 7) = ? ORDER BY date DESC, id DESC LIMIT 1`,
+			)
+			.bind(month)
+			.first<{ id: number }>();
+	const [paycheck, transfer] = await Promise.all([
+		latest("flag_income"),
+		latest("flag_transfer"),
+	]);
+	const ids = [paycheck?.id, transfer?.id, DEMO_BAKERY_ID].filter(
+		(id): id is number => id !== undefined,
+	);
+	// listRowsByIds sorts by date, so the rows go back into the order of the ids.
+	const rows = await listRowsByIds(db, ids);
+	return ids.flatMap((id) => rows.find((row) => row.id === id) ?? []);
+}
+
 /**
  * The rows a bulk action can change (no split parent) that the filters match, whatever the page (#321): what
  * Select all means. Counted on every request, so a changed filter or a new transaction changes the set.

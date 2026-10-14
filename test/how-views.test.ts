@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
+import { START_HERE } from "../src/design-system/mock";
 import { HowLink } from "../src/views/how-link";
+import { DemoBanner } from "../src/views/layout";
+import { StartHere } from "../src/views/start-here";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
 import { WhyLink } from "../src/views/why-link";
 
+const decode = (html: string) =>
+	html
+		.replaceAll("&#39;", "'")
+		.replaceAll("&quot;", '"')
+		.replaceAll("&amp;", "&");
+
 describe("ThingsToTry", () => {
-	it("is a labeled section with the three things to do and the How it works link", async () => {
+	it("is the three things to do under a heading, each linking to where it's done (spec §9)", async () => {
 		const html = await ThingsToTry().toString();
-		expect(html).toMatch(/<section[^>]*aria-labelledby="things-title"/);
-		expect(html).toMatch(
-			/<p id="things-title"[^>]*>New here\? Things to try<\/p>/,
-		);
+		expect(html).toMatch(/<h3[^>]*>Three things to try<\/h3>/);
 		const links = [...html.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)</g)].map(
 			(m) => [m[1], m[2]],
 		);
@@ -18,8 +24,14 @@ describe("ThingsToTry", () => {
 			["/transactions?uncategorized=1", "Give a transaction a category"],
 			["/transactions/110?uncategorized=1", "Set a rule for a merchant"],
 			["/transactions/110?uncategorized=1", "Rename a merchant"],
-			["/how-it-works", "How Tally works →"],
 		]);
+	});
+
+	it("drops Home's box and its How Tally works link, which Start here is already part of", async () => {
+		const html = await ThingsToTry().toString();
+		expect(html).not.toContain("New here?");
+		expect(html).not.toContain("How Tally works");
+		expect(html).not.toContain("<section");
 	});
 
 	it("names the edit panel's own controls: the rule tick and the Name row (#491, #353)", async () => {
@@ -37,6 +49,95 @@ describe("ThingsToTry", () => {
 		for (const a of html.match(/<a [^>]*>/g) ?? []) {
 			expect(a).toContain("min-h-11");
 		}
+	});
+});
+
+describe("DemoBanner", () => {
+	it("reads Demo data and links Start here, in ink and underlined, to How Tally works' first section (P124 A)", async () => {
+		const html = await DemoBanner().toString();
+		expect(html).toContain("Demo data. Nothing here is real. ·");
+		const link = html.match(/<a [^>]*>Start here<\/a>/)?.[0] ?? "";
+		expect(link).toContain('href="/how-it-works#start-here"');
+		for (const word of ["min-h-11", "text-ink", "underline"]) {
+			expect(link).toContain(word);
+		}
+	});
+
+	it("is not hidden on any width, so it shows above the sidebar on desktop too (#549)", async () => {
+		const html = await DemoBanner().toString();
+		expect(html).not.toMatch(/hidden/);
+	});
+});
+
+describe("StartHere", () => {
+	const view = async () =>
+		StartHere({
+			monthName: "October",
+			rows: START_HERE.rows,
+			safeToSpendCents: START_HERE.safeToSpendCents,
+		}).toString();
+
+	it("is the demo's first section, labelled by its h2, with the made-up family sentence in this month's name", async () => {
+		const html = await view();
+		expect(html).toMatch(
+			/<section id="start-here" aria-labelledby="start-here-title"/,
+		);
+		expect(html).toMatch(/<h2 id="start-here-title"[^>]*>Start here<\/h2>/);
+		expect(decode(html)).toContain(
+			"The Riveras are a made-up family. Here's what their bank sent this October, and what Tally wrote down.",
+		);
+	});
+
+	it("strikes each bank line, says so for a screen reader, and puts Tally's row for it under the line", async () => {
+		const html = await view();
+		const pairs = [
+			...html.matchAll(
+				/<s class="decoration-muted">([^<]+)<\/s>[\s\S]*?data-transaction="(\d+)"/g,
+			),
+		].map((m) => [m[1], Number(m[2])]);
+		expect(pairs).toEqual([
+			["ACME CORP PAYROLL", 901],
+			["ONLINE TRANSFER TO SAV ...5678", 902],
+			["SQ *LOCAL BAKERY 4432", 110],
+		]);
+		expect(
+			html.match(/<span class="sr-only">The bank sent <\/span>/g),
+		).toHaveLength(3);
+	});
+
+	it("says what would count without Tally, with its link to the list without Tally", async () => {
+		const html = await view();
+		expect(html).toContain(
+			"Without Tally, the paycheck and the transfer would both count as spending.",
+		);
+		expect(html).toMatch(
+			/<a href="\/transactions\?raw=1"[^>]*>See every line without Tally<\/a>/,
+		);
+	});
+
+	it("shows Safe to spend in whole dollars under a decorative double rule, with one line on what it means", async () => {
+		const html = await view();
+		expect(html).toContain("$1,240");
+		expect(html).toMatch(/<div[^>]*border-double[^>]*>/);
+		expect(html.match(/<div[^>]*border-double[^>]*>/)?.[0]).toContain(
+			'aria-hidden="true"',
+		);
+		expect(decode(html)).toContain(
+			"What's left of October's budget after its spending so far, bills due and savings. It's the big number on Home.",
+		);
+	});
+
+	it("gives the three things to try under their heading, and every link a 44px target", async () => {
+		const html = await view();
+		expect(html).toContain("Three things to try");
+		for (const a of html.match(/<a [^>]*>/g) ?? []) {
+			expect(a).toContain("min-h-11");
+		}
+	});
+
+	it("draws the ledger picture for decoration only", async () => {
+		const html = await view();
+		expect(html).toMatch(/<svg[^>]*aria-hidden="true"/);
 	});
 });
 

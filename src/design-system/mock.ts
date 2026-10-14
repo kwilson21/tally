@@ -173,6 +173,41 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 ];
 
 /** P30 A's suggested-category card, using the same transaction shape as the app. */
+/** Start here's three bank lines, as the list draws them (spec §8.8): the paycheck, the transfer and transaction 110. */
+const START_HERE_ROWS: ListRow[] = [
+	{
+		...row,
+		id: 901,
+		date: "2026-10-01",
+		amountCents: -245000,
+		rawName: "ACME CORP PAYROLL",
+		displayName: "Paycheck, Acme Corp",
+		income: true,
+	},
+	{
+		...row,
+		id: 902,
+		date: "2026-10-02",
+		amountCents: 50000,
+		rawName: "ONLINE TRANSFER TO SAV ...5678",
+		displayName: "Transfer to Savings",
+		excluded: true,
+	},
+	{
+		...row,
+		id: 110,
+		date: "2026-10-03",
+		amountCents: 1200,
+		rawName: "SQ *LOCAL BAKERY 4432",
+		displayName: "Local Bakery",
+	},
+];
+
+export const START_HERE = {
+	safeToSpendCents: 124000,
+	rows: START_HERE_ROWS,
+};
+
 export const CATEGORY_SUGGESTION = {
 	id: 30,
 	name: "Pet Care",

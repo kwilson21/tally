@@ -64,6 +64,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import {
@@ -99,6 +100,7 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
+import { StartHere } from "../views/start-here";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
@@ -134,6 +136,7 @@ import {
 	NET_WORTH_CENTS,
 	NET_WORTH_VIEWS,
 	PROGRESS_ROWS,
+	START_HERE,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
 	TRENDS_EARLY_INPUT,
@@ -999,7 +1002,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop", "HomeForecast"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7, How this works and the Band. Before then, the picked daily-amount line remains. Things to try moves below the Budget list. On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7, How this works and the Band. Before then, the picked daily-amount line remains. Things to try has left Home for Start here (How Tally works, demo only). On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
@@ -4606,11 +4609,33 @@ function Demo() {
 	return (
 		<Group id="demo" title="Guidance">
 			<Specimen
+				id="demo-banner"
+				title="DemoBanner"
+				tier="visual"
+				components={["DemoBanner"]}
+				sentence="The line above every page in the demo, at every width: “Demo data. Nothing here is real.” and Start here, the one ink underlined link, to How Tally works' first section (P124 A). The family app has none."
+			>
+				<DemoBanner />
+			</Specimen>
+			<Specimen
+				id="start-here-section"
+				title="StartHere"
+				tier="visual"
+				components={["StartHere"]}
+				sentence="How Tally works' first section in the demo (P124 A): the made-up family's sentence, three of this month's bank lines struck through with Tally's row under each, the sentence on what would count without Tally, Safe to spend under a double rule, and the three things to try."
+			>
+				<StartHere
+					monthName="October"
+					rows={START_HERE.rows}
+					safeToSpendCents={START_HERE.safeToSpendCents}
+				/>
+			</Specimen>
+			<Specimen
 				id="things-to-try"
 				title="ThingsToTry"
 				tier="visual"
 				components={["ThingsToTry"]}
-				sentence="The demo's bordered “New here? Things to try” block, below Home's Budget list until onboarding (#95) replaces it: three links to where each thing is done, plus How Tally works."
+				sentence="The demo's three things to try, at the end of Start here on How Tally works (spec §9). Each link goes to where it's done. They left Home."
 			>
 				<ThingsToTry />
 			</Specimen>

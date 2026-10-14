@@ -504,16 +504,13 @@ describe("outside the demo", () => {
 });
 
 describe("links in the demo", () => {
-	it("Home has Things to try and a link to the budget section", async () => {
+	it("Home has no Things to try (they live in Start here, spec §9) and keeps its link to the budget section", async () => {
 		const { html } = await get("/");
-		// The page's first heading is its h1; the block's title isn't a heading.
+		// The page's first heading is its h1.
 		expect(html.match(/<h[1-6]\b/)?.[0]).toBe("<h1");
-		expect(html).toContain("New here? Things to try");
+		expect(html).not.toContain("Things to try");
+		expect(html).not.toContain("New here?");
 		expect(html).toContain('href="/how-it-works#budget"');
-		// Things to try comes after the Budget list, so safe to spend leads (#92, decision 46).
-		expect(html.indexOf("Things to try")).toBeGreaterThan(
-			html.indexOf('id="budget-title"'),
-		);
 	});
 
 	it("Transactions links to its section, and the edit sheet to categorization", async () => {
@@ -651,10 +648,13 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 				await family(),
 			],
 		] as const) {
-			const href = accountsHtml.match(/href="(\/how-it-works#[^"]+)"/)?.[1];
-			expect(href).toBe("/how-it-works#net-worth");
+			// The demo's banner also links to How Tally works (Start here), so the Why? link is the one that isn't that.
+			const hrefs = [...accountsHtml.matchAll(/href="(\/how-it-works#[^"]+)"/g)]
+				.map((m) => m[1])
+				.filter((href) => href !== "/how-it-works#start-here");
+			expect(hrefs).toEqual(["/how-it-works#net-worth"]);
 			// The anchor is a real section id on the page it points to.
-			const id = (href ?? "").split("#")[1];
+			const id = (hrefs[0] ?? "").split("#")[1];
 			expect(howHtml).toMatch(new RegExp(`<section[^>]*id="${id}"`));
 		}
 	});
@@ -822,5 +822,116 @@ describe("the Bills section's four statuses (decision 99, #341)", () => {
 		expect(html).toContain("No bill is due in the next 7 days right now.");
 		expect(html).toContain("No bill is upcoming right now.");
 		expect(html).toContain("No bill has been paid yet this month.");
+	});
+});
+
+describe("Start here, the demo banner and the page's order (spec §8.8, §9; P124 A)", () => {
+	const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+	/** The newest bank line of this month with the flag, read the way Start here reads it. */
+	const latestId = async (flag: "flag_income" | "flag_transfer") =>
+		(
+			await env.DB.prepare(
+				`SELECT id FROM transactions WHERE ${flag} = 1 AND parent_id IS NULL AND substr(date, 1, 7) = ? ORDER BY date DESC, id DESC LIMIT 1`,
+			)
+				.bind(thisMonth)
+				.first<{ id: number }>()
+		)?.id;
+	const startHere = (html: string) =>
+		decodeHtml(
+			html.match(/<section[^>]*id="start-here"[\s\S]*?<\/section>/)?.[0] ?? "",
+		);
+
+	it("puts the demo banner's Start here link above the sidebar on every page, and no banner in the family app", async () => {
+		for (const path of ["/", "/transactions", "/how-it-works"]) {
+			const { html } = await get(path);
+			expect(html).toContain("Demo data. Nothing here is real. ·");
+			const link = html.indexOf('href="/how-it-works#start-here"');
+			expect(link).toBeGreaterThan(-1);
+			expect(link).toBeLessThan(html.indexOf("<aside"));
+		}
+		const family = await (await home.request("/", {}, notDemo)).text();
+		expect(family).not.toContain("Demo data. Nothing here is real.");
+		expect(family).not.toContain("#start-here");
+	});
+
+	it("opens How Tally works with Start here, then the feature sections in their order, and How it's built last, in the demo", async () => {
+		const { html } = await get("/how-it-works");
+		const ids = [
+			"start-here",
+			"budget",
+			"transactions",
+			"exclusions",
+			"categorization",
+			"names",
+			"bills",
+			"trends",
+			"what-ai-did",
+			"net-worth",
+			"architecture",
+		];
+		const positions = ids.map((id) => html.indexOf(`id="${id}"`));
+		expect(positions.every((position) => position > -1)).toBe(true);
+		expect(positions).toEqual([...positions].sort((a, b) => a - b));
+		expect(html.indexOf("<h1")).toBeLessThan(positions[0] ?? -1);
+	});
+
+	it("leaves Start here and How it's built out of the family app's How Tally works, which opens with the features", async () => {
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		expect(html).not.toContain('id="start-here"');
+		expect(html).not.toContain('id="architecture"');
+		expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('id="budget"'));
+	});
+
+	it("says what the made-up family's bank sent this month, in the demo's current month", async () => {
+		const { html } = await get("/how-it-works");
+		expect(startHere(html)).toContain(
+			`The Riveras are a made-up family. Here's what their bank sent this ${monthName()}, and what Tally wrote down.`,
+		);
+	});
+
+	it("strikes three of this month's bank lines and writes Tally's row under each: the latest paycheck, the latest transfer, then transaction 110", async () => {
+		const { html } = await get("/how-it-works");
+		const section = startHere(html);
+		const lines = [
+			...section.matchAll(
+				/<s class="decoration-muted">([^<]+)<\/s>[\s\S]*?data-transaction="(\d+)"/g,
+			),
+		].map((m) => [m[1], Number(m[2])]);
+		expect(lines).toEqual([
+			["ACME CORP PAYROLL", await latestId("flag_income")],
+			["ONLINE TRANSFER TO SAV ...5678", await latestId("flag_transfer")],
+			["SQ *LOCAL BAKERY 4432", 110],
+		]);
+		// Each struck line reads as "The bank sent …" to a screen reader; the strike itself is only drawn.
+		expect(section.match(/The bank sent /g)).toHaveLength(3);
+	});
+
+	it("shows Safe to spend exactly as Home does for the same day, under a decorative double rule", async () => {
+		const home = (await get("/")).html;
+		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		expect(amount).toBeTruthy();
+		const { html } = await get("/how-it-works");
+		expect(startHere(html)).toContain(`tabular-nums">${amount}</p>`);
+		expect(html.match(/<div[^>]*border-double[^>]*>/)?.[0] ?? "").toContain(
+			'aria-hidden="true"',
+		);
+		expect(startHere(html)).toContain(
+			`What's left of ${monthName()}'s budget after its spending so far, bills due and savings.`,
+		);
+	});
+
+	it("links to the list without Tally, and has the three things to try, moved here from Home, each linking to where it's done", async () => {
+		const { html } = await get("/how-it-works");
+		const links = [
+			...startHere(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g),
+		].map((m) => [m[1], m[2]]);
+		expect(links).toEqual([
+			["/transactions?raw=1", "See every line without Tally"],
+			["/transactions?uncategorized=1", "Give a transaction a category"],
+			["/transactions/110?uncategorized=1", "Set a rule for a merchant"],
+			["/transactions/110?uncategorized=1", "Rename a merchant"],
+		]);
 	});
 });
