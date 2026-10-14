@@ -606,6 +606,82 @@ describe("Bills' Planned group, Band and sheet", () => {
 	});
 });
 
+describe("a plan pays a whole payment, never one part of a split", () => {
+	// A $300 payment split into a $120 and a $180 part. A part is free to pay a plan only until a re-split deletes it,
+	// which would unlink the plan without a word, so a plan can pay only the whole payment.
+	async function splitUnclaimedPayment() {
+		const tx = await payment(9790, 30000);
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		const part = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1",
+		)
+			.bind(tx)
+			.first<{ id: number }>();
+		return part?.id ?? 0;
+	}
+
+	it("the picker doesn't list a part of a split payment, and a link to one is refused", async () => {
+		const part = await splitUnclaimedPayment();
+		const whole = await payment(9800, 12000);
+		const planId = await plan("Lawn service", 12000, MONTH);
+		const picker = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}`)
+		).text();
+		// The whole payment is listed, so the part's absence is the planner's rule and not an empty picker.
+		expect(picker).toContain(`value="${whole}"`);
+		expect(picker).not.toContain(`value="${part}"`);
+
+		const refused = await post(`/plans/${planId}/link`, {
+			transaction_id: String(part),
+		});
+		expect(await refused.text()).toContain("can&#39;t be linked");
+		const linked = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+		)
+			.bind(planId)
+			.first<{ t: number | null }>();
+		expect(linked?.t).toBeNull();
+	});
+
+	it("a re-split keeps a plan on the whole payment it pays, so it stays paid", async () => {
+		const tx = await payment(9795, 30000);
+		const planId = await plan("Car registration", 18000, MONTH, tx);
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 10000 },
+				{ categoryId: 1, amountCents: 20000 },
+			],
+			"demo",
+		);
+		const kept = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+		)
+			.bind(planId)
+			.first<{ t: number | null }>();
+		expect(kept?.t).toBe(tx);
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+	});
+});
+
 describe("a bill can't take a payment a plan pays", () => {
 	// A $300 payment pays a $180 plan. Splitting it keeps the plan on the payment (decision 82: a split part counts as its
 	// parent's payment), so the parts are not free to pay a bill, by hand, in the picker, through the matcher or in the DB.

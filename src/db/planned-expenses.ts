@@ -25,7 +25,10 @@ export type PlannedExpense = {
 	paidAmountCents: number | null;
 };
 
-/** A payment a plan could be paid by: money out in its month or the next, not already paying a bill or a plan. */
+/**
+ * A payment a plan could be paid by: a whole payment (never one part of a split, which a re-split would delete and so
+ * unlink the plan), money out in its month or the next, not already paying a bill or a plan.
+ */
 export type PlanPaymentCandidate = {
 	id: number;
 	date: string;
@@ -95,7 +98,7 @@ export async function planPaymentCandidates(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS displayName, t.excluded AS excluded
 			 FROM transactions t
-			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
+			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.parent_id IS NULL AND t.flag_income = 0
 				AND substr(t.date, 1, 7) IN (?1, ?2)
 				AND NOT ${paysBillSql("t")}
 				AND NOT ${paysPlanSql("t")}
@@ -108,8 +111,9 @@ export async function planPaymentCandidates(
 }
 
 /**
- * Links a payment to a plan, only if it is still unpaid, is money out in the plan's month or the next, and pays neither
- * a bill nor another plan. Returns whether the link was made; the caller says why when it wasn't.
+ * Links a payment to a plan, only if it is still unpaid, is a whole payment (not a split part, see planPaymentCandidates),
+ * is money out in the plan's month or the next, and pays neither a bill nor another plan. Returns whether the link was
+ * made; the caller says why when it wasn't.
  */
 export async function linkPlanPayment(
 	db: D1Database,
@@ -121,7 +125,7 @@ export async function linkPlanPayment(
 			`UPDATE planned_expenses SET transaction_id = ?1
 			 WHERE id = ?2 AND transaction_id IS NULL
 				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND t.amount_cents > 0 AND t.is_split = 0
-					AND t.flag_income = 0
+					AND t.parent_id IS NULL AND t.flag_income = 0
 					AND substr(t.date, 1, 7) IN (planned_expenses.month, substr(date(planned_expenses.month || '-01', '+1 month'), 1, 7))
 					AND NOT ${paysBillSql("t")} AND NOT ${paysPlanSql("t")})`,
 		)
