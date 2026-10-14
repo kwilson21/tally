@@ -384,7 +384,7 @@ describe("rowCaption", () => {
 		});
 	});
 
-	it("keeps an uncategorized bill payment's bill after its bank-change note (#382)", () => {
+	it("keeps an uncategorized bill payment's refund and bill after its bank-change note (#382)", () => {
 		expect(
 			rowCaption({
 				...base,
@@ -396,6 +396,20 @@ describe("rowCaption", () => {
 			kind: "needs",
 			caption:
 				"The bank changed this from $12.34, so its split was removed. · paid Electric bill",
+			tag: true,
+		});
+		expect(
+			rowCaption({
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+				refundedCents: 1500,
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. · $15.00 refunded · paid Electric bill",
 			tag: true,
 		});
 	});

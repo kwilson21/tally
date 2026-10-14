@@ -69,18 +69,17 @@ export function rowCaption(row: ListRow): Caption {
 		row.splitRemovedFromCents !== undefined
 	) {
 		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.${unpaidBillsNote(row.splitRemovedBills)}`;
-		// A bill payment keeps its bill after the note; a categorized purchase keeps its refunds before its bill (#382).
+		// The refunds and the bill follow the note, in the same order as a categorized row (#313, #382).
+		const facts = [note, refunded(row), paidBill];
 		return row.categoryId === null
 			? {
 					kind: "needs",
-					caption: [note, paidBill].filter(Boolean).join(" · "),
+					caption: facts.filter(Boolean).join(" · "),
 					tag: true,
 				}
 			: {
 					kind: "category",
-					caption: [row.categoryName, note, refunded(row), paidBill]
-						.filter(Boolean)
-						.join(" · "),
+					caption: [row.categoryName, ...facts].filter(Boolean).join(" · "),
 					tag: false,
 				};
 	}

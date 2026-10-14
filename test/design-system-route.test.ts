@@ -620,13 +620,12 @@ describe("GET /design-system in the demo", () => {
 			section.match(
 				/<p class="mt-1 max-w-prose text-muted">([^<]*)<\/p>/,
 			)?.[1] ?? "";
-		expect(sentence).toContain("“$X refunded” comes before its bill");
 		expect(sentence).toContain(
-			"a bill payment keeps “paid [bill] bill” after it",
+			"then “$X refunded” and “paid [bill] bill” where they apply",
 		);
 		expect(sentence).toContain("adds “paid [bill] bill” when it paid one");
 		expect(design).toMatch(
-			/\| TransactionRow \|[^\n]*"\$X refunded" comes before its bill/,
+			/\| TransactionRow \|[^\n]*then "\$X refunded" and "paid \[bill\] bill" where they apply/,
 		);
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*adds "paid \[bill\] bill" when it paid one/,
