@@ -411,11 +411,14 @@ describe("the likely transactions after a new category", () => {
 		);
 		expect(saved.html).toContain("Add 2 to Pet Care");
 		expect(saved.html).toContain("Same merchant as");
+		// The panel posts the name its rows were matched by, so Add can check the category still has it.
+		expect(saved.html).toContain('name="category_name" value="Pet Care"');
 
 		const made = await categoryNamed("Pet Care");
 		const { res, html } = await post(`/transactions/${bakery}/likely`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(first),
 		});
 
@@ -439,6 +442,7 @@ describe("the likely transactions after a new category", () => {
 		const none = await post(`/transactions/${bakery}/likely/count`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 		});
 		expect(none.html).toContain("Add to Pet Care");
 		expect(none.html).toMatch(/<button[^>]*disabled[^>]*>Add to Pet Care/);
@@ -446,6 +450,7 @@ describe("the likely transactions after a new category", () => {
 		const one = await post(`/transactions/${bakery}/likely/count`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(first),
 		});
 		expect(one.html).toContain("Add 1 to Pet Care");
@@ -474,6 +479,7 @@ describe("the likely transactions after a new category", () => {
 		const count = await post(`/transactions/${bakery}/likely/count`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(older),
 		});
 
@@ -496,6 +502,7 @@ describe("the likely transactions after a new category", () => {
 		const { res } = await post(`/transactions/${bakery}/likely`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(first),
 		});
 
@@ -729,6 +736,7 @@ describe("the likely transactions after a new category", () => {
 		const { res } = await post(`/transactions/${bakery}/likely`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(first),
 		});
 
@@ -756,12 +764,91 @@ describe("the likely transactions after a new category", () => {
 		const { res } = await postWithoutJs(`/transactions/${bakery}/likely`, {
 			back: "/transactions",
 			category: String(made?.id),
+			category_name: "Pet Care",
 			ids: String(first),
 		});
 
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/transactions");
 		expect(await filedAs(first)).toEqual({ categoryId: null, source: null });
+	});
+
+	it("with the new category renamed since the panel opened, Add moves nothing and says so", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare(
+			"UPDATE categories SET name = 'Vet Visits', name_key = 'vet visits' WHERE id = ?",
+		)
+			.bind(made?.id)
+			.run();
+
+		const { res } = await post(`/transactions/${bakery}/likely`, {
+			back: "/transactions",
+			category: String(made?.id),
+			category_name: "Pet Care",
+			ids: String(first),
+		});
+
+		const message =
+			"Nothing moved: those transactions changed since the panel opened.";
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message, type: "info" },
+			announce: message,
+		});
+		expect(await filedAs(first)).toEqual({ categoryId: null, source: null });
+	});
+
+	it("with the new category's capitals changed since the panel opened, Add files the rows and names it as stored", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare(
+			"UPDATE categories SET name = 'PET CARE', name_key = 'pet care' WHERE id = ?",
+		)
+			.bind(made?.id)
+			.run();
+
+		const { res } = await post(`/transactions/${bakery}/likely`, {
+			back: "/transactions",
+			category: String(made?.id),
+			category_name: "Pet Care",
+			ids: String(first),
+		});
+
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Set 1 transaction to PET CARE.",
+		);
+		expect(await filedAs(first)).toEqual({
+			categoryId: made?.id,
+			source: "user",
+		});
+	});
+
+	it("with the new category renamed since the panel opened, the Add count says nothing would move", async () => {
+		await post(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const made = await categoryNamed("Pet Care");
+		await env.DB.prepare(
+			"UPDATE categories SET name = 'Vet Visits', name_key = 'vet visits' WHERE id = ?",
+		)
+			.bind(made?.id)
+			.run();
+
+		const count = await post(`/transactions/${bakery}/likely/count`, {
+			back: "/transactions",
+			category: String(made?.id),
+			category_name: "Pet Care",
+			ids: String(first),
+		});
+
+		expect(count.html).toMatch(/<button[^>]*disabled[^>]*>Add to Vet Visits/);
 	});
 });
 
