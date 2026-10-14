@@ -27,6 +27,8 @@ type Props = {
 	currentMonth?: boolean;
 	/** The one next action, when there is one, and its amount (decision 50). */
 	band?: { href: string; text: Child; detail?: string; older?: number };
+	/** False when no category has a budget this month: nothing can be over budget, so it's never brick (#519). */
+	hasBudgets?: boolean;
 };
 
 /** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
@@ -41,11 +43,13 @@ export function HomeTop({
 	dailyAmount,
 	forecast,
 	currentMonth = true,
+	hasBudgets = true,
 }: Props) {
-	const over = safeToSpendCents < 0;
-	const amount = over
+	const negative = safeToSpendCents < 0;
+	const amount = negative
 		? `−${formatCents(-safeToSpendCents, { wholeDollars: -safeToSpendCents >= 100 })}`
 		: formatCents(safeToSpendCents, { wholeDollars: true });
+	const over = hasBudgets && negative;
 	return (
 		<>
 			{monthHeading ?? (
