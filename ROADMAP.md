@@ -118,7 +118,7 @@ The owner picked each open question's answer from a picture (decision 82, P91–
 | The design language: scenery, signage and use, and the audit | [#79](https://github.com/kwilson21/tally/issues/79) | Done (PR [#91](https://github.com/kwilson21/tally/pull/91), decisions 46–50); the screens built since, Bills, Trends and Accounts among them, are audited in [#507](https://github.com/kwilson21/tally/issues/507) |
 | Quiet motion in CSS, with View Transitions between pages (P74 A) | [#218](https://github.com/kwilson21/tally/issues/218) | Merged ([#259](https://github.com/kwilson21/tally/pull/259)) |
 | Squircle corners (P75 A) | [#219](https://github.com/kwilson21/tally/issues/219) | Merged ([#257](https://github.com/kwilson21/tally/pull/257)) |
-| The quiet ledger form, catalog first, then Add a bill and Add cash (P72 A) | [#217](https://github.com/kwilson21/tally/issues/217) | Open: step 1, the catalog, is being built |
+| The quiet ledger form, catalog first, then Add a bill and Add cash (P72 A) | [#217](https://github.com/kwilson21/tally/issues/217) | Open: step 1, the catalog, merged (#520) and signed off (decision 111); step 2, Add a bill and Add cash, is next |
 | MoneyInput sign-off | [#80](https://github.com/kwilson21/tally/issues/80) | Open |
 | The budget, categorize and Settings flows | [#83](https://github.com/kwilson21/tally/issues/83)–[#85](https://github.com/kwilson21/tally/issues/85) | Open: the budget sheet and category row move into `src/views` first |
 | The component review, one issue per component | [#86](https://github.com/kwilson21/tally/issues/86) | Open |
