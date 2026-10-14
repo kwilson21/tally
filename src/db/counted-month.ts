@@ -79,7 +79,8 @@ export const includedSql = (
 /**
  * includedSql in TypeScript, for a row as a save leaves it: not excluded, or paying a bill or a planned expense.
  * `excluded` is the exclusion once saved (excludedAfterSave in src/transactions/edit.ts), so a lifted Plaid exclusion
- * counts. Keep it in step with includedSql; the callers feed jevAsksAbout's `included` from it.
+ * counts. Keep it in step with includedSql. The save feeds jevAsksAbout's `included` from it; the edit panel draws as if
+ * included (name-choices.tsx).
  */
 export function isIncluded(
 	excluded: boolean,
