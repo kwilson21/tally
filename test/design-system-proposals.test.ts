@@ -1213,6 +1213,13 @@ describe("GET /design-system/proposals", () => {
 		expect(drawnBy(firstVisit, "Option A · The first page")).toBe(7);
 		expect(drawnBy(firstVisit, "Option B · One next step")).toBe(4);
 		expect(drawnBy(firstVisit, "Option C · The page total")).toBe(5);
+		// "See every line without Tally" opens the raw view, as the catalog's ViewLinks and Without Tally do.
+		expect(option(firstVisit, "Option A · The first page")).toContain(
+			'<a href="/transactions?raw=1" class="inline-flex min-h-11 items-center">See every line without Tally</a>',
+		);
+		expect(firstVisit).not.toContain(
+			'href="/transactions" class="inline-flex min-h-11 items-center">See every line without Tally',
+		);
 
 		// Each assertion below is scoped to the picture it is about, from its label to the next figure (whose
 		// caption, which may name another picture's words, sits before that figure's picture).
@@ -1587,6 +1594,26 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		expect(section(html, "p121-header")).toContain(
 			"A also shows its Filters pill open.",
 		);
+	});
+
+	it("notes under P121's Fixed line that decision 111 moved How this works to the page foot, before the first option", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		const note =
+			'<span class="font-medium">Replaced by decision 111: </span>Since P124 A (decision 111), How this works sits at the foot of the page, not beside Add cash; Add cash keeps its own line.';
+		expect(s).toContain(note);
+		expect(s.indexOf(note)).toBeLessThan(s.indexOf(">Today (current)"));
+		expect(s).not.toContain("further down");
+		expect(s).not.toContain("decision 82");
+	});
+
+	it("keeps P46's Replaced note on decision 82 with its pointer further down", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p46-past-months");
+		expect(s).toContain(
+			'<span class="font-medium">Replaced by decision 82: </span>',
+		);
+		expect(s).toContain("See P91 to P93, further down.");
 	});
 
 	it("lists the sidebar and the tabs in the pictures from nav.tsx's own items, in order", async () => {

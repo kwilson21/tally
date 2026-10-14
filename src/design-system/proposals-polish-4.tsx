@@ -938,7 +938,7 @@ const storyTotal = (
 		<p class="mt-2">
 			Without Tally, the paycheck and the transfer would both count as spending.
 		</p>
-		<a href="/transactions" class="inline-flex min-h-11 items-center">
+		<a href="/transactions?raw=1" class="inline-flex min-h-11 items-center">
 			See every line without Tally
 		</a>
 		<div class="mt-4 border-t border-ink pt-3">
