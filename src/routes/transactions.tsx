@@ -3586,28 +3586,28 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const category = await liveCategory(c.env.DB, form.get("category"));
-	// A category archived since the panel opened moves nothing, as when every ticked row has changed.
-	const moved = category
+	// A category archived or renamed since the panel opened moves nothing, as when every ticked row has changed.
+	const filed = category
 		? await addLikely(c.env.DB, {
 				savedId: tx.id,
 				categoryId: category.id,
-				categoryName: category.name,
+				categoryName: form.get("category_name")?.toString() ?? "",
 				ticked: form.getAll("ids").map(Number),
 				today,
 				actor: actor(c),
 			})
-		: 0;
+		: { moved: 0, name: null };
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
-	// the panel's rules still allow).
+	// the panel's rules still allow). The toast names the category as it is stored, not as the panel showed it.
 	const message =
-		moved === 0 || !category
+		filed.name === null
 			? "Nothing moved: those transactions changed since the panel opened."
-			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+			: `Set ${filed.moved} ${filed.moved === 1 ? "transaction" : "transactions"} to ${filed.name}.`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message, type: moved === 0 ? "info" : "success" },
+			toast: { message, type: filed.name === null ? "info" : "success" },
 			announce: message,
 		}),
 	);
@@ -3627,7 +3627,8 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const count = (
 		await likelyStill(c.env.DB, {
 			savedId: tx.id,
-			categoryName: category.name,
+			categoryId: category.id,
+			categoryName: form.get("category_name")?.toString() ?? "",
 			today,
 			ticked: form.getAll("ids").map(Number),
 		})
