@@ -18,13 +18,19 @@ export function ruleOfferAnnouncement(
 	return `${lead} Always use ${value.category} for ${value.merchant}? You've picked ${value.category} for ${value.merchant} ${value.count} times.`;
 }
 
-/** The one yes-or-no question after a person has chosen a merchant's category three times. */
+/**
+ * The one yes-or-no question after a person has chosen a merchant's category three times. `savedId` is the
+ * transaction that was saved, so both answers return focus to its row; a bulk save names none, and its answers
+ * return focus to the list.
+ */
 export function RuleOffer({
 	value,
 	focus = false,
+	savedId,
 }: {
 	value: RuleOfferValue;
 	focus?: boolean;
+	savedId?: number;
 }) {
 	return (
 		<div class="flex flex-col gap-3">
@@ -62,6 +68,9 @@ export function RuleOffer({
 					/>
 					<input type="hidden" name="count" value={String(value.count)} />
 					<input type="hidden" name="back" value={value.back} />
+					{savedId !== undefined && (
+						<input type="hidden" name="saved" value={String(savedId)} />
+					)}
 					<Button kind="secondary" type="submit" class="w-full">
 						Not now
 					</Button>
@@ -83,6 +92,9 @@ export function RuleOffer({
 					/>
 					<input type="hidden" name="count" value={String(value.count)} />
 					<input type="hidden" name="back" value={value.back} />
+					{savedId !== undefined && (
+						<input type="hidden" name="saved" value={String(savedId)} />
+					)}
 					<Button type="submit" class="w-full">
 						Yes
 					</Button>

@@ -3672,6 +3672,9 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const merchantKey = form.get("merchant_key")?.toString() ?? "";
 	const categoryId = Number(form.get("category"));
 	const back = safeBack(form.get("back")?.toString());
+	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
+	const saved = Number(form.get("saved"));
+	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
 	const today = await householdToday(c.env.DB);
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
@@ -3698,14 +3701,19 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				: "Saved.";
 	if (yes && offer && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	if (!c.req.header("HX-Request"))
+		return c.redirect(
+			savedId === undefined ? back : withFocus(back, savedId),
+			303,
+		);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
-		focusHeading: true,
+		focusId: savedId,
+		focusHeading: savedId === undefined,
 	});
 }
 
@@ -3763,7 +3771,7 @@ function renderRuleOffer(
 				labelledBy="rule-offer-title"
 				closeHref={savedId === undefined ? back : withFocus(back, savedId)}
 			>
-				<RuleOffer value={value} focus />
+				<RuleOffer value={value} focus savedId={savedId} />
 			</BottomSheet>
 		),
 	});
