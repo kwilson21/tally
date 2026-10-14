@@ -1,7 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { removeMerchantRule } from "../src/db/merchant-rules";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { firstRuleOfferAmong } from "../src/transactions/rule-offer";
@@ -476,7 +475,8 @@ describe("merchant category rule offer", () => {
 			name: merchant,
 		});
 		expect(organized.res.status).toBe(200);
-		expect(organized.html).not.toContain(QUESTION);
+		// Organize asks its own question after the save (#353), and the save makes no rule.
+		expect(organized.html).toContain(QUESTION);
 		const picked = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE id = ?",
 		)
@@ -486,14 +486,12 @@ describe("merchant category rule offer", () => {
 			category_id: groceries,
 			category_source: "user",
 		});
-		// Organize made the group's rule itself. Removed in Settings, the earlier picks still count.
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
-		expect(rule?.default_category_id).toBe(groceries);
-		expect(await removeMerchantRule(env.DB, merchant)).toBe(merchant);
+		expect(rule?.default_category_id ?? null).toBeNull();
 		const panel = await post(`/transactions/${ids[1]}`, edit(groceries));
 		expect(panel.html).not.toContain(QUESTION);
 		const cash = await post("/transactions/cash", {
@@ -511,16 +509,30 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
-	it("an Organize save that makes the third pick never asks, because Organize makes the rule", async () => {
+	it("an Organize save that makes the third pick asks, and only Yes makes the rule, so a later save never asks", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
-		// ids[2] and ids[3] are uncategorized, so Organize lists the group, and its save makes the rule.
+		// ids[2] and ids[3] are uncategorized, so Organize lists the group. Its save files them and asks (#353).
 		const organized = await post("/transactions/organize", {
 			category: String(groceries),
 			group: merchant,
 			name: merchant,
 		});
 		expect(organized.res.status).toBe(200);
-		expect(organized.html).not.toMatch(/Always use Groceries for/);
+		expect(organized.html).toContain(QUESTION);
+		const before = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(before?.default_category_id ?? null).toBeNull();
+		const yes = await post("/transactions/organize/rule", {
+			answer: "yes",
+			merchant_keys: JSON.stringify([merchant]),
+			merchant,
+			category: String(groceries),
+			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
+		});
+		expect(yes.res.status).toBe(200);
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)

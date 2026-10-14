@@ -15,7 +15,10 @@ import { buildSeed } from "../src/demo/seed";
 import { app } from "../src/index";
 import { mergePendingIntoPosted } from "../src/plaid/pending-merge";
 import { tallyExport } from "../src/settings/export";
-import { saveOrganizeGroup } from "../src/transactions/organize";
+import {
+	saveOrganizeGroup,
+	setOrganizeRule,
+} from "../src/transactions/organize";
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
@@ -988,12 +991,12 @@ describe("what the Jev run and the names write", () => {
 		const groupId = category?.id as number;
 		expect(
 			await saveOrganizeGroup(db, ["ORG*BANK"], groupId, "ORG*BANK", "test"),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual([]);
 
 		expect(
 			await saveOrganizeGroup(db, ["ORG*SHOP"], groupId, "Org Shop", "test"),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual(["ORG*SHOP"]);
 	});
 
@@ -1015,7 +1018,7 @@ describe("what the Jev run and the names write", () => {
 		// A first save files ORG*FIRST with no name, so its suggestion stays pending.
 		expect(
 			await saveOrganizeGroup(db, ["ORG*FIRST"], groupId, null, "test"),
-		).toBe(1);
+		).toHaveLength(1);
 
 		// ORG*FIRST's charge is filed already, so only ORG*SECOND's is changed and only it is named and logged.
 		expect(
@@ -1026,7 +1029,7 @@ describe("what the Jev run and the names write", () => {
 				"Org Pick",
 				"test",
 			),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual(["ORG*SECOND"]);
 		expect(
 			await db
@@ -1060,7 +1063,7 @@ describe("what the Jev run and the names write", () => {
 				"Group Shop",
 				"test",
 			),
-		).toBe(5);
+		).toHaveLength(5);
 
 		const day = await householdToday(db);
 		const rows = await db
@@ -1115,7 +1118,7 @@ describe("what the Jev run and the names write", () => {
 				"Big Shop",
 				"test",
 			),
-		).toBe(600);
+		).toHaveLength(600);
 		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
 		expect(await logNames()).toHaveLength(600);
 		const categorized = await db
@@ -1125,6 +1128,68 @@ describe("what the Jev run and the names write", () => {
 			.bind(category?.id)
 			.first<{ n: number }>();
 		expect(categorized?.n).toBe(600);
+	});
+
+	it("a Yes on a group of 600 merchants sets their rule within D1's statement limit (#353)", async () => {
+		// Numbered 101 to 700: tidyName drops a trailing three-digit store number, so every key tidies to "Rule shop",
+		// the name the question offers, and the group is one store (a shorter number would stay in the name).
+		await db.batch([
+			db.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+				 SELECT 'RULE SHOP ' || (i + 100), 'Rule Shop', 'pending' FROM n`,
+			),
+			db
+				.prepare(
+					`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
+				 INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by)
+				 SELECT 1, ?, 650, 'RULE SHOP ' || (i + 100), 'test' FROM n`,
+				)
+				.bind(TODAY),
+		]);
+		const category = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		const categoryId = category?.id as number;
+		const keys = Array.from({ length: 600 }, (_, i) => `RULE SHOP ${i + 101}`);
+		const savedIds = await saveOrganizeGroup(
+			db,
+			keys,
+			categoryId,
+			null,
+			"test",
+		);
+		expect(savedIds).toHaveLength(600);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const ruled = await setOrganizeRule(
+			counted,
+			categoryId,
+			JSON.stringify(savedIds),
+			"Rule shop",
+			"test",
+		);
+		expect(ruled).toHaveLength(600);
+		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
+		const rules = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'RULE SHOP %' AND default_category_id = ?",
+			)
+			.bind(categoryId)
+			.first<{ n: number }>();
+		expect(rules?.n).toBe(600);
 	});
 });
 

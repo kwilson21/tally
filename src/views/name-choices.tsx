@@ -53,7 +53,7 @@ export const NAME_PICK_CLASS = "name-pick";
 /** The class of the "Type your own" radio: the field under it is shown while it is ticked. */
 export const OWN_PICK_CLASS = "name-own";
 /**
- * The edit panel's form: its category, Exclude, Income, refund and Always for this merchant controls fold the re-guess
+ * The edit panel's form: its category, Exclude, Income, refund and merchant rule tick (MerchantRuleTick) controls fold the re-guess
  * note under This one only away once they change (CSS only), so it is a named group that NameChoices' and the Chips'
  * unnamed `group` don't meet.
  */
@@ -193,7 +193,7 @@ export type RenameFacts = {
  * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
  * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
  *   keeps the note, and the save is still right: the route keeps the row's name. This is the one known limit.
- * - always (the Always for this merchant checkbox): covered here, both ways. Ticking it makes the save keep the category,
+ * - always (the merchant rule tick, MerchantRuleTick): covered here, both ways. Ticking it makes the save keep the category,
  *   since the rule settles it. always_was and rule_category_was are the state it was drawn in, so they need no hook.
  * - name_scope: no hook. The note is a line under This one only and describes that choice whichever scope is ticked.
  * - Hidden or server-side, so no hook: merchant_was, jevCategories, paysBill, isSplit and the stored category.
