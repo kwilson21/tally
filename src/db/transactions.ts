@@ -61,6 +61,7 @@ import {
 } from "./merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
 import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
+import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
 import {
@@ -646,6 +647,11 @@ export type TransactionDetail = ListRow & {
 	categoryConfidence: number | null;
 	suggestedCategoryId: number | null;
 	suggestedCategoryName: string | null;
+	/** Jev says the trip looks mixed (#233, decision 113), whoever chose the category; the panel adds looksMixed. */
+	jevSaysMixed: boolean;
+	/** The other category Jev named, when it is active (#233); the mixed line names it after the pick. */
+	alsoCategoryId: number | null;
+	alsoCategoryName: string | null;
 	/** What the Name row offers (P29 A, decision 101): the suggestions, the store's own name, and the Rename list's counts. */
 	nameChoices: NameChoices;
 };
@@ -736,6 +742,7 @@ export async function getTransaction(
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
+				alsoCat.id AS alsoCategoryId, alsoCat.name AS alsoCategoryName, CASE WHEN ${jevSaysMixedSql("t")} THEN 1 ELSE 0 END AS jevSaysMixed,
 				${MAYBE_CATEGORY_COLUMNS},
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
@@ -745,6 +752,7 @@ export async function getTransaction(
 			-- The panel edits the transaction's own category; a linked refund's purchase's is shown separately.
 			LEFT JOIN categories c ON c.id = t.category_id
 			${MAYBE_CATEGORY_JOINS}
+			LEFT JOIN categories alsoCat ON alsoCat.id = t.jev_also_category_id AND alsoCat.archived = 0
 			LEFT JOIN transactions p ON p.id = t.parent_id
 			${COUNTED_JOINS}
 			WHERE t.id = ?`,
@@ -767,8 +775,11 @@ export async function getTransaction(
 				| "isSplit"
 				| "followsPurchase"
 				| "pending"
+				| "jevSaysMixed"
 			> &
 				NameSuggestionColumns & {
+					/** 1 when Jev says the trip looks mixed (#233), whoever chose the category (`jevSaysMixedSql`). */
+					jevSaysMixed: number;
 					merchantTotal: number;
 					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
@@ -849,6 +860,7 @@ export async function getTransaction(
 		isSplit: r.isSplit === 1,
 		followsPurchase: r.followsPurchase === 1,
 		pending: r.pending === 1,
+		jevSaysMixed: r.jevSaysMixed === 1,
 		displayName: shown.name,
 		storeName,
 		nameSuggested: shown.suggested,
@@ -1308,7 +1320,7 @@ export async function saveEdit(
 		statements.push(
 			gated(
 				`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
-					category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, updated_by = ?, updated_at = datetime('now')
+					category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, jev_mixed = NULL, jev_also_category_id = NULL, updated_by = ?, updated_at = datetime('now')
 				WHERE id = ? AND (category_source = 'jev' OR (category_id IS NULL AND category_source IS NULL))
 					AND ${jevAsksAboutSql("transactions")}`,
 				[actor, id],
@@ -1798,7 +1810,7 @@ export async function saveSplit(
 	);
 	const markParent = db
 		.prepare(
-			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, jev_mixed=NULL, jev_also_category_id=NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
 		)
 		.bind(by, parentId, total);
 	const stillUnpaid = stillUnpaidStatement(db, lost);
@@ -2591,7 +2603,7 @@ export async function saveJevResult(
 			.prepare(
 				`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
-					updated_at = datetime('now')
+					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL}))
@@ -2604,6 +2616,8 @@ export async function saveJevResult(
 				options.categoryAsked === false ? null : d.confidence,
 				options.categoryAsked === false ? null : d.suggestedCategoryId,
 				options.categoryAsked === false || !d.noneFit ? 0 : 1,
+				d.mixedProbability ?? null,
+				d.alsoCategoryId ?? null,
 				id,
 				stillOn,
 			);
@@ -2635,7 +2649,7 @@ export async function saveJevResult(
 			transfer_confidence = CASE WHEN excluded_source = 'user' THEN transfer_confidence WHEN ? = 1 AND ? < ? THEN ? ELSE NULL END,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
 			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ? AND (? IS NULL OR ? <= ?)) OR ? = 1) THEN 1 ELSE credit_reviewed END,
-				jev_category_id = ?, jev_none_fit = ?,
+				jev_category_id = ?, jev_none_fit = ?, jev_mixed = ?, jev_also_category_id = ?,
 				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
@@ -2676,6 +2690,8 @@ export async function saveJevResult(
 			income ? 1 : 0,
 			options.categoryAsked === false ? null : d.suggestedCategoryId,
 			options.categoryAsked === false || !d.noneFit ? 0 : 1,
+			d.mixedProbability ?? null,
+			d.alsoCategoryId ?? null,
 			d.flags.transfer ? 1 : 0,
 			d.flags.reimbursement ? 1 : 0,
 			income ? 1 : 0,

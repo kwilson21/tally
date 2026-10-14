@@ -9,6 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
+import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { applyMerchantRuleSql } from "../db/transactions";
 import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
@@ -276,6 +277,8 @@ export async function setOrganizeRule(
 	actor: string,
 ): Promise<string[]> {
 	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
+	// Nothing is asked about a trip that looks mixed (decision 113), so a Yes on a question that went stale makes no rule either.
+	if (await jevSaysMixedAmong(db, JSON.parse(savedIds) as number[])) return [];
 	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
 	// uses them stays inside both statements below. An empty list (no saved key tidies to it) fails a cleared key.
 	const { results: keyRows } = await db
@@ -351,6 +354,8 @@ export async function organizeOffer(
 		.bind(categoryId)
 		.first<{ id: number; name: string }>();
 	if (!category) return null;
+	// Nothing is asked about a trip that looks mixed (decision 113), so a reload of the question shows none either.
+	if (await jevSaysMixedAmong(db, ids)) return null;
 	const savedJson = JSON.stringify(ids);
 	// No rows come back unless every saved charge still holds the category, so one query decides both.
 	const { results } = await db
