@@ -10,6 +10,8 @@ const get = async (path: string) => {
 	return { res, html: await res.text() };
 };
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+// A picture of a screen, as the proposals draw it (labelled, inert).
+const PICTURE = /role="img" aria-label="[^"]*, on (a phone|desktop)"/g;
 
 // Elements HTML never closes, so they don't open a level in actions() below.
 const VOID = new Set([
@@ -352,17 +354,26 @@ describe("GET /design-system/proposals", () => {
 						? 2
 						: 1;
 			expect([id, picked]).toEqual([id, expected]);
+			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
+			// pictures: exactly one for the proposals drawn before P122, and at least one for P122–P124, which draw a
+			// screen per step of a first visit (decision 47). Counted per option, so one option can't lose its picture
+			// while another gains one, and every picture in the proposal must sit inside an option.
+			const drawn = section
+				.split("<h4 ")
+				.slice(1)
+				.map((option) => option.match(PICTURE)?.length ?? 0);
+			expect([
+				id,
+				drawn.every((count) => (n >= 122 ? count >= 1 : count === 1)),
+			]).toEqual([id, true]);
+			expect([id, section.match(PICTURE)?.length ?? 0]).toEqual([
+				id,
+				drawn.reduce((sum, count) => sum + count, 0),
+			]);
 		}
-		// Every option is at least one picture of a screen: labelled, and nothing inside to Tab to. An option may
-		// draw several (P123 and P124 draw a screen per step of a first visit, decision 47), so each is counted once.
-		const options = html.match(/<h4 /g)?.length ?? 0;
-		const pictures =
-			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
-				?.length ?? 0;
-		expect(pictures).toBeGreaterThanOrEqual(options);
 		// …and each picture has something drawn in it, not an empty frame.
 		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
-			pictures,
+			html.match(PICTURE)?.length ?? 0,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
 		expect(DECIDED.length).toBe(72);
@@ -834,6 +845,12 @@ describe("GET /design-system/proposals", () => {
 		])
 			expect(more, text).toContain(text);
 		expect(pictures(more)).toHaveLength(4);
+		// Each option's own pictures: Today one, A two (the Accounts entry with a bank to sign in), B one.
+		const drawnBy = (chunk: string, name: string) =>
+			pictures(option(chunk, name)).length;
+		expect(drawnBy(more, "Today (current)")).toBe(1);
+		expect(drawnBy(more, "Option A · Contents page")).toBe(2);
+		expect(drawnBy(more, "Option B · Plain index")).toBe(1);
 
 		const feedback = section("p123-feedback");
 		expect(names(feedback)).toEqual([
@@ -853,6 +870,10 @@ describe("GET /design-system/proposals", () => {
 		expect(feedback).toContain("Tell us what happened");
 		expect(feedback).toContain("Keeps decision 59&#39;s");
 		expect(pictures(feedback)).toHaveLength(11);
+		// Today's Home, Settings and desktop; A's and B's four each (A adds the masthead's Home at the top).
+		expect(drawnBy(feedback, "Today (current)")).toBe(3);
+		expect(drawnBy(feedback, "Option A · In the top line")).toBe(4);
+		expect(drawnBy(feedback, "Option B · In More and the sidebar")).toBe(4);
 
 		const firstVisit = section("p124-first-visit");
 		expect(names(firstVisit)).toEqual([
@@ -866,7 +887,8 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(firstVisit.match(/>Recommended</g)?.length).toBe(1);
 		for (const text of [
-			"today, being fixed in #519",
+			"before #519 (fixed on main)",
+			"A family with no budgets saw −$2,140 before #519.",
 			"−$2,140",
 			"Start here",
 			"Three lines of 47 so far",
@@ -895,6 +917,10 @@ describe("GET /design-system/proposals", () => {
 			pictures(firstVisit).filter((p) => p.includes("on desktop")),
 		).toHaveLength(1);
 		expect(pictures(firstVisit)).toHaveLength(20);
+		expect(drawnBy(firstVisit, "Today (current)")).toBe(4);
+		expect(drawnBy(firstVisit, "Option A · The first page")).toBe(7);
+		expect(drawnBy(firstVisit, "Option B · One next step")).toBe(4);
+		expect(drawnBy(firstVisit, "Option C · The page total")).toBe(5);
 
 		// Each assertion below is scoped to the picture it is about, from its label to the next figure (whose
 		// caption, which may name another picture's words, sits before that figure's picture).
@@ -937,9 +963,30 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("Childcare");
-		expect(
-			picture(feedback, "Today (current), Settings, on a phone"),
-		).toContain("bottom-[6.5rem]");
+		// Settings draws Gas's open row in the app's order (category-row.tsx): the Name field, then Save, Cancel and
+		// Archive, then Move up and Move down. The pill sits over Move down, so the picture has to reach it.
+		const todaySettings = picture(
+			feedback,
+			"Today (current), Settings, on a phone",
+		);
+		expect(todaySettings).toContain("bottom-[6.5rem]");
+		expect(todaySettings).toContain("3 suggestions to check");
+		const marks = [
+			">Name</label>",
+			">Save<",
+			">Cancel<",
+			">Archive<",
+			">Move up<",
+			">Move down<",
+		].map((mark) => {
+			const at = todaySettings.indexOf(mark);
+			expect(at, mark).toBeGreaterThan(-1);
+			return at;
+		});
+		expect(marks).toEqual([...marks].sort((a, b) => a - b));
+		expect(option(feedback, "Today (current)")).toContain(
+			"In Settings it sits over Move down",
+		);
 		expect(picture(feedback, "Today (current), on desktop")).toContain(
 			"bottom-6 right-6",
 		);
@@ -1002,6 +1049,9 @@ describe("GET /design-system/proposals", () => {
 		);
 		const sheet = picture(firstVisit, "Option B, starting budgets, on a phone");
 		expect(sheet).toContain("Five of the 14 categories are shown.");
+		// Money reads as the rest of the page does: "$1,600", not "$1600", in each row's last-month line.
+		expect(sheet).toContain("Last month $1,600 · starts at $1,600");
+		expect(sheet).not.toMatch(/\$\d{4}\b/);
 		expect(sheet).not.toContain("Budgets add up to");
 		// P124 · Option C: How this works is a pencil note, on Home's top and at its foot.
 		const cOption = option(firstVisit, "Option C · The page total");

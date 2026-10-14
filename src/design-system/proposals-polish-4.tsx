@@ -12,12 +12,14 @@ import { Band } from "../views/band";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { chevron, summaryClass } from "../views/category-row";
 import { FeedbackButton } from "../views/feedback-button";
 import { HowLink } from "../views/how-link";
 import { Icon, type IconName } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { SIDEBAR_ITEMS } from "../views/nav";
 import { ProgressRow } from "../views/progress-row";
+import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Sheet } from "./proposal-parts";
@@ -139,12 +141,15 @@ const BANK_LINES = [
 ];
 
 // ---------------------------------------------------------------------------------------------
-// Frames: a phone's screen and a desktop window, drawn as pictures. They repeat the size, border
+// Frames: a phone's screen and a desktop window, drawn as pictures. They repeat the width, border
 // and inert wrapper of PhoneFrame (specimen.tsx) and DesktopFrame (proposal-parts.tsx), and add
 // what these options need that the shared frames lack: the tab bar, a masthead slot, the pill's
-// overlay, a banner, and a scrolled view with no banner or wordmark. Adding those props to the
-// shared frames would change every proposal file, so this page keeps its own frames for now; that
-// is a follow-up candidate, not part of P122–P124.
+// overlay, a banner, and a scrolled view with no banner or wordmark. A phone here is 390 by 844
+// inside its border, the size the brief names and the app's own viewport. PhoneFrame is 790 tall,
+// and the pill sits at the screen's foot, so a shorter frame would lift the pill over the rows and
+// hide where it really sits. Adding those props to the shared frames would change every proposal
+// file, so this page keeps its own frames for now; that is a follow-up candidate, not part of
+// P122–P124.
 
 type PhoneProps = {
 	label: string;
@@ -178,7 +183,7 @@ function Phone({
 			<div
 				role="img"
 				aria-label={`${label}, on a phone`}
-				class="relative h-[790px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class="relative h-[846px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<div inert>
 					<div data-screen="picture">
@@ -491,7 +496,7 @@ function HomeScrolled() {
 			status={DEMO_STATUS}
 			howLink={false}
 		>
-			<div class="pt-14">
+			<div class="pt-22">
 				<BudgetList rows={BUDGETS} heading={true} />
 			</div>
 		</HomeTop>
@@ -686,43 +691,73 @@ function MoreScreen({ label, children }: { label: string; children?: Child }) {
 // ---------------------------------------------------------------------------------------------
 // P123 · Where Feedback lives.
 
-/** Settings with Gas's row open, so Move up and Move down show; `overlay` puts the pill on it. */
+/**
+ * Settings as the app draws it (routes/settings.tsx, category-row.tsx): the Band above Categories, then
+ * the list with Gas's row open, in the app's order: its Name field, Save, Cancel and Archive, then Move
+ * up and Move down. `fieldId` keeps each picture's field id its own; `overlay` puts the pill on it and
+ * `masthead` puts it in the top line.
+ */
 function SettingsPhone({
 	label,
+	fieldId,
 	overlay,
 	masthead,
 }: {
 	label: string;
+	fieldId: string;
 	overlay?: Child;
 	masthead?: Child;
 }) {
 	return (
 		<Phone label={label} tab="more" overlay={overlay} masthead={masthead}>
 			<h1 class={TITLE}>Settings</h1>
-			<h2 class="mt-8 font-serif text-3xl font-semibold">Categories</h2>
-			<ul class="mt-2 divide-y divide-rule border-y border-rule">
-				{SETTINGS.map((c) => (
-					<li>
-						<details open={c.name === "Gas"}>
-							<summary class="flex min-h-11 list-none items-center gap-4 py-2">
+			<div class="mt-4">
+				<Band href="/settings/suggestions" detail="Tally's guesses; you decide">
+					3 suggestions to check
+				</Band>
+			</div>
+			<section class="mt-8">
+				<h2 class="font-serif text-3xl font-semibold">Categories</h2>
+				<div class="mt-3 border-t border-rule">
+					{SETTINGS.map((c) => (
+						<details class="group border-b border-rule" open={c.name === "Gas"}>
+							<summary class={summaryClass}>
 								<CategoryIcon icon={c.icon} color={c.color} />
-								<span class="text-lg">{c.name}</span>
-								<span class="ml-auto text-sm text-muted">{c.budget}</span>
+								<span class="min-w-0 truncate text-lg font-medium">
+									{c.name}
+								</span>
+								<span class="ml-auto shrink-0 tabular-nums">
+									{c.budget}
+									<span class="text-muted"> a month</span>
+								</span>
+								{chevron}
 							</summary>
 							{c.name === "Gas" && (
-								<>
-									<div class="flex flex-wrap items-center gap-3 pb-3">
-										<Button type="button" class="min-w-24">
-											Save
-										</Button>
-										<Button kind="secondary" type="button" class="min-w-24">
+								<div class="flex flex-col gap-4 pb-5">
+									<TextInput
+										id={`${fieldId}-gas-name`}
+										label="Name"
+										name="name"
+										value={c.name}
+										maxlength={40}
+										autocomplete="off"
+										class="sm:max-w-sm"
+									/>
+									<p class="text-muted">
+										<a href="/" class="inline-flex min-h-11 items-center">
+											Change its budget on Home
+										</a>
+									</p>
+									<div class="flex flex-wrap items-center gap-3">
+										<Button type="button">Save</Button>
+										<Button kind="secondary" type="button">
 											Cancel
 										</Button>
 										<Button kind="text" type="button" class="ml-auto">
 											Archive
 										</Button>
 									</div>
-									<div class="flex flex-wrap gap-2 pb-4">
+									<div class="flex flex-wrap gap-2">
 										<Button kind="secondary" type="button" class="gap-2">
 											<Icon name="arrow-up" class="size-4" />
 											Move up
@@ -732,12 +767,12 @@ function SettingsPhone({
 											Move down
 										</Button>
 									</div>
-								</>
+								</div>
 							)}
 						</details>
-					</li>
-				))}
-			</ul>
+					))}
+				</div>
+			</section>
 		</Phone>
 	);
 }
@@ -1000,7 +1035,7 @@ const startSheet = (
 				<li class="flex min-h-11 items-center justify-between gap-3 py-2">
 					<span class="text-lg">{c.name}</span>
 					<span class="text-sm text-muted">
-						Last month ${c.last} · starts at ${c.start}
+						Last month {money(c.last * 100)} · starts at {money(c.start * 100)}
 					</span>
 				</li>
 			))}
@@ -1219,7 +1254,7 @@ export function PolishRoundCProposals() {
 					<Choice
 						name="Today (current)"
 						width="w-[800px]"
-						note="The pill is fixed bottom-right above the tab bar, where it is now. On Home, scrolled to the list, it sits over the Childcare row's amount. In Settings it sits below the list, clear of the buttons, which are on the left."
+						note="The pill is fixed bottom-right above the tab bar, where it is now. On Home, scrolled to the list, it sits over the Childcare row's amount. In Settings it sits over Move down, at the foot of the open Gas row."
 					>
 						<div class="flex min-w-0 max-w-full flex-wrap items-start gap-4">
 							<Shot caption="Home, scrolled to the Budget list">
@@ -1231,6 +1266,7 @@ export function PolishRoundCProposals() {
 							<Shot caption="Settings, Gas open">
 								<SettingsPhone
 									label="Today (current), Settings"
+									fieldId="today"
 									overlay={floatingPill}
 								/>
 							</Shot>
@@ -1268,7 +1304,11 @@ export function PolishRoundCProposals() {
 								<ScrolledHome label="Option A, Home scrolled" />
 							</Shot>
 							<Shot caption="Settings, Gas open: the pill in the top line">
-								<SettingsPhone label="Option A, Settings" masthead={pill} />
+								<SettingsPhone
+									label="Option A, Settings"
+									fieldId="option-a"
+									masthead={pill}
+								/>
 							</Shot>
 						</div>
 						<Shot caption="The desktop: a second sidebar group, no pill">
@@ -1297,7 +1337,7 @@ export function PolishRoundCProposals() {
 								</MoreScreen>
 							</Shot>
 							<Shot caption="Settings, Gas open: nothing floats">
-								<SettingsPhone label="Option B, Settings" />
+								<SettingsPhone label="Option B, Settings" fieldId="option-b" />
 							</Shot>
 						</div>
 						<Shot caption="The desktop: the sidebar's second group">
@@ -1329,7 +1369,7 @@ export function PolishRoundCProposals() {
 					<Choice
 						name="Today (current)"
 						width="w-full"
-						note="How this works sits under the number, Things to try sits under the Budget list, and How Tally works opens with How it's built. A family with no budgets sees −$2,140."
+						note="How this works sits under the number, Things to try sits under the Budget list, and How Tally works opens with How it's built. A family with no budgets saw −$2,140 before #519."
 					>
 						<Shot caption="The demo's Home: top to the Band and the first two rows">
 							<Phone label="Today (current), Home top" tab="home">
@@ -1347,7 +1387,7 @@ export function PolishRoundCProposals() {
 								{howTodayTop}
 							</Phone>
 						</Shot>
-						<Shot caption="today, being fixed in #519">
+						<Shot caption="before #519 (fixed on main)">
 							<Phone
 								label="Today (current), the family's Home"
 								demo={false}
