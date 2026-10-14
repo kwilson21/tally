@@ -1831,6 +1831,252 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		);
 	});
 
+	// One labelled picture, from its label to the next picture's (the last one runs to the section's end).
+	const picture = (chunk: string, label: string) => {
+		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
+		expect(at, label).toBeGreaterThan(-1);
+		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+		return chunk.slice(at, next === -1 ? undefined : next);
+	};
+	// Every opening tag in a chunk whose class list has `cls` as one of its classes.
+	const tagsWith = (chunk: string, cls: string) =>
+		[...chunk.matchAll(/<[a-zA-Z]+\b[^>]*>/g)]
+			.map((m) => m[0])
+			.filter((tag) =>
+				(/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ").includes(cls),
+			);
+
+	it("carries each option's lines from the brief, word for word, in its pictures", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const LINES: Record<string, string[]> = {
+			[OPTIONS[0] ?? ""]: [
+				"Let Tally read first.",
+				"Link your bank and Tally reads your last 90 days: what you&#39;re paid, what comes back every month and where the rest goes. Then it writes you a first budget. You won&#39;t type a number.",
+				"Tally can only read your bank. It can&#39;t move money.",
+				"What Tally fills in",
+				"Your last 90 days",
+				"Tally sorts the rest tonight. Your first budget will be ready by about 6 a.m.",
+				"Nothing for you to do until then.",
+				"Three of your lines",
+				"ACME CORP PAYROLL PPD ID 4432",
+				"ONLINE TRANSFER TO SAV ...5678",
+				"SQ *BLUE BOTTLE COF 0217",
+				"$2,450 every other Friday, from Acme Corp",
+				"7 paychecks since Jul 17",
+				"8 charges, about $2,062",
+				"Harbor Property, Geico, Spectrum and 5 more",
+				"6 moves between your own accounts",
+				"31 stores, from your bank&#39;s text",
+				"50 of 412 sorted. The rest tonight.",
+				"Ready by about 6 a.m.",
+				"In a typical month, $4,900 came in and about $4,310 went out.",
+				"From Chase, Jul 16 to Oct 13. Tally sorted 362 overnight.",
+				"A first budget",
+				"Each line is what that category spent in a typical month, August and September, rounded up to the next $10.",
+				"Aug $610 · Sep $674",
+				"86 transactions Tally wasn&#39;t sure of · about $320 a month",
+				"Bills · 8",
+				"about $2,062 a month",
+				"Budgets",
+				"$4,050 a month",
+				"Safe to spend today",
+				"$1,411",
+				"Start with this budget",
+				"Untick any you&#39;d rather leave out. Once set, a budget can be changed on Home but not removed.",
+				"Set my own instead",
+				"Your first budget, from your own August and September.",
+				"86 need a category",
+				"$186 of this month&#39;s spending",
+			],
+			[OPTIONS[1] ?? ""]: [
+				"Link your bank, and Tally pencils in your whole budget from your last 90 days.",
+				"Tally can only read it. It can&#39;t move money.",
+				"Reading Chase. Tally pencils in your budget once it has sorted your 90 days: by about 6 a.m.",
+				"Pencilled in from your August and September. Ink it in when it looks right.",
+				"Safe to spend · in pencil",
+				"Paid $2,450 every other Friday by Acme Corp.",
+				"8 charges come back every month, about $2,062.",
+				"6 moves between your own accounts are left out; they aren&#39;t spending.",
+				"38 stores have cleaner names, dashed until you keep them.",
+				"Ink in this budget",
+				"12 budgets and 8 bills, all from your history",
+				"Ink in this budget",
+				"$4,050",
+				"a month",
+				"What each category spent in a typical month, August and September, rounded up to the next $10.",
+				"Budgets · 12 categories",
+				"Bills · 8, about $2,062 a month",
+				"Safe to spend becomes $1,411. Untick any you&#39;d rather leave out: once set, a budget can be changed but not removed.",
+				"Cancel",
+				"Ink it in",
+				"Inked in. Tap any line to change it.",
+			],
+			[OPTIONS[2] ?? ""]: [
+				"Welcome to Tally",
+				"One thing today.",
+				"Tally does the reading; you make the calls.",
+				"Link your bank",
+				"Tally can only read it. It can&#39;t move money.",
+				"Spent so far",
+				"$2,486",
+				"That&#39;s all for today. Tally sorts what it&#39;s sure of by tomorrow, so these will be fewer.",
+				"86 need a category",
+				"$186 of this month&#39;s spending",
+				"Budget 1 of 12",
+				"Rent",
+				"Last month: $1,600.00",
+				"3-month average: $1,600.00",
+				"Skip this one",
+				"Save and next",
+				"Four. The fifth draws itself tomorrow, when you look in.",
+				"Five. You&#39;re set up, and from here Tally just keeps count.",
+				"Thursday: the fifth stroke crosses the four, and all five are ink",
+				"Five. You&#39;re set up.",
+			],
+			[OPTIONS[3] ?? ""]: [
+				"Tally sorted 362 overnight and has 14 questions for you. Safe to spend is written in at the end.",
+				"14 questions from Tally",
+				"About three minutes. Most are one tap.",
+				"Your first page",
+				"4 of 14",
+				"Chase · 412 lines · Jul 16 to Oct 13",
+				"Moves between your accounts · 6 left out",
+				"Paychecks · $4,900 in September",
+				"Costco · Groceries",
+				"Groceries · $610 in August · $674 in September",
+				"$650 a month",
+				"Make it the Groceries budget, from October on?",
+				"Tally&#39;s suggestion: what Groceries spent in a typical month, rounded up to the next $10.",
+				"Yes, $650 a month",
+				"Another amount",
+				"Not now",
+				"Budgets",
+				"$4,050",
+				"Spent so far in October",
+				"−$2,486",
+				"Bills still due this week",
+				"−$153",
+				"Safe to spend",
+				"$1,411",
+				"That&#39;s October, in your own numbers. Home keeps it up to date from here.",
+				"Go to Home",
+			],
+		};
+		for (const name of OPTIONS) {
+			for (const line of LINES[name] ?? []) {
+				expect(option(chunk, name), line).toContain(line);
+			}
+		}
+	});
+
+	it("gives each option its idea and its cost line, as the brief words them", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const IDEAS: Record<string, [string, string]> = {
+			[OPTIONS[0] ?? ""]: [
+				"Tally reads your last 90 days first and writes the first page of your books, ending in a budget you keep with one tap.",
+				"a first-budget rule (a spec line), a Home that is the entry until a budget exists, and checking for the import&#39;s end (htmx polling, a new pattern here).",
+			],
+			[OPTIONS[1] ?? ""]: [
+				"Tally pencils your whole Home in from your history, dashed like every Tally guess, and one tap inks it in.",
+				"a first-budget rule (a spec line) and pencil versions of Home&#39;s number and rows; no new page.",
+			],
+			[OPTIONS[2] ?? ""]: [
+				"Each real step pencils one stroke into Home&#39;s notebook drawing; the morning after the fourth, the fifth crosses them and Home is just Home.",
+				"a kept record of the five steps, a budget walk, and checking for the import&#39;s end (htmx polling).",
+			],
+			[OPTIONS[3] ?? ""]: [
+				"Once Tally has sorted last month, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend.",
+				"a question page, a first-budget rule (a spec line) and one kept date for when the sitting ends.",
+			],
+		};
+		for (const name of OPTIONS) {
+			const [idea, cost] = IDEAS[name] ?? [];
+			expect(option(chunk, name), name).toContain(
+				`<p class="text-sm">${idea}</p>`,
+			);
+			expect(option(chunk, name), name).toContain(`Trade-off: ${cost}`);
+		}
+	});
+
+	it("rests each replay on its end state in the markup, the frame reduced motion shows, so every loop has one", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		// For each replay class: the classes its element must carry, and the ones it must not, at the end state.
+		const AT_REST: Record<string, { must?: string[]; not?: string[] }> = {
+			"proposal-first-strike": { not: ["scale-x-0"] },
+			"proposal-first-strike-later": { not: ["scale-x-0"] },
+			"proposal-first-strike-last": { not: ["scale-x-0"] },
+			"proposal-first-rows": { not: ["opacity-0"] },
+			"proposal-first-ink-text": { must: ["text-ink"] },
+			"proposal-first-pencil-off": { must: ["opacity-0"] },
+			"proposal-first-ink-on": { not: ["opacity-0"] },
+			"proposal-first-bar": { must: ["fill-ink"], not: ["scale-x-0"] },
+			"proposal-first-stroke": { must: ["stroke-ink"] },
+			"proposal-first-cross": { must: ["stroke-ink"] },
+			"proposal-first-line": { not: ["opacity-0", "translate-y-1"] },
+			"proposal-first-rule": { not: ["scale-x-0"] },
+			"proposal-first-amount": { not: ["opacity-0"] },
+		};
+		const used = new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []);
+		expect([...used].sort()).toEqual(Object.keys(AT_REST).sort());
+		for (const [cls, { must = [], not = [] }] of Object.entries(AT_REST)) {
+			const tags = tagsWith(chunk, cls);
+			expect(tags.length, cls).toBeGreaterThan(0);
+			for (const tag of tags) {
+				const classes = (/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ");
+				for (const m of must) expect(classes, `${cls} needs ${m}`).toContain(m);
+				for (const n of not)
+					expect(classes, `${cls} must not carry ${n}`).not.toContain(n);
+			}
+		}
+	});
+
+	it("says 'pencil' in the label of every picture with a pencil state, and in words beside the pencil figures", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const label of [
+			"Option B, before a bank, with the amount a pencil blank",
+			"Option B, that evening, with the amount still a pencil blank",
+			"Option B, pencilled in, the amount in pencil",
+			"Option B, the ink-in sheet over the pencilled Home",
+			"Option B, replay: the pencil inks in",
+			"Option C, that evening, one stroke in pencil",
+			"Option C, the budget walk, two strokes in pencil",
+			"Option C, four strokes in pencil",
+			"Option D, next morning, with the amount a pencil blank",
+			"Option D, a question page, the suggested amount in pencil",
+		]) {
+			picture(chunk, label);
+		}
+		// The strokes say they are pencil in words beside the count, and the picture that inks them says ink.
+		expect(option(chunk, OPTIONS[2] ?? "")).toContain(
+			'Your first tally: 1 of 5<span class="sr-only">, in pencil</span>',
+		);
+		expect(picture(chunk, "Option C, four strokes in pencil")).toContain(
+			"stroke-muted",
+		);
+		expect(picture(chunk, "Option C, five strokes in ink")).not.toContain(
+			"stroke-muted",
+		);
+		expect(option(chunk, OPTIONS[3] ?? "")).toContain(
+			'<span class="sr-only">Pencil blank, not written in yet</span>',
+		);
+	});
+
+	it("writes the replay's new answer last in the ledger, under Costco · Groceries", async () => {
+		const { html } = await get("/design-system/proposals");
+		const replay = picture(
+			section(html),
+			"Option D, replay: a new answer and the total",
+		);
+		expect(replay.indexOf("Costco · Groceries")).toBeGreaterThan(-1);
+		expect(replay.indexOf("Groceries, from October")).toBeGreaterThan(
+			replay.indexOf("Costco · Groceries"),
+		);
+	});
+
 	it("adds no client JavaScript: the section has no script", async () => {
 		const { html } = await get("/design-system/proposals");
 		expect(section(html)).not.toContain("<script");

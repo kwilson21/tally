@@ -423,7 +423,10 @@ function StrokesTop({
 				<div class="flex flex-col items-center">
 					<Notebook strokes={strokes} ink={ink} />
 					{!ink && (
-						<p class="text-sm text-muted">Your first tally: {strokes} of 5</p>
+						<p class="text-sm text-muted">
+							Your first tally: {strokes} of 5
+							{strokes > 0 && <span class="sr-only">, in pencil</span>}
+						</p>
 					)}
 				</div>
 			</div>
@@ -626,7 +629,7 @@ const aFirstBudgetTail = (
 		<div class="mt-3">
 			<FoldedRow label="Bills · 8" value="about $2,062 a month" />
 		</div>
-		<div class="mt-4 flex items-baseline justify-between gap-3 border-t border-ink pt-3">
+		<div class="mt-3 flex items-baseline justify-between gap-3">
 			<p class="text-lg">Budgets</p>
 			<p class="tabular-nums">$4,050 a month</p>
 		</div>
@@ -1013,7 +1016,7 @@ const cReplay = (
 
 const dMorning = (
 	<HomeTop
-		amount={blank("Not worked out yet")}
+		amount={blank("Pencil blank, not written in yet")}
 		status="Tally sorted 362 overnight and has 14 questions for you. Safe to spend is written in at the end."
 		howLink={false}
 		band={
@@ -1047,7 +1050,7 @@ const dQuestion = (
 		</p>
 		<p class="mt-2">
 			<span class="inline-flex items-center rounded-full border border-dashed border-muted px-3 py-1 text-sm text-muted">
-				$650 a month<span class="sr-only">Suggested, not kept yet</span>
+				$650 a month <span class="sr-only">Suggested, not kept yet</span>
 			</span>
 		</p>
 		<h2 class="mt-3 font-serif text-2xl font-semibold">
@@ -1119,13 +1122,14 @@ const dReplay = (
 	<>
 		<h1 class="text-lg font-semibold">Your first page</h1>
 		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
+			{DLEDGER_LINES.map((line) => (
+				<li class="py-2 text-muted">{line}</li>
+			))}
+			<li class="py-2 text-ink">Costco · Groceries</li>
 			<li class="flex justify-between py-2 proposal-first-line">
 				<span>Groceries, from October</span>
 				<span class="tabular-nums">$650 a month</span>
 			</li>
-			{DLEDGER_LINES.map((line) => (
-				<li class="py-2 text-muted">{line}</li>
-			))}
 		</ul>
 		<div class="mt-4 flex justify-between border-t border-ink pt-3">
 			<span class="text-lg">Budgets</span>
@@ -1256,22 +1260,38 @@ export function PolishRoundDProposals() {
 					why="every number looks like a guess until someone keeps it, so nothing reads as settled before it is."
 				>
 					<Shot caption="Before a bank: the amount is a pencil blank, and one link">
-						<Phone label="Option B, before a bank" demo={false} tab="home">
+						<Phone
+							label="Option B, before a bank, with the amount a pencil blank"
+							demo={false}
+							tab="home"
+						>
 							{bBefore}
 						</Phone>
 					</Shot>
 					<Shot caption="That evening: still a blank, and when it will be ready">
-						<Phone label="Option B, that evening" demo={false} tab="home">
+						<Phone
+							label="Option B, that evening, with the amount still a pencil blank"
+							demo={false}
+							tab="home"
+						>
 							{bEvening}
 						</Phone>
 					</Shot>
 					<Shot caption="Next morning: Home pencilled in, with Tally's notes and two pencil rows">
-						<Phone label="Option B, pencilled in" demo={false} tab="home">
+						<Phone
+							label="Option B, pencilled in, the amount in pencil"
+							demo={false}
+							tab="home"
+						>
 							{bMorning}
 						</Phone>
 					</Shot>
 					<Shot caption="Ink it in: a sheet over the pencilled Home">
-						<Phone label="Option B, the ink-in sheet" demo={false} tab="home">
+						<Phone
+							label="Option B, the ink-in sheet over the pencilled Home"
+							demo={false}
+							tab="home"
+						>
 							<Sheet behind={bBehind} top="top-40">
 								{bInkSheet}
 							</Sheet>
@@ -1306,30 +1326,46 @@ export function PolishRoundDProposals() {
 						</Phone>
 					</Shot>
 					<Shot caption="That evening: one stroke, for the bank">
-						<Phone label="Option C, that evening" demo={false} tab="home">
+						<Phone
+							label="Option C, that evening, one stroke in pencil"
+							demo={false}
+							tab="home"
+						>
 							{cSpent}
 						</Phone>
 					</Shot>
 					<Shot caption="The budget walk: a sheet over Home, with two strokes">
-						<Phone label="Option C, the budget walk" demo={false} tab="home">
+						<Phone
+							label="Option C, the budget walk, two strokes in pencil"
+							demo={false}
+							tab="home"
+						>
 							<Sheet behind={cWalkBehind} top="top-40">
 								{cWalkSheet}
 							</Sheet>
 						</Phone>
 					</Shot>
 					<Shot caption="Four strokes, and Safe to spend">
-						<Phone label="Option C, four strokes" demo={false} tab="home">
+						<Phone
+							label="Option C, four strokes in pencil"
+							demo={false}
+							tab="home"
+						>
 							{cFour}
 						</Phone>
 					</Shot>
 					<Shot caption="Thursday: the fifth stroke crosses the four, and all five are ink">
-						<Phone label="Option C, five strokes" demo={false} tab="home">
+						<Phone
+							label="Option C, five strokes in ink"
+							demo={false}
+							tab="home"
+						>
 							{cFive}
 						</Phone>
 					</Shot>
 					<Shot caption="Replay, every 6 seconds: the fifth stroke draws across the four, and all five turn to ink">
 						<Phone
-							label="Option C, replay: the fifth stroke"
+							label="Option C, replay: the fifth stroke crosses the four, and the pencil turns to ink"
 							demo={false}
 							tab="home"
 						>
@@ -1346,12 +1382,20 @@ export function PolishRoundDProposals() {
 					why="a family answers one small question at a time, and each answer is a line they can read back."
 				>
 					<Shot caption="Next morning: 14 questions, and Safe to spend written in at the end">
-						<Phone label="Option D, next morning" demo={false} tab="home">
+						<Phone
+							label="Option D, next morning, with the amount a pencil blank"
+							demo={false}
+							tab="home"
+						>
 							{dMorning}
 						</Phone>
 					</Shot>
 					<Shot caption="A question page: the ledger so far, and one question with one tap">
-						<Phone label="Option D, a question page" demo={false} tab="home">
+						<Phone
+							label="Option D, a question page, the suggested amount in pencil"
+							demo={false}
+							tab="home"
+						>
 							{dQuestion}
 						</Phone>
 					</Shot>
