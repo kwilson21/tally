@@ -65,6 +65,10 @@ class FakeNode extends EventTarget {
 	removeAttribute(name: string) {
 		this.attrs.delete(name);
 	}
+	/** Whether the node is the given one or holds it, as a real node's contains() does. */
+	contains(node: unknown): boolean {
+		return node === this || this.children.some((child) => child.contains(node));
+	}
 	append(...nodes: FakeNode[]) {
 		for (const node of nodes) {
 			node.remove();
@@ -119,13 +123,19 @@ function radio(form: FakeNode | null, name: string, checked = false) {
 	return node;
 }
 
-/** A sheet as BottomSheet draws it: its backdrop link, then the section with a heading, a field and Save. */
-function drawSheet(sheetSlot: FakeNode) {
+/**
+ * A sheet as BottomSheet draws it: its backdrop link, then the section with a heading, a field and Save. The section
+ * is labelled by its heading, as BottomSheet's labelledBy does. `autofocus` marks the field, as a form's first field does.
+ */
+function drawSheet(sheetSlot: FakeNode, { autofocus = false } = {}) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
-	const section = el("section", { "data-sheet": "" });
-	const title = el("h2", { tabindex: "-1" });
+	const section = el("section", {
+		"data-sheet": "",
+		"aria-labelledby": "sheet-title",
+	});
+	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
 	title.tabIndex = -1;
-	const field = el("input");
+	const field = el("input", autofocus ? { autofocus: "" } : {});
 	const save = el("button");
 	section.append(title, field, save);
 	sheetSlot.append(backdrop, section);
@@ -139,8 +149,11 @@ function drawRadioSheet(
 	radios: FakeNode[],
 ) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
-	const section = el("section", { "data-sheet": "" });
-	const title = el("h2", { tabindex: "-1" });
+	const section = el("section", {
+		"data-sheet": "",
+		"aria-labelledby": "sheet-title",
+	});
+	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
 	title.tabIndex = -1;
 	const save = el("button");
 	form.append(...radios);
@@ -154,7 +167,13 @@ function drawRadioSheet(
  * button, #toasts, #announcer]. The main holds the header, the list and #sheet, where a sheet sits.
  * The tab bar is inert before the script runs, as a page drawn that way is.
  */
-function drawPage({ sheet = true }: { sheet?: boolean } = {}) {
+function drawPage({
+	sheet = true,
+	autofocus = false,
+}: {
+	sheet?: boolean;
+	autofocus?: boolean;
+} = {}) {
 	const documentElement = el("html");
 	const body = el("body");
 	documentElement.append(body);
@@ -177,7 +196,7 @@ function drawPage({ sheet = true }: { sheet?: boolean } = {}) {
 	toasts.append(undo);
 	const announcer = el("div", { id: "announcer" });
 	body.append(skip, frame, tabs, feedback, toasts, announcer);
-	const drawn = sheet ? drawSheet(sheetSlot) : null;
+	const drawn = sheet ? drawSheet(sheetSlot, { autofocus }) : null;
 	return {
 		documentElement,
 		body,
@@ -205,9 +224,17 @@ type Page = ReturnType<typeof drawPage>;
  * `beforeScript` runs first, so a test can put another keydown handler ahead of the script's.
  */
 async function sheetPage(
-	options: { sheet?: boolean; beforeScript?: (doc: EventTarget) => void } = {},
+	options: {
+		sheet?: boolean;
+		/** The sheet's field is autofocus, as a form's first field can be. */
+		autofocus?: boolean;
+		beforeScript?: (doc: EventTarget) => void;
+	} = {},
 ) {
-	const parts = drawPage({ sheet: options.sheet });
+	const parts = drawPage({
+		sheet: options.sheet,
+		autofocus: options.autofocus,
+	});
 	const doc = Object.assign(new EventTarget(), {
 		body: parts.body,
 		documentElement: parts.documentElement,
@@ -227,10 +254,10 @@ async function sheetPage(
 }
 
 /** The page after a sheet is drawn in it again: a field's error redraws the open sheet in its place. */
-function redrawSheet(parts: Page) {
+function redrawSheet(parts: Page, options: { autofocus?: boolean } = {}) {
 	parts.drawn?.backdrop.remove();
 	parts.drawn?.section.remove();
-	return drawSheet(parts.sheetSlot);
+	return drawSheet(parts.sheetSlot, options);
 }
 
 /** The sheet leaves the page, as the close swap takes it out, and htmx reports the swap. */
@@ -241,6 +268,11 @@ function closeSheet(parts: Page & { document: EventTarget }) {
 
 function settle(doc: EventTarget) {
 	doc.dispatchEvent(new Event("htmx:after:settle", { bubbles: true }));
+}
+
+/** htmx has put a swap's new content in place: the event sheet.js also listens for, as settle is. */
+function swap(doc: EventTarget) {
+	doc.dispatchEvent(new Event("htmx:after:swap", { bubbles: true }));
 }
 
 function keydown(
@@ -325,6 +357,68 @@ describe("sheet.js: an open sheet is a modal", () => {
 		const parts = await sheetPage({ sheet: false });
 		expect(parts.list.hasAttribute("inert")).toBe(false);
 		expect(parts.body.querySelectorAll("[inert]")).toEqual([parts.tabs]);
+	});
+});
+
+describe("sheet.js: focus goes into the sheet", () => {
+	it("moves focus from the row the sheet covers to the sheet's title when the page loads", async () => {
+		const parts = await sheetPage();
+		expect(parts.document.activeElement).toBe(parts.drawn?.title);
+		expect(parts.drawn?.title.getAttribute("tabindex")).toBe("-1");
+	});
+
+	it("moves focus from the body to the sheet's title when a swap or a settle runs", async () => {
+		const parts = await sheetPage();
+		parts.body.focus();
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(parts.drawn?.title);
+	});
+
+	it("gives focus to the sheet's [autofocus] field, not its title, when the page loads", async () => {
+		const parts = await sheetPage({ autofocus: true });
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("moves focus from a control the redraw removed to the redrawn sheet's [autofocus] field", async () => {
+		const parts = await sheetPage();
+		parts.drawn?.field.focus();
+		const redrawn = redrawSheet(parts, { autofocus: true });
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(redrawn.field);
+	});
+
+	it("moves focus from a control the redraw removed to the redrawn sheet's title, which gets tabindex -1", async () => {
+		const parts = await sheetPage();
+		parts.drawn?.field.focus();
+		const redrawn = redrawSheet(parts);
+		redrawn.title.removeAttribute("tabindex");
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(redrawn.title);
+		expect(redrawn.title.getAttribute("tabindex")).toBe("-1");
+	});
+
+	it("leaves focus on a sheet control where a settle finds it", async () => {
+		const parts = await sheetPage();
+		parts.drawn?.save.focus();
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(parts.drawn?.save);
+	});
+
+	it("leaves focus on an Undo toast when a swap or a settle runs, since toast.js put it there", async () => {
+		const parts = await sheetPage();
+		parts.undo.focus();
+		swap(parts.document);
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(parts.undo);
+	});
+
+	it("leaves focus alone on a page with no sheet", async () => {
+		const parts = await sheetPage({ sheet: false });
+		expect(parts.document.activeElement).toBe(parts.row);
+		parts.body.focus();
+		swap(parts.document);
+		settle(parts.document);
+		expect(parts.document.activeElement).toBe(parts.body);
 	});
 });
 
