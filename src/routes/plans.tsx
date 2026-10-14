@@ -45,13 +45,20 @@ function monthOptions(current: string, own?: string): PlanMonthOption[] {
 	return options;
 }
 
-/** Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). */
+/**
+ * Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). A header value must be
+ * ASCII, so a non-ASCII character in a plan's name (a curly apostrophe) is written as \uXXXX, which the toast's JSON reads back.
+ */
 function withToast(
 	response: Response,
 	toast: Record<string, unknown> & { message: string },
 	announce = toast.message,
 ) {
-	response.headers.set("HX-Trigger", JSON.stringify({ toast, announce }));
+	const json = JSON.stringify({ toast, announce }).replace(
+		/[\u007f-\uffff]/g,
+		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+	response.headers.set("HX-Trigger", json);
 	return response;
 }
 
@@ -156,9 +163,7 @@ plans.post("/plans", async (c) => {
 	);
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { values, errors }, today);
-
 	await insertPlan(c.env.DB, fields, actor(c));
-
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	return withToast(await billsPage(c, undefined, today), {
 		message: `Planned ${fields.name}, ${formatCents(fields.amountCents)}.`,
@@ -371,7 +376,6 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const today = await householdToday(c.env.DB);
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	const deleted = `${verb} ${plan.name}, ${formatCents(plan.amountCents)}.`;
-
 	const response = await billsPage(c, undefined, today);
 	if (!token) {
 		return withToast(response, {

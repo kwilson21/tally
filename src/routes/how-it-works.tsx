@@ -205,7 +205,6 @@ howItWorks.get("/how-it-works", async (c) => {
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
 	// The same totals Home and Bills show, so this page's set-aside amount is theirs.
 	const unpaidDueBillsCents = billTotalsForRows(month, billData.rows).soonCents;
-
 	// Planned expenses are set aside in the current month only, as Home sets them (spec §8.4).
 	const unpaidPlansCents =
 		month === today.slice(0, 7) ? await plansSetAsideCents(c.env.DB, month) : 0;
@@ -215,7 +214,6 @@ howItWorks.get("/how-it-works", async (c) => {
 		unpaidDueBillsCents,
 		unpaidPlansCents,
 	});
-
 	const budgeted = new Set(summary.categories.map((category) => category.id));
 	const unbudgetedCents = data.transactions
 		.filter(

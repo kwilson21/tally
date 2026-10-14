@@ -62,28 +62,24 @@ export function budgetExample(
 ): string {
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const plannedCents = s.plannedCents ?? 0;
-
 	const uncategorizedCents = s.uncategorized.spentCents;
 	const budgetsLeftCents =
 		s.totalBudgetCents -
 		s.totalSpentCents +
 		uncategorizedCents +
 		s.unbudgetedCents;
-
 	const differenceCents =
 		uncategorizedCents +
 		s.unbudgetedCents +
 		s.billsDueCents +
 		savingsGoalCents +
 		plannedCents;
-
 	const amount = (cents: number) =>
 		formatCents(cents, { wholeDollars: cents % 100 === 0 });
 	const difference =
 		differenceCents === 0
 			? "the same as your budgets"
 			: `${amount(Math.abs(differenceCents))} ${differenceCents > 0 ? "less" : "more"}`;
-
 	// Planned expenses are named only when one is set aside, so an example without one reads as it always has.
 	const setAside =
 		plannedCents > 0

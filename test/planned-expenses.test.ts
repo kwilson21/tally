@@ -481,6 +481,18 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(row?.a).toBe(18000);
 	});
 
+	it("keeps a plan's name ASCII-only in the HX-Trigger header, and the toast decodes it to the same words", async () => {
+		const ok = await post("/plans", {
+			name: "Mom’s car",
+			amount: "$10.00",
+			month: MONTH,
+		});
+		const header = ok.headers.get("HX-Trigger") ?? "";
+		expect(header).not.toMatch(/[^\x20-\x7e]/);
+		const trigger = JSON.parse(header) as { toast: { message: string } };
+		expect(trigger.toast.message).toBe("Planned Mom’s car, $10.00.");
+	});
+
 	it("links a payment from the plan's page, and says which bill or plan a payment that can't be linked already pays", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		await payment(9706, 18000);

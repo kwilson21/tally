@@ -359,11 +359,9 @@ export async function page(
 		(sum, plan) => sum + plan.amountCents,
 		0,
 	);
-
 	const statusGroup = (status: BillStatus, extraRows: Child[] = []) => {
 		const group = active.filter((b) => b.status === status);
 		if (!group.length && !extraRows.length) return null;
-
 		return (
 			<section class="mt-4">
 				<BillStatusHeading
@@ -377,13 +375,11 @@ export async function page(
 					{group.map((bill) => (
 						<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
 					))}
-
 					{extraRows}
 				</ul>
 			</section>
 		);
 	};
-
 	return c.html(
 		<Layout
 			title="Bills · Tally"
@@ -434,7 +430,6 @@ export async function page(
 				</div>
 				{/* One Band at a time: a plan waiting for its answer comes before the repeat-charge Band. */}
 				<BillFindingBand count={earlierPlans.length ? 0 : suggestions.length} />
-
 				{rows.length === 0 && (
 					<EmptyState
 						kind="add"
@@ -442,9 +437,7 @@ export async function page(
 						hint="Add a bill to see what needs paying."
 					/>
 				)}
-
 				{statusGroup("overdue")}
-
 				{statusGroup("due")}
 				{statusGroup("upcoming")}
 				{unpaidPlans.length > 0 && (
@@ -462,7 +455,6 @@ export async function page(
 						</ul>
 					</section>
 				)}
-
 				{statusGroup(
 					"paid",
 					plansPaidThisMonth.map((plan) => (
@@ -474,7 +466,6 @@ export async function page(
 						/>
 					)),
 				)}
-
 				{inactive.length > 0 && (
 					<details class="group mt-2 border-t border-rule">
 						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
@@ -491,7 +482,6 @@ export async function page(
 					</details>
 				)}
 			</div>
-
 			<div id="sheet">
 				{sheet?.plan ??
 					(sheet && (
@@ -1743,7 +1733,6 @@ bills.post("/bills/:id/link", async (c) => {
 			undefined,
 			today,
 		);
-
 	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053). The payment's group is the
 	// transaction, its split parent and its parts (paysPlanGroupSql): the picker never lists one, and a request that
 	// names one anyway is refused here, rather than by the trigger's error.

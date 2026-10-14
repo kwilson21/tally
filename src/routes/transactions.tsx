@@ -1516,7 +1516,6 @@ transactions.post("/transactions/select/exclude", async (c) => {
 				? "planned expense"
 				: "bill",
 	);
-
 	return finishSelection(
 		c,
 		today,
@@ -1701,7 +1700,6 @@ function EditSheet({
 					It pays a planned expense, so it counts in the budget.
 				</p>
 			)}
-
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			<p>
 				<HowLink section="categorization" />
