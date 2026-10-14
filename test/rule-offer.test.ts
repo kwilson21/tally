@@ -1263,6 +1263,21 @@ describe("rule offer edge cases (#372)", () => {
 		);
 	});
 
+	it("including a Plaid transfer category again, with Groceries kept, asks when it becomes the third pick", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		// Plaid's transfer category, excluded again by the person: it doesn't count while excluded.
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'user', flag_transfer = 0 WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(included.html).toContain(QUESTION);
+		expect(included.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
 	it("re-including an ordinary pick the person excluded adds no pick, so it asks nothing", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
 		await env.DB.prepare(
