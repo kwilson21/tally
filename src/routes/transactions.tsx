@@ -2858,7 +2858,8 @@ function postedSplitValues(
 
 /**
  * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
- * split refund and its parts are left out, and so is a credit that no longer counts (it is unlinked, not asked about).
+ * split refund is asked about as one refund, its parts are left out, and so is a credit that no longer counts (it is
+ * unlinked, not asked about).
  */
 async function splitRefundsOf(
 	db: D1Database,

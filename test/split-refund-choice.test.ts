@@ -526,3 +526,127 @@ describe("a purchase with a dormant refund link of its own still names the refun
 		expect(await linkOf(SECOND)).toBeNull();
 	});
 });
+
+describe("a split refund moves with its parts, which count once in the chosen part's category and month", () => {
+	const SPLIT_PURCHASE = 9401;
+	const SPLIT_REFUND = 9402;
+	const REFUND_KIDS = 9403;
+	const REFUND_HOUSEHOLD = 9404;
+	const ELSEWHERE = 9405;
+
+	beforeEach(async () => {
+		// A $100.00 purchase on Aug 20, refunded by a split refund dated Sep 5 ($30.00 and $20.00 parts, all linked to it).
+		await db.batch([
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
+				(${SPLIT_PURCHASE}, 3, '2026-08-20', 10000, 'BIG STORE', ${GROCERIES}, 'user', 0, NULL),
+				(${ELSEWHERE}, 3, '2026-08-02', 2000, 'ELSEWHERE SHOP', ${GROCERIES}, 'user', 0, NULL)`),
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, credit_reviewed, credit_reviewed_by) VALUES
+				(${SPLIT_REFUND}, 3, '2026-09-05', -5000, 'BIG STORE', ${GROCERIES}, 'user', 1, NULL, ${SPLIT_PURCHASE}, 1, 'user'),
+				(${REFUND_KIDS}, 3, '2026-09-05', -3000, 'BIG STORE', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user'),
+				(${REFUND_HOUSEHOLD}, 3, '2026-09-05', -2000, 'BIG STORE', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user')`),
+		]);
+	});
+
+	/** What a category counts in a month, as the month's transactions show it (a linked refund in its purchase's). */
+	const spentIn = async (month: string, categoryId: number) =>
+		(await loadMonth(db, month)).transactions
+			.filter((t) => !t.income && t.categoryId === categoryId)
+			.reduce((sum, t) => sum + t.amountCents, 0);
+
+	it("moves the split refund onto the part chosen for it, and both of its parts follow it", async () => {
+		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
+			[SPLIT_REFUND]: 0,
+		});
+		const [kids] = await partIds(SPLIT_PURCHASE);
+		expect(result).toEqual({
+			saved: true,
+			unlinked: [],
+			bills: [],
+			moved: [{ date: "2026-09-05", part: 0 }],
+		});
+		expect(await linkOf(SPLIT_REFUND)).toBe(kids);
+		expect(await linkOf(REFUND_KIDS)).toBe(kids);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(kids);
+	});
+
+	it("counts the parts once each, in the chosen part's category and in the purchase's month", async () => {
+		const augustBefore = await spentIn("2026-08", KIDS);
+		const septemberBefore = await spentIn("2026-09", KIDS);
+		await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", { [SPLIT_REFUND]: 0 });
+		// The new Kids part adds $60.00 to August; the $50.00 refund's two parts take $50.00 off it, once each.
+		expect((await spentIn("2026-08", KIDS)) - augustBefore).toBe(1000);
+		expect((await spentIn("2026-09", KIDS)) - septemberBefore).toBe(0);
+	});
+
+	it("moves only the parts that still follow the split refund, leaving one linked elsewhere where it is", async () => {
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(ELSEWHERE, REFUND_HOUSEHOLD)
+			.run();
+		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
+			[SPLIT_REFUND]: 0,
+		});
+		const [kids] = await partIds(SPLIT_PURCHASE);
+		expect(result.moved).toEqual([{ date: "2026-09-05", part: 0 }]);
+		expect(await linkOf(SPLIT_REFUND)).toBe(kids);
+		expect(await linkOf(REFUND_KIDS)).toBe(kids);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(ELSEWHERE);
+	});
+
+	it("refuses a split refund too big for the part chosen for it, and names it once with its parts", async () => {
+		const result = await saveSplit(
+			db,
+			SPLIT_PURCHASE,
+			[
+				{ categoryId: KIDS, amountCents: 4000 },
+				{ categoryId: HOUSEHOLD, amountCents: 6000 },
+			],
+			"test",
+			{ [SPLIT_REFUND]: 0 },
+		);
+		expect(result.moved).toEqual([]);
+		expect(result.unlinked).toEqual(["2026-09-05"]);
+		expect(await linkOf(SPLIT_REFUND)).toBeNull();
+		expect(await linkOf(REFUND_KIDS)).toBeNull();
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBeNull();
+	});
+
+	it("unlinks a split refund answered Not linked with its parts, and names it once", async () => {
+		const result = await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", {
+			[SPLIT_REFUND]: null,
+		});
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05"],
+			bills: [],
+			moved: [],
+		});
+		expect(await linkOf(SPLIT_REFUND)).toBeNull();
+		expect(await linkOf(REFUND_KIDS)).toBeNull();
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBeNull();
+	});
+
+	it("re-splitting moves a split refund and its parts from an old part to the new part chosen for it", async () => {
+		await saveSplit(db, SPLIT_PURCHASE, PARTS, "test", { [SPLIT_REFUND]: 0 });
+		// The purchase is split again with the Household part first, and the refund is chosen for the Kids part.
+		const again = [
+			{ categoryId: HOUSEHOLD, amountCents: 4000 },
+			{ categoryId: KIDS, amountCents: 6000 },
+		];
+		const result = await saveSplit(db, SPLIT_PURCHASE, again, "test", {
+			[SPLIT_REFUND]: 1,
+		});
+		const [, kids] = await partIds(SPLIT_PURCHASE);
+		expect(result).toEqual({
+			saved: true,
+			unlinked: [],
+			bills: [],
+			moved: [{ date: "2026-09-05", part: 1 }],
+		});
+		expect(await linkOf(SPLIT_REFUND)).toBe(kids);
+		expect(await linkOf(REFUND_KIDS)).toBe(kids);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(kids);
+	});
+});
