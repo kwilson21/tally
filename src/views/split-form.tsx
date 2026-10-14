@@ -1,6 +1,9 @@
+import { shortDay } from "../dates";
 import { formatCents } from "../money";
-import { splitStatus } from "../transactions/split";
+import type { SplitRefund } from "../transactions/refund-guards";
+import { positiveCents, splitStatus } from "../transactions/split";
 import { Button } from "./button";
+import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 
@@ -34,12 +37,84 @@ export function SplitLine({
 	);
 }
 
+/** A part's chip on the refund chooser: its category and amount, or "Part N" until both are filled in. */
+function partLabel(
+	value: SplitValue,
+	index: number,
+	categories: Category[],
+): string {
+	const category = categories.find((cat) => String(cat.id) === value.category);
+	const cents = positiveCents(value.amount);
+	return category && cents !== null
+		? `${category.name} · ${formatCents(cents)}`
+		: `Part ${index + 1}`;
+}
+
+/**
+ * The linked refunds of a split purchase (decision 99): for each, "The refund on Oct 5 goes with", one radio chip
+ * per part, then Not linked. Nothing is chosen when the sheet opens. It is its own element, so a change to a part's
+ * category or amount can draw it again out of band (/split/line, with `oob`). `choices` is what the sheet posted,
+ * so a redraw keeps the answers given: "none" for Not linked, or a part's index.
+ */
+export function RefundChoices({
+	refunds,
+	values,
+	categories,
+	today,
+	choices,
+	oob = false,
+}: {
+	refunds: SplitRefund[];
+	values: SplitValue[];
+	categories: Category[];
+	today: string;
+	choices: Record<number, string | undefined>;
+	oob?: boolean;
+}) {
+	return (
+		<div
+			id="refund-choices"
+			hx-swap-oob={oob ? "true" : undefined}
+			class="flex flex-col gap-4"
+		>
+			{refunds.map((refund) => (
+				<fieldset class="flex flex-col gap-2">
+					<legend class="text-sm text-muted">
+						{`The refund on ${shortDay(refund.date, today)} goes with`}
+					</legend>
+					<div class="flex flex-wrap gap-2">
+						{values.map((value, index) => (
+							<Chip
+								type="radio"
+								name={`refund_${refund.id}`}
+								value={String(index)}
+								checked={choices[refund.id] === String(index)}
+							>
+								{partLabel(value, index, categories)}
+							</Chip>
+						))}
+						<Chip
+							type="radio"
+							name={`refund_${refund.id}`}
+							value="none"
+							checked={choices[refund.id] === "none"}
+						>
+							Not linked
+						</Chip>
+					</div>
+				</fieldset>
+			))}
+		</div>
+	);
+}
+
 /**
  * The split sheet's form. In correction mode (Change the parts, spec §8.4) `totalCents` is the entry's
  * new amount, which the live line counts against, and `amountWas` is the amount the saved parts were
  * drawn with; the parts' own sum is always that amount, so the line says how far the parts are from
  * the new one. `pendingEdit` is the panel's other unsaved changes, carried through every redraw so
- * they are saved with the corrected parts.
+ * they are saved with the corrected parts. A correction keeps each part's links, so it asks about no
+ * refund: `refunds` is for a new split only (decision 99).
  */
 export function SplitForm({
 	id,
@@ -49,6 +124,9 @@ export function SplitForm({
 	pendingEdit,
 	categories,
 	values,
+	refunds = [],
+	choices = {},
+	today,
 	back,
 	error,
 }: {
@@ -59,6 +137,9 @@ export function SplitForm({
 	pendingEdit?: string;
 	categories: Category[];
 	values: SplitValue[];
+	refunds?: SplitRefund[];
+	choices?: Record<number, string | undefined>;
+	today: string;
 	back: string;
 	error?: string;
 }) {
@@ -125,6 +206,14 @@ export function SplitForm({
 						class="min-h-11 rounded-full border border-rule bg-paper px-3"
 						autofocus={index === values.length - 1 && values.length > 2}
 						required
+						// A category change redraws the refund chooser's part labels too (/split/line).
+						hx-post={`/transactions/${id}/split/line`}
+						hx-trigger="change"
+						hx-sync="#split-line:queue last"
+						hx-target="#split-line"
+						hx-select="#split-line > *"
+						hx-swap="innerHTML"
+						hx-include="closest form"
 					>
 						<option value="">Pick a category</option>
 						{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
@@ -157,6 +246,13 @@ export function SplitForm({
 					</div>
 				</div>
 			))}
+			<RefundChoices
+				refunds={correcting ? [] : refunds}
+				values={values}
+				categories={categories}
+				today={today}
+				choices={choices}
+			/>
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">
 					Cancel

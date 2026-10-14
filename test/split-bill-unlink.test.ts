@@ -202,6 +202,7 @@ describe("replacing a split's parts unlinks their bill payments (decision 99)", 
 			saved: true,
 			unlinked: [],
 			bills: [{ name: "Costco membership", period: "2026" }],
+			moved: [],
 		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 		expect(await membershipStatus()).toBe("overdue");
@@ -220,7 +221,12 @@ describe("replacing a split's parts unlinks their bill payments (decision 99)", 
 			"test",
 		);
 
-		expect(result).toEqual({ saved: false, unlinked: [], bills: [] });
+		expect(result).toEqual({
+			saved: false,
+			unlinked: [],
+			bills: [],
+			moved: [],
+		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set(["2026"]));
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
 	});
@@ -349,7 +355,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			"test",
 		);
 
-		expect(result).toEqual({ saved: true, unlinked: [], bills: [] });
+		expect(result).toEqual({ saved: true, unlinked: [], bills: [], moved: [] });
 		const [newMembership] = await partIds(PURCHASE);
 		expect(await linkedOn(MEMBERSHIP)).toEqual([
 			{
@@ -382,6 +388,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			saved: true,
 			unlinked: [],
 			bills: [{ name: "Costco membership", period: "2026" }],
+			moved: [],
 		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
@@ -404,6 +411,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			saved: true,
 			unlinked: [],
 			bills: [{ name: "Costco membership", period: "2026" }],
+			moved: [],
 		});
 		expect(await linkedPeriods(MEMBERSHIP)).toEqual(new Set());
 		expect(await dismissedPayments(MEMBERSHIP)).toEqual([]);
@@ -432,7 +440,7 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 			"test",
 		);
 
-		expect(result).toEqual({ saved: true, unlinked: [], bills: [] });
+		expect(result).toEqual({ saved: true, unlinked: [], bills: [], moved: [] });
 		const [first, second] = await partIds(PURCHASE);
 		expect(await linkedOn(MEMBERSHIP)).toEqual([
 			{

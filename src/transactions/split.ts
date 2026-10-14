@@ -5,7 +5,7 @@ export type SplitResult =
 	| { ok: true; parts: SplitPart[] }
 	| { ok: false; error: string };
 
-function positiveCents(value: string): number | null {
+export function positiveCents(value: string): number | null {
 	try {
 		const cents = toCents(value);
 		return cents > 0 ? cents : null;
