@@ -66,13 +66,35 @@ export function usableSuggestedNames({
 	return namesOn ? names : names.filter((name) => isBankName(name, key));
 }
 
+/** A name's letter runs, so "AT&T" gives "at" and "t", and "APPLE.COM/BILL" gives "apple", "com" and "bill". */
+export const wordsOf = (text: string) =>
+	text
+		.toLowerCase()
+		.split(/[^\p{L}]+/u)
+		.filter(Boolean);
+
+/** A name's whitespace-separated runs, so a run never joins the next word: "Trader Joe's" gives "trader" and "joe's". */
+export const runsOf = (text: string) =>
+	text.toLowerCase().split(/\s+/).filter(Boolean);
+
+const stripped = (text: string, dropped: RegExp) => text.replace(dropped, "");
+
+/** A run with its punctuation removed: "at&t" is "att", "joe's" is "joes", and "#552" is nothing. */
+export const joinedOf = (run: string) => stripped(run, /[^\p{L}]/gu);
+
+/** A name with its punctuation and spacing removed but its digits kept, so "7-eleven" is "7eleven" and "Motel 6" is "motel6". */
+const spelledOf = (text: string) => stripped(text, /[^\p{L}\p{N}]/gu);
+
 /**
- * True when a suggestion repeats the shown text: exactly, or a Tally guess in other capitals (decision 103).
- * The bank's own name is never dropped for only differing in capitals, since the bank sent it (P87 B).
+ * True when a suggestion repeats the shown text: exactly, or a Tally guess that differs from it only in
+ * capitals, punctuation or spacing, so "ATT" beside "AT&T" (decision 103, #412). Digits count, so "Motel 8"
+ * beside "Motel 6" is still offered (#412, Codex review). The bank's own name is never dropped for that,
+ * since the bank sent it (P87 B).
  */
 const repeatsShown = (name: string, key: string, tidied: string) =>
 	name === tidied ||
-	(!isBankName(name, key) && name.toLowerCase() === tidied.toLowerCase());
+	(!isBankName(name, key) &&
+		spelledOf(name.toLowerCase()) === spelledOf(tidied.toLowerCase()));
 
 /**
  * What a transaction's name reads as: a person's chosen name, else the first pending suggestion that
