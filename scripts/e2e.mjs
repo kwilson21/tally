@@ -54,12 +54,8 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 					`unnamed <${el.tagName.toLowerCase()}>`,
 				bottom: rect?.bottom,
 				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
-				isFeedback: el?.matches('a[href="/feedback"]'),
 				tabTop: document
 					.querySelector('nav[aria-label="Tabs"]')
-					?.getBoundingClientRect().top,
-				feedbackTop: document
-					.querySelector('a[href="/feedback"]')
 					?.getBoundingClientRect().top,
 			};
 		});
@@ -67,11 +63,10 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 			focusLeftPage = true;
 			break;
 		}
-		if (focused.key && !focused.isTab && !focused.isFeedback) {
+		if (focused.key && !focused.isTab) {
 			assert(
-				focused.bottom <=
-					Math.min(focused.tabTop, focused.feedbackTop ?? Infinity),
-				`${path}: focused item ${focused.key} overlaps phone tabs or Feedback`,
+				focused.bottom <= focused.tabTop,
+				`${path}: focused item ${focused.key} overlaps the phone tabs`,
 			);
 			seen.add(focused.key);
 		}
@@ -125,13 +120,9 @@ await page.route("**/assets/app.css", async (route) => {
 });
 
 await assertPhoneFocusClearsFixedControls("/transactions?uncategorized=1");
-step(
-	"Tab keeps every focused transaction control above the phone tabs and Feedback",
-);
+step("Tab keeps every focused transaction control above the phone tabs");
 await assertPhoneFocusClearsFixedControls("/settings");
-step(
-	"Tab keeps every focused Settings control above the phone tabs and Feedback",
-);
+step("Tab keeps every focused Settings control above the phone tabs");
 
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");
@@ -158,7 +149,8 @@ const shellInsets = await page.evaluate(() => {
 			right: style('nav[aria-label="Tabs"]').paddingRight,
 			rect: rect('nav[aria-label="Tabs"]'),
 		},
-		feedback: rect('a[href="/feedback"]'),
+		feedback: rect('#top-line a[href="/feedback"]'),
+		feedbackPosition: style('#top-line a[href="/feedback"]').position,
 	};
 });
 assert.equal(shellInsets.bodyTop, "59px");
@@ -167,7 +159,9 @@ assert.equal(shellInsets.page.right, "64px");
 assert.equal(shellInsets.tabs.bottom, "34px");
 assert.equal(shellInsets.tabs.left, "44px");
 assert.equal(shellInsets.tabs.right, "44px");
-assert(shellInsets.feedback.bottom <= shellInsets.tabs.rect.top - 16);
+// The pill sits in the phone's top line, beside the wordmark, below the notch and never fixed (P123 A).
+assert.notEqual(shellInsets.feedbackPosition, "fixed");
+assert(shellInsets.feedback.top >= 59);
 assert(shellInsets.feedback.right <= 390 - 44);
 step("phone shell controls stay clear of simulated safe areas");
 

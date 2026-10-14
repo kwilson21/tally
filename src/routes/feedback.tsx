@@ -90,6 +90,7 @@ function view(
 	return (
 		<Layout
 			title="Send feedback · Tally"
+			active="feedback"
 			demo={demo}
 			currentPath={`/feedback?from=${values.from}`}
 			modules={["/js/feedback-privacy.js"]}

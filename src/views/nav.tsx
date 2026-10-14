@@ -1,3 +1,4 @@
+import { TallyMark } from "./brand";
 import { Icon, type IconName } from "./icons";
 
 export type NavKey =
@@ -7,7 +8,9 @@ export type NavKey =
 	| "trends"
 	| "accounts"
 	| "settings"
-	| "more";
+	| "more"
+	| "how"
+	| "feedback";
 
 type NavItem = { key: NavKey; label: string; href: string; icon: IconName };
 
@@ -32,13 +35,18 @@ export const TAB_ITEMS: NavItem[] = [
 	{ key: "more", label: "More", href: "/more", icon: "more" },
 ];
 
-const MORE_KEYS: NavKey[] = ["accounts", "settings", "more"];
+// How Tally works and Feedback are the desktop sidebar's second group, under a rule, and the phone's
+// More tab is current on both pages (P123 A).
+const MORE_KEYS: NavKey[] = ["accounts", "settings", "more", "how", "feedback"];
 
 function isCurrent(item: NavItem, active?: NavKey) {
 	if (item.key === "more")
 		return active !== undefined && MORE_KEYS.includes(active);
 	return item.key === active;
 }
+
+const SIDEBAR_LINK =
+	"flex min-h-11 items-center gap-3 rounded-control px-2 text-lg text-ink no-underline aria-[current=page]:text-accent";
 
 export function Sidebar({ active }: { active?: NavKey }) {
 	return (
@@ -49,13 +57,35 @@ export function Sidebar({ active }: { active?: NavKey }) {
 						<a
 							href={item.href}
 							aria-current={isCurrent(item, active) ? "page" : undefined}
-							class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg text-ink no-underline aria-[current=page]:text-accent"
+							class={SIDEBAR_LINK}
 						>
 							<Icon name={item.icon} />
 							{item.label}
 						</a>
 					</li>
 				))}
+			</ul>
+			<ul class="mt-3 flex flex-col gap-1 border-t border-rule pt-3">
+				<li>
+					<a
+						href="/how-it-works"
+						aria-current={active === "how" ? "page" : undefined}
+						class={SIDEBAR_LINK}
+					>
+						<TallyMark class="size-6" />
+						How Tally works
+					</a>
+				</li>
+				<li>
+					<a
+						href="/feedback"
+						aria-current={active === "feedback" ? "page" : undefined}
+						class={SIDEBAR_LINK}
+					>
+						<Icon name="message" />
+						Feedback
+					</a>
+				</li>
 			</ul>
 		</nav>
 	);

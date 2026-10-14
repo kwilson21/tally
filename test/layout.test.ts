@@ -26,9 +26,14 @@ describe("app shell", () => {
 		expect(main).toContain("pb-[var(--focus-scroll-room)]");
 		expect(main).toContain("lg:pb-24");
 		expect(css).toMatch(
-			/--focus-scroll-room:\s*calc\([\s\S]*?var\(--tabs-height\)[\s\S]*?var\(--feedback-bottom\)[\s\S]*?var\(--feedback-height\)[\s\S]*?var\(--focus-scroll-gap\)[\s\S]*?var\(--safe-area-bottom\)[\s\S]*?\);/,
+			/--focus-scroll-room:\s*calc\(\s*var\(--tabs-height\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\);/,
 		);
 		expect(css).toMatch(/scroll-padding-bottom:\s*var\(--focus-scroll-room\)/);
+	});
+
+	it("counts only the tab bar in that room: the Feedback pill is in the top line now (P123 A)", () => {
+		expect(css).not.toContain("--feedback-bottom");
+		expect(css).not.toContain("--feedback-height");
 	});
 
 	it("loads our CSS and htmx from our own origin", async () => {
@@ -75,9 +80,6 @@ describe("app shell", () => {
 		);
 		expect(html).toContain(
 			"pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))]",
-		);
-		expect(html).toContain(
-			"bottom-[calc(var(--feedback-bottom)+var(--safe-area-bottom))]",
 		);
 	});
 
@@ -159,11 +161,74 @@ describe("where toasts sit", () => {
 		expect(await toastRegion()).toContain("var(--selection-bar-height)");
 	});
 
-	it("steps the Feedback pill aside while a toast shows, on a phone and only when it has no focus", async () => {
+	it("has no fixed Feedback pill, so no toast or Select rule hides it (P123 A)", async () => {
 		const html = decodeAttributes(await home());
-		expect(html).toContain("max-lg:[body:has(#toasts>*)_&:not(:focus)]:hidden");
-		// Two parts, so Tailwind's scan of this file doesn't build the old, unscoped class into app.css.
+		// Two parts, so Tailwind's scan of this file doesn't build the retired rules into app.css.
 		expect(html).not.toContain(["[body:has(#toasts>*)_&", "]:hidden"].join(""));
+		expect(html).not.toContain(
+			["[body:has(#selection-form)_&", "]:hidden"].join(""),
+		);
+		expect(html).not.toMatch(/fixed bottom-\[calc\(var\(--feedback/);
+	});
+});
+
+// The Feedback pill sits in the phone's top line, beside the wordmark, and scrolls away with the page
+// (P123 A). On desktop the sidebar's second group carries Feedback and How Tally works instead.
+describe("the Feedback pill in the top line", () => {
+	/** The phone's top line: the wordmark and, beside it, the pill. */
+	const topLine = (html: string) =>
+		html.match(/<div id="top-line"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+
+	it("sits at the right of the top line, beside the wordmark, and is not fixed", async () => {
+		const line = topLine(await home());
+		expect(line).toContain('aria-label="Tally home"');
+		const pill = line.match(/<a href="\/feedback" class="([^"]*)"/);
+		expect(pill).not.toBeNull();
+		expect(line.indexOf('aria-label="Tally home"')).toBeLessThan(
+			line.indexOf('href="/feedback"'),
+		);
+		expect(pill?.[1]).not.toMatch(/\bfixed\b/);
+		expect(pill?.[1]).toContain("min-h-11");
+	});
+
+	it("is absent on /feedback, where the top line keeps only the wordmark", async () => {
+		const html = decodeAttributes(
+			await (await exports.default.fetch("http://tally.test/feedback")).text(),
+		);
+		const line = topLine(html);
+		expect(line).toContain('aria-label="Tally home"');
+		expect(line).not.toContain('href="/feedback"');
+	});
+
+	it("adds a second sidebar group under a rule: How Tally works with the tally mark, and Feedback", async () => {
+		const html = await home();
+		const group =
+			html.match(
+				/<ul class="mt-3 flex flex-col gap-1 border-t border-rule pt-3">([\s\S]*?)<\/ul>/,
+			)?.[1] ?? "";
+		expect(group).toContain('href="/how-it-works"');
+		expect(group).toContain("How Tally works");
+		expect(group).toContain('viewBox="0 0 28 28"');
+		expect(group).toContain('href="/feedback"');
+		expect(group).toContain('data-icon="message"');
+	});
+
+	it("marks How Tally works current on its page, with More current on the phone tabs", async () => {
+		const html = decodeAttributes(
+			await (
+				await exports.default.fetch("http://tally.test/how-it-works")
+			).text(),
+		);
+		expect(html).toMatch(/<a href="\/how-it-works" aria-current="page"/);
+		expect(html).toMatch(/<a href="\/more" aria-current="page"/);
+	});
+
+	it("marks Feedback current on its page, with More current on the phone tabs", async () => {
+		const html = decodeAttributes(
+			await (await exports.default.fetch("http://tally.test/feedback")).text(),
+		);
+		expect(html).toMatch(/<a href="\/feedback" aria-current="page"/);
+		expect(html).toMatch(/<a href="\/more" aria-current="page"/);
 	});
 });
 

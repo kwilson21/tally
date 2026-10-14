@@ -762,15 +762,16 @@ describe("demo", () => {
 	});
 });
 
-it("uses the Referer for the return page and omits the button on feedback", async () => {
+it("uses the Referer for the return page and leaves the top line's pill off feedback", async () => {
 	const response = await productionApp().fetch("/feedback", {
 		headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 	});
 	const html = await response.text();
 	expect(html).toContain('name="from" value="/transactions"');
-	expect(html).not.toContain(
-		"fixed bottom-[calc(var(--feedback-bottom)+var(--safe-area-bottom))]",
-	);
+	// The top line keeps its wordmark on this page, and no pill beside it (P123 A).
+	const topLine = html.match(/<div id="top-line"[^>]*>[\s\S]*?<\/div>/)?.[0];
+	expect(topLine).toContain('aria-label="Tally home"');
+	expect(topLine).not.toContain('href="/feedback"');
 });
 
 it("renders a plain feedback link on app pages", async () => {
