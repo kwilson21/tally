@@ -599,13 +599,20 @@ describe("the proposals page's drawings", () => {
 				.flatMap((s) => [...s.matchAll(/\.(proposal-[a-z0-9-]+)/g)])
 				.map((m) => m[1]),
 		);
-		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts).
+		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), and
+		// P118 and P119's saved-row replays (the tick, the ruled line, the let-go band and the toast).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
 				"proposal-cut",
 				"proposal-loop",
 				"proposal-morph",
+				"proposal-saved-band",
+				"proposal-saved-chevron",
+				"proposal-saved-loop",
+				"proposal-saved-rule",
+				"proposal-saved-tick",
+				"proposal-saved-toast",
 				"proposal-slide-in",
 				"proposal-slide-out",
 			].sort(),
@@ -669,6 +676,38 @@ describe("the proposals page's drawings", () => {
 					r.decls.get("animation") === "none",
 			),
 		).toBe(true);
+	});
+
+	it("replays a saved row on a five-second loop from the toast's stay, and rests on the end state under reduced motion (P119)", () => {
+		expect(rule(".proposal-saved-loop")[0]?.decls.get("--loop")).toBe(
+			"calc(var(--duration-toast) * 1.25)",
+		);
+		for (const part of [
+			".proposal-saved-tick",
+			".proposal-saved-chevron",
+			".proposal-saved-toast",
+			".proposal-saved-rule",
+			".proposal-saved-band",
+		]) {
+			expect(
+				rules.some(
+					(r) =>
+						!inReduce(r) &&
+						selectorsOf(r).includes(part) &&
+						r.decls.get("animation")?.includes("var(--loop)"),
+				),
+				part,
+			).toBe(true);
+			expect(
+				rules.some(
+					(r) =>
+						inReduce(r) &&
+						selectorsOf(r).includes(part) &&
+						r.decls.get("animation") === "none",
+				),
+				`${part} under reduced motion`,
+			).toBe(true);
+		}
 	});
 
 	it("keeps the switch moving too: it is drawn Off, and the loop slides the real knob and track from the On look", async () => {

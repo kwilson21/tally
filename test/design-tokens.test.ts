@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	COLOR_TOKENS,
 	DURATION_TOKENS,
+	PROPOSED_COLOR_TOKENS,
 	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
 } from "../src/design-system/tokens";
@@ -733,6 +734,18 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
+	});
+
+	it("proposes --color-press (P118) as ink at 6% on paper, marked as not used by the app yet, and lists it with its contrast", () => {
+		expect(css).toContain(
+			"--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);",
+		);
+		expect(css).toContain("proposed in P118, not used by the app yet");
+		// Its value is not hex, so it is listed apart from the catalog's colours, which the test above matches to app.css.
+		expect(PROPOSED_COLOR_TOKENS).toEqual([
+			expect.objectContaining({ name: "press", contrast: "16.1" }),
+		]);
+		expect(COLOR_TOKENS.map((t) => t.name)).not.toContain("press");
 	});
 
 	it("lists the swipe easing and distance as app.css tokens", () => {
