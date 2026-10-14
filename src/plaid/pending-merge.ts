@@ -118,7 +118,7 @@ const PERSON_TAKEN = takesDetailSql(
 /** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
 const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
 	AND COALESCE(t.category_source, '') != 'user'`;
-/** Mirrors Jev's category statement: Jev's answer moves onto a posted row with no category, at the same amount, never a split. */
+/** Mirrors JEV_CATEGORY_ARM (the Jev answer statement): Jev's category moves onto a posted row with no category, at the same amount, never a split. */
 const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL AND t.is_split = 0`;
 /** Mirrors the split statement that takes the pre-split category when the amount changed. */
@@ -152,6 +152,19 @@ const KEEP_PLAN_PART = `(SELECT part.id FROM transactions part, transactions pp
 /** Whether the posted row's payment group already pays a linked bill or a planned expense (POSTED_GROUP). */
 const POSTED_GROUP_PAYS = `(EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
 	OR EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP}))`;
+
+/**
+ * Jev's category arm of the Jev answer statement (STATEMENTS): a confident pick, or one below the threshold kept with its
+ * confidence, onto a posted row with no category and no confidence. The statement's shared guard adds the amount, the
+ * unset confidence and that the purchase isn't split.
+ */
+const JEV_CATEGORY_ARM = `p.category_confidence IS NOT NULL AND transactions.category_id IS NULL AND transactions.category_source IS NULL`;
+/**
+ * Jev's mixed-trip arm of the same statement (#233, #546): its pick, none-fit or mixed reading onto a posted row with a
+ * category of its own and no Jev answer. It moves no category.
+ */
+const JEV_MIXED_ARM = `(p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
+	AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL`;
 
 const STATEMENTS = [
 	// Tally's log of the pending row's category (spec section 5) moves to the posted row only when that category moves with
@@ -220,23 +233,21 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Tally's own answer, after the person's choices above, so it only fills what's still unanswered. Each
 	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
-	// amount is a new question, as for any bank correction.
-	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
-	// A split purchase takes none of Jev's answers, here or in the statement below.
-	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
-		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id,
-		jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed, jev_also_category_id = p.jev_also_category_id
-	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
-	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
-	// Jev's pick, none-fit and mixed-trip reading move onto a posted row with a category of its own and no Jev answer, which
-	// the category statement above leaves alone. A split purchase keeps no mixed-trip reading, so it takes none. It moves no category, so it needs no ai_log arm.
-	`UPDATE transactions SET jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
+	// amount is a new question, as for any bank correction. A split purchase takes none of Jev's answers.
+	// One statement holds both of Jev's category arms (JEV_CATEGORY_ARM, JEV_MIXED_ARM): the first moves Jev's category
+	// (a confident pick, or one below the threshold kept with its confidence, decision 27), the second moves Jev's pick,
+	// none-fit and mixed-trip reading (#233) onto a posted row with a category of its own and no Jev answer. A row both
+	// arms match takes the first arm's category, as it did when the second statement ran after the first, which set the
+	// confidence the second requires to be unset. The second moves no category, so it needs no ai_log arm; the four Jev
+	// columns come from the pending row on either arm.
+	`UPDATE transactions SET
+		category_id = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_id ELSE transactions.category_id END,
+		category_source = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_source ELSE transactions.category_source END,
+		category_confidence = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_confidence ELSE transactions.category_confidence END,
+		jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
 		jev_also_category_id = p.jev_also_category_id
-	 ${FROM_PENDING} AND p.amount_cents = ?3
-	 AND (p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
-	 AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL
-	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
+	 ${FROM_PENDING} AND p.amount_cents = ?3 AND transactions.category_confidence IS NULL AND transactions.is_split = 0
+	 AND (${JEV_CATEGORY_ARM} OR ${JEV_MIXED_ARM})`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
