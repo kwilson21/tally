@@ -346,7 +346,6 @@ app.route("/", settings);
 app.route("/", accounts);
 app.route("/", bills);
 app.route("/", plans);
-
 app.route("/", destinations);
 app.route("/", feedback);
 app.route("/", designSystem);

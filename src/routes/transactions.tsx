@@ -1504,7 +1504,6 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	}
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
-
 	// Bills and planned expenses share one count and one sentence; the noun names the kinds that are there.
 	const { paying, bills, plans } = await payingCounts(c.env.DB, excluded);
 	const stillCounts = stillCountsSentence(
@@ -1673,7 +1672,6 @@ function EditSheet({
 					{unpaidBillsNote(tx.splitRemovedBills)}
 				</p>
 			)}
-
 			{tx.countsInMonth && (!tx.excluded || tx.paysBill || tx.paysPlan) && (
 				<p class="text-muted">
 					Counts in{" "}
@@ -1684,7 +1682,6 @@ function EditSheet({
 				</p>
 			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
-
 			{tx.excluded && !tx.paysBill && !tx.paysPlan && (
 				<p class="flex items-center gap-2 text-muted">
 					<Icon name="transfer" class="size-5" />
@@ -1692,7 +1689,6 @@ function EditSheet({
 				</p>
 			)}
 			{/* A payment linked to a bill counts whatever its exclusion (spec §8.5), so the panel says so. */}
-
 			{tx.excluded && tx.paysBill && (
 				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
 			)}

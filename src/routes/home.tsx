@@ -145,7 +145,6 @@ async function renderHome(
 		: [];
 	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
 	const unpaidBillsCents = billTotals?.soonCents ?? 0;
-
 	// Planned expenses set aside this month (decision 74): only the current month's Safe to spend sets them aside.
 	const unpaidPlansCents = current
 		? await plansSetAsideCents(c.env.DB, month)
@@ -157,7 +156,6 @@ async function renderHome(
 		savingsGoalCents: data.savingsGoalCents,
 		unpaidPlansCents,
 	});
-
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const storedFirstMonth =
 		firstMonthOption ?? (await firstCountedMonth(c.env.DB));

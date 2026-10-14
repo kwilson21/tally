@@ -182,6 +182,37 @@ describe("planned payments in the budget", () => {
 		).first<{ n: number }>();
 		expect(linked?.n).toBe(0);
 	});
+
+	it("the bill matcher's write skips a payment a plan takes after its read, so the run doesn't abort", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9708,'Registration bill',18000,3,'monthly','DMV FIXTURE')",
+		).run();
+		await payment(9707, 18000);
+		// A plan takes the payment between the matcher's read and its write: the write's guard leaves it out.
+		let raced = false;
+		const db = {
+			prepare: (query: string) => {
+				const statement = env.DB.prepare(query);
+				if (!query.startsWith("INSERT OR IGNORE INTO bill_payments"))
+					return statement;
+				return {
+					bind: (...values: unknown[]) => ({
+						run: async () => {
+							raced = true;
+							await plan("Car registration", 18000, MONTH, 9707);
+							return statement.bind(...values).run();
+						},
+					}),
+				} as unknown as D1PreparedStatement;
+			},
+		} as unknown as D1Database;
+		expect(await matchBillPayments(db, TODAY)).toBe(0);
+		expect(raced).toBe(true);
+		const linked = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=9707 AND status='linked'",
+		).first<{ n: number }>();
+		expect(linked?.n).toBe(0);
+	});
 });
 
 describe("Bills' Planned group, Band and sheet", () => {
@@ -540,6 +571,21 @@ describe("Bills' Planned group, Band and sheet", () => {
 			body: new URLSearchParams({}),
 		});
 		expect(plain.headers.get("location")).toBe("/bills");
+	});
+
+	it("an Unlink on a plan that is already unpaid claims no unlink: no toast, and the redrawn page or sheet shows it unpaid", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const onPage = await post(`/plans/${id}/unlink`, { from: "plan" });
+		expect(onPage.headers.get("HX-Trigger")).toBeNull();
+		const pageHtml = await onPage.text();
+		expect(pageHtml).toContain('<h1 class="font-serif text-5xl');
+		expect(pageHtml).toContain("Link a payment");
+
+		const onSheet = await post(`/plans/${id}/unlink`, {});
+		expect(onSheet.headers.get("HX-Trigger")).toBeNull();
+		const sheetHtml = await onSheet.text();
+		expect(sheetHtml).toContain('id="plan-sheet-title"');
+		expect(sheetHtml).not.toContain("Paid by");
 	});
 
 	it("restores a plan unpaid, and returns its name, when a bill took its payment during the Undo window", async () => {

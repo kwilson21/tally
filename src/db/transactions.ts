@@ -95,13 +95,11 @@ export type ListRow = {
 	excluded: boolean;
 	/** Linked to a bill's occurrence: it counts in Spent whatever its exclusion, and isn't shown as excluded. */
 	paysBill?: boolean;
-
 	/** The linked bill whose payment this transaction is. */
 	billName?: string | null;
 	/** Linked to a planned expense: it counts whatever its exclusion, as a bill's payment does (decision 82), and `planName` says which. */
 	paysPlan?: boolean;
 	planName?: string | null;
-
 	income: boolean;
 	incomeConfidence?: number | null;
 	creditReviewed: boolean;
@@ -154,7 +152,6 @@ export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.categor
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
 /** The name of the planned expense whose payment this transaction is, on its own link or its split parent's (`paysPlanSql`). */
 export const PLAN_NAME_COLUMN = `(SELECT pe.name FROM planned_expenses pe WHERE pe.transaction_id IN (t.id, t.parent_id) LIMIT 1) AS planName`;
-
 /** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
 export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
 /** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */

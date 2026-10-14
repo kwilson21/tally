@@ -250,7 +250,6 @@ const STATEMENTS = [
 		 AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
 		 AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP}))
 		OR (transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${KEEP_PLAN_PART} IS NOT NULL))`,
-
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}
 	 WHERE refund_of_id = ${PENDING} AND id != ${POSTED} AND ${READY}`,

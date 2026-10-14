@@ -17,7 +17,6 @@ import {
 	updatePlan,
 } from "../db/planned-expenses";
 import { centsToAmount, formatCents, toCents } from "../money";
-
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
@@ -326,15 +325,20 @@ plans.post("/plans/:id/unlink", async (c) => {
 	if (!plan) return c.notFound();
 	// The plan's own page and its sheet both unlink, and each answers with the view it came from (decision 101), as Link does.
 	const onPage = (await c.req.parseBody()).from === "plan";
-	await unlinkPlanPayment(c.env.DB, id);
+	const unlinked = await unlinkPlanPayment(c.env.DB, id);
 	const today = await householdToday(c.env.DB);
 	if (!c.req.header("HX-Request"))
 		return c.redirect(onPage ? `/plans/${id}` : "/bills", 303);
 	const toast = { message: "Payment unlinked", type: "success" };
-	if (onPage) return withToast(await planPage(c, id), toast);
+	// A stale sheet's second Unlink finds the plan unpaid already: the redrawn page shows it, and no toast claims an unlink.
+	if (onPage) {
+		const page = await planPage(c, id);
+		return unlinked ? withToast(page, toast) : page;
+	}
 	// On the sheet, which stays open on the plan, now unpaid.
 	const fresh = (await loadPlan(c.env.DB, id)) ?? plan;
-	return withToast(await sheetPage(c, { plan: fresh }, today), toast);
+	const sheet = await sheetPage(c, { plan: fresh }, today);
+	return unlinked ? withToast(sheet, toast) : sheet;
 });
 
 plans.post("/plans/:id/move", async (c) => {

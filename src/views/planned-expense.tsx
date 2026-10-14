@@ -101,7 +101,7 @@ export function PlannedHeading({ totalCents }: { totalCents?: number }) {
 }
 
 /**
- * The Band for a plan unpaid when its month ended: "Car registration wasn't paid", with Move to this month and Drop,
+ * The Band for a plan unpaid when its month ended: "Car registration wasn't paid", with Move to this month's short name and Drop,
  * and a dot for each plan waiting. The first dot is the one being asked; the rest are the other plans (P105).
  */
 export function PlanBand({

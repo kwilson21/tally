@@ -22,22 +22,18 @@ export function rowCaption(row: ListRow): Caption {
 	const paidBillName = row.parentId
 		? (row.billName ?? row.parentBillName)
 		: row.billName;
-
 	const paidBill =
 		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
 	// A payment for a planned expense says what it paid, by the plan's name (P101's row, owner's pick decision 101).
 	const paidPlan = row.paysPlan && row.planName ? `paid ${row.planName}` : null;
 	const paid = paidBill ?? paidPlan;
-
 	// A refund the bank's change unlinked says why, with the purchase's date, until a person links it again (decision 99).
 	const unlinked = row.refundUnlinkedPurchaseDate
 		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
 		: null;
 	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
-
 	if (row.excluded && !row.paysBill && !row.paysPlan)
 		return { kind: "excluded", caption: "Excluded", tag: false };
-
 	if (maybeIncomeVisible(row))
 		return { kind: "needs", caption: "Maybe income", tag: false };
 	if (

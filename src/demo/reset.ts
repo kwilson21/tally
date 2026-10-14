@@ -239,7 +239,6 @@ export async function resetDemo(
 				.prepare(
 					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT b.id, ?, t.id, 'user', 'linked' FROM bills b, transactions t WHERE b.merchant_raw_name = ? AND t.raw_name = ? AND t.date = ? AND t.amount_cents = ?",
 				)
-
 				.bind(period, seedMerchantKey(RENT_PAYEE), RENT_PAYEE, date, cents),
 		),
 		// Planned one-time expenses (#202): one set aside this month, and one from last month still unpaid, so Bills shows
@@ -255,7 +254,6 @@ export async function resetDemo(
 			)
 			.bind(monthOffset(today, 1)),
 	]);
-
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;
 		const petYearNumber =

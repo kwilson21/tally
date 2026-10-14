@@ -341,7 +341,6 @@ export async function page(
 	});
 	const active = rows.filter((b) => b.active);
 	const inactive = rows.filter((b) => !b.active);
-
 	const totals = billTotalsForRows(today.slice(0, 7), active);
 	const month = today.slice(0, 7);
 	// Planned one-time expenses (decision 101): the unpaid ones are Planned, whatever their month; a paid one shows with
@@ -408,7 +407,6 @@ export async function page(
 						month={today.slice(0, 7)}
 					/>
 				)}
-
 				<HowLink section="bills" />
 				{earlierPlans[0] && (
 					<PlanBand
@@ -1904,7 +1902,8 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 		: null;
 	// The link comes back as the matcher's ('auto'): the dismissal doesn't remember how the payment was linked, and most
 	// links are the matcher's. Only a hand link's "by hand" label is lost (the export keeps the column). The guard checks
-	// the token again, since the read above and this batch don't run atomically.
+	// the token again, since the read above and this batch don't run atomically. A plan that took the payment meanwhile
+	// keeps it unlinked: a dismissal doesn't block a plan, and the migration's trigger would refuse the bill link.
 	const restored = held?.fresh
 		? (
 				await c.env.DB.batch([
@@ -1912,7 +1911,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 						`INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status)
 						 SELECT ?1,?2,?3,'auto','linked' WHERE EXISTS(SELECT 1 FROM bill_payments WHERE undo_token=?4 AND transaction_id=?3 AND status='dismissed' AND matched_by='user' AND julianday('now')-julianday(created_at)<10.0/86400)
 						 AND NOT EXISTS(SELECT 1 FROM bill_payments WHERE transaction_id=?3 AND status='linked')
-						 AND EXISTS(SELECT 1 FROM transactions WHERE id=?3 AND is_split=0 AND flag_income=0 AND amount_cents>0)`,
+						 AND EXISTS(SELECT 1 FROM transactions t WHERE t.id=?3 AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT ${paysPlanGroupSql("t")})`,
 					).bind(id, held.period, held.transactionId, token),
 					c.env.DB.prepare(liftNotThisOneSql).bind(
 						id,
