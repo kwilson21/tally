@@ -645,6 +645,48 @@ describe("GET /transactions/:id", () => {
 		).toEqual({ category_id: 2 });
 	});
 
+	it("redraws a refused save with the rule tick still ticked and its rule's hint, as the panel had it", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "2",
+			merchant: "Local Bakery",
+			note: "x".repeat(501),
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		const savedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		expect(res.status).toBe(422);
+		expect(html).toContain("Keep the note under 500 characters.");
+		expect(html).toMatch(/name="always" value="1" checked/);
+		expect(html).toContain(
+			`Local Bakery is always ${savedName}. Untick it and save to remove the rule.`,
+		);
+	});
+
 	it("unticks the toggle for another selected category and ticking saves that category as the rule", async () => {
 		const merchantKey = (
 			await env.DB.prepare(

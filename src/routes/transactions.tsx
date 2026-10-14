@@ -2545,6 +2545,17 @@ function asksFromThisPage(c: Context<App>) {
 	}
 }
 
+/**
+ * The store's merchant rule matches this entry as it's saved: its category is the rule's. The panel's rule tick
+ * opens ticked then, and its hint names the rule (MerchantRuleTick), so every panel literal sets both fields from it.
+ */
+function ruleMatches(tx: TransactionDetail) {
+	return (
+		tx.merchantRuleCategoryId !== null &&
+		tx.merchantRuleCategoryId === tx.categoryId
+	);
+}
+
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -2559,12 +2570,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
-		alwaysWas:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysForMerchant: ruleMatches(tx),
+		alwaysWas: ruleMatches(tx),
 		merchantRuleWas: tx.merchantRuleCategoryId,
 		// Nothing is typed yet: "Type your own" starts empty (decision 101).
 		displayName: null,
@@ -3740,9 +3747,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewedByUser,
-			alwaysForMerchant:
-				tx.merchantRuleCategoryId !== null &&
-				tx.merchantRuleCategoryId === tx.categoryId,
+			alwaysForMerchant: ruleMatches(tx),
+			alwaysWas: ruleMatches(tx),
 			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: null,
 			note: tx.note,

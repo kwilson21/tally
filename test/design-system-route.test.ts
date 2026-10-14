@@ -949,6 +949,20 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("gives the rule-offer section's heading and its two question samples different ids, so the catalog has no duplicate id (#353)", async () => {
+		const { html } = await get("/design-system");
+		// The section's own heading (Specimen's `${id}-title`), then RuleOffer's and GroupRuleOffer's samples. A repeated id
+		// would hide one heading from screen readers and from the labelled section.
+		const titles = [
+			...html.matchAll(/\sid="([^"]*rule-offer[^"]*-title)"/g),
+		].map((match) => match[1]);
+		expect(titles).toEqual([
+			"rule-offer-title",
+			"rule-offer-sample-title",
+			"group-rule-offer-sample-title",
+		]);
+	});
+
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {
 		const { html } = await get("/design-system");
 		const tags = specimens(html);

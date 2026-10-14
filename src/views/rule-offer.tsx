@@ -19,11 +19,14 @@ export function GroupRuleOffer({
 	value,
 	action,
 	focus = false,
+	id = "rule-offer-title",
 }: {
 	value: GroupRuleOfferValue;
 	/** The route that answers the question, with the skips the page carries. */
 	action: string;
 	focus?: boolean;
+	/** The heading's id. Organize keeps the default; the catalog passes its own, since its section heading takes the default. */
+	id?: string;
 }) {
 	return (
 		<div class="flex flex-col gap-3">
@@ -32,7 +35,7 @@ export function GroupRuleOffer({
 				Saved as {value.category}
 			</p>
 			<h2
-				id="rule-offer-title"
+				id={id}
 				tabindex={focus ? -1 : undefined}
 				autofocus={focus || undefined}
 				class="font-serif text-4xl font-semibold tracking-tight"
@@ -96,9 +99,12 @@ export function ruleOfferAnnouncement(
 export function RuleOffer({
 	value,
 	focus = false,
+	id = "rule-offer-title",
 }: {
 	value: RuleOfferValue;
 	focus?: boolean;
+	/** The heading's id, as GroupRuleOffer's: the catalog's sample passes its own. */
+	id?: string;
 }) {
 	return (
 		<div class="flex flex-col gap-3">
@@ -107,7 +113,7 @@ export function RuleOffer({
 				Saved as {value.category}
 			</p>
 			<h2
-				id="rule-offer-title"
+				id={id}
 				tabindex={focus ? -1 : undefined}
 				autofocus={focus || undefined}
 				class="font-serif text-4xl font-semibold tracking-tight"

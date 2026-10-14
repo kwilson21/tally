@@ -2931,6 +2931,7 @@ function Categorization() {
 				<State label="Edit panel and list: after the third pick, the question over the list, with its count">
 					<div inert class="max-w-xl">
 						<RuleOffer
+							id="rule-offer-sample-title"
 							value={{
 								merchantKey: "COSTCO",
 								merchant: "Costco",
@@ -2945,6 +2946,7 @@ function Categorization() {
 				<State label="Organize: after Save and next, in place of the store, with Not now and Yes; Yes makes the rule for every merchant of the group">
 					<div inert class="max-w-xl">
 						<GroupRuleOffer
+							id="group-rule-offer-sample-title"
 							value={{
 								merchantKeys: ["COSTCO WHSE #0431", "COSTCO GAS"],
 								merchant: "Costco",

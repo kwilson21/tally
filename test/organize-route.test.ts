@@ -326,7 +326,7 @@ describe("POST /transactions/organize", () => {
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 	});
 
-	it("a Yes after the group's charges were filed elsewhere makes no rule and says no rule was made (htmx)", async () => {
+	it("a Yes after the group's charges were filed elsewhere makes no rule, moves on silently and sends focus to the next store (htmx)", async () => {
 		await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
@@ -335,7 +335,7 @@ describe("POST /transactions/organize", () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = 3 WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND category_id = 2",
 		).run();
-		const { res } = await post(
+		const { res, html } = await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
@@ -348,6 +348,10 @@ describe("POST /transactions/organize", () => {
 		expect(res.status).toBe(200);
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
 		expect(res.headers.get("HX-Trigger")).toBeNull();
+		// The question is gone, and the next store's heading takes focus instead of the store that was answered.
+		expect(html).not.toContain("rule-offer-title");
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+		expect(html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
 	});
 
 	it("skips the question when every merchant of the group already has that rule, and moves on as before (JavaScript off)", async () => {
