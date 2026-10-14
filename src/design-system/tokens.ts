@@ -44,6 +44,13 @@ export const COLOR_TOKENS = [
 		contrast: "4.8",
 	},
 	{
+		name: "press",
+		hex: "color-mix(in srgb, var(--color-ink) 6%, transparent)",
+		swatch: "bg-press",
+		use: "a pressed row, and a row whose sheet is loading (ink at 6% over paper, #EDEAE4)",
+		contrast: "16.1 (ink text on it)",
+	},
+	{
 		name: "ok",
 		hex: "#2f7a4f",
 		swatch: "bg-ok",
@@ -165,18 +172,6 @@ export const SHADOW_TOKENS = [
 		name: "shadow-swipe-cue",
 		value: "0 2px 8px ink at 18%",
 		use: "the dark finished-month chart arrow",
-	},
-] as const;
-
-// Proposed tokens (P118): drawn on the proposals page, not used by the app yet. Kept apart from
-// COLOR_TOKENS, whose hex values test/design-tokens.test.ts matches to app.css; a proposed token's
-// value is a colour mix. Its contrast is ink text on the tint.
-export const PROPOSED_COLOR_TOKENS = [
-	{
-		name: "press",
-		value: "ink at 6% over paper (#EDEAE4)",
-		use: "a pressed row's box, held still (P118); not used by the app yet",
-		contrast: "16.1",
 	},
 ] as const;
 

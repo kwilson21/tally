@@ -1333,6 +1333,31 @@ describe("splits unlink their refunds", () => {
 		);
 	});
 
+	it("names the refund a purchase split unlinks when the purchase keeps a dormant refund link of its own", async () => {
+		// PURCHASE was a refund of another purchase before its amount turned positive, so its own link is dormant.
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(OTHER_MERCHANT, PURCHASE)
+			.run();
+		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "30"],
+			["part_amount", "20"],
+			[`refund_${REFUND}`, "none"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(200);
+		expect(await refundOf(REFUND)).toBeNull();
+		expect(trigger?.toast.message).toBe(
+			"Split Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+		expect(trigger?.announce).toBe(
+			"Saved split for Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
 	it("re-splitting replaces the parts and unlinks their refunds", async () => {
 		await link(REFUND, PART_HOUSEHOLD);
 		const { res, trigger } = await post(`/transactions/${SPLIT}/split`, [

@@ -18,6 +18,7 @@ import { Phase5PlansProposals } from "./proposals-phase5-plans";
 import { Phase5TransactionsProposals } from "./proposals-phase5-transactions";
 import { Phase35Proposals } from "./proposals-phase35";
 import { Phase35StatesProposals } from "./proposals-phase35-states";
+import { PlannedDiagramProposal } from "./proposals-planned-diagram";
 import { PolishProposals } from "./proposals-polish";
 import { PolishRoundAProposals } from "./proposals-polish-2";
 import { PolishRoundBProposals } from "./proposals-polish-3";
@@ -485,7 +486,18 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="polish4-title" class="mt-10">
+			<section aria-labelledby="p126-title" class="mt-10">
+				<h2 id="p126-title" class="font-serif text-3xl font-semibold">
+					Open: the Budget diagram with Planned
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 14 for the owner's pick on #202 (PR #545): Planned joins the
+					Budget diagram without its boxes shrinking.
+				</p>
+				<PlannedDiagramProposal />
+			</section>
+
+			<section aria-labelledby="polish4-title" class="mt-12">
 				<h2 id="polish4-title" class="font-serif text-3xl font-semibold">
 					Picked: the polish track, More, Feedback and the first visit
 				</h2>
