@@ -163,6 +163,7 @@ export function SplitForm({
 	choices = {},
 	today,
 	back,
+	cancelHref = back,
 	error,
 	// Each drawing of the sheet gets a new token, which every line request posts back (hx-include).
 	sheet = crypto.randomUUID(),
@@ -178,6 +179,8 @@ export function SplitForm({
 	choices?: Record<number, string | undefined>;
 	today: string;
 	back: string;
+	/** Where Cancel goes, when it is not the list the form returns to (a sheet's close asks for focus). */
+	cancelHref?: string;
 	error?: string;
 	sheet?: string;
 }) {
@@ -294,7 +297,7 @@ export function SplitForm({
 				sheet={sheet}
 			/>
 			<div class="grid grid-cols-2 gap-3">
-				<Button href={back} kind="secondary">
+				<Button href={cancelHref} kind="secondary">
 					Cancel
 				</Button>
 				<Button type="submit">Save split</Button>

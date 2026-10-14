@@ -6,11 +6,14 @@ export function SavingsGoalSheet({
 	value,
 	error,
 	month,
+	closeHref,
 	closeAttrs,
 }: {
 	value: string;
 	error?: string;
 	month: string;
+	/** Where Cancel goes without JavaScript: the sheet's backdrop address. */
+	closeHref: string;
 	closeAttrs: Record<string, string>;
 }) {
 	return (
@@ -48,7 +51,12 @@ export function SavingsGoalSheet({
 					autofocus
 				/>
 				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
+					<Button
+						href={closeHref}
+						kind="secondary"
+						class="w-full"
+						{...closeAttrs}
+					>
 						Cancel
 					</Button>
 					<Button
