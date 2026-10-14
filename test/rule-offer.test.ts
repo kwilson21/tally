@@ -453,6 +453,45 @@ describe("merchant category rule offer", () => {
 		}
 	});
 
+	it("from a filtered list, Yes and Not now focus the list's count, since the saved row has left it (#211, #87)", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			back: "/transactions?uncategorized=1",
+		});
+		expect(third.html).toContain(QUESTION);
+		const row = new RegExp(
+			`<a href="/transactions/${ids[2]}(?:\\?[^"]*)?"[^>]*autofocus`,
+		);
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		const dismissed = await post(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		for (const reply of [yes.html, dismissed.html]) {
+			expect(reply).toMatch(/<p id="result-count"[^>]*autofocus/);
+			expect(reply).not.toMatch(/<h1[^>]*autofocus/);
+			expect(reply).not.toMatch(row);
+		}
+	});
+
+	it("without JavaScript, Not now from a filtered list lands on that list's count (#87)", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			back: "/transactions?uncategorized=1",
+		});
+		const dismissed = await postPlain(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		expect(dismissed.res.status).toBe(303);
+		const location = dismissed.res.headers.get("Location") ?? "";
+		expect(location).toBe(`/transactions?uncategorized=1&focus=${ids[2]}`);
+		const drawn = await exports.default.fetch(BASE + location);
+		expect(await drawn.text()).toMatch(/<p id="result-count"[^>]*autofocus/);
+	});
+
 	it("a bulk save names no row, so its answers keep the transactions heading focused", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const bulk = await post("/transactions/select/category/save", {
