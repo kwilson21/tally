@@ -3521,6 +3521,28 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		expect(made?.n).toBe(0);
 	});
 
+	it("a linked credit that looks mixed draws its split line only while its category is open", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = 0.6, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
+			)
+			.bind(GROCERIES, HOUSEHOLD, REFUND)
+			.run();
+		expect((await get(`/transactions/${REFUND}`)).html).not.toContain(
+			"This trip looks like",
+		);
+		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+		expect(fieldsetTag(opened.html)).not.toContain("disabled");
+		expect(opened.html).toContain(
+			"This trip looks like Groceries and Household.",
+		);
+		expect(opened.html).toContain(`/transactions/${REFUND}/split?back=`);
+		const locked = await step(REFUND, opened.form, { income: undefined });
+		expect(fieldsetTag(locked.html)).toContain("disabled");
+		expect(locked.html).not.toContain("This trip looks like");
+	});
+
 	it("draws the toggles that redraw the category, and only for a linked credit", async () => {
 		await link(REFUND, PURCHASE);
 		const linked = (await get(`/transactions/${REFUND}`)).html;

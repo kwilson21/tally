@@ -382,6 +382,8 @@ describe("data exports", () => {
 				"jev_category_id",
 				"jev_failed_at",
 				"jev_none_fit",
+				"jev_mixed",
+				"jev_also_category_id",
 				"merchant_name",
 				"note",
 				"note_guessed",

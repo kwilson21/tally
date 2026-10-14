@@ -1,5 +1,6 @@
 import { INCLUDED_ROW, markedTransferSql } from "../db/counted-month";
 import { merchantKeySql } from "../db/merchant-key";
+import { jevSaysMixedSql } from "../db/mixed-trip";
 
 export type RuleOffer = {
 	merchantKey: string;
@@ -60,6 +61,8 @@ export async function firstRuleOfferAmong(
 				FROM transactions
 				WHERE id IN (SELECT value FROM json_each(?)) AND ${COUNTED_PICKS_SQL}
 				GROUP BY ${merchantKeySql("transactions")}
+				-- A store with a selected trip that looks mixed is never asked (decision 113).
+				HAVING SUM(CASE WHEN ${jevSaysMixedSql("transactions")} THEN 1 ELSE 0 END) = 0
 			)
 			SELECT s.merchantKey AS merchantKey, s.transactionId AS transactionId, COUNT(*) AS count
 			FROM selected s
@@ -89,7 +92,8 @@ export async function ruleOfferForTransaction(
 ): Promise<RuleOffer | null> {
 	const row = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ? AND ${COUNTED_PICKS_SQL}`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ? AND ${COUNTED_PICKS_SQL}
+				AND NOT ${jevSaysMixedSql("transactions")}`,
 		)
 		.bind(transactionId, categoryId)
 		.first<{ merchantKey: string }>();

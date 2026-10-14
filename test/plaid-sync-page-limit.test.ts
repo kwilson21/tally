@@ -277,8 +277,9 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 	const removedRows = () => Array.from({ length: ROWS }, (_, i) => `a${i}`);
 
 	// Measured on this branch with runAfterSync off, so the batch is the page's own: per row, 9 for an added row,
-	// 9 modified, 1 removed (a removed split costs the same as a removed row), 10 pending rekey, 41 pending merge,
-	// 9 split removal, 41 merge onto a split. A ceiling is its per-row cost times 100 plus PAGE_STATEMENTS.
+	// 9 modified, 1 removed (a removed split costs the same as a removed row), 10 pending rekey, 42 pending merge (one
+	// more than before #233's Jev mixed-trip statement, pending-merge.ts), 9 split removal, 42 merge onto a split. A ceiling
+	// is its per-row cost times 100 plus PAGE_STATEMENTS.
 	it.each([
 		{
 			shape: "added",
@@ -318,7 +319,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 		},
 		{
 			shape: "pending merge",
-			perRow: 41,
+			perRow: 42,
 			seed: async () => {
 				await seedPending(ROWS);
 				await seedPosted(ROWS);
@@ -335,7 +336,7 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 		},
 		{
 			shape: "merge onto split",
-			perRow: 41,
+			perRow: 42,
 			seed: async () => {
 				for (let i = 0; i < ROWS; i++) await seedSplit(`p${i}`, true);
 				await seedPosted(ROWS);

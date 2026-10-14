@@ -611,6 +611,20 @@ describe("the tally's counts", () => {
 		});
 	});
 
+	it("doesn't move a Jev pick onto a split posted row with no category, as the pick doesn't move there (#233)", async () => {
+		await mergedPurchase({
+			pending:
+				"category_id = 1, category_source = 'jev', category_confidence = 0.9, jev_category_id = 1, jev_mixed = 0.9, jev_also_category_id = 2",
+			posted: "is_split = 1",
+			logged: "category",
+		});
+		expect(await logIds("category")).toEqual([null]);
+		expect(await readAiTally(db, TODAY)).toMatchObject({
+			sorted: 1,
+			changed: 0,
+		});
+	});
+
 	it("still moves a pending row's income log to the posted row", async () => {
 		const { postedId } = await mergedPurchase({
 			pending: "flag_income = 1, income_source = 'jev'",
