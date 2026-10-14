@@ -189,13 +189,13 @@ const STATEMENTS = [
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,
 	// Jev's pick, none-fit and mixed-trip reading move onto a posted row with a category of its own and no Jev answer, which
-	// the category statement above leaves alone. It moves no category, so it needs no ai_log arm.
+	// the category statement above leaves alone. A split purchase keeps no mixed-trip reading, so it takes none. It moves no category, so it needs no ai_log arm.
 	`UPDATE transactions SET jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
 		jev_also_category_id = p.jev_also_category_id
 	 ${FROM_PENDING} AND p.amount_cents = ?3
 	 AND (p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
 	 AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL
-	 AND transactions.category_confidence IS NULL`,
+	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
