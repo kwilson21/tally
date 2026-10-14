@@ -459,6 +459,18 @@ describe("sheet.js: an Undo toast on screen is in the Tab cycle", () => {
 		expect(fromHeading.defaultPrevented).toBe(true);
 		expect(parts.document.activeElement).toBe(parts.drawn?.save);
 	});
+
+	it("sends Tab from the body or the heading to the sheet's first control, not to the Undo toast", async () => {
+		const parts = await sheetPage();
+		parts.body.focus();
+		const fromBody = keydown(parts.document, "Tab");
+		expect(fromBody.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+		parts.drawn?.title.focus();
+		const fromHeading = keydown(parts.document, "Tab");
+		expect(fromHeading.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
 });
 
 describe("sheet.js: a radio group is one Tab stop", () => {
