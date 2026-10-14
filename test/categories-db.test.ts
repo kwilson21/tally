@@ -153,6 +153,29 @@ describe("categoryNames", () => {
 			archived: true,
 		});
 	});
+
+	it("lists an archived category after the active ones, even one added first, so a lookup by name finds the active one", async () => {
+		// Migration 0052 kept a Unicode-case pair: the archived 'École' has the lower id.
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 1) RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		await setArchived(db, archived, true, "2026-07-15");
+		await db
+			.prepare(
+				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('école', 'école', 'tag', 'cat-blue', 1)",
+			)
+			.run();
+
+		const all = await categoryNames(db);
+		const names = all.map((c) => c.name);
+		expect(names.indexOf("école")).toBeLessThan(names.indexOf("École"));
+		const firstArchived = all.findIndex((c) => c.archived);
+		expect(all.slice(firstArchived).every((c) => c.archived)).toBe(true);
+	});
 });
 
 describe("category archive dates", () => {

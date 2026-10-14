@@ -45,8 +45,12 @@ export type NewCategorySuggestion = {
 	suggestionId: number;
 	/** The name Tally suggested, tidied: "Pet Care". */
 	name: string;
-	/** The family's active category with this name, as it stored it, when it already has one (decision 101). */
+	/**
+	 * The family's category with this name, as it stored it, when it already has one (decision 101): active, so the
+	 * ticks are added to it, or archived, so they bring it back (`archived`, decision 110).
+	 */
 	existing: string | null;
+	archived: boolean;
 	date: string;
 	rows: {
 		transactionId: number;
@@ -293,8 +297,8 @@ async function newCategorySuggestions(
 	// Every pending suggestion, not only the ten Settings lists: the count covers every kind (decision 101).
 	const suggestions = await pendingSuggestions(db, Number.MAX_SAFE_INTEGER);
 	if (suggestions.length === 0) return [];
-	// The same check Settings makes for its "Add to" button: an active category with the name, as sameName reads it.
-	const active = (await categoryNames(db)).filter((c) => !c.archived);
+	// The same check Settings makes for its "Add to" or "Restore" button: a category with the name, as sameName reads it.
+	const categories = await categoryNames(db);
 	const ids = suggestions.flatMap((suggestion) =>
 		suggestion.rows.map((row) => row.id),
 	);
@@ -341,6 +345,7 @@ async function newCategorySuggestions(
 			).values(),
 		];
 		const name = tidyName(suggestion.name);
+		const found = categories.find((c) => sameName(c.name, name));
 		items.push({
 			order: suggestion.id,
 			item: {
@@ -348,7 +353,8 @@ async function newCategorySuggestions(
 				id: `new-${suggestion.id}`,
 				suggestionId: suggestion.id,
 				name,
-				existing: active.find((c) => sameName(c.name, name))?.name ?? null,
+				existing: found?.name ?? null,
+				archived: found?.archived ?? false,
 				date: rows.reduce(
 					(latest, row) => (row.date > latest ? row.date : latest),
 					"",

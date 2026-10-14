@@ -510,7 +510,9 @@ function NewCategoryForm({
 			<div class="flex flex-col gap-3">
 				<Button type="submit" name="answer" value="yes" class="w-full">
 					{item.existing
-						? `Yes, add to ${item.existing}`
+						? item.archived
+							? `Yes, restore ${item.existing}`
+							: `Yes, add to ${item.existing}`
 						: `Yes, create ${item.name}`}
 				</Button>
 				<Button
