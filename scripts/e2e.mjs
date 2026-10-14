@@ -968,6 +968,76 @@ step(
 	"Select all with its count still loading, then a search: the search stays",
 );
 
+// A tick made while Select all's reply is held, then a search typed before that reply comes back (#471). A person can't
+// tick during a list load (the rows are paused), so the tick is a change event the test sends. The tick's count queues
+// behind Select all (or runs beside it, unpatched): the search must replace Select all's request either way, and Select
+// all's held reply must not land over the search.
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+const tickHeldCounts = [];
+let tickFirstCountHeld;
+const tickFirstCountIsHeld = new Promise(
+	(resolve) => (tickFirstCountHeld = resolve),
+);
+await page.route("**/transactions/select/count*", (route) => {
+	tickHeldCounts.push(route);
+	tickFirstCountHeld();
+});
+await page.getByRole("link", { name: "Select" }).click();
+await tickFirstCountIsHeld;
+let tickHeldSelectAll = null;
+let tickSelectAllHeld;
+const tickSelectAllIsHeld = new Promise(
+	(resolve) => (tickSelectAllHeld = resolve),
+);
+await page.route("**/transactions?*focus=set-category-selection*", (route) => {
+	tickHeldSelectAll = route;
+	tickSelectAllHeld();
+});
+let tickHeldSearch = null;
+let tickSearchHeld;
+const tickSearchIsHeld = new Promise((resolve) => (tickSearchHeld = resolve));
+await page.route("**/transactions?*q=Local*", (route) => {
+	tickHeldSearch = route;
+	tickSearchHeld();
+});
+await page.evaluate(() => {
+	window.__searchEnded = false;
+	window.__selectAllEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		const { action } = event.detail.ctx.request;
+		if (action.includes("q=Local")) window.__searchEnded = true;
+		if (action.includes("focus=set-category-selection"))
+			window.__selectAllEnded = true;
+	});
+});
+await page.getByRole("link", { name: /^Select all \d+$/ }).click();
+await tickSelectAllIsHeld;
+await page.evaluate(() => {
+	const box = document.querySelector("#selection-form input[name=ids]");
+	box.checked = true;
+	box.dispatchEvent(new Event("change", { bubbles: true }));
+});
+await page.getByLabel("Search transactions").fill("Local Bakery");
+await tickSearchIsHeld;
+await tickHeldSearch.continue();
+await page.waitForFunction(() => window.__searchEnded);
+await tickHeldSelectAll.continue().catch(() => {}); // a patched htmx has already aborted it, as the search replaced it
+await page.waitForFunction(() => window.__selectAllEnded);
+for (const route of tickHeldCounts) await route.continue().catch(() => {}); // a count the page dropped can't be released
+assert.match(
+	page.url(),
+	/[?&]q=Local/,
+	"the search must stay when a tick's count and Select all are still in flight",
+);
+await page.unroute("**/transactions/select/count*");
+await page.unroute("**/transactions?*focus=set-category-selection*");
+await page.unroute("**/transactions?*q=Local*");
+dropReplacedRequestLogs(errorsBefore);
+step("a tick made while Select all is held, then a search: the search stays");
+
 // Next while a count is still loading: page 2 must get its own ids, not page 1's (#215).
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
