@@ -86,8 +86,11 @@ describe("the Name row's choices carry the class that opens the Rename list", ()
 	});
 });
 
-// The re-guess note under This one only folds away once the edit form's controls move off the state it was
-// drawn from (CSS only, decision 101). Its hooks are literal classes, and the form is the named group/edit.
+// The re-guess note under This one only is drawn whenever a guess could happen in the edit (the route decides
+// that), and CSS hides it while a control that blocks the guess is ticked (decision 101). Its hooks are literal
+// classes, and the form is the named group/edit. A ticked checkbox hides it whether or not it was drawn ticked,
+// so unticking it shows the note again. A radio is read against how it was drawn, since its blocking value is
+// any other choice.
 describe("the re-guess note follows the edit form's controls", () => {
 	const markup = (facts: RenameFacts) =>
 		String(
@@ -108,11 +111,7 @@ describe("the re-guess note follows the edit form's controls", () => {
 	});
 
 	// One row per posted field the re-guess reads (name-choices.tsx lists them, and says which are hidden or
-	// need no hook). A checkbox folds both ways, a radio when it is ticked; a field with no hook has none.
-	const both = (field: string) => [
-		`group-has-[input[name=${field}]:checked:not([checked])]/edit:hidden`,
-		`group-has-[input[name=${field}][checked]:not(:checked)]/edit:hidden`,
-	];
+	// need no hook). A ticked checkbox hides the note; a radio hides it when it is ticked but was drawn unticked.
 	it.each([
 		{
 			field: "category",
@@ -120,16 +119,28 @@ describe("the re-guess note follows the edit form's controls", () => {
 				"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
 			],
 		},
-		{ field: "excluded", hooks: both("excluded") },
-		{ field: "income", hooks: both("income") },
+		{
+			field: "excluded",
+			hooks: ["group-has-[input[name=excluded]:checked]/edit:hidden"],
+		},
+		{
+			field: "income",
+			hooks: ["group-has-[input[name=income]:checked]/edit:hidden"],
+		},
 		{
 			field: "refund_of",
 			hooks: [
 				"group-has-[input[name=refund\\_of]:checked:not([checked])]/edit:hidden",
 			],
 		},
-		{ field: "creditReviewed", hooks: both("creditReviewed") },
-		{ field: "always", hooks: both("always") },
+		{
+			field: "creditReviewed",
+			hooks: ["group-has-[input[name=creditReviewed]:checked]/edit:hidden"],
+		},
+		{
+			field: "always",
+			hooks: ["group-has-[input[name=always]:checked]/edit:hidden"],
+		},
 		{
 			field: "name_pick",
 			hooks: ["group-has-[.name-same:checked]/edit:hidden"],
@@ -142,13 +153,14 @@ describe("the re-guess note follows the edit form's controls", () => {
 		if (hooks.length === 0) expect(note).not.toContain(`input[name=${field}]`);
 	});
 
-	it("folds the note away when Exclude changes, unless the row pays a bill", () => {
-		const counted = guessAgainClass(markup(rename));
-		expect(counted).toContain(
-			"group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden",
-		);
-		expect(counted).toContain(
-			"group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden",
+	it("never hides a checkbox's note by the state it was drawn in, so unticking one shows it again", () => {
+		const note = guessAgainClass(markup(rename));
+		expect(note).not.toContain("[checked]:not(:checked)");
+	});
+
+	it("hides the note while Exclude is ticked, unless the row pays a bill", () => {
+		expect(guessAgainClass(markup(rename))).toContain(
+			"group-has-[input[name=excluded]:checked]/edit:hidden",
 		);
 		const paysBill = guessAgainClass(
 			markup({ ...rename, excludeCounts: false }),
@@ -163,13 +175,9 @@ describe("the re-guess note follows the edit form's controls", () => {
 		);
 	});
 
-	it("folds the note on the review chip only while a linked purchase is there to count", () => {
-		const linked = guessAgainClass(markup(rename));
-		expect(linked).toContain(
-			"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
-		);
-		expect(linked).toContain(
-			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+	it("hides the note on the review chip only while a linked purchase is there to count", () => {
+		expect(guessAgainClass(markup(rename))).toContain(
+			"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
 		);
 		expect(
 			guessAgainClass(markup({ ...rename, reviewCounts: false })),

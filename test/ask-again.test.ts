@@ -576,18 +576,16 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		);
 	});
 
-	it("folds the note both ways when Always for this merchant changes, since ticking it keeps the category", async () => {
+	it("hides the note while Always for this merchant is ticked, since ticking it keeps the category", async () => {
 		await pickedByTally(await firstCategory());
 		const html = await panel({ JEV_API_KEY: "jev-key" });
 		const note = html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
 		expect(note).toContain(
-			"group-has-[input[name=always]:checked:not([checked])]/edit:hidden",
+			"group-has-[input[name=always]:checked]/edit:hidden",
 		);
-		expect(note).toContain(
-			"group-has-[input[name=always][checked]:not(:checked)]/edit:hidden",
-		);
+		expect(note).not.toContain("[checked]:not(:checked)");
 	});
 
 	it("draws no note on a 422 redraw that posts another category, since the save keeps that one", async () => {
@@ -626,7 +624,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(html).toContain("Tally guesses its category again.");
 	});
 
-	it("draws no note on a 422 redraw that posts the row's own category with Always for this merchant ticked, since the save keeps it", async () => {
+	it("hides the note on a 422 redraw that posts the row's own category with Always for this merchant ticked, since the save keeps it", async () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev();
@@ -640,7 +638,10 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			rule_category_was: "",
 		});
 		expect(response.status).toBe(422);
-		expect(html).not.toContain("Tally guesses its category again.");
+		expect(html).toMatch(/<input[^>]*name="always"[^>]*checked/);
+		expect(html).toContain(
+			"group-has-[input[name=always]:checked]/edit:hidden",
+		);
 	});
 
 	it("draws no note on a row whose category was set by a person, even with no category id", async () => {
@@ -1066,15 +1067,46 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 	};
 
-	it("on a linked, unreviewed credit, the note folds on the review chip both ways, since ticking it makes the refund follow its purchase", async () => {
+	it("on a linked, unreviewed credit, the note is hidden by the review chip while it is ticked, since ticking it makes the refund follow its purchase", async () => {
 		await pickedByTally(await firstCategory());
 		await creditLinked(true);
 		const note = noteClass(await panel({ JEV_API_KEY: "jev-key" }));
 		expect(note).toContain(
-			"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
+			"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
 		);
-		expect(note).toContain(
-			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+		expect(note).not.toContain("[checked]:not(:checked)");
+	});
+
+	// PR #387's review (P2): a linked credit the person reviewed, whose category Tally picked, follows its purchase
+	// at open, so the note used to be left out. Unticking Reviewed, then naming it "This one only", makes Tally
+	// guess again, so the note is drawn and the chip hides it only while it is ticked.
+	it("draws the note on a linked credit the person reviewed, so unticking Reviewed can show it (#428)", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toMatch(/<input[^>]*name="creditReviewed"[^>]*checked/);
+		expect(noteClass(html)).toContain(
+			"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
+		);
+	});
+
+	it("draws no note on a linked credit whose review Jev holds, since unticking Reviewed can't stop it following", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		expect(await panel({ JEV_API_KEY: "jev-key" })).not.toContain(
+			"Tally guesses its category again.",
 		);
 	});
 
@@ -1212,21 +1244,34 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			)
 		).text();
 
-	it.each<{ name: string; extra: string; fields: Record<string, string> }>([
+	it.each<{
+		name: string;
+		extra: string;
+		fields: Record<string, string>;
+		/** The hook that hides the note while the blocking control is ticked; null when no note is drawn at all. */
+		hook: string | null;
+	}>([
 		{
 			name: "an excluded transaction that doesn't pay a bill",
 			extra: ", excluded = 1, excluded_source = 'user'",
 			fields: { excluded: "1" },
+			hook: "group-has-[input[name=excluded]:checked]/edit:hidden",
 		},
 		{
 			name: "an income transaction",
 			extra: ", flag_income = 1, income_source = 'user'",
 			fields: { income: "1", income_was: "1" },
+			hook: "group-has-[input[name=income]:checked]/edit:hidden",
 		},
-		{ name: "a split purchase", extra: ", is_split = 1", fields: {} },
+		{
+			name: "a split purchase",
+			extra: ", is_split = 1",
+			fields: {},
+			hook: null,
+		},
 	])(
-		"keeps Tally's category for $name, and says nothing of guessing again",
-		async ({ extra, fields }) => {
+		"keeps Tally's category for $name, and hides any note of guessing again",
+		async ({ extra, fields, hook }) => {
 			const category = await firstCategory();
 			await pickedByTally(category, extra);
 			const jev = fakeJev(() => reply(0.2));
@@ -1246,9 +1291,15 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			expect(
 				JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 			).toBe("Saved Dog bed.");
-			expect(await panelHtml()).not.toContain(
-				"Tally guesses its category again.",
-			);
+			const html = await panelHtml();
+			if (hook === null) {
+				expect(html).not.toContain("Tally guesses its category again.");
+				return;
+			}
+			const note = html.match(
+				/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+			)?.[1];
+			expect(note).toContain(hook);
 		},
 	);
 
@@ -1284,8 +1335,11 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Saved Dog bed.");
-		expect(await panelHtml()).not.toContain(
-			"Tally guesses its category again.",
+		// The refund follows its purchase, so the review chip the person ticked hides the note.
+		const html = await panelHtml();
+		expect(html).toMatch(/<input[^>]*name="creditReviewed"[^>]*checked/);
+		expect(html).toContain(
+			"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
 		);
 	});
 

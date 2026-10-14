@@ -158,7 +158,10 @@ export type RenameFacts = {
 	owned: OwnedRow[];
 	/** This transaction's own name, when it has one. */
 	thisOwn: string | null;
-	/** Tally picked this transaction's category, or it has none and no one set one, and Jev can be asked: "This one only" makes Tally guess again. */
+	/**
+	 * Whether a guess could happen in this edit: Tally picked this transaction's category (or it has none), Jev can be asked, and
+	 * no control the edit reads has already ruled it out (the hooks hide the note for those). "This one only" makes Tally guess again.
+	 */
 	tallyCategory: boolean;
 	/** Whether Exclude changes whether Jev can be asked about the row: false for a payment linked to a bill, which counts whatever its exclusion. */
 	excludeCounts: boolean;
@@ -173,28 +176,33 @@ export type RenameFacts = {
 };
 
 /**
- * The re-guess note's hooks (CSS only, decision 101, read from EDIT_FORM_GROUP). The note folds away once a field the
- * save reads moves from the state the panel drew it in: the save then keeps the person's category, or Jev isn't asked.
- * It only ever hides what was drawn, so where :has() isn't supported it stays. A checkbox folds both ways (ticked now
- * but drawn unticked, and the reverse); a radio folds when it is ticked but was drawn unticked. Each hook is a literal
- * class, so Tailwind compiles it. Tailwind reads a bare underscore in an arbitrary value as a space, so refund_of keeps
- * its escape: String.raw leaves the backslash in the class, as the stylesheet expects.
+ * The re-guess note's hooks (CSS only, decision 101, read from EDIT_FORM_GROUP). The note is drawn whenever a guess could
+ * happen in this edit (the route's tallyCategory), and these hooks hide it while a control the save reads blocks that guess:
+ * the save then keeps the person's category, or Jev isn't asked. A ticked checkbox hides it whether it was drawn ticked or
+ * not, so unticking it shows the note again. A radio hides it once it moves off the choice it was drawn with, since any
+ * other choice is what changes the answer. Each hook is a literal class, so Tailwind compiles it. Tailwind reads a bare
+ * underscore in an arbitrary value as a space, so refund_of keeps its escape: String.raw leaves the backslash in the class,
+ * as the stylesheet expects. Where :has() isn't supported the hooks do nothing, so the note stays as it was drawn; that
+ * is never seen, since the Rename list itself needs :has() to open.
  *
  * Every posted field the re-guess reads at save time (oneOffGuessesAgain, the route's `row`, followsPurchaseAfterSave
  * and parseEdit), and the hook that covers it or why it needs none:
- * - category (a radio; NewCategoryChip and SuggestedCategoryChip post it too): covered here. new_category_name counts
- *   only while category is "new", so the same hook covers it.
+ * - category (a radio; NewCategoryChip and SuggestedCategoryChip post it too): covered here, by any choice other than the
+ *   one drawn. new_category_name counts only while category is "new", so the same hook covers it.
  * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion.
- * - income (a checkbox): covered here, both ways. income_was is the state it was drawn in, so it needs no hook.
- * - refund_of (a radio): covered here. A link also includes the row (excludedNow) and reviews the credit.
+ * - income (a checkbox): covered here, while it is ticked.
+ * - refund_of (a radio): covered here. A link also includes the row (excludedNow) and reviews the credit. Picking "Not
+ *   linked" on a row drawn linked doesn't bring the note back: the radio reads as changed, so it stays hidden, and a
+ *   ticked review keeps it hidden too. The save still guesses again, so this is a known miss, not a false show.
  * - creditReviewed (a checkbox): REVIEW_FOLDS, while reviewCounts holds (a linked purchase that isn't excluded). A new
  *   link already folds through refund_of. creditReviewed_was is the state it was drawn in, and creditReviewedVisible
  *   only says the chip was drawn, so neither needs a hook.
  * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
  * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
- *   keeps the note, and the save is still right: the route keeps the row's name. This is the one known limit.
- * - always (the merchant rule tick, MerchantRuleTick): covered here, both ways. Ticking it makes the save keep the category,
- *   since the rule settles it. always_was and rule_category_was are the state it was drawn in, so they need no hook.
+ *   keeps the note, and the save is still right: the route keeps the row's name. This is one of two known limits; the
+ *   other is "Not linked" under refund_of.
+ * - always (the merchant rule tick, MerchantRuleTick): covered here, while it is ticked. Ticking it makes the save keep the
+ *   category, since the rule settles it. always_was and rule_category_was are the state it was drawn in, so they need no hook.
  * - name_scope: no hook. The note is a line under This one only and describes that choice whichever scope is ticked.
  * - Hidden or server-side, so no hook: merchant_was, jevCategories, paysBill, isSplit and the stored category.
  *   details_action=keep and displayed_name_guess: with nothing ticked the Rename list is hidden, and the save names
@@ -204,22 +212,16 @@ export type RenameFacts = {
  */
 const GUESS_AGAIN_FOLDS = [
 	"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
-	"group-has-[input[name=income]:checked:not([checked])]/edit:hidden",
-	"group-has-[input[name=income][checked]:not(:checked)]/edit:hidden",
+	"group-has-[input[name=income]:checked]/edit:hidden",
 	String.raw`group-has-[input[name=refund\_of]:checked:not([checked])]/edit:hidden`,
 	"group-has-[.name-same:checked]/edit:hidden",
-	"group-has-[input[name=always]:checked:not([checked])]/edit:hidden",
-	"group-has-[input[name=always][checked]:not(:checked)]/edit:hidden",
+	"group-has-[input[name=always]:checked]/edit:hidden",
 ];
-/** Exclude changes whether Jev is asked, unless the row pays a bill (excludeCounts). */
-const EXCLUDE_FOLDS = [
-	"group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden",
-	"group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden",
-];
-/** The review chip decides whether a linked refund follows its purchase, so it counts while a purchase is linked (reviewCounts). */
+/** Exclude blocks the guess unless the row pays a bill (excludeCounts). */
+const EXCLUDE_FOLDS = ["group-has-[input[name=excluded]:checked]/edit:hidden"];
+/** The review chip blocks it while a linked purchase is there to count (reviewCounts). */
 const REVIEW_FOLDS = [
-	"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
-	"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+	"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
 ];
 
 /** The classes of the re-guess note under This one only: the hooks that apply to the row it is drawn for. */

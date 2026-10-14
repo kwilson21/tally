@@ -3844,6 +3844,37 @@ function Controls() {
 						/>
 					</div>
 				</State>
+				<State label="Exclude ticked on a row Tally could guess again: the Rename list shows, This one only ticked, and the re-guess note stays hidden until Exclude is unticked">
+					<div class="group/edit flex max-w-xl flex-col gap-3">
+						<div class="flex flex-wrap gap-2">
+							<Chip type="checkbox" name="excluded" value="1" checked>
+								Exclude from budget
+							</Chip>
+						</div>
+						<NameChoices
+							id="ds-rename-excluded"
+							radioName="ds-rename-excluded"
+							names={[]}
+							source="tally"
+							tidied="Amazon mktpl"
+							rawName="AMAZON MKTPL*2K4"
+							picked={OWN_VALUE}
+							own="Dog bed"
+							rename={{
+								merchant: "Amazon",
+								total: 23,
+								owned: [],
+								thisOwn: null,
+								tallyCategory: true,
+								excludeCounts: true,
+								reviewCounts: false,
+								today: "2026-10-11",
+								scope: "one",
+								scopeName: "ds-rename-excluded-scope",
+							}}
+						/>
+					</div>
+				</State>
 				<State label="A suggestion ticked on a row Tally sorted, with the All line counting the own names it keeps">
 					<div class="max-w-xl">
 						<NameChoices

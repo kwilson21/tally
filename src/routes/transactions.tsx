@@ -1887,26 +1887,32 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
-								// tick, keeps the category (rename.ts).
+								// The note is drawn wherever a guess could happen in this edit (rename.ts), and the hooks hide it while
+								// Exclude, Income, the review chip or Always blocks it. So the controls are read as if they were
+								// all off, and what stays out is what no control here changes: a split row, a refund the review
+								// chip can't stop following, a category someone else set, or a category the person has changed.
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
 									values.newCategory !== true &&
-									values.alwaysForMerchant !== true &&
 									(values.categoryId === null ||
 										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: !values.excluded || tx.paysBill === true,
+										included: true,
 										isSplit: tx.isSplit === true,
-										income: values.income,
-										followsPurchase: purchase !== undefined,
+										income: false,
+										followsPurchase:
+											linkedPurchase !== undefined &&
+											followsPurchaseAfterSave(tx, {
+												...values,
+												income: false,
+												creditReviewed: false,
+											}),
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
 								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
+								// against (followsPurchaseAfterSave), so the chip hides the note only where one is drawn.
 								reviewCounts: linkedPurchase !== undefined,
 								today,
 								scope: nameScope,
