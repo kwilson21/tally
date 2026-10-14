@@ -3937,10 +3937,7 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: isIncluded(
-				excludedNow,
-				tx.paysBill === true || tx.paysPlan === true,
-			),
+			included: isIncluded(excludedNow, paysBillOrPlan),
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
