@@ -73,7 +73,7 @@ export function Layout({
 						<div class="mb-8">
 							<Wordmark />
 						</div>
-						<Sidebar active={active} />
+						<Sidebar active={active} currentPath={currentPath} />
 					</aside>
 					<main
 						id="main"

@@ -227,7 +227,7 @@ describe("the Feedback pill in the top line", () => {
 		const html = decodeAttributes(
 			await (await exports.default.fetch("http://tally.test/feedback")).text(),
 		);
-		expect(html).toMatch(/<a href="\/feedback" aria-current="page"/);
+		expect(html).toMatch(/<a href="\/feedback[^"]*" aria-current="page"/);
 		expect(html).toMatch(/<a href="\/more" aria-current="page"/);
 	});
 });

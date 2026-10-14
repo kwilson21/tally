@@ -48,7 +48,13 @@ function isCurrent(item: NavItem, active?: NavKey) {
 const SIDEBAR_LINK =
 	"flex min-h-11 items-center gap-3 rounded-control px-2 text-lg text-ink no-underline aria-[current=page]:text-accent";
 
-export function Sidebar({ active }: { active?: NavKey }) {
+export function Sidebar({
+	active,
+	currentPath,
+}: {
+	active?: NavKey;
+	currentPath?: string;
+}) {
 	return (
 		<nav aria-label="Main" class="hidden lg:block">
 			<ul class="flex flex-col gap-1">
@@ -77,8 +83,11 @@ export function Sidebar({ active }: { active?: NavKey }) {
 					</a>
 				</li>
 				<li>
+					{/* On its own page the item carries the page the form came from, so clicking it again keeps it. */}
 					<a
-						href="/feedback"
+						href={
+							active === "feedback" && currentPath ? currentPath : "/feedback"
+						}
 						aria-current={active === "feedback" ? "page" : undefined}
 						class={SIDEBAR_LINK}
 					>

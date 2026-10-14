@@ -92,7 +92,7 @@ function view(
 			title="Send feedback · Tally"
 			active="feedback"
 			demo={demo}
-			currentPath={`/feedback?from=${values.from}`}
+			currentPath={`/feedback?return_to=${encodeURIComponent(values.returnTo ?? values.from)}`}
 			modules={["/js/feedback-privacy.js"]}
 		>
 			<FeedbackForm
@@ -107,18 +107,21 @@ function view(
 }
 
 feedback.get("/feedback", async (c) => {
-	let from = "/";
-	let returnTo = "/";
+	let source: string | undefined;
 	const referer = c.req.header("referer");
 	if (referer) {
 		try {
 			const url = new URL(referer);
-			if (url.origin === new URL(c.req.url).origin) {
-				from = sanitizeFeedbackRoute(url.pathname);
-				returnTo = safePath(`${url.pathname}${url.search}`, true);
-			}
+			if (url.origin === new URL(c.req.url).origin)
+				// On /feedback itself, the sidebar's current item carries the page the form came from.
+				source =
+					url.pathname === "/feedback"
+						? c.req.query("return_to")
+						: `${url.pathname}${url.search}`;
 		} catch {}
 	}
+	const from = source ? sanitizeFeedbackRoute(source) : "/";
+	const returnTo = source ? safePath(source, true) : "/";
 	const existingToken = feedbackLimitId(c.req.header("cookie"));
 	const response = c.html(
 		view(
