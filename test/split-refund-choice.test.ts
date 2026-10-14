@@ -308,6 +308,43 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 		expect(await linkOf(SECOND)).toBe(household);
 	});
 
+	it("unlinks and names a chosen refund that a competing save split, rather than moving it", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET is_split = 1 WHERE id = ?",
+			[FIRST],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		const [, household] = await partIds(PURCHASE);
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05"],
+			bills: [],
+			moved: [{ date: "2026-09-06", part: 1 }],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBe(household);
+	});
+
+	it("names a chosen refund's date as the competing save wrote it, not as it was read", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET date = '2026-09-08' WHERE id = ?",
+			[FIRST],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		expect(result.saved).toBe(true);
+		expect(result.moved).toEqual([
+			{ date: "2026-09-08", part: 0 },
+			{ date: "2026-09-06", part: 1 },
+		]);
+		expect(result.unlinked).toEqual([]);
+	});
+
 	it("unlinks and names every chosen refund when a competing save excludes the purchase", async () => {
 		const racing = racingWith(
 			"UPDATE transactions SET excluded = 1 WHERE id = ?",

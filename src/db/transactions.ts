@@ -1688,11 +1688,12 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * Not linked. Only an offered refund (offeredToSplit) can be chosen; the others are unlinked, and named. A refund left
  * out of `choices`, or whose part is not among `parts`, is unlinked, as before. A chosen refund is parked on the
  * purchase before the old parts are deleted, so it is checked where it is in the batch: it moves to its part only if
- * it is still linked to the purchase or its parts, still follows the purchase (FOLLOWS_PURCHASE), and the whole refund
- * still fits that part (refundFitsSql), counting the refunds already moved there in this batch. A chosen refund that
- * a competing save relinked or unlinked since the read stays as it is, and is named in neither list. One that was
- * parked but doesn't move is unlinked, and is listed in `unlinked` like any other. `moved` lists the chosen refunds
- * that moved; `unlinked` lists the refunds this save unlinked, by date.
+ * it is still linked to the purchase or its parts, still a plain, top-level refund that follows the purchase
+ * (FOLLOWS_PURCHASE), and the whole refund still fits that part (refundFitsSql), counting the refunds already moved
+ * there in this batch. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
+ * is named in neither list. One that was parked but doesn't move is unlinked, and is listed in `unlinked` like any
+ * other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked` lists the refunds
+ * this save unlinked, by date.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1732,7 +1733,7 @@ export async function saveSplit(
 			Number.isInteger(part) &&
 			part >= 0 &&
 			part < parts.length
-			? [{ refundId: refund.id, date: refund.date, part }]
+			? [{ refundId: refund.id, part }]
 			: [];
 	});
 	const chosenIds = JSON.stringify(moves.map((move) => move.refundId));
@@ -1800,16 +1801,18 @@ export async function saveSplit(
 			.bind(parentId, total, move.refundId),
 	}));
 	// A chosen refund moves onto its part once the parts exist. It moves only if it is still on the purchase (parked
-	// above), still follows the purchase (a competing save can change the credit after the read), and the whole refund
-	// still fits that part (refundFitsSql), counting the refunds moved before it in this batch. A refusal leaves it on
-	// the purchase, where the sweep below unlinks it.
+	// above), still a plain, top-level refund that follows the purchase (a competing save can split or change the credit
+	// after the read), and the whole refund still fits that part (refundFitsSql), counting the refunds moved before it in
+	// this batch. A refusal leaves it on the purchase, where the sweep below unlinks it. RETURNING gives the row it
+	// moved, with the date the save wrote it.
 	const moveStatements = moves.map((move) => ({
 		move,
 		statement: db
 			.prepare(
 				`UPDATE transactions SET refund_of_id = ${partAt("?4")}
 				WHERE id = ?3 AND refund_of_id = ?1 AND ${refundFitsSql("?3", partAt("?4"))} AND ${unchangedNumbered}
-				AND EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?3 AND ${FOLLOWS_PURCHASE})`,
+				AND EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?3 AND ${FOLLOWS_PURCHASE} AND t.is_split = 0 AND t.parent_id IS NULL)
+				RETURNING id, date`,
 			)
 			.bind(parentId, total, move.refundId, move.part),
 	}));
@@ -1880,8 +1883,8 @@ export async function saveSplit(
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
 	const changed = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.meta.changes ?? 0) > 0;
-	// The refunds the two unlink statements returned, oldest first: the ones this save unlinked.
-	const unlinkedRows = (statement: D1PreparedStatement) =>
+	// The rows a statement returned with RETURNING: the refunds it changed.
+	const returnedRows = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.results ?? []) as {
 			id: number;
 			date: string;
@@ -1893,7 +1896,7 @@ export async function saveSplit(
 		unlinked: !saved
 			? []
 			: !linkedPurchase?.refundOfId
-				? [...unlinkedRows(unlinkLinked), ...unlinkedRows(sweepRefused)]
+				? [...returnedRows(unlinkLinked), ...returnedRows(sweepRefused)]
 						.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
 						.map((row) => row.date)
 				: refundUnlinked
@@ -1903,10 +1906,15 @@ export async function saveSplit(
 		bills: saved
 			? unpaidBillsFrom(results[statements.indexOf(stillUnpaid)])
 			: [],
-		// A chosen refund that moved changed its row, which it does only once it passed every check in the batch.
-		moved: moveStatements
-			.filter(({ statement }) => saved && changed(statement))
-			.map(({ move }) => ({ date: move.date, part: move.part })),
+		// A chosen refund that moved returned its row, which it does only once it passed every check in the batch.
+		moved: saved
+			? moveStatements.flatMap(({ move, statement }) =>
+					returnedRows(statement).map((row) => ({
+						date: row.date,
+						part: move.part,
+					})),
+				)
+			: [],
 	};
 }
 
