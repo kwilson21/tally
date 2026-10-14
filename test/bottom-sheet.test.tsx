@@ -3,16 +3,16 @@ import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import { BottomSheet } from "../src/views/bottom-sheet";
 
-// The markup from main before the footer slot existed, captured then: a sheet without a footer
-// must still draw exactly this.
+// The markup from main before the footer slot existed, captured then, plus the two markers sheet.js
+// finds the sheet by (#87): a sheet without a footer must otherwise still draw exactly this.
 const PLAIN_BEFORE_FOOTER =
-	'<a href="/bills" aria-label="Close" tabindex="-1" class="fade-in fixed inset-0 z-40 bg-ink/30" hx-get="/bills" hx-target="#page"></a><section role="dialog" aria-labelledby="sheet-title" class="sheet-panel fixed inset-x-0 bottom-0 z-50 max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet">Body</section>';
+	'<a href="/bills" aria-label="Close" tabindex="-1" data-sheet-close="" class="fade-in fixed inset-0 z-40 bg-ink/30" hx-get="/bills" hx-target="#page"></a><section role="dialog" aria-labelledby="sheet-title" data-sheet="" class="sheet-panel fixed inset-x-0 bottom-0 z-50 max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet">Body</section>';
 
 const STILL_BEFORE_FOOTER =
-	'<a href="/bills" aria-label="Close" tabindex="-1" class="fixed inset-0 z-40 bg-ink/30"></a><section role="dialog" aria-labelledby="sheet-title" class="fixed inset-x-0 bottom-0 z-50 max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet">Body</section>';
+	'<a href="/bills" aria-label="Close" tabindex="-1" data-sheet-close="" class="fixed inset-0 z-40 bg-ink/30"></a><section role="dialog" aria-labelledby="sheet-title" data-sheet="" class="fixed inset-x-0 bottom-0 z-50 max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet">Body</section>';
 
 describe("BottomSheet without a footer", () => {
-	it("draws exactly the markup it drew before the footer slot", () => {
+	it("draws exactly the markup it drew before the footer slot, with the sheet markers", () => {
 		expect(
 			renderToString(
 				<BottomSheet
@@ -91,6 +91,15 @@ describe("BottomSheet with a footer", () => {
 		expect(footer).toContain('id="footer-save"');
 		// Nothing of the footer sits inside the scrolling element.
 		expect(html.slice(scroller, footerStart)).not.toContain("footer-save");
+	});
+
+	it("marks the section and its backdrop for sheet.js, as it does without a footer", () => {
+		expect(html).toMatch(
+			/<section role="dialog" aria-labelledby="sheet-title" data-sheet="" class="[^"]*">/,
+		);
+		expect(html).toMatch(
+			/<a href="\/bills" aria-label="Close" tabindex="-1" data-sheet-close="" class="[^"]*"><\/a>/,
+		);
 	});
 
 	it("keeps the still sheet's classes off the footer's markup when still", () => {

@@ -847,7 +847,8 @@ describe("select several transactions", () => {
 			form([a, b], { back: "/transactions?month=all" }),
 		);
 		const html = await res.text();
-		const cancel = `/transactions?month=all&amp;select=1&amp;ids=${a},${b}`;
+		// Cancel puts focus back on Set category (#87), with the ticks kept.
+		const cancel = `/transactions?month=all&amp;select=1&amp;ids=${a},${b}&amp;focus=set-category-back`;
 		expect(html).toContain(`href="${cancel}"`);
 		expect(
 			html.match(new RegExp(`href="${cancel.replace(/[?]/g, "\\?")}"`, "g"))
@@ -1854,7 +1855,8 @@ describe("select several transactions", () => {
 			expect(attribute(addCash, "hx-include")).toBe(
 				"#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]",
 			);
-			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			// Closing puts focus back on Add cash (#87), with the ticks kept.
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}&focus=add-cash`;
 			const sheetUrl = `/transactions/cash/new?${new URLSearchParams([
 				["back", "/transactions?month=all"],
 				["select", "1"],
@@ -1892,7 +1894,8 @@ describe("select several transactions", () => {
 				new RegExp(`id="selected-count"[^>]*>${ids.length} selected`),
 			);
 			expect([...tickedIds(html)].sort()).toEqual([...ids].sort());
-			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}`;
+			// Closing puts focus back on Add cash (#87), with the ticks kept.
+			const close = `/transactions?month=all&select=1&ids=${ticksParam(ids)}&focus=add-cash`;
 			const backdrop =
 				html.match(/<a [^>]*aria-label="Close"[^>]*>/)?.[0] ?? "";
 			expect(attribute(backdrop, "href")).toBe(close);

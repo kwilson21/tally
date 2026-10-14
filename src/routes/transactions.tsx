@@ -143,6 +143,7 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
 	FOCUS_SET_CATEGORY,
+	FOCUS_SET_CATEGORY_BACK,
 	LIST_LOAD_PAUSE,
 	MAX_SELECTED,
 	NOT_ON_PAGE_FIELD,
@@ -217,6 +218,8 @@ type ListOptions = {
 	focusSetCategory?: boolean;
 	/** The reply to Older or Newer in select mode: focus the first row's tick (FOCUS_FIRST_TICK). */
 	focusFirstTick?: boolean;
+	/** The Add cash sheet closed: focus Add cash, the button it was opened from (FOCUS_ADD_CASH). */
+	focusAddCash?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -292,6 +295,7 @@ async function renderList(
 		focusHeading = false,
 		focusSetCategory = false,
 		focusFirstTick = false,
+		focusAddCash = false,
 	}: ListOptions = {},
 ) {
 	const [
@@ -599,6 +603,7 @@ async function renderList(
 					kind="secondary"
 					href={cashHref}
 					class="gap-2"
+					autofocus={focusAddCash}
 					hx-get={cashGet}
 					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
 					{...(selecting ? TICKS_INCLUDE : {})}
@@ -985,7 +990,10 @@ transactions.get("/transactions", async (c) => {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		countFocus: params.get("focus") === "count",
 		selecting,
-		focusSetCategory: selecting && selectAll,
+		focusSetCategory:
+			selecting &&
+			(selectAll || params.get("focus") === FOCUS_SET_CATEGORY_BACK),
+		focusAddCash: params.get("focus") === FOCUS_ADD_CASH,
 		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 		selection,
 		selectPushBase,
@@ -1212,7 +1220,11 @@ function SelectCategorySheet({
 	/** Its Save was refused, so the open sheet is drawn again where it is. */
 	still?: boolean;
 }) {
-	const cancelHref = selectModeHref(back, selection);
+	// Cancel and the backdrop keep the ticks, and put focus back on Set category (#87).
+	const cancelHref = withFocus(
+		selectModeHref(back, selection),
+		FOCUS_SET_CATEGORY_BACK,
+	);
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
@@ -1559,13 +1571,24 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 	);
 }
 
+/** The `focus` value the Add cash sheet's close asks for: the list puts focus on its Add cash button (#87). */
+const FOCUS_ADD_CASH = "add-cash";
+
+/**
+ * The list address with `focus` set, so the list it draws puts focus on that row or control. A sheet's close
+ * asks for it, as a plain link without JavaScript and as its htmx swap with it.
+ */
+function withFocus(href: string, focus: string | number): string {
+	return `${href}${href.includes("?") ? "&" : "?"}focus=${focus}`;
+}
+
 /**
  * Closing a sheet swaps the list back in and returns focus to this transaction's row; the pushed URL
  * stays clean.
  */
 function listCloseAttrs(back: string, id: number): Record<string, string> {
 	return {
-		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${id}`,
+		"hx-get": withFocus(back, id),
 		"hx-target": "#page",
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
@@ -1594,6 +1617,8 @@ function EditSheet({
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
+	// Where Cancel and the backdrop go without JavaScript: the list, with focus on this row.
+	const closeHref = withFocus(back, tx.id);
 	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
@@ -1613,7 +1638,7 @@ function EditSheet({
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
-			closeHref={back}
+			closeHref={closeHref}
 			closeAttrs={closeAttrs}
 			// A field's error and the delete question draw the open panel again.
 			still={still || deleteConfirm || Object.keys(errors).length > 0}
@@ -2269,7 +2294,12 @@ function EditSheet({
 				    has two ways to leave it side by side (decision 84). */}
 				{!deleteConfirm && (
 					<div class="mt-2 grid grid-cols-2 gap-3">
-						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
+						<Button
+							href={closeHref}
+							kind="secondary"
+							class="w-full"
+							{...closeAttrs}
+						>
 							Cancel
 						</Button>
 						<Button
@@ -2377,7 +2407,10 @@ function CashSheet({
 	today: string;
 }) {
 	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's selection.
-	const closeHref = selection ? selectModeHref(back, selection) : back;
+	const closeHref = withFocus(
+		selection ? selectModeHref(back, selection) : back,
+		FOCUS_ADD_CASH,
+	);
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -2510,7 +2543,7 @@ transactions.post("/transactions/cash", async (c) => {
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
 	if (!c.req.header("HX-Request"))
 		return offer
-			? renderRuleOffer(c, today, address, offer)
+			? renderRuleOffer(c, today, address, offer, saved.id)
 			: c.redirect(address, 303);
 	// The save's own words come first in the announcement, with or without the question after them.
 	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
@@ -2523,7 +2556,7 @@ transactions.post("/transactions/cash", async (c) => {
 			}),
 		);
 		c.header("HX-Push-Url", address);
-		return renderRuleOffer(c, today, address, offer);
+		return renderRuleOffer(c, today, address, offer, saved.id);
 	}
 	c.header(
 		"HX-Trigger",
@@ -2657,7 +2690,12 @@ function SplitSheet({
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
-		<BottomSheet labelledBy="split-title" closeHref={back} still={still}>
+		// Closing it, by the backdrop or Cancel, returns focus to this transaction's row, as the edit panel does (#87).
+		<BottomSheet
+			labelledBy="split-title"
+			closeHref={withFocus(back, tx.id)}
+			still={still}
+		>
 			<p class="text-sm text-muted">{tx.rawName}</p>
 			<h2
 				id="split-title"
@@ -2684,6 +2722,7 @@ function SplitSheet({
 				categories={categories}
 				values={values}
 				back={back}
+				cancelHref={withFocus(back, tx.id)}
 				error={error}
 			/>
 		</BottomSheet>
@@ -3499,7 +3538,7 @@ async function savePanel(
 	const panel = likely && likely.rows.length > 0 ? likely : null;
 	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
 	if (!c.req.header("HX-Request")) {
-		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
 		if (panel) return renderLikely(c, today, filters, panel);
 		return c.redirect(back, 303);
 	}
@@ -3559,7 +3598,7 @@ async function savePanel(
 	c.header("HX-Push-Url", back);
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
-	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
 	if (panel) return renderLikely(c, today, filters, panel);
 	return renderList(c, today, filters, { focusId: tx.id });
 }
@@ -3656,6 +3695,9 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const merchantKey = form.get("merchant_key")?.toString() ?? "";
 	const categoryId = Number(form.get("category"));
 	const back = safeBack(form.get("back")?.toString());
+	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
+	const saved = Number(form.get("saved"));
+	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
 	const today = await householdToday(c.env.DB);
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
@@ -3682,14 +3724,19 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				: "Saved.";
 	if (yes && offer && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	if (!c.req.header("HX-Request"))
+		return c.redirect(
+			savedId === undefined ? back : withFocus(back, savedId),
+			303,
+		);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
-		focusHeading: true,
+		focusId: savedId,
+		focusHeading: savedId === undefined,
 	});
 }
 
@@ -3715,6 +3762,7 @@ function renderLikely(
 				savedDate={panel.savedDate}
 				savedCents={panel.savedCents}
 				back={panel.back}
+				closeHref={withFocus(panel.back, panel.savedId)}
 				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}
@@ -3730,16 +3778,24 @@ function renderLikely(
 	});
 }
 
+/**
+ * The rule offer after a save. `savedId` is the transaction that was saved, so closing the question puts focus on
+ * its row (#87); a Select-mode save names no one row, so its close goes to the list.
+ */
 function renderRuleOffer(
 	c: Context<App>,
 	today: string,
 	back: string,
 	value: RuleOfferValue,
+	savedId?: number,
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: () => (
-			<BottomSheet labelledBy="rule-offer-title" closeHref={back}>
-				<RuleOffer value={value} focus />
+			<BottomSheet
+				labelledBy="rule-offer-title"
+				closeHref={savedId === undefined ? back : withFocus(back, savedId)}
+			>
+				<RuleOffer value={value} focus savedId={savedId} />
 			</BottomSheet>
 		),
 	});

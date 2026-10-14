@@ -1079,7 +1079,10 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
-		expect(html).toMatch(/<a[^>]*href="\/bills"[^>]*>\s*Cancel/);
+		// A new bill's Cancel returns focus to Add a bill (#87).
+		expect(html).toMatch(
+			/<a[^>]*href="\/bills\?focus=add-bill"[^>]*>\s*Cancel/,
+		);
 		const { id } = (await env.DB.prepare(
 			"SELECT id FROM bills WHERE active=1 LIMIT 1",
 		).first<{ id: number }>()) as { id: number };

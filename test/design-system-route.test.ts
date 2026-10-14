@@ -918,6 +918,10 @@ describe("GET /design-system in the demo", () => {
 			/<section role="dialog" aria-labelledby="ds-sheet-title"/,
 		);
 		expect(html).toContain('id="ds-sheet-title"');
+		// The title takes focus when the sheet opens, as the app's sheets' titles do (sheet.js, #87).
+		const title = html.match(/<h2 id="ds-sheet-title"[^>]*>/)?.[0] ?? "";
+		expect(title).toContain('tabindex="-1"');
+		expect(title).toContain("autofocus");
 		expect(html).toContain("Count as income");
 		expect(html).toContain("Reviewed as a refund or other non-income credit");
 		expect(design).toMatch(
@@ -1154,6 +1158,10 @@ describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
 		expect(html).toMatch(
 			/<h2 id="ledger-sheet-title" class="font-serif text-2xl font-semibold tracking-tight"[^>]*>\s*Add a bill\s*<\/h2>/,
 		);
+		// The title takes focus when the sheet opens, as the app's sheets' titles do (sheet.js, #87).
+		const title = html.match(/<h2 id="ledger-sheet-title"[^>]*>/)?.[0] ?? "";
+		expect(title).toContain('tabindex="-1"');
+		expect(title).toContain("autofocus");
 		const scroller = html.indexOf("min-h-0 flex-1 overflow-y-auto");
 		const form = html.indexOf('<form id="ledger-sheet-form"');
 		const formEnd = html.indexOf("</form>");
