@@ -2507,6 +2507,35 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				...keptAnswer,
 			});
 		});
+
+		it("clears the posted row's Jev answer when the pending row's planned expense moves onto it and counts it, so the night run asks again with the name (#202)", async () => {
+			const item = await addItem();
+			const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+			const ids = await bothStored(item, loan);
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			// A plan keeps its payment's own category (decision 82), so the clear is what changes the posted row's guess.
+			const plan = await planPaidBy(ids.pending);
+			await jevAnswer(ids.posted);
+			await post(item, loan);
+			// Plaid excluded the posted payment, so the plan moving onto it is what counts it.
+			expect(await planPayer(plan)).toBe(ids.posted);
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "plaid",
+				category_id: null,
+				category_source: null,
+				category_confidence: null,
+				jev_category_id: null,
+			});
+			expect((await pendingForJev(env.DB, 10)).map((r) => r.id)).toContain(
+				ids.posted,
+			);
+		});
 	});
 
 	describe("a moved split's parts follow the posted row, except for a choice made on the part", () => {
