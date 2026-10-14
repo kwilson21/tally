@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { loadBillSuggestions } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
@@ -34,6 +35,24 @@ function backdropHref(html: string) {
 			/<a href="([^"]*)" aria-label="Close"[^>]*data-sheet-close/,
 		)?.[1] ?? "";
 	return href.replaceAll("&amp;", "&");
+}
+
+/** The id of the first bill on the Bills list. */
+async function firstBillId() {
+	const list = await get("/bills");
+	const id = list.match(/href="\/bills\/(\d+)"/)?.[1] ?? "";
+	expect(id).not.toBe("");
+	return id;
+}
+
+/** The opening tag of the Add link for a possible bill, found by the finding it carries. */
+function addLinkFor(html: string, rawName: string) {
+	const finding = new URLSearchParams({ finding: rawName }).toString();
+	return (
+		(html.match(/<a [^>]*>/g) ?? []).find(
+			(tag) => tag.includes("/bills/new?") && tag.includes(finding),
+		) ?? ""
+	);
 }
 
 /** The opening tag of the element with this id, so a test can read its attributes. */
@@ -104,16 +123,69 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 		expect(tagWithId(html, "add-bill")).toContain("autofocus");
 	});
 
-	it("closes a bill's sheet to that bill's row, and puts focus on the row", async () => {
-		const list = await get("/bills");
-		const id = list.match(/href="\/bills\/(\d+)"/)?.[1] ?? "";
-		expect(id).not.toBe("");
+	it("closes an edit sheet, from its backdrop and from Cancel, to its bill's page, with focus on Edit bill", async () => {
+		const id = await firstBillId();
 		const sheet = await get(`/bills/${id}/edit`);
-		expect(backdropHref(sheet)).toBe(`/bills?focus=${id}`);
-		const drawn = await get(`/bills?focus=${id}`);
+		expect(backdropHref(sheet)).toBe(`/bills/${id}?focus=edit-bill`);
+		expect(sheet.split(`href="/bills/${id}?focus=edit-bill"`).length - 1).toBe(
+			2,
+		);
+	});
+
+	it("keeps that close when the edit sheet is drawn again with a field's error", async () => {
+		const id = await firstBillId();
+		const html = await post(`/bills/${id}`, new URLSearchParams({ name: "" }));
+		expect(html).toContain("Enter a name.");
+		expect(backdropHref(html)).toBe(`/bills/${id}?focus=edit-bill`);
+	});
+
+	it("puts focus on Edit bill when the bill's page is drawn with that focus, and not otherwise", async () => {
+		const id = await firstBillId();
 		expect(
-			drawn.match(new RegExp(`<a [^>]*href="/bills/${id}"[^>]*>`))?.[0],
+			tagWithId(await get(`/bills/${id}?focus=edit-bill`), "edit-bill"),
 		).toContain("autofocus");
+		expect(tagWithId(await get(`/bills/${id}`), "edit-bill")).not.toContain(
+			"autofocus",
+		);
+	});
+
+	it("closes a new bill added from a possible bill to that finding on the Possible bills page", async () => {
+		// A raw name with a space and a % (which encodeURIComponent must escape) and no database rows needed.
+		const finding = "SHOP BANK 50%";
+		const html = await get(
+			`/bills/new?${new URLSearchParams({ name: "Shop bank", merchant_raw_name: finding, finding })}`,
+		);
+		const closeTo = `/bills/find?focus=${encodeURIComponent(finding)}`;
+		expect(backdropHref(html)).toBe(closeTo);
+		expect(html.split(`href="${closeTo}"`).length - 1).toBe(2);
+		expect(html).toMatch(
+			/<input[^>]*name="finding"[^>]*value="SHOP BANK 50%"|<input[^>]*value="SHOP BANK 50%"[^>]*name="finding"/,
+		);
+	});
+
+	it("keeps that close when the new bill is drawn again with a field's error", async () => {
+		const finding = "SHOP BANK 50%";
+		const html = await post(
+			"/bills",
+			new URLSearchParams({ name: "Shop bank", finding }),
+		);
+		expect(html).toContain("Enter an amount");
+		expect(backdropHref(html)).toBe(
+			`/bills/find?focus=${encodeURIComponent(finding)}`,
+		);
+	});
+
+	it("puts focus on the possible bill's Add when the Possible bills page is drawn with that focus", async () => {
+		const [suggestion] = await loadBillSuggestions(
+			env.DB,
+			todayIn(DEFAULT_TIME_ZONE),
+		);
+		expect(suggestion).toBeDefined();
+		const rawName = suggestion?.rawName ?? "";
+		const drawn = await get(`/bills/find?focus=${encodeURIComponent(rawName)}`);
+		expect(addLinkFor(drawn, rawName)).toContain("autofocus");
+		const other = await get("/bills/find?focus=NOPE");
+		expect(other).not.toContain("autofocus");
 	});
 });
 

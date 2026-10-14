@@ -38,6 +38,8 @@ export function BillFindingRow({
 		frequency: "monthly",
 		category_id: String(suggestion.categoryId ?? ""),
 		merchant_raw_name: suggestion.rawName,
+		// The finding the Add came from: its sheet closes back to this row (#87).
+		finding: suggestion.rawName,
 	});
 	return (
 		<li id={`finding-${encodeURIComponent(suggestion.rawName)}`} class="py-3">

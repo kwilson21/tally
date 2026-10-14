@@ -319,14 +319,14 @@ async function page(
 		values?: Values;
 		errors?: Record<string, string>;
 		bigAmount?: BigAmount;
+		/** The possible bill a new bill was added from, whose Possible bills row the sheet closes to (#87). */
+		finding?: string;
 	},
 	given?: string,
 ) {
 	const today = given ?? (await householdToday(c.env.DB));
-	// A sheet's close asks for focus on its bill's row, or on Add a bill (?focus=, #87).
-	const focus = c.req.query("focus");
-	const focusAddBill = focus === "add-bill";
-	const focusBillId = Number(focus);
+	// A sheet's close asks for focus on Add a bill (?focus=add-bill, #87).
+	const focusAddBill = c.req.query("focus") === "add-bill";
 	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	// A payment at another price is offered on the row it would pay: an active bill whose shown
@@ -406,7 +406,6 @@ async function page(
 												bill={bill}
 												today={today}
 												href={`/bills/${bill.id}`}
-												autofocus={bill.id === focusBillId}
 											/>
 										))}
 									</ul>
@@ -416,10 +415,7 @@ async function page(
 					)
 				)}
 				{inactive.length > 0 && (
-					<details
-						class="group mt-2 border-t border-rule"
-						open={inactive.some((bill) => bill.id === focusBillId)}
-					>
+					<details class="group mt-2 border-t border-rule">
 						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
 							<span class="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
 								<Icon name="chevron-right" class="size-5" />
@@ -428,12 +424,7 @@ async function page(
 						</summary>
 						<ul class="divide-y divide-rule">
 							{inactive.map((bill) => (
-								<BillRow
-									bill={bill}
-									today={today}
-									href={`/bills/${bill.id}`}
-									autofocus={bill.id === focusBillId}
-								/>
+								<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
 							))}
 						</ul>
 					</details>
@@ -490,7 +481,12 @@ async function activeBills(c: Context<App>) {
 /** The sheet again, with the Name error for a name another active bill has (`values.name` is the name). */
 async function nameTaken(
 	c: Context<App>,
-	sheet: { bill?: DbBill; values: Values; bigAmount?: BigAmount },
+	sheet: {
+		bill?: DbBill;
+		values: Values;
+		bigAmount?: BigAmount;
+		finding?: string;
+	},
 ) {
 	const name = sheet.values.name;
 	const taken = duplicateBillName(await activeBills(c), name, sheet.bill?.id);
@@ -529,6 +525,7 @@ function BillSheet({
 	categories,
 	today,
 	keptCents,
+	finding,
 }: {
 	bill?: DbBill;
 	values?: Values;
@@ -538,10 +535,17 @@ function BillSheet({
 	today: string;
 	/** The price earlier months keep, when the bill had one (see earlierPrice); the note is left out otherwise. */
 	keptCents?: number;
+	/** The possible bill a new bill is added from: the form carries it, so a redrawn sheet still closes there. */
+	finding?: string;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
-	// Closing the sheet, by the backdrop or Cancel, returns focus to this bill's row, or to Add a bill (#87).
-	const closeHref = bill ? `/bills?focus=${bill.id}` : "/bills?focus=add-bill";
+	// Closing the sheet, by the backdrop or Cancel, returns focus to what opened it (#87): this bill's Edit bill
+	// button, the Possible bills row a new bill was added from, or Add a bill.
+	const closeHref = bill
+		? `/bills/${bill.id}?focus=edit-bill`
+		: finding
+			? `/bills/find?focus=${encodeURIComponent(finding)}`
+			: "/bills?focus=add-bill";
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
 	// to get it back (P45 A's duplicate name has no other way out).
 	const activeAction = bill
@@ -570,6 +574,7 @@ function BillSheet({
 				hx-swap="outerHTML"
 				class="bill-form flex flex-col gap-3"
 			>
+				{finding && <input type="hidden" name="finding" value={finding} />}
 				<TextInput
 					id="bill-name"
 					name="name"
@@ -815,13 +820,18 @@ bills.get("/bills/new", (c) => {
 				merchant_raw_name: q.merchant_raw_name ?? "",
 			}
 		: undefined;
-	return page(c, { values });
+	return page(c, { values, finding: q.finding || undefined });
 });
 bills.get("/bills/find", async (c) => {
 	const suggestions = await loadBillSuggestions(
 		c.env.DB,
 		await householdToday(c.env.DB),
 	);
+	// The Add sheet closes back to its finding (?focus=, #87), unless that finding has gone.
+	const focus = c.req.query("focus");
+	const focusRawName = suggestions.some((s) => s.rawName === focus)
+		? focus
+		: undefined;
 	return c.html(
 		<Layout
 			title="Possible bills · Tally"
@@ -841,7 +851,7 @@ bills.get("/bills/find", async (c) => {
 					About the same amount, about a month apart. Nothing becomes a bill
 					until you add it.
 				</p>
-				{billFindingList(suggestions)}
+				{billFindingList(suggestions, focusRawName)}
 			</div>
 		</Layout>,
 	);
@@ -912,6 +922,8 @@ bills.get("/bills/:id/edit", async (c) => {
 async function save(c: Context<App>, id?: number) {
 	const form = await c.req.parseBody();
 	const raw = (name: string) => String(form[name] ?? "").trim();
+	// The possible bill a new bill was added from: a redrawn sheet keeps it, so its close still goes there (#87).
+	const finding = raw("finding") || undefined;
 	const values: Values = {
 		name: raw("name"),
 		amount: raw("amount"),
@@ -1025,7 +1037,13 @@ async function save(c: Context<App>, id?: number) {
 		}
 	}
 	if (Object.keys(errors).length)
-		return page(c, { bill: bill ?? undefined, values, errors, bigAmount });
+		return page(c, {
+			bill: bill ?? undefined,
+			values,
+			errors,
+			bigAmount,
+			finding,
+		});
 	// Typed bank text saves its transaction's merchant key, so the bill's payments match it (spec §6.1). Only a
 	// text the bill already has keeps the bill's old bank-text flag, so an unchanged legacy bill keeps matching
 	// by bank text (write.ts).
@@ -1056,7 +1074,12 @@ async function save(c: Context<App>, id?: number) {
 		: await insertBill(c.env.DB, fields, today);
 	// Another save took the name since the check above, and the write refused it.
 	if (!written)
-		return nameTaken(c, { bill: bill ?? undefined, values, bigAmount });
+		return nameTaken(c, {
+			bill: bill ?? undefined,
+			values,
+			bigAmount,
+			finding,
+		});
 	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
 	if (c.req.header("HX-Request")) {
@@ -1574,8 +1597,10 @@ async function billPage(
 				</ul>
 				<div class="mt-3">
 					<Button
+						id="edit-bill"
 						kind="secondary"
 						href={`/bills/${id}/edit`}
+						autofocus={c.req.query("focus") === "edit-bill"}
 						{...sheetAttrs(`/bills/${id}/edit`)}
 					>
 						Edit bill

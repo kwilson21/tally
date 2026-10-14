@@ -656,7 +656,7 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	states:
 		"Closed: not drawn. Opening: the motion below. Open: the sheet and backdrop at rest. Loading and error belong to the form inside (a Save that is pending, a field's error in role=alert); a failed request leaves the sheet as it is, with what was typed, and a toast says so. Hover, pressed and disabled: not applicable to the sheet itself.",
 	feedback:
-		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there; if nothing in the sheet took focus, sheet.js puts it on the title. Cancel or the backdrop bring the list back with focus on the row that was open; a save does the same with a toast and an announcement.",
+		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there; if nothing in the sheet took focus, sheet.js puts it on the title. Cancel or the backdrop bring back the page it was opened from, with focus on what opened it (a row or a button); a save does the same with a toast and an announcement.",
 	input:
 		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Escape closes the sheet the way Cancel does, Tab stays inside it (from its last control to an Undo toast on screen, if any, then back to its first, and the other way with Shift; a radio group is one stop), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a modal dialog named by the sheet's heading, with the page behind it inert. The toasts stay usable. Without sheet.js (decision 109), see the edges.",
 	motion:
