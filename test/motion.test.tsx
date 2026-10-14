@@ -599,13 +599,19 @@ describe("the proposals page's drawings", () => {
 				.flatMap((s) => [...s.matchAll(/\.(proposal-[a-z0-9-]+)/g)])
 				.map((m) => m[1]),
 		);
-		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts).
+		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), and
+		// P118 and P119's saved-row replays (the tick, the let-go press and the toast).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
 				"proposal-cut",
 				"proposal-loop",
 				"proposal-morph",
+				"proposal-saved-chevron",
+				"proposal-saved-loop",
+				"proposal-saved-press",
+				"proposal-saved-tick",
+				"proposal-saved-toast",
 				"proposal-slide-in",
 				"proposal-slide-out",
 			].sort(),
@@ -669,6 +675,85 @@ describe("the proposals page's drawings", () => {
 					r.decls.get("animation") === "none",
 			),
 		).toBe(true);
+	});
+
+	it("replays a saved row on a five-second loop from the toast's stay, and rests on the end state under reduced motion (P119)", () => {
+		expect(rule(".proposal-saved-loop")[0]?.decls.get("--loop")).toBe(
+			"calc(var(--duration-toast) * 1.25)",
+		);
+		for (const part of [
+			".proposal-saved-tick",
+			".proposal-saved-chevron",
+			".proposal-saved-toast",
+			".proposal-saved-press",
+		]) {
+			expect(
+				rules.some(
+					(r) =>
+						!inReduce(r) &&
+						selectorsOf(r).includes(part) &&
+						r.decls.get("animation")?.includes("var(--loop)"),
+				),
+				part,
+			).toBe(true);
+			expect(
+				rules.some(
+					(r) =>
+						inReduce(r) &&
+						selectorsOf(r).includes(part) &&
+						r.decls.get("animation") === "none",
+				),
+				`${part} under reduced motion`,
+			).toBe(true);
+		}
+	});
+
+	it("times the saved row's replay in keyframe stops: the tick and toast arrive in 150 ms (3%), the toast lifts at 80% to 83%, and the let-go press holds to 26% (1.3 s) then fades by 30%", () => {
+		// Each stop is a share of the five-second loop: 3% is 150 ms, 26% is 1.3 s and 30% is 1.5 s.
+		const stops = (name: string) =>
+			new Map(
+				keyframes(name).flatMap((r) =>
+					selectorsOf(r).map((s) => [s, r.decls] as const),
+				),
+			);
+		expect([...stops("replay-tick").keys()]).toEqual([
+			"0%",
+			"3%",
+			"80%",
+			"83%",
+			"100%",
+		]);
+		expect(stops("replay-tick").get("3%")?.get("opacity")).toBe("1");
+		expect(stops("replay-tick").get("83%")?.get("opacity")).toBe("0");
+		expect([...stops("replay-toast").keys()]).toEqual([
+			"0%",
+			"3%",
+			"80%",
+			"83%",
+			"100%",
+		]);
+		expect(stops("replay-toast").get("80%")?.get("opacity")).toBe("1");
+		expect(stops("replay-toast").get("83%")?.get("opacity")).toBe("0");
+		expect([...stops("replay-chevron").keys()]).toEqual([
+			"0%",
+			"80%",
+			"83%",
+			"100%",
+		]);
+		expect(stops("replay-chevron").get("80%")?.get("opacity")).toBe("0");
+		expect(stops("replay-chevron").get("83%")?.get("opacity")).toBe("1");
+		expect([...stops("replay-press").keys()]).toEqual([
+			"0%",
+			"26%",
+			"30%",
+			"100%",
+		]);
+		expect(stops("replay-press").get("26%")?.get("background-color")).toBe(
+			"var(--color-press)",
+		);
+		expect(stops("replay-press").get("30%")?.get("background-color")).toBe(
+			"transparent",
+		);
 	});
 
 	it("keeps the switch moving too: it is drawn Off, and the loop slides the real knob and track from the On look", async () => {

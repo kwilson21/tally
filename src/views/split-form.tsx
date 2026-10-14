@@ -1,6 +1,9 @@
+import { shortDay } from "../dates";
 import { formatCents } from "../money";
-import { splitStatus } from "../transactions/split";
+import type { SplitRefund } from "../transactions/refund-guards";
+import { positiveCents, splitStatus } from "../transactions/split";
 import { Button } from "./button";
+import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
 
@@ -34,12 +37,119 @@ export function SplitLine({
 	);
 }
 
+/** A part's chip on the refund chooser: its category and amount, or "Part N" until both are filled in. */
+function partLabel(
+	value: SplitValue,
+	index: number,
+	categories: Category[],
+): string {
+	const category = categories.find((cat) => String(cat.id) === value.category);
+	const cents = positiveCents(value.amount);
+	return category && cents !== null
+		? `${category.name} · ${formatCents(cents)}`
+		: `Part ${index + 1}`;
+}
+
+/**
+ * The id of a part's label on the refund chooser: /split/line redraws it out of band, by sheet, refund and part. Each
+ * drawing of the sheet has its own mark, so a label update meant for an earlier drawing finds nothing to change.
+ */
+const partLabelId = (sheet: string, refundId: number, index: number) =>
+	`refund-${sheet}-${refundId}-part-${index}`;
+
+/**
+ * The linked refunds of a split purchase (decision 99): for each, "The refund on Oct 5 goes with", one radio chip
+ * per part, then Not linked. Nothing is chosen when the sheet opens. A part's chip text is its own span, which
+ * /split/line redraws out of band (RefundPartLabels); the radios are never redrawn, so a pick made meanwhile stays
+ * checked and focused. `choices` is what the sheet posted, so a redraw of the whole sheet keeps the answers given:
+ * "none" for Not linked, or a part's index.
+ */
+export function RefundChoices({
+	refunds,
+	values,
+	categories,
+	today,
+	choices,
+	sheet,
+}: {
+	refunds: SplitRefund[];
+	values: SplitValue[];
+	categories: Category[];
+	today: string;
+	choices: Record<number, string | undefined>;
+	sheet: string;
+}) {
+	return (
+		<div id="refund-choices" class="flex flex-col gap-4">
+			{refunds.map((refund) => (
+				<fieldset class="flex flex-col gap-2">
+					<legend class="text-sm text-muted">
+						{`The refund on ${shortDay(refund.date, today)} goes with`}
+					</legend>
+					<div class="flex flex-wrap gap-2">
+						{values.map((value, index) => (
+							<Chip
+								type="radio"
+								name={`refund_${refund.id}`}
+								value={String(index)}
+								checked={choices[refund.id] === String(index)}
+							>
+								<span id={partLabelId(sheet, refund.id, index)}>
+									{partLabel(value, index, categories)}
+								</span>
+							</Chip>
+						))}
+						<Chip
+							type="radio"
+							name={`refund_${refund.id}`}
+							value="none"
+							checked={choices[refund.id] === "none"}
+						>
+							Not linked
+						</Chip>
+					</div>
+				</fieldset>
+			))}
+		</div>
+	);
+}
+
+/**
+ * The refund chooser's part labels, redrawn out of band by /split/line as the parts' categories and amounts are typed
+ * (decision 99). Each one replaces the text of one chip, found by its id, which carries the sheet's token; the radios
+ * are not in the reply.
+ */
+export function RefundPartLabels({
+	refunds,
+	values,
+	categories,
+	sheet,
+}: {
+	refunds: SplitRefund[];
+	values: SplitValue[];
+	categories: Category[];
+	sheet: string;
+}) {
+	return (
+		<>
+			{refunds.flatMap((refund) =>
+				values.map((value, index) => (
+					<span id={partLabelId(sheet, refund.id, index)} hx-swap-oob="true">
+						{partLabel(value, index, categories)}
+					</span>
+				)),
+			)}
+		</>
+	);
+}
+
 /**
  * The split sheet's form. In correction mode (Change the parts, spec §8.4) `totalCents` is the entry's
  * new amount, which the live line counts against, and `amountWas` is the amount the saved parts were
  * drawn with; the parts' own sum is always that amount, so the line says how far the parts are from
  * the new one. `pendingEdit` is the panel's other unsaved changes, carried through every redraw so
- * they are saved with the corrected parts.
+ * they are saved with the corrected parts. A correction keeps each part's links, so it asks about no
+ * refund: `refunds` is for a new split only (decision 99).
  */
 export function SplitForm({
 	id,
@@ -49,9 +159,14 @@ export function SplitForm({
 	pendingEdit,
 	categories,
 	values,
+	refunds = [],
+	choices = {},
+	today,
 	back,
 	cancelHref = back,
 	error,
+	// Each drawing of the sheet gets a new token, which every line request posts back (hx-include).
+	sheet = crypto.randomUUID(),
 }: {
 	id: number;
 	parentCents: number;
@@ -60,10 +175,14 @@ export function SplitForm({
 	pendingEdit?: string;
 	categories: Category[];
 	values: SplitValue[];
+	refunds?: SplitRefund[];
+	choices?: Record<number, string | undefined>;
+	today: string;
 	back: string;
 	/** Where Cancel goes, when it is not the list the form returns to (a sheet's close asks for focus). */
 	cancelHref?: string;
 	error?: string;
+	sheet?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
 	return (
@@ -78,6 +197,7 @@ export function SplitForm({
 			hx-select-oob="#needs-count:innerHTML"
 		>
 			<input type="hidden" name="back" value={back} />
+			<input type="hidden" name="sheet" value={sheet} />
 			{correcting && (
 				<>
 					<input type="hidden" name="total" value={String(totalCents)} />
@@ -128,6 +248,14 @@ export function SplitForm({
 						class="min-h-11 rounded-full border border-rule bg-paper px-3"
 						autofocus={index === values.length - 1 && values.length > 2}
 						required
+						// A category change redraws the refund chooser's part labels too (/split/line).
+						hx-post={`/transactions/${id}/split/line`}
+						hx-trigger="change"
+						hx-sync="#split-line:queue last"
+						hx-target="#split-line"
+						hx-select="#split-line > *"
+						hx-swap="innerHTML"
+						hx-include="closest form"
 					>
 						<option value="">Pick a category</option>
 						{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
@@ -160,6 +288,14 @@ export function SplitForm({
 					</div>
 				</div>
 			))}
+			<RefundChoices
+				refunds={correcting ? [] : refunds}
+				values={values}
+				categories={categories}
+				today={today}
+				choices={choices}
+				sheet={sheet}
+			/>
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={cancelHref} kind="secondary">
 					Cancel
