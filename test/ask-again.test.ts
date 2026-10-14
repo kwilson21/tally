@@ -90,6 +90,23 @@ const callsUsed = async () =>
 				.first<{ value: string }>()
 		)?.value ?? 0,
 	);
+/**
+ * Makes the transaction a payment linked to bill 700, so it pays a bill. Link before Tally picks the category: the
+ * link's trigger (migration 0035) gives a linked row the bill's category, source 'bill', which Tally never re-guesses.
+ */
+const linkToBill = async (transactionId: number) => {
+	await db
+		.prepare(
+			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (700, 'Bakery club', 650, 28, 'monthly', 1, 'Not a match')",
+		)
+		.run();
+	await db
+		.prepare(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', 'linked')",
+		)
+		.bind(transactionId)
+		.run();
+};
 
 let bakery: number;
 beforeEach(async () => {
@@ -1291,17 +1308,7 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 
 	it("still re-guesses the category of an excluded transaction that pays a bill", async () => {
 		const category = await firstCategory();
-		await db
-			.prepare(
-				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (700, 'Bakery club', 650, 28, 'monthly', 1, 'Not a match')",
-			)
-			.run();
-		await db
-			.prepare(
-				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', 'linked')",
-			)
-			.bind(bakery)
-			.run();
+		await linkToBill(bakery);
 		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
 		const jev = fakeJev(() => reply(0.2));
 		await save(bakery, {
@@ -1317,6 +1324,24 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			category_id: null,
 			category_source: null,
 		});
+	});
+
+	it("re-guesses a bill payment the person excluded and says nothing of counting again when the save leaves Exclude off", async () => {
+		const category = await firstCategory();
+		await linkToBill(bakery);
+		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: "",
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed. Tally guesses its category again.");
 	});
 
 	it("re-guesses the category when the same save un-excludes the transaction", async () => {
@@ -1360,13 +1385,16 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 			)
 			.bind(source, categoryId, bakery)
 			.run();
-	/** The panel's fields for a one-off name under This one only, with the exclusion chip and the review chip as given. */
-	const renamed = (review: "0" | "1") => ({
+	/** The panel's fields for a one-off name under This one only, with the exclusion chip (`exclude`, Exclude on by default) and the review chip as given. */
+	const renamed = (
+		review: "0" | "1",
+		exclude: Record<string, string> = { excluded: "1" },
+	) => ({
 		category: "",
 		name_pick: "own",
 		merchant: "Dog bed",
 		name_scope: "one",
-		excluded: "1",
+		...exclude,
 		income: "0",
 		income_was: "0",
 		creditReviewed: review,
@@ -1480,5 +1508,52 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		expect(await panelHtml()).not.toContain(
 			"Tally guesses its category again.",
 		);
+	});
+
+	it("guesses the category again for a bill payment the review lifts, and doesn't say it counts again, since a bill payment counted all along", async () => {
+		await linkToBill(bakery);
+		await excludedCredit(await firstCategory());
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, renamed("1"));
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(
+			await db
+				.prepare("SELECT excluded FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first<{ excluded: number }>(),
+		).toMatchObject({ excluded: 0 });
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed. Tally guesses its category again.");
+	});
+
+	it("draws the note on a bill payment the review lifts, and the review doesn't fold it, since a bill payment counts either way", async () => {
+		await linkToBill(bakery);
+		await excludedCredit(await firstCategory());
+		const note = (await panelHtml()).match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toBeDefined();
+		expect(note).not.toContain("input[name=creditReviewed]");
+	});
+
+	it("draws the note on a redraw with Exclude off, and the review doesn't fold it, since Exclude off means the review lifts nothing", async () => {
+		await excludedCredit(await firstCategory());
+		fakeJev();
+		const { response, html } = await save(bakery, {
+			...renamed("0", {}),
+			merchant: "",
+		});
+		expect(response.status).toBe(422);
+		const note = html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toBeDefined();
+		expect(note).not.toContain("input[name=creditReviewed]");
 	});
 });

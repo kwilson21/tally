@@ -1646,6 +1646,12 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
+	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	const countsIfReviewed = (creditReviewed: boolean) =>
+		isIncluded(
+			excludedAfterSave(tx, { ...values, creditReviewed }),
+			tx.paysBill === true,
+		);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1909,14 +1915,12 @@ function EditSheet({
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), and so is an exclusion Plaid set, which a review lifts
-								// (excludedAfterSave). The chip folds the note only where one of them is drawn.
+								// The review chip folds the note where the review decides whether the row counts: a Plaid
+								// exclusion it lifts, not on a bill payment and not once Exclude is off. A linked purchase is
+								// one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
 								reviewCounts:
 									linkedPurchase !== undefined ||
-									(tx.excluded &&
-										tx.excludedSource === "plaid" &&
-										tx.amountCents < 0),
+									countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -3730,14 +3734,17 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
+	// A bill payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
+	const countedBefore = isIncluded(tx.excluded, tx.paysBill === true);
+	const countsNow = isIncluded(excludedNow, tx.paysBill === true);
 	const exclusion =
-		excludedNow === tx.excluded
-			? ""
-			: excludedNow
-				? tx.paysBill
-					? " It still counts while it pays a bill."
-					: " It's excluded from the budget."
-				: " It counts in the budget again.";
+		excludedNow && !tx.excluded
+			? tx.paysBill
+				? " It still counts while it pays a bill."
+				: " It's excluded from the budget."
+			: countsNow && !countedBefore
+				? " It counts in the budget again."
+				: "";
 	const keptWords = unnamed
 		? "Kept the details."
 		: guessAgain
