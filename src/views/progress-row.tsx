@@ -4,7 +4,7 @@ import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
 import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
-import { Icon, ROW_OPENS, RowArrow } from "./icons";
+import { Icon, ROW_OPENS, RowArrow, RowArrowSpace } from "./icons";
 
 type Props = {
 	name: string;
@@ -29,6 +29,8 @@ type Props = {
 		/** Put focus on this button: after a tap turns the other one off at a limit, so focus isn't lost. */
 		focus?: "up" | "down";
 	};
+	/** Its list has rows that open, so a row with no link keeps the arrow's empty space and the bars line up (P118 A). */
+	reserveArrow?: boolean;
 };
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
@@ -113,6 +115,7 @@ export function ProgressRow({
 	attrs,
 	autofocus,
 	nudge,
+	reserveArrow,
 }: Props) {
 	const over = spentCents > budgetCents;
 	const nearLimit =
@@ -190,8 +193,11 @@ export function ProgressRow({
 					)}
 					{href && <span class="sr-only">, change the budget</span>}
 				</div>
-				{/* Hung in the margin, outside the text column, so every bar keeps its length. Adjust mode's − and + take its place. */}
+				{/* Hung in the margin, outside the text column. A row with no link keeps the same empty box in a list whose rows open, so the bars still end together. Adjust mode's − and + take its place. */}
 				{href && !nudge && <RowArrow class="self-start mt-1" />}
+				{reserveArrow && !href && !nudge && (
+					<RowArrowSpace class="self-start mt-1" />
+				)}
 			</Wrap>
 			{nudgeProps && <Nudge direction="up" {...nudgeProps} />}
 		</li>

@@ -71,6 +71,7 @@ import {
 	MaybeIncome,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
@@ -90,7 +91,7 @@ import {
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
-import { RuleOffer } from "../views/rule-offer";
+import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -570,6 +571,25 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 		"Name · Tally's guess · From your bank · Why? · {Blue bottle cof} · The bank says {SQ *BLUE BOTTLE COF 0412} · Type your own · Your own name · Errors: Type a name here, or pick one above. · Keep the name under 80 characters. · Pick one of the names shown. · Settings: Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
 };
 
+// The rule tick's use spec (#353, decision 101): a rule is made only when the person ticks it.
+const MERCHANT_RULE_TICK_SPEC: UseSpecText = {
+	purpose:
+		"Let a person decide, in the edit panel, whether this category becomes the store's rule for next time. Saving the panel for another reason never makes a rule.",
+	affordance:
+		"A plain row above Save, the round mark Select mode uses: an empty ring when unticked, a check in an ink ring when ticked. The words “Use this category for Local Bakery from now on” sit beside it, with a muted hint under them: “Leave it unticked to change just this one.” When a rule already matches the transaction the row opens ticked, and the hint reads “Local Bakery is always Groceries. Untick it and save to remove the rule.” The whole row is one label of 44px or more.",
+	states:
+		"Unticked (the default), ticked, and focus: the round mark takes the focus-visible ring when the checkbox has keyboard focus. The check mark shows while ticked, so the state is never color alone. Disabled and loading: none; Save shows its busy state. A linked refund has no row at all.",
+	feedback:
+		"Saving the panel says what was done in its toast, as the rest of the panel does. Without JavaScript the tick posts with Save and the panel is drawn again if a field is wrong.",
+	input:
+		"Tap anywhere on the row to tick it. Tab reaches the checkbox, Space toggles it, and the focus ring shows on the round mark. Screen reader: “Use this category for Local Bakery from now on, checkbox, not checked”, then the hint through aria-describedby.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"Ticking it on a transaction that doesn't match the rule changes the store's rule. A ticked row saved with another category changes the rule to that category, and the row opens ticked again with the new words. Unticking a matching rule and saving removes it, and the words under the row say so.",
+	words:
+		"Use this category for {Local Bakery} from now on · Leave it unticked to change just this one. · {Local Bakery} is always {Groceries}. Untick it and save to remove the rule.",
+};
+
 // The Rename list's use spec (decision 101, Name row round 2 A): every line answered before the owner signs it off.
 const RENAME_CHOICES_SPEC: UseSpecText = {
 	purpose:
@@ -632,17 +652,17 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	purpose:
 		"Make one change over the list it came from, without leaving it: a transaction's edit panel, a budget, adding cash.",
 	affordance:
-		"A dimmed backdrop (ink at 30%) over the page, and on it a paper sheet with curved top corners against a phone's bottom edge, or a panel against the right edge on desktop. The page behind stays in view, so it reads as over the list. Cancel, a secondary button, closes it, and so does the backdrop.",
+		"A dimmed backdrop (ink at 30%) over the page, and on it a paper sheet with curved top corners against a phone's bottom edge, or a panel against the right edge on desktop. The page behind stays in view, so it reads as over the list. Cancel, a secondary button, closes it, and so do the backdrop and Escape.",
 	states:
 		"Closed: not drawn. Opening: the motion below. Open: the sheet and backdrop at rest. Loading and error belong to the form inside (a Save that is pending, a field's error in role=alert); a failed request leaves the sheet as it is, with what was typed, and a toast says so. Hover, pressed and disabled: not applicable to the sheet itself.",
 	feedback:
-		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there. Cancel or the backdrop bring the list back with focus on the row that was open; a save does the same with a toast and an announcement.",
+		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there; if nothing in the sheet took focus, sheet.js puts it on the title. Cancel or the backdrop bring back the page it was opened from, with focus on what opened it (a row or a button); a save does the same with a toast and an announcement.",
 	input:
-		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Tab goes through the sheet's controls; Escape isn't supported (it would need JavaScript), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a dialog named by the sheet's heading. It isn't a modal, so the page behind isn't hidden from it.",
+		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Escape closes the sheet the way Cancel does, Tab stays inside it (from its last control to an Undo toast on screen, if any, then back to its first, and the other way with Shift; a radio group is one stop), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a modal dialog named by the sheet's heading, with the page behind it inert. The toasts stay usable. Without sheet.js (decision 109), see the edges.",
 	motion:
 		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
 	edges:
-		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
+		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without sheet.js it is today's page region, not a modal: Cancel and the backdrop are links that close it, Escape does nothing, and the page behind stays in reach.",
 	words:
 		"The backdrop's name for a screen reader is “Close”. The sheet is named by its title (the category, the transaction's name); every other word is its form's.",
 };
@@ -946,6 +966,7 @@ function HomeTopGroup() {
 		averageCents: 60245,
 		transactionCount: 12,
 		month: "2026-10",
+		closeHref: "/?focus=1",
 		closeAttrs: {
 			"hx-get": "/?focus=1",
 			"hx-target": "#page",
@@ -2142,7 +2163,7 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet, so it ends in the chevron on its name line and takes the press tint as it opens; here each row links to this section, and a pressed row is held still in its own state."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet, so it ends in the chevron on its name line and takes the press tint as it opens; here each row links to this section, and a pressed row is held still in its own state. Beside rows that open, an archived category keeps the arrow’s space, so the bars end together."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
@@ -2151,6 +2172,21 @@ function Rows() {
 						</ul>
 					</State>
 				))}
+				<State label="Beside rows that open, an archived category keeps the arrow's space, so the bars end together">
+					<ul class="max-w-xl">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} href="#progress-row" />
+						))}
+						<ProgressRow
+							name="Kids"
+							icon="kids"
+							color="cat-ochre"
+							spentCents={12000}
+							budgetCents={20000}
+							reserveArrow
+						/>
+					</ul>
+				</State>
 				<State label="Pressed, held still: the press tint on a row that opens while its sheet loads">
 					<ul class="max-w-xl [&_.row-opens]:bg-press">
 						{PROGRESS_ROWS.slice(0, 1).map((s) => (
@@ -2263,6 +2299,7 @@ function Rows() {
 						<SavingsGoalSheet
 							value="500.00"
 							month="October"
+							closeHref="/?focus=savings-goal"
 							closeAttrs={{
 								"hx-get": "/?focus=savings-goal",
 								"hx-target": "#page",
@@ -2304,7 +2341,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
@@ -3010,26 +3047,46 @@ function Categorization() {
 				id="rule-offer"
 				title="RuleOffer"
 				tier="visual"
-				components={["RuleOffer", "Button", "Icon"]}
-				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
+				components={["RuleOffer", "GroupRuleOffer", "Button", "Icon"]}
+				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time. After Organize saves a store, the same question appears in place of the store, with no count (#353)."
 			>
-				<div inert class="max-w-xl">
-					<RuleOffer
-						value={{
-							merchantKey: "COSTCO",
-							merchant: "Costco",
-							categoryId: 1,
-							category: "Groceries",
-							count: 3,
-							back: "/transactions",
-						}}
-					/>
-				</div>
+				<State label="Edit panel and list: after the third pick, the question over the list, with its count">
+					<div inert class="max-w-xl">
+						<RuleOffer
+							id="rule-offer-sample-title"
+							value={{
+								merchantKey: "COSTCO",
+								merchant: "Costco",
+								categoryId: 1,
+								category: "Groceries",
+								count: 3,
+								back: "/transactions",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="Organize: after Save and next, in place of the store, with Not now and Yes; Yes makes the rule for every merchant of the group">
+					<div inert class="max-w-xl">
+						<GroupRuleOffer
+							id="group-rule-offer-sample-title"
+							value={{
+								savedIds: [1, 2],
+								merchant: "Costco",
+								categoryId: 1,
+								category: "Groceries",
+							}}
+							action="/transactions/organize/rule"
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<p class="mt-4 text-muted">
 				Use: the question follows every matching save until the merchant has a
 				rule. Not now closes it without saving a rule; Yes applies the existing
-				merchant rule behavior. All answers use server forms, and every swap is
+				merchant rule behavior. Organize's question is asked after each save
+				unless every merchant of the group already has that rule; Not now moves
+				on to the next store with no rule, and Yes makes the rule on each
+				merchant of the group. All answers use server forms, and every swap is
 				announced.
 			</p>
 		</Group>
@@ -3393,9 +3450,6 @@ function Controls() {
 						Checkbox chips: toggles, on and off
 					</legend>
 					<div class="mt-2 flex flex-wrap gap-2">
-						<Chip type="checkbox" name="ds-always" value="1" checked>
-							Always for this merchant
-						</Chip>
 						<Chip type="checkbox" name="ds-exclude" value="1">
 							Exclude from budget
 						</Chip>
@@ -3904,6 +3958,34 @@ function Controls() {
 				<UseSpec spec={RENAME_CHOICES_SPEC} />
 			</Specimen>
 			<Specimen
+				id="merchant-rule-tick"
+				title="MerchantRuleTick"
+				tier="interactive"
+				components={["MerchantRuleTick"]}
+				sentence="The edit panel's rule tick (#353, decision 101): a plain row above Save, with Select mode's round mark, in place of the pill “Always for this merchant”. Unticked, it makes no rule; ticked, it makes this category the store's rule. Unticked is the default, so saving the panel for another reason never makes a rule."
+			>
+				<State label="Unticked, for a store with no rule: the hint says leaving it unticked changes just this one">
+					<div class="max-w-xl">
+						<MerchantRuleTick
+							id="ds-rule-none"
+							merchant="Local Bakery"
+							checked={false}
+						/>
+					</div>
+				</State>
+				<State label="Ticked, because a rule already matches this transaction: the hint says what unticking does">
+					<div class="max-w-xl">
+						<MerchantRuleTick
+							id="ds-rule-matched"
+							merchant="Local Bakery"
+							checked
+							ruleCategory="Groceries"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={MERCHANT_RULE_TICK_SPEC} />
+			</Specimen>
+			<Specimen
 				id="detail-row"
 				title="Transaction detail row"
 				tier="interactive"
@@ -4169,7 +4251,7 @@ function Controls() {
 				title="SplitForm"
 				tier="visual"
 				components={["SplitForm"]}
-				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total."
+				sentence="Category and amount parts with a live, worded line that says what remains or confirms the total. Change the parts (a split cash entry whose amount changed) opens with the new total at the top, the saved parts filled in, the muted line about the mismatch, and the live line against the new total. A split of a purchase with a linked refund asks which part each refund goes with, or Not linked; the chooser's chips follow each part's category and amount, and Save split waits until every refund has an answer that fits."
 			>
 				<State label="A new split, with $25.42 left to assign">
 					<div inert>
@@ -4184,6 +4266,7 @@ function Controls() {
 								{ category: "1", amount: "150.00" },
 								{ category: "5", amount: "12.00" },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4203,6 +4286,7 @@ function Controls() {
 								{ category: "1", amount: "60.00", partId: 201 },
 								{ category: "5", amount: "30.00", partId: 202 },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4224,6 +4308,7 @@ function Controls() {
 									kept: { id: 5, name: "Household" },
 								},
 							]}
+							today="2026-10-14"
 							back="/transactions"
 						/>
 					</div>
@@ -4243,8 +4328,53 @@ function Controls() {
 								{ category: "1", amount: "50.00", partId: 201 },
 								{ category: "5", amount: "30.00", partId: 202 },
 							]}
+							today="2026-10-14"
 							back="/transactions"
 							error="Linked refunds add up to $85.00, so the amount can't be less than that."
+						/>
+					</div>
+				</State>
+				<State label="A split with two linked refunds: the first is answered, Kids; the second is still open">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={10000}
+							categories={[
+								{ id: 4, name: "Kids" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "4", amount: "60.00" },
+								{ category: "5", amount: "40.00" },
+							]}
+							refunds={[
+								{ id: 1, date: "2026-10-05", amountCents: -4500 },
+								{ id: 2, date: "2026-10-06", amountCents: -2000 },
+							]}
+							choices={{ 1: "0" }}
+							today="2026-10-14"
+							back="/transactions"
+						/>
+					</div>
+				</State>
+				<State label="A refund too big for its part: the refund is $45.00, and Household is only $40.00">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={10000}
+							categories={[
+								{ id: 4, name: "Kids" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "4", amount: "60.00" },
+								{ category: "5", amount: "40.00" },
+							]}
+							refunds={[{ id: 1, date: "2026-10-05", amountCents: -4500 }]}
+							choices={{ 1: "1" }}
+							today="2026-10-14"
+							back="/transactions"
+							error="The refund is $45.00, and Household is only $40.00."
 						/>
 					</div>
 				</State>
@@ -4394,7 +4524,7 @@ function Feedback() {
 				title="BottomSheet"
 				tier="visual"
 				components={["BottomSheet"]}
-				sentence="A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop."
+				sentence="A modal over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop, closed by Escape, Cancel or the backdrop; without its script, a page region."
 			>
 				<p>
 					It covers the page, so it has a page of its own:{" "}
@@ -5610,9 +5740,9 @@ export function SheetSpecimen() {
 				BottomSheet
 			</h1>
 			<p class="mt-2 text-muted">
-				Visual: the sheet over sample rows. Cancel or the backdrop go back to
-				the catalog. Opening this page plays the sheet's motion: it rises on a
-				phone and slides in from the right on desktop.
+				Visual: the sheet over sample rows. Escape, Cancel or the backdrop go
+				back to the catalog. Opening this page plays the sheet's motion: it
+				rises on a phone and slides in from the right on desktop.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
@@ -5627,12 +5757,15 @@ export function SheetSpecimen() {
 					<h2
 						id="ds-sheet-title"
 						class="font-serif text-4xl font-semibold tracking-tight"
+						tabindex={-1}
+						autofocus
 					>
 						Groceries
 					</h2>
 					<p class="mt-2 text-muted">
 						On phones it rises from the bottom; on desktop it's a panel on the
-						right. It isn't a modal: the page behind it stays in place.
+						right. It is a modal (sheet.js): Escape or Cancel closes it, Tab
+						stays inside it, and the page behind it is inert.
 					</p>
 					<div class="mt-4 flex flex-col gap-3 border-t border-rule pt-3">
 						<p class="text-base text-ink">Income</p>
@@ -5672,9 +5805,9 @@ export function LedgerSheetSpecimen() {
 			</h1>
 			<p class="mt-2 text-muted">
 				Visual: the ledger form on a sheet, with Category open so the middle is
-				long. Cancel or the backdrop go back to the Ledger form group. The
-				middle scrolls; Cancel and Save stay in view on a phone and on desktop.
-				Save is drawn only: the catalog's CSP lets no form post.
+				long. Escape, Cancel or the backdrop go back to the Ledger form group.
+				The middle scrolls; Cancel and Save stay in view on a phone and on
+				desktop. Save is drawn only: the catalog's CSP lets no form post.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
@@ -5702,6 +5835,7 @@ export function LedgerSheetSpecimen() {
 						id="ledger-sheet-title"
 						class="font-serif text-2xl font-semibold tracking-tight"
 						tabindex={-1}
+						autofocus
 					>
 						Add a bill
 					</h2>

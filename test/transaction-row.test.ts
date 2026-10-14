@@ -23,6 +23,21 @@ const base: ListRow = {
 	categoryColor: null,
 };
 
+/** The caption line's text, as a reader hears it: its tags stripped, and no-break spaces read as spaces. */
+const captionLine = (html: string) => {
+	const start = html.indexOf(
+		'<span class="flex min-w-0 items-center gap-2 leading-6">',
+	);
+	const end = html.indexOf(
+		'</span></span><span class="shrink-0 text-lg">',
+		start,
+	);
+	return html
+		.slice(start, end)
+		.replace(/<[^>]+>/g, "")
+		.replaceAll(" ", " ");
+};
+
 describe("rowCaption", () => {
 	it("shows a newly imported credit as needing review", async () => {
 		expect(
@@ -363,6 +378,71 @@ describe("rowCaption", () => {
 			kind: "category",
 			caption:
 				"Groceries · The bank changed this from $12.34, so its split was removed. 2 bills are no longer paid.",
+			tag: false,
+		});
+	});
+
+	it("keeps a categorized purchase's refund and bill beside its bank-change note (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				...kids,
+				splitRemovedFromCents: 1234,
+				refundedCents: 2499,
+				paysBill: true,
+				billName: "Electric",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Kids · The bank changed this from $12.34, so its split was removed. · $24.99 refunded · paid Electric bill",
+			tag: false,
+		});
+	});
+
+	it("keeps an uncategorized bill payment's refund and bill after its bank-change note (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. · paid Electric bill",
+			tag: true,
+		});
+		expect(
+			rowCaption({
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+				refundedCents: 1500,
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. · $15.00 refunded · paid Electric bill",
+			tag: true,
+		});
+	});
+
+	it("keeps a refund that follows its purchase beside the bill it paid (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+				followsPurchase: true,
+				paysBill: true,
+				billName: "Electric",
+			}),
+		).toEqual({
+			kind: "needs",
+			caption: "Refund for Sep 5 · paid Electric bill",
 			tag: false,
 		});
 	});
@@ -720,12 +800,49 @@ describe("TransactionRow", () => {
 			row: { ...base, pending: true },
 		}).toString();
 		expect(html).toContain(
-			'<span class="shrink-0 text-muted">Pending ·</span>',
+			'<span class="shrink-0 text-muted">Pending · Needs category</span>',
 		);
-		expect(html.indexOf("Pending ·")).toBeLessThan(
-			html.indexOf("Needs category"),
-		);
+		expect(captionLine(html)).toBe("Pending · Needs category");
 		expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
+	});
+
+	it("reads Pending · Needs category · and the bank change's note on a pending row whose split the bank changed", async () => {
+		const html = await TransactionRow({
+			row: { ...base, pending: true, splitRemovedFromCents: 1234 },
+		}).toString();
+		expect(captionLine(html)).toBe(
+			"Pending · Needs category · The bank changed this from $12.34, so its split was removed.",
+		);
+	});
+
+	it("keeps Needs category first in a caption with the bank change, a refund and a bill", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+				refundedCents: 1500,
+			},
+		}).toString();
+		expect(captionLine(html)).toBe(
+			"Needs category · The bank changed this from $12.34, so its split was removed. · $15.00 refunded · paid Electric bill",
+		);
+	});
+
+	it("reads a refund that follows its purchase as its date and bill, with no Needs category", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+				followsPurchase: true,
+				paysBill: true,
+				billName: "Electric",
+			},
+		}).toString();
+		expect(captionLine(html)).toBe("Refund for Sep 5 · paid Electric bill");
+		expect(html).not.toContain("Needs category");
 	});
 
 	it("keeps a Maybe guess's dashed tag instead of the words", async () => {
@@ -814,7 +931,7 @@ describe("a TransactionRow that opens", () => {
 			href: "/transactions/7",
 		}).toString();
 		expect(html).toMatch(
-			/<span class="shrink-0 text-lg">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
+			/<span class="shrink-0 text-lg">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
 		);
 	});
 
@@ -824,7 +941,7 @@ describe("a TransactionRow that opens", () => {
 			href: "/transactions/7",
 		}).toString();
 		expect(html).toContain(
-			'class="flex h-16 items-center gap-4 text-ink no-underline group row-opens"',
+			'class="flex h-16 items-center gap-4 text-ink no-underline group/row row-opens"',
 		);
 	});
 

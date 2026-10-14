@@ -49,6 +49,9 @@ class FakeNode extends EventTarget {
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 	}
+	getAttribute(name: string) {
+		return this.attrs.get(name) ?? null;
+	}
 	hasAttribute(name: string) {
 		return this.attrs.has(name);
 	}
@@ -148,6 +151,7 @@ async function page({
 	selectAll,
 	resizeObserver = true,
 	billPage = false,
+	sheet = false,
 }: {
 	listed?: boolean;
 	bar?: FakeNode;
@@ -156,12 +160,21 @@ async function page({
 	resizeObserver?: boolean;
 	/** A bill's page: no Transactions title, but its own page-title, which takes focus instead. */
 	billPage?: boolean;
+	/** A sheet open over the page: its section, and the heading that section is labelled by (#87). */
+	sheet?: boolean;
 } = {}) {
 	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
 	// Every Transactions state renders the page's title, listed or not.
 	const heading = new FakeNode("h1");
+	const sheetSection = sheet ? new FakeNode("section") : null;
+	const sheetTitle = sheet ? new FakeNode("h2") : null;
+	if (sheetSection && sheetTitle) {
+		sheetSection.setAttribute("data-sheet", "");
+		sheetSection.setAttribute("aria-labelledby", "sheet-title");
+		sheetTitle.id = "sheet-title";
+	}
 	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
 	const documentTarget = new EventTarget();
@@ -181,6 +194,8 @@ async function page({
 		body,
 		documentElement,
 		activeElement: body as unknown,
+		querySelector: (selector: string) =>
+			selector === "section[data-sheet]" ? sheetSection : null,
 		getElementById: (id: string) =>
 			id === "toasts"
 				? toasts
@@ -190,15 +205,17 @@ async function page({
 						? (bar ?? null)
 						: id === "select-all-link"
 							? (selectAll ?? null)
-							: id === "transactions-title"
-								? billPage
-									? null
-									: heading
-								: id === "page-title" && billPage
-									? heading
-									: id === "result-count" && listed
-										? resultCount
-										: null,
+							: id === "sheet-title"
+								? sheetTitle
+								: id === "transactions-title"
+									? billPage
+										? null
+										: heading
+									: id === "page-title" && billPage
+										? heading
+										: id === "result-count" && listed
+											? resultCount
+											: null,
 		createElement: (tag: string) => new FakeNode(tag),
 		createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
 		createTextNode: (text: string) =>
@@ -243,6 +260,7 @@ async function page({
 		htmx,
 		resultCount,
 		heading,
+		sheetTitle,
 		bar,
 		resizeObservers,
 		swapBody,
@@ -891,6 +909,82 @@ describe("focus on an Undo toast", () => {
 		vi.advanceTimersByTime(10000);
 		expect(headingFocus).not.toHaveBeenCalled();
 		expect(document.activeElement).toBe(elsewhere);
+	});
+});
+
+// A sheet is open over the page (#87): the page behind it is inert, so focus that a toast hands back goes to the
+// sheet's own heading, not to the Transactions heading behind it.
+describe("focus from an Undo toast while a sheet is open", () => {
+	const TOKEN = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+	const undoToast = (body: EventTarget) =>
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: TOKEN,
+			undoExpiresInMs: 10000,
+		});
+	const undoButton = (toast: FakeNode) =>
+		toast.all().find((node) => node.tag === "button") as FakeNode;
+
+	it("moves focus to the sheet's title, not the Transactions heading, when the Undo toast's time runs out", async () => {
+		const { body, document, toasts, heading, sheetTitle } = await page({
+			sheet: true,
+		});
+		const title = sheetTitle as FakeNode;
+		const headingFocus = vi.spyOn(heading, "focus");
+		const titleFocus = vi.spyOn(title, "focus");
+		undoToast(body);
+		expect(document.activeElement).toBe(
+			undoButton(toasts.children[0] as FakeNode),
+		);
+		vi.advanceTimersByTime(10000);
+		expect(toasts.children).toHaveLength(0);
+		expect(titleFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(title);
+		expect(title.attrs.get("tabindex")).toBe("-1");
+		expect(headingFocus).not.toHaveBeenCalled();
+	});
+
+	it("moves focus to the sheet's title when an Undo's answer ends its toast while focus is on Undo", async () => {
+		const { body, document, toasts, heading, sheetTitle } = await page({
+			sheet: true,
+		});
+		const title = sheetTitle as FakeNode;
+		const headingFocus = vi.spyOn(heading, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		expect(document.activeElement).toBe(undoButton(undo));
+		fire(body, "toast", {
+			message: "That cash entry is already back.",
+			type: "success",
+			undoDone: TOKEN,
+		});
+		expect(toasts.children).not.toContain(undo);
+		expect(document.activeElement).toBe(title);
+		expect(title.attrs.get("tabindex")).toBe("-1");
+		expect(headingFocus).not.toHaveBeenCalled();
+	});
+
+	it("moves focus to the sheet's title when an Undo request fails after its time ran out and focus is lost", async () => {
+		const { body, document, toasts, heading, sheetTitle } = await page({
+			sheet: true,
+		});
+		const title = sheetTitle as FakeNode;
+		const headingFocus = vi.spyOn(heading, "focus");
+		const titleFocus = vi.spyOn(title, "focus");
+		undoToast(body);
+		const undo = toasts.children[0] as FakeNode;
+		const form = undo.all().find((node) => node.tag === "form") as FakeNode;
+		form.dispatchEvent(new Event("submit"));
+		document.activeElement = body;
+		vi.advanceTimersByTime(10000);
+		expect(toasts.children).not.toContain(undo);
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: form, request: { method: "POST" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(titleFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(title);
+		expect(headingFocus).not.toHaveBeenCalled();
 	});
 });
 

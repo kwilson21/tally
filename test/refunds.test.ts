@@ -830,7 +830,8 @@ describe("linking a refund", () => {
 		expect(fieldset).toMatch(/name="category" value="4"[^>]*checked/);
 		expect(fieldset).not.toMatch(/name="category" value="1"[^>]*checked/);
 		expect(html).toContain("Counts in Kids with the Aug 20 purchase.");
-		expect(html).not.toContain("Always for this merchant");
+		// A linked refund has no rule tick at all (#353), so no "from now on" row either.
+		expect(html).not.toContain("from now on");
 
 		await save(REFUND, [["category", String(GAS)]]);
 		expect(await ownCategory(REFUND)).toBe(GROCERIES);
@@ -1258,6 +1259,7 @@ describe("splits unlink their refunds", () => {
 			["part_category", String(GAS)],
 			["part_amount", "15"],
 			["part_amount", "15"],
+			["refund_9002", "none"],
 			["back", "/transactions"],
 		]);
 		expect(res.status).toBe(200);

@@ -490,6 +490,44 @@ describe("scheduled handler: merchant names", () => {
 		vi.restoreAllMocks();
 	});
 
+	it("asks about the 3 names waiting in production's 09:20 run, though 150 untried notes come first (#458)", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 150)
+				 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name, details_asked, note_worth_writing)
+				 SELECT 'plaid-note-' || i, 1, '2026-09-20', 650, 'NOTE SHOP ' || i, 'Note Shop', 1, 1 FROM n`,
+			),
+			env.DB.prepare(
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 3)
+				 INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				 SELECT 'plaid-name-' || i, 1, '2026-09-20', 500 + i, 'SHOP NUMBER ' || i FROM n`,
+			),
+		]);
+		// A note's call answers empty, so it is tried and not asked again; a name's call answers a name.
+		const ai = {
+			run: vi.fn(async (_model: string, input: unknown) => ({
+				response: JSON.stringify(input).includes("NOTE SHOP")
+					? ""
+					: "Some Place Name",
+			})),
+		} as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+		await runFirstSort({ ...env, DEMO: "false", AI: ai });
+		const asked = ai.run.mock.calls.map(([, input]) => JSON.stringify(input));
+		expect(asked.filter((text) => text.includes("NOTE SHOP"))).toHaveLength(
+			nameCallLimit / 2,
+		);
+		expect(asked.filter((text) => text.includes("SHOP NUMBER"))).toHaveLength(
+			3,
+		);
+		vi.restoreAllMocks();
+	});
+
 	it("does nothing where there is no Workers AI binding, as in local development", async () => {
 		await oneUnnamedCharge();
 		await runSecondSort({ ...env, DEMO: "false" });

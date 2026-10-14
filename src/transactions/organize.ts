@@ -9,6 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
+import { applyMerchantRuleSql } from "../db/transactions";
 import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
@@ -19,6 +20,32 @@ const NEEDS_CATEGORY_UPDATE = `category_id IS NULL AND ${INCLUDED_ROW} AND is_sp
 const KEY = merchantKeySql("t");
 const KEY_UPDATE = merchantKeySql("transactions");
 const CHUNK_SIZE = 90;
+/**
+ * Every charge in a saved list (a JSON array of ids) still exists and holds the category as a person's choice
+ * (#353). Its binds, in order, are `savedStillHoldArgs`.
+ */
+export const SAVED_STILL_HOLD_SQL = `(SELECT COUNT(DISTINCT value) FROM json_each(?)) = (SELECT COUNT(*) FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user')`;
+/** The binds for SAVED_STILL_HOLD_SQL's `?`s: the saved list, the saved list again, then the category. */
+export const savedStillHoldArgs = (savedIds: string, categoryId: number) => [
+	savedIds,
+	savedIds,
+	categoryId,
+];
+/**
+ * Every saved charge's key still shows the name the question offered (#353): its display name, or with none, its
+ * tidied key, as organizeOffer names it (an empty display name is none, as `||` reads it). Only compared, never
+ * written. A key with no `merchants` row has no name either. Its binds, in order, are `savedStillNamedArgs`.
+ */
+export const SAVED_STILL_NAMED_SQL = `NOT EXISTS (SELECT 1 FROM transactions s2 LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("s2")} WHERE s2.id IN (SELECT value FROM json_each(?)) AND CASE WHEN NULLIF(m.display_name, '') IS NULL THEN ${merchantKeySql("s2")} NOT IN (SELECT value FROM json_each(?)) ELSE m.display_name != ? END)`;
+/**
+ * The binds for SAVED_STILL_NAMED_SQL's `?`s: the saved list, the tidied keys (a JSON array of the saved keys whose
+ * tidied name is the question's), then the name the question offered.
+ */
+export const savedStillNamedArgs = (
+	savedIds: string,
+	tidyKeys: string,
+	merchant: string,
+) => [savedIds, tidyKeys, merchant];
 
 export type OrganizeGroup = {
 	name: string;
@@ -117,16 +144,20 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 	);
 }
 
-/** Categorizes a current merchant group and creates rules for future transactions. */
+/**
+ * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
+ * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
+ * Returns the ids of the charges it filed, which the question carries back so Yes can tell whether they still hold it.
+ */
 export async function saveOrganizeGroup(
 	db: D1Database,
 	merchantKeys: string[],
 	categoryId: number,
 	displayName: string | null,
 	updatedBy: string,
-): Promise<number> {
+): Promise<number[]> {
 	const names = [...new Set(merchantKeys)];
-	if (names.length === 0) return 0;
+	if (names.length === 0) return [];
 	let saved = 0;
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
@@ -139,8 +170,8 @@ export async function saveOrganizeGroup(
 			.first<{ n: number }>();
 		saved += count?.n ?? 0;
 	}
-	// A stale form must not alter rules after another request categorized the group.
-	if (saved === 0) return 0;
+	// A stale form files nothing after another request categorized the group.
+	if (saved === 0) return [];
 
 	const updates: D1PreparedStatement[] = [];
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
@@ -151,13 +182,14 @@ export async function saveOrganizeGroup(
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 						updated_by = ?, updated_at = datetime('now')
-					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})`,
+					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})
+					RETURNING id`,
 				)
 				.bind(categoryId, updatedBy, ...chunk),
 		);
 	}
-	// A merchant gets its rule only while one of its charges still needs a category when this batch starts, so a group
-	// another save filed first keeps its rule. The checks run ahead of the updates that file the charges.
+	// A merchant's row is written only while one of its charges still needs a category when this batch starts, so a
+	// group another save filed first keeps its name. The checks run ahead of the updates that file the charges.
 	// The guessed names a person keeps are logged in this batch, in one statement ahead of every merchant's settling
 	// upsert (spec §8.6). The log reads each merchant as its upsert finds it, so it must come first. It has the
 	// upsert's EXISTS guard too, so a group another save filed first logs no rename.
@@ -180,18 +212,169 @@ export async function saveOrganizeGroup(
 		settles.push(
 			db
 				.prepare(
-					`INSERT INTO merchants (raw_name, display_name, default_category_id)
-					SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
-					ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id,
+					`INSERT INTO merchants (raw_name, display_name)
+					SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} = ?)
+					ON CONFLICT(raw_name) DO UPDATE SET
 						display_name = CASE WHEN ? IS NULL THEN merchants.display_name ELSE excluded.display_name END,
 						${SETTLE_SUGGESTION_SQL}`,
 				)
-				.bind(merchantKey, displayName, categoryId, merchantKey, displayName),
+				.bind(merchantKey, displayName, merchantKey, displayName),
 		);
 	}
 	const results = await db.batch([...settles, ...updates]);
 	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
 	return results
 		.slice(settles.length)
-		.reduce((changed, result) => changed + result.meta.changes, 0);
+		.flatMap((result) =>
+			(result.results as { id: number }[]).map((row) => row.id),
+		);
+}
+
+/**
+ * Whether every merchant key of a group already has `categoryId` as its rule, so Organize has no question to
+ * ask after the group is saved (#353). A key with no `merchants` row has no rule.
+ */
+export async function groupHasRule(
+	db: D1Database,
+	merchantKeys: string[],
+	categoryId: number,
+): Promise<boolean> {
+	const names = [...new Set(merchantKeys)];
+	let ruled = 0;
+	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
+		const chunk = names.slice(offset, offset + CHUNK_SIZE);
+		const marks = chunk.map(() => "?").join(", ");
+		const row = await db
+			.prepare(
+				`SELECT COUNT(*) AS n FROM merchants WHERE default_category_id = ? AND raw_name IN (${marks})`,
+			)
+			.bind(categoryId, ...chunk)
+			.first<{ n: number }>();
+		ruled += row?.n ?? 0;
+	}
+	return ruled === names.length;
+}
+
+/**
+ * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key of the charges
+ * Save filed, creating the `merchants` rows that don't exist yet, and applies it to the store's transactions a person
+ * hasn't chosen, as setMerchantRule (#209's Yes) does, so later ones follow. Keys come from the saved rows, never from
+ * the request, and a key gets the rule only where a saved row carries it as a person's choice. It acts only while every
+ * row that Save filed (`savedIds`, a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or
+ * recategorized row makes the Yes stale (no rule, no charge changed, no toast). A pending charge that sync merges into
+ * its posted row (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit
+ * panel's tick can still make the rule. `merchant` is the store's name the question offered: a key whose display name is
+ * another name, or whose cleared name tidies to another, makes the Yes stale too, so the toast can't name a store the rule
+ * doesn't cover. The name is only compared, never written. Returns the keys whose rule was written, so a caller can tell
+ * whether there is a rule to name.
+ */
+export async function setOrganizeRule(
+	db: D1Database,
+	categoryId: number,
+	savedIds: string,
+	merchant: string,
+	actor: string,
+): Promise<string[]> {
+	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
+	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
+	// uses them stays inside both statements below. An empty list (no saved key tidies to it) fails a cleared key.
+	const { results: keyRows } = await db
+		.prepare(
+			`SELECT DISTINCT ${merchantKeySql("s")} AS merchantKey FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(savedIds)
+		.all<{ merchantKey: string }>();
+	const tidyKeys = JSON.stringify(
+		keyRows
+			.map((row) => row.merchantKey)
+			.filter((key) => tidyName(key) === merchant),
+	);
+	// Two statements whatever the group's size, and both carry the guard, so the rules and the charges they name
+	// move together or not at all.
+	const rule = db
+		.prepare(
+			`INSERT INTO merchants (raw_name, default_category_id)
+			SELECT DISTINCT ${merchantKeySql("s")}, ? FROM ${savedRows} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}
+			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id
+			RETURNING raw_name`,
+		)
+		.bind(
+			categoryId,
+			savedIds,
+			categoryId,
+			...savedStillHoldArgs(savedIds, categoryId),
+			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
+		);
+	const apply = db
+		.prepare(
+			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}`,
+		)
+		.bind(
+			categoryId,
+			actor,
+			savedIds,
+			categoryId,
+			...savedStillHoldArgs(savedIds, categoryId),
+			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
+		);
+	// Only the rule's statement returns rows: the keys it wrote.
+	const [written] = await db.batch([rule, apply]);
+	return ((written?.results ?? []) as { raw_name: string }[]).map(
+		(row) => row.raw_name,
+	);
+}
+
+/** Organize's question for a saved group, as `organizeOffer` rebuilds it; the view draws it (#353). */
+export type GroupOffer = {
+	savedIds: number[];
+	merchant: string;
+	categoryId: number;
+	category: string;
+};
+
+/**
+ * Rebuilds Organize's question from the charges a save filed, or returns nothing when they no longer hold the
+ * category (#353). The question's address carries only the saved ids and the category, so every key and name here
+ * comes from the database: a crafted address can show a question that is true of the data, or none. It returns
+ * nothing unless those charges are one store's, so ids from two stores can't name one of them, and nothing once
+ * every key already has the rule, so Back after Yes shows no question.
+ */
+export async function organizeOffer(
+	db: D1Database,
+	savedIds: number[],
+	categoryId: number,
+): Promise<GroupOffer | null> {
+	const ids = [...new Set(savedIds)];
+	if (ids.length === 0) return null;
+	const category = await db
+		.prepare("SELECT id, name FROM categories WHERE id = ? AND archived = 0")
+		.bind(categoryId)
+		.first<{ id: number; name: string }>();
+	if (!category) return null;
+	const savedJson = JSON.stringify(ids);
+	// No rows come back unless every saved charge still holds the category, so one query decides both.
+	const { results } = await db
+		.prepare(
+			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
+			FROM transactions t
+			WHERE t.id IN (SELECT value FROM json_each(?)) AND ${SAVED_STILL_HOLD_SQL}`,
+		)
+		.bind(savedJson, ...savedStillHoldArgs(savedJson, categoryId))
+		.all<{ merchantKey: string; shownName: string | null }>();
+	// Named as organizeGroups names a group: the store's display name, else its tidied key.
+	const names = [
+		...new Set(
+			results.map((row) => row.shownName || tidyName(row.merchantKey)),
+		),
+	];
+	const merchant = names[0];
+	if (names.length !== 1 || merchant === undefined) return null;
+	const merchantKeys = results.map((row) => row.merchantKey);
+	if (await groupHasRule(db, merchantKeys, categoryId)) return null;
+	return {
+		savedIds: ids,
+		merchant,
+		categoryId,
+		category: category.name,
+	};
 }

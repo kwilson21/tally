@@ -115,7 +115,7 @@ describe("savings goal routes", () => {
 		expect(goalRow).not.toContain("bar-fill");
 		expect(goalRow).not.toContain("nudge-");
 		expect(goalRow).toMatch(
-			/<a href="\/savings-goal"[^>]*class="flex min-h-11 items-start gap-4 py-3[^"]*focus-visible:outline-accent group row-opens"[^>]*>[\s\S]*Set aside from Safe to spend<\/p><\/div><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink self-start mt-1"[\s\S]*<\/svg><\/a>/,
+			/<a href="\/savings-goal"[^>]*class="flex min-h-11 items-start gap-4 py-3[^"]*focus-visible:outline-accent group\/row row-opens"[^>]*>[\s\S]*Set aside from Safe to spend<\/p><\/div><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink self-start mt-1"[\s\S]*<\/svg><\/a>/,
 		);
 		expect(goalRow).toContain('class="size-7"');
 
@@ -130,7 +130,7 @@ describe("savings goal routes", () => {
 			"Set aside from Safe to spend at the start of every month.",
 		);
 		expect(sheetHtml).toMatch(
-			/<a href="\/" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
+			/<a href="\/\?focus=savings-goal" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
 		);
 		const cancelled = await homeRoutes.fetch(
 			new Request("http://tally.test/?focus=savings-goal", {

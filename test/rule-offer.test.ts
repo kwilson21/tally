@@ -1,7 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { removeMerchantRule } from "../src/db/merchant-rules";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { firstRuleOfferAmong } from "../src/transactions/rule-offer";
@@ -48,9 +47,14 @@ function offerFields(html: string): Record<string, string> {
 		...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g),
 	]
 		.filter((match) =>
-			["merchant_key", "merchant", "category", "count", "back"].includes(
-				match[1] ?? "",
-			),
+			[
+				"merchant_key",
+				"merchant",
+				"category",
+				"count",
+				"back",
+				"saved",
+			].includes(match[1] ?? ""),
 		)
 		.reduce<Record<string, string>>((fields, match) => {
 			fields[match[1] ?? ""] = match[2] ?? "";
@@ -158,6 +162,16 @@ describe("merchant category rule offer", () => {
 		expect(fourth.html).toContain(
 			"You&#39;ve picked Groceries for rule-offer-store 4 times.",
 		);
+	});
+
+	it("closes its question back to the transaction that was saved, so focus returns to its row (#87)", async () => {
+		await post(`/transactions/${ids[0]}`, edit(groceries));
+		await post(`/transactions/${ids[1]}`, edit(groceries));
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const close = third.html.match(
+			/<a href="([^"]*)" aria-label="Close"[^>]*data-sheet-close/,
+		)?.[1];
+		expect(close?.replaceAll("&amp;", "&")).toContain(`focus=${ids[2]}`);
 	});
 
 	it("still offers when the store also has another category's picks (decision 90: nothing counts a store's categories)", async () => {
@@ -331,7 +345,10 @@ describe("merchant category rule offer", () => {
 			offerFields(third.html),
 		);
 		expect(yes.res.status).toBe(303);
-		expect(yes.res.headers.get("Location")).toBe("/transactions");
+		// The redirect returns focus to the saved row, as the question's backdrop does (#87).
+		expect(yes.res.headers.get("Location")).toBe(
+			`/transactions?focus=${ids[2]}`,
+		);
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
@@ -419,18 +436,90 @@ describe("merchant category rule offer", () => {
 		}
 	});
 
-	it("Yes and Not now answer with the transactions heading focused", async () => {
+	it("Yes and Not now answer with the saved row focused, not the heading (#87)", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
 		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const row = new RegExp(
+			`<a href="/transactions/${ids[2]}(?:\\?[^"]*)?"[^>]*autofocus`,
+		);
 		const yes = await post("/transactions/rule-offer", offerFields(third.html));
 		const dismissed = await post(
 			"/transactions/rule-offer/dismiss",
 			offerFields(third.html),
 		);
-		for (const reply of [yes.html, dismissed.html])
-			expect(reply).toMatch(
-				/<h1[^>]*id="transactions-title"[^>]*tabindex="-1"[^>]*autofocus/,
-			);
+		for (const reply of [yes.html, dismissed.html]) {
+			expect(reply).toMatch(row);
+			expect(reply).not.toMatch(/<h1[^>]*autofocus/);
+		}
+	});
+
+	it("from a filtered list, Yes and Not now focus the list's count, since the saved row has left it (#211, #87)", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			back: "/transactions?uncategorized=1",
+		});
+		expect(third.html).toContain(QUESTION);
+		const row = new RegExp(
+			`<a href="/transactions/${ids[2]}(?:\\?[^"]*)?"[^>]*autofocus`,
+		);
+		const yes = await post("/transactions/rule-offer", offerFields(third.html));
+		const dismissed = await post(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		for (const reply of [yes.html, dismissed.html]) {
+			expect(reply).toMatch(/<p id="result-count"[^>]*autofocus/);
+			expect(reply).not.toMatch(/<h1[^>]*autofocus/);
+			expect(reply).not.toMatch(row);
+		}
+	});
+
+	it("without JavaScript, Not now from a filtered list lands on that list's count (#87)", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			back: "/transactions?uncategorized=1",
+		});
+		const dismissed = await postPlain(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		expect(dismissed.res.status).toBe(303);
+		const location = dismissed.res.headers.get("Location") ?? "";
+		expect(location).toBe(`/transactions?uncategorized=1&focus=${ids[2]}`);
+		const drawn = await exports.default.fetch(BASE + location);
+		expect(await drawn.text()).toMatch(/<p id="result-count"[^>]*autofocus/);
+	});
+
+	it("a bulk save names no row, so its answers keep the transactions heading focused", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const bulk = await post("/transactions/select/category/save", {
+			ids: String(ids[2]),
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(bulk.html).toContain(QUESTION);
+		const dismissed = await post(
+			"/transactions/rule-offer/dismiss",
+			offerFields(bulk.html),
+		);
+		expect(dismissed.html).toMatch(
+			/<h1[^>]*id="transactions-title"[^>]*tabindex="-1"[^>]*autofocus/,
+		);
+	});
+
+	it("without JavaScript, Not now redirects to the saved row too, so focus returns to it (#87)", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const dismissed = await postPlain(
+			"/transactions/rule-offer/dismiss",
+			offerFields(third.html),
+		);
+		expect(dismissed.res.status).toBe(303);
+		expect(dismissed.res.headers.get("Location")).toBe(
+			`/transactions?focus=${ids[2]}`,
+		);
 	});
 
 	it("Yes refreshes the Needs category count, since the rule fills the merchant's uncategorized rows", async () => {
@@ -476,7 +565,8 @@ describe("merchant category rule offer", () => {
 			name: merchant,
 		});
 		expect(organized.res.status).toBe(200);
-		expect(organized.html).not.toContain(QUESTION);
+		// Organize asks its own question after the save (#353), and the save makes no rule.
+		expect(organized.html).toContain(QUESTION);
 		const picked = await env.DB.prepare(
 			"SELECT category_id, category_source FROM transactions WHERE id = ?",
 		)
@@ -486,14 +576,12 @@ describe("merchant category rule offer", () => {
 			category_id: groceries,
 			category_source: "user",
 		});
-		// Organize made the group's rule itself. Removed in Settings, the earlier picks still count.
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)
 			.bind(merchant)
 			.first<{ default_category_id: number | null }>();
-		expect(rule?.default_category_id).toBe(groceries);
-		expect(await removeMerchantRule(env.DB, merchant)).toBe(merchant);
+		expect(rule?.default_category_id ?? null).toBeNull();
 		const panel = await post(`/transactions/${ids[1]}`, edit(groceries));
 		expect(panel.html).not.toContain(QUESTION);
 		const cash = await post("/transactions/cash", {
@@ -511,16 +599,30 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
-	it("an Organize save that makes the third pick never asks, because Organize makes the rule", async () => {
+	it("an Organize save that makes the third pick asks, and only Yes makes the rule, so a later save never asks", async () => {
 		await setCategory([ids[0], ids[1]], groceries, "user");
-		// ids[2] and ids[3] are uncategorized, so Organize lists the group, and its save makes the rule.
+		// ids[2] and ids[3] are uncategorized, so Organize lists the group. Its save files them and asks (#353).
 		const organized = await post("/transactions/organize", {
 			category: String(groceries),
 			group: merchant,
 			name: merchant,
 		});
 		expect(organized.res.status).toBe(200);
-		expect(organized.html).not.toMatch(/Always use Groceries for/);
+		expect(organized.html).toContain(QUESTION);
+		const before = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(before?.default_category_id ?? null).toBeNull();
+		const yes = await post("/transactions/organize/rule", {
+			answer: "yes",
+			merchant_keys: JSON.stringify([merchant]),
+			merchant,
+			category: String(groceries),
+			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
+		});
+		expect(yes.res.status).toBe(200);
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
 		)

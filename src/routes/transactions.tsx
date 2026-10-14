@@ -25,10 +25,12 @@ import {
 	firstVisitState,
 	getTransaction,
 	type ListRow,
+	linkedRefunds,
 	listRowsByIds,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	offeredToSplit,
 	PAGE_SIZE,
 	payingBillsCount,
 	type RefundPurchase,
@@ -76,9 +78,12 @@ import {
 	SHOWS,
 } from "../transactions/filters";
 import {
+	refundAnswersError,
+	refundPartIndex,
 	refundPartTooBigMessage,
 	refundPurchaseLabel,
 	refundTooBigMessage,
+	type SplitRefund,
 } from "../transactions/refund-guards";
 import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
@@ -117,6 +122,7 @@ import {
 	maybeIncomeVisible,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
@@ -142,6 +148,7 @@ import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
 	FOCUS_SET_CATEGORY,
+	FOCUS_SET_CATEGORY_BACK,
 	LIST_LOAD_PAUSE,
 	MAX_SELECTED,
 	NOT_ON_PAGE_FIELD,
@@ -161,7 +168,12 @@ import {
 	TICKS_INCLUDE,
 	TOO_MANY,
 } from "../views/selection-action-bar";
-import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
+import {
+	RefundPartLabels,
+	SplitForm,
+	SplitLine,
+	type SplitValue,
+} from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
@@ -216,6 +228,8 @@ type ListOptions = {
 	focusSetCategory?: boolean;
 	/** The reply to Older or Newer in select mode: focus the first row's tick (FOCUS_FIRST_TICK). */
 	focusFirstTick?: boolean;
+	/** The Add cash sheet closed: focus Add cash, the button it was opened from (FOCUS_ADD_CASH). */
+	focusAddCash?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -291,6 +305,7 @@ async function renderList(
 		focusHeading = false,
 		focusSetCategory = false,
 		focusFirstTick = false,
+		focusAddCash = false,
 	}: ListOptions = {},
 ) {
 	const [
@@ -598,6 +613,7 @@ async function renderList(
 					kind="secondary"
 					href={cashHref}
 					class="gap-2"
+					autofocus={focusAddCash}
 					hx-get={cashGet}
 					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
 					{...(selecting ? TICKS_INCLUDE : {})}
@@ -984,7 +1000,10 @@ transactions.get("/transactions", async (c) => {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		countFocus: params.get("focus") === "count",
 		selecting,
-		focusSetCategory: selecting && selectAll,
+		focusSetCategory:
+			selecting &&
+			(selectAll || params.get("focus") === FOCUS_SET_CATEGORY_BACK),
+		focusAddCash: params.get("focus") === FOCUS_ADD_CASH,
 		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 		selection,
 		selectPushBase,
@@ -1211,7 +1230,11 @@ function SelectCategorySheet({
 	/** Its Save was refused, so the open sheet is drawn again where it is. */
 	still?: boolean;
 }) {
-	const cancelHref = selectModeHref(back, selection);
+	// Cancel and the backdrop keep the ticks, and put focus back on Set category (#87).
+	const cancelHref = withFocus(
+		selectModeHref(back, selection),
+		FOCUS_SET_CATEGORY_BACK,
+	);
 	const alert = error && (
 		<p id="select-category-error" role="alert" class="text-sm text-over">
 			{error}
@@ -1539,6 +1562,11 @@ type SheetProps = {
 	/** Jev answers categories now, so a one-off name's Rename list says Tally guesses again (decision 101). */
 	jevCategories?: boolean;
 	/**
+	 * The rule's category name as the posted panel showed it, passed only on a refused save's redraw; a first
+	 * draw uses tx.merchantRuleCategoryName. For display only: the save never reads it.
+	 */
+	ruleCategoryName?: string;
+	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
 	 */
@@ -1553,13 +1581,24 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 	);
 }
 
+/** The `focus` value the Add cash sheet's close asks for: the list puts focus on its Add cash button (#87). */
+const FOCUS_ADD_CASH = "add-cash";
+
+/**
+ * The list address with `focus` set, so the list it draws puts focus on that row or control. A sheet's close
+ * asks for it, as a plain link without JavaScript and as its htmx swap with it.
+ */
+function withFocus(href: string, focus: string | number): string {
+	return `${href}${href.includes("?") ? "&" : "?"}focus=${focus}`;
+}
+
 /**
  * Closing a sheet swaps the list back in and returns focus to this transaction's row; the pushed URL
  * stays clean.
  */
 function listCloseAttrs(back: string, id: number): Record<string, string> {
 	return {
-		"hx-get": `${back}${back.includes("?") ? "&" : "?"}focus=${id}`,
+		"hx-get": withFocus(back, id),
 		"hx-target": "#page",
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
@@ -1584,9 +1623,12 @@ function EditSheet({
 	nameWas = null,
 	nameScope = "one",
 	jevCategories = false,
+	ruleCategoryName,
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
+	// Where Cancel and the backdrop go without JavaScript: the list, with focus on this row.
+	const closeHref = withFocus(back, tx.id);
 	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
@@ -1603,13 +1645,10 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	const ruleCategory = categories.find(
-		(cat) => cat.id === tx.merchantRuleCategoryId,
-	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
-			closeHref={back}
+			closeHref={closeHref}
 			closeAttrs={closeAttrs}
 			// A field's error and the delete question draw the open panel again.
 			still={still || deleteConfirm || Object.keys(errors).length > 0}
@@ -1849,8 +1888,8 @@ function EditSheet({
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
 								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks Always for this
-								// merchant, keeps the category (rename.ts).
+								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
+								// tick, keeps the category (rename.ts).
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
 									values.newCategory !== true &&
@@ -2172,19 +2211,8 @@ function EditSheet({
 						</div>
 					</details>
 				)}
-				{/* The two things people change most after the category, one tap each (owner's pick C). */}
+				{/* Exclude is a pill; the merchant rule is the tick row above Save (#353). */}
 				<div class="flex flex-wrap gap-2">
-					{/* A linked refund has no category of its own to make a rule from. */}
-					{tx.refundOfId == null && (
-						<Chip
-							type="checkbox"
-							name="always"
-							value="1"
-							checked={values.alwaysForMerchant}
-						>
-							Always for this merchant
-						</Chip>
-					)}
 					<Chip
 						type="checkbox"
 						name="excluded"
@@ -2194,24 +2222,15 @@ function EditSheet({
 						Exclude from budget
 					</Chip>
 				</div>
-				{tx.refundOfId == null && (
-					<p class="text-sm text-muted">
-						Ticking this for a transaction that doesn't match the rule changes
-						it for this merchant. To change a rule this transaction already
-						matches, remove it in Settings first.
-					</p>
-				)}
-				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null ? (
-					<p class="text-sm text-muted">
-						Remove it in Settings, under{" "}
-						<a href="/settings#merchant-rules">Tally's rules</a>.
-					</p>
-				) : ruleCategory && values.alwaysForMerchant ? (
-					<p class="text-sm text-muted">
-						{tx.displayName} is always {ruleCategory.name}. Untick it and save
-						to remove the rule.
-					</p>
-				) : null}
+				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
+				{tx.merchantRuleCategoryName &&
+					values.alwaysForMerchant &&
+					tx.refundOfId != null && (
+						<p class="text-sm text-muted">
+							Remove it in Settings, under{" "}
+							<a href="/settings#merchant-rules">Tally's rules</a>.
+						</p>
+					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -2266,11 +2285,31 @@ function EditSheet({
 						</Chip>
 					</div>
 				)}
+				{tx.refundOfId == null && (
+					<div class="border-t border-rule pt-3">
+						<MerchantRuleTick
+							merchant={tx.storeName}
+							checked={values.alwaysForMerchant}
+							ruleCategory={
+								values.alwaysWas
+									? (ruleCategoryName ??
+										tx.merchantRuleCategoryName ??
+										undefined)
+									: undefined
+							}
+						/>
+					</div>
+				)}
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
 				    has two ways to leave it side by side (decision 84). */}
 				{!deleteConfirm && (
 					<div class="mt-2 grid grid-cols-2 gap-3">
-						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
+						<Button
+							href={closeHref}
+							kind="secondary"
+							class="w-full"
+							{...closeAttrs}
+						>
 							Cancel
 						</Button>
 						<Button
@@ -2378,7 +2417,10 @@ function CashSheet({
 	today: string;
 }) {
 	// Closing (the backdrop or Cancel) returns to the list the sheet was opened from, with Select mode's selection.
-	const closeHref = selection ? selectModeHref(back, selection) : back;
+	const closeHref = withFocus(
+		selection ? selectModeHref(back, selection) : back,
+		FOCUS_ADD_CASH,
+	);
 	return (
 		// A field's error draws the open sheet again.
 		<BottomSheet
@@ -2511,7 +2553,7 @@ transactions.post("/transactions/cash", async (c) => {
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
 	if (!c.req.header("HX-Request"))
 		return offer
-			? renderRuleOffer(c, today, address, offer)
+			? renderRuleOffer(c, today, address, offer, saved.id)
 			: c.redirect(address, 303);
 	// The save's own words come first in the announcement, with or without the question after them.
 	const savedWords = `Added ${formatCents(saved.amountCents)} cash spending at ${saved.merchant}.`;
@@ -2524,7 +2566,7 @@ transactions.post("/transactions/cash", async (c) => {
 			}),
 		);
 		c.header("HX-Push-Url", address);
-		return renderRuleOffer(c, today, address, offer);
+		return renderRuleOffer(c, today, address, offer, saved.id);
 	}
 	c.header(
 		"HX-Trigger",
@@ -2557,6 +2599,17 @@ function asksFromThisPage(c: Context<App>) {
 	}
 }
 
+/**
+ * The store's merchant rule matches this entry as it's saved: its category is the rule's. The panel's rule tick
+ * opens ticked then, and its hint names the rule (MerchantRuleTick), so every panel literal sets both fields from it.
+ */
+function ruleMatches(tx: TransactionDetail) {
+	return (
+		tx.merchantRuleCategoryId !== null &&
+		tx.merchantRuleCategoryId === tx.categoryId
+	);
+}
+
 // The edit panel over the list. A real URL: reloading or sharing it keeps the list's filters.
 transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -2571,12 +2624,8 @@ transactions.get("/transactions/:id{[0-9]+}", async (c) => {
 	const back = listHref(filters, thisMonth);
 	const values: Edit = {
 		categoryId: tx.categoryId,
-		alwaysForMerchant:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
-		alwaysWas:
-			tx.merchantRuleCategoryId !== null &&
-			tx.merchantRuleCategoryId === tx.categoryId,
+		alwaysForMerchant: ruleMatches(tx),
+		alwaysWas: ruleMatches(tx),
 		merchantRuleWas: tx.merchantRuleCategoryId,
 		// Nothing is typed yet: "Type your own" starts empty (decision 101).
 		displayName: null,
@@ -2638,6 +2687,8 @@ function SplitSheet({
 	today,
 	still,
 	correction,
+	refunds = [],
+	choices = {},
 }: {
 	tx: TransactionDetail;
 	back: string;
@@ -2648,10 +2699,18 @@ function SplitSheet({
 	/** Add a part, or an error, draws the open sheet again, so it isn't drawn arriving. */
 	still?: boolean;
 	correction?: Correction;
+	/** The linked refunds the sheet asks about, and what was answered for each (decision 99). */
+	refunds?: SplitRefund[];
+	choices?: Record<number, string | undefined>;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
-		<BottomSheet labelledBy="split-title" closeHref={back} still={still}>
+		// Closing it, by the backdrop or Cancel, returns focus to this transaction's row, as the edit panel does (#87).
+		<BottomSheet
+			labelledBy="split-title"
+			closeHref={withFocus(back, tx.id)}
+			still={still}
+		>
 			<p class="text-sm text-muted">{tx.rawName}</p>
 			<h2
 				id="split-title"
@@ -2677,11 +2736,20 @@ function SplitSheet({
 				pendingEdit={correction?.pendingEdit}
 				categories={categories}
 				values={values}
+				refunds={refunds}
+				choices={choices}
+				today={today}
 				back={back}
+				cancelHref={withFocus(back, tx.id)}
 				error={error}
 			/>
 		</BottomSheet>
 	);
+}
+
+/** The token a split sheet posts with its line requests (SplitForm's sheet), or null when it isn't one a sheet drew. */
+function sheetToken(raw: string | null): string | null {
+	return raw !== null && /^[0-9a-f-]{36}$/.test(raw) ? raw : null;
 }
 
 /** A posted amount in cents: a whole, positive number of cents, or null. */
@@ -2720,6 +2788,35 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 		else return null;
 	}
 	return ids;
+}
+
+/**
+ * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
+ * split refund and its parts are left out, and so is a credit that no longer counts (it is unlinked, not asked about).
+ */
+async function splitRefundsOf(
+	db: D1Database,
+	parentId: number,
+): Promise<SplitRefund[]> {
+	return (await linkedRefunds(db, parentId, true))
+		.filter(offeredToSplit)
+		.map(({ id, date, amountCents }) => ({ id, date, amountCents }));
+}
+
+/**
+ * What a split sheet posted for each refund's radio: "none" for Not linked, a part's index, or nothing when no part
+ * was chosen. A redraw checks the same radios again.
+ */
+function refundAnswers(
+	refunds: SplitRefund[],
+	form: FormData,
+): Record<number, string | undefined> {
+	return Object.fromEntries(
+		refunds.map((refund) => [
+			refund.id,
+			form.get(`refund_${refund.id}`)?.toString(),
+		]),
+	);
 }
 
 async function splitContext(c: Context<App>) {
@@ -2816,6 +2913,8 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 		{ category: "", amount: "" },
 		{ category: "", amount: "" },
 	];
+	// The linked refunds ask which part they go with; nothing is chosen until a person picks (decision 99).
+	const refunds = await splitRefundsOf(c.env.DB, tx.id);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -2824,6 +2923,7 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 				categories={categories}
 				values={values}
 				today={today}
+				refunds={refunds}
 			/>
 		),
 	});
@@ -2835,13 +2935,37 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const form = await c.req.formData();
 	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
+	const amounts = form.getAll("part_amount").map(String);
+	const categoryValues = form.getAll("part_category").map(String);
+	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
+	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
+	// A Change the parts sheet keeps its links by part, so it has no chooser. The labels belong to the drawing of the
+	// sheet that posted its token, so a reply with no valid token draws none.
+	const sheet = sheetToken(form.get("sheet")?.toString() ?? null);
+	const refunds =
+		total === null && sheet !== null
+			? await splitRefundsOf(c.env.DB, tx.id)
+			: [];
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+	).all<Category>();
 	return c.html(
-		<div id="split-line">
-			<SplitLine
-				parentCents={total ?? tx.amountCents}
-				amounts={form.getAll("part_amount").map(String)}
-			/>
-		</div>,
+		<>
+			<div id="split-line">
+				<SplitLine parentCents={total ?? tx.amountCents} amounts={amounts} />
+			</div>
+			{sheet !== null && (
+				<RefundPartLabels
+					sheet={sheet}
+					refunds={refunds}
+					values={categoryValues.map((category, index) => ({
+						category,
+						amount: amounts[index] ?? "",
+					}))}
+					categories={categories}
+				/>
+			)}
+		</>,
 	);
 });
 
@@ -2885,6 +3009,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			kept: partId === undefined ? undefined : archived.get(partId),
 		};
 	});
+	// Which part each linked refund goes with (decision 99). A Change the parts sheet keeps each part's links, so it
+	// asks nothing; a new split asks about every linked refund, and a redraw keeps the answers given.
+	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
+	const choices = refundAnswers(refunds, form);
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same
 	// sheet back, refused in words, as the other split refusals do.
 	if (tx.income)
@@ -2898,6 +3026,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error="Income can't be split."
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
@@ -2914,6 +3044,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					categories={categories}
 					values={values}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
@@ -2938,8 +3070,41 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error={parsed.error}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
+				/>
+			),
+		});
+	// Each linked refund goes with a part or Not linked, and every part has room for what is chosen for it (decision
+	// 99). Refused in words with nothing saved, and the sheet comes back with the answers given.
+	const partNames = (parts: { categoryId: number; amountCents: number }[]) =>
+		parts.map((part) => ({
+			name: categories.find((cat) => cat.id === part.categoryId)?.name ?? "",
+			amountCents: part.amountCents,
+		}));
+	const refundError = refundAnswersError(
+		refunds,
+		choices,
+		partNames(parsed.parts),
+		today,
+	);
+	if (refundError)
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error={refundError}
+					today={today}
+					still
+					correction={correction}
+					refunds={refunds}
+					choices={choices}
 				/>
 			),
 		});
@@ -2977,14 +3142,39 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error={error}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
 			),
 		});
 	}
-	const result = await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
-	if (result.saved) return splitSaved(c, tx, today, back, result);
+	// The part each refund goes with, or null for Not linked (every answer was checked above).
+	const result = await saveSplit(
+		c.env.DB,
+		tx.id,
+		parsed.parts,
+		actor(c),
+		Object.fromEntries(
+			refunds.map((refund) => [
+				refund.id,
+				refundPartIndex(choices[refund.id], parsed.parts.length),
+			]),
+		),
+	);
+	if (result.saved)
+		return splitSaved(c, tx, today, back, {
+			unlinked: result.unlinked,
+			bills: result.bills,
+			moved: result.moved.map((move) => ({
+				date: move.date,
+				category:
+					categories.find(
+						(cat) => cat.id === parsed.parts[move.part]?.categoryId,
+					)?.name ?? "",
+			})),
+		});
 	// Show the bank's new amount, so the next save checks against it.
 	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 	return renderList(c, today, filtersFrom(c, today, back), {
@@ -2997,6 +3187,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				values={values}
 				error="The bank just changed this amount. Check the parts and save again."
 				today={today}
+				refunds={refunds}
+				choices={choices}
 				still
 			/>
 		),
@@ -3004,7 +3196,12 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 /** What a split change unlinked: refunds by the date of their purchase, and bill payments by bill (decision 99). */
-type SplitChange = { unlinked: string[]; bills: UnpaidBill[] };
+type SplitChange = {
+	unlinked: string[];
+	bills: UnpaidBill[];
+	/** The refunds a person chose a part for, with the category of that part (decision 99). */
+	moved?: { date: string; category: string }[];
+};
 
 /** A saved split: the list again with its toast and announcement, or a redirect for a browser without htmx. */
 function splitSaved(
@@ -3037,7 +3234,7 @@ function splitSaved(
  * linked. The Costco membership bill for 2026 is no longer paid.", or "" for none (decisions 60 and 99).
  */
 function unlinkedSentence(
-	{ unlinked, bills }: SplitChange,
+	{ unlinked, bills, moved = [] }: SplitChange,
 	today: string,
 ): string {
 	const [first] = unlinked;
@@ -3047,7 +3244,14 @@ function unlinkedSentence(
 			: unlinked.length === 1
 				? `The refund on ${shortDay(first, today)} is no longer linked.`
 				: `${unlinked.length} refunds are no longer linked.`;
-	return [refunds, unpaidBillsSentence(bills)]
+	return [
+		...moved.map(
+			(refund) =>
+				`The refund on ${shortDay(refund.date, today)} now counts with ${refund.category}.`,
+		),
+		refunds,
+		unpaidBillsSentence(bills),
+	]
 		.filter(Boolean)
 		.map((sentence) => ` ${sentence}`)
 		.join("");
@@ -3220,7 +3424,7 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
-	const showErrors = (
+	const showErrors = async (
 		errors: EditErrors,
 		changePartsTotalCents?: number,
 		shownPeople: HouseholdPerson[] = people,
@@ -3252,6 +3456,14 @@ async function savePanel(
 				: tx.forPersonId,
 			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
+		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
+		// save clears only the rule posted (saveEdit), so the hint must not name the rule the store has now.
+		const postedRule =
+			values.alwaysWas && values.merchantRuleWas
+				? await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+						.bind(values.merchantRuleWas)
+						.first<{ name: string }>()
+				: null;
 		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
@@ -3268,6 +3480,7 @@ async function savePanel(
 					nameWas={form.get("merchant_was")?.toString() ?? null}
 					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
 					jevCategories={jevCategories}
+					ruleCategoryName={postedRule?.name}
 					cashValues={cashValues}
 					changePartsTotalCents={changePartsTotalCents}
 				/>
@@ -3484,7 +3697,7 @@ async function savePanel(
 	const panel = likely && likely.rows.length > 0 ? likely : null;
 	// With JavaScript off the question is drawn as a whole page, like the Select save's; no question redirects.
 	if (!c.req.header("HX-Request")) {
-		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+		if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
 		if (panel) return renderLikely(c, today, filters, panel);
 		return c.redirect(back, 303);
 	}
@@ -3544,7 +3757,7 @@ async function savePanel(
 	c.header("HX-Push-Url", back);
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
-	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer);
+	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
 	if (panel) return renderLikely(c, today, filters, panel);
 	return renderList(c, today, filters, { focusId: tx.id });
 }
@@ -3586,28 +3799,28 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 	const today = await householdToday(c.env.DB);
 	const filters = filtersFrom(c, today, back);
 	const category = await liveCategory(c.env.DB, form.get("category"));
-	// A category archived since the panel opened moves nothing, as when every ticked row has changed.
-	const moved = category
+	// A category archived or renamed since the panel opened moves nothing, as when every ticked row has changed.
+	const filed = category
 		? await addLikely(c.env.DB, {
 				savedId: tx.id,
 				categoryId: category.id,
-				categoryName: category.name,
+				categoryName: form.get("category_name")?.toString() ?? "",
 				ticked: form.getAll("ids").map(Number),
 				today,
 				actor: actor(c),
 			})
-		: 0;
+		: { moved: 0, name: null };
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	// Nothing moves when every ticked row changed since the panel opened (addLikely files only the ticked rows
-	// the panel's rules still allow).
+	// the panel's rules still allow). The toast names the category as it is stored, not as the panel showed it.
 	const message =
-		moved === 0 || !category
+		filed.name === null
 			? "Nothing moved: those transactions changed since the panel opened."
-			: `Set ${moved} ${moved === 1 ? "transaction" : "transactions"} to ${category.name}.`;
+			: `Set ${filed.moved} ${filed.moved === 1 ? "transaction" : "transactions"} to ${filed.name}.`;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
-			toast: { message, type: moved === 0 ? "info" : "success" },
+			toast: { message, type: filed.name === null ? "info" : "success" },
 			announce: message,
 		}),
 	);
@@ -3627,7 +3840,8 @@ transactions.post("/transactions/:id{[0-9]+}/likely/count", async (c) => {
 	const count = (
 		await likelyStill(c.env.DB, {
 			savedId: tx.id,
-			categoryName: category.name,
+			categoryId: category.id,
+			categoryName: form.get("category_name")?.toString() ?? "",
 			today,
 			ticked: form.getAll("ids").map(Number),
 		})
@@ -3640,6 +3854,9 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	const merchantKey = form.get("merchant_key")?.toString() ?? "";
 	const categoryId = Number(form.get("category"));
 	const back = safeBack(form.get("back")?.toString());
+	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
+	const saved = Number(form.get("saved"));
+	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
 	const today = await householdToday(c.env.DB);
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
@@ -3666,14 +3883,19 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				: "Saved.";
 	if (yes && offer && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
-	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
+	if (!c.req.header("HX-Request"))
+		return c.redirect(
+			savedId === undefined ? back : withFocus(back, savedId),
+			303,
+		);
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
-		focusHeading: true,
+		focusId: savedId,
+		focusHeading: savedId === undefined,
 	});
 }
 
@@ -3699,6 +3921,7 @@ function renderLikely(
 				savedDate={panel.savedDate}
 				savedCents={panel.savedCents}
 				back={panel.back}
+				closeHref={withFocus(panel.back, panel.savedId)}
 				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}
@@ -3714,16 +3937,24 @@ function renderLikely(
 	});
 }
 
+/**
+ * The rule offer after a save. `savedId` is the transaction that was saved, so closing the question puts focus on
+ * its row (#87); a Select-mode save names no one row, so its close goes to the list.
+ */
 function renderRuleOffer(
 	c: Context<App>,
 	today: string,
 	back: string,
 	value: RuleOfferValue,
+	savedId?: number,
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: () => (
-			<BottomSheet labelledBy="rule-offer-title" closeHref={back}>
-				<RuleOffer value={value} focus />
+			<BottomSheet
+				labelledBy="rule-offer-title"
+				closeHref={savedId === undefined ? back : withFocus(back, savedId)}
+			>
+				<RuleOffer value={value} focus savedId={savedId} />
 			</BottomSheet>
 		),
 	});
@@ -3752,9 +3983,8 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 			categoryId: tx.categoryId,
 			income: tx.income,
 			creditReviewed: tx.creditReviewedByUser,
-			alwaysForMerchant:
-				tx.merchantRuleCategoryId !== null &&
-				tx.merchantRuleCategoryId === tx.categoryId,
+			alwaysForMerchant: ruleMatches(tx),
+			alwaysWas: ruleMatches(tx),
 			merchantRuleWas: tx.merchantRuleCategoryId,
 			displayName: null,
 			note: tx.note,

@@ -640,6 +640,8 @@ export type TransactionDetail = ListRow & {
 	storeName: string;
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	merchantRuleCategoryId: number | null;
+	/** The rule's category name, archived or not (the edit panel's chips list only active ones), or null. */
+	merchantRuleCategoryName: string | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
 	suggestedCategoryId: number | null;
@@ -719,7 +721,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, (SELECT rc.name FROM categories rc WHERE rc.id = ${merchantColumnSql("t", "default_category_id")}) AS merchantRuleCategoryName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
 				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
@@ -874,12 +876,17 @@ const EXCLUDE =
 /**
  * Gives a merchant's rule category to every transaction a person hasn't chosen (§7), except a split
  * purchase and a purchase a bank change sent back to its earlier category (§6.1, decision 99). Binds
- * the category, the actor and the merchant key; callers add their own last condition.
+ * the category, the actor, then what `keyCondition` binds (`= ?` for one key); callers add their own
+ * last condition.
  */
-const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+export function applyMerchantRuleSql(keyCondition: string): string {
+	return `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
 	updated_by = ?, updated_at = datetime('now')
-WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'
+WHERE ${merchantKeySql("transactions")} ${keyCondition} AND COALESCE(category_source, '') != 'user'
 	AND is_split = 0 AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`;
+}
+
+export const APPLY_MERCHANT_RULE_SQL = applyMerchantRuleSql("= ?");
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
@@ -1269,7 +1276,7 @@ export async function saveEdit(
 	}
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
 	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
-	// place, unless the same save ticks Always for this merchant, which settles the category (oneOffGuessesAgain).
+	// place, unless the same save ticks the merchant rule, which settles the category (oneOffGuessesAgain).
 	// A pending new-category suggestion the row is behind is released with it, so the row leaves the
 	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
 	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
@@ -1505,7 +1512,7 @@ export async function saveEdit(
 }
 
 /**
- * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * Sets a merchant's category rule the way the edit panel's tick does, for a save that has no
  * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
  */
 export async function setMerchantRule(
@@ -1526,18 +1533,62 @@ export async function setMerchantRule(
 }
 
 /**
- * Dates of the refunds linked to a purchase or its parts, oldest first: the ones a split change affects.
+ * A refund linked to a purchase or one of its parts. A split refund's own row is `isSplit`; its parts are the refunds,
+ * marked `isPart`. `follows` is FOLLOWS_PURCHASE: a credit that still counts against its purchase.
+ */
+export type LinkedRefund = {
+	id: number;
+	date: string;
+	amountCents: number;
+	isSplit: boolean;
+	isPart: boolean;
+	follows: boolean;
+};
+
+/**
+ * The refunds linked to a purchase or its parts, oldest first: the ones a split change affects.
  * `self` includes refunds of the purchase itself.
  */
-async function linkedRefundDates(db: D1Database, id: number, self: boolean) {
+export async function linkedRefunds(
+	db: D1Database,
+	id: number,
+	self: boolean,
+): Promise<LinkedRefund[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT date FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1${self ? " OR id = ?1" : ""}) ORDER BY date, id`,
+			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.is_split AS isSplit,
+				t.parent_id IS NOT NULL AS isPart, ${FOLLOWS_PURCHASE} AS follows
+			FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id
+			WHERE t.refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1${self ? " OR id = ?1" : ""})
+			ORDER BY t.date, t.id`,
 		)
 		.bind(id)
-		.all<{ date: string }>();
-	return results.map((row) => row.date);
+		.all<{
+			id: number;
+			date: string;
+			amountCents: number;
+			isSplit: number;
+			isPart: number;
+			follows: number;
+		}>();
+	return results.map((row) => ({
+		id: row.id,
+		date: row.date,
+		amountCents: row.amountCents,
+		isSplit: row.isSplit === 1,
+		isPart: row.isPart === 1,
+		follows: row.follows === 1,
+	}));
 }
+
+/**
+ * Whether the split sheet asks which part a linked refund goes with, and saveSplit moves it (decision 99): a plain
+ * refund that still follows its purchase. A split refund's own row is never offered, nor are its parts, since its
+ * parts are what count. A credit that no longer follows (income, unreviewed, or on an excluded purchase) isn't asked
+ * about: a split unlinks it, and the toast names it.
+ */
+export const offeredToSplit = (refund: LinkedRefund) =>
+	!refund.isSplit && !refund.isPart && refund.follows;
 
 /**
  * The bills the linked payments of a purchase's parts pay, oldest payment first. Read before a change
@@ -1632,13 +1683,30 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills still
  * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the
  * purchase, and each new part starts with it.
+ *
+ * `choices` says which part each linked refund goes with (decision 99): the part's index in `parts`, or null for
+ * Not linked. Only an offered refund (offeredToSplit) can be chosen; the others are unlinked, and named. A refund left
+ * out of `choices`, or whose part is not among `parts`, is unlinked, as before. A chosen refund is parked on the
+ * purchase before the old parts are deleted, so it is checked where it is in the batch: it moves to its part only if
+ * it is still linked to the purchase or its parts, still a plain, top-level refund that follows the purchase
+ * (FOLLOWS_PURCHASE), and the whole refund still fits that part (refundFitsSql), counting the refunds already moved
+ * there in this batch. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
+ * is named in neither list. One that was parked but doesn't move is unlinked, and is listed in `unlinked` like any
+ * other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked` lists the refunds
+ * this save unlinked, by date.
  */
 export async function saveSplit(
 	db: D1Database,
 	parentId: number,
 	parts: SplitPart[],
 	by: string,
-): Promise<{ saved: boolean; unlinked: string[]; bills: UnpaidBill[] }> {
+	choices: Record<number, number | null> = {},
+): Promise<{
+	saved: boolean;
+	unlinked: string[];
+	bills: UnpaidBill[];
+	moved: { date: string; part: number }[];
+}> {
 	const parent = await db
 		.prepare("SELECT id FROM transactions WHERE id = ? AND parent_id IS NULL")
 		.bind(parentId)
@@ -1655,7 +1723,20 @@ export async function saveSplit(
 	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
-	const unlinked = await linkedRefundDates(db, parentId, true);
+	const linked = await linkedRefunds(db, parentId, true);
+	// A chosen refund goes with its part: only an offered refund can move. Each move is checked in the batch
+	// (refundFitsSql), and only the ones that fit move.
+	const moves = linked.flatMap((refund) => {
+		const part = choices[refund.id] ?? null;
+		return offeredToSplit(refund) &&
+			part !== null &&
+			Number.isInteger(part) &&
+			part >= 0 &&
+			part < parts.length
+			? [{ refundId: refund.id, part }]
+			: [];
+	});
+	const chosenIds = JSON.stringify(moves.map((move) => move.refundId));
 	const payments = await partBills(db, parentId);
 	const { kept, lost } = keepPayments(payments, parts);
 	const linkedPurchase = await db
@@ -1704,13 +1785,57 @@ export async function saveSplit(
 		)
 		.bind(by, parentId, total);
 	const stillUnpaid = stillUnpaidStatement(db, lost);
-	const statements = [
-		db
+	// The new part at a sheet index (its id order, as restore finds a kept payment's part). ?1 is the purchase.
+	const partAt = (index: string) =>
+		`(SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id LIMIT 1 OFFSET ${index})`;
+	// A chosen refund is parked on the purchase before the old parts go, so a part's delete can't unlink it, and the
+	// move below checks it is still there. Only a link that is still on the purchase or its parts parks (changes a row):
+	// one a competing save moved or unlinked since the read doesn't, and stays as it is.
+	const parkStatements = moves.map((move) => ({
+		move,
+		statement: db
 			.prepare(
-				`UPDATE transactions SET refund_of_id = NULL
-				WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ? OR id = ?) AND ${unchanged}`,
+				`UPDATE transactions SET refund_of_id = ?1
+				WHERE id = ?3 AND refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1 OR id = ?1) AND ${unchangedNumbered}`,
 			)
-			.bind(parentId, parentId, parentId, total),
+			.bind(parentId, total, move.refundId),
+	}));
+	// A chosen refund moves onto its part once the parts exist. It moves only if it is still on the purchase (parked
+	// above), still a plain, top-level refund that follows the purchase (a competing save can split or change the credit
+	// after the read), and the whole refund still fits that part (refundFitsSql), counting the refunds moved before it in
+	// this batch. A refusal leaves it on the purchase, where the sweep below unlinks it. RETURNING gives the row it
+	// moved, with the date the save wrote it.
+	const moveStatements = moves.map((move) => ({
+		move,
+		statement: db
+			.prepare(
+				`UPDATE transactions SET refund_of_id = ${partAt("?4")}
+				WHERE id = ?3 AND refund_of_id = ?1 AND ${refundFitsSql("?3", partAt("?4"))} AND ${unchangedNumbered}
+				AND EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?3 AND ${FOLLOWS_PURCHASE} AND t.is_split = 0 AND t.parent_id IS NULL)
+				RETURNING id, date`,
+			)
+			.bind(parentId, total, move.refundId, move.part),
+	}));
+	// A chosen refund that parked and didn't move is still on the purchase: it is unlinked, and named. One that moved is not.
+	const sweepRefused = db
+		.prepare(
+			`UPDATE transactions SET refund_of_id = NULL
+			WHERE id IN (SELECT value FROM json_each(?3)) AND refund_of_id = ?1 AND ${unchangedNumbered}
+			RETURNING id, date`,
+		)
+		.bind(parentId, total, chosenIds);
+	// Every refund still linked to the purchase or its parts is unlinked, except the chosen ones, which are parked
+	// above and move below. RETURNING names each one it unlinks, including one a competing save linked after the read.
+	const unlinkLinked = db
+		.prepare(
+			`UPDATE transactions SET refund_of_id = NULL
+			WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1 OR id = ?1) AND id NOT IN (SELECT value FROM json_each(?3)) AND ${unchangedNumbered}
+			RETURNING id, date`,
+		)
+		.bind(parentId, total, chosenIds);
+	const statements = [
+		...parkStatements.map(({ statement }) => statement),
+		unlinkLinked,
 		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105). It runs before
 		// park, since a payment a person linked by hand is parked as a dismissal on the purchase and would hide that one.
 		db
@@ -1744,6 +1869,8 @@ export async function saveSplit(
 				),
 		),
 		...restore,
+		...moveStatements.map(({ statement }) => statement),
+		sweepRefused,
 		// Each new part starts with the purchase's own Not this one (decision 105), once the kept payments are restored.
 		db
 			.prepare(purchaseDismissalsToPartsSql("?1", unchangedNumbered))
@@ -1754,21 +1881,39 @@ export async function saveSplit(
 	const results = await db.batch(statements);
 	const saved =
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
+	const changed = (statement: D1PreparedStatement) =>
+		(results[statements.indexOf(statement)]?.meta.changes ?? 0) > 0;
+	// The rows a statement returned with RETURNING: the refunds it changed.
+	const returnedRows = (statement: D1PreparedStatement) =>
+		(results[statements.indexOf(statement)]?.results ?? []) as {
+			id: number;
+			date: string;
+		}[];
 	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
-	const refundUnlinked =
-		(results[statements.indexOf(unlinkRefund)]?.meta.changes ?? 0) > 0;
+	const refundUnlinked = changed(unlinkRefund);
 	return {
 		saved,
 		unlinked: !saved
 			? []
 			: !linkedPurchase?.refundOfId
-				? unlinked
+				? [...returnedRows(unlinkLinked), ...returnedRows(sweepRefused)]
+						.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
+						.map((row) => row.date)
 				: refundUnlinked
 					? [linkedPurchase.date]
 					: [],
 		// Only the bills a person's split change unlinked and that are still unpaid are named (decisions 99 and 105).
 		bills: saved
 			? unpaidBillsFrom(results[statements.indexOf(stillUnpaid)])
+			: [],
+		// A chosen refund that moved returned its row, which it does only once it passed every check in the batch.
+		moved: saved
+			? moveStatements.flatMap(({ move, statement }) =>
+					returnedRows(statement).map((row) => ({
+						date: row.date,
+						part: move.part,
+					})),
+				)
 			: [],
 	};
 }
@@ -1958,7 +2103,9 @@ export async function removeSplit(
 	parentId: number,
 	by: string,
 ): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
-	const unlinked = await linkedRefundDates(db, parentId, false);
+	const unlinked = (await linkedRefunds(db, parentId, false)).map(
+		(refund) => refund.date,
+	);
 	const bills = await partBills(db, parentId);
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")
@@ -2285,6 +2432,21 @@ export async function saveJevDetails(
 	void result;
 }
 
+/** The columns a note is checked against, read the way the list reads a row's name (#426, #412). */
+const NOTE_NAME_COLUMNS = `t.raw_name AS rawName, t.merchant_name AS merchantName,
+	${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}`;
+
+export type NoteNameRow = {
+	id: number;
+	rawName: string;
+	merchantName: string | null;
+	displayName: string | null;
+	ownName: string | null;
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
+	merchantKey: string;
+};
+
 /**
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
@@ -2297,38 +2459,37 @@ export async function saveJevDetails(
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
 	limit: number,
-): Promise<
-	{
-		id: number;
-		rawName: string;
-		merchantName: string | null;
-		displayName: string | null;
-		ownName: string | null;
-		suggestedNames: string | null;
-		suggestionStatus: string | null;
-		merchantKey: string;
-	}[]
-> {
+): Promise<NoteNameRow[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
-				${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}
+			`SELECT t.id, ${NOTE_NAME_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
 			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			 ORDER BY t.note_failed_at IS NOT NULL, t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
-		.all<{
-			id: number;
-			rawName: string;
-			merchantName: string | null;
-			displayName: string | null;
-			ownName: string | null;
-			suggestedNames: string | null;
-			suggestionStatus: string | null;
-			merchantKey: string;
-		}>();
+		.all<NoteNameRow>();
+	return results;
+}
+
+/**
+ * The same name columns as `transactionsNeedingNoteGuess`, for these charges as they stand now. A person may name
+ * a charge or its merchant while a note's call is out, so a note is checked against these, read just before it is
+ * saved (#412). One query for any number of ids.
+ */
+export async function noteNameRows(
+	db: D1Database,
+	ids: number[],
+): Promise<NoteNameRow[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, ${NOTE_NAME_COLUMNS}
+			 FROM transactions t
+			 WHERE t.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify(ids))
+		.all<NoteNameRow>();
 	return results;
 }
 

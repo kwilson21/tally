@@ -5,7 +5,7 @@ import { SavingsGoalRow } from "../src/views/savings-goal-row";
 
 /** The arrow's classes, as RowArrow writes them (decision 111, P118 A). */
 const ARROW =
-	'class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink';
+	'class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover/row:text-ink';
 
 const budget = (props: Partial<Parameters<typeof ProgressRow>[0]> = {}) =>
 	ProgressRow({
@@ -44,6 +44,29 @@ describe("ProgressRow that opens", () => {
 		const html = await budget({ href: undefined });
 		expect(html).not.toContain("chevron-right");
 		expect(html).not.toContain("row-opens");
+	});
+
+	it("keeps the arrow's empty space on a row with no link in a list whose rows open, so the bars end together", async () => {
+		const html = await budget({ href: undefined, reserveArrow: true });
+		expect(html).toMatch(
+			/<span aria-hidden="true" class="size-5 shrink-0 -ml-3 -mr-2 self-start mt-1"><\/span>/,
+		);
+		expect(html).not.toContain("chevron-right");
+		expect(html).not.toContain("row-opens");
+	});
+
+	it("keeps no space on a row with no link when its list has no rows that open", async () => {
+		const html = await budget({ href: undefined });
+		expect(html).not.toContain("size-5 shrink-0 -ml-3 -mr-2");
+	});
+
+	it("keeps no space in Adjust mode, where the − and + take the room", async () => {
+		const html = await budget({
+			href: undefined,
+			reserveArrow: true,
+			nudge: { href: "/budget/3/nudge", id: "nudge-3" },
+		});
+		expect(html).not.toContain("size-5 shrink-0 -ml-3 -mr-2");
 	});
 });
 

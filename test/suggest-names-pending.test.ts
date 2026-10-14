@@ -5,6 +5,7 @@ import { resetDemo } from "../src/demo/reset";
 import {
 	nameCallLimit,
 	suggestMerchantNames,
+	suggestNightlyNames,
 	suggestTransactionNotes,
 } from "../src/suggest-names-pending";
 
@@ -745,5 +746,179 @@ describe("suggestTransactionNotes", () => {
 			note_guessed: 1,
 			tried: 1,
 		});
+	});
+
+	// A person may name the charge or its merchant while the call is out, so the note is checked against the names
+	// as they are once the call returns, not as the pass read them before it (#412).
+	it.each([
+		[
+			"the charge's own name",
+			"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+		],
+		[
+			"the merchant's name",
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('Note Shop', 'Dog bed') ON CONFLICT(raw_name) DO UPDATE SET display_name = 'Dog bed'",
+		],
+	])(
+		"checks a note against %s set during its call, so a note that now restates it is not saved",
+		async (_label, rename) => {
+			await addNoteCandidates(1);
+			const ai = fakeAi(() => ({ response: "Dog bed" }));
+			ai.run.mockImplementationOnce(async () => {
+				await db.prepare(rename).run();
+				return { response: "Dog bed" };
+			});
+			expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+				asked: 1,
+				suggested: 0,
+			});
+			expect(await noteOf("NOTE SHOP 1")).toEqual({
+				note: null,
+				note_guessed: 0,
+				tried: 1,
+			});
+		},
+	);
+
+	it("keeps a note checked against a name set during its call when the note says more than that name", async () => {
+		await addNoteCandidates(1);
+		const ai = fakeAi(() => ({ response: "Vet visit" }));
+		ai.run.mockImplementationOnce(async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+				)
+				.run();
+			return { response: "Vet visit" };
+		});
+		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(await noteOf("NOTE SHOP 1")).toEqual({
+			note: "Vet visit",
+			note_guessed: 1,
+			tried: 1,
+		});
+	});
+
+	it("saves 100 notes in a small fixed statement count, reading each batch's names once before its save", async () => {
+		await addNoteCandidates(nameCallLimit);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const ai = fakeAi(() => ({ response: "Bought a gift" }));
+		expect(
+			await suggestTransactionNotes({
+				DB: counted as D1Database,
+				AI: ai,
+			}),
+		).toEqual({ asked: nameCallLimit, suggested: nameCallLimit });
+		// The switch read and the candidate query, then for every five calls a switch read, the batch's names read
+		// and its save: 2 + 20 × 3 = 62.
+		expect(statements).toBeLessThanOrEqual(62);
+	});
+});
+
+// The night's notes and names share its calls (#458): while a name waits, notes take at most half of them.
+describe("suggestNightlyNames", () => {
+	/** A note's call answers empty; a name's call answers "Some Place Name". */
+	const noteOrName = (text: string) =>
+		text.startsWith("NOTE SHOP")
+			? { response: "" }
+			: { response: "Some Place Name" };
+
+	/** How many of the night's calls were for notes, and how many for names, by the bank text each was about. */
+	const askedAbout = (ai: { run: ReturnType<typeof vi.fn> }) => {
+		const texts = callsFor(ai);
+		return {
+			notes: texts.filter((text) => text?.startsWith("NOTE SHOP")).length,
+			names: texts.filter((text) => !text?.startsWith("NOTE SHOP")).length,
+		};
+	};
+
+	/** `n` bank texts nobody has named, each on a charge of its own. */
+	const addNamesWaiting = (n: number) =>
+		addTransactions(
+			Array.from({ length: n }, (_, i) => ({ rawName: `SHOP NUMBER ${i}` })),
+		);
+
+	it("with 150 untried notes and 3 names waiting, night one asks about all 3 names and at most half the limit of notes", async () => {
+		await addNoteCandidates(150);
+		await addNamesWaiting(3);
+		const ai = fakeAi(noteOrName);
+		await suggestNightlyNames({ DB: db, AI: ai });
+		expect(askedAbout(ai)).toEqual({ notes: nameCallLimit / 2, names: 3 });
+		expect(
+			(await merchants()).filter((row) => row.suggestion_status === "pending"),
+		).toHaveLength(3);
+	});
+
+	it("with no name waiting, notes may use the whole limit", async () => {
+		await addNoteCandidates(150);
+		const ai = fakeAi(noteOrName);
+		await suggestNightlyNames({ DB: db, AI: ai });
+		expect(askedAbout(ai)).toEqual({ notes: nameCallLimit, names: 0 });
+	});
+
+	it("with few notes, names get everything the notes left of the limit", async () => {
+		await addNoteCandidates(10);
+		await addNamesWaiting(150);
+		const ai = fakeAi(noteOrName);
+		await suggestNightlyNames({ DB: db, AI: ai });
+		expect(askedAbout(ai)).toEqual({ notes: 10, names: nameCallLimit - 10 });
+	});
+
+	it("with the names switch off, notes keep the whole limit even while names wait", async () => {
+		await saveAiSwitches(db, { names: false });
+		await addNoteCandidates(150);
+		await addNamesWaiting(3);
+		const ai = fakeAi(noteOrName);
+		await suggestNightlyNames({ DB: db, AI: ai });
+		expect(askedAbout(ai)).toEqual({ notes: nameCallLimit, names: 0 });
+	});
+
+	it("the worst split, one note and 150 names waiting with every other name call failing, stays under 90 statements", async () => {
+		await addNoteCandidates(1);
+		await addNamesWaiting(150);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		let namesAsked = 0;
+		const ai = fakeAi((text) => {
+			if (text.startsWith("NOTE SHOP")) return { response: "Bought a gift" };
+			namesAsked += 1;
+			// Every other name call fails: no three in a row, and each batch saves both answers and failures.
+			if (namesAsked % 2 === 1) throw new Error("capacity");
+			return { response: "Some Place Name" };
+		});
+		await suggestNightlyNames({ DB: counted as D1Database, AI: ai });
+		expect(askedAbout(ai)).toEqual({ notes: 1, names: 99 });
+		// The probe (the switch read and the names query): 2. The notes' own two reads, then the note's batch (its
+		// switch read, the names it reads and its save): 5. The names' switch read and query, then for each of 20
+		// batches a switch read and three writes: 2 + 20 × 4 = 82. 2 + 5 + 82 = 89.
+		expect(statements).toBeLessThanOrEqual(89);
+		logged.mockRestore();
+		vi.restoreAllMocks();
 	});
 });

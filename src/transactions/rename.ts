@@ -110,7 +110,7 @@ export function jevAsksAbout(row: JevRow): boolean {
  * A one-off name makes Tally guess the category again, from the purchase's own name (decision 101), when
  * the category is Tally's (`jev`) or empty and the person didn't pick a different one in the same save.
  * This covers the store's own name under This one only too, which is a one-off name as well. A merchant-wide
- * rename and a name that didn't change ask nothing. Ticking Always for this merchant in the same save settles
+ * rename and a name that didn't change ask nothing. Ticking the merchant rule in the same save settles
  * the category, so nothing is guessed. Tally guesses only while Jev answers categories
  * (`jevCategories`), and only on a row Jev can be asked about (`row`); otherwise the category is left as it is.
  */

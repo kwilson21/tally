@@ -649,6 +649,16 @@ describe("finding bills", () => {
 		);
 	});
 
+	it("names the possible bill in its Add link, so the Add sheet closes back to this finding", async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills/find")
+		).text();
+		expect(html).toContain(
+			"merchant_raw_name=CITY+GYM+MEMBERSHIP&amp;finding=CITY+GYM+MEMBERSHIP",
+		);
+	});
+
 	it("remembers Not a bill and removes the row with feedback", async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 		const raw = (

@@ -693,6 +693,21 @@ describe("Bills", () => {
 		expect(details?.[0]).toMatch(/Inactive \(1\)\s*<\/summary>/);
 	});
 
+	it("names each row's group, so an inactive bill's arrow turns ink on its own row's hover, not the disclosure's", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const start = html.indexOf('<details class="group ');
+		const disclosure = html.slice(start, html.indexOf("</details>", start));
+		expect(disclosure).toMatch(
+			/<a href="\/bills\/\d+" class="[^"]*\bgroup\/row\b/,
+		);
+		expect(disclosure).toMatch(
+			/<svg class="[^"]*group-hover\/row:text-ink[^"]*"[^>]*data-icon="chevron-right"/,
+		);
+		expect(html).not.toContain("group-hover:text-ink");
+	});
+
 	it("does not call an inactive-only bill list empty", async () => {
 		await env.DB.prepare("UPDATE bills SET active=0").run();
 		const html = await (
@@ -1079,7 +1094,10 @@ describe("Bills", () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
-		expect(html).toMatch(/<a[^>]*href="\/bills"[^>]*>\s*Cancel/);
+		// A new bill's Cancel returns focus to Add a bill (#87).
+		expect(html).toMatch(
+			/<a[^>]*href="\/bills\?focus=add-bill"[^>]*>\s*Cancel/,
+		);
 		const { id } = (await env.DB.prepare(
 			"SELECT id FROM bills WHERE active=1 LIMIT 1",
 		).first<{ id: number }>()) as { id: number };

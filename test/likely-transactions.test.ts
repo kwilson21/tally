@@ -358,7 +358,7 @@ describe("addLikely", () => {
 			suggestionId: suggested,
 		});
 
-		const moved = await addLikely(env.DB, {
+		const { moved, name } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: pet,
 			categoryName: "Pet Care",
@@ -369,6 +369,7 @@ describe("addLikely", () => {
 		});
 
 		expect(moved).toBe(2);
+		expect(name).toBe("Pet Care");
 		expect(await filed(sameNew)).toEqual({
 			categoryId: pet,
 			source: "user",
@@ -403,7 +404,7 @@ describe("addLikely", () => {
 			.bind(ticked, unticked)
 			.run();
 
-		const moved = await addLikely(env.DB, {
+		const { moved } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: pet,
 			categoryName: "Pet Care",
@@ -469,7 +470,7 @@ describe("addLikely", () => {
 			[guess, false],
 		]);
 
-		const moved = await addLikely(env.DB, {
+		const { moved } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: ecole,
 			categoryName: "École",
@@ -502,7 +503,7 @@ describe("addLikely", () => {
 			suggestionId: decomposed,
 		});
 
-		const moved = await addLikely(env.DB, {
+		const { moved } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: ecole,
 			categoryName: "École",
@@ -535,7 +536,7 @@ describe("addLikely", () => {
 		const shown = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
 		expect(shown.map((row) => row.id)).not.toContain(older);
 
-		const moved = await addLikely(env.DB, {
+		const { moved } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: pet,
 			categoryName: "Pet Care",
@@ -572,7 +573,7 @@ describe("addLikely", () => {
 			const changed = victim === "same" ? sameNew : guessNew;
 			const control = victim === "same" ? guessNew : sameNew;
 
-			const moved = await addLikely(editedAfterRead(change, changed), {
+			const { moved } = await addLikely(editedAfterRead(change, changed), {
 				savedId: saved,
 				categoryId: pet,
 				categoryName: "Pet Care",
@@ -603,7 +604,7 @@ describe("addLikely", () => {
 			.run();
 
 		// Called directly, as if the archive landed between the route's liveCategory() check and this write.
-		const moved = await addLikely(env.DB, {
+		const { moved } = await addLikely(env.DB, {
 			savedId: saved,
 			categoryId: pet,
 			categoryName: "Pet Care",
@@ -614,6 +615,69 @@ describe("addLikely", () => {
 
 		expect(moved).toBe(0);
 		expect((await filed(sameNew))?.categoryId).toBeNull();
+	});
+
+	it("files nothing into a category renamed since the panel was read, though its rows still match the old name", async () => {
+		const sameNew = await tx(
+			`${THIS}-03`,
+			7650,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		const guessNew = await tx(`${THIS}-05`, 6412, "CHEWY.COM", "Chewy", {
+			suggestionId: suggested,
+		});
+		await env.DB.prepare(
+			"UPDATE categories SET name = 'Vet Visits', name_key = 'vet visits' WHERE id = ?",
+		)
+			.bind(pet)
+			.run();
+
+		// Called directly, as if the rename landed between the route's liveCategory() read and this write.
+		const { moved, name } = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: pet,
+			categoryName: "Pet Care",
+			ticked: [sameNew, guessNew],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(0);
+		expect(name).toBeNull();
+		expect((await filed(sameNew))?.categoryId).toBeNull();
+		expect((await filed(guessNew))?.categoryId).toBeNull();
+	});
+
+	it("names the category as stored when its capitals changed since the panel was read", async () => {
+		const sameNew = await tx(
+			`${THIS}-03`,
+			7650,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare(
+			"UPDATE categories SET name = 'PET CARE', name_key = 'pet care' WHERE id = ?",
+		)
+			.bind(pet)
+			.run();
+
+		const { moved, name } = await addLikely(env.DB, {
+			savedId: saved,
+			categoryId: pet,
+			categoryName: "Pet Care",
+			ticked: [sameNew],
+			today: TODAY,
+			actor: "test",
+		});
+
+		expect(moved).toBe(1);
+		expect(name).toBe("PET CARE");
+		expect(await filed(sameNew)).toEqual({
+			categoryId: pet,
+			source: "user",
+			suggestionId: null,
+		});
 	});
 });
 

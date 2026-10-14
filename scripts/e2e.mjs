@@ -87,6 +87,32 @@ const goto = async (url, options) => {
 	);
 	return page.goto(url, options);
 };
+// A slowed reply is let go after its delay, and each release is kept here. settleReplies waits for every kept release, so a
+// step waits for the replies it slowed to be answered or dropped, rather than for a guessed time.
+const heldReplies = [];
+const holdReply = (route, delay) => {
+	const released = new Promise((resolve) => setTimeout(resolve, delay)).then(
+		() => route.continue().catch(() => {}), // the page may already have replaced this request
+	);
+	heldReplies.push(released);
+	return released;
+};
+// Waits for every held reply to be let go, then for htmx to have no request in flight: a reply the page replaced is gone,
+// and one it kept has been swapped in, so the assertions after this read the page the reply left.
+const settleReplies = async () => {
+	await Promise.all(heldReplies.splice(0));
+	await page.waitForFunction(() => !document.querySelector(".htmx-request"));
+};
+// htmx logs a request that a newer one replaces (hx-sync) as an abort. toast.js ignores that, and the steps
+// that replace requests on purpose drop only those lines; any other console error still fails.
+const dropReplacedRequestLogs = (from) => {
+	const logged = consoleErrors.splice(from);
+	consoleErrors.push(
+		...logged.filter(
+			(error) => !/^htmx: htmx:error: .*abort/i.test(error.text),
+		),
+	);
+};
 
 // Inject simulated insets into the app's same-origin stylesheet to respect its CSP.
 await page.route("**/assets/app.css", async (route) => {
@@ -497,20 +523,21 @@ await page.getByRole("link", { name: /Local Bakery/ }).click();
 await page.getByRole("link", { name: "Split" }).click();
 let lineAnswers = 0;
 const slowFirstLine = async (route) => {
-	if (++lineAnswers === 1)
-		await new Promise((resolve) => setTimeout(resolve, 1500));
+	if (++lineAnswers === 1) return holdReply(route, 1500);
 	await route.continue();
 };
 await page.route("**/split/line", slowFirstLine);
 const amounts = page.getByLabel(/^Part \d amount$/);
+// The amount waits out a 300ms debounce, so wait for part 1's request to go before part 2 is typed.
+const firstLineSent = page.waitForRequest("**/split/line");
 await amounts.nth(0).fill("5.00");
-// Past the 300ms delay, so part 1's request goes out before part 2 is typed.
-await page.waitForTimeout(400);
+await firstLineSent;
 await page.getByLabel("Part 1 category").selectOption("1");
 await amounts.nth(1).fill("7.00");
 await page.getByLabel("Part 2 category").selectOption("5");
 await page.getByText("Adds up to $12.00").waitFor();
-await page.waitForTimeout(1500);
+// The held first answer lands (or is dropped) before the line is read, so a late answer can't be the line's last word.
+await settleReplies();
 assert.equal(
 	(await page.locator("#split-line").textContent())?.trim(),
 	"Adds up to $12.00",
@@ -530,6 +557,68 @@ await page
 	.waitFor();
 assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
+
+// A split of a purchase with a linked refund asks which part the refund goes with. The part labels redraw out of band as
+// the parts change, and a pick made while that redraw is held stays checked and focused. The demo's Target purchase
+// ($84.99) has a linked $24.99 refund; the sheet is cancelled, so the demo data stays as it was.
+const errorsBeforeChooser = consoleErrors.length;
+await goto(`${BASE}/transactions?q=Target&month=all`, {
+	waitUntil: "networkidle",
+});
+await page
+	.locator("#results li[data-transaction]")
+	.filter({ hasText: "$24.99 refunded" })
+	.locator("a")
+	.click();
+await page.locator('[role="dialog"]').waitFor();
+await page.getByRole("link", { name: "Split" }).click();
+const chooserAmounts = page.getByLabel(/^Part \d amount$/);
+await page.getByLabel("Part 1 category").selectOption({ label: "Kids" });
+await chooserAmounts.nth(0).fill("60.00");
+await page.getByLabel("Part 2 category").selectOption({ label: "Household" });
+await chooserAmounts.nth(1).fill("24.99");
+// The out-of-band part label lands: the radio is named by its new text, not the "Part 2" it had.
+const household = page.getByRole("radio", { name: "Household · $24.99" });
+await household.waitFor({ state: "attached" });
+await page.waitForFunction(() => !document.querySelector(".htmx-request"));
+// Hold the next answer about the chooser, and let every later one through.
+let heldLine = null;
+let lineHeld;
+const lineIsHeld = new Promise((resolve) => (lineHeld = resolve));
+const holdNextLine = (route) => {
+	if (heldLine) return route.continue();
+	heldLine = route;
+	lineHeld();
+};
+await page.route("**/split/line", holdNextLine);
+await page.evaluate(() => {
+	window.__lineEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (event.detail.ctx.request.action.includes("/split/line"))
+			window.__lineEnded = true;
+	});
+});
+await chooserAmounts.nth(0).fill("50.00");
+await lineIsHeld;
+await household.focus();
+await page.keyboard.press("Space");
+assert.equal(await household.isChecked(), true);
+await heldLine.continue();
+await page.waitForFunction(() => window.__lineEnded);
+await page.getByRole("radio", { name: "Kids · $50.00" }).waitFor({
+	state: "attached",
+});
+assert.equal(await household.isChecked(), true);
+assert.equal(
+	await household.evaluate((el) => document.activeElement === el),
+	true,
+	"the pick must keep focus through the redraw",
+);
+await page.getByRole("link", { name: "Cancel" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "hidden" });
+await page.unroute("**/split/line", holdNextLine);
+dropReplacedRequestLogs(errorsBeforeChooser);
+step("a pick made while the chooser's labels redraw stays checked and focused");
 
 // The demo's Target refund is linked to its purchase (P19): its row says so, and its panel shows the link.
 await goto(`${BASE}/transactions?q=Target&month=all`, {
@@ -622,20 +711,7 @@ assert.deepEqual(
 );
 step("Move up in Settings moves Gas up one place");
 
-// htmx logs a request that a newer one replaces (hx-sync) as an abort. toast.js ignores that, and the steps
-// that replace requests on purpose drop only those lines; any other console error still fails.
-const dropReplacedRequestLogs = (from) => {
-	const logged = consoleErrors.splice(from);
-	consoleErrors.push(
-		...logged.filter(
-			(error) => !/^htmx: htmx:error: .*abort/i.test(error.text),
-		),
-	);
-};
-const slowCount = async (route) => {
-	await new Promise((resolve) => setTimeout(resolve, 1500));
-	await route.continue().catch(() => {}); // the page may already have replaced this request
-};
+const slowCount = (route) => holdReply(route, 1500);
 
 // Select all from the keyboard: its link leaves with the reply, so focus must land on Set category, not the page top (#215).
 const keyboardErrors = consoleErrors.length;
@@ -681,8 +757,10 @@ assert.equal(
 	"select-all-link",
 	"Tab from the last tick must reach Select all, through the pager",
 );
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+// The held reply draws the whole-set link in place of the page link (the same element, so focus stays on it).
+await page
+	.locator("#select-all-page a", { hasText: /^Select all \d+ in / })
+	.waitFor();
 const wholeLink = page.locator("#select-all-page a");
 const wholeLabel = (await wholeLink.textContent())?.trim() ?? "";
 assert.match(
@@ -734,8 +812,11 @@ assert.equal(
 	"select-all-link",
 	"Tab from the last tick must reach Select all",
 );
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+// The held reply takes the link away and htmx moves focus to the count: wait for both before reading them.
+await page.locator("#select-all-page a").waitFor({ state: "detached" });
+await page.waitForFunction(() =>
+	Boolean(document.activeElement?.closest("#selected-count")),
+);
 assert.equal(
 	await page.locator("#select-all-page a").count(),
 	0,
@@ -809,8 +890,9 @@ await page.mouse.move(
 	pressBox.y + pressBox.height / 2,
 );
 await page.mouse.down();
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+await page
+	.locator("#select-all-page a", { hasText: /^Select all \d+ in / })
+	.waitFor();
 const pressLabel = (await pressLink.textContent())?.trim() ?? "";
 assert.match(
 	pressLabel,
@@ -842,8 +924,8 @@ await page.route("**/transactions/select/count*", slowCount);
 await page.getByRole("link", { name: "Select" }).click();
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 await page.getByRole("link", { name: /^Select all \d+$/ }).click();
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+// The Select all list replaces the count still in flight: settle waits for that count to be let go, and for the list to land.
+await settleReplies();
 const selectable = await page
 	.locator("#selection-form input[name=ids]")
 	.count();
@@ -868,10 +950,7 @@ dropReplacedRequestLogs(errorsBefore);
 step("a count still loading when Select all lands can't overwrite the bar");
 
 // Select all, then a filter change before its list comes back: the old list must not return ticked (#215).
-const slowSelectAll = async (route) => {
-	await new Promise((resolve) => setTimeout(resolve, 1500));
-	await route.continue().catch(() => {});
-};
+const slowSelectAll = (route) => holdReply(route, 1500);
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
@@ -883,8 +962,9 @@ await page.route(
 );
 await page.getByRole("link", { name: /^Select all \d+$/ }).click();
 await page.getByLabel("Search transactions").fill("Local Bakery");
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+// The search's list is the one that stays; the held Select all list it replaces must not come back once it is let go.
+await page.waitForURL(/[?&]q=Local/);
+await settleReplies();
 assert.match(
 	page.url(),
 	/[?&]q=Local/,
@@ -902,6 +982,142 @@ await page.unroute(
 dropReplacedRequestLogs(errorsBefore);
 step("Select all, then a filter change before it returns, keeps the filter");
 
+// Select all pressed while its count is still loading, then a search typed before Select all's reply comes back (#471).
+// Select all replaces the count, so its own request goes out at once; a search typed while that request is held must
+// replace it, and its held reply must not land over the search. Both requests are held, and each wait is on the
+// request's own effect, never a sleep.
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+let heldCount = null;
+let countHeld;
+const countIsHeld = new Promise((resolve) => (countHeld = resolve));
+const holdCount = (route) => {
+	heldCount = route;
+	countHeld();
+};
+await page.route("**/transactions/select/count*", holdCount);
+await page.getByRole("link", { name: "Select" }).click();
+await countIsHeld;
+let heldSelectAll = null;
+let selectAllHeld;
+const selectAllIsHeld = new Promise((resolve) => (selectAllHeld = resolve));
+const holdSelectAll = (route) => {
+	heldSelectAll = route;
+	selectAllHeld();
+};
+await page.route(
+	"**/transactions?*focus=set-category-selection*",
+	holdSelectAll,
+);
+await page.evaluate(() => {
+	window.__selectAllEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (
+			event.detail.ctx.request.action.includes("focus=set-category-selection")
+		)
+			window.__selectAllEnded = true;
+	});
+});
+await page.getByRole("link", { name: /^Select all \d+$/ }).click();
+// Select all replaced the count in flight, so the count is already dropped; Select all's own request is the one held.
+await heldCount.continue().catch(() => {}); // a count the page has already dropped can't be released, and needn't be
+await selectAllIsHeld;
+await page.getByLabel("Search transactions").fill("Local Bakery");
+await page.waitForFunction(() => location.search.includes("q=Local"));
+await heldSelectAll.continue().catch(() => {}); // the page may already have aborted it, as the search replaces it
+await page.waitForFunction(() => window.__selectAllEnded);
+assert.match(
+	page.url(),
+	/[?&]q=Local/,
+	"the search must be the list that stays",
+);
+assert.equal(
+	await page.locator("#selection-form input[name=ids]:checked").count(),
+	0,
+	"the Select all list must not come back ticked over the search",
+);
+await page.unroute("**/transactions/select/count*", holdCount);
+await page.unroute(
+	"**/transactions?*focus=set-category-selection*",
+	holdSelectAll,
+);
+dropReplacedRequestLogs(errorsBefore);
+step(
+	"Select all with its count still loading, then a search: the search stays",
+);
+
+// A tick made while Select all's reply is held, then a search typed before that reply comes back (#471). A person can't
+// tick during a list load (the rows are paused), so the tick is a change event the test sends. The tick's count queues
+// behind Select all (or runs beside it, unpatched): the search must replace Select all's request either way, and Select
+// all's held reply must not land over the search.
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+const tickHeldCounts = [];
+let tickFirstCountHeld;
+const tickFirstCountIsHeld = new Promise(
+	(resolve) => (tickFirstCountHeld = resolve),
+);
+await page.route("**/transactions/select/count*", (route) => {
+	tickHeldCounts.push(route);
+	tickFirstCountHeld();
+});
+await page.getByRole("link", { name: "Select" }).click();
+await tickFirstCountIsHeld;
+let tickHeldSelectAll = null;
+let tickSelectAllHeld;
+const tickSelectAllIsHeld = new Promise(
+	(resolve) => (tickSelectAllHeld = resolve),
+);
+await page.route("**/transactions?*focus=set-category-selection*", (route) => {
+	tickHeldSelectAll = route;
+	tickSelectAllHeld();
+});
+let tickHeldSearch = null;
+let tickSearchHeld;
+const tickSearchIsHeld = new Promise((resolve) => (tickSearchHeld = resolve));
+await page.route("**/transactions?*q=Local*", (route) => {
+	tickHeldSearch = route;
+	tickSearchHeld();
+});
+await page.evaluate(() => {
+	window.__searchEnded = false;
+	window.__selectAllEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		const { action } = event.detail.ctx.request;
+		if (action.includes("q=Local")) window.__searchEnded = true;
+		if (action.includes("focus=set-category-selection"))
+			window.__selectAllEnded = true;
+	});
+});
+await page.getByRole("link", { name: /^Select all \d+$/ }).click();
+await tickSelectAllIsHeld;
+await page.evaluate(() => {
+	const box = document.querySelector("#selection-form input[name=ids]");
+	box.checked = true;
+	box.dispatchEvent(new Event("change", { bubbles: true }));
+});
+await page.getByLabel("Search transactions").fill("Local Bakery");
+await tickSearchIsHeld;
+await tickHeldSearch.continue();
+await page.waitForFunction(() => window.__searchEnded);
+await tickHeldSelectAll.continue().catch(() => {}); // a patched htmx has already aborted it, as the search replaced it
+await page.waitForFunction(() => window.__selectAllEnded);
+for (const route of tickHeldCounts) await route.continue().catch(() => {}); // a count the page dropped can't be released
+assert.match(
+	page.url(),
+	/[?&]q=Local/,
+	"the search must stay when a tick's count and Select all are still in flight",
+);
+await page.unroute("**/transactions/select/count*");
+await page.unroute("**/transactions?*focus=set-category-selection*");
+await page.unroute("**/transactions?*q=Local*");
+dropReplacedRequestLogs(errorsBefore);
+step("a tick made while Select all is held, then a search: the search stays");
+
 // Next while a count is still loading: page 2 must get its own ids, not page 1's (#215).
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
@@ -909,8 +1125,14 @@ await page.route("**/transactions/select/count*", slowCount);
 await page.getByRole("link", { name: "Select" }).click();
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 await page.locator('a[rel="next"]').click();
-await page.waitForTimeout(1600);
-await page.waitForLoadState("networkidle");
+// The Next list replaces the count still in flight: settle waits for that count to be let go and for the list to land.
+await settleReplies();
+// The Next reply focuses the first tick on the frame after the list swaps in (toast.js), so its page-2 ids are in place.
+await page.waitForFunction(
+	() =>
+		document.activeElement ===
+		document.querySelector("#results input[name=ids]"),
+);
 assert.match(page.url(), /[?&]page=2\b/);
 const shownIds = await page
 	.locator("#results input[name=ids]")
@@ -944,7 +1166,8 @@ const slowList = async (route) => {
 await page.route("**/transactions?*page=2*", slowList);
 const countsBeforeLoad = countRequests.length;
 await page.locator('a[rel="next"]').click();
-await page.waitForTimeout(200);
+// The slowed load marks the form while it runs; wait for that instead of a fixed pause.
+await page.waitForSelector("#selection-form.htmx-request");
 assert.equal(
 	await page.locator("#selection-form.htmx-request").count(),
 	1,
@@ -974,6 +1197,7 @@ await page.mouse.click(
 	tapBox.x + tapBox.width / 2,
 	tapBox.y + tapBox.height / 2,
 );
+// A tap during the load has no reply to wait for (it must do nothing), so give one that got through a moment to show.
 await page.waitForTimeout(300);
 assert.equal(
 	await page.locator("#selection-form input[name=ids]").nth(1).isChecked(),
@@ -1065,7 +1289,8 @@ const slowLists = async (route) => {
 };
 await page.route("**/transactions?*", slowLists);
 await page.locator("#show").selectOption("spending");
-await page.waitForTimeout(400);
+// The filter waits out a 300ms debounce: wait for its slowed list to be in flight, so the next change lands on that load.
+await page.waitForSelector("#selection-form.htmx-request");
 await page.locator("#show").selectOption("all");
 await page.waitForFunction(
 	() => !document.querySelector("#selection-form.htmx-request"),

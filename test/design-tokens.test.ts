@@ -6,6 +6,7 @@ import {
 	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
 } from "../src/design-system/tokens";
+import tokensSource from "../src/design-system/tokens.ts?raw";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
@@ -771,6 +772,16 @@ describe("the press token and the rows that open (P118 A)", () => {
 		expect(design).toMatch(
 			/^\| press \| .* \| a pressed row, and a row whose sheet is loading \| 16\.1 \(ink text on it\) \|$/m,
 		);
+	});
+
+	it("holds the press token once in DESIGN.md and app.css, with the proposal's wording gone from DESIGN.md, app.css and tokens.ts", () => {
+		expect(design.match(/^\| press\b/gm)).toHaveLength(1);
+		expect(css.match(/--color-press:/g)).toHaveLength(1);
+		for (const source of [design, css, tokensSource]) {
+			expect(source).not.toContain("proposed in P118");
+			expect(source).not.toContain("not used by the app yet");
+			expect(source).not.toContain("PROPOSED_COLOR_TOKENS");
+		}
 	});
 
 	it("gives a row that opens the tap flash, the mouse press and the loading tint, and no transition", () => {

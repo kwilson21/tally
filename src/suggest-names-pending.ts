@@ -2,10 +2,11 @@
 // production it runs last in the 09:20 run, after that run's Jev pass, and the demo's one run names after
 // Jev too (src/index.tsx); in both it stops starting requests once its deadline has passed
 // (src/run-budget.ts). It only ever makes pending suggestions; a person chooses (decision 64).
-import { suggestNames, suggestNote } from "./ai/suggest-name";
+import { restatesStore, suggestNames, suggestNote } from "./ai/suggest-name";
 import { readAiSwitches } from "./db/ai-switches";
 import { merchantsToAsk, saveAskedNames } from "./db/merchant-names";
 import {
+	noteNameRows,
 	saveNoteAttempts,
 	transactionsNeedingNoteGuess,
 } from "./db/transactions";
@@ -19,6 +20,8 @@ import { usableSuggestedNames } from "./transactions/name-suggestions";
  * its work and the rest wait for the next night.
  */
 export const nameCallLimit = 100;
+// While a name waits, notes take at most half the night's calls, so the names always get the other half (#458).
+const noteCallLimitWhileNamesWait = Math.floor(nameCallLimit / 2);
 // The switches are read after every five calls, so one turned off mid-run stops within five; a batch's
 // answers are kept or dropped together.
 const SWITCH_CHECK_BATCH = 5;
@@ -32,7 +35,12 @@ type NamesEnv = {
 	AI?: Ai;
 };
 
-/** Writes notes for details Jev has already asked about, sharing the night's Workers AI call limit. */
+/**
+ * Writes notes for details Jev has already asked about, sharing the night's Workers AI call limit. A note that
+ * only restates a name the row shows is dropped, checked against the names as they are just before the batch is
+ * saved, since a person may name the charge during its call (#412). The batch's names cost one read, and none when
+ * it has no note.
+ */
 export async function suggestTransactionNotes(
 	env: NamesEnv,
 	limit = nameCallLimit,
@@ -51,17 +59,7 @@ export async function suggestTransactionNotes(
 		for (const transaction of transactions.slice(i, i + SWITCH_CHECK_BATCH)) {
 			if (pastDeadline(time)) break;
 			done.asked += 1;
-			const result = await suggestNote(env.AI, transaction.rawName, [
-				transaction.merchantName,
-				transaction.displayName,
-				transaction.ownName,
-				...usableSuggestedNames({
-					stored: transaction.suggestedNames,
-					status: transaction.suggestionStatus,
-					key: transaction.merchantKey,
-					namesOn: switches.names,
-				}),
-			]);
+			const result = await suggestNote(env.AI, transaction.rawName);
 			if (!result.ok) {
 				failed.push(transaction.id);
 				failuresInARow += 1;
@@ -74,17 +72,58 @@ export async function suggestTransactionNotes(
 				guesses.push({ id: transaction.id, note: result.note });
 		}
 		// Keep or discard this small batch together if the details switch changed during an AI call.
-		const detailsOn = (await readAiSwitches(env.DB)).details;
-		if (!detailsOn) break;
-		// Answered calls are remembered as tried; a failed one stays untried and is asked again tomorrow, after the rest.
-		await saveNoteAttempts(env.DB, answered, guesses, failed);
-		done.suggested += guesses.length;
+		const current = await readAiSwitches(env.DB);
+		if (!current.details) break;
+		const kept = await notesNotRestatingShownNames(
+			env.DB,
+			guesses,
+			current.names,
+		);
+		// Answered calls are remembered as tried, even when their note is dropped; a failed one stays untried and is asked again tomorrow, after the rest.
+		await saveNoteAttempts(env.DB, answered, kept, failed);
+		done.suggested += kept.length;
 		if (failuresInARow >= MAX_FAILURES_IN_A_ROW || pastDeadline(time)) break;
 	}
 	console.log(
 		`workers-ai: notes asked ${done.asked}, suggested ${done.suggested}`,
 	);
 	return done;
+}
+
+/**
+ * The guesses that don't only restate the store by the bank text or a name the row shows as it is now: the
+ * charge's own name, its merchant's name, and the merchant's usable suggestions (decision 103, #412). One read
+ * for the guesses' rows, and none when there are no guesses.
+ */
+async function notesNotRestatingShownNames(
+	db: D1Database,
+	guesses: { id: number; note: string }[],
+	namesOn: boolean,
+): Promise<{ id: number; note: string }[]> {
+	if (guesses.length === 0) return guesses;
+	const rows = await noteNameRows(
+		db,
+		guesses.map((guess) => guess.id),
+	);
+	const byId = new Map(rows.map((row) => [row.id, row]));
+	return guesses.filter(({ id, note }) => {
+		const row = byId.get(id);
+		return (
+			row !== undefined &&
+			!restatesStore(note, [
+				row.rawName,
+				row.merchantName,
+				row.displayName,
+				row.ownName,
+				...usableSuggestedNames({
+					stored: row.suggestedNames,
+					status: row.suggestionStatus,
+					key: row.merchantKey,
+					namesOn,
+				}),
+			])
+		);
+	});
 }
 
 /**
@@ -138,4 +177,30 @@ export async function suggestMerchantNames(
 	}
 	console.log(`workers-ai: asked ${done.asked}, suggested ${done.suggested}`);
 	return done;
+}
+
+/**
+ * The night's notes, then its names (spec §7), sharing `nameCallLimit` Workers AI calls. While a name waits, notes
+ * take at most `noteCallLimitWhileNamesWait` and the names get the rest, so untried notes can't leave them no calls
+ * (#458). With none waiting, notes may use the whole limit, and the names get what the notes didn't ask.
+ */
+export async function suggestNightlyNames(
+	env: NamesEnv,
+	time?: Deadline,
+): Promise<void> {
+	const notesLimit = (await namesWaiting(env))
+		? noteCallLimitWhileNamesWait
+		: nameCallLimit;
+	const notes = await suggestTransactionNotes(env, notesLimit, time);
+	await suggestMerchantNames(env, nameCallLimit - notes.asked, time);
+}
+
+/**
+ * Whether the names step has a merchant to ask about tonight: the names switch is on and one is waiting. It is the
+ * names' own query for one row, plus the switch read (#458).
+ */
+async function namesWaiting(env: NamesEnv): Promise<boolean> {
+	if (!env.AI) return false;
+	if (!(await readAiSwitches(env.DB)).names) return false;
+	return (await merchantsToAsk(env.DB, 1)).length > 0;
 }

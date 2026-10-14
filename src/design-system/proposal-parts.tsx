@@ -24,6 +24,16 @@ export type Option = {
 	screen: Child;
 };
 
+/** The owner's pick, beside an option's name: the same pill on every proposal that has one. */
+export function PickedPill() {
+	return (
+		<span class="inline-flex items-center gap-1 rounded-full bg-band px-2.5 py-0.5 text-sm font-medium">
+			<Icon name="check" class="size-4" />
+			Picked
+		</span>
+	);
+}
+
 /**
  * A proposal's options side by side, each named, described and weighed above its picture. The
  * picture sits in a `data-screen` box, so a test can tell a drawn screen from an empty frame.
@@ -43,12 +53,7 @@ export function Options({ options }: { options: Option[] }) {
 									Recommended
 								</span>
 							)}
-							{o.picked && (
-								<span class="inline-flex items-center gap-1 rounded-full bg-band px-2.5 py-0.5 text-sm font-medium">
-									<Icon name="check" class="size-4" />
-									Picked
-								</span>
-							)}
+							{o.picked && <PickedPill />}
 						</h4>
 						<p class="text-sm">{o.note}</p>
 						{o.tradeoff && (
@@ -111,15 +116,23 @@ export function Fixed({ children }: { children?: Child }) {
 }
 
 /**
- * What a later pick (decision 82) replaced in an earlier drawing, and the drawing that takes its
- * place, named in plain words so the line adds no link to tap. The earlier drawing stays as it was,
- * so the page still shows what was picked first.
+ * What a later pick replaced in an earlier drawing, in plain words: the decision that replaced
+ * the drawing is named (82 unless given), and `by` points down to the drawing that takes its place.
  */
-export function Replaced({ by, children }: { by: string; children?: Child }) {
+export function Replaced({
+	by,
+	decision = 82,
+	children,
+}: {
+	by?: string;
+	decision?: number;
+	children?: Child;
+}) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Replaced by decision 82: </span>
-			{children} See {by}, further down.
+			<span class="font-medium">Replaced by decision {decision}: </span>
+			{children}
+			{by ? <> See {by}, further down.</> : null}
 		</p>
 	);
 }
