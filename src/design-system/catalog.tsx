@@ -652,17 +652,17 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	purpose:
 		"Make one change over the list it came from, without leaving it: a transaction's edit panel, a budget, adding cash.",
 	affordance:
-		"A dimmed backdrop (ink at 30%) over the page, and on it a paper sheet with curved top corners against a phone's bottom edge, or a panel against the right edge on desktop. The page behind stays in view, so it reads as over the list. Cancel, a secondary button, closes it, and so does the backdrop.",
+		"A dimmed backdrop (ink at 30%) over the page, and on it a paper sheet with curved top corners against a phone's bottom edge, or a panel against the right edge on desktop. The page behind stays in view, so it reads as over the list. Cancel, a secondary button, closes it, and so do the backdrop and Escape.",
 	states:
 		"Closed: not drawn. Opening: the motion below. Open: the sheet and backdrop at rest. Loading and error belong to the form inside (a Save that is pending, a field's error in role=alert); a failed request leaves the sheet as it is, with what was typed, and a toast says so. Hover, pressed and disabled: not applicable to the sheet itself.",
 	feedback:
-		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there. Cancel or the backdrop bring the list back with focus on the row that was open; a save does the same with a toast and an announcement.",
+		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there; if nothing in the sheet took focus, sheet.js puts it on the title. Cancel or the backdrop bring back the page it was opened from, with focus on what opened it (a row or a button); a save does the same with a toast and an announcement.",
 	input:
-		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Tab goes through the sheet's controls; Escape isn't supported (it would need JavaScript), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a dialog named by the sheet's heading. It isn't a modal, so the page behind isn't hidden from it.",
+		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Escape closes the sheet the way Cancel does, Tab stays inside it (from its last control to an Undo toast on screen, if any, then back to its first, and the other way with Shift; a radio group is one stop), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a modal dialog named by the sheet's heading, with the page behind it inert. The toasts stay usable. Without sheet.js (decision 109), see the edges.",
 	motion:
 		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
 	edges:
-		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without JavaScript the sheet is a page of its own, and Cancel and the backdrop are links.",
+		"Tall content scrolls inside the sheet (at most 90% of the screen's height on a phone, and always leaving room at its top for the toasts on screen, an Undo toast and an error toast together included, with the floor unchanged (decision 101); the full height on desktop), and the safe areas keep it clear of a notch and the home indicator. Without sheet.js it is today's page region, not a modal: Cancel and the backdrop are links that close it, Escape does nothing, and the page behind stays in reach.",
 	words:
 		"The backdrop's name for a screen reader is “Close”. The sheet is named by its title (the category, the transaction's name); every other word is its form's.",
 };
@@ -966,6 +966,7 @@ function HomeTopGroup() {
 		averageCents: 60245,
 		transactionCount: 12,
 		month: "2026-10",
+		closeHref: "/?focus=1",
 		closeAttrs: {
 			"hx-get": "/?focus=1",
 			"hx-target": "#page",
@@ -2245,6 +2246,7 @@ function Rows() {
 						<SavingsGoalSheet
 							value="500.00"
 							month="October"
+							closeHref="/?focus=savings-goal"
 							closeAttrs={{
 								"hx-get": "/?focus=savings-goal",
 								"hx-target": "#page",
@@ -4414,7 +4416,7 @@ function Feedback() {
 				title="BottomSheet"
 				tier="visual"
 				components={["BottomSheet"]}
-				sentence="A page region over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop; not a modal, closed by Cancel or the backdrop."
+				sentence="A modal over the list (bottom sheet on phones, right-hand panel on desktop) with a dimmed backdrop, closed by Escape, Cancel or the backdrop; without its script, a page region."
 			>
 				<p>
 					It covers the page, so it has a page of its own:{" "}
@@ -5630,9 +5632,9 @@ export function SheetSpecimen() {
 				BottomSheet
 			</h1>
 			<p class="mt-2 text-muted">
-				Visual: the sheet over sample rows. Cancel or the backdrop go back to
-				the catalog. Opening this page plays the sheet's motion: it rises on a
-				phone and slides in from the right on desktop.
+				Visual: the sheet over sample rows. Escape, Cancel or the backdrop go
+				back to the catalog. Opening this page plays the sheet's motion: it
+				rises on a phone and slides in from the right on desktop.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
@@ -5647,12 +5649,15 @@ export function SheetSpecimen() {
 					<h2
 						id="ds-sheet-title"
 						class="font-serif text-4xl font-semibold tracking-tight"
+						tabindex={-1}
+						autofocus
 					>
 						Groceries
 					</h2>
 					<p class="mt-2 text-muted">
 						On phones it rises from the bottom; on desktop it's a panel on the
-						right. It isn't a modal: the page behind it stays in place.
+						right. It is a modal (sheet.js): Escape or Cancel closes it, Tab
+						stays inside it, and the page behind it is inert.
 					</p>
 					<div class="mt-4 flex flex-col gap-3 border-t border-rule pt-3">
 						<p class="text-base text-ink">Income</p>
@@ -5692,9 +5697,9 @@ export function LedgerSheetSpecimen() {
 			</h1>
 			<p class="mt-2 text-muted">
 				Visual: the ledger form on a sheet, with Category open so the middle is
-				long. Cancel or the backdrop go back to the Ledger form group. The
-				middle scrolls; Cancel and Save stay in view on a phone and on desktop.
-				Save is drawn only: the catalog's CSP lets no form post.
+				long. Escape, Cancel or the backdrop go back to the Ledger form group.
+				The middle scrolls; Cancel and Save stay in view on a phone and on
+				desktop. Save is drawn only: the catalog's CSP lets no form post.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
@@ -5722,6 +5727,7 @@ export function LedgerSheetSpecimen() {
 						id="ledger-sheet-title"
 						class="font-serif text-2xl font-semibold tracking-tight"
 						tabindex={-1}
+						autofocus
 					>
 						Add a bill
 					</h2>
