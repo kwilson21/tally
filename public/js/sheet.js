@@ -51,30 +51,61 @@
 		close.click();
 	});
 
-	// Tab stays inside the sheet. The page behind it is inert, but the toasts are not, so the browser's own
-	// order could carry focus out of the sheet at either end. Focus outside the sheet, or on its heading (which
-	// takes focus but is not a stop), goes to the first stop, or to the last one for Shift+Tab. Between two
-	// stops the browser moves focus itself.
+	// A stop is a control that can take focus now: in the Tab order, enabled and drawn.
+	function stopsIn(root) {
+		if (!root) return [];
+		return [...root.querySelectorAll(TABBABLE)].filter(
+			(node) =>
+				node.tabIndex >= 0 && !node.disabled && node.getClientRects().length,
+		);
+	}
+
+	// Radios with one name in one form are one group; an unnamed radio is a group of its own. A group is one stop,
+	// where its first radio is: its checked radio, or that first radio when none is checked.
+	const sameGroup = (a, b) =>
+		a === b ||
+		(a.type === "radio" &&
+			b.type === "radio" &&
+			a.name !== "" &&
+			a.name === b.name &&
+			a.form === b.form);
+	function oneStopPerGroup(stops) {
+		const kept = [];
+		for (const node of stops) {
+			const group = stops.filter((other) => sameGroup(node, other));
+			if (group[0] === node)
+				kept.push(group.find((radio) => radio.checked) ?? node);
+		}
+		return kept;
+	}
+
+	// Tab moves through the sheet's stops and on to the Undo toasts on screen, and wraps at both ends of that
+	// cycle. The page behind the sheet is inert, but the toasts are not, so the browser's own order could carry
+	// focus out of the sheet. Between two stops of one region the browser moves focus itself; a wrap, or a move
+	// from the sheet into the toasts or back, is done here. Focus outside the cycle (the heading, the body)
+	// goes to the sheet's first stop, or its last for Shift+Tab, never to a toast.
 	document.addEventListener("keydown", (event) => {
 		if (event.key !== "Tab" || event.defaultPrevented) return;
 		const sheet = openSheet();
 		if (!sheet) return;
-		const stops = [...sheet.querySelectorAll(TABBABLE)].filter(
-			(node) =>
-				node.tabIndex >= 0 && !node.disabled && node.getClientRects().length,
-		);
-		if (!stops.length) {
+		const sheetStops = oneStopPerGroup(stopsIn(sheet));
+		const cycle = [
+			...sheetStops,
+			...stopsIn(document.getElementById("toasts")),
+		];
+		const focused = document.activeElement;
+		const at = cycle.findIndex((stop) => sameGroup(stop, focused));
+		if (at === -1) {
 			event.preventDefault();
+			(event.shiftKey ? sheetStops.at(-1) : sheetStops[0])?.focus();
 			return;
 		}
-		const at = stops.indexOf(document.activeElement);
-		let target = null;
-		if (at === -1) target = event.shiftKey ? stops.at(-1) : stops[0];
-		else if (event.shiftKey && at === 0) target = stops.at(-1);
-		else if (!event.shiftKey && at === stops.length - 1) target = stops[0];
-		if (!target) return;
+		const seam = sheetStops.length;
+		const next = at + (event.shiftKey ? -1 : 1);
+		const sameRegion = next < seam === at < seam;
+		if (next >= 0 && next < cycle.length && sameRegion) return;
 		event.preventDefault();
-		target.focus();
+		cycle[(next + cycle.length) % cycle.length].focus();
 	});
 
 	sync();

@@ -31,6 +31,11 @@ class FakeNode extends EventTarget {
 	disabled = false;
 	/** A node with display: none has no boxes, so it can't take focus. */
 	hidden = false;
+	/** A form control's type, name, checked state and form owner, which sheet.js reads as properties. */
+	type = "";
+	name = "";
+	checked = false;
+	form: FakeNode | null = null;
 	tabIndex: number;
 	/** How many times the node was clicked, by the script or by a test. */
 	clicks = 0;
@@ -104,6 +109,16 @@ function el(tag: string, attrs: Record<string, string> = {}) {
 	return node;
 }
 
+/** A radio button in a form, as the browser reads it: its name and form are properties, not attributes. */
+function radio(form: FakeNode | null, name: string, checked = false) {
+	const node = el("input");
+	node.type = "radio";
+	node.name = name;
+	node.form = form;
+	node.checked = checked;
+	return node;
+}
+
 /** A sheet as BottomSheet draws it: its backdrop link, then the section with a heading, a field and Save. */
 function drawSheet(sheetSlot: FakeNode) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
@@ -115,6 +130,23 @@ function drawSheet(sheetSlot: FakeNode) {
 	section.append(title, field, save);
 	sheetSlot.append(backdrop, section);
 	return { backdrop, section, title, field, save };
+}
+
+/** A sheet whose middle is a form of radios: the heading, the form holding the radios, then Save. */
+function drawRadioSheet(
+	sheetSlot: FakeNode,
+	form: FakeNode,
+	radios: FakeNode[],
+) {
+	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
+	const section = el("section", { "data-sheet": "" });
+	const title = el("h2", { tabindex: "-1" });
+	title.tabIndex = -1;
+	const save = el("button");
+	form.append(...radios);
+	section.append(title, form, save);
+	sheetSlot.append(backdrop, section);
+	return { backdrop, section, title, save };
 }
 
 /**
@@ -183,6 +215,8 @@ async function sheetPage(
 		querySelector: (selector: string) => parts.body.querySelector(selector),
 		querySelectorAll: (selector: string) =>
 			parts.body.querySelectorAll(selector),
+		getElementById: (id: string) =>
+			parts.body.descendants().find((node) => node.id === id) ?? null,
 	});
 	vi.stubGlobal("document", doc);
 	activeDocument = doc;
@@ -335,6 +369,7 @@ describe("sheet.js: Escape", () => {
 describe("sheet.js: Tab stays inside the sheet", () => {
 	it("wraps from the last control to the first, and from the first back to the last", async () => {
 		const parts = await sheetPage();
+		parts.undo.hidden = true;
 		const field = parts.drawn?.field;
 		const save = parts.drawn?.save;
 		save?.focus();
@@ -362,11 +397,132 @@ describe("sheet.js: Tab stays inside the sheet", () => {
 		expect(event.defaultPrevented).toBe(false);
 	});
 
-	it("brings focus back into the sheet from outside it, such as a toast's Undo", async () => {
+	it("takes Tab from an Undo toast on to the sheet's first control, which is the Undo toast's last stop", async () => {
 		const parts = await sheetPage();
 		parts.undo.focus();
 		const event = keydown(parts.document, "Tab");
 		expect(event.defaultPrevented).toBe(true);
 		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+});
+
+describe("sheet.js: an Undo toast on screen is in the Tab cycle", () => {
+	it("moves Tab from the sheet's last control to the Undo toast, and from the Undo toast on to the first control", async () => {
+		const parts = await sheetPage();
+		parts.drawn?.save.focus();
+		const forward = keydown(parts.document, "Tab");
+		expect(forward.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.undo);
+		const again = keydown(parts.document, "Tab");
+		expect(again.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("moves Shift+Tab from the Undo toast back to the sheet's last control, and from the first control to the Undo toast", async () => {
+		const parts = await sheetPage();
+		parts.undo.focus();
+		const back = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(back.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.save);
+		parts.drawn?.field.focus();
+		const wrapped = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(wrapped.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.undo);
+	});
+
+	it("skips an Undo toast that is hidden", async () => {
+		const parts = await sheetPage();
+		parts.undo.hidden = true;
+		parts.drawn?.save.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("skips an Undo toast whose button is disabled", async () => {
+		const parts = await sheetPage();
+		parts.undo.disabled = true;
+		parts.drawn?.save.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("sends Shift+Tab from the body or the heading to the sheet's last control, not to the Undo toast", async () => {
+		const parts = await sheetPage();
+		parts.body.focus();
+		const fromBody = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(fromBody.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.save);
+		parts.drawn?.title.focus();
+		const fromHeading = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(fromHeading.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.save);
+	});
+});
+
+describe("sheet.js: a radio group is one Tab stop", () => {
+	/**
+	 * A sheet with three radios named "category" in one form, then Save. The Undo toast is hidden, so Save is
+	 * the sheet's last stop. `checked` is the number of the radio that is checked, or null for none.
+	 */
+	async function radioPage(checked: number | null) {
+		const parts = await sheetPage({ sheet: false });
+		const form = el("form");
+		const r1 = radio(form, "category", checked === 1);
+		const r2 = radio(form, "category", checked === 2);
+		const r3 = radio(form, "category", checked === 3);
+		const { save } = drawRadioSheet(parts.sheetSlot, form, [r1, r2, r3]);
+		settle(parts.document);
+		parts.undo.hidden = true;
+		return { ...parts, r1, r2, r3, save };
+	}
+
+	it("with the checked radio focused, Shift+Tab goes to Save, the last stop, and stays in the sheet", async () => {
+		const parts = await radioPage(2);
+		parts.r2.focus();
+		const event = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.save);
+	});
+
+	it("Tab from Save lands on the checked radio, not on the first radio of its group", async () => {
+		const parts = await radioPage(2);
+		parts.save.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.r2);
+	});
+
+	it("with no radio checked, the first radio is the group's stop, and Shift+Tab from the last radio of it wraps to Save", async () => {
+		const parts = await radioPage(null);
+		parts.save.focus();
+		keydown(parts.document, "Tab");
+		expect(parts.document.activeElement).toBe(parts.r1);
+		parts.r3.focus();
+		const event = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.save);
+	});
+
+	it("counts a radio with another name, or in another form, as a stop of its own", async () => {
+		const parts = await sheetPage({ sheet: false });
+		const form = el("form");
+		const otherForm = el("form");
+		const r1 = radio(form, "category");
+		const r2 = radio(form, "other");
+		const r3 = radio(otherForm, "category");
+		drawRadioSheet(parts.sheetSlot, form, [r1, r2, r3]);
+		settle(parts.document);
+		parts.undo.hidden = true;
+		// Each is its own stop, so Shift+Tab from one of them is left to the browser, which moves to the one before.
+		r2.focus();
+		expect(
+			keydown(parts.document, "Tab", { shiftKey: true }).defaultPrevented,
+		).toBe(false);
+		r3.focus();
+		expect(
+			keydown(parts.document, "Tab", { shiftKey: true }).defaultPrevented,
+		).toBe(false);
 	});
 });

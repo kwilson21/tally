@@ -638,7 +638,7 @@ const BOTTOM_SHEET_SPEC: UseSpecText = {
 	feedback:
 		"It opens when a row is tapped, and focus moves in by autofocus (the title or the first field), so a screen reader starts there. Cancel or the backdrop bring the list back with focus on the row that was open; a save does the same with a toast and an announcement.",
 	input:
-		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Escape closes the sheet the way Cancel does, Tab stays inside it (from its last control back to its first, and the other way with Shift), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a modal dialog named by the sheet's heading, with the page behind it inert. The toasts stay usable. Without sheet.js (decision 109), see the edges.",
+		"Touch: the backdrop is the whole page behind the sheet, and Cancel is 44px tall. Keyboard: Escape closes the sheet the way Cancel does, Tab stays inside it (from its last control to an Undo toast on screen, if any, then back to its first, and the other way with Shift; a radio group is one stop), and the backdrop is out of the Tab order because Cancel does the same. Screen reader: a modal dialog named by the sheet's heading, with the page behind it inert. The toasts stay usable. Without sheet.js (decision 109), see the edges.",
 	motion:
 		"It arrives in 200 ms, ease-out. On a phone the sheet rises from the bottom edge while its backdrop fades in; at desktop width (1024px and up) the panel slides in from the right edge while its backdrop fades in. The classes are fade-in and sheet-panel in app.css, on the rising token. Closing is at once. It plays only when it opens: a swap that draws the open sheet again (a field's error, the delete question, Add a part, Keep it) leaves it still, so an error never looks like the sheet closing and opening, and the field's own shake is seen. Reduced motion shows the sheet and backdrop at once, with nothing moving.",
 	edges:
@@ -946,6 +946,7 @@ function HomeTopGroup() {
 		averageCents: 60245,
 		transactionCount: 12,
 		month: "2026-10",
+		closeHref: "/?focus=1",
 		closeAttrs: {
 			"hx-get": "/?focus=1",
 			"hx-target": "#page",
@@ -2225,6 +2226,7 @@ function Rows() {
 						<SavingsGoalSheet
 							value="500.00"
 							month="October"
+							closeHref="/?focus=savings-goal"
 							closeAttrs={{
 								"hx-get": "/?focus=savings-goal",
 								"hx-target": "#page",

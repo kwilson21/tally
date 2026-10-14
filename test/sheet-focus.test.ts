@@ -116,3 +116,61 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 		).toContain("autofocus");
 	});
 });
+
+describe("the edit panel: its close returns focus to the transaction's row", () => {
+	it("closes, and Cancels, to that row", async () => {
+		const html = await get("/transactions/110");
+		expect(backdropHref(html)).toBe("/transactions?focus=110");
+		expect(html.split('href="/transactions?focus=110"').length - 1).toBe(2);
+	});
+
+	it("keeps the list's filters, and joins focus to them with &", async () => {
+		const html = await get("/transactions/110?uncategorized=1");
+		expect(backdropHref(html)).toBe("/transactions?uncategorized=1&focus=110");
+		expect(
+			html.split('href="/transactions?uncategorized=1&amp;focus=110"').length -
+				1,
+		).toBe(2);
+	});
+});
+
+describe("Budget: its close returns focus to the category's row on Home", () => {
+	it("closes, and Cancels, to that row", async () => {
+		const html = await get("/budget/1");
+		expect(backdropHref(html)).toBe("/?focus=1");
+		expect(html.split('href="/?focus=1"').length - 1).toBe(2);
+	});
+
+	it("does the same when the amount is refused and the sheet is drawn again", async () => {
+		const html = await post(
+			"/budget/1",
+			new URLSearchParams({ budget: "abc" }),
+		);
+		expect(backdropHref(html)).toBe("/?focus=1");
+		expect(html.split('href="/?focus=1"').length - 1).toBe(2);
+	});
+});
+
+describe("Savings goal: its close returns focus to the Savings row on Home", () => {
+	it("closes, and Cancels, to the Savings row", async () => {
+		const html = await get("/savings-goal");
+		expect(backdropHref(html)).toBe("/?focus=savings-goal");
+		expect(html.split('href="/?focus=savings-goal"').length - 1).toBe(2);
+	});
+
+	it("does the same when the amount is refused and the sheet is drawn again", async () => {
+		const html = await post(
+			"/savings-goal",
+			new URLSearchParams({ goal: "abc" }),
+		);
+		expect(backdropHref(html)).toBe("/?focus=savings-goal");
+		expect(html.split('href="/?focus=savings-goal"').length - 1).toBe(2);
+	});
+
+	it("puts focus on the Savings row when Home is drawn with that focus, without JavaScript too", async () => {
+		const drawn = await get("/?focus=savings-goal");
+		const rows = drawn.match(/<a [^>]*href="\/savings-goal"[^>]*>/g) ?? [];
+		expect(rows.length).toBeGreaterThan(0);
+		for (const row of rows) expect(row).toContain("autofocus");
+	});
+});

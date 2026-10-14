@@ -1610,6 +1610,8 @@ function EditSheet({
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
+	// Where Cancel and the backdrop go without JavaScript: the list, with focus on this row.
+	const closeHref = withFocus(back, tx.id);
 	const closeAttrs = listCloseAttrs(back, tx.id);
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
@@ -1632,7 +1634,7 @@ function EditSheet({
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
-			closeHref={back}
+			closeHref={closeHref}
 			closeAttrs={closeAttrs}
 			// A field's error and the delete question draw the open panel again.
 			still={still || deleteConfirm || Object.keys(errors).length > 0}
@@ -2293,7 +2295,12 @@ function EditSheet({
 				    has two ways to leave it side by side (decision 84). */}
 				{!deleteConfirm && (
 					<div class="mt-2 grid grid-cols-2 gap-3">
-						<Button href={back} kind="secondary" class="w-full" {...closeAttrs}>
+						<Button
+							href={closeHref}
+							kind="secondary"
+							class="w-full"
+							{...closeAttrs}
+						>
 							Cancel
 						</Button>
 						<Button
@@ -3739,6 +3746,7 @@ function renderLikely(
 				savedDate={panel.savedDate}
 				savedCents={panel.savedCents}
 				back={panel.back}
+				closeHref={withFocus(panel.back, panel.savedId)}
 				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}

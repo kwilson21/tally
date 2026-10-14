@@ -578,7 +578,9 @@ describe("GET /transactions/:id", () => {
 		expect(html).toContain('value="store"');
 		expect(html).toMatch(/<label for="note"[^>]*>What it was<\/label>/);
 		expect(html).toMatch(
-			/<a href="\/transactions\?uncategorized=1"[^>]*>Cancel<\/a>/,
+			new RegExp(
+				`<a href="/transactions\\?uncategorized=1&amp;focus=${bakery}"[^>]*>Cancel</a>`,
+			),
 		);
 		expect(html).toMatch(
 			/<button type="submit"[^>]*>[\s\S]*?Save[\s\S]*?<\/button>/,

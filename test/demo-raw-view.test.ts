@@ -603,7 +603,9 @@ describe("the list, straight from the bank (?raw=1, in the demo)", () => {
 		expect(rows.length).toBeGreaterThan(10);
 		for (const row of rows)
 			expect(textOf(row.html), `row ${row.id}`).toContain("Needs category");
-		expect(html).toMatch(/<a [^>]*href="\/transactions\?raw=1"[^>]*>Cancel</);
+		expect(html).toMatch(
+			/<a [^>]*href="\/transactions\?raw=1&amp;focus=5"[^>]*>Cancel</,
+		);
 	});
 });
 

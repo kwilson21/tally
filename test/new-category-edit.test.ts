@@ -700,6 +700,18 @@ describe("the likely transactions after a new category", () => {
 		);
 	});
 
+	it("with JavaScript off, the panel's backdrop and Not now both go back to the saved row", async () => {
+		const saved = await postWithoutJs(
+			`/transactions/${bakery}`,
+			saveFields({ category: "new", new_category_name: "Pet Care" }),
+		);
+		const back = `/transactions?focus=${bakery}`;
+		expect(saved.html.match(/<a href="([^"]*)" aria-label="Close"/)?.[1]).toBe(
+			back,
+		);
+		expect(saved.html.split(`href="${back}"`).length - 1).toBe(2);
+	});
+
 	it("with JavaScript off and nothing likely, a new category answers 303 back", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE raw_name = 'SQ *LOCAL BAKERY 4432' AND id <> ?",
