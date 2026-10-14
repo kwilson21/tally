@@ -1,6 +1,7 @@
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
+import { headlineAmountClass } from "./headline-amount";
 import { NetWorthChart } from "./net-worth-chart";
 
 /**
@@ -16,13 +17,16 @@ export function AccountsTop({
 	history: NetWorthView;
 	action?: Child;
 }) {
+	const netWorth = formatCents(netWorthCents, { wholeDollars: true });
 	return (
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Accounts</h1>
 			{action}
 			<p class="mt-3 text-lg text-muted">Net worth</p>
-			<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
-				{formatCents(netWorthCents, { wholeDollars: true })}
+			<p
+				class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${headlineAmountClass(netWorth)}`}
+			>
+				{netWorth}
 			</p>
 			<NetWorthChart view={history} />
 		</>

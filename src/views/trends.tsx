@@ -13,6 +13,7 @@ import {
 } from "../trends";
 import { CategoryIcon } from "./category";
 import { EmptyState } from "./empty-state";
+import { headlineAmountClass } from "./headline-amount";
 import { HowLink } from "./how-link";
 import { Icon } from "./icons";
 import { WhyLink } from "./why-link";
@@ -37,7 +38,9 @@ export function TrendsTop({
 	return (
 		<>
 			<p class="text-lg text-muted">Spent so far in {month}</p>
-			<p class="font-serif text-6xl font-semibold tracking-tight lg:text-7xl">
+			<p
+				class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${headlineAmountClass(spent)}`}
+			>
 				{spent}
 			</p>
 			{sentence && (

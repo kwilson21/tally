@@ -202,6 +202,12 @@ export const TYPE_ROLES = [
 		sample: "$1,284",
 	},
 	{
+		role: "Headline amount, 9 or more characters",
+		classes:
+			"font-serif text-6xl font-semibold tracking-tight lg:text-7xl max-sm:text-5xl",
+		sample: "$1,000,000",
+	},
+	{
 		role: "Sheet title and amount",
 		classes: "font-serif text-4xl font-semibold tracking-tight",
 		sample: "Local Bakery",
