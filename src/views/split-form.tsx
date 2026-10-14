@@ -50,9 +50,12 @@ function partLabel(
 		: `Part ${index + 1}`;
 }
 
-/** The id of a part's label on the refund chooser: /split/line redraws it out of band, by refund and part. */
-const partLabelId = (refundId: number, index: number) =>
-	`refund-${refundId}-part-${index}`;
+/**
+ * The id of a part's label on the refund chooser: /split/line redraws it out of band, by sheet, refund and part. Each
+ * drawing of the sheet has its own mark, so a label update meant for an earlier drawing finds nothing to change.
+ */
+const partLabelId = (sheet: string, refundId: number, index: number) =>
+	`refund-${sheet}-${refundId}-part-${index}`;
 
 /**
  * The linked refunds of a split purchase (decision 99): for each, "The refund on Oct 5 goes with", one radio chip
@@ -67,12 +70,14 @@ export function RefundChoices({
 	categories,
 	today,
 	choices,
+	sheet,
 }: {
 	refunds: SplitRefund[];
 	values: SplitValue[];
 	categories: Category[];
 	today: string;
 	choices: Record<number, string | undefined>;
+	sheet: string;
 }) {
 	return (
 		<div id="refund-choices" class="flex flex-col gap-4">
@@ -89,7 +94,7 @@ export function RefundChoices({
 								value={String(index)}
 								checked={choices[refund.id] === String(index)}
 							>
-								<span id={partLabelId(refund.id, index)}>
+								<span id={partLabelId(sheet, refund.id, index)}>
 									{partLabel(value, index, categories)}
 								</span>
 							</Chip>
@@ -111,22 +116,25 @@ export function RefundChoices({
 
 /**
  * The refund chooser's part labels, redrawn out of band by /split/line as the parts' categories and amounts are typed
- * (decision 99). Each one replaces the text of one chip, found by its id; the radios are not in the reply.
+ * (decision 99). Each one replaces the text of one chip, found by its id, which carries the sheet's token; the radios
+ * are not in the reply.
  */
 export function RefundPartLabels({
 	refunds,
 	values,
 	categories,
+	sheet,
 }: {
 	refunds: SplitRefund[];
 	values: SplitValue[];
 	categories: Category[];
+	sheet: string;
 }) {
 	return (
 		<>
 			{refunds.flatMap((refund) =>
 				values.map((value, index) => (
-					<span id={partLabelId(refund.id, index)} hx-swap-oob="true">
+					<span id={partLabelId(sheet, refund.id, index)} hx-swap-oob="true">
 						{partLabel(value, index, categories)}
 					</span>
 				)),
@@ -156,6 +164,8 @@ export function SplitForm({
 	today,
 	back,
 	error,
+	// Each drawing of the sheet gets a new token, which every line request posts back (hx-include).
+	sheet = crypto.randomUUID(),
 }: {
 	id: number;
 	parentCents: number;
@@ -169,6 +179,7 @@ export function SplitForm({
 	today: string;
 	back: string;
 	error?: string;
+	sheet?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
 	return (
@@ -183,6 +194,7 @@ export function SplitForm({
 			hx-select-oob="#needs-count:innerHTML"
 		>
 			<input type="hidden" name="back" value={back} />
+			<input type="hidden" name="sheet" value={sheet} />
 			{correcting && (
 				<>
 					<input type="hidden" name="total" value={String(totalCents)} />
@@ -279,6 +291,7 @@ export function SplitForm({
 				categories={categories}
 				today={today}
 				choices={choices}
+				sheet={sheet}
 			/>
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">

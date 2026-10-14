@@ -267,4 +267,117 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 		expect(result.moved).toEqual([{ date: "2026-09-06", part: 1 }]);
 		expect(result.unlinked).toEqual([]);
 	});
+
+	it("unlinks and names a chosen refund that a competing save marked as income, rather than moving it", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET flag_income = 1 WHERE id = ?",
+			[FIRST],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		const [, household] = await partIds(PURCHASE);
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05"],
+			bills: [],
+			moved: [{ date: "2026-09-06", part: 1 }],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBe(household);
+	});
+
+	it("unlinks and names a chosen refund that a competing save left unreviewed, rather than moving it", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET credit_reviewed = 0 WHERE id = ?",
+			[FIRST],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		const [, household] = await partIds(PURCHASE);
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05"],
+			bills: [],
+			moved: [{ date: "2026-09-06", part: 1 }],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBe(household);
+	});
+
+	it("unlinks and names every chosen refund when a competing save excludes the purchase", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET excluded = 1 WHERE id = ?",
+			[PURCHASE],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05", "2026-09-06"],
+			bills: [],
+			moved: [],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBeNull();
+	});
+
+	it("unlinks and names a chosen refund on an old part that a competing save marked as income", async () => {
+		await saveSplit(db, PURCHASE, PARTS, "test", { [FIRST]: 0 });
+		const racing = racingWith(
+			"UPDATE transactions SET flag_income = 1 WHERE id = ?",
+			[FIRST],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+		});
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05"],
+			bills: [],
+			moved: [],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+	});
+
+	it("names only the refunds this save unlinked, not one a competing save relinked after the read", async () => {
+		const racing = racingWith(
+			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			[OTHER, SECOND],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: null,
+		});
+		expect(result).toEqual({
+			saved: true,
+			unlinked: [],
+			bills: [],
+			moved: [{ date: "2026-09-05", part: 0 }],
+		});
+		expect(await linkOf(SECOND)).toBe(OTHER);
+	});
+
+	it("names a refund the split unlinks even when a competing save linked it after the read", async () => {
+		await db
+			.prepare(`INSERT INTO transactions
+			(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, credit_reviewed, credit_reviewed_by) VALUES
+			(9105, 3, '2026-09-07', -500, 'WAREHOUSE CLUB', ${GROCERIES}, 'user', 0, NULL, 1, 'user')`)
+			.run();
+		const racing = racingWith(
+			"UPDATE transactions SET refund_of_id = ? WHERE id = ?",
+			[PURCHASE, 9105],
+		);
+		const result = await saveSplit(racing, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: 1,
+		});
+		expect(result.unlinked).toEqual(["2026-09-07"]);
+		expect(await linkOf(9105)).toBeNull();
+	});
 });

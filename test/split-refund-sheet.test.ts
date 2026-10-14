@@ -29,6 +29,27 @@ beforeEach(async () => {
 /** The page's HTML with the apostrophes an escaped alert carries written back as they read. */
 const readable = (html: string) => html.replace(/&#39;/g, "'");
 
+const TOKEN = /^[0-9a-f-]{36}$/;
+/** A drawing's token: the hidden input every drawing of the sheet carries (SplitForm's sheet). */
+const tokenOf = (html: string) =>
+	html.match(/name="sheet"[^>]*value="([^"]+)"/)?.[1] ?? "";
+/** A fresh drawing of the sheet, as GET /split draws it. */
+const drawSheet = async () =>
+	readable(
+		await (
+			await exports.default.fetch(
+				`${BASE}/transactions/${PURCHASE}/split?back=%2Ftransactions`,
+			)
+		).text(),
+	);
+/** The parts a line request posts, before its sheet token and any answers. */
+const LINE_PARTS: [string, string][] = [
+	["part_category", String(KIDS)],
+	["part_category", String(HOUSEHOLD)],
+	["part_amount", "60.00"],
+	["part_amount", "40.00"],
+];
+
 const linkOf = async (id: number) =>
 	(
 		await db
@@ -80,9 +101,26 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 		expect(html).toContain("Not linked");
 		expect(html).not.toMatch(/name="refund_9202"[^>]*checked/);
 		expect(html).not.toMatch(/name="refund_9203"[^>]*checked/);
-		// Each chip's label is in a span that /split/line redraws out of band, by part.
-		expect(html).toContain('id="refund-9202-part-0"');
-		expect(html).toContain('id="refund-9203-part-1"');
+		// Each chip's label is in a span that /split/line redraws out of band, by sheet, refund and part.
+		const token = tokenOf(html);
+		expect(token).toMatch(TOKEN);
+		expect(html).toContain(`id="refund-${token}-${FIRST}-part-0"`);
+		expect(html).toContain(`id="refund-${token}-${SECOND}-part-1"`);
+	});
+
+	it("gives each drawing of the sheet its own token, in its hidden input and its label ids", async () => {
+		const drawn = await drawSheet();
+		const { html: added } = await post(
+			`/transactions/${PURCHASE}/split`,
+			parts(["add", "1"]),
+		);
+		const first = tokenOf(drawn);
+		const second = tokenOf(added);
+		expect(first).toMatch(TOKEN);
+		expect(second).toMatch(TOKEN);
+		expect(second).not.toBe(first);
+		expect(added).toContain(`id="refund-${second}-${FIRST}-part-0"`);
+		expect(added).not.toContain(`refund-${first}-`);
 	});
 
 	it("refuses a save with a refund left unanswered, in words, and saves nothing", async () => {
@@ -138,23 +176,61 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 	});
 
 	it("redraws only the part labels out of band, so no reply can uncheck or revert a pick", async () => {
+		const token = tokenOf(await drawSheet());
 		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [
-			["part_category", String(KIDS)],
-			["part_category", String(HOUSEHOLD)],
-			["part_amount", "60.00"],
-			["part_amount", "40.00"],
-			["refund_9202", "1"],
+			...LINE_PARTS,
+			["sheet", token],
+			[`refund_${FIRST}`, "1"],
 		]);
 		expect(res.status).toBe(200);
 		expect(html).toMatch(
-			/<span id="refund-9202-part-0"[^>]*hx-swap-oob="true"[^>]*>Kids · \$60\.00<\/span>/,
+			new RegExp(
+				`<span id="refund-${token}-${FIRST}-part-0"[^>]*hx-swap-oob="true"[^>]*>Kids · \\$60\\.00</span>`,
+			),
 		);
 		expect(html).toMatch(
-			/<span id="refund-9203-part-1"[^>]*hx-swap-oob="true"[^>]*>Household · \$40\.00<\/span>/,
+			new RegExp(
+				`<span id="refund-${token}-${SECOND}-part-1"[^>]*hx-swap-oob="true"[^>]*>Household · \\$40\\.00</span>`,
+			),
 		);
 		expect(html).not.toContain('id="refund-choices"');
 		expect(html).not.toContain('type="radio"');
-		expect(html).not.toContain('name="refund_9202"');
+		expect(html).not.toContain(`name="refund_${FIRST}"`);
+	});
+
+	it("draws a label update for an earlier drawing onto nothing on a redrawn sheet", async () => {
+		const token = tokenOf(await drawSheet());
+		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [
+			...LINE_PARTS,
+			["sheet", token],
+			[`refund_${FIRST}`, "1"],
+		]);
+		expect(res.status).toBe(200);
+		const labels = [
+			...html.matchAll(/<span id="([^"]+)"[^>]*hx-swap-oob="true"/g),
+		].map((match) => match[1]);
+		expect(labels).toEqual([
+			`refund-${token}-${FIRST}-part-0`,
+			`refund-${token}-${FIRST}-part-1`,
+			`refund-${token}-${SECOND}-part-0`,
+			`refund-${token}-${SECOND}-part-1`,
+		]);
+		const redrawn = await drawSheet();
+		expect(tokenOf(redrawn)).not.toBe(token);
+		for (const label of labels) expect(redrawn).not.toContain(`id="${label}"`);
+	});
+
+	it.each<[string, [string, string][]]>([
+		["with no sheet field", LINE_PARTS],
+		["with a malformed sheet field", [...LINE_PARTS, ["sheet", "not-a-sheet"]]],
+	])("draws the parts' totals and no label updates %s", async (_, fields) => {
+		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [
+			...fields,
+			[`refund_${FIRST}`, "1"],
+		]);
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="split-line"');
+		expect(html).not.toContain("hx-swap-oob");
 	});
 
 	it("shows no chooser when a split cash entry's parts change (Change the parts)", async () => {

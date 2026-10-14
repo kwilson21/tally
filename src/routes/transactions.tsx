@@ -2708,6 +2708,11 @@ function SplitSheet({
 	);
 }
 
+/** The token a split sheet posts with its line requests (SplitForm's sheet), or null when it isn't one a sheet drew. */
+function sheetToken(raw: string | null): string | null {
+	return raw !== null && /^[0-9a-f-]{36}$/.test(raw) ? raw : null;
+}
+
 /** A posted amount in cents: a whole, positive number of cents, or null. */
 function wholeCents(raw: string | null): number | null {
 	if (raw === null || !/^[1-9]\d*$/.test(raw)) return null;
@@ -2895,8 +2900,13 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const categoryValues = form.getAll("part_category").map(String);
 	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
 	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
-	// A Change the parts sheet keeps its links by part, so it has no chooser.
-	const refunds = total === null ? await splitRefundsOf(c.env.DB, tx.id) : [];
+	// A Change the parts sheet keeps its links by part, so it has no chooser. The labels belong to the drawing of the
+	// sheet that posted its token, so a reply with no valid token draws none.
+	const sheet = sheetToken(form.get("sheet")?.toString() ?? null);
+	const refunds =
+		total === null && sheet !== null
+			? await splitRefundsOf(c.env.DB, tx.id)
+			: [];
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 	).all<Category>();
@@ -2905,14 +2915,17 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 			<div id="split-line">
 				<SplitLine parentCents={total ?? tx.amountCents} amounts={amounts} />
 			</div>
-			<RefundPartLabels
-				refunds={refunds}
-				values={categoryValues.map((category, index) => ({
-					category,
-					amount: amounts[index] ?? "",
-				}))}
-				categories={categories}
-			/>
+			{sheet !== null && (
+				<RefundPartLabels
+					sheet={sheet}
+					refunds={refunds}
+					values={categoryValues.map((category, index) => ({
+						category,
+						amount: amounts[index] ?? "",
+					}))}
+					categories={categories}
+				/>
+			)}
 		</>,
 	);
 });
