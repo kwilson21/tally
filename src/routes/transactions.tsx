@@ -1654,7 +1654,8 @@ function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
 /**
  * The panel's category choice (spec §8). A linked refund that counts with its purchase is locked: the choice is
  * disabled, drawn with the purchase's category and the "Counts in" line. The choice sits in its own wrapper, which
- * the category lock route draws again when Count as income or Reviewed changes.
+ * the category lock route draws again when Count as income or Reviewed changes. A locked choice's last pick sits in
+ * hidden fields after the disabled fieldset, since a browser posts nothing from a disabled one.
  */
 function CategoryChoice({
 	tx,
@@ -1754,6 +1755,21 @@ function CategoryChoice({
 					</p>
 				)}
 			</fieldset>
+			{/* Only while locked: an open choice's radios post category themselves, and a copy would post it twice. */}
+			{purchase && (values.newCategory || values.categoryId !== null) && (
+				<input
+					type="hidden"
+					name="category"
+					value={values.newCategory ? "new" : String(values.categoryId)}
+				/>
+			)}
+			{purchase && values.newCategoryName && (
+				<input
+					type="hidden"
+					name="new_category_name"
+					value={values.newCategoryName}
+				/>
+			)}
 		</div>
 	);
 }
@@ -3392,7 +3408,8 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 					: "Pick a category.",
 			}),
 		);
-	// A locked category is disabled, so the browser posts none: the row's own category is then the one drawn.
+	// A locked choice is disabled, so the browser posts none of its radios: it carries the last pick in hidden
+	// fields (CategoryChoice), and the row's own category is drawn only when nothing is posted.
 	const posted = form.get("category");
 	return c.html(
 		<CategoryChoice

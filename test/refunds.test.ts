@@ -120,17 +120,9 @@ function categoryFieldsetTag(html: string) {
 	return sheet.slice(start, sheet.indexOf(">", start) + 1);
 }
 
-/**
- * The fields the open edit panel posts as drawn, the way a browser sends its form: every hidden and text
- * input, and each checked box or radio. Fields in a disabled fieldset are not skipped, so use this only for
- * a panel whose fieldsets are open.
- */
-function drawnFields(html: string, id: number): [string, string][] {
-	const start = html.indexOf(
-		`<form method="post" action="/transactions/${id}"`,
-	);
-	const form = html.slice(start, html.indexOf("</form>", start));
-	return (form.match(/<input\b[^>]*>/g) ?? []).flatMap((tag) => {
+/** The fields the inputs in `fragment` post: every named input, and each checked box or radio. */
+function inputsOf(fragment: string): [string, string][] {
+	return (fragment.match(/<input\b[^>]*>/g) ?? []).flatMap((tag) => {
 		const name = /\sname="([^"]*)"/.exec(tag)?.[1];
 		if (!name) return [];
 		const value = (/\svalue="([^"]*)"/.exec(tag)?.[1] ?? "").replace(
@@ -144,6 +136,23 @@ function drawnFields(html: string, id: number): [string, string][] {
 				: true;
 		return posted ? [[name, value] as [string, string]] : [];
 	});
+}
+
+/** The edit panel's form in `html`, for transaction `id`. */
+function panelForm(html: string, id: number) {
+	const start = html.indexOf(
+		`<form method="post" action="/transactions/${id}"`,
+	);
+	return html.slice(start, html.indexOf("</form>", start));
+}
+
+/**
+ * The fields the open edit panel posts as drawn, the way a browser sends its form: every hidden and text
+ * input, and each checked box or radio. Fields in a disabled fieldset are not skipped, so use this only for
+ * a panel whose fieldsets are open.
+ */
+function drawnFields(html: string, id: number): [string, string][] {
+	return inputsOf(panelForm(html, id));
 }
 
 /** The drawn fields with some changed: a name in `changes` takes its new value, or is not posted when undefined. */
@@ -3312,14 +3321,44 @@ describe("refund guards", () => {
 });
 
 describe("the category lock redraws when Count as income or Reviewed changes", () => {
-	/** The fields the open panel posts as drawn. A locked category is disabled, so a browser sends none: see `lockedFields`. */
+	/**
+	 * The fields a browser posts from HTML: a disabled fieldset posts none of its inputs, so a locked choice's
+	 * radios and its name field are left out, and the hidden fields after the fieldset are kept.
+	 */
+	const browserFields = (html: string) =>
+		inputsOf(
+			html.replace(
+				/<fieldset\b[^>]*\sdisabled\b[^>]*>[\s\S]*?<\/fieldset>/g,
+				"",
+			),
+		);
+	/** The open panel's fields as a browser posts them, whether its category is locked or not. */
 	const panel = async (id: number) =>
-		drawnFields((await get(`/transactions/${id}`)).html, id);
-	/** The fields as a browser sends them from a panel whose category is locked: the disabled category is not posted. */
-	const lockedFields = (fields: [string, string][]) =>
-		fields.filter(([name]) => name !== "category");
+		browserFields(panelForm((await get(`/transactions/${id}`)).html, id));
 	const redraw = (id: number, fields: [string, string][]) =>
 		post(`/transactions/${id}/category/lock`, fields);
+	/** The panel's fields once a redraw's reply is in: the reply's posted fields replace the panel's category choice. */
+	const withReply = (fields: [string, string][], reply: string) => [
+		...fields.filter(
+			([name]) => name !== "category" && name !== "new_category_name",
+		),
+		...browserFields(reply),
+	];
+	/**
+	 * One redraw as the browser runs it: the form's fields with `changes` made are posted to the lock route, and
+	 * the form then holds the reply's fields (`form`), as the swap leaves them.
+	 */
+	const step = async (
+		id: number,
+		form: [string, string][],
+		changes: Record<string, string | undefined>,
+	) => {
+		const fields = edited(form, changes);
+		const reply = await redraw(id, fields);
+		return { ...reply, form: withReply(fields, reply.html) };
+	};
+	const newCategoryName = (html: string) =>
+		/<input\b[^>]*\sid="new-category-name"[^>]*>/.exec(html)?.[0] ?? "";
 	/** The Category fieldset's opening tag in a redraw, which is the reply's only fieldset. */
 	const fieldsetTag = (html: string) =>
 		html.slice(
@@ -3331,7 +3370,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		await link(REFUND, PURCHASE);
 		const { res, html, trigger } = await redraw(
 			REFUND,
-			edited(lockedFields(await panel(REFUND)), { income: "1" }),
+			edited(await panel(REFUND), { income: "1" }),
 		);
 		expect(res.status).toBe(200);
 		expect(fieldsetTag(html)).not.toContain("disabled");
@@ -3348,7 +3387,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		await link(REFUND, PURCHASE);
 		const { html, trigger } = await redraw(
 			REFUND,
-			edited(lockedFields(await panel(REFUND)), {
+			edited(await panel(REFUND), {
 				creditReviewed: undefined,
 			}),
 		);
@@ -3383,7 +3422,7 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		await link(REFUND, PURCHASE);
 		const { html } = await redraw(
 			REFUND,
-			edited(lockedFields(await panel(REFUND)), {
+			edited(await panel(REFUND), {
 				creditReviewed: undefined,
 			}),
 		);
@@ -3399,6 +3438,87 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		expect(saved.res.status).toBe(200);
 		expect(await ownCategory(REFUND)).toBe(GAS);
 		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("keeps a picked category when the lock comes and goes", async () => {
+		await link(REFUND, PURCHASE);
+		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+		expect(fieldsetTag(opened.html)).not.toContain("disabled");
+		// Gas is picked and Count as income is unticked: the choice locks on the purchase's Kids.
+		const locked = await step(REFUND, opened.form, {
+			category: String(GAS),
+			income: undefined,
+		});
+		expect(fieldsetTag(locked.html)).toContain("disabled");
+		expect(locked.html).toMatch(/name="category" value="4"[^>]*checked/);
+		expect(locked.html).toContain("Counts in Kids with the Aug 20 purchase.");
+		// The pick is carried after the disabled fieldset, where a browser still posts it.
+		expect(locked.html.slice(locked.html.indexOf("</fieldset>"))).toContain(
+			'<input type="hidden" name="category" value="3"',
+		);
+		const unlocked = await step(REFUND, locked.form, { income: "1" });
+		expect(fieldsetTag(unlocked.html)).not.toContain("disabled");
+		expect(unlocked.html).toMatch(/name="category" value="3"[^>]*checked/);
+	});
+
+	it("keeps a typed new category name when the lock comes and goes", async () => {
+		await link(REFUND, PURCHASE);
+		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+		const locked = await step(REFUND, opened.form, {
+			category: "new",
+			new_category_name: "Returns",
+			income: undefined,
+		});
+		expect(fieldsetTag(locked.html)).toContain("disabled");
+		const carried = locked.html.slice(locked.html.indexOf("</fieldset>"));
+		expect(carried).toContain(
+			'<input type="hidden" name="category" value="new"',
+		);
+		expect(carried).toContain(
+			'<input type="hidden" name="new_category_name" value="Returns"',
+		);
+		const unlocked = await step(REFUND, locked.form, { income: "1" });
+		expect(fieldsetTag(unlocked.html)).not.toContain("disabled");
+		expect(unlocked.html).toMatch(/name="category" value="new"[^>]*checked/);
+		expect(newCategoryName(unlocked.html)).toContain('value="Returns"');
+	});
+
+	it("a save while locked doesn't change the category", async () => {
+		await link(REFUND, PURCHASE);
+		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+		const locked = await step(REFUND, opened.form, {
+			category: String(GAS),
+			income: undefined,
+		});
+		expect(locked.html).toContain(
+			'<input type="hidden" name="category" value="3"',
+		);
+		const saved = await save(REFUND, locked.form);
+		expect(saved.res.status).toBe(200);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("a save while locked doesn't make a category from a typed name", async () => {
+		await link(REFUND, PURCHASE);
+		const opened = await step(REFUND, await panel(REFUND), { income: "1" });
+		const locked = await step(REFUND, opened.form, {
+			category: "new",
+			new_category_name: "Returns",
+			income: undefined,
+		});
+		expect(locked.html).toContain(
+			'<input type="hidden" name="new_category_name" value="Returns"',
+		);
+		const saved = await save(REFUND, locked.form);
+		expect(saved.res.status).toBe(200);
+		expect(await ownCategory(REFUND)).toBe(GROCERIES);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+		const made = await db
+			.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = ?")
+			.bind("Returns")
+			.first<{ n: number }>();
+		expect(made?.n).toBe(0);
 	});
 
 	it("draws the toggles that redraw the category, and only for a linked credit", async () => {
