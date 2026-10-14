@@ -6,8 +6,10 @@
 --                    and leaves it set aside again. Any later rebuild of transactions must copy this table and
 --                    planned_delete_holds aside first, as bill_payments is in 0035, or the rebuild's DROP would null these links.
 --   created_by       the email claim of who planned it (or 'demo'), as cash and split rows keep updated_by.
+--   id               AUTOINCREMENT, as cash and split rows are (0009, 0024, 0030, 0043): a deleted plan's id is never handed
+--                    out again, so a cash entry's Undo can't relink a plan that was deleted and replaced in its window.
 CREATE TABLE planned_expenses (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
   month TEXT NOT NULL CHECK (month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
