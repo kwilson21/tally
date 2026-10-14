@@ -6,7 +6,7 @@
  * a link needs beyond these checks, and the link reports which one fired.
  */
 import { monthsBefore } from "../dates";
-import { paysBillSql, paysPlanSql } from "./counted-month";
+import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { merchantColumnSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
 
@@ -18,16 +18,15 @@ export type PlannedExpense = {
 	month: string;
 	/** The payment linked to it, or null while it is still planned. */
 	transactionId: number | null;
-	/** The linked payment's date and name, when it is paid. */
-
+	/** The linked payment's date, name and amount, when it is paid. */
 	paidDate: string | null;
 	paidName: string | null;
 	paidAmountCents: number | null;
 };
 
 /**
- * A payment a plan could be paid by: a whole payment (never one part of a split, which a re-split would delete and so
- * unlink the plan), money out in its month or the next, not already paying a bill or a plan.
+ * A payment a plan could be paid by, as a bill's picker lists one (decision 82): money out in its month or the next,
+ * not already paying a bill or a plan, a split part included (a split parent is not listed, since it is no longer one payment).
  */
 export type PlanPaymentCandidate = {
 	id: number;
@@ -61,11 +60,10 @@ export async function loadPlans(db: D1Database): Promise<PlannedExpense[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
-				
-t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
-FROM planned_expenses pe
-LEFT JOIN transactions t ON t.id = pe.transaction_id
-ORDER BY pe.month, pe.id`,
+					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
+				FROM planned_expenses pe
+				LEFT JOIN transactions t ON t.id = pe.transaction_id
+				ORDER BY pe.month, pe.id`,
 		)
 		.all<PlannedExpense>();
 	return results;
@@ -79,11 +77,10 @@ export async function loadPlan(
 	return db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
-				
-t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
-FROM planned_expenses pe
-LEFT JOIN transactions t ON t.id = pe.transaction_id
-WHERE pe.id = ?`,
+					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
+				FROM planned_expenses pe
+				LEFT JOIN transactions t ON t.id = pe.transaction_id
+				WHERE pe.id = ?`,
 		)
 		.bind(id)
 		.first<PlannedExpense>();
@@ -98,10 +95,10 @@ export async function planPaymentCandidates(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS displayName, t.excluded AS excluded
 			 FROM transactions t
-			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.parent_id IS NULL AND t.flag_income = 0
+			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
 				AND substr(t.date, 1, 7) IN (?1, ?2)
-				AND NOT ${paysBillSql("t")}
-				AND NOT ${paysPlanSql("t")}
+				AND NOT ${paysBillGroupSql("t")}
+				AND NOT ${paysPlanGroupSql("t")}
 			 ORDER BY ABS(t.amount_cents - ?3), t.date, t.id
 			 LIMIT 20`,
 		)
@@ -111,9 +108,9 @@ export async function planPaymentCandidates(
 }
 
 /**
- * Links a payment to a plan, only if it is still unpaid, is a whole payment (not a split part, see planPaymentCandidates),
- * is money out in the plan's month or the next, and pays neither a bill nor another plan. Returns whether the link was
- * made; the caller says why when it wasn't.
+ * Links a payment to a plan, only if it is still unpaid, is money out in the plan's month or the next, and pays neither
+ * a bill nor another plan (the candidates' rule, planPaymentCandidates). Returns whether the link was made; the caller
+ * says why when it wasn't.
  */
 export async function linkPlanPayment(
 	db: D1Database,
@@ -124,10 +121,9 @@ export async function linkPlanPayment(
 		.prepare(
 			`UPDATE planned_expenses SET transaction_id = ?1
 			 WHERE id = ?2 AND transaction_id IS NULL
-				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND t.amount_cents > 0 AND t.is_split = 0
-					AND t.parent_id IS NULL AND t.flag_income = 0
+				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
 					AND substr(t.date, 1, 7) IN (planned_expenses.month, substr(date(planned_expenses.month || '-01', '+1 month'), 1, 7))
-					AND NOT ${paysBillSql("t")} AND NOT ${paysPlanSql("t")})`,
+					AND NOT ${paysBillGroupSql("t")} AND NOT ${paysPlanGroupSql("t")})`,
 		)
 		.bind(transactionId, planId)
 		.run();
@@ -246,7 +242,7 @@ export async function restorePlanDelete(
 				 SELECT h.name, h.amount_cents, h.month,
 					CASE WHEN h.transaction_id IS NOT NULL
 						AND EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = h.transaction_id
-							AND NOT ${paysBillSql("pt")} AND NOT ${paysPlanSql("pt")})
+							AND NOT ${paysBillGroupSql("pt")} AND NOT ${paysPlanGroupSql("pt")})
 					THEN h.transaction_id END,
 					h.created_by
 				 FROM planned_delete_holds h WHERE h.token = ?1 AND h.created_ms > ?2`,

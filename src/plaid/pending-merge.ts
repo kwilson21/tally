@@ -47,7 +47,7 @@ import {
 	purchaseDismissalsToPartsSql,
 } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
-import { jevAsksAboutSql } from "../db/counted-month";
+import { jevAsksAboutSql, paysPlanGroupSql } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -58,6 +58,8 @@ function hasAnswerSql(personChoice: string, jevAnswer: string) {
 const PENDING =
 	"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1)";
 const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
+/** The posted row's payment group (decision 82): the row, its split parent and its parts, as the triggers read it. */
+const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED}, (SELECT parent_id FROM transactions WHERE id = ${POSTED})) OR g.parent_id = ${POSTED})`;
 const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
 
@@ -111,10 +113,9 @@ const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
 const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
 	WHERE pp.id = bill_payments.transaction_id AND part.parent_id = ${POSTED}
 	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
-	
-AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
-AND NOT EXISTS (SELECT 1 FROM planned_expenses own WHERE own.transaction_id = part.id)
-ORDER BY part.id LIMIT 1)`;
+	AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
+	AND NOT ${paysPlanGroupSql("part")}
+	ORDER BY part.id LIMIT 1)`;
 
 const STATEMENTS = [
 	// Tally's log of the pending row's category (spec section 5) moves to the posted row only when that category moves with
@@ -221,16 +222,16 @@ const STATEMENTS = [
 	// A bill payment (and a dismissal) moves, unless the posted row already pays a bill or a planned expense (a payment pays
 	// one of them, never both: migration 0053's triggers would refuse the move, so it is checked here first).
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
-WHERE transaction_id = ${PENDING} AND ${READY}
-AND (status = 'dismissed' OR (NOT EXISTS (
-SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
-AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = ${POSTED})))`,
+	WHERE transaction_id = ${PENDING} AND ${READY}
+	AND (status = 'dismissed' OR (NOT EXISTS (
+	SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
+	AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})))`,
 	// A planned expense's payment moves the same way (spec section 5, every link moves to the posted row), unless the posted
 	// row already pays a bill or another plan.
 	`UPDATE planned_expenses SET transaction_id = ${POSTED}
-WHERE transaction_id = ${PENDING} AND ${READY}
-AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
-AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = ${POSTED})`,
+	WHERE transaction_id = ${PENDING} AND ${READY}
+	AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
+	AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})`,
 
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}

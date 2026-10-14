@@ -53,7 +53,7 @@ import { amountRowsByBill } from "../db/bill-amounts";
 import {
 	billPeriodMonth,
 	type CountedBill,
-	paysPlanSql,
+	paysPlanGroupSql,
 } from "../db/counted-month";
 import {
 	isMerchantTextSql,
@@ -62,9 +62,7 @@ import {
 	merchantTextArgs,
 } from "../db/merchant-key";
 import { ownNameSql } from "../db/own-name";
-
 import { loadPlans } from "../db/planned-expenses";
-
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
@@ -1450,7 +1448,7 @@ async function billPage(
 		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT ${paysPlanSql("t")} ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT ${paysPlanGroupSql("t")} ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
@@ -1750,11 +1748,11 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 
-	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053), and a split part is its parent's
-	// payment (paysPlanSql): the picker never lists it, and a request that names one anyway is refused here, rather than by
-	// the trigger's error.
+	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053). The payment's group is the
+	// transaction, its split parent and its parts (paysPlanGroupSql): the picker never lists one, and a request that
+	// names one anyway is refused here, rather than by the trigger's error.
 	const plannedAlready = await c.env.DB.prepare(
-		`SELECT 1 FROM transactions t WHERE t.id=? AND ${paysPlanSql("t")}`,
+		`SELECT 1 FROM transactions t WHERE t.id=? AND ${paysPlanGroupSql("t")}`,
 	)
 		.bind(transaction)
 		.first();
@@ -1768,7 +1766,6 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 	// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324). A credit fails here
-
 	// and in the INSERT below, with the same message as a payment outside the window.
 	const eligible = await c.env.DB.prepare(
 		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?",
@@ -1791,7 +1788,8 @@ bills.post("/bills/:id/link", async (c) => {
 	// one a link replaces (decision 99, and decision 105 for a purchase's) is lifted by liftNotThisOneSql, once the link
 	// is in. It runs only when this link was made, since the DELETE needs the linked row this payment just got. The last
 	// statement reads the month as the INSERT left it, which says why a link made nothing.
-	const [insert, , state] = await c.env.DB.batch<{ unpaid: number }>([
+	// A plan's link that landed after the check above is refused by the INSERT's trigger (migration 0053): the same field error.
+	const batch = await c.env.DB.batch<{ unpaid: number }>([
 		c.env.DB.prepare(linkPaymentSql).bind(
 			id,
 			period,
@@ -1801,7 +1799,20 @@ bills.post("/bills/:id/link", async (c) => {
 		),
 		c.env.DB.prepare(liftNotThisOneSql).bind(id, period, transaction),
 		c.env.DB.prepare(unpaidSelect).bind(id, period),
-	]);
+	]).catch((error: unknown) => {
+		if (String(error).includes("already pays a planned expense")) return null;
+		throw error;
+	});
+	if (!batch)
+		return billPage(
+			c,
+			id,
+			opened,
+			"That payment already pays a planned expense.",
+			undefined,
+			today,
+		);
+	const [insert, , state] = batch;
 	if (!insert?.meta.changes)
 		return billPage(
 			c,

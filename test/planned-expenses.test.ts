@@ -19,7 +19,7 @@ import {
 	plansSetAsideCents,
 	restorePlanDelete,
 } from "../src/db/planned-expenses";
-import { saveSplit } from "../src/db/transactions";
+import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
@@ -369,6 +369,14 @@ describe("Bills' Planned group, Band and sheet", () => {
 		);
 	});
 
+	it("the sheet's amount field shows the plan's cents, as the money input does", async () => {
+		const id = await plan("Car registration", 18050, MONTH);
+		const html = await (
+			await exports.default.fetch(`${BASE}/plans/${id}/edit`)
+		).text();
+		expect(html).toContain('value="180.50"');
+	});
+
 	it("asks Delete Car registration, $180.00? before the plan is deleted", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		const html = await (
@@ -606,9 +614,8 @@ describe("Bills' Planned group, Band and sheet", () => {
 	});
 });
 
-describe("a plan pays a whole payment, never one part of a split", () => {
-	// A $300 payment split into a $120 and a $180 part. A part is free to pay a plan only until a re-split deletes it,
-	// which would unlink the plan without a word, so a plan can pay only the whole payment.
+describe("a plan pays a part of a split payment, as a bill does", () => {
+	// A $300 payment split into a $120 and a $180 part, with no bill or plan on it yet.
 	async function splitUnclaimedPayment() {
 		const tx = await payment(9790, 30000);
 		await saveSplit(
@@ -628,27 +635,21 @@ describe("a plan pays a whole payment, never one part of a split", () => {
 		return part?.id ?? 0;
 	}
 
-	it("the picker doesn't list a part of a split payment, and a link to one is refused", async () => {
+	it("the picker lists a part of a split payment, and a link to one is kept", async () => {
 		const part = await splitUnclaimedPayment();
-		const whole = await payment(9800, 12000);
 		const planId = await plan("Lawn service", 12000, MONTH);
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
-		// The whole payment is listed, so the part's absence is the planner's rule and not an empty picker.
-		expect(picker).toContain(`value="${whole}"`);
-		expect(picker).not.toContain(`value="${part}"`);
+		expect(picker).toContain(`value="${part}"`);
 
-		const refused = await post(`/plans/${planId}/link`, {
-			transaction_id: String(part),
-		});
-		expect(await refused.text()).toContain("can&#39;t be linked");
+		await post(`/plans/${planId}/link`, { transaction_id: String(part) });
 		const linked = await env.DB.prepare(
 			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
 		)
 			.bind(planId)
 			.first<{ t: number | null }>();
-		expect(linked?.t).toBeNull();
+		expect(linked?.t).toBe(part);
 	});
 
 	it("a re-split keeps a plan on the whole payment it pays, so it stays paid", async () => {
@@ -679,6 +680,170 @@ describe("a plan pays a whole payment, never one part of a split", () => {
 			.first<{ t: number | null }>();
 		expect(kept?.t).toBe(tx);
 		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+	});
+});
+
+describe("a split keeps a plan and a bill on parts, and Undo or Remove split leaves neither unpaid", () => {
+	const splitInTwo = (tx: number, first: number, second: number) =>
+		saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: first },
+				{ categoryId: 1, amountCents: second },
+			],
+			"demo",
+		);
+
+	async function partIds(tx: number) {
+		const { results } = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+			.bind(tx)
+			.all<{ id: number }>();
+		return results.map((row) => row.id);
+	}
+
+	async function insertBill(id: number, name: string, amountCents: number) {
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(?,?,?,3,'monthly',?)",
+		)
+			.bind(id, name, amountCents, `${name.toUpperCase()} FIXTURE`)
+			.run();
+	}
+
+	async function linkBill(billId: number, transactionId: number) {
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,?,?,'user','linked')",
+		)
+			.bind(billId, MONTH, transactionId)
+			.run();
+	}
+
+	const paidBy = async (planId: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+			)
+				.bind(planId)
+				.first<{ t: number | null }>()
+		)?.t ?? null;
+
+	it("a re-split moves a plan on a part to the first part no bill took, so it stays paid", async () => {
+		const tx = await payment(9800, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		await insertBill(9801, "Water", 12000);
+		await linkBill(9801, first ?? 0);
+		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+
+		await splitInTwo(tx, 12000, 18000);
+		const [newFirst, newSecond] = await partIds(tx);
+		const bill = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM bill_payments WHERE bill_id = 9801 AND status = 'linked'",
+		).first<{ t: number }>();
+		// The bill keeps the part that matches its amount and category; the plan takes the next free part.
+		expect(bill?.t).toBe(newFirst);
+		expect(await paidBy(planId)).toBe(newSecond);
+	});
+
+	it("a re-split with new amounts keeps a plan on a part on the first part, still paid", async () => {
+		const tx = await payment(9805, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+
+		await splitInTwo(tx, 10000, 20000);
+		const [newFirst] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newFirst);
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+	});
+
+	it("Remove split puts a plan on a part back on the whole payment, still paid", async () => {
+		const tx = await payment(9808, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+
+		await removeSplit(env.DB, tx, "demo");
+		expect(await paidBy(planId)).toBe(tx);
+	});
+
+	it("an Undo after a split with a bill on a part brings the plan back unpaid, never on the bill's money", async () => {
+		const tx = await payment(9810, 30000);
+		const planId = await plan("Car registration", 18000, MONTH, tx);
+		const deleted = await post(`/plans/${planId}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		await insertBill(9811, "Water", 12000);
+		await linkBill(9811, first ?? 0);
+
+		const restored = await post("/plans/undo-delete", { token });
+		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe(
+			"Restored Car registration. Its payment is no longer linked.",
+		);
+		const back = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE name = 'Car registration'",
+		).first<{ t: number | null }>();
+		expect(back?.t).toBeNull();
+	});
+
+	it("the database refuses a plan on a whole payment while a bill pays one of its parts", async () => {
+		const tx = await payment(9815, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		await insertBill(9816, "Water", 12000);
+		await linkBill(9816, first ?? 0);
+		await expect(
+			env.DB.prepare(
+				"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Lawn service',9000,?,?,'demo')",
+			)
+				.bind(MONTH, tx)
+				.run(),
+		).rejects.toThrow("already pays a bill");
+	});
+
+	it("the database refuses a bill on a whole payment while a plan pays one of its parts", async () => {
+		const tx = await payment(9818, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		await plan("Lawn service", 9000, MONTH, first ?? 0);
+		await insertBill(9819, "Water", 12000);
+		await expect(
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9819,?,?,'user','linked')",
+			)
+				.bind(MONTH, tx)
+				.run(),
+		).rejects.toThrow("already pays a planned expense");
+	});
+
+	it("a bill's link that loses a race to a plan's link is refused in its field, not as a failed request", async () => {
+		const tx = await payment(9820, 18000);
+		await insertBill(9821, "Registration fee", 18000);
+		// The plan's link lands after the link's check and before its batch: the trigger refuses the bill's payment there.
+		await env.DB.prepare(
+			"CREATE TRIGGER race_plan_link BEFORE INSERT ON bill_payments WHEN NEW.transaction_id = 9820 BEGIN SELECT RAISE(ABORT, 'That payment already pays a planned expense.'); END",
+		).run();
+		try {
+			const refused = await post("/bills/9821/link", {
+				transaction_id: String(tx),
+				period: MONTH,
+				opened_period: MONTH,
+			});
+			expect(refused.status).toBe(200);
+			expect(await refused.text()).toContain(
+				"That payment already pays a planned expense.",
+			);
+		} finally {
+			await env.DB.prepare("DROP TRIGGER race_plan_link").run();
+		}
 	});
 });
 

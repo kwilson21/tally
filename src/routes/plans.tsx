@@ -15,7 +15,7 @@ import {
 	unlinkPlanPayment,
 	updatePlan,
 } from "../db/planned-expenses";
-import { formatCents, toCents } from "../money";
+import { centsToAmount, formatCents, toCents } from "../money";
 
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -73,7 +73,7 @@ async function sheetPage(
 		(plan
 			? {
 					name: plan.name,
-					amount: (plan.amountCents / 100).toFixed(2),
+					amount: centsToAmount(plan.amountCents),
 					month: plan.month,
 				}
 			: { name: "", amount: "", month });
