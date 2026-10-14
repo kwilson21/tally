@@ -35,6 +35,7 @@ import {
 	usableSuggestedNames,
 } from "../transactions/name-suggestions";
 import { type OwnedRow, oneOffGuessesAgain } from "../transactions/rename";
+import { countedTransferSql } from "../transactions/rule-offer";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
 import { JEV_ANSWER_LOG_SQL, KEPT_NAME_LOG_SQL } from "./ai-log";
@@ -653,6 +654,8 @@ export type TransactionDetail = ListRow & {
 	suggestedCategoryName: string | null;
 	/** Jev says the trip looks mixed (#233, decision 113), whoever chose the category; the panel adds looksMixed. */
 	jevSaysMixed: boolean;
+	/** A transfer for the rule offer (`countedTransferSql`): put back in the budget, it can become a counted pick (#372). */
+	markedTransfer: boolean;
 	/** The other category Jev named, when it is active (#233); the mixed line names it after the pick. */
 	alsoCategoryId: number | null;
 	alsoCategoryName: string | null;
@@ -747,6 +750,7 @@ export async function getTransaction(
 				c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 				t.jev_category_id AS suggestedCategoryId, maybeCat.name AS suggestedCategoryName,
 				alsoCat.id AS alsoCategoryId, alsoCat.name AS alsoCategoryName, CASE WHEN ${jevSaysMixedSql("t")} THEN 1 ELSE 0 END AS jevSaysMixed,
+				${countedTransferSql("t")} AS markedTransfer,
 				${MAYBE_CATEGORY_COLUMNS},
 				CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth,
 				a.name AS accountName, a.mask AS accountMask, a.type AS accountType, pi.institution_name AS bankName
@@ -780,10 +784,12 @@ export async function getTransaction(
 				| "followsPurchase"
 				| "pending"
 				| "jevSaysMixed"
+				| "markedTransfer"
 			> &
 				NameSuggestionColumns & {
 					/** 1 when Jev says the trip looks mixed (#233), whoever chose the category (`jevSaysMixedSql`). */
 					jevSaysMixed: number;
+					markedTransfer: number;
 					merchantTotal: number;
 					/** A JSON array of the other own-named transactions from this merchant (parts included): name, date and whether a part. */
 					ownedJson: string;
@@ -865,6 +871,7 @@ export async function getTransaction(
 		followsPurchase: r.followsPurchase === 1,
 		pending: r.pending === 1,
 		jevSaysMixed: r.jevSaysMixed === 1,
+		markedTransfer: r.markedTransfer === 1,
 		displayName: shown.name,
 		storeName,
 		nameSuggested: shown.suggested,
