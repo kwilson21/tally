@@ -455,6 +455,14 @@ describe("GET /transactions/:id", () => {
 		expect(sheet).not.toContain("Use this category for");
 		const ordinary = (await get(`/transactions/${purchase?.id}`)).html;
 		expect(ordinary).toContain("Untick it and save to remove the rule.");
+		// An archived category's rule is still listed in Settings (paused), so the linked refund still points there.
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		const archived = (await get(`/transactions/${refund?.id}`)).html;
+		expect(archived.slice(archived.indexOf('role="dialog"'))).toContain(
+			"Remove it in Settings, under",
+		);
 	});
 	it("shows a below-threshold Jev pick as the first suggested chip after the real save path", async () => {
 		const id = Number(
@@ -643,6 +651,55 @@ describe("GET /transactions/:id", () => {
 				.bind(bakery)
 				.first(),
 		).toEqual({ category_id: 2 });
+	});
+
+	it("names an archived rule category in the tick's hint on the panel and on a refused save's redraw, since the chips list only active categories", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		const archivedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const hint = `Local Bakery is always ${archivedName}. Untick it and save to remove the rule.`;
+
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toMatch(/name="always" value="1" checked/);
+		expect(sheet).toContain(hint);
+
+		const { res, html: refused } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "2",
+			merchant: "Local Bakery",
+			note: "x".repeat(501),
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		expect(refused).toMatch(/name="always" value="1" checked/);
+		expect(refused).toContain(hint);
 	});
 
 	it("redraws a refused save with the rule tick still ticked and its rule's hint, as the panel had it", async () => {

@@ -1331,6 +1331,20 @@ describe("cash lifecycle", () => {
 		expect(otherSheet).toMatch(/name="always_was" value="0"/);
 		expect(otherSheet).toContain("Leave it unticked to change just this one.");
 		expect(otherSheet).not.toContain("Untick it and save to remove the rule.");
+
+		// The rule's category is archived since: the entry still matches it, so the tick stays ticked and names it.
+		await setRule(1);
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 1",
+		).run();
+		const archived = await askAboutDelete();
+		const archivedSheet = archived.html.slice(
+			archived.html.indexOf('role="dialog"'),
+		);
+		expect(archivedSheet).toMatch(/name="always" value="1" checked/);
+		expect(archivedSheet).toContain(
+			`Rule cash shop is always ${await categoryName(1)}. Untick it and save to remove the rule.`,
+		);
 	});
 
 	it("hides and rejects delete for a split part, then confirms and cascades a parent delete", async () => {
@@ -2663,6 +2677,40 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toMatch(/name="always" value="1" checked/);
 		expect(html).toContain(
 			`Rule split is always ${groceries}. Untick it and save to remove the rule.`,
+		);
+	});
+
+	it("a pending edit's rule tick names an archived rule category in its hint when the panel refuses it after the parts are saved", async () => {
+		const { id, a, b } = await splitCash("Archived rule split");
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Archived rule split', 2)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const archivedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", shiftDay(today(), 1)],
+			["amount", "100.00"],
+			["merchant", "Archived rule split"],
+			["always", "1"],
+			["always_was", "1"],
+			["rule_category_was", "2"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain("Choose today or an earlier date.");
+		expect(html).toMatch(/name="always" value="1" checked/);
+		expect(html).toContain(
+			`Archived rule split is always ${archivedName}. Untick it and save to remove the rule.`,
 		);
 	});
 

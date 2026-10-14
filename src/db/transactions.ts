@@ -647,6 +647,8 @@ export type TransactionDetail = ListRow & {
 	storeName: string;
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	merchantRuleCategoryId: number | null;
+	/** The rule's category name, archived or not (the edit panel's chips list only active ones), or null. */
+	merchantRuleCategoryName: string | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
 	suggestedCategoryId: number | null;
@@ -726,7 +728,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, (SELECT rc.name FROM categories rc WHERE rc.id = ${merchantColumnSql("t", "default_category_id")}) AS merchantRuleCategoryName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
 				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,

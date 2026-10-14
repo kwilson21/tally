@@ -1604,9 +1604,6 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	const ruleCategory = categories.find(
-		(cat) => cat.id === tx.merchantRuleCategoryId,
-	);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -2185,12 +2182,14 @@ function EditSheet({
 					</Chip>
 				</div>
 				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
-				{ruleCategory && values.alwaysForMerchant && tx.refundOfId != null && (
-					<p class="text-sm text-muted">
-						Remove it in Settings, under{" "}
-						<a href="/settings#merchant-rules">Tally's rules</a>.
-					</p>
-				)}
+				{tx.merchantRuleCategoryName &&
+					values.alwaysForMerchant &&
+					tx.refundOfId != null && (
+						<p class="text-sm text-muted">
+							Remove it in Settings, under{" "}
+							<a href="/settings#merchant-rules">Tally's rules</a>.
+						</p>
+					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
 					<div class="flex flex-wrap gap-2">
@@ -2250,7 +2249,11 @@ function EditSheet({
 						<MerchantRuleTick
 							merchant={tx.displayName}
 							checked={values.alwaysForMerchant}
-							ruleCategory={values.alwaysWas ? ruleCategory?.name : undefined}
+							ruleCategory={
+								values.alwaysWas
+									? (tx.merchantRuleCategoryName ?? undefined)
+									: undefined
+							}
 						/>
 					</div>
 				)}
