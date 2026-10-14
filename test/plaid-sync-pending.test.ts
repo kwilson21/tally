@@ -1424,6 +1424,26 @@ describe("when the posted transaction is already stored as the link arrives", ()
 					jev_also_category_id: null,
 				});
 			});
+
+			it("a split purchase takes no mixed-trip answer from its pending row, even with no category of its own (#233)", async () => {
+				const item = await addItem();
+				const ids = await bothStored(item);
+				await env.DB.prepare(
+					"UPDATE transactions SET is_split = 1, category_id = NULL, category_source = NULL, category_confidence = NULL WHERE id = ?",
+				)
+					.bind(ids.posted)
+					.run();
+				await pendingMixed(ids.pending);
+				await post(item);
+				expect(await mixedAnswerOf("posted-1")).toEqual({
+					category_id: null,
+					category_source: null,
+					category_confidence: null,
+					jev_category_id: null,
+					jev_mixed: null,
+					jev_also_category_id: null,
+				});
+			});
 		});
 
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
