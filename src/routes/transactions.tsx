@@ -11,7 +11,7 @@ import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { FOLLOWS_PURCHASE } from "../db/counted-month";
+import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
 import {
 	addLikely,
 	type LikelyRow,
@@ -62,6 +62,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	excludedAfterSave,
 	FOR_PERSON_ERROR,
 	followsPurchaseAfterSave,
 	parseEdit,
@@ -1665,6 +1666,12 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
+	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	const countsIfReviewed = (creditReviewed: boolean) =>
+		isIncluded(
+			excludedAfterSave(tx, { ...values, creditReviewed }),
+			tx.paysBill === true || tx.paysPlan === true,
+		);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1923,19 +1930,22 @@ function EditSheet({
 										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included:
-											!values.excluded ||
-											tx.paysBill === true ||
-											tx.paysPlan === true,
+										included: isIncluded(
+											excludedAfterSave(tx, values),
+											tx.paysBill === true || tx.paysPlan === true,
+										),
 										isSplit: tx.isSplit === true,
 										income: values.income,
 										followsPurchase: purchase !== undefined,
 									}),
-								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
+								// Exclude changes the answer only where the row isn't a bill or planned-expense payment, which counts either way.
 								excludeCounts: tx.paysBill !== true && tx.paysPlan !== true,
-								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
-								reviewCounts: linkedPurchase !== undefined,
+								// The review chip folds the note where the review decides whether the row counts: a Plaid
+								// exclusion it lifts, not on a bill or planned-expense payment and not once Exclude is off. A linked
+								// purchase is one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
+								reviewCounts:
+									linkedPurchase !== undefined ||
+									countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -3744,11 +3754,8 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
+	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
+	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
@@ -3759,7 +3766,10 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: !excludedNow || tx.paysBill === true || tx.paysPlan === true,
+			included: isIncluded(
+				excludedNow,
+				tx.paysBill === true || tx.paysPlan === true,
+			),
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
@@ -3814,16 +3824,20 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
+	// A bill or planned-expense payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
+	const paysBillOrPlan = tx.paysBill === true || tx.paysPlan === true;
+	const countedBefore = isIncluded(tx.excluded, paysBillOrPlan);
+	const countsNow = isIncluded(excludedNow, paysBillOrPlan);
 	const exclusion =
-		excludedNow === tx.excluded
-			? ""
-			: excludedNow
-				? tx.paysBill
-					? " It still counts while it pays a bill."
-					: tx.paysPlan
-						? " It still counts while it pays a planned expense."
-						: " It's excluded from the budget."
-				: " It counts in the budget again.";
+		excludedNow && !tx.excluded
+			? tx.paysBill
+				? " It still counts while it pays a bill."
+				: tx.paysPlan
+					? " It still counts while it pays a planned expense."
+					: " It's excluded from the budget."
+			: countsNow && !countedBefore
+				? " It counts in the budget again."
+				: "";
 	const keptWords = unnamed
 		? "Kept the details."
 		: guessAgain

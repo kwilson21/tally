@@ -77,6 +77,18 @@ export const includedSql = (
 ) => `(${alias}.excluded = 0 OR ${paysBill})`;
 
 /**
+ * includedSql in TypeScript, for a row as a save leaves it: not excluded, or paying a bill or a planned expense.
+ * `excluded` is the exclusion once saved (excludedAfterSave in src/transactions/edit.ts), so a lifted Plaid exclusion
+ * counts. Keep it in step with includedSql; the callers feed jevAsksAbout's `included` from it.
+ */
+export function isIncluded(
+	excluded: boolean,
+	paysBillOrPlan: boolean,
+): boolean {
+	return !excluded || paysBillOrPlan;
+}
+
+/**
  * Whether Jev can be asked about the category of the row `alias` names, as jevAsksAbout (rename.ts) says for a
  * row as a save leaves it: included, not a split, not income, and not a refund that follows its purchase. This
  * is the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION and NOT FOLLOWS_PURCHASE in

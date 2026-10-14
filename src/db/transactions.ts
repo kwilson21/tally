@@ -15,6 +15,7 @@ import { householdToday } from "../dates";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import {
 	type Edit,
+	excludedAfterSave,
 	followsPurchaseAfterSave,
 	merchantRuleChange,
 } from "../transactions/edit";
@@ -48,6 +49,7 @@ import {
 	INCLUDED,
 	INCLUDED_ROW,
 	includedSql,
+	isIncluded,
 	jevAsksAboutSql,
 	markedTransferSql,
 	PAYS_A_BILL_OR_PLAN,
@@ -640,6 +642,8 @@ export type TransactionDetail = ListRow & {
 	forPersonGuessed: boolean;
 	/** A person explicitly reviewed this credit as non-income; Jev's settled state is separate. */
 	creditReviewedByUser: boolean;
+	/** Who set the exclusion ("plaid", "jev" or "user"), or null when none did; a review as non-income lifts only Plaid's. */
+	excludedSource: string | null;
 	/** Who last settled the income answer ("user" or "jev"), or null when nothing has. */
 	incomeSource: string | null;
 	accountName: string;
@@ -749,7 +753,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
-				t.excluded, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
+				t.excluded, t.excluded_source AS excludedSource, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
 				${BILL_NAME_COLUMN},
 				${PENDING_SQL} AS pending, t.flag_income AS income, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
@@ -968,7 +972,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, ${paysBillSql("transactions")} AS paysBill, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -982,7 +986,9 @@ export async function saveEdit(
 			creditReviewed: number | null;
 			creditReviewedBy: string | null;
 			excluded: number;
+			excludedSource: string | null;
 			paysBill: number;
+			paysPlan: number;
 			/** The linked purchase's exclusion (1 or 0), or null when nothing is linked. */
 			purchaseExcluded: number | null;
 			refundOfId: number | null;
@@ -1030,6 +1036,8 @@ export async function saveEdit(
 	// its parts do, and the cap ignores whether a refund is excluded or reviewed.)
 	const storedCredit = {
 		amountCents: current.amountCents,
+		excluded: current.excluded === 1,
+		excludedSource: current.excludedSource,
 		refundOfId: current.refundOfId,
 		income: current.income === 1,
 		incomeSource: current.incomeSource,
@@ -1312,7 +1320,10 @@ export async function saveEdit(
 	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
 	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
 	const askable = {
-		included: excluded === 0 || current.paysBill === 1,
+		included: isIncluded(
+			excludedAfterSave(storedCredit, edit),
+			current.paysBill === 1 || current.paysPlan === 1,
+		),
 		isSplit: current.isSplit === 1,
 		income:
 			incomeChanged || creditReviewByUser
