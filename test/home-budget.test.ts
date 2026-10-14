@@ -125,7 +125,7 @@ describe("Home's budget rows", () => {
 		)?.[1];
 		expect(arrow).toContain("text-muted group-hover/row:text-ink");
 		expect(space).toBe(
-			arrow?.replace(" text-muted group-hover/row:text-ink", ""),
+			arrow?.replace(" text-muted group-hover/row:text-ink", " invisible"),
 		);
 		expect(rowWith(">Eating Out<")).not.toContain("<a ");
 	});

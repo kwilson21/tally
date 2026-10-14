@@ -49,7 +49,7 @@ describe("ProgressRow that opens", () => {
 	it("keeps the arrow's empty space on a row with no link in a list whose rows open, so the bars end together", async () => {
 		const html = await budget({ href: undefined, reserveArrow: true });
 		expect(html).toMatch(
-			/<span aria-hidden="true" class="size-5 shrink-0 -ml-3 -mr-2 self-start mt-1"><\/span>/,
+			/<span aria-hidden="true" class="size-5 shrink-0 -ml-3 -mr-2 invisible self-start mt-1"><\/span>/,
 		);
 		expect(html).not.toContain("chevron-right");
 		expect(html).not.toContain("row-opens");

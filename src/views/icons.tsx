@@ -316,7 +316,11 @@ export function RowArrowSpace({ class: extra }: { class?: string }) {
 	return (
 		<span
 			aria-hidden="true"
-			class={extra ? `${ROW_ARROW_BOX} ${extra}` : ROW_ARROW_BOX}
+			class={
+				extra
+					? `${ROW_ARROW_BOX} invisible ${extra}`
+					: `${ROW_ARROW_BOX} invisible`
+			}
 		/>
 	);
 }
