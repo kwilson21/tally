@@ -939,12 +939,12 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
-	it("keeps the RuleOffer specimen's two forms inside an inert wrapper, so Yes cannot post", async () => {
+	it("keeps the RuleOffer specimen's forms inside an inert wrapper, so Yes cannot post", async () => {
 		const { html } = await get("/design-system");
 		const section =
 			html.split('id="rule-offer"')[1]?.split("</section>")[0] ?? "";
-		// Both forms are present, so the loop below cannot pass by finding none.
-		expect(section.match(/<form\b/g)).toHaveLength(2);
+		// The RuleOffer's two forms and the Organize question's one form are present, so the loop below cannot pass by finding none (#353).
+		expect(section.match(/<form\b/g)).toHaveLength(3);
 		const openDivs: boolean[] = [];
 		for (const match of section.matchAll(
 			/<div\b[^>]*>|<\/div>|<form\b[^>]*>/g,
@@ -955,6 +955,20 @@ describe("GET /design-system in the demo", () => {
 				openDivs.push(/\sinert(?:\s|>|=)/.test(tag));
 			else expect(openDivs, tag).toContain(true);
 		}
+	});
+
+	it("gives the rule-offer section's heading and its two question samples different ids, so the catalog has no duplicate id (#353)", async () => {
+		const { html } = await get("/design-system");
+		// The section's own heading (Specimen's `${id}-title`), then RuleOffer's and GroupRuleOffer's samples. A repeated id
+		// would hide one heading from screen readers and from the labelled section.
+		const titles = [
+			...html.matchAll(/\sid="([^"]*rule-offer[^"]*-title)"/g),
+		].map((match) => match[1]);
+		expect(titles).toEqual([
+			"rule-offer-title",
+			"rule-offer-sample-title",
+			"group-rule-offer-sample-title",
+		]);
 	});
 
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {

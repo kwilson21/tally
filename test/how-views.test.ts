@@ -22,6 +22,16 @@ describe("ThingsToTry", () => {
 		]);
 	});
 
+	it("names the edit panel's own controls: the rule tick and the Name row (#491, #353)", async () => {
+		const html = await ThingsToTry().toString();
+		expect(html).toContain(
+			"For a rule, open a transaction and tick &quot;Use this category for … from now on.&quot;",
+		);
+		expect(html).toContain("For a new name, pick one in its Name row.");
+		expect(html).not.toContain("Always for this merchant");
+		expect(html).not.toContain("Rename or add a note");
+	});
+
 	it("gives every link a 44px touch target", async () => {
 		const html = await ThingsToTry().toString();
 		for (const a of html.match(/<a [^>]*>/g) ?? []) {

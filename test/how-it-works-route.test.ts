@@ -563,6 +563,19 @@ describe("links in the demo", () => {
 		);
 	});
 
+	it("says a merchant rule is set by the edit panel's tick, and removed by unticking it (#491, #353)", async () => {
+		const html = (await get("/how-it-works")).html;
+		const categorization =
+			html.match(/<section[^>]*id="categorization"[\s\S]*?<\/section>/)?.[0] ??
+			"";
+		expect(categorization).toContain(
+			"set by ticking &quot;Use this category for … from now on&quot; in the edit panel.",
+		);
+		expect(categorization).toContain("to remove a rule, untick it and save.");
+		expect(categorization).not.toContain("remove it in Settings");
+		expect(categorization).not.toContain("Always for this merchant");
+	});
+
 	it("says a what-it-was line is written only when it can say more than the store's name (decision 103)", async () => {
 		const html = (await get("/how-it-works")).html;
 		const categorization =

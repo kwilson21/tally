@@ -97,7 +97,15 @@ beforeEach(async () => {
 describe("merchantKeySql", () => {
 	it.each([
 		["new check sets and applies rule", false, true, 1, 4, 4, 4],
-		["checked category change is transaction-only", true, true, 1, 3, 1, 1],
+		[
+			"checked category change makes that category the rule",
+			true,
+			true,
+			1,
+			3,
+			3,
+			3,
+		],
 		["explicit uncheck clears rule", true, false, 1, null, null, 1],
 		["unchecked note save keeps rule", false, false, 1, null, 1, 1],
 		["paused checked rule keeps category and rule", true, true, 1, null, 1, 1],
@@ -303,7 +311,7 @@ describe("merchant rules", () => {
 		);
 	});
 
-	it("Organize groups raw names that share a merchant name and makes one rule for them", async () => {
+	it("Organize groups raw names that share a merchant name, files them, and makes no rule until Yes", async () => {
 		const group = (await organizeGroups(db)).find((g) =>
 			g.merchantKeys.includes("Target"),
 		);
@@ -331,6 +339,7 @@ describe("merchant rules", () => {
 			category_source: "user",
 		});
 		expect(await row(8003)).toMatchObject({ category_id: null });
+		// Organize files the charges and makes no rule (#353): only Yes on the question does.
 		expect(
 			await db
 				.prepare(
@@ -338,7 +347,7 @@ describe("merchant rules", () => {
 				)
 				.all(),
 		).toMatchObject({
-			results: [{ raw_name: "Target", default_category_id: GROCERIES }],
+			results: [{ raw_name: "Target", default_category_id: null }],
 		});
 	});
 
@@ -832,11 +841,12 @@ describe("one merchants row per key, whatever the bank text", () => {
 
 		expect(await row(8601)).toMatchObject({ category_id: GAS });
 		expect(await row(8602)).toMatchObject({ category_id: GAS });
+		// Organize names the merchant and files its charges; it leaves the merchant's rule as it was (#353).
 		expect(await merchantRows()).toEqual([
 			{
 				raw_name: "Comcast",
 				display_name: "Comcast Two",
-				category: GAS,
+				category: 5,
 				not_a_bill: 0,
 			},
 		]);

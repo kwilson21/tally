@@ -455,11 +455,11 @@ howItWorks.get("/how-it-works", async (c) => {
 						<li>A person's choice, which nothing overwrites.</li>
 						<li>
 							A merchant rule: "Always use this category for this merchant," set
-							with "Always for this merchant" in the edit panel. It replaces a
-							bill category or Tally's unconfirmed guess, but never a person's
-							choice. Ticking it on a transaction that does not match the rule
-							changes the rule for that merchant; to change a rule this
-							transaction already matches, remove it in Settings first.
+							by ticking "Use this category for … from now on" in the edit
+							panel. It replaces a bill category or Tally's unconfirmed guess,
+							but never a person's choice. Ticking it on a transaction that does
+							not match the rule changes the rule for that merchant; to remove a
+							rule, untick it and save.
 						</li>
 						<li>
 							A bill: a payment linked by the matcher or by hand takes its
