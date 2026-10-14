@@ -129,6 +129,41 @@ function firesByItself(html: string): string[] {
 		);
 }
 
+/**
+ * Every element a keyboard can reach (a link with an href, a button, a form control, a summary, anything with a
+ * tabindex) that sits inside a picture (role="img") and outside any inert element. A picture is one labelled image,
+ * so nothing inside it may take focus. Walks the tags as actions() does, so a wrong nesting fails.
+ */
+function reachableInPictures(html: string): string[] {
+	const open: { tag: string; inert: boolean; picture: boolean }[] = [];
+	const found: string[] = [];
+	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+	for (const match of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+		const raw = match[0];
+		const tag = (match[1] ?? "").toLowerCase();
+		if (raw.startsWith("</")) {
+			expect(open.pop()?.tag, raw).toBe(tag);
+			continue;
+		}
+		const attrs = attributes(raw);
+		const inert = attrs.has("inert") || open.some((o) => o.inert);
+		const picture = attrs.get("role") === "img" || open.some((o) => o.picture);
+		const reachable =
+			(tag === "a" && attrs.has("href")) ||
+			["button", "input", "select", "textarea", "summary"].includes(tag) ||
+			attrs.has("tabindex");
+		if (reachable && picture && !inert) found.push(raw);
+		if (!raw.endsWith("/>") && !VOID.has(tag))
+			open.push({
+				tag,
+				inert: attrs.has("inert"),
+				picture: attrs.get("role") === "img",
+			});
+	}
+	expect(open).toEqual([]);
+	return found;
+}
+
 describe("actions()", () => {
 	it("doesn't count the word inert inside a quoted value as an inert attribute", () => {
 		const found = actions(
@@ -739,6 +774,11 @@ describe("GET /design-system/proposals", () => {
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
+	it("keeps every link and button inside a picture inside an inert element, so a picture has nothing to Tab to (#95)", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(reachableInPictures(html)).toEqual([]);
+	});
+
 	it("opens the page with the open polish picks P122–P124 (issues #499, #95 and #501): each option named and drawn, A recommended, none picked", async () => {
 		const { html } = await get("/design-system/proposals");
 		// The new section comes first, above the Picked polish pass, and says what it is for.
@@ -838,7 +878,8 @@ describe("GET /design-system/proposals", () => {
 			"This fills in once your budgets are set.",
 			"86 need a category",
 			"Start from September",
-			"Budgets add up to $3,840 a month.",
+			"Five of the 14 categories are shown.",
+			"Together they start at $3,840 a month.",
 			"Use these budgets",
 			"The Riveras&#39; tally",
 			"Named 38 stores",
@@ -854,6 +895,120 @@ describe("GET /design-system/proposals", () => {
 			pictures(firstVisit).filter((p) => p.includes("on desktop")),
 		).toHaveLength(1);
 		expect(pictures(firstVisit)).toHaveLength(20);
+
+		// Each assertion below is scoped to the picture it is about, from its label to the next figure (whose
+		// caption, which may name another picture's words, sits before that figure's picture).
+		const picture = (chunk: string, label: string) => {
+			const start = chunk.indexOf(`aria-label="${label}"`);
+			expect(start, label).toBeGreaterThan(-1);
+			const end = chunk.indexOf("<figure", start);
+			return chunk.slice(start, end === -1 ? undefined : end);
+		};
+		// The phone's top line: the wordmark's row, from its class to the row's closing tag.
+		const masthead = (screen: string) => {
+			const start = screen.indexOf(
+				"mb-4 flex items-center justify-between gap-3",
+			);
+			expect(start).toBeGreaterThan(-1);
+			return screen.slice(start, screen.indexOf("</div>", start));
+		};
+		// The desktop sidebar's second group, under its rule: How Tally works and Feedback.
+		const secondGroup = (desk: string) => {
+			const start = desk.indexOf(
+				"mt-3 flex flex-col gap-1 border-t border-rule pt-3",
+			);
+			expect(start).toBeGreaterThan(-1);
+			return desk.slice(start, desk.indexOf("</ul>", start));
+		};
+
+		// P122 · More: the contents page's rows, leader and colophon.
+		expect(more).toContain(
+			"grid min-h-16 grid-cols-[1.5rem_1fr] items-start gap-x-4 py-3",
+		);
+		expect(more).toContain("border-dotted border-rule");
+		expect(more).toContain(
+			"mt-10 flex items-center justify-center gap-2 text-sm text-muted",
+		);
+
+		// P123 · Today: the pill is drawn over a row's amount on Home and over Move down in Settings.
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("bottom-[6.5rem]");
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("Childcare");
+		expect(
+			picture(feedback, "Today (current), Settings, on a phone"),
+		).toContain("bottom-[6.5rem]");
+		expect(picture(feedback, "Today (current), on desktop")).toContain(
+			"bottom-6 right-6",
+		);
+		// P123 · Option A: the pill sits in the top line of a screen's first phone, and nothing floats.
+		const aTop = picture(feedback, "Option A, Home at the top, on a phone");
+		expect(masthead(aTop)).toContain('href="/feedback"');
+		expect(masthead(aTop)).toContain('aria-label="Tally home"');
+		const aSettings = picture(feedback, "Option A, Settings, on a phone");
+		expect(masthead(aSettings)).toContain('href="/feedback"');
+		const aScrolled = picture(feedback, "Option A, Home scrolled, on a phone");
+		expect(aScrolled).not.toContain('href="/feedback"');
+		for (const screen of [aTop, aSettings, aScrolled])
+			expect(screen).not.toContain("bottom-[6.5rem]");
+		// P123 · Options A and B on desktop: the second sidebar group under a rule, and Home's How this works link.
+		for (const label of ["Option A, on desktop", "Option B, on desktop"]) {
+			const desk = picture(feedback, label);
+			expect(secondGroup(desk)).toContain('href="/how-it-works"');
+			expect(secondGroup(desk)).toContain("How Tally works");
+			expect(secondGroup(desk)).toContain('href="/feedback"');
+			expect(secondGroup(desk)).toContain("Feedback");
+			expect(desk).toContain("How this works");
+			expect(desk).not.toContain("bottom-6 right-6");
+		}
+		// P123 · Option B: no pill on any phone; Feedback is a row in More.
+		for (const label of [
+			"Option B, Home scrolled, on a phone",
+			"Option B, Settings, on a phone",
+		])
+			expect(picture(feedback, label)).not.toContain('href="/feedback"');
+		expect(picture(feedback, "Option B, More, on a phone")).toContain(
+			'href="/feedback"',
+		);
+
+		// P124 · Option A: Start here is the one ink link, and Home's footnote carries How this works.
+		const aFirst = picture(firstVisit, "Option A, Home top, on a phone");
+		expect(aFirst).toContain(
+			'class="inline-flex min-h-11 items-center font-medium text-ink underline underline-offset-4">Start here</a>',
+		);
+		expect(aFirst).not.toContain("How this works");
+		const aFirstVisit = option(firstVisit, "Option A · The first page");
+		expect(aFirstVisit).toContain("w-12 border-t border-muted");
+		// The bank's line is struck once, in the story; Tally's row under it does not repeat the bank's text.
+		expect(aFirstVisit.split("SQ *LOCAL BAKERY 4432").length - 1).toBe(1);
+		expect(aFirstVisit).toContain("Local Bakery");
+		expect(aFirstVisit).toContain("Needs category");
+		// P124 · Option B: How this works is muted and underlined on both Home pictures, and the sheet names its sample.
+		const bOption = option(firstVisit, "Option B · One next step");
+		expect(bOption).toContain(
+			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
+		);
+		const bFamily = picture(
+			firstVisit,
+			"Option B, the family&#39;s Home, on a phone",
+		);
+		expect(bFamily).toContain("No budgets set yet.");
+		expect(bFamily).toContain("Start your budgets from September");
+		expect(bFamily).toContain("Not set yet");
+		expect(bFamily).toContain(
+			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
+		);
+		const sheet = picture(firstVisit, "Option B, starting budgets, on a phone");
+		expect(sheet).toContain("Five of the 14 categories are shown.");
+		expect(sheet).not.toContain("Budgets add up to");
+		// P124 · Option C: How this works is a pencil note, on Home's top and at its foot.
+		const cOption = option(firstVisit, "Option C · The page total");
+		expect(cOption).toContain("border-l border-muted pl-3 text-sm text-muted");
+		expect(cOption).toContain(
+			'class="text-muted underline underline-offset-4">How this works</a>',
+		);
 	});
 
 	it("is linked from the catalog", async () => {

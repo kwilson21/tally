@@ -133,17 +133,18 @@ const BANK_LINES = [
 	},
 	{
 		bank: "SQ *LOCAL BAKERY 4432",
-		row: {
-			...tx(903, "2026-10-03", "SQ *LOCAL BAKERY 4432", 1200),
-			displayName: "Local Bakery",
-		},
+		// Tally's name is the row's raw name too, so only Needs category shows under it; the bank's text is struck above.
+		row: tx(903, "2026-10-03", "Local Bakery", 1200),
 	},
 ];
 
 // ---------------------------------------------------------------------------------------------
-// Frames: a phone's screen and a desktop window, drawn as pictures. Each keeps the frame that
-// PhoneFrame and DesktopFrame draw, and adds what these options need: the tab bar, a masthead
-// slot, the pill, and a scrolled view with no banner or wordmark.
+// Frames: a phone's screen and a desktop window, drawn as pictures. They repeat the size, border
+// and inert wrapper of PhoneFrame (specimen.tsx) and DesktopFrame (proposal-parts.tsx), and add
+// what these options need that the shared frames lack: the tab bar, a masthead slot, the pill's
+// overlay, a banner, and a scrolled view with no banner or wordmark. Adding those props to the
+// shared frames would change every proposal file, so this page keeps its own frames for now; that
+// is a follow-up candidate, not part of P122–P124.
 
 type PhoneProps = {
 	label: string;
@@ -299,9 +300,9 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 							</aside>
 							<main class="min-w-0 flex-1">{children}</main>
 						</div>
+						{floating && <div class="absolute bottom-6 right-6">{pill}</div>}
 					</div>
 				</div>
-				{floating && <div class="absolute bottom-6 right-6">{pill}</div>}
 			</div>
 		</div>
 	);
@@ -335,6 +336,10 @@ type ChoiceProps = {
 	children?: Child;
 };
 
+/**
+ * Options' markup (proposal-parts.tsx), kept here because one of these options draws several pictures
+ * and a longer note, which Options (one picture, one screen) cannot take.
+ */
 function Choice({
 	name,
 	note,
@@ -682,9 +687,17 @@ function MoreScreen({ label, children }: { label: string; children?: Child }) {
 // P123 · Where Feedback lives.
 
 /** Settings with Gas's row open, so Move up and Move down show; `overlay` puts the pill on it. */
-function SettingsPhone({ label, overlay }: { label: string; overlay?: Child }) {
+function SettingsPhone({
+	label,
+	overlay,
+	masthead,
+}: {
+	label: string;
+	overlay?: Child;
+	masthead?: Child;
+}) {
 	return (
-		<Phone label={label} tab="more" overlay={overlay}>
+		<Phone label={label} tab="more" overlay={overlay} masthead={masthead}>
 			<h1 class={TITLE}>Settings</h1>
 			<h2 class="mt-8 font-serif text-3xl font-semibold">Categories</h2>
 			<ul class="mt-2 divide-y divide-rule border-y border-rule">
@@ -978,7 +991,7 @@ const startFromSeptember = [
 	{ name: "Gas", last: 326, start: 330 },
 ];
 
-/** The budgets that B's sheet offers: last month's amount rounded up to the next $10 (the total is $3,840). */
+/** The budgets that B's sheet offers: last month's amount rounded up to the next $10 (the five shown add up to $3,840, not the family's whole list of 14). */
 const startSheet = (
 	<>
 		<h2 class="font-serif text-3xl font-semibold">Start from September</h2>
@@ -992,7 +1005,10 @@ const startSheet = (
 				</li>
 			))}
 		</ul>
-		<p class="text-muted">Budgets add up to $3,840 a month.</p>
+		<p class="text-muted">
+			Five of the 14 categories are shown. Together they start at $3,840 a
+			month.
+		</p>
 		<div class="grid grid-cols-2 gap-3">
 			<Button kind="secondary" type="button" class="w-full">
 				Cancel
@@ -1111,6 +1127,7 @@ const familyBehind = (
 			</Amount>
 		}
 		status="No budgets set yet."
+		howLink={quietHowLink}
 		band={
 			<Band
 				href="/transactions/organize"
@@ -1250,8 +1267,8 @@ export function PolishRoundCProposals() {
 							<Shot caption="Home scrolled: nothing floats">
 								<ScrolledHome label="Option A, Home scrolled" />
 							</Shot>
-							<Shot caption="Settings, Gas open: nothing floats">
-								<SettingsPhone label="Option A, Settings" />
+							<Shot caption="Settings, Gas open: the pill in the top line">
+								<SettingsPhone label="Option A, Settings" masthead={pill} />
 							</Shot>
 						</div>
 						<Shot caption="The desktop: a second sidebar group, no pill">
@@ -1259,7 +1276,6 @@ export function PolishRoundCProposals() {
 								<HomeTop
 									amount={<Amount>{money(124000)}</Amount>}
 									status={DEMO_STATUS}
-									howLink={false}
 									band={DEMO_BAND}
 								/>
 							</Desk>
@@ -1289,7 +1305,6 @@ export function PolishRoundCProposals() {
 								<HomeTop
 									amount={<Amount>{money(124000)}</Amount>}
 									status={DEMO_STATUS}
-									howLink={false}
 									band={DEMO_BAND}
 								/>
 							</Desk>
