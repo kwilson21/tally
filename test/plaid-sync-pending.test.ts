@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
+import { paysBillSql, paysPlanSql } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
+import { plansSetAsideCents } from "../src/db/planned-expenses";
 import {
 	pendingForJev,
 	transactionsNeedingNoteGuess,
@@ -176,6 +178,7 @@ async function addBillLinkedTo(
 
 beforeEach(async () => {
 	await env.DB.batch([
+		env.DB.prepare("DELETE FROM planned_expenses"),
 		env.DB.prepare("DELETE FROM bill_payments"),
 		env.DB.prepare("DELETE FROM bills"),
 		env.DB.prepare("DELETE FROM transactions"),
@@ -1795,6 +1798,76 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const payers = [await planPayer(first), await planPayer(second)];
 		expect(payers.filter((payer) => payer === own[0])).toHaveLength(1);
 		expect(payers).toContain(null);
+	});
+
+	/** Transactions that a bill and a planned expense both pay: the never-both rule (spec section 5) the merge must keep. */
+	const bothPaying = async () =>
+		(
+			await env.DB.prepare(
+				`SELECT t.id FROM transactions t WHERE ${paysBillSql("t")} AND ${paysPlanSql("t")}`,
+			).all<{ id: number }>()
+		).results.map((found) => found.id);
+
+	const partsUnder = (parent: number) =>
+		count("SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?", parent);
+
+	it("sets a planned expense on a pending part aside when the posted row already pays a bill, so the part can't pay both (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await addBillLinkedTo(ids.posted);
+		await post(item);
+		// The parts hang under the posted row, which pays the bill, so the plan's part would share its payment: the plan is set aside.
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 700 AND transaction_id = ? AND status = 'linked'",
+				ids.posted,
+			),
+		).toBe(1);
+		expect(await bothPaying()).toEqual([]);
+	});
+
+	it("sets a planned expense on a pending part aside when the posted row already pays another planned expense (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		const other = await planPaidBy(ids.posted, "Gym");
+		await post(item);
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await planPayer(other)).toBe(ids.posted);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+		expect(await bothPaying()).toEqual([]);
+	});
+
+	it("lets a planned expense on a pending part ride its part to an unoccupied posted row, as before (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBe(pending[0]);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(0);
+	});
+
+	it("unlinks a bill on a pending part, with no dismissal, when the posted row already pays a planned expense (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		await addBillLinkedTo(pending[0] ?? 0);
+		const plan = await planPaidBy(ids.posted);
+		await post(item);
+		// The part moves under the posted row, which pays the plan, so the bill's payment goes: the matcher may link it again.
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await count("SELECT COUNT(*) AS n FROM bill_payments")).toBe(0);
+		expect(await planPayer(plan)).toBe(ids.posted);
+		expect(await bothPaying()).toEqual([]);
 	});
 
 	it("moves refund links both ways", async () => {
