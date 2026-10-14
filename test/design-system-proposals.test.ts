@@ -2043,6 +2043,27 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		});
 	});
 
+	it("gives the 320 px frames room for their widest spill (55 px) and the 390 px frames less, so both columns fit the card", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		const wrappers = [
+			...chunk.matchAll(/<div class="([^"]*)"><div role="img"/g),
+		];
+		expect(wrappers.length).toBe(16);
+		wrappers.forEach(([, cls = ""], i) => {
+			const width = WIDTHS[Math.floor(i / 2) % 2];
+			expect(cls).toContain(width === 320 ? "pr-16" : "pr-8");
+		});
+		const cards = [
+			...chunk.matchAll(
+				/class="flex min-w-0 max-w-full flex-col gap-4 w-\[(\d+)px\]"/g,
+			),
+		];
+		expect(cards.length).toBe(4);
+		// Two columns: 320 px with 64 px of room, a 16 px gap, then 390 px with 32 px of room (822 px).
+		for (const [, width = "0"] of cards)
+			expect(Number(width)).toBeGreaterThanOrEqual(822);
+	});
+
 	it("keeps the minus with its number: every amount is one nowrap run", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const amounts = [

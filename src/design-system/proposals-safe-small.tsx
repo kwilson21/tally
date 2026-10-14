@@ -127,7 +127,9 @@ function HomeTop({
 /**
  * One picture: a frame at a phone's width, with its content in an inert page and a terracotta guide
  * line at the frame's right edge. The frame's own overflow stays visible, so a spill shows past the
- * line; its wrapper leaves room for it and scrolls only past that.
+ * line; its wrapper leaves room for it and scrolls only past that. The 320 px frame's room is the
+ * widest spill (55 px); the 390 px frame never spills, so it keeps less, and both columns fit the
+ * 824 px card.
  */
 function Screen({
 	name,
@@ -142,7 +144,9 @@ function Screen({
 }) {
 	const amount = negative ? NEGATIVE : POSITIVE;
 	return (
-		<div class="w-fit max-w-full overflow-x-auto pr-12">
+		<div
+			class={`w-fit max-w-full overflow-x-auto ${width === 320 ? "pr-16" : "pr-8"}`}
+		>
 			<div
 				role="img"
 				aria-label={`${name}, ${width} px wide, with ${amount}, on a phone`}
@@ -214,7 +218,7 @@ export function SafeToSpendSmallProposal() {
 				<Choice
 					name="Option A · No drawing below 360 px"
 					note="Under 360 px the notebook is left out, so the amount has the whole row; from 360 px up it stays beside the amount, as today."
-					cost="CSS only, one class on the drawing in home-top.tsx. Home is 8 px shorter at 320 px and the same at 390 px."
+					cost="a wrapper div with a class around the drawing in home-top.tsx. Home is 8 px shorter at 320 px and the same at 390 px."
 					why="it fits all four pictures, and of those options it changes Home's height least."
 					width="w-[824px]"
 				>
@@ -222,8 +226,8 @@ export function SafeToSpendSmallProposal() {
 				</Choice>
 				<Choice
 					name="Option B · A smaller drawing on phones"
-					note="Below the desktop breakpoint the notebook is 72 px with a 16 px gap beside the amount; desktop keeps 112 px."
-					cost="CSS only, in home-top.tsx: the drawing's size and the row's gap change below lg. Home is 8 px shorter."
+					note="Below the desktop breakpoint the notebook is 72 px with a 16 px gap beside the amount; desktop keeps its own size."
+					cost="a wrapper div with its own size and gap in home-top.tsx, below lg. Home is 8 px shorter."
 					width="w-[824px]"
 				>
 					<Pictures
