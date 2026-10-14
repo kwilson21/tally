@@ -319,6 +319,7 @@ describe("the budget guide with no activity", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM budget_amounts"),
 			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+			env.DB.prepare("DELETE FROM planned_expenses"),
 		]);
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
@@ -426,6 +427,7 @@ describe("outside the demo", () => {
 		await env.DB.prepare("DELETE FROM budget_amounts").run();
 		await env.DB.prepare("DELETE FROM transactions").run();
 		await env.DB.prepare("UPDATE bills SET active = 0").run();
+		await env.DB.prepare("DELETE FROM planned_expenses").run();
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();

@@ -91,6 +91,9 @@ describe("savings goal routes", () => {
 		)
 			.bind(todayIn(DEFAULT_TIME_ZONE))
 			.run();
+
+		// The demo's planned expenses are set aside too; this test sets its own Safe to spend, so it starts with none.
+		await env.DB.prepare("DELETE FROM planned_expenses").run();
 		await env.DB.prepare(
 			"INSERT INTO bills (name, amount_cents, due_day, frequency, merchant_raw_name) VALUES ('Rent', 14200, ?, 'monthly', 'RENT')",
 		)
@@ -102,6 +105,7 @@ describe("savings goal routes", () => {
 			.bind(month)
 			.run();
 		const home = await exports.default.fetch("http://tally.test/");
+
 		const html = await home.text();
 		expect(html.indexOf("Savings")).toBeLessThan(html.indexOf("Groceries"));
 		expect(html).toContain("$500");

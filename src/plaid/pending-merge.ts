@@ -111,8 +111,10 @@ const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
 const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
 	WHERE pp.id = bill_payments.transaction_id AND part.parent_id = ${POSTED}
 	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
-	AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
-	ORDER BY part.id LIMIT 1)`;
+	
+AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
+AND NOT EXISTS (SELECT 1 FROM planned_expenses own WHERE own.transaction_id = part.id)
+ORDER BY part.id LIMIT 1)`;
 
 const STATEMENTS = [
 	// Tally's log of the pending row's category (spec section 5) moves to the posted row only when that category moves with
@@ -215,11 +217,21 @@ const STATEMENTS = [
 	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),
 		transfer_maybe_declined = MAX(transactions.transfer_maybe_declined, p.transfer_maybe_declined)
 	 ${FROM_PENDING} AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
-	// A bill payment (and a dismissal) moves, unless the posted row is already linked to a bill.
+
+	// A bill payment (and a dismissal) moves, unless the posted row already pays a bill or a planned expense (a payment pays
+	// one of them, never both: migration 0053's triggers would refuse the move, so it is checked here first).
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
-	 WHERE transaction_id = ${PENDING} AND ${READY}
-	 AND (status = 'dismissed' OR NOT EXISTS (
-		SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked'))`,
+WHERE transaction_id = ${PENDING} AND ${READY}
+AND (status = 'dismissed' OR (NOT EXISTS (
+SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
+AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = ${POSTED})))`,
+	// A planned expense's payment moves the same way (spec section 5, every link moves to the posted row), unless the posted
+	// row already pays a bill or another plan.
+	`UPDATE planned_expenses SET transaction_id = ${POSTED}
+WHERE transaction_id = ${PENDING} AND ${READY}
+AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
+AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = ${POSTED})`,
+
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}
 	 WHERE refund_of_id = ${PENDING} AND id != ${POSTED} AND ${READY}`,

@@ -239,9 +239,23 @@ export async function resetDemo(
 				.prepare(
 					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) SELECT b.id, ?, t.id, 'user', 'linked' FROM bills b, transactions t WHERE b.merchant_raw_name = ? AND t.raw_name = ? AND t.date = ? AND t.amount_cents = ?",
 				)
+
 				.bind(period, seedMerchantKey(RENT_PAYEE), RENT_PAYEE, date, cents),
 		),
+		// Planned one-time expenses (#202): one set aside this month, and one from last month still unpaid, so Bills shows
+		// its Band ("Car registration wasn't paid") and Safe to spend sets both aside.
+		db
+			.prepare(
+				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Lawn service', 9000, ?, 'demo')",
+			)
+			.bind(today.slice(0, 7)),
+		db
+			.prepare(
+				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Car registration', 18000, ?, 'demo')",
+			)
+			.bind(monthOffset(today, 1)),
 	]);
+
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;
 		const petYearNumber =

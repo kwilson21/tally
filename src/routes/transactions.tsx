@@ -31,6 +31,7 @@ import {
 	needsCategoryCount,
 	PAGE_SIZE,
 	payingBillsCount,
+	payingPlansCount,
 	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
@@ -168,6 +169,17 @@ import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
+/**
+ * The sentence after a saved exclusion, for the rows that still count because they pay a bill or a planned expense
+ * (`thing`). Empty when none of the selection pays one.
+ */
+function stillCountsSentence(selected: number, paying: number, thing: string) {
+	if (paying === 0) return "";
+	if (selected === 1) return ` It still counts while it pays a ${thing}.`;
+	if (paying === 1) return ` 1 still counts while it pays a ${thing}.`;
+	return ` ${paying} still count while they pay a ${thing}.`;
+}
+
 export const transactions = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
@@ -1493,15 +1505,13 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	}
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
+
 	const paying = await payingBillsCount(c.env.DB, excluded);
+	const payingPlans = await payingPlansCount(c.env.DB, excluded);
 	const stillCounts =
-		paying === 0
-			? ""
-			: excluded.length === 1
-				? " It still counts while it pays a bill."
-				: paying === 1
-					? " 1 still counts while it pays a bill."
-					: ` ${paying} still count while they pay a bill.`;
+		stillCountsSentence(excluded.length, paying, "bill") ||
+		stillCountsSentence(excluded.length, payingPlans, "planned expense");
+
 	return finishSelection(
 		c,
 		today,
@@ -1658,7 +1668,8 @@ function EditSheet({
 					{unpaidBillsNote(tx.splitRemovedBills)}
 				</p>
 			)}
-			{tx.countsInMonth && (!tx.excluded || tx.paysBill) && (
+
+			{tx.countsInMonth && (!tx.excluded || tx.paysBill || tx.paysPlan) && (
 				<p class="text-muted">
 					Counts in{" "}
 					{new Intl.DateTimeFormat("en-US", {
@@ -1668,16 +1679,24 @@ function EditSheet({
 				</p>
 			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
-			{tx.excluded && !tx.paysBill && (
+
+			{tx.excluded && !tx.paysBill && !tx.paysPlan && (
 				<p class="flex items-center gap-2 text-muted">
 					<Icon name="transfer" class="size-5" />
 					Excluded from the budget
 				</p>
 			)}
 			{/* A payment linked to a bill counts whatever its exclusion (spec §8.5), so the panel says so. */}
+
 			{tx.excluded && tx.paysBill && (
 				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
 			)}
+			{tx.excluded && !tx.paysBill && tx.paysPlan && (
+				<p class="text-muted">
+					It pays a planned expense, so it counts in the budget.
+				</p>
+			)}
+
 			{/* Outside the form, so following it never happens by accident mid-edit. */}
 			<p>
 				<HowLink section="categorization" />
@@ -1859,13 +1878,16 @@ function EditSheet({
 										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: !values.excluded || tx.paysBill === true,
+										included:
+											!values.excluded ||
+											tx.paysBill === true ||
+											tx.paysPlan === true,
 										isSplit: tx.isSplit === true,
 										income: values.income,
 										followsPurchase: purchase !== undefined,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
-								excludeCounts: tx.paysBill !== true,
+								excludeCounts: tx.paysBill !== true && tx.paysPlan !== true,
 								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
 								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
 								reviewCounts: linkedPurchase !== undefined,
@@ -3453,7 +3475,7 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: !excludedNow || tx.paysBill === true,
+			included: !excludedNow || tx.paysBill === true || tx.paysPlan === true,
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
@@ -3514,7 +3536,9 @@ async function savePanel(
 			: excludedNow
 				? tx.paysBill
 					? " It still counts while it pays a bill."
-					: " It's excluded from the budget."
+					: tx.paysPlan
+						? " It still counts while it pays a planned expense."
+						: " It's excluded from the budget."
 				: " It counts in the budget again.";
 	const keptWords = unnamed
 		? "Kept the details."

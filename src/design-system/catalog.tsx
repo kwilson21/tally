@@ -89,6 +89,13 @@ import {
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
+import {
+	PlanBand,
+	PlannedHeading,
+	PlannedRow,
+	PlanPaymentPicker,
+	PlanSheet,
+} from "../views/planned-expense";
 import { ProgressRow } from "../views/progress-row";
 import { RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
@@ -2055,6 +2062,178 @@ function Rows() {
 							/>
 						</ul>
 					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="planned-expense"
+				title="Planned expenses: the row, the Planned heading, the Band and the sheet"
+				tier="visual"
+				components={[
+					"PlannedRow",
+					"PlannedHeading",
+					"PlanBand",
+					"PlanSheet",
+					"PlanPaymentPicker",
+				]}
+				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with Move to this month or Drop (decision 101)."
+			>
+				<State label="Planned, with this month's total">
+					<div class="max-w-xl">
+						<PlannedHeading totalCents={18000} />
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 1,
+									name: "Car registration",
+									amountCents: 18000,
+									month: "2026-10",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Set aside from a later month">
+					<div class="max-w-xl">
+						<PlannedHeading />
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 2,
+									name: "Holiday gifts",
+									amountCents: 40000,
+									month: "2026-12",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Paid this month, with a check in its heading">
+					<div class="max-w-xl">
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 3,
+									name: "Car registration",
+									amountCents: 18000,
+									month: "2026-10",
+									paidDate: "2026-10-03",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="The Band: one plan waiting, then two">
+					<div class="max-w-xl">
+						<PlanBand
+							planId={1}
+							name="Car registration"
+							moveLabel="Nov"
+							waiting={1}
+						/>
+						<PlanBand
+							planId={1}
+							name="Car registration"
+							moveLabel="Nov"
+							waiting={2}
+						/>
+					</div>
+				</State>
+				<State label="Plan an expense, with the Month select">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-11",
+							}}
+							months={[
+								{ value: "2026-10", label: "October 2026" },
+								{ value: "2026-11", label: "November 2026" },
+								{ value: "2026-12", label: "December 2026" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="A plan's sheet once it's paid, with Unlink">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							plan={{
+								id: 3,
+								name: "Car registration",
+								amountCents: 18000,
+
+								month: "2026-10",
+								paidDate: "2026-10-03",
+							}}
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-10",
+							}}
+							months={[{ value: "2026-10", label: "October 2026" }]}
+							paidBy={{ name: "DMV", date: "2026-10-03", amountCents: 18000 }}
+						/>
+					</div>
+				</State>
+				<State label="Delete asks first, with the amount">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							plan={{
+								id: 1,
+								name: "Car registration",
+								amountCents: 18000,
+
+								month: "2026-10",
+							}}
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-10",
+							}}
+							months={[{ value: "2026-10", label: "October 2026" }]}
+							deleteConfirm
+						/>
+					</div>
+				</State>
+				<State label="A payment's picker on the plan's page">
+					<PlanPaymentPicker
+						planId={1}
+						name="Car registration"
+						amountCents={18000}
+						candidates={[
+							{
+								id: 11,
+								date: "2026-11-03",
+								dateLabel: "Nov 3",
+								amountCents: 18000,
+								displayName: "DMV",
+								excluded: false,
+							},
+							{
+								id: 12,
+								date: "2026-10-30",
+								dateLabel: "Oct 30",
+								amountCents: 21200,
+								displayName: "Costco",
+								excluded: false,
+							},
+						]}
+					/>
 				</State>
 			</Specimen>
 			<Specimen

@@ -33,6 +33,8 @@ export type MonthSummary = {
 	totalBudgetCents: number;
 	totalSpentCents: number;
 	savingsGoalCents?: number;
+	/** Planned one-time expenses set aside this month (spec §6, decision 74). */
+	plannedCents: number;
 	safeToSpendCents: number;
 };
 
@@ -144,6 +146,7 @@ export function summarizeMonth(input: MonthInput): MonthSummary {
 		totalBudgetCents,
 		totalSpentCents,
 		savingsGoalCents: input.savingsGoalCents ?? 0,
+		plannedCents: input.unpaidPlansCents ?? 0,
 		safeToSpendCents:
 			totalBudgetCents -
 			totalSpentCents -

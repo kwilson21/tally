@@ -415,7 +415,7 @@ export async function page(
 					<PlanBand
 						planId={earlierPlans[0].id}
 						name={earlierPlans[0].name}
-						moveLabel={`Move to ${shortMonthName(month)}`}
+						moveLabel={shortMonthName(month)}
 						waiting={earlierPlans.length}
 					/>
 				)}
@@ -437,45 +437,45 @@ export async function page(
 				</div>
 				{/* One Band at a time: a plan waiting for its answer comes before the repeat-charge Band. */}
 				<BillFindingBand count={earlierPlans.length ? 0 : suggestions.length} />
-				{rows.length === 0 && plans.length === 0 ? (
+
+				{rows.length === 0 && (
 					<EmptyState
 						kind="add"
 						sentence="No bills yet."
 						hint="Add a bill to see what needs paying."
 					/>
-				) : (
-					<>
-						{statusGroup("overdue")}
-						{statusGroup("due")}
-						{statusGroup("upcoming")}
-						{unpaidPlans.length > 0 && (
-							<section class="mt-4">
-								<PlannedHeading totalCents={plannedThisMonthCents} />
-								<ul class="divide-y divide-rule">
-									{unpaidPlans.map((plan) => (
-										<PlannedRow
-											plan={plan}
-											month={month}
-											today={today}
-											href={`/plans/${plan.id}/edit`}
-										/>
-									))}
-								</ul>
-							</section>
-						)}
+				)}
 
-						{statusGroup(
-							"paid",
-							plansPaidThisMonth.map((plan) => (
+				{statusGroup("overdue")}
+
+				{statusGroup("due")}
+				{statusGroup("upcoming")}
+				{unpaidPlans.length > 0 && (
+					<section class="mt-4">
+						<PlannedHeading totalCents={plannedThisMonthCents} />
+						<ul class="divide-y divide-rule">
+							{unpaidPlans.map((plan) => (
 								<PlannedRow
 									plan={plan}
 									month={month}
 									today={today}
 									href={`/plans/${plan.id}/edit`}
 								/>
-							)),
-						)}
-					</>
+							))}
+						</ul>
+					</section>
+				)}
+
+				{statusGroup(
+					"paid",
+					plansPaidThisMonth.map((plan) => (
+						<PlannedRow
+							plan={plan}
+							month={month}
+							today={today}
+							href={`/plans/${plan.id}/edit`}
+						/>
+					)),
 				)}
 
 				{inactive.length > 0 && (
@@ -1746,7 +1746,25 @@ bills.post("/bills/:id/link", async (c) => {
 			undefined,
 			today,
 		);
+
+	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053): the picker never lists it, and a
+	// request that names one anyway is refused here, rather than by the trigger's error.
+	const plannedAlready = await c.env.DB.prepare(
+		"SELECT 1 FROM planned_expenses WHERE transaction_id=?",
+	)
+		.bind(transaction)
+		.first();
+	if (plannedAlready)
+		return billPage(
+			c,
+			id,
+			opened,
+			"That payment already pays a planned expense.",
+			undefined,
+			today,
+		);
 	// Only money out pays a bill: a positive amount is money out, in Plaid's sign (#324). A credit fails here
+
 	// and in the INSERT below, with the same message as a payment outside the window.
 	const eligible = await c.env.DB.prepare(
 		"SELECT 1 FROM transactions WHERE id=? AND is_split=0 AND flag_income=0 AND amount_cents>0 AND abs(julianday(date)-julianday(?))<=?",

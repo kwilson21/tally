@@ -177,7 +177,7 @@ export function PlanSheet({
 	deleteConfirm = false,
 }: {
 	/** The plan being edited; absent for Plan an expense. */
-	plan?: PlannedRowData & { paidName?: string | null };
+	plan?: PlannedRowData;
 	values: PlanValues;
 	months: PlanMonthOption[];
 	errors?: Record<string, string>;

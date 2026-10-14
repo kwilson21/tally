@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 
-beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
+// The demo seed plans its own two; these tests plan what they need, so they start with none.
+beforeEach(async () => {
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	await env.DB.prepare("DELETE FROM planned_expenses").run();
+});
 
 /** Three bank payments (money out) with fixed ids, so each test links its own. */
 async function payments() {

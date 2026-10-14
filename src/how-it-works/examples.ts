@@ -58,28 +58,42 @@ export function budgetExample(
 		| "safeToSpendCents"
 		| "savingsGoalCents"
 		| "uncategorized"
-	> & { unbudgetedCents: number; billsDueCents: number },
+	> & { unbudgetedCents: number; billsDueCents: number; plannedCents?: number },
 ): string {
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
+	const plannedCents = s.plannedCents ?? 0;
+
 	const uncategorizedCents = s.uncategorized.spentCents;
 	const budgetsLeftCents =
 		s.totalBudgetCents -
 		s.totalSpentCents +
 		uncategorizedCents +
 		s.unbudgetedCents;
+
 	const differenceCents =
-		uncategorizedCents + s.unbudgetedCents + s.billsDueCents + savingsGoalCents;
+		uncategorizedCents +
+		s.unbudgetedCents +
+		s.billsDueCents +
+		savingsGoalCents +
+		plannedCents;
+
 	const amount = (cents: number) =>
 		formatCents(cents, { wholeDollars: cents % 100 === 0 });
 	const difference =
 		differenceCents === 0
 			? "the same as your budgets"
 			: `${amount(Math.abs(differenceCents))} ${differenceCents > 0 ? "less" : "more"}`;
+
+	// Planned expenses are named only when one is set aside, so an example without one reads as it always has.
+	const setAside =
+		plannedCents > 0
+			? `${amount(s.billsDueCents)} is set aside for bills due, ${amount(savingsGoalCents)} is set aside for the savings goal, and ${amount(plannedCents)} is set aside for planned expenses`
+			: `${amount(s.billsDueCents)} is set aside for bills due, and ${amount(savingsGoalCents)} is set aside for the savings goal`;
 	const spendingPart = (cents: number, normal: string, where: string) =>
 		cents < 0
 			? `${amount(-cents)} more came back as refunds than was spent ${where}`
 			: `${amount(cents)} ${normal}`;
-	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, ${amount(s.billsDueCents)} is set aside for bills due, and ${amount(savingsGoalCents)} is set aside for the savings goal.`;
+	return `Your budgets have ${amount(budgetsLeftCents)} left. Safe to spend is ${difference}: ${spendingPart(uncategorizedCents, "has no category yet", "there")}, ${spendingPart(s.unbudgetedCents, "went to categories with no budget", "in categories with no budget")}, ${setAside}.`;
 }
 
 /**

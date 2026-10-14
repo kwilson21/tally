@@ -53,6 +53,7 @@ import {
 	PAYS_A_BILL_OR_PLAN,
 	paysBillOrPlanSql,
 	paysBillSql,
+	paysPlanSql,
 } from "./counted-month";
 import { maybeIncomeConfidenceSql, plaidSetIncomeSql } from "./income";
 import {
@@ -94,8 +95,13 @@ export type ListRow = {
 	excluded: boolean;
 	/** Linked to a bill's occurrence: it counts in Spent whatever its exclusion, and isn't shown as excluded. */
 	paysBill?: boolean;
+
 	/** The linked bill whose payment this transaction is. */
 	billName?: string | null;
+	/** Linked to a planned expense: it counts whatever its exclusion, as a bill's payment does (decision 82), and `planName` says which. */
+	paysPlan?: boolean;
+	planName?: string | null;
+
 	income: boolean;
 	incomeConfidence?: number | null;
 	creditReviewed: boolean;
@@ -147,6 +153,9 @@ export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.categor
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
 /** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
+/** The name of the planned expense whose payment this transaction is, on its own link or its split parent's (`paysPlanSql`). */
+export const PLAN_NAME_COLUMN = `(SELECT pe.name FROM planned_expenses pe WHERE pe.transaction_id IN (t.id, t.parent_id) LIMIT 1) AS planName`;
+
 export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
 /** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */
 export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.date,1,7) THEN ${COUNTED_MONTH} END AS countsInMonth`;
@@ -375,7 +384,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
-				t.excluded, ${paysBillSql("t")} AS paysBill,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
 				${BILL_NAME_COLUMN},
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence,
@@ -392,6 +401,8 @@ export async function listTransactions(
 				ListRow,
 				| "excluded"
 				| "paysBill"
+				| "paysPlan"
+				| "planName"
 				| "income"
 				| "creditReviewed"
 				| "noteGuessed"
@@ -411,6 +422,8 @@ export async function listTransactions(
 					parentRawName: string | null;
 					excluded: number;
 					paysBill: number;
+					paysPlan: number;
+					planName: string | null;
 					income: number;
 					creditReviewed: number;
 					incomeConfidence: number | null;
@@ -463,6 +476,8 @@ export async function listTransactions(
 					: null,
 				excluded: r.excluded === 1,
 				paysBill: r.paysBill === 1,
+				paysPlan: r.paysPlan === 1,
+				planName: r.planName,
 				income: r.income === 1,
 				incomeConfidence: incomeOn ? r.incomeConfidence : null,
 				creditReviewed: r.creditReviewed === 1,
@@ -736,7 +751,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
-				t.excluded, ${paysBillSql("t")} AS paysBill,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
 				${BILL_NAME_COLUMN},
 				${PENDING_SQL} AS pending, t.flag_income AS income, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
@@ -761,6 +776,8 @@ export async function getTransaction(
 				TransactionDetail,
 				| "excluded"
 				| "paysBill"
+				| "paysPlan"
+				| "planName"
 				| "income"
 				| "creditReviewed"
 				| "noteGuessed"
@@ -782,6 +799,8 @@ export async function getTransaction(
 					thisOwnName: string | null;
 					excluded: number;
 					paysBill: number;
+					paysPlan: number;
+					planName: string | null;
 					income: number;
 					creditReviewed: number;
 					creditReviewedByUser: number;
@@ -840,6 +859,8 @@ export async function getTransaction(
 		detailsVisible: detailsOn,
 		excluded: r.excluded === 1,
 		paysBill: r.paysBill === 1,
+		paysPlan: r.paysPlan === 1,
+		planName: r.planName,
 		income: r.income === 1,
 		incomeConfidence: incomeOn ? r.incomeConfidence : null,
 		creditReviewed: r.creditReviewed === 1,
@@ -2526,6 +2547,22 @@ export async function saveJevResult(
 }
 
 /** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
+
+/** How many of these transactions pay a planned expense, on their own link or their split parent's (`paysPlanSql`). */
+export async function payingPlansCount(
+	db: D1Database,
+	ids: number[],
+): Promise<number> {
+	if (ids.length === 0) return 0;
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysPlanSql("t")}`,
+		)
+		.bind(JSON.stringify(ids))
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
 export async function payingBillsCount(
 	db: D1Database,
 	ids: number[],
