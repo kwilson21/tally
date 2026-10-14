@@ -416,6 +416,39 @@ describe("Plans: a plan's sheet closes to what opened it, with focus back there"
 		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
 	});
 
+	it("keeps the plan's own page under its sheet when an invalid save redraws it from that page", async () => {
+		const id = await planId();
+		const fields = planFields("", thisMonth);
+		fields.set("opener", "plan");
+		const html = await post(`/plans/${id}`, fields);
+		expect(html).toContain('id="plan-sheet-title"');
+		expect(html).toContain("Say what it");
+		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
+		expect(html).toMatch(
+			/<h1 class="font-serif text-5xl[^"]*">Car registration<\/h1>/,
+		);
+		expect(tagWithId(html, "edit-plan")).not.toBe("");
+		expect(tagWithId(html, "edit-plan")).not.toContain("autofocus");
+		expect(html).not.toContain('id="plan-expense"');
+		expect(html).not.toContain('id="add-bill"');
+	});
+
+	it("draws the plan's own page under its edit sheet when a no-JavaScript edit from that page is loaded", async () => {
+		const id = await planId();
+		const html = await get(`/plans/${id}/edit?opener=plan`);
+		expect(html).toContain('id="edit-plan"');
+		expect(html).not.toContain('id="plan-expense"');
+	});
+
+	it("keeps Bills as the answer for a plan's invalid save and its sheet's Unlink when the sheet isn't opened from the plan's page", async () => {
+		const id = await planId();
+		const invalid = await post(`/plans/${id}`, planFields("", thisMonth));
+		expect(invalid).toContain('id="plan-expense"');
+		expect(backdropHref(invalid)).toBe(`/bills?focus=plan-${id}`);
+		const unlink = await post(`/plans/${id}/unlink`, new URLSearchParams());
+		expect(unlink).toContain('id="plan-expense"');
+	});
+
 	it("saving an edit from the plan's page with htmx answers with that page, focus on Edit planned expense, and its address", async () => {
 		const id = await planId();
 		const fields = planFields("Car registration", thisMonth);

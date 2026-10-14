@@ -8,6 +8,9 @@ import { LedgerField } from "./ledger-field";
 import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
 
+/** The longest name a planned expense can have: the sheet's field stops at it, and the save refuses more (plans.tsx). */
+export const PLAN_NAME_MAX = 80;
+
 export type PlannedRowData = {
 	id: number;
 	name: string;
@@ -277,7 +280,7 @@ export function PlanSheet({
 						error={errors.name}
 						surface="paper"
 						required
-						maxlength={80}
+						maxlength={PLAN_NAME_MAX}
 					/>
 					<LedgerField
 						big

@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import { actor } from "../actor";
 import { householdToday, monthName, monthsBefore, shortDay } from "../dates";
 import {
@@ -21,6 +22,7 @@ import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
 import {
+	PLAN_NAME_MAX,
 	type PlanMonthOption,
 	PlanPaymentPicker,
 	PlanSheet,
@@ -33,16 +35,12 @@ export const plans = new Hono<App>();
 
 /** The months a plan can be set aside in: this month and the next eleven, plus the plan's own month when earlier. */
 function monthOptions(current: string, own?: string): PlanMonthOption[] {
-	const start = own && own < current ? own : current;
-	const end = monthsBefore(current, -11);
-	const options: PlanMonthOption[] = [];
-	for (let month = start; month <= end; month = monthsBefore(month, -1)) {
-		options.push({
-			value: month,
-			label: `${monthName(month)} ${month.slice(0, 4)}`,
-		});
-	}
-	return options;
+	const months = own && own < current ? [own] : [];
+	for (let i = 0; i < 12; i++) months.push(monthsBefore(current, -i));
+	return months.map((month) => ({
+		value: month,
+		label: `${monthName(month)} ${month.slice(0, 4)}`,
+	}));
 }
 
 /**
@@ -100,23 +98,21 @@ async function sheetPage(
 					amountCents: plan.paidAmountCents,
 				}
 			: undefined;
-	return billsPage(
-		c,
-		{
-			plan: (
-				<PlanSheet
-					plan={plan}
-					values={values}
-					months={monthOptions(month, plan?.month)}
-					errors={errors}
-					paidBy={paidBy}
-					deleteConfirm={deleteConfirm}
-					opener={opener}
-				/>
-			),
-		},
-		today,
+	const sheet = (
+		<PlanSheet
+			plan={plan}
+			values={values}
+			months={monthOptions(month, plan?.month)}
+			errors={errors}
+			paidBy={paidBy}
+			deleteConfirm={deleteConfirm}
+			opener={opener}
+		/>
 	);
+	// Opened from the plan's own page, the sheet stays over that page, so a redraw keeps the page under it.
+	if (opener && plan)
+		return planPage(c, plan.id, undefined, false, false, sheet);
+	return billsPage(c, { plan: sheet }, today);
 }
 
 /**
@@ -132,10 +128,15 @@ function planForm(form: Record<string, unknown>, month: string, own?: string) {
 	};
 	const errors: Record<string, string> = {};
 	if (!values.name) errors.name = "Say what it's for.";
+	else if (values.name.length > PLAN_NAME_MAX)
+		errors.name = `Keep the name under ${PLAN_NAME_MAX} characters.`;
 	let amountCents = 0;
 	try {
 		amountCents = toCents(values.amount);
-		if (amountCents <= 0) throw new Error("not above zero");
+		if (!Number.isSafeInteger(amountCents))
+			errors.amount = "Enter a smaller amount in dollars and cents.";
+		else if (amountCents <= 0)
+			errors.amount = "Enter an amount greater than $0.";
 	} catch {
 		errors.amount = "Enter an amount greater than $0.";
 	}
@@ -233,6 +234,7 @@ plans.get("/plans/:id/delete", async (c) => {
 /**
  * A plan's own page, where its payment is linked (P101). `focusEditPlan` and `focusLinkHeading` take focus when the page is
  * drawn: Edit planned expense after its sheet's save, the Link a payment heading after an Unlink that changed nothing (#87).
+ * `sheet` is a plan's sheet drawn over the page (#87); the sheet takes focus, so neither of those focuses applies then.
  */
 async function planPage(
 	c: Context<App>,
@@ -240,6 +242,7 @@ async function planPage(
 	error?: string,
 	focusEditPlan = false,
 	focusLinkHeading = false,
+	sheet?: Child,
 ) {
 	const plan = await loadPlan(c.env.DB, id);
 	if (!plan) return c.notFound();
@@ -292,7 +295,7 @@ async function planPage(
 						name={plan.name}
 						amountCents={plan.amountCents}
 						error={error}
-						focusHeading={focusLinkHeading}
+						focusHeading={focusLinkHeading && !sheet}
 						candidates={candidates.map((candidate) => ({
 							id: candidate.id,
 							date: candidate.date,
@@ -308,13 +311,15 @@ async function planPage(
 						id="edit-plan"
 						kind="secondary"
 						href={`/plans/${plan.id}/edit?opener=plan`}
-						autofocus={focusEditPlan || c.req.query("focus") === "edit-plan"}
+						autofocus={
+							!sheet && (focusEditPlan || c.req.query("focus") === "edit-plan")
+						}
 						{...sheetAttrs(`/plans/${plan.id}/edit?opener=plan`)}
 					>
 						Edit planned expense
 					</Button>
 				</div>
-				<div id="sheet" />
+				<div id="sheet">{sheet}</div>
 			</div>
 		</Layout>,
 	);

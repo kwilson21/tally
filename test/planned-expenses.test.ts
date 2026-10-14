@@ -450,6 +450,156 @@ describe("Bills' Planned group, Band and sheet", () => {
 		);
 	});
 
+	it("unlinks a paid plan from its sheet opened on the plan's own page, which answers with that page under the sheet, now unpaid", async () => {
+		const id = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9756, 18000),
+		);
+		const sheet = await post(`/plans/${id}/unlink`, { opener: "plan" });
+		expect(sheet.headers.get("HX-Trigger")).toContain("Payment unlinked");
+		const html = await sheet.text();
+		expect(html).toContain('id="plan-sheet-title"');
+		expect(html).not.toContain("Paid by");
+		expect(html).toContain('id="edit-plan"');
+		expect(html).toContain("Link a payment");
+		expect(html).not.toContain('id="plan-expense"');
+	});
+
+	it("offers this month and the next eleven, plus only the plan's own earlier month, on a new plan's and an edit's Month", async () => {
+		const own = monthsBefore(MONTH, 6);
+		const id = await plan("Car registration", 18000, own);
+		const offeredBy = async (path: string) => {
+			const html = await (await exports.default.fetch(BASE + path)).text();
+			const select =
+				html.match(/<select id="plan-month"[\s\S]*?<\/select>/)?.[0] ?? "";
+			return [...select.matchAll(/<option value="([^"]*)"/g)].map(
+				(match) => match[1],
+			);
+		};
+		const thisAndNext = Array.from({ length: 12 }, (_, i) =>
+			monthsBefore(MONTH, -i),
+		);
+		expect(await offeredBy(`/plans/${id}/edit`)).toEqual([own, ...thisAndNext]);
+		expect(await offeredBy("/plans/new")).toEqual(thisAndNext);
+	});
+
+	it("refuses a plan's month in the gap between its own month and this month's next eleven, and keeps the month", async () => {
+		const own = monthsBefore(MONTH, 6);
+		const id = await plan("Car registration", 18000, own);
+		const gap = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: monthsBefore(MONTH, 3),
+		});
+		expect(await gap.text()).toContain("Choose a month.");
+		const row = await env.DB.prepare(
+			"SELECT month FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ month: string }>();
+		expect(row?.month).toBe(own);
+	});
+
+	it("saves a plan in its own earlier month", async () => {
+		const own = monthsBefore(MONTH, 6);
+		const id = await plan("Car registration", 18000, own);
+		const kept = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: own,
+		});
+		expect(kept.headers.get("HX-Trigger")).toContain("Saved Car registration.");
+	});
+
+	it("refuses an amount too large to store, for a new plan and an edit, and keeps the plan's amount", async () => {
+		const huge = await post("/plans", {
+			name: "Big plan",
+			amount: "99999999999999999999",
+			month: MONTH,
+		});
+		expect(await huge.text()).toContain(
+			"Enter a smaller amount in dollars and cents.",
+		);
+		const created = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name='Big plan'",
+		).first<{ n: number }>();
+		expect(created?.n).toBe(0);
+
+		const id = await plan("Car registration", 18000, MONTH);
+		for (const amount of ["99999999999999999999", `1${"0".repeat(400)}`]) {
+			const edited = await post(`/plans/${id}`, {
+				name: "Car registration",
+				amount,
+				month: MONTH,
+			});
+			expect(edited.status).toBe(200);
+			expect(await edited.text()).toContain(
+				"Enter a smaller amount in dollars and cents.",
+			);
+		}
+		const row = await env.DB.prepare(
+			"SELECT amount_cents AS a FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ a: number }>();
+		expect(row?.a).toBe(18000);
+	});
+
+	it("refuses a plan name over 80 characters on create, and keeps the name on an edit", async () => {
+		const created = await post("/plans", {
+			name: "N".repeat(81),
+			amount: "180",
+			month: MONTH,
+		});
+		expect(await created.text()).toContain(
+			"Keep the name under 80 characters.",
+		);
+		const count = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE name=?",
+		)
+			.bind("N".repeat(81))
+			.first<{ n: number }>();
+		expect(count?.n).toBe(0);
+
+		const id = await plan("Car registration", 18000, MONTH);
+		const edited = await post(`/plans/${id}`, {
+			name: "E".repeat(81),
+			amount: "180",
+			month: MONTH,
+		});
+		expect(await edited.text()).toContain("Keep the name under 80 characters.");
+		const row = await env.DB.prepare(
+			"SELECT name FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ name: string }>();
+		expect(row?.name).toBe("Car registration");
+	});
+
+	it("saves a plan name of exactly 80 characters, on create and on edit", async () => {
+		const created = await post("/plans", {
+			name: "N".repeat(80),
+			amount: "180",
+			month: MONTH,
+		});
+		expect(created.headers.get("HX-Trigger")).toContain("Planned ");
+		const id = await plan("Car registration", 18000, MONTH);
+		const edited = await post(`/plans/${id}`, {
+			name: "E".repeat(80),
+			amount: "180",
+			month: MONTH,
+		});
+		expect(edited.headers.get("HX-Trigger")).toContain("Saved ");
+		const row = await env.DB.prepare(
+			"SELECT name FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ name: string }>();
+		expect(row?.name).toBe("E".repeat(80));
+	});
+
 	it("totals Paid this month with the plans it lists, as the bills' paid total does", async () => {
 		await plan("Car registration", 18000, MONTH, await payment(9740, 18000));
 		const html = await (await exports.default.fetch(`${BASE}/bills`)).text();
@@ -568,6 +718,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(html).toContain('id="plan-sheet-title"');
 		expect(html).not.toContain("Paid by");
 		expect(html).toContain('id="page"');
+		expect(html).toContain('id="plan-expense"');
 
 		const plain = await exports.default.fetch(`${BASE}/plans/${id}/unlink`, {
 			method: "POST",
