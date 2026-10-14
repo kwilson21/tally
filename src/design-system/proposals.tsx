@@ -445,33 +445,35 @@ export function Proposals() {
 
 			<section aria-labelledby="polish4-title" class="mt-10">
 				<h2 id="polish4-title" class="font-serif text-3xl font-semibold">
-					Open: the polish track, More, Feedback and the first visit
+					Picked: the polish track, More, Feedback and the first visit
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 13 for the owner's pick: what More shows, where Feedback
-					lives, and what a first visit shows and teaches.
+					Drawn Oct 13. The owner's picks, marked Picked, are decision 111: what
+					More shows, where Feedback lives, and what a first visit shows and
+					teaches.
 				</p>
 				<PolishRoundCProposals />
 			</section>
 
 			<section aria-labelledby="polish3-title" class="mt-12">
 				<h2 id="polish3-title" class="font-serif text-3xl font-semibold">
-					Open: the polish track, the edit panel and the list's top
+					Picked: the polish track, the edit panel and the list's top
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 13 for the owner's pick: what the edit panel leads with, and
-					how much of Transactions' first screen goes to filters.
+					Drawn Oct 13. The owner's picks, marked Picked, are decision 111: what
+					the edit panel leads with, and how much of Transactions' first screen
+					goes to filters.
 				</p>
 				<PolishRoundBProposals />
 			</section>
 
 			<section aria-labelledby="polish2-title" class="mt-12">
 				<h2 id="polish2-title" class="font-serif text-3xl font-semibold">
-					Open: the polish track, rows and saves
+					Picked: the polish track, rows and saves
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 13 for the owner's pick: how a row shows it opens, and how
-					the row you just saved shows it changed.
+					Drawn Oct 13. The owner's picks, marked Picked, are decision 111: how
+					a row shows it opens, and how the row you just saved shows it changed.
 				</p>
 				<PolishRoundAProposals />
 			</section>

@@ -2,8 +2,8 @@
 // layouts (P120) and how much of Transactions' first screen goes to filters (P121). Each picture is
 // the real components in src/views/ (DetailRow, Switch, Chip, FilterSelect, TransactionRow, ViewLinks,
 // HowLink, WhyLink) with the prototypes the picked drawings left (Search, Footer, Row, TallSheet).
-// Today is Mon Oct 13. Local Bakery needs a category; Trader Joe's was picked by Tally. Nothing here
-// is decided until the owner picks.
+// Today is Mon Oct 13. Local Bakery needs a category; Trader Joe's was picked by Tally. The owner's
+// picks (decision 111) are marked Picked.
 
 import type { Child } from "hono/jsx";
 import { dayLabel } from "../dates";
@@ -23,7 +23,7 @@ import { Switch } from "../views/switch";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
-import { Fixed, type Option, Options } from "./proposal-parts";
+import { Fixed, type Option, Options, PickedPill } from "./proposal-parts";
 import {
 	categoryValue,
 	Footer,
@@ -803,6 +803,7 @@ function Pictured({ options }: { options: Wide[] }) {
 									Recommended
 								</span>
 							)}
+							{o.picked && <PickedPill />}
 						</h4>
 						<p class="text-sm">{o.note}</p>
 						{o.tradeoff && (
@@ -867,6 +868,7 @@ const panelOptions: Wide[] = [
 	},
 	{
 		name: "B · Category leads, folds when set",
+		picked: true,
 		note: "When a transaction needs a category the choices lead; when it has one, it's one line you can open.",
 		tradeoff: "changing an already-sorted category takes one extra tap.",
 		recommended:
@@ -941,6 +943,7 @@ const panelDesktop: Option[] = [
 	},
 	{
 		name: "At 1280: B · Category leads, folds when set",
+		picked: true,
 		note: "The same panel for Local Bakery, with its categories open.",
 		desktop: true,
 		screen: (
@@ -965,6 +968,7 @@ const filterOptions: Wide[] = [
 	},
 	{
 		name: "A · Filters fold away",
+		picked: true,
 		note: "Search and Needs category stay in view; the four filters fold behind one Filters pill.",
 		tradeoff: "changing the month or account takes one more tap.",
 		recommended:
@@ -1009,6 +1013,7 @@ const filterDesktop: Option[] = [
 	},
 	{
 		name: "At 1280: A · Filters fold away",
+		picked: true,
 		note: "The Filters pill on a wide screen, closed.",
 		desktop: true,
 		screen: (
@@ -1029,7 +1034,7 @@ const filterDesktop: Option[] = [
 	},
 ];
 
-/** P120 and P121 on the proposals page, open (decision 47). */
+/** P120 and P121 on the proposals page, picked (decision 111): each option drawn, the owner's pick marked. */
 export function PolishRoundBProposals() {
 	return (
 		<>

@@ -1,4 +1,4 @@
-// P122–P124 (issues #499, #95 and #501): the owner's open polish picks, each option drawn as the
+// P122–P124 (issues #499, #95 and #501): the owner's polish picks (decision 111), each option drawn as the
 // screens it changes, so the owner decides by seeing (decision 47). Every picture is inert and
 // labelled, like the rest of the page. Where the app's markup is the same at a phone's size (the
 // Wordmark, Band, WhyLink, ProgressRow, TransactionRow, FeedbackButton, LedgerIllustration, Icon),
@@ -22,7 +22,7 @@ import { ProgressRow } from "../views/progress-row";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
-import { Fixed, Sheet } from "./proposal-parts";
+import { Fixed, PickedPill, Sheet } from "./proposal-parts";
 import { TITLE, tx } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
@@ -337,6 +337,8 @@ type ChoiceProps = {
 	cost?: string;
 	/** Why it's the recommended one, in one line. */
 	why?: string;
+	/** The owner picked this one (decision 111). */
+	picked?: boolean;
 	/** One more sentence under the idea. */
 	extra?: Child;
 	/** A card as wide as its pictures need. */
@@ -353,6 +355,7 @@ function Choice({
 	note,
 	cost,
 	why,
+	picked,
 	extra,
 	width = "w-[392px]",
 	children,
@@ -367,6 +370,7 @@ function Choice({
 							Recommended
 						</span>
 					)}
+					{picked && <PickedPill />}
 				</h4>
 				<p class="text-sm">{note}</p>
 				{extra && <p class="text-sm">{extra}</p>}
@@ -1174,9 +1178,9 @@ const familyBehind = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// The page's three open proposals.
+// The page's three polish proposals, picked.
 
-/** The three open polish picks: More, Feedback, and a first visit (P122–P124). */
+/** The three polish picks: More, Feedback, and a first visit (P122–P124), picked in decision 111. */
 export function PolishRoundCProposals() {
 	return (
 		<>
@@ -1203,6 +1207,7 @@ export function PolishRoundCProposals() {
 						note="More reads like the contents page of a ledger: each place, what it holds, and a count that says when it needs you."
 						cost="Two small live counts on More."
 						why="A newcomer sees what's behind each door, and More points to the place that needs them."
+						picked
 					>
 						<div class="flex min-w-0 max-w-full flex-col gap-4">
 							<MoreScreen label="Option A, More">{contentsMore}</MoreScreen>
@@ -1282,6 +1287,7 @@ export function PolishRoundCProposals() {
 						note="The pill you signed off moves into the top line of every page, so it's always on the first screen and never over a number."
 						cost="On a long page it's at the top, not beside your thumb."
 						why="Nothing ever covers an amount or a button again."
+						picked
 						extra={
 							<>
 								Keeps decision 59's "always visible" on every page's first
@@ -1365,6 +1371,10 @@ export function PolishRoundCProposals() {
 					demo resets every night; How Tally works and Why? links stay (decision
 					65).
 				</Fixed>
+				<p class="mt-6">
+					P124 A is picked for the demo's first visit; the family's first week
+					is being redrawn.
+				</p>
 				<Choices>
 					<Choice
 						name="Today (current)"
@@ -1403,6 +1413,7 @@ export function PolishRoundCProposals() {
 						note="Tally's story gets one opening page: the bank's lines struck through, Tally's written over them, and the total under a double rule."
 						cost="A visitor who never taps Start here never sees the story; How this works moves to each page's foot."
 						why="The whole idea in three lines and one total, and a new family never sees a wrong number on day one."
+						picked
 					>
 						<Shot caption="The demo's Home: Start here in the banner, no link under the number">
 							<Phone

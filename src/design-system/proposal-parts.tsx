@@ -24,6 +24,16 @@ export type Option = {
 	screen: Child;
 };
 
+/** The owner's pick, beside an option's name: the same pill on every proposal that has one. */
+export function PickedPill() {
+	return (
+		<span class="inline-flex items-center gap-1 rounded-full bg-band px-2.5 py-0.5 text-sm font-medium">
+			<Icon name="check" class="size-4" />
+			Picked
+		</span>
+	);
+}
+
 /**
  * A proposal's options side by side, each named, described and weighed above its picture. The
  * picture sits in a `data-screen` box, so a test can tell a drawn screen from an empty frame.
@@ -43,12 +53,7 @@ export function Options({ options }: { options: Option[] }) {
 									Recommended
 								</span>
 							)}
-							{o.picked && (
-								<span class="inline-flex items-center gap-1 rounded-full bg-band px-2.5 py-0.5 text-sm font-medium">
-									<Icon name="check" class="size-4" />
-									Picked
-								</span>
-							)}
+							{o.picked && <PickedPill />}
 						</h4>
 						<p class="text-sm">{o.note}</p>
 						{o.tradeoff && (

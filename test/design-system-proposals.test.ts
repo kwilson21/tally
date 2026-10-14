@@ -31,6 +31,16 @@ const optionOf = (chunk: string, name: string) => {
 	return chunk.slice(at, end);
 };
 
+/** A block's options in drawing order, each with its name and whether its heading carries the Picked pill. */
+const optionPicks = (chunk: string) =>
+	[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map((m) => {
+		const heading = m[1] ?? "";
+		return {
+			name: heading.split("<")[0] ?? "",
+			picked: heading.includes(">Picked<"),
+		};
+	});
+
 // Elements HTML never closes, so they don't open a level in actions() below.
 const VOID = new Set([
 	"area",
@@ -334,7 +344,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P119 with one recommended option each (P91–P109 and P117 are picks drawn as decided; P118 and P119 are open), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P124 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -343,9 +353,9 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P119 is drawn, and each id is used once.
+		// Every proposal from P23 to P124 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 119; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 124; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -367,14 +377,17 @@ describe("GET /design-system/proposals", () => {
 				id,
 				eachOption ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
 			]);
-			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options. P118 to P124 are open (no pick yet), so they mark none.
+			// P34 on mark the owner's pick (decisions 72–86), and P118 to P124 mark the owner's picks (decision 111).
+			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
-			const expected =
-				n < 34 || n >= 118
-					? 0
-					: id === "p60-bills-total" || id === "p111-delete-cash"
-						? 2
-						: 1;
+			const twoPicks = [
+				"p60-bills-total",
+				"p111-delete-cash",
+				"p118-rows",
+				"p120-panel",
+				"p121-header",
+			];
+			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -388,7 +401,11 @@ describe("GET /design-system/proposals", () => {
 			expect([
 				id,
 				drawn.every((count) =>
-					id === "p119-saved" ? count === 0 : n >= 120 ? count >= 1 : count === 1,
+					id === "p119-saved"
+						? count === 0
+						: n >= 120
+							? count >= 1
+							: count === 1,
 				),
 			]).toEqual([id, true]);
 			expect([id, section.match(PICTURE)?.length ?? 0]).toEqual([
@@ -811,7 +828,35 @@ describe("GET /design-system/proposals", () => {
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
-	describe("P118 and P119 · the open polish track (#497, #71)", () => {
+	it("marks the owner's picks for P118 to P124 (decision 111): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
+		const { html } = await get("/design-system/proposals");
+		const picks = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start, id).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return optionPicks(html.slice(start, next < 0 ? undefined : next))
+				.filter((option) => option.picked)
+				.map((option) => option.name);
+		};
+		expect(picks("p118-rows")).toEqual([
+			"A · Quiet chevron",
+			"Desktop · A · Quiet chevron",
+		]);
+		expect(picks("p119-saved")).toEqual(["A · Auditor&#39;s tick"]);
+		expect(picks("p120-panel")).toEqual([
+			"B · Category leads, folds when set",
+			"At 1280: B · Category leads, folds when set",
+		]);
+		expect(picks("p121-header")).toEqual([
+			"A · Filters fold away",
+			"At 1280: A · Filters fold away",
+		]);
+		expect(picks("p122-more")).toEqual(["Option A · Contents page"]);
+		expect(picks("p123-feedback")).toEqual(["Option A · In the top line"]);
+		expect(picks("p124-first-visit")).toEqual(["Option A · The first page"]);
+	});
+
+	describe("P118 and P119 · the polish track, picked (#497, #71, decision 111)", () => {
 		it("opens the page with its own section, ahead of the polish pass's picks", async () => {
 			const { html } = await get("/design-system/proposals");
 			const open = html.indexOf('<section aria-labelledby="polish2-title"');
@@ -820,9 +865,9 @@ describe("GET /design-system/proposals", () => {
 				html.indexOf('<section aria-labelledby="polish-title"'),
 			);
 			expect(html).toContain('id="polish2-title"');
-			expect(html).toContain("Open: the polish track, rows and saves");
+			expect(html).toContain("Picked: the polish track, rows and saves");
 			expect(html).toContain(
-				"Drawn Oct 13 for the owner&#39;s pick: how a row shows it opens, and how the row you just saved shows it changed.",
+				"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: how a row shows it opens, and how the row you just saved shows it changed.",
 			);
 		});
 
@@ -1028,7 +1073,7 @@ describe("GET /design-system/proposals", () => {
 		expect(reachableInPictures(html)).toEqual([]);
 	});
 
-	it("opens the page with the open polish picks P122–P124 (issues #499, #95 and #501): each option named and drawn, A recommended, none picked", async () => {
+	it("opens the page with the picked polish choices P122–P124 (issues #499, #95 and #501): each option named and drawn, A recommended and picked, the demo's first visit only", async () => {
 		const { html } = await get("/design-system/proposals");
 		// The new section comes first, above the Picked polish pass, and says what it is for.
 		const first = html.indexOf('<section aria-labelledby="polish4-title"');
@@ -1037,10 +1082,14 @@ describe("GET /design-system/proposals", () => {
 			html.indexOf('<section aria-labelledby="polish-title"'),
 		);
 		expect(html).toContain(
-			'<h2 id="polish4-title" class="font-serif text-3xl font-semibold">Open: the polish track, More, Feedback and the first visit</h2>',
+			'<h2 id="polish4-title" class="font-serif text-3xl font-semibold">Picked: the polish track, More, Feedback and the first visit</h2>',
 		);
 		expect(html).toContain(
-			"Drawn Oct 13 for the owner&#39;s pick: what More shows, where Feedback lives, and what a first visit shows and teaches.",
+			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what More shows, where Feedback lives, and what a first visit shows and teaches.",
+		);
+		// P124 A is the pick for the demo's first visit; the family's first week is still being redrawn.
+		expect(html).toContain(
+			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is being redrawn.",
 		);
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
@@ -1369,10 +1418,10 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		);
 		expect(html).toContain('<h2 id="polish3-title"');
 		expect(html).toContain(
-			"Open: the polish track, the edit panel and the list&#39;s top",
+			"Picked: the polish track, the edit panel and the list&#39;s top",
 		);
 		expect(html).toContain(
-			"Drawn Oct 13 for the owner&#39;s pick: what the edit panel leads with, and how much of Transactions&#39; first screen goes to filters.",
+			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what the edit panel leads with, and how much of Transactions&#39; first screen goes to filters.",
 		);
 	});
 

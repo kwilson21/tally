@@ -1,8 +1,8 @@
-// P118 and P119 (#497 and #71, decision 47): the polish track's open choices, drawn so the owner can
+// P118 and P119 (#497 and #71, decision 47): the polish track's choices, drawn so the owner can
 // pick by seeing. P118 is how a row shows it opens. P119 is how the row you just saved shows it
 // changed. Today's pictures are the real components. Each option is a copy of them that changes only
-// what the option changes, so the pictures compare like with like. Nothing here is decided until the
-// owner picks.
+// what the option changes, so the pictures compare like with like. The owner's picks (decision 111)
+// are marked Picked.
 
 import type { Child } from "hono/jsx";
 import { dayLabel } from "../dates";
@@ -17,7 +17,7 @@ import { BottomTabs, type NavKey } from "../views/nav";
 import { ProgressRow } from "../views/progress-row";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { rowCaption, TransactionRow } from "../views/transaction-row";
-import { DesktopFrame, Fixed } from "./proposal-parts";
+import { DesktopFrame, Fixed, PickedPill } from "./proposal-parts";
 import {
 	EATING_OUT,
 	GROCERIES,
@@ -403,6 +403,7 @@ type Choice = {
 	cost?: string;
 	why?: string;
 	recommended?: boolean;
+	picked?: boolean;
 	desktop?: boolean;
 	picture: Child;
 };
@@ -423,6 +424,7 @@ function Choices({ choices }: { choices: Choice[] }) {
 									Recommended
 								</span>
 							)}
+							{c.picked && <PickedPill />}
 						</h4>
 						<p class="text-sm">{c.note}</p>
 						{c.cost && <p class="text-sm text-muted">Trade-off: {c.cost}</p>}
@@ -714,6 +716,7 @@ function SavedOption({
 	cost,
 	why,
 	recommended,
+	picked,
 	notes = [],
 	pictures,
 }: {
@@ -722,6 +725,7 @@ function SavedOption({
 	cost?: string;
 	why?: string;
 	recommended?: boolean;
+	picked?: boolean;
 	notes?: string[];
 	pictures: { caption: string; still: Child }[];
 }) {
@@ -735,6 +739,7 @@ function SavedOption({
 							Recommended
 						</span>
 					)}
+					{picked && <PickedPill />}
 				</h4>
 				<p class="text-sm">{note}</p>
 				{cost && <p class="text-sm text-muted">Trade-off: {cost}</p>}
@@ -782,7 +787,7 @@ function savedPictures(option: Option) {
 
 // ---------------------------------------------------------------------------------------------
 
-/** P118 and P119 on the proposals page, open: each option drawn, none picked. */
+/** P118 and P119 on the proposals page, picked (decision 111): each option drawn, the owner's pick marked. */
 export function PolishRoundAProposals() {
 	return (
 		<>
@@ -807,6 +812,7 @@ export function PolishRoundAProposals() {
 						{
 							name: "A · Quiet chevron",
 							recommended: true,
+							picked: true,
 							note: "Every row that opens ends in the same small muted arrow Settings already uses.",
 							cost: "One small arrow on four kinds of row; names lose about 2 letters at 390.",
 							why: "A tap target you can see on every row, and twelve pills become quiet words.",
@@ -828,6 +834,7 @@ export function PolishRoundAProposals() {
 						{
 							name: "Desktop · A · Quiet chevron",
 							note: "Transactions at 1280: the same six rows, with the arrow.",
+							picked: true,
 							desktop: true,
 							picture: <ul class="divide-y divide-rule">{quietRows()}</ul>,
 						},
@@ -881,6 +888,7 @@ export function PolishRoundAProposals() {
 					<SavedOption
 						option="tick"
 						recommended
+						picked
 						note="A pencil tick lands where the row's arrow sits, the mark you'd make in a paper ledger, and lifts with the toast at four seconds."
 						cost="One new drawn mark; the row's arrow is hidden while the toast is up."
 						why="You see exactly which row you changed, beside its number, and nothing stays behind."
