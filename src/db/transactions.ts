@@ -1853,8 +1853,8 @@ export async function saveSplit(
 			: [];
 	// The purchase's own refund link is cleared only when the refund no longer fits (unlinkSplitOverRefundedSql), and the
 	// new parts keep it otherwise. RETURNING names it when it goes, alongside the refunds unlinked from the purchase and parts.
-	// A part that a kept plan still holds here is positive (a plan's payment is money out, linkPlanPayment), so no refund
-	// counts it: the refund check reads the same as without those parts.
+	// A part that a kept plan still holds here has no refund link left: unlinkLinked, earlier in this batch, has cleared
+	// every refund link on the purchase's parts, so no refund counts it.
 	const unlinkRefund = db
 		.prepare(
 			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)
