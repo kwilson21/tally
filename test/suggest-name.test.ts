@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	cleanSuggestedNames,
 	NAME_MODEL,
+	restatesStore,
 	suggestNames,
 	suggestNote,
 } from "../src/ai/suggest-name";
@@ -190,11 +191,7 @@ describe("suggestNote", () => {
 
 	it("keeps a line that says more than the store's name", async () => {
 		expect(
-			await suggestNote(
-				fakeAi("App or iCloud subscription"),
-				"APPLE.COM/BILL",
-				["Apple"],
-			),
+			await suggestNote(fakeAi("App or iCloud subscription"), "APPLE.COM/BILL"),
 		).toEqual({ ok: true, note: "App or iCloud subscription" });
 	});
 
@@ -203,7 +200,6 @@ describe("suggestNote", () => {
 			await suggestNote(
 				fakeAi("CVS Pharmacy prescription refill"),
 				"CVS PHARMACY #1234",
-				["CVS Pharmacy"],
 			),
 		).toEqual({ ok: true, note: "CVS Pharmacy prescription refill" });
 	});
@@ -220,89 +216,73 @@ describe("suggestNote", () => {
 		["Pharmacy stuff", "CVS PHARMACY #1234"],
 		["CVS bill payment", "CVS PHARMACY #1234"],
 	])(
-		"drops %j for %j, since it only restates the store and a generic noun",
+		"drops %j for %j, since it only restates the bank text and a generic noun",
 		async (answer, rawName) => {
-			expect(
-				await suggestNote(fakeAi(answer), rawName, ["CVS Pharmacy"]),
-			).toEqual({ ok: true, note: null });
+			expect(await suggestNote(fakeAi(answer), rawName)).toEqual({
+				ok: true,
+				note: null,
+			});
 		},
 	);
 
-	it("drops a line that restates the store when there is no merchant name", async () => {
-		expect(await suggestNote(fakeAi("Blue Bottle"), RAW, [null])).toEqual({
+	it("drops a line that restates the bank text", async () => {
+		expect(await suggestNote(fakeAi("Blue Bottle"), RAW)).toEqual({
 			ok: true,
 			note: null,
 		});
 	});
+});
 
+describe("restatesStore", () => {
 	it.each([
 		["ATT bill", "AT&T", null],
 		["AT&T bill", "AT&T", null],
 		["Trader Joes purchase", "TRADER JOE'S #552", "Trader Joe's"],
 		["Trader Joe's purchase", "TRADER JOES #552", null],
 		["Walmart purchase", "WAL-MART #1234", null],
-	])(
-		"drops %j for %j, since the store's name matches once its inner punctuation is dropped",
-		async (answer, rawName, merchantName) => {
-			expect(
-				await suggestNote(fakeAi(answer), rawName, [merchantName]),
-			).toEqual({ ok: true, note: null });
-		},
-	);
-
-	it("keeps a line that names something the store's name with punctuation doesn't", async () => {
-		expect(await suggestNote(fakeAi("Wireless plan"), "AT&T", [null])).toEqual({
-			ok: true,
-			note: "Wireless plan",
-		});
-	});
-
-	it.each([
+		["CVS purchase.", "CVS PHARMACY #1234", "CVS Pharmacy"],
 		["Trip to CVS", "CVS PHARMACY #1234", "CVS Pharmacy"],
 		["Visit to CVS", "CVS PHARMACY #1234", "CVS Pharmacy"],
 		["My CVS order", "CVS PHARMACY #1234", "CVS Pharmacy"],
 		["Our Costco trip", "COSTCO WHSE #1234", "Costco"],
 	])(
-		"drops %j for %j, since to, my and our only add filler to the store's name",
-		async (answer, rawName, merchantName) => {
-			expect(
-				await suggestNote(fakeAi(answer), rawName, [merchantName]),
-			).toEqual({ ok: true, note: null });
+		"says %j restates the store %j named %j, since to, my, our and the generic words only add filler",
+		(answer, rawName, merchantName) => {
+			expect(restatesStore(answer, [rawName, merchantName])).toBe(true);
 		},
 	);
 
-	it("keeps a line that says what was bought, even with to, with or my in it", async () => {
+	it("says a line restates a name the row shows, when the bank sent no merchant name", () => {
 		expect(
-			await suggestNote(
-				fakeAi("Trip to CVS for allergy meds"),
-				"CVS PHARMACY #1234",
-				["CVS Pharmacy"],
-			),
-		).toEqual({ ok: true, note: "Trip to CVS for allergy meds" });
-		expect(
-			await suggestNote(fakeAi("Lunch with my team"), "THAI PALACE", [
-				"Thai Palace",
-			]),
-		).toEqual({ ok: true, note: "Lunch with my team" });
-	});
-
-	it("drops a line that repeats a name the row shows, when the bank sent no merchant name", async () => {
-		expect(
-			await suggestNote(fakeAi("Blue Bottle Coffee purchase"), "BL BTTL COF", [
-				null,
+			restatesStore("Blue Bottle Coffee purchase", [
+				"BL BTTL COF",
 				"Blue Bottle Coffee",
 				null,
 			]),
-		).toEqual({ ok: true, note: null });
+		).toBe(true);
 	});
 
-	it("drops a line that repeats a name in a newline-separated suggestion list", async () => {
+	it("says a line restates a name in a newline-separated suggestion list", () => {
 		expect(
-			await suggestNote(fakeAi("Blue Bottle Coffee purchase"), "BL BTTL COF", [
+			restatesStore("Blue Bottle Coffee purchase", [
+				"BL BTTL COF",
 				null,
-				null,
-				"Blue Bottle Coffee\nBlue Bottle",
+				"Blue Bottle Coffee",
+				"Blue Bottle",
 			]),
-		).toEqual({ ok: true, note: null });
+		).toBe(true);
 	});
+
+	it.each([
+		["App or iCloud subscription", "APPLE.COM/BILL", "Apple"],
+		["CVS Pharmacy prescription refill", "CVS PHARMACY #1234", "CVS Pharmacy"],
+		["Trip to CVS for allergy meds", "CVS PHARMACY #1234", "CVS Pharmacy"],
+		["Lunch with my team", "THAI PALACE", "Thai Palace"],
+		["Wireless plan", "AT&T", null],
+	])(
+		"says %j for %j named %j is not a restatement",
+		(answer, rawName, merchantName) => {
+			expect(restatesStore(answer, [rawName, merchantName])).toBe(false);
+		},
+	);
 });
