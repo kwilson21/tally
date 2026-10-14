@@ -254,8 +254,8 @@ export async function holdPlanDelete(
 			.bind(now - PLAN_UNDO_MS),
 		db
 			.prepare(
-				`INSERT INTO planned_delete_holds (token, created_ms, name, amount_cents, month, transaction_id, created_by)
-				 SELECT ?1, ?2, name, amount_cents, month, transaction_id, created_by FROM planned_expenses WHERE id = ?3`,
+				`INSERT INTO planned_delete_holds (token, created_ms, name, amount_cents, month, transaction_id, had_payment, created_by)
+				 SELECT ?1, ?2, name, amount_cents, month, transaction_id, transaction_id IS NOT NULL, created_by FROM planned_expenses WHERE id = ?3`,
 			)
 			.bind(token, now, planId),
 		db.prepare("DELETE FROM planned_expenses WHERE id = ?").bind(planId),
@@ -266,9 +266,9 @@ export async function holdPlanDelete(
 
 /**
  * Writes a deleted plan back, once, within its ten seconds. Returns the restored plan's name, or null when the token
- * is unknown, already used or too old. The payment comes back only if it is still free to pay a plan; when a bill or
- * another plan took it meanwhile, the plan comes back unpaid and set aside again, and `unlinked` says so (true only
- * when the deleted plan had a payment and lost it).
+ * is unknown, already used or too old. The payment comes back only if it is still free to pay a plan; when a bill,
+ * another plan or a deletion took it meanwhile, the plan comes back unpaid and set aside again, and `unlinked` says so
+ * (true only when the deleted plan had a payment and lost it).
  */
 export async function restorePlanDelete(
 	db: D1Database,
@@ -277,10 +277,10 @@ export async function restorePlanDelete(
 ): Promise<{ name: string; unlinked: boolean } | null> {
 	const hold = await db
 		.prepare(
-			"SELECT name, transaction_id AS transactionId FROM planned_delete_holds WHERE token = ? AND created_ms > ?",
+			"SELECT name, had_payment AS hadPayment FROM planned_delete_holds WHERE token = ? AND created_ms > ?",
 		)
 		.bind(token, now - PLAN_UNDO_MS)
-		.first<{ name: string; transactionId: number | null }>();
+		.first<{ name: string; hadPayment: number }>();
 	if (!hold) return null;
 	const [inserted] = await db.batch([
 		db
@@ -306,6 +306,6 @@ export async function restorePlanDelete(
 		.first<{ transactionId: number | null }>();
 	return {
 		name: hold.name,
-		unlinked: hold.transactionId !== null && restored?.transactionId === null,
+		unlinked: hold.hadPayment === 1 && restored?.transactionId === null,
 	};
 }

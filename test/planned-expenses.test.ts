@@ -824,6 +824,60 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(trigger.toast.message).toBe("Restored Car registration.");
 		expect(trigger.announce).toBe("Restored Car registration.");
 	});
+
+	it("restores a plan unpaid, unlinked: true, when its payment was deleted during the Undo window, and a reused id links nothing", async () => {
+		const tx = await payment(9780, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const now = Date.now();
+		const token = await holdPlanDelete(env.DB, id, now);
+		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(tx)
+			.run();
+		// A new transaction takes the deleted payment's id, as SQLite can hand a freed rowid out again.
+		await env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT ?,id,?,4200,'GROCERY REUSE FIXTURE' FROM accounts WHERE type!='cash' LIMIT 1",
+		)
+			.bind(tx, dateIn(MONTH))
+			.run();
+		expect(await restorePlanDelete(env.DB, token ?? "", now)).toEqual({
+			name: "Car registration",
+			unlinked: true,
+		});
+		const restored = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
+		).first<{ t: number | null }>();
+		expect(restored?.t).toBeNull();
+		const paying = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id = ?",
+		)
+			.bind(tx)
+			.first<{ n: number }>();
+		expect(paying?.n).toBe(0);
+	});
+
+	it("an Undo that brings back a plan whose payment was deleted says its payment is no longer linked", async () => {
+		const tx = await payment(9781, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const deleted = await post(`/plans/${id}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		await env.DB.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(tx)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) SELECT ?,id,?,4200,'GROCERY REUSE FIXTURE' FROM accounts WHERE type!='cash' LIMIT 1",
+		)
+			.bind(tx, dateIn(MONTH))
+			.run();
+		const restored = await post("/plans/undo-delete", { token });
+		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+		const words = "Restored Car registration. Its payment is no longer linked.";
+		expect(trigger.toast.message).toBe(words);
+		expect(trigger.announce).toBe(words);
+	});
 });
 
 describe("a plan pays a part of a split payment, as a bill does", () => {

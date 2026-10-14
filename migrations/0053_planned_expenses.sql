@@ -3,8 +3,8 @@
 --   linked payment keeps its own (decision 82).
 --   transaction_id   the payment linked to the plan. UNIQUE, so one payment pays at most one plan. ON DELETE SET NULL,
 --                    so a bank that drops a pending payment (or a person who deletes the transaction) unlinks the plan
---                    and leaves it set aside again. Any later rebuild of transactions must copy this table aside first,
---                    as bill_payments is in 0035, or the rebuild's DROP would null these links.
+--                    and leaves it set aside again. Any later rebuild of transactions must copy this table and
+--                    planned_delete_holds aside first, as bill_payments is in 0035, or the rebuild's DROP would null these links.
 --   created_by       the email claim of who planned it (or 'demo'), as cash and split rows keep updated_by.
 CREATE TABLE planned_expenses (
   id INTEGER PRIMARY KEY,
@@ -68,7 +68,9 @@ BEGIN
 END;
 
 -- A Delete on a plan can be undone for ten seconds (decision 101, like a cash entry). The hold keeps the plan's own
--- values and its payment, so Undo writes the same plan back under a new id, once. Holds older than ten seconds are
+-- values and its payment, so Undo writes the same plan back under a new id, once. transaction_id is a foreign key with
+-- ON DELETE SET NULL, so a payment deleted inside the window is forgotten and a reused id is never linked; had_payment
+-- keeps whether the plan had one, so Undo can say its payment is no longer linked. Holds older than ten seconds are
 -- pruned by each delete and cleared by the demo reset. created_ms is the server's clock in epoch milliseconds.
 CREATE TABLE planned_delete_holds (
   token TEXT PRIMARY KEY,
@@ -76,6 +78,7 @@ CREATE TABLE planned_delete_holds (
   name TEXT NOT NULL,
   amount_cents INTEGER NOT NULL,
   month TEXT NOT NULL,
-  transaction_id INTEGER,
+  transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+  had_payment INTEGER NOT NULL DEFAULT 0 CHECK (had_payment IN (0, 1)),
   created_by TEXT NOT NULL
 );
