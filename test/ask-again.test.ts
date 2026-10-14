@@ -67,6 +67,18 @@ async function save(
 	return { response, html: await response.text() };
 }
 
+/** The re-guess note's review hook: Reviewed ticked hides it only while a linked purchase is ticked too (name-choices.tsx). */
+const REVIEW_HOLD =
+	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden";
+/** The opening tag of the input named `name` with `value` (the first one), or "" when the markup has none. */
+const inputTag = (html: string, name: string, value: string) =>
+	html
+		.match(/<input\b[^>]*>/g)
+		?.find(
+			(tag) =>
+				tag.includes(`name="${name}"`) && tag.includes(`value="${value}"`),
+		) ?? "";
+
 const rowOf = (id: number) =>
 	db
 		.prepare(
@@ -589,25 +601,27 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
 		expect(note).toContain(
-			"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
+		);
+		// The category Tally picked is the chip the hook doesn't count; a chip Tally didn't pick is.
+		expect(inputTag(html, "category", String(await firstCategory()))).toContain(
+			"tally-category",
 		);
 	});
 
-	it("folds the note both ways when Always for this merchant changes, since ticking it keeps the category", async () => {
+	it("hides the note while Always for this merchant is ticked, since ticking it keeps the category", async () => {
 		await pickedByTally(await firstCategory());
 		const html = await panel({ JEV_API_KEY: "jev-key" });
 		const note = html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
 		expect(note).toContain(
-			"group-has-[input[name=always]:checked:not([checked])]/edit:hidden",
+			"group-has-[input[name=always]:checked]/edit:hidden",
 		);
-		expect(note).toContain(
-			"group-has-[input[name=always][checked]:not(:checked)]/edit:hidden",
-		);
+		expect(note).not.toContain("[checked]:not(:checked)");
 	});
 
-	it("draws no note on a 422 redraw that posts another category, since the save keeps that one", async () => {
+	it("folds the note on a 422 redraw that posts another category, since the save keeps that one, and Tally's category brings it back", async () => {
 		const category = await firstCategory();
 		const other = (
 			await db
@@ -626,7 +640,14 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			name_scope: "one",
 		});
 		expect(response.status).toBe(422);
-		expect(html).not.toContain("Tally guesses its category again.");
+		// The note is drawn so that picking Tally's category again can reveal it; the chip folds it while the other one is ticked.
+		const note = html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toContain(
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
+		);
+		expect(inputTag(html, "category", String(other))).toContain("checked");
 	});
 
 	it("keeps the note on a 422 redraw that posts the row's own category", async () => {
@@ -643,7 +664,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 		expect(html).toContain("Tally guesses its category again.");
 	});
 
-	it("draws no note on a 422 redraw that posts the row's own category with Always for this merchant ticked, since the save keeps it", async () => {
+	it("hides the note on a 422 redraw that posts the row's own category with Always for this merchant ticked, since the save keeps it", async () => {
 		const category = await firstCategory();
 		await pickedByTally(category);
 		fakeJev();
@@ -657,7 +678,10 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			rule_category_was: "",
 		});
 		expect(response.status).toBe(422);
-		expect(html).not.toContain("Tally guesses its category again.");
+		expect(html).toMatch(/<input[^>]*name="always"[^>]*checked/);
+		expect(html).toContain(
+			"group-has-[input[name=always]:checked]/edit:hidden",
+		);
 	});
 
 	it("draws no note on a row whose category was set by a person, even with no category id", async () => {
@@ -1063,6 +1087,8 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 	});
 
 	/** The re-guess note as the panel draws it, with its classes. */
+	/** The note's hooks, one token per hook, so a hook is matched whole (the review hook contains a link hook inside it). */
+	const folds = (html: string) => noteClass(html).split(" ");
 	const noteClass = (html: string) =>
 		html.match(
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
@@ -1083,24 +1109,172 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			.run();
 	};
 
-	it("on a linked, unreviewed credit, the note folds on the review chip both ways, since ticking it makes the refund follow its purchase", async () => {
+	it("on a linked, unreviewed credit, the note is hidden by the review chip while it is ticked, since ticking it makes the refund follow its purchase", async () => {
 		await pickedByTally(await firstCategory());
 		await creditLinked(true);
 		const note = noteClass(await panel({ JEV_API_KEY: "jev-key" }));
-		expect(note).toContain(
-			"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
+		expect(note).toContain(REVIEW_HOLD);
+		expect(note).not.toContain("[checked]:not(:checked)");
+	});
+
+	// PR #387's review (P2): a linked credit the person reviewed, whose category Tally picked, follows its purchase
+	// at open, so the note used to be left out. Unticking Reviewed, then naming it "This one only", makes Tally
+	// guess again, so the note is drawn and the chip hides it only while it is ticked.
+	it("draws the note on a linked credit the person reviewed, so unticking Reviewed can show it (#428)", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toMatch(/<input[^>]*name="creditReviewed"[^>]*checked/);
+		expect(noteClass(html)).toContain(REVIEW_HOLD);
+	});
+
+	// Jev holds this review, so unticking Reviewed doesn't stop the link following; only unlinking does. The note is
+	// drawn, folded while the purchase stays ticked, so picking Not linked shows it (#428).
+	it("draws the note on a linked credit whose review Jev holds, folded while its purchase is ticked and shown by Not linked", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(folds(html)).toContain(
+			"group-has-[.linked-purchase:checked]/edit:hidden",
 		);
-		expect(note).toContain(
-			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+		const purchaseId = (
+			await db
+				.prepare("SELECT refund_of_id AS id FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first<{ id: number }>()
+		)?.id;
+		expect(inputTag(html, "refund_of", String(purchaseId))).toContain(
+			"linked-purchase",
+		);
+		expect(inputTag(html, "refund_of", "")).not.toContain("linked-purchase");
+	});
+
+	// A refund that follows its purchase disables the category fieldset, and its drawn chip is the purchase's category, not
+	// the row's own. A disabled chip posts nothing, so it must not fold the note at open: `:enabled` exempts it, so the
+	// note stays drawn for the person to reveal by unlinking or unticking Reviewed.
+	it("keeps the note on a refund that follows a purchase whose category differs from the row's, since the disabled category can't block it", async () => {
+		const category = await firstCategory();
+		const other = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
+				)
+				.bind(category)
+				.first<{ id: number }>()
+		)?.id as number;
+		await pickedByTally(category);
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ? WHERE id = (SELECT refund_of_id FROM transactions WHERE id = ?)",
+			)
+			.bind(other, bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toMatch(/<fieldset[^>]*\bdisabled\b/);
+		expect(inputTag(html, "category", String(other))).toContain("checked");
+		expect(html).toContain("Tally guesses its category again.");
+		expect(folds(html)).toContain(
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 		);
 	});
 
-	it("on an unlinked credit, the note has no review hooks, since no purchase is linked for a review to count", async () => {
+	it("draws no link hold on a linked credit whose review the person has not ticked, so the note shows", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(folds(html)).not.toContain(
+			"group-has-[.linked-purchase:checked]/edit:hidden",
+		);
+		expect(html).toContain("Tally guesses its category again.");
+	});
+
+	it("doesn't hold the note for a linked purchase that is excluded, since a refund of it doesn't follow", async () => {
+		await pickedByTally(await firstCategory());
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = (SELECT refund_of_id FROM transactions WHERE id = ?)",
+			)
+			.bind(bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		const purchaseId = (
+			await db
+				.prepare("SELECT refund_of_id AS id FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first<{ id: number }>()
+		)?.id;
+		expect(inputTag(html, "refund_of", String(purchaseId))).not.toContain(
+			"linked-purchase",
+		);
+		expect(folds(html)).not.toContain(
+			"group-has-[.linked-purchase:checked]/edit:hidden",
+		);
+	});
+
+	it("re-guesses a Jev-held credit once it is unlinked and given a new name, which the note reveals", async () => {
+		const category = await firstCategory();
+		await pickedByTally(category);
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = NULL WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: String(category),
+			refund_of: "",
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+			income: "0",
+			income_was: "0",
+			creditReviewedVisible: "1",
+			creditReviewed_was: "0",
+		});
+		await background();
+		expect(response.status).toBe(200);
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bed" });
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+	});
+
+	it("on an unlinked credit, Reviewed alone doesn't fold the note, since no purchase is linked for it to follow", async () => {
 		await pickedByTally(await firstCategory());
 		await creditLinked(false);
 		const html = await panel({ JEV_API_KEY: "jev-key" });
 		expect(html).toContain("Tally guesses its category again.");
-		expect(noteClass(html)).not.toContain("input[name=creditReviewed]");
+		expect(noteClass(html)).toContain(REVIEW_HOLD);
 	});
 
 	it("marks the suggested name the row already shows as its own, so ticking it folds the note: the save keeps Tally's category", async () => {
@@ -1229,21 +1403,34 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			)
 		).text();
 
-	it.each<{ name: string; extra: string; fields: Record<string, string> }>([
+	it.each<{
+		name: string;
+		extra: string;
+		fields: Record<string, string>;
+		/** The hook that hides the note while the blocking control is ticked; null when no note is drawn at all. */
+		hook: string | null;
+	}>([
 		{
 			name: "an excluded transaction that doesn't pay a bill",
 			extra: ", excluded = 1, excluded_source = 'user'",
 			fields: { excluded: "1" },
+			hook: "group-has-[input[name=excluded]:checked]/edit:hidden",
 		},
 		{
 			name: "an income transaction",
 			extra: ", flag_income = 1, income_source = 'user'",
 			fields: { income: "1", income_was: "1" },
+			hook: "group-has-[input[name=income]:checked]/edit:hidden",
 		},
-		{ name: "a split purchase", extra: ", is_split = 1", fields: {} },
+		{
+			name: "a split purchase",
+			extra: ", is_split = 1",
+			fields: {},
+			hook: null,
+		},
 	])(
-		"keeps Tally's category for $name, and says nothing of guessing again",
-		async ({ extra, fields }) => {
+		"keeps Tally's category for $name, and hides any note of guessing again",
+		async ({ extra, fields, hook }) => {
 			const category = await firstCategory();
 			await pickedByTally(category, extra);
 			const jev = fakeJev(() => reply(0.2));
@@ -1263,9 +1450,15 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 			expect(
 				JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 			).toBe("Saved Dog bed.");
-			expect(await panelHtml()).not.toContain(
-				"Tally guesses its category again.",
-			);
+			const html = await panelHtml();
+			if (hook === null) {
+				expect(html).not.toContain("Tally guesses its category again.");
+				return;
+			}
+			const note = html.match(
+				/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+			)?.[1];
+			expect(note).toContain(hook);
 		},
 	);
 
@@ -1301,9 +1494,10 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Saved Dog bed.");
-		expect(await panelHtml()).not.toContain(
-			"Tally guesses its category again.",
-		);
+		// The refund follows its purchase, so the review chip the person ticked hides the note.
+		const html = await panelHtml();
+		expect(html).toMatch(/<input[^>]*name="creditReviewed"[^>]*checked/);
+		expect(html).toContain(REVIEW_HOLD);
 	});
 
 	it("still re-guesses the category of an excluded transaction that pays a bill", async () => {
@@ -1410,6 +1604,19 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 			)
 		).text();
 
+	/** The note's hook tokens as the panel draws them, one per hook, so a hook is matched whole (name-choices.tsx). */
+	const foldsOf = (html: string) =>
+		(
+			html.match(
+				/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+			)?.[1] ?? ""
+		).split(" ");
+	/** Exclude hides the note only while Reviewed is unticked, where the review lifts Plaid's exclusion (reviewLifts). */
+	const EXCLUDE_UNLESS_REVIEWED =
+		"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden";
+	/** Exclude hides the note while it is ticked, where the review doesn't lift the exclusion. */
+	const EXCLUDE_PLAIN = "group-has-[input[name=excluded]:checked]/edit:hidden";
+
 	it("guesses the category again when the same save renames the credit and reviews it, and says it counts again", async () => {
 		await excludedCredit(await firstCategory());
 		const jev = fakeJev(() => reply(0.2));
@@ -1486,7 +1693,7 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		).toBe("Saved Dog bed. It counts in the budget again.");
 	});
 
-	it("draws the note on a 422 redraw that posts the review, and folds it when the review is unticked", async () => {
+	it("draws the note on a 422 redraw that posts the review, with Exclude's hook stepping aside while Reviewed is ticked (#428)", async () => {
 		await excludedCredit(await firstCategory());
 		fakeJev();
 		const { response, html } = await save(bakery, {
@@ -1495,19 +1702,33 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		});
 		expect(response.status).toBe(422);
 		expect(html).toContain("Tally guesses its category again.");
-		const note = html.match(
-			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
-		)?.[1];
-		expect(note).toContain(
-			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
-		);
+		const folds = foldsOf(html);
+		expect(folds).toContain(EXCLUDE_UNLESS_REVIEWED);
+		expect(folds).not.toContain(EXCLUDE_PLAIN);
 	});
 
-	it("draws no note on the credit as it stands, since the exclusion still holds until the review", async () => {
+	it("draws the note on a Plaid-excluded credit as it stands, hidden while Exclude is ticked and shown once Reviewed is ticked, since the review makes it count (#428, #407)", async () => {
 		await excludedCredit(await firstCategory());
-		expect(await panelHtml()).not.toContain(
-			"Tally guesses its category again.",
-		);
+		const html = await panelHtml();
+		expect(html).toContain("Tally guesses its category again.");
+		const folds = foldsOf(html);
+		expect(folds).toContain(EXCLUDE_UNLESS_REVIEWED);
+		expect(folds).not.toContain(EXCLUDE_PLAIN);
+		expect(inputTag(html, "excluded", "1")).toContain("checked");
+		expect(inputTag(html, "creditReviewed", "1")).not.toContain("checked");
+	});
+
+	it("draws the note on a credit the person excluded, hidden by Exclude alone, since the review doesn't lift a person's exclusion", async () => {
+		await excludedCredit(await firstCategory(), "user");
+		const html = await panelHtml();
+		expect(html).toContain("Tally guesses its category again.");
+		const folds = foldsOf(html);
+		expect(folds).toContain(EXCLUDE_PLAIN);
+		expect(
+			folds.some((token) =>
+				token.includes("input[name=creditReviewed]:not(:checked)"),
+			),
+		).toBe(false);
 	});
 
 	it("guesses the category again for a bill payment the review lifts, and doesn't say it counts again, since a bill payment counted all along", async () => {
@@ -1532,17 +1753,21 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 		).toBe("Saved Dog bed. Tally guesses its category again.");
 	});
 
-	it("draws the note on a bill payment the review lifts, and the review doesn't fold it, since a bill payment counts either way", async () => {
+	it("draws the note on a bill payment the review lifts, with no Exclude hook, since a bill payment counts either way", async () => {
 		await linkToBill(bakery);
 		await excludedCredit(await firstCategory());
-		const note = (await panelHtml()).match(
-			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
-		)?.[1];
-		expect(note).toBeDefined();
-		expect(note).not.toContain("input[name=creditReviewed]");
+		const html = await panelHtml();
+		expect(html).toContain("Tally guesses its category again.");
+		const folds = foldsOf(html);
+		expect(folds.some((token) => token.includes("input[name=excluded]"))).toBe(
+			false,
+		);
+		expect(
+			folds.filter((token) => token.includes("input[name=creditReviewed]")),
+		).toEqual([REVIEW_HOLD]);
 	});
 
-	it("draws the note on a redraw with Exclude off, and the review doesn't fold it, since Exclude off means the review lifts nothing", async () => {
+	it("draws the note on a redraw with Exclude off, and the review alone doesn't fold it while Exclude is off", async () => {
 		await excludedCredit(await firstCategory());
 		fakeJev();
 		const { response, html } = await save(bakery, {
@@ -1550,10 +1775,14 @@ describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)"
 			merchant: "",
 		});
 		expect(response.status).toBe(422);
-		const note = html.match(
-			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
-		)?.[1];
-		expect(note).toBeDefined();
-		expect(note).not.toContain("input[name=creditReviewed]");
+		expect(html).toContain("Tally guesses its category again.");
+		expect(inputTag(html, "excluded", "1")).not.toContain("checked");
+		const reviewTokens = foldsOf(html).filter((token) =>
+			token.includes("input[name=creditReviewed]"),
+		);
+		expect(reviewTokens).toHaveLength(2);
+		expect(reviewTokens).toEqual(
+			expect.arrayContaining([REVIEW_HOLD, EXCLUDE_UNLESS_REVIEWED]),
+		);
 	});
 });
