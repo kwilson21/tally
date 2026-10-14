@@ -38,6 +38,33 @@ const unlinkedFirstPageIds = async () => {
 	return (await firstPageIds()).filter((id) => !linked.has(id));
 };
 
+/**
+ * The fields a browser without JavaScript submits from the selection form: each checked box and each hidden input the
+ * form draws, the no-JavaScript block's included (without JavaScript its inputs are real). A native submit sends
+ * exactly these, so a test reads them as the server will (#383).
+ */
+const submittedFields = (html: string) => {
+	const form =
+		html.match(/<form id="selection-form"[\s\S]*?<\/form>/)?.[0] ?? "";
+	const fields = new URLSearchParams();
+	for (const tag of form.match(/<input [^>]*>/g) ?? []) {
+		const name = tag.match(/ name="([^"]*)"/)?.[1];
+		if (name === undefined) continue;
+		if (/type="checkbox"/.test(tag) && !/ checked/.test(tag)) continue;
+		fields.append(
+			name,
+			tag.match(/ value="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
+		);
+	}
+	return fields;
+};
+
+/** The address Add cash's button submits to without JavaScript: its action, with the selection form's fields (#383). */
+const addCashSubmitAddress = (html: string) => {
+	const button = html.match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+	return `${button.match(/ formaction="([^"]*)"/)?.[1] ?? ""}?${submittedFields(html)}`;
+};
+
 describe("Set category on a refund that follows its purchase (#346, decision 99)", () => {
 	const GROCERIES = 1;
 	const EATING_OUT = 2;
@@ -864,13 +891,102 @@ describe("select several transactions", () => {
 		expect((list.match(/name="ids"[^>]*checked/g) ?? []).length).toBe(2);
 	});
 
-	it("offers page links in select mode and keeps select in them", async () => {
+	it("offers page links in select mode as buttons that submit the selection form, and keeps select in it", async () => {
 		const html = await (
 			await request("/transactions?month=all&select=1")
 		).text();
-		expect(html).toMatch(
-			/<a href="\/transactions\?month=all&amp;page=2&amp;select=1" rel="next"/,
-		);
+		const older = html.match(/<button [^>]*>Older<\/button>/)?.[0] ?? "";
+		expect(older).toContain('form="selection-form"');
+		expect(older).toContain('formaction="/transactions"');
+		expect(older).toContain('formmethod="get"');
+		expect(older).toContain('name="page" value="2"');
+		expect(html).not.toMatch(/rel="next"/);
+	});
+
+	describe("Select mode's controls submit the selection form without JavaScript (#383)", () => {
+		/** The list as a request without JavaScript or htmx draws it. */
+		const listHtml = async (query: string) =>
+			(await request(`/transactions?${query}`)).text();
+		/** The selection form, from its opening tag to its closing one. */
+		const selectionForm = (html: string) =>
+			html.match(/<form id="selection-form"[\s\S]*?<\/form>/)?.[0] ?? "";
+		/** The no-JavaScript block inside the selection form: the list's own fields, drawn as they stand. */
+		const noscriptBlock = (html: string) =>
+			selectionForm(html).match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] ?? "";
+
+		it("makes Older and Newer buttons that submit the selection form, each with its page as its own value", async () => {
+			const html = await listHtml("month=all&page=2&select=1");
+			const newer = html.match(/<button [^>]*>Newer<\/button>/)?.[0] ?? "";
+			const older = html.match(/<button [^>]*>Older<\/button>/)?.[0] ?? "";
+			expect(newer).toContain('name="page" value="1"');
+			expect(older).toContain('name="page" value="3"');
+			for (const button of [newer, older]) {
+				expect(button).toContain('type="submit"');
+				expect(button).toContain('form="selection-form"');
+				expect(button).toContain('formaction="/transactions"');
+				expect(button).toContain('formmethod="get"');
+				expect(button).not.toContain("href=");
+			}
+		});
+
+		it("keeps Older and Newer's htmx requests as they were: the page, focus on the first tick, and the ticks included", async () => {
+			const html = await listHtml("month=all&page=2&select=1");
+			const older = html.match(/<button [^>]*>Older<\/button>/)?.[0] ?? "";
+			expect(older).toContain(
+				'hx-get="/transactions?month=all&amp;page=3&amp;select=1&amp;focus=first-tick"',
+			);
+			expect(older).toContain('hx-include="');
+			expect(older).toContain(
+				'hx-push-url="/transactions?month=all&amp;page=3&amp;select=1"',
+			);
+		});
+
+		it("draws the list's select and filters in the selection form's no-JavaScript block, but not the page", async () => {
+			const block = noscriptBlock(
+				await listHtml("month=all&q=coffee&page=2&select=1"),
+			);
+			expect(block).toContain('name="select" value="1"');
+			expect(block).toContain('name="q" value="coffee"');
+			expect(block).toContain('name="month" value="all"');
+			expect(block).not.toContain('name="page"');
+		});
+
+		it("draws Add cash as a button that submits the selection form to the sheet, with no name of its own", async () => {
+			const html = await listHtml("month=all&select=1");
+			const addCash = html.match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			expect(addCash).toContain('form="selection-form"');
+			expect(addCash).toContain('formaction="/transactions/cash/new"');
+			expect(addCash).toContain('formmethod="get"');
+			expect(addCash).not.toContain(' name="');
+			expect(addCash).not.toContain("href=");
+		});
+
+		it("keeps Add cash and the page links plain links outside Select mode", async () => {
+			const html = await listHtml("month=all&page=2");
+			const addCash = html.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			expect(addCash).toContain('href="/transactions/cash/new');
+			expect(html).toMatch(/<a [^>]*rel="next"[^>]*>Older<\/a>/);
+			expect(html).not.toContain('formaction="');
+		});
+
+		it("counts the ticks a page link submits as they stand, so a row left unticked is dropped", async () => {
+			const [first, second] = await firstPageIds();
+			const both = await listHtml(
+				`month=all&page=2&select=1&ids=${first}&ids=${second}`,
+			);
+			expect(both).toMatch(/id="selected-count"[^>]*>2 selected/);
+			const one = await listHtml(`month=all&page=2&select=1&ids=${first}`);
+			expect(one).toMatch(/id="selected-count"[^>]*>1 selected/);
+		});
+
+		it("keeps a row unticked from the whole set when a page link is submitted, with the page's rows as page-ids", async () => {
+			const [kept, unticked] = await firstPageIds();
+			const html = await listHtml(
+				`month=all&page=2&select=1&all=1&page-ids=${kept},${unticked}&ids=${kept}`,
+			);
+			expect(html).toContain(`name="unticked" value="${unticked}"`);
+			expect(html).not.toContain(`name="unticked" value="${kept}"`);
+		});
 	});
 
 	it("refreshes Select or Done, the back input and the selection on list changes", async () => {
@@ -887,7 +1003,9 @@ describe("select several transactions", () => {
 			"#select-all-page:outerHTML",
 		])
 			expect(oob).toContain(part);
-		const pageOob = html.match(/rel="next"[^>]*hx-select-oob="([^"]*)"/)?.[1];
+		const pageOob = html.match(
+			/name="page" value="2"[^>]*hx-select-oob="([^"]*)"/,
+		)?.[1];
 		expect(pageOob).toContain("#select-toggle:outerHTML");
 		expect(pageOob).toContain("#selected-count:innerHTML");
 		expect(html).toMatch(/id="select-toggle"/);
@@ -1331,9 +1449,13 @@ describe("select several transactions", () => {
 	/** The opening tag of the first element that matches. */
 	const openingTag = (html: string, pattern: RegExp) =>
 		html.match(pattern)?.[0] ?? "";
-	/** The list's page links (Newer and Older), whole. */
+	/** The list's page links (Newer and Older), whole: anchors outside Select mode, buttons inside it (#383). */
 	const pageLinks = (html: string) =>
-		[...html.matchAll(/<a [^>]*rel="(?:prev|next)"[^>]*>/g)].map((m) => m[0]);
+		[
+			...html.matchAll(
+				/<(?:a|button) [^>]*(?:rel="(?:prev|next)"|name="page")[^>]*>/g,
+			),
+		].map((m) => m[0]);
 	const LOAD_PAUSE = {
 		"hx-indicator": "#selection-form",
 		"hx-disable": "#set-category-selection, #exclude-selection",
@@ -1394,10 +1516,10 @@ describe("select several transactions", () => {
 		const links = pageLinks(html);
 		expect(links.length).toBeGreaterThan(0);
 		for (const link of links) {
-			const href = attribute(link, "href");
-			expect(href).toContain("select=1");
-			expect(attribute(link, "hx-get")).toBe(`${href}&focus=first-tick`);
-			expect(attribute(link, "hx-push-url")).toBe(href);
+			const pushed = attribute(link, "hx-push-url");
+			expect(pushed).toContain("select=1");
+			expect(attribute(link, "hx-get")).toBe(`${pushed}&focus=first-tick`);
+			expect(attribute(link, "formaction")).toBe("/transactions");
 		}
 		const plain = await pageHtml("month=all&page=2");
 		expect(plain).not.toContain("first-tick");
@@ -1757,7 +1879,7 @@ describe("select several transactions", () => {
 			expect(withoutLine).not.toContain('name="not-on-page"');
 		});
 
-		it("carries the ticks in the no-JS page links and filter form, and never in the htmx requests", async () => {
+		it("submits the ticks with the no-JS page links through the selection form, and never puts them in the htmx requests", async () => {
 			const ids = await pageOneTicks();
 			const html = await pageHtml(
 				`month=all&page=2&select=1&ids=${ticksParam(ids)}`,
@@ -1765,10 +1887,17 @@ describe("select several transactions", () => {
 			const links = pageLinks(html);
 			expect(links.length).toBeGreaterThan(0);
 			for (const link of links) {
-				expect(attribute(link, "href")).toContain(`ids=${ticksParam(ids)}`);
+				// Without JavaScript the link submits the selection form, which draws each tick as a checked box (#383).
+				expect(attribute(link, "formaction")).toBe("/transactions");
 				expect(attribute(link, "hx-get")).toContain("focus=first-tick");
 				expect(attribute(link, "hx-get")).not.toContain("ids=");
 			}
+			expect(
+				submittedFields(html)
+					.getAll("ids")
+					.map(Number)
+					.sort((a, b) => a - b),
+			).toEqual([...ids].sort((a, b) => a - b));
 			// Without JavaScript the filter form submits these; with it, htmx ignores a noscript block.
 			const noscript = (
 				html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? []
@@ -1843,10 +1972,19 @@ describe("select several transactions", () => {
 		it("keeps the ticks in the Add cash sheet's close link and Cancel, and in its address", async () => {
 			const ids = await pageOneTicks();
 			const list = await pageHtml(`month=all&select=1&ids=${ticksParam(ids)}`);
-			const addCash = list.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
-			const cashHref = attribute(addCash, "href") ?? "";
-			expect(cashHref).toBe(
-				`/transactions/cash/new?back=%2Ftransactions%3Fmonth%3Dall&select=1&ids=${ticksParam(ids)}`,
+			const addCash = list.match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+			// Without JavaScript the button submits the selection form: the address it sends carries the ticks as drawn (#383).
+			expect(attribute(addCash, "formaction")).toBe("/transactions/cash/new");
+			const submitted = new URL(
+				addCashSubmitAddress(list),
+				"http://tally.test",
+			);
+			expect(submitted.searchParams.get("back")).toBe(
+				"/transactions?month=all",
+			);
+			expect(submitted.searchParams.get("select")).toBe("1");
+			expect(submitted.searchParams.getAll("ids").map(Number)).toEqual(
+				expect.arrayContaining([...ids]),
 			);
 			// With JavaScript the request carries the ticks as they are when tapped, not as drawn.
 			expect(attribute(addCash, "hx-get")).toBe(
@@ -1869,7 +2007,7 @@ describe("select several transactions", () => {
 			expect(attribute(cancel, "href")).toBe(close);
 			// The sheet's form still returns to the plain list, and a reload of the sheet (no JavaScript) keeps the ticks.
 			expect(sheet).toContain('name="back" value="/transactions?month=all"');
-			const reload = await (await request(cashHref)).text();
+			const reload = await (await request(addCashSubmitAddress(list))).text();
 			expect([...tickedIds(reload)].sort()).toEqual([...ids].sort());
 		});
 
@@ -1911,7 +2049,7 @@ describe("select several transactions", () => {
 				expect(cashForm).toContain(`name="ids" value="${id}"`);
 		});
 
-		it("counts 100 real ticks on a full page load, past a missing one and a split parent, and carries only those into the links", async () => {
+		it("counts 100 real ticks on a full page load, past a missing one and a split parent, and submits only those from the links", async () => {
 			const real = (await addHundredOneRows()).slice(0, 100);
 			await splitParent();
 			const html = await pageHtml(
@@ -1927,15 +2065,20 @@ describe("select several transactions", () => {
 			);
 			const links = pageLinks(html);
 			expect(links.length).toBeGreaterThan(0);
+			// Without JavaScript the page links and Add cash submit the selection form, which draws every tick (#383).
 			for (const link of links)
-				expect(sorted(idsIn(attribute(link, "href") ?? ""))).toEqual(
-					sorted(real),
-				);
-			expect(sorted(noscriptIds(html))).toEqual(sorted(real));
-			const addCash = html.match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
-			expect(sorted(idsIn(attribute(addCash, "href") ?? ""))).toEqual(
+				expect(attribute(link, "formaction")).toBe("/transactions");
+			expect(sorted(submittedFields(html).getAll("ids").map(Number))).toEqual(
 				sorted(real),
 			);
+			expect(sorted(noscriptIds(html))).toEqual(sorted(real));
+			expect(
+				sorted(
+					new URL(addCashSubmitAddress(html), "http://tally.test").searchParams
+						.getAll("ids")
+						.map(Number),
+				),
+			).toEqual(sorted(real));
 			// Select all's address also carries this page's own rows, as it always has; no stale id is in it.
 			const selectAll = idsIn(selectAllHref(html) ?? "");
 			expect(selectAll).not.toContain(999999);
@@ -2897,13 +3040,15 @@ describe("select several transactions", () => {
 			/** The back an Add cash address carries: the list the sheet returns to. */
 			const backOf = (address: string) =>
 				new URL(address, "http://tally.test").searchParams.get("back") ?? "";
-			/** The Add cash link on the TURNOVER Select all list, as drawn at the moment. */
+			/** The TURNOVER Select all list, as drawn at the moment. */
+			const addCashPage = async () =>
+				(await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")).text();
+			/** The Add cash button on that list (#383). */
 			const addCashTag = async () =>
-				(
-					await (
-						await request("/transactions?q=ZQ+TURNOVER&select=1&all=1")
-					).text()
-				).match(/<a [^>]*id="add-cash"[^>]*>/)?.[0] ?? "";
+				(await addCashPage()).match(/<button [^>]*id="add-cash"[^>]*>/)?.[0] ??
+				"";
+			/** The address that button submits to without JavaScript, with the selection form's fields. */
+			const addCashHref = async () => addCashSubmitAddress(await addCashPage());
 
 			it("names the month on screen in the bar's back, even when that is this month", async () => {
 				atInstant(OCTOBER);
@@ -2985,10 +3130,10 @@ describe("select several transactions", () => {
 				);
 			});
 
-			it("names the month on screen in the Add cash link's back, in its href and hx-get, and keeps all", async () => {
+			it("names the month on screen in the Add cash link's back, in its submitted address and hx-get, and keeps all", async () => {
 				atInstant(OCTOBER);
 				const link = await addCashTag();
-				const href = attribute(link, "href") ?? "";
+				const href = await addCashHref();
 				expect(monthOf(backOf(href))).toBe("2026-10");
 				expect(new URL(href, "http://tally.test").searchParams.get("all")).toBe(
 					"1",
@@ -3000,7 +3145,7 @@ describe("select several transactions", () => {
 
 			it("keeps the month on screen in the Add cash sheet on the next month, in its close link, Cancel and back field", async () => {
 				atInstant(OCTOBER);
-				const href = attribute(await addCashTag(), "href") ?? "";
+				const href = await addCashHref();
 				atInstant(NOVEMBER);
 				const sheet = await (
 					await request(href, { headers: { "HX-Request": "true" } })
@@ -3024,7 +3169,7 @@ describe("select several transactions", () => {
 
 			it("keeps the month on screen when the Add cash form is refused on the next month, in its close link, Cancel and back field", async () => {
 				atInstant(OCTOBER);
-				const back = backOf(attribute(await addCashTag(), "href") ?? "");
+				const back = backOf(await addCashHref());
 				atInstant(NOVEMBER);
 				const res = await post(
 					"/transactions/cash",

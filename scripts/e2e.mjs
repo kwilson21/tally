@@ -1128,7 +1128,7 @@ await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
 await page.route("**/transactions/select/count*", slowCount);
 await followLink(page.getByRole("link", { name: "Select" }));
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
-await page.locator('a[rel="next"]').click();
+await page.getByRole("button", { name: "Older", exact: true }).click();
 // The Next list replaces the count still in flight: settle waits for that count to be let go and for the list to land.
 await settleReplies();
 // The Next reply focuses the first tick on the frame after the list swaps in (toast.js), so its page-2 ids are in place.
@@ -1169,7 +1169,7 @@ const slowList = async (route) => {
 };
 await page.route("**/transactions?*page=2*", slowList);
 const countsBeforeLoad = countRequests.length;
-await page.locator('a[rel="next"]').click();
+await page.getByRole("button", { name: "Older", exact: true }).click();
 // The slowed load marks the form while it runs; wait for that instead of a fixed pause.
 await page.waitForSelector("#selection-form.htmx-request");
 assert.equal(
@@ -1265,7 +1265,7 @@ step(
 
 // Newer's load ends the same way, with focus on the page's first tick, once the rows are shown (#456).
 await page.route("**/transactions?*focus=first-tick*", slowList);
-await page.locator('a[rel="prev"]').click();
+await page.getByRole("button", { name: "Newer", exact: true }).click();
 await page.waitForSelector("#selection-form.htmx-request");
 await page.waitForFunction(
 	() => !document.querySelector("#selection-form.htmx-request"),
@@ -1331,7 +1331,7 @@ await goto(`${BASE}/transactions?month=all&select=1`, {
 });
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 await page.getByText("1 selected", { exact: true }).waitFor();
-await page.locator('a[rel="next"]').click();
+await page.getByRole("button", { name: "Older", exact: true }).click();
 await page.waitForFunction(
 	() =>
 		document.querySelector("#selected-count")?.textContent?.trim() ===
@@ -1482,6 +1482,68 @@ await page.unroute(isOrganizeSave);
 step(
 	"a double click on Organize's Save files the group once, and the question keeps its address",
 );
+
+// Without JavaScript Older, Newer and Add cash submit the selection form (#383), so a tick made on the page survives
+// a page change, an untick does too, and Add cash's sheet gets the tick. This context has no JavaScript at all.
+const plainContext = await browser.newContext({
+	viewport: { width: 390, height: 844 },
+	javaScriptEnabled: false,
+	reducedMotion: "reduce",
+});
+const plain = await plainContext.newPage();
+// On a phone the first row sits low, under the fixed selection bar, so it is centred before its tick is clicked.
+const tickFirstRow = async (scope) => {
+	const label = plain.locator(`${scope} label:has(input[name=ids])`).nth(0);
+	await label.evaluate((element) =>
+		element.scrollIntoView({ block: "center" }),
+	);
+	await label.click();
+};
+await plain.goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "load",
+});
+await tickFirstRow("#selection-form");
+const tickedRowId = await plain
+	.locator("#selection-form input[name=ids]")
+	.nth(0)
+	.getAttribute("value");
+await plain.getByRole("button", { name: "Older", exact: true }).click();
+await plain.waitForURL(/page=2/);
+const countOnPageTwo = await plain.locator("#selected-count").textContent();
+assert.ok(
+	countOnPageTwo?.startsWith("1 selected"),
+	`Older dropped the tick made on page 1: ${countOnPageTwo}`,
+);
+step("without JavaScript, Older keeps a tick made on the page");
+
+await plain.locator("#not-on-page summary").click();
+await tickFirstRow("#not-on-page");
+await plain.getByRole("button", { name: "Newer", exact: true }).click();
+await plain.waitForURL(/page=1/);
+assert.equal(
+	await plain.locator("#selected-count").textContent(),
+	"Choose rows, then an action",
+	"Newer brought back a tick that was unticked on page 2",
+);
+assert.equal(
+	await plain.locator("#selection-form input[name=ids]").nth(0).isChecked(),
+	false,
+	"the row unticked on page 2 came back ticked on page 1",
+);
+step("without JavaScript, Newer keeps an untick made off the page");
+
+await plain.goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "load",
+});
+await tickFirstRow("#selection-form");
+await plain.getByRole("button", { name: "Add cash", exact: true }).click();
+await plain.waitForURL(/\/transactions\/cash\/new/);
+assert.ok(
+	new URL(plain.url()).searchParams.getAll("ids").includes(tickedRowId),
+	`Add cash's sheet dropped the tick: ${plain.url()}`,
+);
+step("without JavaScript, Add cash's sheet keeps the tick");
+await plainContext.close();
 
 const restored = await fetch(`${BASE}/cdn-cgi/handler/scheduled`);
 assert.equal(restored.status, 200, "restoring the demo data failed");

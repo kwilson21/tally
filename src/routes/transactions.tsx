@@ -166,8 +166,8 @@ import {
 	SelectionFields,
 	SelectionLimit,
 	selectAllOffer,
-	selectionQuery,
 	selectModeHref,
+	submitsSelection,
 	TICKS_INCLUDE,
 	TOO_MANY,
 } from "../views/selection-action-bar";
@@ -460,32 +460,46 @@ async function renderList(
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
-	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
-	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
-	const pageLinkHref = (n: number) =>
-		selecting ? `${pageHref(n)}${selectionQuery(current)}` : pageHref(n);
 	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
-	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
-		<a
-			href={pageLinkHref(n)}
-			rel={rel}
-			class="inline-flex min-h-11 items-center px-2 -mx-2"
+	// In select mode a page link is a button that submits the selection form, so without JavaScript it carries the
+	// ticks as they stand, not as drawn (#383). Its own value is the page; the list's other fields are in the form's
+	// no-JavaScript block, as the filter form's ticks are.
+	const pageLink = (n: number, rel: "prev" | "next", label: string) => {
+		const swap = {
 			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
-			hx-get={
-				selecting ? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}` : pageHref(n)
-			}
-			hx-sync="#filters:replace"
-			hx-target="#results"
-			hx-select="#results > *"
-			hx-select-oob={LIST_OOB}
-			hx-swap="innerHTML show:top"
+			"hx-get": selecting
+				? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}`
+				: pageHref(n),
+			"hx-sync": "#filters:replace",
+			"hx-target": "#results",
+			"hx-select": "#results > *",
+			"hx-select-oob": LIST_OOB,
+			"hx-swap": "innerHTML show:top",
 			// In Select mode the reply's HX-Push-Url (the ticks, without the focus marker) replaces this.
-			hx-push-url={selecting ? pageHref(n) : "true"}
-			{...includeTicked}
-		>
-			{label}
-		</a>
-	);
+			"hx-push-url": selecting ? pageHref(n) : "true",
+			...includeTicked,
+		};
+		return selecting ? (
+			<button
+				{...submitsSelection("/transactions")}
+				name="page"
+				value={n}
+				class="inline-flex min-h-11 cursor-pointer items-center px-2 -mx-2 text-accent"
+				{...swap}
+			>
+				{label}
+			</button>
+		) : (
+			<a
+				href={pageHref(n)}
+				rel={rel}
+				class="inline-flex min-h-11 items-center px-2 -mx-2"
+				{...swap}
+			>
+				{label}
+			</a>
+		);
+	};
 	const pageNav = pages > 1 && (
 		<nav
 			aria-label="Pages"
@@ -542,11 +556,11 @@ async function renderList(
 		</>
 	));
 	const htmx = c.req.header("HX-Request") === "true";
-	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
-	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
 	// In Select mode the sheet returns to the pinned back, so the month on screen survives the month turning over (#321).
+	// Add cash is a button that submits the selection form in Select mode (#383), so a browser without JavaScript sends
+	// the ticks as they stand; with it, the request sends them as they are when the button is tapped (TICKS_INCLUDE).
+	// The sheet's close link and Cancel keep the ticks as drawn (#350), since they can't change while the sheet is open.
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
-	const cashHref = selecting ? selectModeHref(cashPath, current) : cashPath;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
 	if (selecting && htmx && selectPushBase !== undefined)
@@ -616,8 +630,9 @@ async function renderList(
 				<Button
 					id="add-cash"
 					kind="secondary"
-					href={cashHref}
-					class="gap-2"
+					href={selecting ? undefined : cashPath}
+					{...(selecting ? submitsSelection("/transactions/cash/new") : {})}
+					class="gap-2 cursor-pointer"
 					autofocus={focusAddCash}
 					hx-get={cashGet}
 					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
@@ -817,6 +832,20 @@ async function renderList(
 							name="back"
 							value={selectionBack}
 						/>
+						{/* Without JavaScript the page links and Add cash submit this form (#383), so it carries the list's
+						    own fields as they are drawn: Select and the filters, but not the page, which a page link names.
+						    With JavaScript this block is raw text, so the count and the actions post what they always did. */}
+						<noscript>
+							<input type="hidden" name="select" value="1" />
+							{Array.from(
+								new URLSearchParams(
+									filtersToQuery({ ...filters, page: 1 }, today.slice(0, 7)),
+								),
+								([name, value]) => (
+									<input type="hidden" name={name} value={value} />
+								),
+							)}
+						</noscript>
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
 							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}

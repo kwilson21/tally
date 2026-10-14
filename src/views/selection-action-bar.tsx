@@ -85,6 +85,20 @@ export const NOT_ON_PAGE_IDS_FIELD = "not-on-page-ids";
 export const TICKS_INCLUDE = { "hx-include": TICKS };
 
 /**
+ * A button that submits the selection form as a GET to `action` (#383). Without JavaScript it sends the ticks as
+ * they stand, since the form owns the boxes; with it, htmx cancels the submit and sends its own request (the
+ * button's htmx attributes), as a click on a submit button in a form does. Its own name and value, if any, come
+ * with it: a page button names the page, so the list's other fields come from the form's no-JavaScript block.
+ */
+export const submitsSelection = (action: string) =>
+	({
+		type: "submit",
+		form: "selection-form",
+		formaction: action,
+		formmethod: "get",
+	}) as const;
+
+/**
  * The selection as address parameters, each only when it is set: the ticks and the held ticks as `ids` (each
  * once), the all-mode flag, and the rows unticked from the whole set (#321). Each is written in the address, so
  * a reload keeps the selection, and an address read sorts a held tick back into place (settle).
