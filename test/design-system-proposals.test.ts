@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
+import css from "../src/styles/app.css?raw";
 import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
@@ -344,7 +345,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P124 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P125 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -353,9 +354,9 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P124 is drawn, and each id is used once.
+		// Every proposal from P23 to P125 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 124; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 125; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -371,7 +372,9 @@ describe("GET /design-system/proposals", () => {
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
-			const eachOption = id === "p118-rows" || id === "p119-saved";
+			// P125 gives each of its four options a reason too (its A is the one recommended).
+			const eachOption =
+				id === "p118-rows" || id === "p119-saved" || id === "p125-first-week";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -387,7 +390,8 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P125 is open: the owner has not picked from it yet, so it carries no Picked pill.
+			const expected = n < 34 || n === 125 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -854,6 +858,7 @@ describe("GET /design-system/proposals", () => {
 		expect(picks("p122-more")).toEqual(["Option A · Contents page"]);
 		expect(picks("p123-feedback")).toEqual(["Option A · In the top line"]);
 		expect(picks("p124-first-visit")).toEqual(["Option A · The first page"]);
+		expect(picks("p125-first-week")).toEqual([]);
 	});
 
 	describe("P118 and P119 · the polish track, picked (#497, #71, decision 111)", () => {
@@ -1629,5 +1634,159 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		expect(s).toContain(
 			'aria-label="At 1280: B · One filter strip, on desktop"',
 		);
+	});
+});
+
+// P125 (#95): a family's first week, four ways, drawn for the owner's pick. Proposal only: nothing in the app changes.
+describe("GET /design-system/proposals, polish round D (P125, a new family's first week)", () => {
+	// The P125 section, up to the next top-level section (its pictures can hold sections of their own).
+	const section = (html: string) => {
+		const start = html.indexOf('<section id="p125-first-week"');
+		expect(start).toBeGreaterThan(-1);
+		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
+		expect(end).toBeGreaterThan(start);
+		return html.slice(start, end);
+	};
+	// One option's heading and everything drawn under it, up to the next option's heading.
+	const option = (chunk: string, name: string) => {
+		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return chunk.slice(at, next);
+	};
+	// Each labelled picture in a chunk, from its label on.
+	const pictures = (chunk: string) =>
+		chunk.split('role="img" aria-label="').slice(1);
+	const OPTIONS = [
+		"Option A · The Opening Entry",
+		"Option B · Pencil, then ink",
+		"Option C · The notebook fills in",
+		"Option D · Kitchen-table sitting",
+	];
+
+	it("opens the page with its own section, first, titled and dated as the brief asks", async () => {
+		const { html } = await get("/design-system/proposals");
+		const open = html.indexOf('<section aria-labelledby="polish5-title"');
+		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish4-title"'),
+		);
+		expect(html).toContain(
+			'<h2 id="polish5-title" class="font-serif text-3xl font-semibold">Open: the polish track, a new family&#39;s first week</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 14 for the owner&#39;s pick: four ways a family&#39;s first week can feel, from linking a bank to a Home that&#39;s just Home.",
+		);
+		expect(html).toContain('<section id="p125-first-week"');
+		expect(html).toContain(
+			'<h3 id="p125-first-week-title" class="text-xl font-semibold">P125 · A new family&#39;s first week</h3>',
+		);
+	});
+
+	it("draws four options: A recommended and none picked, each with its cost and its reason, all in the family's app", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const names = [...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map(
+			(m) => m[1] ?? "",
+		);
+		expect(names).toEqual(OPTIONS);
+		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
+		expect(option(chunk, OPTIONS[0] ?? "")).toContain(">Recommended<");
+		expect(chunk).not.toContain(">Picked<");
+		expect(chunk.match(/Trade-off: /g)?.length).toBe(4);
+		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(4);
+		// The family's first week has no demo banner: none of these pictures draws one.
+		expect(chunk).not.toContain("Demo data. Nothing here is real.");
+		expect(chunk).toContain(
+			'<span class="font-medium">Already fixed by the spec: </span>Tally only suggests and a person decides (decision 101): nothing is saved until someone says yes;',
+		);
+	});
+
+	it("draws each stage as a phone picture with a caption in words, and each option's replay as one more", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).not.toContain("on desktop");
+		const stages = [9, 6, 6, 4];
+		OPTIONS.forEach((name, i) => {
+			// Each picture's label, up to its closing quote: the words after it belong to other pictures too.
+			const labels = pictures(option(chunk, name)).map((p) =>
+				p.slice(0, p.indexOf('"')),
+			);
+			const phones = labels.filter((label) => label.endsWith(", on a phone"));
+			expect(phones, name).toHaveLength(stages[i] ?? 0);
+			// Each option's replay is labelled as one, and loops (a proposals-only class in app.css).
+			expect(
+				phones.filter((label) => label.toLowerCase().includes("replay")),
+				name,
+			).toHaveLength(1);
+		});
+		expect(chunk.match(/Replay, every (5|6) seconds/g)?.length).toBe(4);
+	});
+
+	it("keeps one sample household in every option: $1,411 safe to spend, and the same 86 that need a category", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const name of OPTIONS) {
+			expect(option(chunk, name), name).toContain("$1,411");
+		}
+		expect(chunk).toContain("86 need a category");
+		expect(chunk).toContain("$186 of this month&#39;s spending");
+		expect(chunk).toContain("$4,050");
+		expect(chunk).toContain("$2,486");
+		expect(chunk).toContain("Harbor Property");
+		expect(chunk).toContain("Acme Corp");
+	});
+
+	it("says in words what each pencil state is, for a screen reader, as well as drawing it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).toContain(
+			'<span class="sr-only">Not pencilled in yet</span>',
+		);
+		expect(chunk).toContain("pencilled in, not kept yet");
+		expect(chunk).toContain("border-dashed border-muted");
+	});
+
+	it("draws the replays from proposal-only keyframes in app.css, each one resting on its end state under reduced motion", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const classes = [...new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? [])];
+		expect(classes.length).toBeGreaterThan(0);
+		for (const cls of classes) {
+			expect(css, cls).toContain(`.${cls}`);
+			expect(css, cls).toMatch(new RegExp(`\\.${cls}\\s*\\{[^}]*animation:`));
+			expect(css, cls).toMatch(
+				new RegExp(
+					`@media \\(prefers-reduced-motion: reduce\\)\\s*\\{[\\s\\S]*?\\.${cls}[^{]*\\{\\s*animation: none`,
+				),
+			);
+		}
+		// The P125 keyframes are proposal-only and live in their own block.
+		expect(css).toContain("Proposals only (P125)");
+	});
+
+	it("words the first budget as raised to the next $10, and says in words each pencil state (a dashed amount, a dashed tag, a dashed tick)", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).not.toContain("rounded up to the next $10");
+		expect(chunk.match(/raised to the next \$10/g)?.length).toBe(3);
+		// Option B's pencilled budget rows: each row says it is pencilled in, not kept yet.
+		expect(
+			option(chunk, OPTIONS[1] ?? "").match(/Pencilled in, not kept yet: /g)
+				?.length,
+		).toBe(2);
+		// Option A's line that needs a category is not ticked yet, and option D's suggested amount is not kept yet.
+		expect(option(chunk, OPTIONS[0] ?? "")).toContain(
+			'<span class="sr-only">Not ticked yet</span>',
+		);
+		expect(option(chunk, OPTIONS[3] ?? "")).toContain(
+			'<span class="sr-only">Suggested, not kept yet</span>',
+		);
+	});
+
+	it("adds no client JavaScript: the section has no script", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(section(html)).not.toContain("<script");
 	});
 });

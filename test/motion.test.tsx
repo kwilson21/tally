@@ -599,12 +599,26 @@ describe("the proposals page's drawings", () => {
 				.flatMap((s) => [...s.matchAll(/\.(proposal-[a-z0-9-]+)/g)])
 				.map((m) => m[1]),
 		);
-		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), and
-		// P118 and P119's saved-row replays (the tick, the let-go press and the toast).
+		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), P118 and
+		// P119's saved-row replays (the tick, the let-go press and the toast), and P125's replays of a family's
+		// first week (the strikes, the rows, the pencil and ink, the strokes, the ledger line and the rule).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
 				"proposal-cut",
+				"proposal-first-amount",
+				"proposal-first-bar",
+				"proposal-first-cross",
+				"proposal-first-ink-on",
+				"proposal-first-ink-text",
+				"proposal-first-line",
+				"proposal-first-pencil-off",
+				"proposal-first-rows",
+				"proposal-first-rule",
+				"proposal-first-strike",
+				"proposal-first-strike-last",
+				"proposal-first-strike-later",
+				"proposal-first-stroke",
 				"proposal-loop",
 				"proposal-morph",
 				"proposal-saved-chevron",

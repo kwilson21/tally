@@ -746,6 +746,216 @@ html:not(.js) [data-money-js] {
 }
 
 /*
+ * Proposals only (P125): the replays of a family's first week, none of it in the app yet. Each replay loops, and
+ * its base state is the end state, so reduced motion rests there (the reduce rule below stops every loop), and a
+ * still capture, which starts each loop mid-hold, shows it too. Each keyframe starts from the before-state at 0%
+ * and holds the end state to 100%, where the loop starts again from the before-state. A (6 s): the three bank
+ * lines are struck in turn, 200 ms apart, and Tally's rows fade in under them. B (5 s): the pencilled amount inks
+ * in over 150 ms, its dashed rule turns solid, and the two bars fill. C (6 s): the fifth stroke draws across the
+ * four in 200 ms, and all five turn from pencil to ink in 150 ms. D (6 s): the new answer's line fades in and rises
+ * 4 px in 200 ms, the double rule draws from the left, and the amount fades in.
+ */
+@keyframes replay-first-strike {
+	0%,
+	9.99% {
+		transform: scaleX(0);
+	}
+	13.33%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-rows {
+	0%,
+	19.99% {
+		opacity: 0;
+	}
+	23.33%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-ink-text {
+	0%,
+	19.99% {
+		color: var(--color-muted);
+	}
+	23%,
+	100% {
+		color: var(--color-ink);
+	}
+}
+@keyframes replay-first-pencil-off {
+	0%,
+	19.99% {
+		opacity: 1;
+	}
+	23%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-ink-on {
+	0%,
+	19.99% {
+		opacity: 0;
+	}
+	23%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-bar {
+	0%,
+	23.99% {
+		transform: scaleX(0);
+	}
+	36%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-stroke {
+	0%,
+	19.99% {
+		stroke: var(--color-muted);
+	}
+	22.5%,
+	100% {
+		stroke: var(--color-ink);
+	}
+}
+@keyframes replay-first-cross {
+	0%,
+	16.66% {
+		stroke-dashoffset: 35;
+	}
+	20%,
+	100% {
+		stroke-dashoffset: 0;
+	}
+}
+@keyframes replay-first-line {
+	0%,
+	16.66% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	20%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-rule {
+	0%,
+	19.99% {
+		transform: scaleX(0);
+	}
+	23.33%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-amount {
+	0%,
+	23.32% {
+		opacity: 0;
+	}
+	26.66%,
+	100% {
+		opacity: 1;
+	}
+}
+.proposal-first-strike {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-strike var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-strike-later {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-strike var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising));
+}
+.proposal-first-strike-last {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-strike var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising) * 2);
+}
+.proposal-first-rows {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-rows var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-ink-text {
+	--loop: calc(var(--duration-toast) * 1.25);
+	animation: replay-first-ink-text var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-pencil-off {
+	--loop: calc(var(--duration-toast) * 1.25);
+	animation: replay-first-pencil-off var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-ink-on {
+	--loop: calc(var(--duration-toast) * 1.25);
+	animation: replay-first-ink-on var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-bar {
+	--loop: calc(var(--duration-toast) * 1.25);
+	transform-origin: left;
+	animation: replay-first-bar var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-stroke {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-stroke var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-cross {
+	--loop: calc(var(--duration-rising) * 30);
+	stroke-dasharray: 35;
+	animation:
+		replay-first-stroke var(--loop) linear infinite,
+		replay-first-cross var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-line {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-line var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-rule {
+	--loop: calc(var(--duration-rising) * 30);
+	transform-origin: left;
+	animation: replay-first-rule var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-amount {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-amount var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+	.proposal-first-strike,
+	.proposal-first-strike-later,
+	.proposal-first-strike-last,
+	.proposal-first-rows,
+	.proposal-first-ink-text,
+	.proposal-first-pencil-off,
+	.proposal-first-ink-on,
+	.proposal-first-bar,
+	.proposal-first-stroke,
+	.proposal-first-cross,
+	.proposal-first-line,
+	.proposal-first-rule,
+	.proposal-first-amount {
+		animation: none;
+	}
+}
+
+/*
  * A Select-mode list load (#215). While htmx marks the selection form (.selection-list.htmx-request,
  * from LIST_LOAD_PAUSE), a round tick can't be tapped or reached: its label takes no taps, and its
  * checkbox is hidden, so it leaves the keyboard's order. It stays checked, and hx-include still sends
