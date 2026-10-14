@@ -1122,7 +1122,9 @@ describe("scheduled handler: new category suggestions", () => {
 	});
 });
 
-// D1 allows 1,000 queries in one Worker invocation, and every statement a run prepares is one. A Jev call
+// D1 allows 1,000 queries in one Worker invocation. A batch is one request, so in production a batch may count once
+// rather than statement by statement (the D1 limits page doesn't say; issue #418). This check counts every statement a
+// run prepares, a conservative check: a run under it fits under either reading. A Jev call
 // costs about three (the switches read, and saving its answer with its log row in one batch), plus one merchant-history
 // query per Jev run; a name costs about three too, and each new category suggestion about five. Each of
 // production's three runs and the demo's one is an invocation of its own, so each has to fit its worst case:
