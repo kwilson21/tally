@@ -481,14 +481,32 @@ function Notebook({
 	strokes,
 	ink = false,
 	replay = false,
+	drawLast = false,
+	size = "size-32",
 }: {
 	strokes: number;
 	ink?: boolean;
+	/** C's replay: all five strokes ink in from pencil, and the fifth draws across the four. */
 	replay?: boolean;
+	/** E's replay: the last stroke draws a beat after its line, and the strokes before it are already ink. */
+	drawLast?: boolean;
+	/** The notebook's box: size-32 by default, size-12 beside a question. */
+	size?: string;
 }) {
+	const lineClass = (i: number) => {
+		if (replay) {
+			return `stroke-ink proposal-first-stroke${i === 4 ? " proposal-first-cross" : ""}`;
+		}
+		if (drawLast) {
+			return i === strokes - 1
+				? "stroke-ink proposal-first-stroke proposal-first-cross proposal-first-stroke-after"
+				: "stroke-ink";
+		}
+		return ink ? "stroke-ink" : "stroke-muted";
+	};
 	return (
 		<svg
-			class="size-32 shrink-0"
+			class={`${size} shrink-0`}
 			viewBox="0 0 120 120"
 			fill="none"
 			stroke-width="1.75"
@@ -503,19 +521,7 @@ function Notebook({
 				))}
 				{STROKE_LINES.slice(0, replay ? 5 : strokes).map(
 					([x1, y1, x2, y2], i) => (
-						<line
-							x1={x1}
-							y1={y1}
-							x2={x2}
-							y2={y2}
-							class={
-								replay
-									? `stroke-ink proposal-first-stroke${i === 4 ? " proposal-first-cross" : ""}`
-									: ink
-										? "stroke-ink"
-										: "stroke-muted"
-							}
-						/>
+						<line x1={x1} y1={y1} x2={x2} y2={y2} class={lineClass(i)} />
 					),
 				)}
 			</g>
@@ -531,7 +537,78 @@ function Notebook({
 	);
 }
 
-/** A screen's top with the notebook beside its headline, for option C's setup (in place of Home's own drawing). */
+/** One stroke's line in TallySteps: its name, its note at the right, and whether the stroke is done. */
+type StepLine = { name: string; done: boolean; note: string };
+
+/** The five lines in order: `notes` gives each its note, and the first `done` of them are done. */
+function stepsOf(
+	names: readonly string[],
+	notes: readonly string[],
+	done: number,
+): StepLine[] {
+	return names.map((name, i) => ({
+		name,
+		done: i < done,
+		note: notes[i] ?? "",
+	}));
+}
+
+/**
+ * The five strokes as a list, under the notebook (P125 C and E): each line's glyph is its stroke, a short
+ * vertical line for the first four and a diagonal slash for the fifth, in ink when done and dashed muted when
+ * not. A done line says so in words too (sr-only "done"); the note at the right says what was done.
+ */
+function TallySteps({ steps }: { steps: StepLine[] }) {
+	const done = steps.filter((s) => s.done).length;
+	return (
+		<div class="mt-4">
+			<p class="text-sm text-muted">Your first tally · {done} of 5</p>
+			<ul class="mt-2 border-t border-rule">
+				{steps.map((s, i) => (
+					<li class="flex min-h-11 items-center gap-3 border-b border-rule">
+						<svg
+							class="h-6 w-3 shrink-0"
+							viewBox="0 0 12 24"
+							fill="none"
+							stroke-width="2"
+							stroke-linecap="round"
+							aria-hidden="true"
+						>
+							{i < 4 ? (
+								<line
+									x1="6"
+									y1="2"
+									x2="6"
+									y2="22"
+									class={s.done ? "stroke-ink" : "stroke-muted"}
+									stroke-dasharray={s.done ? undefined : "3 3"}
+								/>
+							) : (
+								<line
+									x1="1"
+									y1="22"
+									x2="11"
+									y2="2"
+									class={s.done ? "stroke-ink" : "stroke-muted"}
+									stroke-dasharray={s.done ? undefined : "3 3"}
+								/>
+							)}
+						</svg>
+						<span
+							class={`min-w-0 flex-1 py-2 text-base ${s.done ? "text-ink" : "text-muted"}`}
+						>
+							{s.name}
+							{s.done && <span class="sr-only">, done</span>}
+						</span>
+						<span class="shrink-0 text-sm text-muted">{s.note}</span>
+					</li>
+				))}
+			</ul>
+		</div>
+	);
+}
+
+/** A screen's top with the notebook beside its headline, for option C's and E's setup (in place of Home's own drawing). `caption` names the count under the notebook; a TallySteps list says it instead. */
 function StrokesTop({
 	label,
 	headline,
@@ -539,6 +616,7 @@ function StrokesTop({
 	ink = false,
 	status,
 	band,
+	caption = true,
 	children,
 }: {
 	label: Child;
@@ -547,6 +625,7 @@ function StrokesTop({
 	ink?: boolean;
 	status: Child;
 	band?: Child;
+	caption?: boolean;
 	children?: Child;
 }) {
 	return (
@@ -558,9 +637,9 @@ function StrokesTop({
 				</div>
 				<div class="flex flex-col items-center">
 					<Notebook strokes={strokes} ink={ink} />
-					{!ink && (
+					{caption && !ink && (
 						<p class="text-sm text-muted">
-							Your first tally: {strokes} of 5
+							Your first tally · {strokes} of 5
 							{strokes > 0 && <span class="sr-only">, in pencil</span>}
 						</p>
 					)}
@@ -1043,12 +1122,47 @@ const bReplay = (
 
 // ---------------------------------------------------------------------------------------------
 // Option C · The notebook fills in: each real step pencils a stroke, and the fifth crosses the four.
+// Its five lines are TallySteps (under the notebook); a finished step says what it did.
+
+const C_NAMES = [
+	"Link your bank",
+	"Sort what Tally wasn't sure of",
+	"Set your budgets",
+	"Keep a bill",
+	"Tomorrow · Tally keeps count on its own",
+];
+
+/** Thursday's Safe to spend: $1,398, after the overnight sort's three new transactions. */
+const SAFE_THURSDAY = 139800;
+
+/** Thursday, with all five strokes in ink: C's last picture and E's last, with their own step names. */
+function FiveStrokes({ steps }: { steps: StepLine[] }) {
+	return (
+		<StrokesTop
+			label={
+				<>
+					Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+				</>
+			}
+			headline={<Amount>{money(SAFE_THURSDAY)}</Amount>}
+			strokes={5}
+			ink
+			status="Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up."
+		>
+			<TallySteps steps={steps} />
+			<p class="mt-4 text-sm text-muted">
+				From tomorrow this list goes, and Home is just Home.
+			</p>
+		</StrokesTop>
+	);
+}
 
 const cWelcome = (
 	<StrokesTop
 		label="Welcome to Tally"
 		headline={<h1 class={TITLE}>One thing today.</h1>}
 		strokes={0}
+		caption={false}
 		status="Tally does the reading; you make the calls."
 		band={
 			<Band
@@ -1058,7 +1172,11 @@ const cWelcome = (
 				Link your bank
 			</Band>
 		}
-	/>
+	>
+		<TallySteps
+			steps={stepsOf(C_NAMES, ["Next", "Later", "Later", "Later", "Later"], 0)}
+		/>
+	</StrokesTop>
 );
 
 const cSpent = (
@@ -1070,12 +1188,21 @@ const cSpent = (
 		}
 		headline={<Amount>{money(SPENT)}</Amount>}
 		strokes={1}
+		caption={false}
 		status="That's all for today. Tally sorts what it's sure of by tomorrow, so these will be fewer."
 		band={FAMILY_BAND}
-	/>
+	>
+		<TallySteps
+			steps={stepsOf(
+				C_NAMES,
+				["Chase, linked", "86 to go", "Later", "Later", "Later"],
+				1,
+			)}
+		/>
+	</StrokesTop>
 );
 
-/** The budget walk: one category at a time, over Home with two strokes drawn. */
+/** The budget walk: one category at a time, over Home with two strokes drawn and its count under the notebook. */
 const cWalkBehind = (
 	<StrokesTop
 		label={
@@ -1118,6 +1245,36 @@ const cWalkSheet = (
 	</>
 );
 
+const cBills = (
+	<StrokesTop
+		label={
+			<>
+				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+			</>
+		}
+		headline={<Amount>{money(SAFE)}</Amount>}
+		strokes={3}
+		caption={false}
+		status="Three. Tally found 8 charges that come back every month. Keep the real ones and that's four."
+		band={
+			<Band
+				href="/bills/find"
+				detail="From repeat charges in the last 3 months"
+			>
+				8 possible bills found
+			</Band>
+		}
+	>
+		<TallySteps
+			steps={stepsOf(
+				C_NAMES,
+				["Chase, linked", "Done", "12 budgets", "Next", "Later"],
+				3,
+			)}
+		/>
+	</StrokesTop>
+);
+
 const cFour = (
 	<StrokesTop
 		label={
@@ -1127,21 +1284,38 @@ const cFour = (
 		}
 		headline={<Amount>{money(SAFE)}</Amount>}
 		strokes={4}
-		status="Four. The fifth draws itself tomorrow, when you look in."
-	/>
+		caption={false}
+		status="Four. Tomorrow Tally keeps count on its own, and that's the fifth."
+	>
+		<TallySteps
+			steps={stepsOf(
+				C_NAMES,
+				[
+					"Chase, linked",
+					"Done",
+					"12 budgets",
+					"Harbor Property and 7 more",
+					"Next",
+				],
+				4,
+			)}
+		/>
+	</StrokesTop>
 );
 
 const cFive = (
-	<StrokesTop
-		label={
-			<>
-				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
-			</>
-		}
-		headline={<Amount>{money(SAFE)}</Amount>}
-		strokes={5}
-		ink
-		status="Five. You're set up, and from here Tally just keeps count."
+	<FiveStrokes
+		steps={stepsOf(
+			C_NAMES,
+			[
+				"Chase, linked",
+				"Done",
+				"12 budgets",
+				"Harbor Property and 7 more",
+				"Overnight",
+			],
+			5,
+		)}
 	/>
 );
 
@@ -1159,13 +1333,19 @@ const cReplay = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// Option D · Kitchen-table sitting: a few plain questions after last month is sorted; each answer is a line.
+// Option D · Kitchen-table sitting: Tally sorts the last 90 days from the bank, then asks a few plain questions;
+// each answer is a line in the family's own first page.
 
 const dMorning = (
 	<HomeTop
 		amount={blank("Pencil blank, not written in yet")}
-		status="Tally sorted 362 overnight and has 14 questions for you. Safe to spend is written in at the end."
-		howLink={false}
+		status="Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end."
+		howLink={
+			<p class="text-sm text-muted">
+				Your pay first, then your bills, then a budget for each category that
+				spent something.
+			</p>
+		}
 		band={
 			<Band href="/questions" detail="About three minutes. Most are one tap.">
 				14 questions from Tally
@@ -1175,93 +1355,182 @@ const dMorning = (
 );
 
 const DLEDGER_LINES = [
-	"Chase · 412 lines · Jul 16 to Oct 13",
+	"From Chase · 412 lines · Jul 16 to Oct 13",
 	"Moves between your accounts · 6 left out",
 	"Paychecks · $4,900 in September",
 ];
 
+/** A line of a question page's ledger: an answer (ink) or what the bank says (muted). */
+type LedgerLine = { text: string; ink?: boolean };
+
+/** A question page's top: "Your first page", the count at the right, and the ledger so far. */
+function FirstPage({
+	right,
+	lines,
+	children,
+}: {
+	right?: Child;
+	lines: LedgerLine[];
+	children?: Child;
+}) {
+	return (
+		<>
+			<div class="flex items-center justify-between gap-3">
+				<h1 class="text-lg font-semibold">Your first page</h1>
+				{right}
+			</div>
+			<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
+				{lines.map((l) => (
+					<li class={`py-2 ${l.ink ? "text-ink" : "text-muted"}`}>{l.text}</li>
+				))}
+			</ul>
+			{children}
+		</>
+	);
+}
+
+/** The small notebook beside a question page's headline, with what it counts. */
+function SmallNotebook({
+	strokes,
+	text,
+	drawLast = false,
+}: {
+	strokes: number;
+	text: string;
+	drawLast?: boolean;
+}) {
+	return (
+		<div class="flex items-center gap-2">
+			<Notebook strokes={strokes} ink drawLast={drawLast} size="size-12" />
+			<p class="text-sm text-muted">{text}</p>
+		</div>
+	);
+}
+
+const D_LEDGER: LedgerLine[] = [
+	...DLEDGER_LINES.map((text) => ({ text })),
+	{ text: "Costco · Groceries", ink: true },
+];
+
+const E_LEDGER: LedgerLine[] = [
+	{ text: "Pay · Acme Corp, $2,450 every other Friday", ink: true },
+	{ text: "Bills · 8 kept, about $2,062 a month", ink: true },
+];
+
+/** The Groceries question, as D asks it and as E asks it one at a time: what the bank shows, the suggestion in a dashed tag, and the one button. */
+function GroceriesQuestion({ quiet }: { quiet: string }) {
+	return (
+		<>
+			<p class="mt-6 text-base text-muted">
+				Your bank shows Groceries spent $610 in August and $674 in September.
+			</p>
+			<p class="mt-2">
+				<span class="inline-flex items-center rounded-full border border-dashed border-muted px-3 py-1 text-sm text-muted">
+					$650 a month <span class="sr-only">Suggested, not kept yet</span>
+				</span>
+			</p>
+			<h2 class="mt-3 font-serif text-2xl font-semibold">
+				Make $650 a month your Groceries budget?
+			</h2>
+			<p class="mt-2 text-sm text-muted">
+				Tally's suggestion: a typical month, rounded up to the next $10. From
+				October on.
+			</p>
+			<div class="mt-4">
+				<Button type="button" class="w-full">
+					Yes, $650 a month
+				</Button>
+			</div>
+			<details class="mt-3">
+				<summary class="inline-flex min-h-11 cursor-pointer items-center text-ink">
+					Another amount
+				</summary>
+			</details>
+			<div class="mt-1">
+				<Button kind="text" type="button">
+					{quiet}
+				</Button>
+			</div>
+		</>
+	);
+}
+
 const dQuestion = (
-	<>
-		<div class="flex items-baseline justify-between gap-3">
-			<h1 class="text-lg font-semibold">Your first page</h1>
-			<p class="text-sm text-muted">4 of 14</p>
-		</div>
-		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-			{DLEDGER_LINES.map((line) => (
-				<li class="py-2 text-muted">{line}</li>
-			))}
-			<li class="py-2 text-ink">Costco · Groceries</li>
-		</ul>
-		<p class="mt-6 text-sm text-muted">
-			Groceries · $610 in August · $674 in September
-		</p>
-		<p class="mt-2">
-			<span class="inline-flex items-center rounded-full border border-dashed border-muted px-3 py-1 text-sm text-muted">
-				$650 a month <span class="sr-only">Suggested, not kept yet</span>
-			</span>
-		</p>
-		<h2 class="mt-3 font-serif text-2xl font-semibold">
-			Make it the Groceries budget, from October on?
-		</h2>
-		<p class="mt-2 text-sm text-muted">
-			Tally's suggestion: what Groceries spent in a typical month, rounded up to
-			the next $10.
-		</p>
-		<div class="mt-4">
-			<Button type="button" class="w-full">
-				Yes, $650 a month
-			</Button>
-		</div>
-		<details class="mt-3">
-			<summary class="inline-flex min-h-11 cursor-pointer items-center text-ink">
-				Another amount
-			</summary>
-		</details>
-		<div class="mt-1">
-			<Button kind="text" type="button">
-				Not now
-			</Button>
-		</div>
-	</>
+	<FirstPage right={<p class="text-sm text-muted">4 of 14</p>} lines={D_LEDGER}>
+		<GroceriesQuestion quiet="Not now" />
+	</FirstPage>
 );
 
-const dTotalPicture = (
-	<>
-		<h1 class="text-lg font-semibold">Your first page</h1>
-		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-			{DLEDGER_LINES.map((line) => (
-				<li class="py-2 text-muted">{line}</li>
-			))}
-			<li class="py-2 text-ink">Costco · Groceries</li>
-		</ul>
-		<div class="mt-4 flex justify-between border-t border-ink pt-3">
-			<span class="text-lg">Budgets</span>
-			<span class="tabular-nums">$4,050</span>
-		</div>
-		<div class="flex justify-between">
-			<span class="text-lg">Spent so far in October</span>
-			<span class="tabular-nums">−$2,486</span>
-		</div>
-		<div class="flex justify-between">
-			<span class="text-lg">Bills still due this week</span>
-			<span class="tabular-nums">−$153</span>
-		</div>
-		<div class="mt-2 border-b-[3px] border-double border-ink" />
-		<p class="mt-4 text-lg text-muted">
-			Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+/** A category the bank has no history for: the same page, with no suggestion and an empty amount. */
+const dNoHistory = (
+	<FirstPage
+		right={<p class="text-sm text-muted">13 of 14</p>}
+		lines={D_LEDGER}
+	>
+		<p class="mt-6 text-base text-muted">
+			Your bank shows nothing for Date Night in August or September.
 		</p>
-		<p class="font-serif text-6xl font-semibold tracking-tight">
-			{money(SAFE)}
-		</p>
-		<p class="mt-3 font-serif text-lg italic">
-			That's October, in your own numbers. Home keeps it up to date from here.
-		</p>
-		<div class="mt-6">
+		<h2 class="mt-3 font-serif text-2xl font-semibold">
+			Do you want a Date Night budget?
+		</h2>
+		<div class="mt-3">
+			<MoneyInput
+				id="date-night"
+				name="date_night"
+				label="Date Night, a month"
+				value=""
+			/>
+		</div>
+		<div class="mt-4">
 			<Button type="button" class="w-full">
-				Go to Home
+				Save this budget
 			</Button>
 		</div>
-	</>
+		<div class="mt-1">
+			<Button kind="text" type="button">
+				No Date Night budget
+			</Button>
+		</div>
+	</FirstPage>
+);
+
+/** The ruled-off total: the budgets, what's spent and still due, the double rule, and Safe to spend with its status. */
+function RuledTotal({ status }: { status: string }) {
+	return (
+		<>
+			<div class="mt-4 flex justify-between border-t border-ink pt-3">
+				<span class="text-lg">Budgets</span>
+				<span class="tabular-nums">{money(BUDGETS_TOTAL)}</span>
+			</div>
+			<div class="flex justify-between">
+				<span class="text-lg">Spent so far in October</span>
+				<span class="tabular-nums">−{money(SPENT)}</span>
+			</div>
+			<div class="flex justify-between">
+				<span class="text-lg">Bills still due this week</span>
+				<span class="tabular-nums">−{money(BILLS_DUE)}</span>
+			</div>
+			<div class="mt-2 border-b-[3px] border-double border-ink" />
+			<p class="mt-4 text-lg text-muted">
+				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+			</p>
+			<p class="font-serif text-6xl font-semibold tracking-tight">
+				{money(SAFE)}
+			</p>
+			<p class="mt-3 font-serif text-lg italic">{status}</p>
+			<div class="mt-6">
+				<Button type="button" class="w-full">
+					Go to Home
+				</Button>
+			</div>
+		</>
+	);
+}
+
+const dTotalPicture = (
+	<FirstPage lines={D_LEDGER}>
+		<RuledTotal status="That's October, in your own numbers. Home keeps it up to date from here." />
+	</FirstPage>
 );
 
 /** Option D's replay: the new answer's line is written into the ledger, then the total is ruled off. */
@@ -1301,16 +1570,233 @@ const dReplay = (
 );
 
 // ---------------------------------------------------------------------------------------------
-// The page: four options, each with its pictures and one replay.
+// Option E · The notebook, one question at a time: C's notebook counts the steps, and D's plain questions fill
+// it in, from the family's own last 90 days. The budgets can be kept all at once or one at a time.
 
-/** P125 on the proposals page: the four ways a new family's first week can go, drawn for the owner's pick. */
+const E_NAMES = [
+	"Link your bank",
+	"Your pay",
+	"Your bills",
+	"Your budgets",
+	"Tomorrow · Tally keeps count on its own",
+];
+
+const eBefore = (
+	<>
+		<div class="mt-2 flex items-center justify-between gap-4">
+			<h1 class="font-serif text-4xl font-semibold tracking-tight">
+				Five strokes, and you're set up.
+			</h1>
+			<Notebook strokes={0} size="size-24" />
+		</div>
+		<TallySteps
+			steps={stepsOf(
+				E_NAMES,
+				[
+					"About a minute",
+					"One question",
+					"One question",
+					"One tap, or one at a time",
+					"Later",
+				],
+				0,
+			)}
+		/>
+		<div class="mt-6">
+			<Button type="button" class="w-full">
+				Link a bank
+			</Button>
+		</div>
+		<p class="mt-3 text-sm text-muted">
+			Tally can only read your bank. It can't move money.
+		</p>
+	</>
+);
+
+const eEvening = (
+	<>
+		<div class="mt-2 flex items-center justify-between gap-4">
+			<p class="text-lg text-muted">Tuesday, 7 p.m.</p>
+			<Notebook strokes={1} ink size="size-24" />
+		</div>
+		<p class="mt-3 font-serif text-lg italic">
+			One. Tally's reading your last 90 days from Chase. Your questions will be
+			ready in the morning.
+		</p>
+		<p class="mt-2 text-sm text-muted">Nothing for you to do until then.</p>
+		<TallySteps
+			steps={stepsOf(
+				E_NAMES,
+				[
+					"Chase, linked",
+					"Tomorrow morning",
+					"Tomorrow morning",
+					"Tomorrow morning",
+					"Later",
+				],
+				1,
+			)}
+		/>
+	</>
+);
+
+const eMorning = (
+	<StrokesTop
+		label={
+			<>
+				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+			</>
+		}
+		headline={blank("Pencil blank, not written in yet")}
+		strokes={1}
+		ink
+		caption={false}
+		status="Tally sorted 362 overnight. Three things to check, and Safe to spend is written in at the end."
+		band={
+			<Band
+				href="/questions"
+				detail="Your pay, your bills and your budgets. About three minutes."
+			>
+				Three things to check
+			</Band>
+		}
+	/>
+);
+
+const ePay = (
+	<FirstPage
+		right={<SmallNotebook strokes={1} text="1 of 5" />}
+		lines={[
+			{ text: "From Chase · 412 lines · Jul 16 to Oct 13" },
+			{ text: "Moves between your accounts · 6 left out" },
+		]}
+	>
+		<p class="mt-6 text-base text-muted">
+			Your bank shows ACME CORP PAYROLL paying $2,450 every other Friday, 7
+			times since Jul 17.
+		</p>
+		<h2 class="mt-3 font-serif text-2xl font-semibold">Is this your pay?</h2>
+		<div class="mt-4">
+			<Button type="button" class="w-full">
+				Yes, that's my pay
+			</Button>
+		</div>
+		<div class="mt-1">
+			<Button kind="text" type="button">
+				No, it's something else
+			</Button>
+		</div>
+	</FirstPage>
+);
+
+const eBudgets = (
+	<FirstPage
+		right={<SmallNotebook strokes={3} text="3 of 5" />}
+		lines={E_LEDGER}
+	>
+		<p class="mt-3 text-sm text-muted">
+			Your bank shows what each category spent in August and September. Tally
+			rounded each up to the next $10.
+		</p>
+		<ul class="mt-3 divide-y divide-rule border-y border-rule">
+			{BUDGETS.slice(0, 5).map((b) => (
+				<li class="flex items-center justify-between gap-3 py-1">
+					<div class="min-w-0">
+						<p class="text-base">{b.name}</p>
+						<p class="text-sm text-muted">
+							Aug {money((b.aug ?? 0) * 100)} · Sep {money((b.sep ?? 0) * 100)}
+						</p>
+					</div>
+					<span class="shrink-0 rounded-full border border-dashed border-muted px-3 py-0.5 text-sm text-muted">
+						{money(b.budgetCents)}
+						<span class="sr-only">Suggested, not kept yet</span>
+					</span>
+				</li>
+			))}
+		</ul>
+		<div class="mt-1">
+			<FoldedRow label="7 more · $1,120 a month" />
+		</div>
+		<h2 class="mt-3 font-serif text-xl font-semibold">
+			Keep all 12 budgets, {money(BUDGETS_TOTAL)} a month?
+		</h2>
+		<div class="mt-3">
+			<Button type="button" class="w-full">
+				Keep all 12
+			</Button>
+		</div>
+		<div class="mt-2">
+			<Button kind="secondary" type="button" class="w-full">
+				One at a time
+			</Button>
+		</div>
+		<p class="mt-3 text-sm text-muted">
+			Once set, a budget can be changed on Home but not removed.
+		</p>
+	</FirstPage>
+);
+
+const eOne = (
+	<FirstPage
+		right={<SmallNotebook strokes={3} text="Budgets · 1 of 12" />}
+		lines={E_LEDGER}
+	>
+		<GroceriesQuestion quiet="Skip this one" />
+	</FirstPage>
+);
+
+const eTotal = (
+	<FirstPage
+		right={<SmallNotebook strokes={4} text="4 of 5" />}
+		lines={E_LEDGER}
+	>
+		<RuledTotal status="Four. Tomorrow Tally keeps count on its own, and that's the fifth." />
+	</FirstPage>
+);
+
+const eFive = (
+	<FiveStrokes
+		steps={stepsOf(
+			E_NAMES,
+			[
+				"Chase, linked",
+				"Acme Corp",
+				"Harbor Property and 7 more",
+				"12 budgets",
+				"Overnight",
+			],
+			5,
+		)}
+	/>
+);
+
+/** Option E's replay, 6 s: the bills line writes in, then its stroke draws and inks, on the budgets page narrowed to the bills answer. */
+const eReplay = (
+	<>
+		<div class="flex items-center justify-between gap-3">
+			<h1 class="text-lg font-semibold">Your first page</h1>
+			<SmallNotebook strokes={3} text="3 of 5" drawLast />
+		</div>
+		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
+			<li class="py-2 text-ink">Pay · Acme Corp, $2,450 every other Friday</li>
+			<li class="py-2 text-ink proposal-first-line">
+				Bills · 8 kept, about $2,062 a month
+			</li>
+		</ul>
+	</>
+);
+
+// ---------------------------------------------------------------------------------------------
+// The page: five options, each with its pictures and one replay.
+
+/** P125 on the proposals page: the five ways a new family's first week can go, drawn for the owner's pick. */
 export function PolishRoundDProposals() {
 	return (
 		<Specimen
 			id="p125-first-week"
 			title="P125 · A new family's first week"
 			tier="visual"
-			sentence="Four ways a new family's first week can go, from linking a bank to a Home that's just Home. Each option is the family's app, on the same Chase household. Pick one."
+			sentence="Five ways a new family's first week can go, from linking a bank to a Home that's just Home. Each option is the family's app, on the same Chase household. Pick one."
 		>
 			<Fixed>
 				Tally only suggests and a person decides (decision 101): nothing is
@@ -1325,7 +1811,7 @@ export function PolishRoundDProposals() {
 					note="Tally's part against yours: Tally finds your paycheck, bills and transfers, names your stores and writes a first budget, and you link a bank. Home fills itself in while Tally reads."
 					cost="a first-budget rule (a spec line), a Home that is the entry until a budget exists, Plaid Link opened on Home (the approved plaid-link.js, loaded there while no bank is linked), and Home checking every 5 seconds while Tally reads (htmx polling, a new pattern here). The status line is the only thing read aloud: once when the first month is in and once when all 90 days are."
 					why="a family sees what Tally does for them on their own money as it arrives, and the only thing they did was link a bank."
-					recommended
+					recommended={false}
 				>
 					<Shot caption="Before a bank: Tally's part, and yours">
 						<Phone label="Option A, before a bank" demo={false} tab="home">
@@ -1509,6 +1995,15 @@ export function PolishRoundDProposals() {
 							</Sheet>
 						</Phone>
 					</Shot>
+					<Shot caption="The bills step: three strokes, and eight possible bills">
+						<Phone
+							label="Option C, the bills step, three strokes in pencil"
+							demo={false}
+							tab="home"
+						>
+							{cBills}
+						</Phone>
+					</Shot>
 					<Shot caption="Four strokes, and Safe to spend">
 						<Phone
 							label="Option C, four strokes in pencil"
@@ -1541,7 +2036,7 @@ export function PolishRoundDProposals() {
 					name="Option D · Kitchen-table sitting"
 					recommended={false}
 					width="w-full"
-					note="Once Tally has sorted last month, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend."
+					note="Once Tally has sorted the last 90 days from your bank, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend."
 					cost="a question page, a first-budget rule (a spec line) and one kept date for when the sitting ends."
 					why="a family answers one small question at a time, and each answer is a line they can read back."
 				>
@@ -1563,6 +2058,15 @@ export function PolishRoundDProposals() {
 							{dQuestion}
 						</Phone>
 					</Shot>
+					<Shot caption="A category with no history: a blank amount, and no suggestion">
+						<Phone
+							label="Option D, a category with no history, a blank amount"
+							demo={false}
+							tab="home"
+						>
+							{dNoHistory}
+						</Phone>
+					</Shot>
 					<Shot caption="The total: the ledger, and Safe to spend ruled off">
 						<Phone label="Option D, the total" demo={false} tab="home">
 							{dTotalPicture}
@@ -1575,6 +2079,96 @@ export function PolishRoundDProposals() {
 							tab="home"
 						>
 							{dReplay}
+						</Phone>
+					</Shot>
+				</Choice>
+				<Choice
+					name="Option E · The notebook, one question at a time"
+					width="w-full"
+					note="C's notebook shows how far along you are, and D's plain questions fill it in: your pay, your bills, then your budgets, all from your own last 90 days."
+					cost="a kept record of the five strokes (one household setting), a question page, and a first-budget rule (a spec line); no polling, since the questions are ready the next morning."
+					why="every step says what it's for, every number comes from the family's own bank, and the longest part, the budgets, can be one tap."
+				>
+					<Shot caption="Before a bank: five strokes and you're set up">
+						<Phone
+							label="Option E, before a bank, five strokes in pencil"
+							demo={false}
+							tab="home"
+						>
+							{eBefore}
+						</Phone>
+					</Shot>
+					<Shot caption="That evening: one stroke">
+						<Phone
+							label="Option E, that evening, one stroke in ink"
+							demo={false}
+							tab="home"
+						>
+							{eEvening}
+						</Phone>
+					</Shot>
+					<Shot caption="Next morning: three things to check">
+						<Phone
+							label="Option E, next morning, three things to check"
+							demo={false}
+							tab="home"
+						>
+							{eMorning}
+						</Phone>
+					</Shot>
+					<Shot caption="Your pay: one question">
+						<Phone
+							label="Option E, your pay, one question"
+							demo={false}
+							tab="home"
+						>
+							{ePay}
+						</Phone>
+					</Shot>
+					<Shot caption="Your budgets: keep all, or one at a time">
+						<Phone
+							label="Option E, your budgets, keep all or one at a time"
+							demo={false}
+							scrolled
+							tab="home"
+						>
+							{eBudgets}
+						</Phone>
+					</Shot>
+					<Shot caption="One at a time: Groceries">
+						<Phone
+							label="Option E, one at a time, Groceries"
+							demo={false}
+							tab="home"
+						>
+							{eOne}
+						</Phone>
+					</Shot>
+					<Shot caption="Ruled off: four strokes">
+						<Phone
+							label="Option E, ruled off, four strokes"
+							demo={false}
+							tab="home"
+						>
+							{eTotal}
+						</Phone>
+					</Shot>
+					<Shot caption="Thursday: the fifth crosses the four">
+						<Phone
+							label="Option E, Thursday, five strokes in ink"
+							demo={false}
+							tab="home"
+						>
+							{eFive}
+						</Phone>
+					</Shot>
+					<Shot caption="Replay, every 6 seconds: an answer writes its ledger line, then its stroke inks in.">
+						<Phone
+							label="Option E, replay: an answer writes its line, then its stroke inks in"
+							demo={false}
+							tab="home"
+						>
+							{eReplay}
 						</Phone>
 					</Shot>
 				</Choice>

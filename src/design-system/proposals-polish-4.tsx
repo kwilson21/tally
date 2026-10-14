@@ -27,7 +27,8 @@ import { Fixed, PickedPill, Sheet } from "./proposal-parts";
 import { TITLE, tx } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
-export const money = (cents: number) => formatCents(cents, { wholeDollars: true });
+export const money = (cents: number) =>
+	formatCents(cents, { wholeDollars: true });
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style.
@@ -318,7 +319,13 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 }
 
 /** One picture of an option, with a caption in words above it. */
-export function Shot({ caption, children }: { caption: string; children?: Child }) {
+export function Shot({
+	caption,
+	children,
+}: {
+	caption: string;
+	children?: Child;
+}) {
 	return (
 		<figure class="flex min-w-0 max-w-full flex-col gap-2">
 			<figcaption class="text-sm text-muted">{caption}</figcaption>
@@ -397,7 +404,13 @@ export function Choices({ children }: { children?: Child }) {
 // Home: its top and its Budget list, as the real HomeTop and ProgressRow draw them at a phone's size.
 
 /** The big amount, at the phone's size (HomeTop's size; no lg: step, so it fits the frame). */
-export function Amount({ tone = "", children }: { tone?: string; children?: Child }) {
+export function Amount({
+	tone = "",
+	children,
+}: {
+	tone?: string;
+	children?: Child;
+}) {
 	return (
 		<p
 			class={`font-serif text-6xl font-semibold tracking-tight whitespace-nowrap ${tone}`}

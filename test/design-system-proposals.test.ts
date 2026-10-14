@@ -383,7 +383,7 @@ describe("GET /design-system/proposals", () => {
 			// P34 on mark the owner's pick (decisions 72–86), and P118 to P124 mark the owner's picks (decision 111).
 			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
-						const twoPicks = [
+			const twoPicks = [
 				"p60-bills-total",
 				"p111-delete-cash",
 				"p118-rows",
@@ -1998,12 +1998,14 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		"proposal-first-later",
 		"proposal-first-last",
 		"proposal-first-second-round",
+		"proposal-first-stroke-after",
 	];
 	const OPTIONS = [
 		"Option A · The Opening Entry",
 		"Option B · Pencil, then ink",
 		"Option C · The notebook fills in",
 		"Option D · Kitchen-table sitting",
+		"Option E · The notebook, one question at a time",
 	];
 
 	it("opens the page with its own section, after P126 and before the polish pass's picks, titled and dated as the brief asks", async () => {
@@ -2025,7 +2027,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		);
 	});
 
-	it("draws four options: A recommended and none picked, each with its cost and its reason, all in the family's app", async () => {
+	it("draws five options: E recommended and none picked, each with its cost and its reason, all in the family's app", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 		const names = [...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map(
@@ -2033,10 +2035,10 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		);
 		expect(names).toEqual(OPTIONS);
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
-		expect(option(chunk, OPTIONS[0] ?? "")).toContain(">Recommended<");
+		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Recommended<");
 		expect(chunk).not.toContain(">Picked<");
-		expect(chunk.match(/Trade-off: /g)?.length).toBe(4);
-		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(4);
+		expect(chunk.match(/Trade-off: /g)?.length).toBe(5);
+		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(5);
 		// The family's first week has no demo banner: none of these pictures draws one.
 		expect(chunk).not.toContain("Demo data. Nothing here is real.");
 		expect(chunk).toContain(
@@ -2048,7 +2050,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 		expect(chunk).not.toContain("on desktop");
-		const stages = [11, 6, 6, 4];
+		const stages = [11, 6, 7, 5, 9];
 		OPTIONS.forEach((name, i) => {
 			// Each picture's label, up to its closing quote: the words after it belong to other pictures too.
 			const labels = pictures(option(chunk, name)).map((p) =>
@@ -2066,9 +2068,9 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			chunk.match(
 				/Replay, (every (5|6) seconds|a few minutes shortened to 8 seconds)/g,
 			)?.length,
-		).toBe(4);
+		).toBe(5);
 		// Every phone is 390 by 844 inside its 1px border: 392 by 846 drawn, as the Phone frame in proposals-polish-4 draws it.
-		expect(chunk.match(/h-\[846px\] w-\[392px\]/g)?.length).toBe(27);
+		expect(chunk.match(/h-\[846px\] w-\[392px\]/g)?.length).toBe(38);
 	});
 
 	it("loops each replay on its own clock: 8 s for A, 5 s for B, 6 s for C and D, all set from the rising token", async () => {
@@ -2163,7 +2165,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 		expect(chunk).not.toContain("raised to the next $10");
-		expect(chunk.match(/rounded up to the next \$10/g)?.length).toBe(3);
+		expect(chunk.match(/rounded up to the next \$10/g)?.length).toBe(4);
 		// Option B's pencilled budget rows: each row says it is pencilled in, not kept yet.
 		expect(
 			option(chunk, OPTIONS[1] ?? "").match(/Pencilled in, not kept yet: /g)
@@ -2298,25 +2300,26 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 				"3-month average: $1,600.00",
 				"Skip this one",
 				"Save and next",
-				"Four. The fifth draws itself tomorrow, when you look in.",
-				"Five. You&#39;re set up, and from here Tally just keeps count.",
+				"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+				"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You&#39;re set up.",
 				"Thursday: the fifth stroke crosses the four, and all five are ink",
 				"Five. You&#39;re set up.",
 			],
 			[OPTIONS[3] ?? ""]: [
-				"Tally sorted 362 overnight and has 14 questions for you. Safe to spend is written in at the end.",
+				"Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end.",
+				"Your pay first, then your bills, then a budget for each category that spent something.",
 				"14 questions from Tally",
 				"About three minutes. Most are one tap.",
 				"Your first page",
 				"4 of 14",
-				"Chase · 412 lines · Jul 16 to Oct 13",
+				"From Chase · 412 lines · Jul 16 to Oct 13",
 				"Moves between your accounts · 6 left out",
 				"Paychecks · $4,900 in September",
 				"Costco · Groceries",
-				"Groceries · $610 in August · $674 in September",
+				"Your bank shows Groceries spent $610 in August and $674 in September.",
 				"$650 a month",
-				"Make it the Groceries budget, from October on?",
-				"Tally&#39;s suggestion: what Groceries spent in a typical month, rounded up to the next $10.",
+				"Make $650 a month your Groceries budget?",
+				"Tally&#39;s suggestion: a typical month, rounded up to the next $10. From October on.",
 				"Yes, $650 a month",
 				"Another amount",
 				"Not now",
@@ -2356,8 +2359,12 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 				"a kept record of the five steps, a budget walk, and checking for the import&#39;s end (htmx polling).",
 			],
 			[OPTIONS[3] ?? ""]: [
-				"Once Tally has sorted last month, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend.",
+				"Once Tally has sorted the last 90 days from your bank, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend.",
 				"a question page, a first-budget rule (a spec line) and one kept date for when the sitting ends.",
+			],
+			[OPTIONS[4] ?? ""]: [
+				"C&#39;s notebook shows how far along you are, and D&#39;s plain questions fill it in: your pay, your bills, then your budgets, all from your own last 90 days.",
+				"a kept record of the five strokes (one household setting), a question page, and a first-budget rule (a spec line); no polling, since the questions are ready the next morning.",
 			],
 		};
 		for (const name of OPTIONS) {
@@ -2427,8 +2434,10 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			picture(chunk, label);
 		}
 		// The strokes say they are pencil in words beside the count, and the picture that inks them says ink.
-		expect(option(chunk, OPTIONS[2] ?? "")).toContain(
-			'Your first tally: 1 of 5<span class="sr-only">, in pencil</span>',
+		expect(
+			picture(chunk, "Option C, the budget walk, two strokes in pencil"),
+		).toContain(
+			'Your first tally · 2 of 5<span class="sr-only">, in pencil</span>',
 		);
 		expect(picture(chunk, "Option C, four strokes in pencil")).toContain(
 			"stroke-muted",
@@ -2694,5 +2703,264 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 	it("adds no client JavaScript: the section has no script", async () => {
 		const { html } = await get("/design-system/proposals");
 		expect(section(html)).not.toContain("<script");
+	});
+});
+
+// P125, round E (#95): the stroke list, the fixes to C and D, and option E (proposal only: nothing in the app changes).
+describe("GET /design-system/proposals, P125 round E (the stroke list, C and D fixed, option E)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const section = (html: string) => {
+		const start = html.indexOf('<section id="p125-first-week"');
+		expect(start).toBeGreaterThan(-1);
+		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
+		expect(end).toBeGreaterThan(start);
+		return html.slice(start, end);
+	};
+	// One labelled phone picture: from its label to the next picture's.
+	const picture = (chunk: string, label: string) => {
+		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
+		expect(at, label).toBeGreaterThan(-1);
+		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+		return chunk.slice(at, next === -1 ? undefined : next);
+	};
+	// One option: from its heading to the next option's heading.
+	const option = (chunk: string, name: string) => {
+		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return chunk.slice(at, next);
+	};
+	// The notebook's own strokes (its tally lines), not the list's glyphs: their coordinates are the notebook's.
+	const notebookStrokes = (s: string) =>
+		s.match(/<line x1="(41|46|53|60|67)" [^>]*stroke-(ink|muted)/g)?.length ??
+		0;
+	// The list's glyphs that are not done yet: a dashed stroke.
+	const dashedGlyphs = (s: string) =>
+		s.match(/stroke-dasharray="3 3"/g)?.length ?? 0;
+
+	it("draws the five strokes as a list under the notebook: each line's glyph, name and note, and a done line says so in words", async () => {
+		const chunk = section(await drawn());
+		const welcome = picture(chunk, "Option C, welcome");
+		expect(welcome).toContain("Your first tally · 0 of 5");
+		expect(welcome.match(/<li class="flex min-h-11/g)?.length).toBe(5);
+		expect(dashedGlyphs(welcome)).toBe(5);
+		expect(welcome).toContain("Link your bank");
+		expect(welcome).toContain("Next");
+		const evening = picture(
+			chunk,
+			"Option C, that evening, one stroke in pencil",
+		);
+		expect(evening).toContain("Your first tally · 1 of 5");
+		expect(evening).toContain("Chase, linked");
+		expect(evening).toContain('<span class="sr-only">, done</span>');
+		expect(evening).toContain("86 to go");
+		expect(dashedGlyphs(evening)).toBe(4);
+	});
+
+	it("draws C's bills step as its own picture: three strokes, step four Next, and the eight possible bills", async () => {
+		const chunk = section(await drawn());
+		const bills = picture(
+			chunk,
+			"Option C, the bills step, three strokes in pencil",
+		);
+		expect(bills).toContain(
+			"Three. Tally found 8 charges that come back every month. Keep the real ones and that&#39;s four.",
+		);
+		expect(bills).toContain("8 possible bills found");
+		expect(bills).toContain("From repeat charges in the last 3 months");
+		expect(bills).toContain("Your first tally · 3 of 5");
+		expect(bills).toContain("Keep a bill");
+		expect(dashedGlyphs(bills)).toBe(2);
+		expect(notebookStrokes(bills)).toBe(3);
+	});
+
+	it("says Harbor Property and 7 more at four strokes, and ends on Thursday with the fifth stroke done and $1,398", async () => {
+		const chunk = section(await drawn());
+		const four = picture(chunk, "Option C, four strokes in pencil");
+		expect(four).toContain("Harbor Property and 7 more");
+		expect(four).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+		);
+		expect(four).toContain("Your first tally · 4 of 5");
+		const thursday = picture(chunk, "Option C, five strokes in ink");
+		expect(thursday).toContain("$1,398");
+		expect(thursday).toContain(
+			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You&#39;re set up.",
+		);
+		expect(thursday).toContain("Your first tally · 5 of 5");
+		expect(thursday).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+		expect(dashedGlyphs(thursday)).toBe(0);
+	});
+
+	it("shows Your first tally · 2 of 5 on the Home behind the budget walk", async () => {
+		const chunk = section(await drawn());
+		const walk = picture(
+			chunk,
+			"Option C, the budget walk, two strokes in pencil",
+		);
+		expect(walk).toContain("Your first tally · 2 of 5");
+		expect(walk).toContain("Budget 1 of 12");
+	});
+
+	it("says where D's Groceries suggestion comes from, and asks a category with no history a question of its own", async () => {
+		const chunk = section(await drawn());
+		const question = picture(
+			chunk,
+			"Option D, a question page, the suggested amount in pencil",
+		);
+		expect(question).toContain(
+			"Your bank shows Groceries spent $610 in August and $674 in September.",
+		);
+		expect(question).toContain("From Chase · 412 lines · Jul 16 to Oct 13");
+		expect(question).toContain("Make $650 a month your Groceries budget?");
+		expect(question).toContain("Yes, $650 a month");
+		expect(question).toContain("Another amount");
+		expect(question).toContain("Not now");
+		expect(question).toContain("4 of 14");
+		expect(question).not.toContain(">Chase · 412 lines");
+		const none = picture(
+			chunk,
+			"Option D, a category with no history, a blank amount",
+		);
+		expect(none).toContain("13 of 14");
+		expect(none).toContain(
+			"Your bank shows nothing for Date Night in August or September.",
+		);
+		expect(none).toContain("Do you want a Date Night budget?");
+		expect(none).toContain("Date Night, a month");
+		expect(none).toContain("Save this budget");
+		expect(none).toContain("No Date Night budget");
+		expect(none).not.toContain("Last month: ");
+		expect(none).not.toContain("3-month average: ");
+		expect(none).not.toContain("Suggested, not kept yet");
+		expect(none).not.toContain("$650");
+	});
+
+	it("tells D's next morning that the questions come from the last 90 days, and that the pay, the bills and the budgets come next", async () => {
+		const chunk = section(await drawn());
+		const morning = picture(
+			chunk,
+			"Option D, next morning, with the amount a pencil blank",
+		);
+		expect(morning).toContain(
+			"Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end.",
+		);
+		expect(morning).toContain(
+			"Your pay first, then your bills, then a budget for each category that spent something.",
+		);
+	});
+
+	it("draws option E's eight pictures and its replay, each with its words", async () => {
+		const chunk = section(await drawn());
+		const e = option(chunk, "Option E · The notebook, one question at a time");
+		const phones = [
+			...e.matchAll(/role="img" aria-label="([^"]*), on a phone"/g),
+		].map((m) => m[1] ?? "");
+		expect(phones).toHaveLength(9);
+		expect(
+			phones.filter((p) => p.toLowerCase().includes("replay")),
+		).toHaveLength(1);
+		const before = picture(
+			chunk,
+			"Option E, before a bank, five strokes in pencil",
+		);
+		expect(before).toContain("Five strokes, and you&#39;re set up.");
+		expect(before).toContain("Link a bank");
+		expect(before).toContain(
+			"Tally can only read your bank. It can&#39;t move money.",
+		);
+		expect(before).toContain("Your first tally · 0 of 5");
+		expect(before).toContain("About a minute");
+		expect(notebookStrokes(before)).toBe(0);
+		const evening = picture(chunk, "Option E, that evening, one stroke in ink");
+		expect(evening).toContain(
+			"One. Tally&#39;s reading your last 90 days from Chase. Your questions will be ready in the morning.",
+		);
+		expect(evening).toContain("Nothing for you to do until then.");
+		expect(evening.match(/Tomorrow morning/g)?.length).toBe(3);
+		expect(notebookStrokes(evening)).toBe(1);
+		const morning = picture(
+			chunk,
+			"Option E, next morning, three things to check",
+		);
+		expect(morning).toContain(
+			"Tally sorted 362 overnight. Three things to check, and Safe to spend is written in at the end.",
+		);
+		expect(morning).toContain("Three things to check");
+		expect(morning).toContain("About three minutes.");
+		const pay = picture(chunk, "Option E, your pay, one question");
+		expect(pay).toContain(
+			"Your bank shows ACME CORP PAYROLL paying $2,450 every other Friday, 7 times since Jul 17.",
+		);
+		expect(pay).toContain("Is this your pay?");
+		expect(pay).toContain("Yes, that&#39;s my pay");
+		expect(pay).toContain("No, it&#39;s something else");
+		expect(pay).toContain("From Chase · 412 lines · Jul 16 to Oct 13");
+		expect(pay).toContain("Moves between your accounts · 6 left out");
+		expect(pay).toContain("1 of 5");
+		expect(notebookStrokes(pay)).toBe(1);
+		const budgets = picture(
+			chunk,
+			"Option E, your budgets, keep all or one at a time",
+		);
+		expect(budgets).toContain("Keep all 12 budgets, $4,050 a month?");
+		expect(budgets).toContain("Keep all 12");
+		expect(budgets).toContain("One at a time");
+		expect(budgets).toContain(
+			"Once set, a budget can be changed on Home but not removed.",
+		);
+		expect(budgets).toContain("Pay · Acme Corp, $2,450 every other Friday");
+		expect(budgets).toContain("Bills · 8 kept, about $2,062 a month");
+		expect(budgets).toContain("7 more · $1,120 a month");
+		expect(budgets).toContain("Aug $610 · Sep $674");
+		for (const tag of ["$650", "$320", "$180", "$1,600"]) {
+			expect(budgets, tag).toContain(tag);
+		}
+		expect(budgets).toContain("3 of 5");
+		expect(notebookStrokes(budgets)).toBe(3);
+		const one = picture(chunk, "Option E, one at a time, Groceries");
+		expect(one).toContain("Budgets · 1 of 12");
+		expect(one).toContain("Skip this one");
+		expect(one).toContain("Make $650 a month your Groceries budget?");
+		expect(one).toContain("Yes, $650 a month");
+		expect(notebookStrokes(one)).toBe(3);
+		const total = picture(chunk, "Option E, ruled off, four strokes");
+		expect(total).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+		);
+		expect(total).toContain("$1,411");
+		expect(total).toContain("Go to Home");
+		expect(total).toContain("−$2,486");
+		expect(notebookStrokes(total)).toBe(4);
+		const thursday = picture(chunk, "Option E, Thursday, five strokes in ink");
+		expect(thursday).toContain("$1,398");
+		expect(thursday).toContain("Your first tally · 5 of 5");
+		expect(thursday).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+		expect(notebookStrokes(thursday)).toBe(5);
+		const replay = picture(
+			chunk,
+			"Option E, replay: an answer writes its line, then its stroke inks in",
+		);
+		expect(replay).toContain("proposal-first-line");
+		expect(replay).toContain("proposal-first-cross");
+		expect(replay).toContain("proposal-first-stroke-after");
+		expect(replay).toContain("Bills · 8 kept, about $2,062 a month");
+		expect(notebookStrokes(replay)).toBe(3);
+	});
+
+	it("gives the Recommended pill to option E alone, and takes it off option A", async () => {
+		const chunk = section(await drawn());
+		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
+		expect(
+			option(chunk, "Option E · The notebook, one question at a time"),
+		).toContain(">Recommended<");
+		expect(option(chunk, "Option A · The Opening Entry")).not.toContain(
+			">Recommended<",
+		);
 	});
 });

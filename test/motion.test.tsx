@@ -602,7 +602,7 @@ describe("the proposals page's drawings", () => {
 		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), P118 and
 		// P119's saved-row replays (the tick, the let-go press and the toast), and P125's replays of a family's
 		// first week (the headline and status lines, the promises and found lines, the strikes, the pencil and ink, the strokes,
-		// the ledger line and the rule), plus the three step classes that set when a line starts (no animation).
+		// the ledger line and the rule), plus the four step classes that set when a line or a stroke starts (no animation of their own).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
@@ -627,6 +627,7 @@ describe("the proposals page's drawings", () => {
 				"proposal-first-status-middle",
 				"proposal-first-strike",
 				"proposal-first-stroke",
+				"proposal-first-stroke-after",
 				"proposal-first-title-first",
 				"proposal-first-title-last",
 				"proposal-loop",

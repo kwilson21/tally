@@ -777,7 +777,8 @@ html:not(.js) [data-money-js] {
  * bank's line (struck through) with Tally's name fade in. Lines 2 to 4 have keyframes of their own, which their step classes name, so each turns found at its own point. B (5 s): the pencilled amount inks
  * in over 150 ms, its dashed rule turns solid, and the two bars fill. C (6 s): the fifth stroke draws across the
  * four in 200 ms, and all five turn from pencil to ink in 150 ms. D (6 s): the new answer's line fades in and rises
- * 4 px in 200 ms, the double rule draws from the left, and the amount fades in.
+ * 4 px in 200 ms, the double rule draws from the left, and the amount fades in. E (6 s): the new ledger line fades in
+ * and rises 4 px, and its stroke draws 200 ms after it (.proposal-first-stroke-after) and inks in.
  */
 @keyframes replay-first-ink-text {
 	0%,
@@ -1257,6 +1258,10 @@ html:not(.js) [data-money-js] {
 	--kf-fact: replay-first-fact-line2;
 	--kf-strike: replay-first-strike-line2;
 	--kf-name: replay-first-name-line2;
+}
+/* E's last stroke draws a beat after its ledger line (200 ms, one --duration-rising): the same draw and ink keyframes, started later. */
+.proposal-first-stroke-after {
+	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising));
 }
 
 @media (prefers-reduced-motion: reduce) {
