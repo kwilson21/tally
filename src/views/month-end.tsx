@@ -336,7 +336,9 @@ export function MonthEnd({
 	amountCents: number;
 	rows: CategorySummary[];
 }) {
-	const over = amountCents < 0;
+	// With no budgeted category there is no budget result to stamp: no Over, and no Under either (#519).
+	const budgeted = rows.length > 0;
+	const over = budgeted && amountCents < 0;
 	const amount = wholeUnlessTiny(Math.abs(amountCents));
 	return (
 		<section aria-label={`${monthName} ended`}>
@@ -347,12 +349,14 @@ export function MonthEnd({
 				>
 					{amount}
 				</p>
-				<span
-					class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
-				>
-					{over ? "Over" : "Under"}
-					<span class="sr-only"> budget</span>
-				</span>
+				{budgeted && (
+					<span
+						class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
+					>
+						{over ? "Over" : "Under"}
+						<span class="sr-only"> budget</span>
+					</span>
+				)}
 			</div>
 			<EndBars rows={rows} chartId={chartId} />
 		</section>

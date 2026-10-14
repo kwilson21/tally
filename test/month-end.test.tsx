@@ -279,6 +279,34 @@ describe("MonthEnd budget bars", () => {
 		},
 	);
 
+	// Issue #519: a finished month with no budgeted category has no budget result to stamp, so it gets
+	// neither Over nor Under; a month with a budget still stamps.
+	it("is not stamped Over or Under when no category had a budget", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="no-budgets"
+				monthName="September"
+				amountCents={-5700}
+				rows={[]}
+			/>,
+		);
+		expect(html).toContain(">$57</p>");
+		expect(html).not.toMatch(/>(?:Over|Under)<span class="sr-only"> budget/);
+		expect(html).not.toMatch(/text-6xl[^"]*text-over/);
+	});
+
+	it("still stamps Over when a budgeted category is overspent", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="budgeted-over"
+				monthName="September"
+				amountCents={-5700}
+				rows={rows(1)}
+			/>,
+		);
+		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
+	});
+
 	it("never shows negative zero", () => {
 		const html = renderToString(
 			<MonthEnd
