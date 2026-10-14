@@ -89,7 +89,6 @@ import {
 import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import {
-	categoryRuleOffer,
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../transactions/rule-offer";
@@ -2545,11 +2544,11 @@ transactions.post("/transactions/cash", async (c) => {
 	// In Select mode the reply's address is the list's own, keeping a month that has turned over on screen (#321);
 	// otherwise it is the back as sent, as it always was.
 	const address = selecting ? listAddress(c, today, back) : back;
-	const offerRecord = await categoryRuleOffer(
-		c.env.DB,
-		saved.merchant,
-		saved.categoryId,
-	);
+	// A repost of an entry already saved stores nothing new, so it asks nothing: only a row this
+	// save stored can be the pick.
+	const offerRecord = saved.inserted
+		? await ruleOfferForTransaction(c.env.DB, saved.id, saved.categoryId)
+		: null;
 	const categoryName = categories.find(
 		(category) => category.id === saved.categoryId,
 	)?.name;
@@ -3690,10 +3689,20 @@ async function savePanel(
 			? tx.merchantName
 			: parsed.value.displayName) ??
 		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
+	// Linking a refund includes it, whatever the Exclude chip held.
+	const excludedNow =
+		refundOfId !== null && refundOfId !== current
+			? false
+			: parsed.value.excluded;
+	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts
+	// while excluded, and a bill's payment counts whatever its exclusion (COUNTED_PICKS_SQL), so neither is a new pick.
+	const putBackInBudget =
+		tx.markedTransfer && tx.excluded && !excludedNow && tx.paysBill !== true;
+	// The question follows a new pick: a category picked, or a transfer put back in the budget. The post-save lookup drops it when the store
+	// already has that rule, including one this save made or kept (decision 101).
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
-		parsed.value.categoryId === tx.categoryId ||
-		parsed.value.alwaysForMerchant
+		(parsed.value.categoryId === tx.categoryId && !putBackInBudget)
 			? null
 			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
 	const offerCategory = categories.find(
@@ -3723,11 +3732,6 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
