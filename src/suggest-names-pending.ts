@@ -54,6 +54,7 @@ export async function suggestTransactionNotes(
 			const result = await suggestNote(env.AI, transaction.rawName, [
 				transaction.merchantName,
 				transaction.displayName,
+				transaction.ownName,
 				...usableSuggestedNames({
 					stored: transaction.suggestedNames,
 					status: transaction.suggestionStatus,

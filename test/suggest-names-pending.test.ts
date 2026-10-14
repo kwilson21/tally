@@ -670,4 +670,80 @@ describe("suggestTransactionNotes", () => {
 				.first<{ n: number }>(),
 		).toEqual({ n: 3 });
 	});
+
+	// A renamed charge shows its own name, so a note that only repeats it is dropped (#426), the same as one
+	// that repeats the bank text or the merchant's name. The rejected note is counted as answered empty.
+	const noteOf = (rawName: string) =>
+		db
+			.prepare(
+				"SELECT note, note_guessed, note_tried_at IS NOT NULL AS tried FROM transactions WHERE raw_name = ?",
+			)
+			.bind(rawName)
+			.first<{ note: string | null; note_guessed: number; tried: number }>();
+
+	it.each([
+		["the same words", "Dog bed"],
+		["another case and punctuation", "DOG-BED."],
+	])(
+		"a renamed charge whose note only repeats its own name (%s) saves no note and counts as answered empty",
+		async (_label, guess) => {
+			await addNoteCandidates(1);
+			await db
+				.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+				)
+				.run();
+			const ai = fakeAi(() => ({ response: guess }));
+			expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+				asked: 1,
+				suggested: 0,
+			});
+			expect(await noteOf("NOTE SHOP 1")).toEqual({
+				note: null,
+				note_guessed: 0,
+				tried: 1,
+			});
+
+			// Answered empty, so a later night doesn't ask about it again.
+			const later = fakeAi(() => ({ response: guess }));
+			expect(await suggestTransactionNotes({ DB: db, AI: later })).toEqual({
+				asked: 0,
+				suggested: 0,
+			});
+			expect(later.run).not.toHaveBeenCalled();
+		},
+	);
+
+	it("a renamed charge whose note says more than its own name keeps the note", async () => {
+		await addNoteCandidates(1);
+		await db
+			.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+			)
+			.run();
+		const ai = fakeAi(() => ({ response: "Dog bed for the puppy" }));
+		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(await noteOf("NOTE SHOP 1")).toEqual({
+			note: "Dog bed for the puppy",
+			note_guessed: 1,
+			tried: 1,
+		});
+	});
+
+	it("a charge with no own name keeps a note whose words it doesn't show, as before", async () => {
+		await addNoteCandidates(1);
+		const ai = fakeAi(() => ({ response: "Dog bed" }));
+		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(await noteOf("NOTE SHOP 1")).toEqual({
+			note: "Dog bed",
+			note_guessed: 1,
+			tried: 1,
+		});
+	});
 });
