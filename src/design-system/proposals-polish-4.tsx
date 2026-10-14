@@ -3,8 +3,9 @@
 // labelled, like the rest of the page. Where the app's markup is the same at a phone's size (the
 // Wordmark, Band, WhyLink, ProgressRow, TransactionRow, FeedbackButton, LedgerIllustration, Icon),
 // the real component draws it; where an option changes a screen, that screen is a prototype in
-// tokens. The demo is the Riveras in October (Safe to spend $1,240); the family's numbers are
-// the ones they see once a bank is linked: 86 need a category, $2,140 spent, no budgets yet.
+// tokens. The demo is the Riveras in October (Safe to spend $1,240). The family pictures use
+// made-up sample numbers for a new household once a bank is linked (86 need a category, $2,140
+// spent, no budgets yet), never a real household's.
 
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
@@ -26,8 +27,7 @@ import { Fixed, PickedPill, Sheet } from "./proposal-parts";
 import { TITLE, tx } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
-export const money = (cents: number) =>
-	formatCents(cents, { wholeDollars: true });
+export const money = (cents: number) => formatCents(cents, { wholeDollars: true });
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style.
@@ -120,7 +120,7 @@ const BANK_LINES = [
 			...tx(901, "2026-10-01", "ACME CORP PAYROLL", -245000, undefined, {
 				income: true,
 			}),
-			displayName: "Paycheck",
+			displayName: "Paycheck, Acme Corp",
 		},
 	},
 	{
@@ -318,13 +318,7 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 }
 
 /** One picture of an option, with a caption in words above it. */
-export function Shot({
-	caption,
-	children,
-}: {
-	caption: string;
-	children?: Child;
-}) {
+export function Shot({ caption, children }: { caption: string; children?: Child }) {
 	return (
 		<figure class="flex min-w-0 max-w-full flex-col gap-2">
 			<figcaption class="text-sm text-muted">{caption}</figcaption>
@@ -403,13 +397,7 @@ export function Choices({ children }: { children?: Child }) {
 // Home: its top and its Budget list, as the real HomeTop and ProgressRow draw them at a phone's size.
 
 /** The big amount, at the phone's size (HomeTop's size; no lg: step, so it fits the frame). */
-export function Amount({
-	tone = "",
-	children,
-}: {
-	tone?: string;
-	children?: Child;
-}) {
+export function Amount({ tone = "", children }: { tone?: string; children?: Child }) {
 	return (
 		<p
 			class={`font-serif text-6xl font-semibold tracking-tight whitespace-nowrap ${tone}`}
@@ -420,8 +408,8 @@ export function Amount({
 }
 
 const DEMO_BAND = (
-	<Band href="/transactions/organize" detail="$228 of this month's spending">
-		12 need a category
+	<Band href="/transactions/organize" detail="$211 of this month's spending">
+		10 need a category
 	</Band>
 );
 
@@ -535,7 +523,7 @@ function HomeScrolled() {
 	);
 }
 
-/** The family's Home before any budget is set, with a bank linked and 86 transactions needing a category. */
+/** A new family's Home before any budget is set, in made-up sample numbers: a bank linked and 86 transactions needing a category. */
 function FamilyHome({
 	amount,
 	status,
@@ -581,6 +569,10 @@ const NEEDS_ATTENTION = (
 		<Icon name="alert" class="size-4" />
 		Needs attention
 	</span>
+);
+
+const NONE_LINKED = (
+	<span class="shrink-0 text-sm text-muted">None linked yet</span>
 );
 
 /** The places More holds, each with what it holds and, where it has one, a folio. */
@@ -927,10 +919,13 @@ const thingsPhone = (
 	</section>
 );
 
-/** How Tally works' opening, as the story (A): the bank's line, struck, and Tally's row under it. */
+/** How Tally works' opening, as the story (A): the page's title, then the bank's line, struck, and Tally's row under it. */
 const storyHead = (
 	<>
-		<div class="flex items-center justify-between gap-4">
+		<h1 class="font-serif text-5xl font-semibold tracking-tight">
+			How Tally works
+		</h1>
+		<div class="mt-8 flex items-center justify-between gap-4">
 			<h2 class="font-serif text-3xl font-semibold">Start here</h2>
 			<div class="shrink-0 [&>svg]:size-24">
 				<LedgerIllustration />
@@ -940,7 +935,7 @@ const storyHead = (
 			The Riveras are a made-up family. Here's what their bank sent this
 			October, and what Tally wrote down.
 		</p>
-		<h3 class="mt-6 font-medium text-muted">Three lines of 47 so far</h3>
+		<h3 class="mt-6 font-medium text-muted">Three lines of 42 so far</h3>
 		<div class="mt-3 flex flex-col gap-4">
 			{BANK_LINES.map(({ bank, row }) => (
 				<div>
@@ -963,7 +958,7 @@ const storyTotal = (
 		<p class="mt-2">
 			Without Tally, the paycheck and the transfer would both count as spending.
 		</p>
-		<a href="/transactions" class="inline-flex min-h-11 items-center">
+		<a href="/transactions?raw=1" class="inline-flex min-h-11 items-center">
 			See every line without Tally
 		</a>
 		<div class="mt-4 border-t border-ink pt-3">
@@ -973,8 +968,8 @@ const storyTotal = (
 			</div>
 			<div class="mt-1 border-b-[3px] border-double border-ink" />
 			<p class="mt-2 text-sm text-muted">
-				What's left of October's budget after bills due and savings. It's the
-				big number on Home.
+				What's left of October's budget after its spending so far, bills due and
+				savings. It's the big number on Home.
 			</p>
 		</div>
 		<h3 class="mt-8 font-serif text-2xl font-semibold">Three things to try</h3>
@@ -1256,6 +1251,24 @@ export function PolishRoundCProposals() {
 									</div>
 								</div>
 							</div>
+							<div
+								role="img"
+								aria-label="Option A, before a bank is linked, on a phone"
+								class="w-[392px] max-w-full rounded-control border border-ink bg-paper px-5 py-2"
+							>
+								<div inert>
+									<div data-screen="picture">
+										<p class="text-sm text-muted">
+											The same place, before a bank is linked
+										</p>
+										<ul class="mt-2 border-y border-rule">
+											<li>
+												<Entry place={{ ...ACCOUNTS, folio: NONE_LINKED }} />
+											</li>
+										</ul>
+									</div>
+								</div>
+							</div>
 						</div>
 					</Choice>
 					<Choice
@@ -1473,7 +1486,11 @@ export function PolishRoundCProposals() {
 							</Phone>
 						</Shot>
 						<Shot caption="How Tally works, the total and the things to try">
-							<Phone label="Option A, How Tally works, the total" tab="more">
+							<Phone
+								label="Option A, How Tally works, the total"
+								scrolled
+								tab="more"
+							>
 								{storyTotal}
 							</Phone>
 						</Shot>
@@ -1613,7 +1630,7 @@ export function PolishRoundCProposals() {
 							</Phone>
 						</Shot>
 						<Shot caption="How Tally works, its end: How it's built, last">
-							<Phone label="Option C, How it's built, last" tab="more">
+							<Phone label="Option C, How it's built, last" scrolled tab="more">
 								<section>
 									<h2 class="font-serif text-3xl font-semibold">
 										How it's built

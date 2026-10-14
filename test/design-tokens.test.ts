@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import design from "../DESIGN.md?raw";
 import {
 	COLOR_TOKENS,
 	DURATION_TOKENS,
-	PROPOSED_COLOR_TOKENS,
 	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
 } from "../src/design-system/tokens";
+import tokensSource from "../src/design-system/tokens.ts?raw";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
@@ -722,9 +723,12 @@ describe("design tokens (DESIGN.md)", () => {
 	});
 
 	it("lists every color token in the catalog, with app.css's value", () => {
-		const theme = [...css.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6})/gi)].map(
-			([, name, hex]) => [name, (hex ?? "").toLowerCase()],
-		);
+		// A token is a hex value, or a colour mix (press: ink at 6%, which has no hex of its own).
+		const theme = [
+			...css.matchAll(
+				/--color-([\w-]+):\s*(#[0-9a-f]{6}|color-mix\([^;]*\))\s*;/gi,
+			),
+		].map(([, name, value]) => [name, (value ?? "").toLowerCase()]);
 		expect(theme.length).toBeGreaterThan(10);
 		expect(COLOR_TOKENS.map((t) => [t.name, t.hex.toLowerCase()])).toEqual(
 			theme,
@@ -737,18 +741,6 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
-	});
-
-	it("proposes --color-press (P118) as ink at 6% on paper, marked as not used by the app yet, and lists it with its contrast", () => {
-		expect(css).toContain(
-			"--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);",
-		);
-		expect(css).toContain("proposed in P118, not used by the app yet");
-		// Its value is not hex, so it is listed apart from the catalog's colours, which the test above matches to app.css.
-		expect(PROPOSED_COLOR_TOKENS).toEqual([
-			expect.objectContaining({ name: "press", contrast: "16.1" }),
-		]);
-		expect(COLOR_TOKENS.map((t) => t.name)).not.toContain("press");
 	});
 
 	it("lists the swipe easing and distance as app.css tokens", () => {
@@ -766,5 +758,45 @@ describe("design tokens (DESIGN.md)", () => {
 				use: "the dark finished-month chart arrow",
 			},
 		]);
+	});
+});
+
+describe("the press token and the rows that open (P118 A)", () => {
+	it("is ink at 6% over paper, in app.css, the catalog's colours and DESIGN.md's tokens, with its contrast", () => {
+		expect(css).toContain(
+			"--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);",
+		);
+		expect(COLOR_TOKENS).toContainEqual(
+			expect.objectContaining({
+				name: "press",
+				contrast: "16.1 (ink text on it)",
+			}),
+		);
+		expect(design).toMatch(
+			/^\| press \| .* \| a pressed row, and a row whose sheet is loading \| 16\.1 \(ink text on it\) \|$/m,
+		);
+	});
+
+	it("holds the press token once in DESIGN.md and app.css, with the proposal's wording gone from DESIGN.md, app.css and tokens.ts", () => {
+		expect(design.match(/^\| press\b/gm)).toHaveLength(1);
+		expect(css.match(/--color-press:/g)).toHaveLength(1);
+		for (const source of [design, css, tokensSource]) {
+			expect(source).not.toContain("proposed in P118");
+			expect(source).not.toContain("not used by the app yet");
+			expect(source).not.toContain("PROPOSED_COLOR_TOKENS");
+		}
+	});
+
+	it("gives a row that opens the tap flash, the mouse press and the loading tint, and no transition", () => {
+		expect(css).toMatch(
+			/\.row-opens \{\s*-webkit-tap-highlight-color: var\(--color-press\);\s*\}/,
+		);
+		expect(css).toMatch(
+			/@media \(hover: hover\) \{\s*\.row-opens:active \{\s*background-color: var\(--color-press\);\s*\}\s*\}/,
+		);
+		expect(css).toMatch(
+			/\.row-opens\.htmx-request \{\s*background-color: var\(--color-press\);\s*\}/,
+		);
+		expect(css).not.toMatch(/\.row-opens[^{]*\{[^}]*transition/);
 	});
 });

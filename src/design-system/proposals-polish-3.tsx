@@ -23,7 +23,13 @@ import { Switch } from "../views/switch";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
-import { Fixed, type Option, Options, PickedPill } from "./proposal-parts";
+import {
+	Fixed,
+	type Option,
+	Options,
+	PickedPill,
+	Replaced,
+} from "./proposal-parts";
 import {
 	categoryValue,
 	Footer,
@@ -80,7 +86,7 @@ const LIST_ROWS: ListRow[] = [
 	tx(43, NOW, "Doordash taco", 3107, undefined, {
 		rawName: "DD *DOORDASH TACO",
 	}),
-	tx(44, NOW, "Google youtube", 1399, HOUSEHOLD, {
+	tx(44, NOW, "City Water", 1399, HOUSEHOLD, {
 		paysBill: true,
 		billName: "Water",
 	}),
@@ -1065,6 +1071,10 @@ export function PolishRoundBProposals() {
 					and is what a screen reader hears after a filter changes; With Tally ·
 					Without Tally (decision 103); search; the Needs category shortcut.
 				</Fixed>
+				<Replaced decision={111}>
+					Since P124 A (decision 111), How this works sits at the foot of the
+					page, not beside Add cash; Add cash keeps its own line.
+				</Replaced>
 				<Pictured options={filterOptions} />
 				<Options options={filterDesktop} />
 			</Specimen>

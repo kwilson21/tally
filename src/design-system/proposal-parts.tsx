@@ -116,15 +116,23 @@ export function Fixed({ children }: { children?: Child }) {
 }
 
 /**
- * What a later pick (decision 82) replaced in an earlier drawing, and the drawing that takes its
- * place, named in plain words so the line adds no link to tap. The earlier drawing stays as it was,
- * so the page still shows what was picked first.
+ * What a later pick replaced in an earlier drawing, in plain words: the decision that replaced
+ * the drawing is named (82 unless given), and `by` points down to the drawing that takes its place.
  */
-export function Replaced({ by, children }: { by: string; children?: Child }) {
+export function Replaced({
+	by,
+	decision = 82,
+	children,
+}: {
+	by?: string;
+	decision?: number;
+	children?: Child;
+}) {
 	return (
 		<p class="max-w-prose text-sm">
-			<span class="font-medium">Replaced by decision 82: </span>
-			{children} See {by}, further down.
+			<span class="font-medium">Replaced by decision {decision}: </span>
+			{children}
+			{by ? <> See {by}, further down.</> : null}
 		</p>
 	);
 }

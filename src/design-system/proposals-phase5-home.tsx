@@ -641,6 +641,7 @@ function HowBudget({
 			{diagram && (
 				<div class="mt-4">
 					<BudgetDiagram
+						id="p48-budget-diagram"
 						totalBudgetCents={BUDGET_CENTS}
 						totalSpentCents={SPENT_CENTS}
 						safeToSpendCents={SAFE_CENTS}

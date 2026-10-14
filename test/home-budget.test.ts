@@ -63,6 +63,14 @@ describe("Home's budget rows", () => {
 		expect(textOf(html)).not.toContain("Add a budget");
 	});
 
+	it("end each row that opens in its arrow, marked so the press shows (P118 A)", async () => {
+		const { html } = await get("/");
+		expect(html).toMatch(/<a href="\/budget\/1" class="[^"]*\brow-opens\b/);
+		expect(html).toMatch(
+			/<svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink self-start mt-1"[^>]*data-icon="chevron-right"/,
+		);
+	});
+
 	it("list a category with no budget under Not budgeted", async () => {
 		await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Travel', 'tag', 'cat-blue', 9)",
@@ -100,6 +108,33 @@ describe("Home's budget rows", () => {
 		const { html } = await get("/");
 		expect(textOf(html)).toContain("Eating Out");
 		expect(html).not.toContain('href="/budget/2"');
+	});
+
+	it("keeps an archived row's arrow space beside the rows that open, so the bars end together", async () => {
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE id = 2",
+		).run();
+		const { html } = await get("/");
+		const rowWith = (text: string) =>
+			html.split("<li").find((part) => part.includes(text)) ?? "";
+		const arrow = rowWith('href="/budget/1"').match(
+			/<svg class="([^"]*)"[^>]*data-icon="chevron-right"/,
+		)?.[1];
+		const space = rowWith(">Eating Out<").match(
+			/<span aria-hidden="true" class="([^"]*)"><\/span>/,
+		)?.[1];
+		expect(arrow).toContain("text-muted group-hover/row:text-ink");
+		expect(space).toBe(
+			arrow?.replace(" text-muted group-hover/row:text-ink", " invisible"),
+		);
+		expect(rowWith(">Eating Out<")).not.toContain("<a ");
+	});
+
+	it("keeps no arrow space in a past month, where no row opens", async () => {
+		const previous = monthsBefore(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), 1);
+		const { html } = await get(`/?month=${previous}`);
+		expect(html).not.toContain("size-5 shrink-0 -ml-3 -mr-2");
+		expect(html).not.toContain("group-hover/row:text-ink");
 	});
 
 	it("leave archived categories out of Not budgeted", async () => {

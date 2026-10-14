@@ -393,6 +393,7 @@ async function renderHome(
 												budgetCents={cat.budgetCents}
 												href={href}
 												attrs={href ? openAttrs(href) : undefined}
+												reserveArrow={current && !adjusting}
 												autofocus={cat.id === focusId}
 												nudge={
 													current && adjusting && href

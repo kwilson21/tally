@@ -1252,6 +1252,112 @@ describe("splits unlink their refunds", () => {
 		expect(await refundOf(SECOND_REFUND)).toBeNull();
 	});
 
+	it("names a split refund once, not once for each of its parts, when removing a split unlinks it", async () => {
+		// The $20 refund is split in two $10 parts, all three linked to one part of the split purchase.
+		await link(REFUND, PART_HOUSEHOLD);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		expect(await refundOf(REFUND)).toBeNull();
+		expect(trigger?.toast.message).toBe(
+			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
+	it("names a split refund linked only through one of its parts when removing a split", async () => {
+		// The $20 refund is split in two $10 parts, linked to the Household part of the split purchase.
+		await link(REFUND, PART_HOUSEHOLD);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const { results } = await db
+			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+			.bind(REFUND)
+			.all<{ id: number }>();
+		const [kids, gas] = results.map((row) => row.id);
+		// Only the Gas part still points at the Household part; the refund's own row and its Kids part do not.
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = NULL WHERE id IN (?, ?)",
+				)
+				.bind(REFUND, kids),
+			db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(PART_HOUSEHOLD, gas),
+		]);
+		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		expect(trigger?.toast.message).toBe(
+			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
+	it("names a split refund once, not once for each of its parts, when a purchase split unlinks it", async () => {
+		// The $20 refund is split in two $10 parts, and both stay linked to the $50 purchase.
+		await link(REFUND, PURCHASE);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		// Splitting the purchase leaves the split refund Not linked: its own row and each part are unlinked.
+		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "30"],
+			["part_amount", "20"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(200);
+		expect(await refundOf(REFUND)).toBeNull();
+		expect(trigger?.toast.message).toBe(
+			"Split Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+		expect(trigger?.announce).toBe(
+			"Saved split for Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
+	it("names the refund a purchase split unlinks when the purchase keeps a dormant refund link of its own", async () => {
+		// PURCHASE was a refund of another purchase before its amount turned positive, so its own link is dormant.
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(OTHER_MERCHANT, PURCHASE)
+			.run();
+		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "30"],
+			["part_amount", "20"],
+			[`refund_${REFUND}`, "none"],
+			["back", "/transactions"],
+		]);
+		expect(res.status).toBe(200);
+		expect(await refundOf(REFUND)).toBeNull();
+		expect(trigger?.toast.message).toBe(
+			"Split Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+		expect(trigger?.announce).toBe(
+			"Saved split for Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
 	it("re-splitting replaces the parts and unlinks their refunds", async () => {
 		await link(REFUND, PART_HOUSEHOLD);
 		const { res, trigger } = await post(`/transactions/${SPLIT}/split`, [
@@ -1259,6 +1365,7 @@ describe("splits unlink their refunds", () => {
 			["part_category", String(GAS)],
 			["part_amount", "15"],
 			["part_amount", "15"],
+			["refund_9002", "none"],
 			["back", "/transactions"],
 		]);
 		expect(res.status).toBe(200);

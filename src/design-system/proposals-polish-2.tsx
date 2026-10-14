@@ -275,7 +275,7 @@ function TxDay({ hint, children }: { hint?: Child; children?: Child }) {
 	);
 }
 
-/** P118's rows as the real components draw them today: the pill, no arrow, nothing pressed. */
+/** P118's rows as the real components draw them now (A is built): the arrow, Needs category in words, nothing pressed. */
 const todayRows = (rows: ListRow[]) =>
 	rows.map((r) => <TransactionRow row={r} href={transactionHref(r.id)} />);
 
@@ -520,7 +520,7 @@ const sayPicture = (
 			r === GROCERIES_ROW ? (
 				<BudgetRow row={r} href={budgetHref(i)} look="say" />
 			) : (
-				<ProgressRow {...r} href={budgetHref(i)} />
+				<ProgressRow {...r} />
 			),
 		)}
 	/>
@@ -677,9 +677,9 @@ function savedHome(option: Option) {
 			<div class="mt-3">
 				<Band
 					href="/transactions/organize"
-					detail="$228 of this month's spending"
+					detail="$211 of this month's spending"
 				>
-					12 transactions need a category
+					10<span class="sr-only"> transactions</span> need a category
 				</Band>
 			</div>
 			<BudgetBlock>
@@ -806,7 +806,7 @@ export function PolishRoundAProposals() {
 					choices={[
 						{
 							name: "Today (current)",
-							note: "The real rows, as they are: no arrow, and Needs category as today's filled pill. Nothing shows on touch.",
+							note: "The real rows, as the app draws them now: each row that opens ends in the arrow, and Needs category is quiet words.",
 							picture: todayPicture,
 						},
 						{
@@ -853,7 +853,7 @@ export function PolishRoundAProposals() {
 							},
 							{
 								name: "A, pressed",
-								note: "The shared press: the row's box in the press tint (--color-press, proposed), square, between its rules.",
+								note: "The shared press: the row's box in the press tint (--color-press), square, between its rules.",
 								picture: pressedQuiet,
 							},
 							{
