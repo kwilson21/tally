@@ -49,6 +49,81 @@ export function SplitLine({
 }
 
 /**
+ * A part's label and category select (#233). The live line draws both again out of band (`oob`) as a person
+ * types or picks, so the part turns solid at once. A redraw never carries autofocus: focus must not move while
+ * a person types in another part.
+ */
+export function PartCategory({
+	index,
+	value,
+	categories,
+	autofocus = false,
+	oob = false,
+}: {
+	index: number;
+	value: SplitValue;
+	categories: Category[];
+	autofocus?: boolean;
+	oob?: boolean;
+}) {
+	const guessed = isGuessedPart(value);
+	const swap = oob ? "outerHTML" : undefined;
+	return (
+		<>
+			<label
+				id={`part-label-${index}`}
+				for={`part-category-${index}`}
+				class="sr-only"
+				hx-swap-oob={swap}
+			>
+				{`Part ${index + 1} category${guessed ? ", Tally's guess" : ""}`}
+			</label>
+			<select
+				id={`part-category-${index}`}
+				name="part_category"
+				class={`min-h-11 rounded-full border ${guessed ? "border-dashed border-ink" : "border-rule"} bg-paper px-3`}
+				hx-swap-oob={swap}
+				autofocus={autofocus}
+				required
+			>
+				<option value="">Pick a category</option>
+				{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
+					<option value={cat.id} selected={value.category === String(cat.id)}>
+						{cat.name}
+					</option>
+				))}
+			</select>
+		</>
+	);
+}
+
+/**
+ * Tally's guess above the parts (#233): shown while a part is still Tally's guess. It is hidden, not removed, once
+ * none is, so the live line can draw it again out of band (`oob`) when a person types or picks.
+ */
+export function GuessLine({
+	label,
+	guessing,
+	oob = false,
+}: {
+	label: string;
+	guessing: boolean;
+	oob?: boolean;
+}) {
+	return (
+		<p
+			id="split-guess"
+			hidden={!guessing}
+			hx-swap-oob={oob ? "outerHTML" : undefined}
+			class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
+		>
+			{`Tally's guess: ${label} · `}
+			<WhyLink section="categorization" topic="Tally's guess" />
+		</p>
+	);
+}
+
+/**
  * The split sheet's form. In correction mode (Change the parts, spec §8.4) `totalCents` is the entry's
  * new amount, which the live line counts against, and `amountWas` is the amount the saved parts were
  * drawn with; the parts' own sum is always that amount, so the line says how far the parts are from
@@ -123,71 +198,45 @@ export function SplitForm({
 					{error}
 				</p>
 			)}
-			{guessing && guessLabel && (
-				<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
-					{`Tally's guess: ${guessLabel} · `}
-					<WhyLink section="categorization" topic="Tally's guess" />
-				</p>
-			)}
-			{values.map((value, index) => {
-				const guessed = isGuessedPart(value);
-				return (
-					<div
-						class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
-					>
-						{correcting && (
-							<input
-								type="hidden"
-								name="part_id"
-								value={value.partId === undefined ? "" : String(value.partId)}
-							/>
-						)}
-						{/* Posted back so a redraw knows which categories were Tally's guess (#233). */}
-						<input type="hidden" name="part_guess" value={value.guess ?? ""} />
-						<label for={`part-category-${index}`} class="sr-only">
-							{`Part ${index + 1} category${guessed ? ", Tally's guess" : ""}`}
-						</label>
-						<select
-							id={`part-category-${index}`}
-							name="part_category"
-							class={`min-h-11 rounded-full border ${guessed ? "border-dashed border-ink" : "border-rule"} bg-paper px-3`}
-							autofocus={index === values.length - 1 && values.length > 2}
-							required
-						>
-							<option value="">Pick a category</option>
-							{[...categories, ...(value.kept ? [value.kept] : [])].map(
-								(cat) => (
-									<option
-										value={cat.id}
-										selected={value.category === String(cat.id)}
-									>
-										{cat.name}
-									</option>
-								),
-							)}
-						</select>
-						<div
-							hx-post={`/transactions/${id}/split/line`}
-							hx-trigger="input delay:300ms"
-							// Every part shares one queue: a request waits for the one in flight, and only the newest
-							// waiting one is sent, so the last answer is always about the newest amounts. Nothing is
-							// cancelled, so htmx logs no error.
-							hx-sync="#split-line:queue last"
-							hx-target="#split-line"
-							hx-select="#split-line > *"
-							hx-swap="innerHTML"
-							hx-include="closest form"
-						>
-							<MoneyInput
-								id={`part-amount-${index}`}
-								name="part_amount"
-								label={`Part ${index + 1} amount`}
-								value={value.amount}
-							/>
-						</div>
-					</div>
-				);
-			})}
+			{guessLabel && <GuessLine label={guessLabel} guessing={guessing} />}
+			{values.map((value, index) => (
+				<div
+					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
+					// A part's category or amount changed: the live line redraws the parts, so a part turns solid as a
+					// person types or picks (#233). Every part shares one queue: a request waits for the one in flight,
+					// and only the newest waiting one is sent, so the last answer is always about the newest values.
+					// Nothing is cancelled, so htmx logs no error.
+					hx-post={`/transactions/${id}/split/line`}
+					hx-trigger="input delay:300ms"
+					hx-sync="#split-line:queue last"
+					hx-target="#split-line"
+					hx-select="#split-line > *"
+					hx-swap="innerHTML"
+					hx-include="closest form"
+				>
+					{correcting && (
+						<input
+							type="hidden"
+							name="part_id"
+							value={value.partId === undefined ? "" : String(value.partId)}
+						/>
+					)}
+					{/* Posted back so a redraw knows which categories were Tally's guess (#233). */}
+					<input type="hidden" name="part_guess" value={value.guess ?? ""} />
+					<PartCategory
+						index={index}
+						value={value}
+						categories={categories}
+						autofocus={index === values.length - 1 && values.length > 2}
+					/>
+					<MoneyInput
+						id={`part-amount-${index}`}
+						name="part_amount"
+						label={`Part ${index + 1} amount`}
+						value={value.amount}
+					/>
+				</div>
+			))}
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">
 					Cancel

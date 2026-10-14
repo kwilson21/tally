@@ -179,7 +179,7 @@ describe("syncItem", () => {
 				.bind(`Pet Care ${kind}`)
 				.first<{ id: number }>();
 			await env.DB.prepare(
-				"UPDATE transactions SET category_confidence=.95,jev_none_fit=1,category_suggestion_id=? WHERE id=?",
+				"UPDATE transactions SET category_confidence=.95,jev_none_fit=1,category_suggestion_id=?,jev_mixed=.9,jev_also_category_id=(SELECT id FROM categories ORDER BY id LIMIT 1) WHERE id=?",
 			)
 				.bind(suggestion?.id, tx?.id)
 				.run();
@@ -201,7 +201,7 @@ describe("syncItem", () => {
 			);
 			expect(
 				await env.DB.prepare(
-					"SELECT category_confidence,jev_none_fit,category_suggestion_id FROM transactions WHERE id=?",
+					"SELECT category_confidence,jev_none_fit,category_suggestion_id,jev_mixed,jev_also_category_id FROM transactions WHERE id=?",
 				)
 					.bind(tx?.id)
 					.first(),
@@ -209,6 +209,8 @@ describe("syncItem", () => {
 				category_confidence: null,
 				jev_none_fit: 0,
 				category_suggestion_id: null,
+				jev_mixed: null,
+				jev_also_category_id: null,
 			});
 		},
 	);

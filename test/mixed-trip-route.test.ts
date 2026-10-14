@@ -38,6 +38,26 @@ async function postSplit(id: number, fields: [string, string][]) {
 	return { res, html: await res.text() };
 }
 
+/** The live line's reply to a form's current fields, as a person types or picks (#233). */
+async function postLine(id: number, fields: [string, string][]) {
+	const res = await exports.default.fetch(
+		`${BASE}/transactions/${id}/split/line`,
+		{
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams([
+				["back", "/transactions"],
+				...fields,
+			]).toString(),
+		},
+	);
+	return { res, html: await res.text() };
+}
+
 const categoryId = async (name: string) =>
 	(
 		await db
@@ -217,5 +237,113 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 		]);
 		expect(html).not.toMatch(ANY_GUESS);
 		expect(html).not.toMatch(/id="part-category-0"[^>]*border-dashed/);
+	});
+});
+
+/** The whole element with this id, from its opening tag to its closing tag, as the reply draws it. */
+function elementWithId(html: string, id: string, tag: string): string {
+	return (
+		html.match(
+			new RegExp(`<${tag}\\b[^>]*\\sid="${id}"[\\s\\S]*?</${tag}>`),
+		)?.[0] ?? ""
+	);
+}
+
+/** The opening tag of the element with this id, as the reply draws it. */
+function openingTagWithId(html: string, id: string): string {
+	return (
+		html.match(new RegExp(`<[a-z]+\\b[^>]*\\sid="${id}"[^>]*>`))?.[0] ?? ""
+	);
+}
+
+describe("the live line redraws the parts as a person types or picks (#233)", () => {
+	it("turns a part solid once its amount is typed, and the other part stays Tally's guess", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const { res, html } = await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", ""],
+		]);
+		expect(res.status).toBe(200);
+		const first = elementWithId(html, "part-category-0", "select");
+		expect(first).toContain('hx-swap-oob="outerHTML"');
+		expect(first).not.toContain("border-dashed");
+		expect(first).not.toContain("autofocus");
+		expect(elementWithId(html, "part-category-1", "select")).toContain(
+			"border-dashed",
+		);
+		expect(html).toContain("$70.00 left to assign");
+	});
+
+	it("turns a part solid once its category is changed, keeping the picked category selected", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const { html } = await postLine(id, [
+			["part_category", String(household)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", ""],
+			["part_amount", ""],
+		]);
+		const first = elementWithId(html, "part-category-0", "select");
+		expect(first).not.toContain("border-dashed");
+		expect(first).toMatch(new RegExp(`<option value="${household}" selected`));
+		expect(elementWithId(html, "part-category-1", "select")).toContain(
+			"border-dashed",
+		);
+		// The label a screen reader hears follows the same state.
+		const label = elementWithId(html, "part-label-0", "label");
+		expect(label).toContain("Part 1 category");
+		expect(label).not.toContain("Tally's guess");
+	});
+
+	it("takes the guess line away once no part is a guess, and keeps it while one is", async () => {
+		const groceries = await categoryId("Groceries");
+		const household = await categoryId("Household");
+		const id = await mixedTrip();
+		const one = await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", ""],
+		]);
+		expect(openingTagWithId(one.html, "split-guess")).not.toContain("hidden");
+		const both = await postLine(id, [
+			["part_category", String(groceries)],
+			["part_category", String(household)],
+			["part_guess", String(groceries)],
+			["part_guess", String(household)],
+			["part_amount", "144.36"],
+			["part_amount", "70.00"],
+		]);
+		expect(openingTagWithId(both.html, "split-guess")).toContain("hidden");
+	});
+
+	it("draws no out-of-band parts on a trip that doesn't look mixed", async () => {
+		const groceries = await categoryId("Groceries");
+		const plain = await mixedTrip({
+			jev_mixed: null,
+			jev_also_category_id: null,
+		});
+		const { res, html } = await postLine(plain, [
+			["part_category", String(groceries)],
+			["part_category", String(groceries)],
+			["part_guess", String(groceries)],
+			["part_guess", String(groceries)],
+			["part_amount", "10.00"],
+			["part_amount", ""],
+		]);
+		expect(res.status).toBe(200);
+		expect(html).toContain("left to assign");
+		expect(html).not.toContain("hx-swap-oob");
 	});
 });

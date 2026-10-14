@@ -164,7 +164,14 @@ import {
 	TICKS_INCLUDE,
 	TOO_MANY,
 } from "../views/selection-action-bar";
-import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
+import {
+	GuessLine,
+	isGuessedPart,
+	PartCategory,
+	SplitForm,
+	SplitLine,
+	type SplitValue,
+} from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
@@ -2747,6 +2754,36 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 	return ids;
 }
 
+/**
+ * The split sheet's rows as the form posted them (#233): each row's category and amount, its saved part's id and
+ * kept category (`archived`, for a correction), and Tally's guess while the trip still looks mixed. A save and the
+ * live line both read the rows here, so a part is a guess the same way in each. A part stays a guess only while its
+ * category is the one Tally guessed and its amount is empty (isGuessedPart), so typing or picking makes it solid.
+ */
+function postedSplitValues(
+	tx: TransactionDetail,
+	form: FormData,
+	partIds: (number | undefined)[],
+	archived: Map<number, { id: number; name: string }>,
+): SplitValue[] {
+	const guessing = mixedCategories(tx) !== null;
+	const guesses = form.getAll("part_guess").map(String);
+	const amounts = form.getAll("part_amount").map(String);
+	return form
+		.getAll("part_category")
+		.map(String)
+		.map((category, i) => {
+			const partId = partIds[i];
+			return {
+				category,
+				amount: amounts[i] ?? "",
+				partId,
+				kept: partId === undefined ? undefined : archived.get(partId),
+				guess: guessing ? guesses[i] || undefined : undefined,
+			};
+		});
+}
+
 async function splitContext(c: Context<App>) {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
 	const categories = await c.env.DB.prepare(
@@ -2871,18 +2908,40 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const { tx, categories } = await splitContext(c);
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
+	const partIds = partIdsOf(form.getAll("part_id").map(String));
+	if (partIds === null) return c.notFound();
+	const guess = guessLabelOf(tx);
+	// A trip that looks mixed draws its parts and guess line again out of band, so a part turns solid as a person
+	// types or picks (#233). Its parts are never saved ones, so none has a kept category.
+	const values =
+		guess === undefined ? [] : postedSplitValues(tx, form, partIds, new Map());
 	return c.html(
-		<div id="split-line">
-			<SplitLine
-				parentCents={total ?? tx.amountCents}
-				amounts={form.getAll("part_amount").map(String)}
-			/>
-		</div>,
+		<>
+			<div id="split-line">
+				<SplitLine
+					parentCents={total ?? tx.amountCents}
+					amounts={form.getAll("part_amount").map(String)}
+				/>
+			</div>
+			{guess !== undefined && (
+				<>
+					{values.map((value, index) => (
+						<PartCategory
+							index={index}
+							value={value}
+							categories={categories}
+							oob
+						/>
+					))}
+					<GuessLine label={guess} guessing={values.some(isGuessedPart)} oob />
+				</>
+			)}
+		</>,
 	);
 });
 
@@ -2917,20 +2976,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const archived = correction
 		? await archivedPartCategories(c.env.DB, tx.id)
 		: new Map<number, Category>();
-	// Tally's guess survives a redraw only on a trip that still looks mixed; a part stays a guess only while its
-	// category is the one Tally guessed and its amount is empty (isGuessedPart), so typing or picking makes it solid.
-	const guessing = mixedCategories(tx) !== null;
-	const guesses = form.getAll("part_guess").map(String);
-	const values: SplitValue[] = categoryValues.map((category, i) => {
-		const partId = partIds[i];
-		return {
-			category,
-			amount: amountValues[i] ?? "",
-			partId,
-			kept: partId === undefined ? undefined : archived.get(partId),
-			guess: guessing ? guesses[i] || undefined : undefined,
-		};
-	});
+	const values = postedSplitValues(tx, form, partIds, archived);
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same
 	// sheet back, refused in words, as the other split refusals do.
 	if (tx.income)
