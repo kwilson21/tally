@@ -308,25 +308,26 @@ describe("GET /design-system/proposals", () => {
 			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
 				recommended,
 			);
-			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options.
+			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options. P122–P124 are open picks.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected =
-				n < 34
+				n < 34 || n >= 122
 					? 0
 					: id === "p60-bills-total" || id === "p111-delete-cash"
 						? 2
 						: 1;
 			expect([id, picked]).toEqual([id, expected]);
 		}
-		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
+		// Every option is at least one picture of a screen: labelled, and nothing inside to Tab to. An option may
+		// draw several (P123 and P124 draw a screen per step of a first visit, decision 47), so each is counted once.
 		const options = html.match(/<h4 /g)?.length ?? 0;
 		const pictures =
 			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
 				?.length ?? 0;
-		expect(pictures).toBe(options);
+		expect(pictures).toBeGreaterThanOrEqual(options);
 		// …and each picture has something drawn in it, not an empty frame.
 		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
-			options,
+			pictures,
 		);
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
 		expect(DECIDED.length).toBe(72);
@@ -736,6 +737,123 @@ describe("GET /design-system/proposals", () => {
 			(m) => m[0] ?? "",
 		);
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
+	});
+
+	it("opens the page with the open polish picks P122–P124 (issues #499, #95 and #501): each option named and drawn, A recommended, none picked", async () => {
+		const { html } = await get("/design-system/proposals");
+		// The new section comes first, above the Picked polish pass, and says what it is for.
+		const first = html.indexOf('<section aria-labelledby="polish4-title"');
+		expect(first).toBeGreaterThan(-1);
+		expect(first).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish-title"'),
+		);
+		expect(html).toContain(
+			'<h2 id="polish4-title" class="font-serif text-3xl font-semibold">Open: the polish track, More, Feedback and the first visit</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 13 for the owner&#39;s pick: what More shows, where Feedback lives, and what a first visit shows and teaches.",
+		);
+		const section = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start, id).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		const names = (chunk: string) =>
+			[...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map((m) => m[1] ?? "");
+		const pictures = (chunk: string) =>
+			chunk.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g) ?? [];
+		const option = (chunk: string, name: string) => {
+			const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+			const at = heads.find((i) =>
+				chunk.slice(i, i + 300).includes(`>${name}`),
+			);
+			expect(at, name).toBeDefined();
+			const end = heads.find((i) => i > (at ?? 0));
+			return chunk.slice(at, end);
+		};
+
+		const more = section("p122-more");
+		expect(names(more)).toEqual([
+			"Today (current)",
+			"Option A · Contents page",
+			"Option B · Plain index",
+		]);
+		expect(option(more, "Option A · Contents page")).toContain(">Recommended<");
+		expect(more.match(/>Recommended</g)?.length).toBe(1);
+		// Each place with its icon, what it holds, and a count that says when it needs you.
+		for (const text of [
+			"3 accounts",
+			"3 to check",
+			"Needs attention",
+			"Balances, net worth and your banks",
+			"Categories, rules, your household and your data",
+			"What each number means, with the Riveras&#39; numbers",
+			"Tally demo · resets every night",
+			"Trade-off: Two small live counts on More.",
+		])
+			expect(more, text).toContain(text);
+		expect(pictures(more)).toHaveLength(4);
+
+		const feedback = section("p123-feedback");
+		expect(names(feedback)).toEqual([
+			"Today (current)",
+			"Option A · In the top line",
+			"Option B · In More and the sidebar",
+		]);
+		expect(option(feedback, "Option A · In the top line")).toContain(
+			">Recommended<",
+		);
+		expect(feedback.match(/>Recommended</g)?.length).toBe(1);
+		// Today's pill sits over a number and a button; A's sits in the top line and leaves the page alone.
+		expect(option(feedback, "Today (current)")).toContain("Childcare");
+		expect(option(feedback, "Today (current)")).toContain('href="/feedback"');
+		expect(feedback).toContain("Something confusing, broken or missing");
+		expect(feedback).toContain("Off in the demo; you can still see the form");
+		expect(feedback).toContain("Tell us what happened");
+		expect(feedback).toContain("Keeps decision 59&#39;s");
+		expect(pictures(feedback)).toHaveLength(11);
+
+		const firstVisit = section("p124-first-visit");
+		expect(names(firstVisit)).toEqual([
+			"Today (current)",
+			"Option A · The first page",
+			"Option B · One next step",
+			"Option C · The page total",
+		]);
+		expect(option(firstVisit, "Option A · The first page")).toContain(
+			">Recommended<",
+		);
+		expect(firstVisit.match(/>Recommended</g)?.length).toBe(1);
+		for (const text of [
+			"today, being fixed in #519",
+			"−$2,140",
+			"Start here",
+			"Three lines of 47 so far",
+			"ACME CORP PAYROLL",
+			"Without Tally, the paycheck and the transfer would both count as spending.",
+			"See every line without Tally",
+			"Three things to try",
+			"Not worked out yet",
+			"This fills in once your budgets are set.",
+			"86 need a category",
+			"Start from September",
+			"Budgets add up to $3,840 a month.",
+			"Use these budgets",
+			"The Riveras&#39; tally",
+			"Named 38 stores",
+			"Sorted 196 into categories",
+			"Set 3 transfers aside",
+			"Found 2 paychecks",
+			"Your first page",
+			"Everything resets every night, so try anything.",
+		])
+			expect(firstVisit, text).toContain(text);
+		// The family's first page is the only one drawn on a desktop, and only for the recommended option.
+		expect(
+			pictures(firstVisit).filter((p) => p.includes("on desktop")),
+		).toHaveLength(1);
+		expect(pictures(firstVisit)).toHaveLength(20);
 	});
 
 	it("is linked from the catalog", async () => {
