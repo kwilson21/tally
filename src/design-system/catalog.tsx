@@ -1,11 +1,13 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import { parseBudgetAmount } from "../budgets/amount";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
+import { nameForm, parseCategory } from "../settings/category-form";
 import {
 	buildTrends,
 	type ChangeData,
@@ -34,9 +36,11 @@ import {
 } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
+import { BudgetSheet } from "../views/budget-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { DetailRow } from "../views/detail-row";
@@ -941,6 +945,31 @@ const TRANSACTIONS_BUTTON_SPEC: UseSpecText = {
 };
 
 function HomeTopGroup() {
+	// The budget sheet's sample: Groceries at $600.00, as Home opens it. The refused words are the
+	// parser's own, the ones POST /budget/:id shows for an amount it can't read.
+	const groceriesSheet = {
+		category: {
+			id: 1,
+			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
+			archived: false,
+			budgetCents: 60000,
+		},
+		spentCents: 41230,
+		lastMonthCents: 57180,
+		averageCents: 60245,
+		transactionCount: 12,
+		month: "2026-10",
+		closeAttrs: {
+			"hx-get": "/?focus=1",
+			"hx-target": "#page",
+			"hx-select": "#page",
+			"hx-swap": "outerHTML",
+			"hx-push-url": "/",
+		},
+	};
+	const refusal = parseBudgetAmount("six hundred");
 	const forecast = (
 		<HomeForecast
 			month="2026-10"
@@ -1130,9 +1159,9 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
-				<State label="A $1,000,000 result at 320px: the stamp wraps under the amount">
-					<Picture label="A seven-figure finished amount at 320px, with its Under stamp dropping beneath it">
-						<div class="w-[320px] max-w-full">
+				<State label="A $1,000,000 result on a phone under 640px: one size smaller, and the stamp wraps under the amount">
+					<Picture label="A seven-figure finished amount in the 280px column of a 320px phone, one size smaller, with its Under stamp dropping beneath it">
+						<div class="w-[320px] max-w-full px-5">
 							<MonthEnd
 								chartId="catalog-large-result"
 								monthName="September"
@@ -1295,6 +1324,51 @@ function HomeTopGroup() {
 					</Picture>
 				</State>
 				<UseSpec spec={BANK_LINE_SPEC} />
+			</Specimen>
+			<Specimen
+				id="budget-sheet"
+				title="BudgetSheet"
+				tier="visual"
+				components={["BudgetSheet", "MoneyInput", "TransactionsButton"]}
+				sentence="A category's budget sheet from Home: its name, what's spent this month (or what was refunded) and its counted transactions, then one labeled amount from this month on, with Round to and the last-month and 3-month average chips. Cancel and the backdrop close it and return focus to the row; a refused amount keeps the sheet open and says why in words."
+			>
+				<State label="At rest: Groceries at $600.00, with last month's and the 3-month average chips">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-rest"
+							value="600.00"
+						/>
+					</div>
+				</State>
+				<State label="With cents: the amount reads $612.45, so Round to offers $613">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-cents"
+							value="612.45"
+						/>
+					</div>
+				</State>
+				<State label="A refused amount: the field is marked, and the words the server gives sit under it">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<BudgetSheet
+							{...groceriesSheet}
+							id="ds-budget-refused"
+							value="six hundred"
+							error={refusal.ok ? undefined : refusal.error}
+						/>
+					</div>
+				</State>
 			</Specimen>
 		</Group>
 	);
@@ -4640,6 +4714,8 @@ const TRENDS_TOP_STATES = [
 ] as const;
 
 function SettingsGroup() {
+	// The server's own words for an empty name, so the catalog can't drift from what Settings says.
+	const blank = parseCategory(nameForm(""), [], null);
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
@@ -4774,6 +4850,102 @@ function SettingsGroup() {
 							}}
 							switches={{ names: true, categories: true, income: true }}
 						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="category-row"
+				title="CategoryRow"
+				tier="visual"
+				components={["CategoryRow", "AddCategoryRow", "TextInput", "Button"]}
+				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list."
+			>
+				<State label="Closed: one with a budget, one with No budget">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 11,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open={false}
+							focus={false}
+						/>
+						<CategoryRow
+							category={{
+								id: 12,
+								name: "Household",
+								icon: "household",
+								color: "cat-plum",
+								budgetCents: null,
+							}}
+							first={false}
+							last
+							open={false}
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="First row open: no Move up">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 21,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="Last row open: no Move down">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 31,
+								name: "Household",
+								icon: "household",
+								color: "cat-plum",
+								budgetCents: null,
+							}}
+							first={false}
+							last
+							open
+							focus={false}
+						/>
+					</div>
+				</State>
+				<State label="A name left empty: the row stays open and says why">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 41,
+								name: "Rent",
+								icon: "household",
+								color: "cat-blue",
+								budgetCents: 150000,
+							}}
+							first={false}
+							last={false}
+							open
+							focus={false}
+							values={{ name: "" }}
+							errors={blank.ok ? {} : blank.errors}
+						/>
+					</div>
+				</State>
+				<State label="Add category open">
+					<div inert class="max-w-3xl border-t border-rule">
+						<AddCategoryRow open />
 					</div>
 				</State>
 			</Specimen>

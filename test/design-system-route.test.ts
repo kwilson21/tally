@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import design from "../DESIGN.md?raw";
 import dsScript from "../public/js/ds.js?raw";
+import { parseBudgetAmount } from "../src/budgets/amount";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -120,6 +121,37 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain(">Cancel</a>");
 		expect(html).toContain(">Save</button>");
 		expect(design).toMatch(/\| SavingsGoalSheet \|/);
+	});
+
+	it("shows the budget sheet in its three states, each with its own ids, and documents it", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="budget-sheet"'));
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain(
+			'data-ds-components="BudgetSheet MoneyInput TransactionsButton"',
+		);
+		const section =
+			html.split('id="budget-sheet"')[1]?.split("</section>")[0] ?? "";
+		// At rest: the spent line, the transactions link and the two chips.
+		expect(section).toContain("$412.30 spent so far in October");
+		expect(section).toContain("12 transactions");
+		expect(section).toContain("Last month: $571.80");
+		expect(section).toContain("3-month average: $602.45");
+		// With cents: the amount reads $612.45 and Round to offers $613.
+		expect(section).toContain('value="612.45"');
+		expect(section).toContain("Round to $613");
+		// A refused amount: the parser's own words, in role=alert, on a marked field.
+		const refused = parseBudgetAmount("six hundred");
+		expect(refused.ok).toBe(false);
+		if (refused.ok) throw new Error("expected a refusal");
+		expect(section).toMatch(
+			new RegExp(`role="alert"[^>]*>${refused.error.replaceAll(".", "\\.")}<`),
+		);
+		// Three sheets on one page: no id is drawn twice.
+		const ids = [...section.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(design).toMatch(/\| BudgetSheet \|/);
 	});
 
 	it("shows the split correction state and the cash amount error with Change the parts", async () => {
@@ -677,6 +709,54 @@ describe("GET /design-system in the demo", () => {
 		// DESIGN.md says what it is, and that it works without a script.
 		expect(design).toMatch(
 			/\| TimeZoneRow \|[^\n]*"Time zone"[^\n]*works without JavaScript/,
+		);
+	});
+
+	it("shows Settings' category row closed, open at both ends of the list, with a name error, and Add category open, all inert (as Settings draws it)", async () => {
+		const { html } = await get("/design-system");
+		const tag = specimens(html).find((t) => t.includes('id="category-row"'));
+		// Visual: a form here posts nowhere, and the specimen is inert to htmx.
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain(
+			'data-ds-components="CategoryRow AddCategoryRow TextInput Button"',
+		);
+		expect(tag).toContain("hx-ignore");
+		const section =
+			html.split('id="category-row"')[1]?.split("</section>")[0] ?? "";
+		// One inert box per state: two closed rows, then the first and last rows open, the name error, and Add category.
+		expect(section.match(/<div inert/g)).toHaveLength(5);
+		expect(
+			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
+				/\sopen(\s|>|=)/.test(m[0]),
+			),
+		).toEqual([false, false, true, true, true, true]);
+		// Closed: a budget, then No budget.
+		const closed = section.split('id="cat-21-form"')[0] ?? "";
+		expect(closed).toContain("$700");
+		expect(closed).toContain("No budget");
+		// The first row open: Move up is absent, Move down is there.
+		const first =
+			section.split('id="cat-21-form"')[1]?.split('id="cat-31-form"')[0] ?? "";
+		expect(first).not.toContain("Move up");
+		expect(first).toContain("Move down");
+		// The last row open: Move down is absent, Move up is there.
+		const last =
+			section.split('id="cat-31-form"')[1]?.split('id="cat-41-form"')[0] ?? "";
+		expect(last).toContain("Move up");
+		expect(last).not.toContain("Move down");
+		// The name error, in role=alert, with the server's words for an empty name.
+		const error =
+			section
+				.split('id="cat-41-form"')[1]
+				?.split('id="new-category-form"')[0] ?? "";
+		expect(error).toMatch(/role="alert"[^>]*>Give the category a name\.<\/p>/);
+		// Add category, open, with its own Name field and button.
+		const add = section.split('id="new-category-form"')[1] ?? "";
+		expect(add).toContain('id="new-name"');
+		expect(add).toContain(">Add category</span>");
+		// DESIGN.md says what it is, right after the Bank sign-in emails row.
+		expect(design).toMatch(
+			/\| BankSignInEmails \|[^\n]*\n\| CategoryRow, AddCategoryRow \|/,
 		);
 	});
 
