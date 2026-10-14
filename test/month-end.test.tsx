@@ -279,6 +279,73 @@ describe("MonthEnd budget bars", () => {
 		},
 	);
 
+	// Issue #519: a finished month with no budgeted category has no budget result to stamp, so it gets
+	// neither Over nor Under; a month with a budget still stamps.
+	it("is not stamped Over or Under when no category had a budget", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="no-budgets"
+				monthName="September"
+				amountCents={-5700}
+				rows={[]}
+			/>,
+		);
+		expect(html).toContain(">−$57</p>");
+		expect(html).not.toContain(">$57</p>");
+		expect(html).not.toMatch(/>(?:Over|Under)<span class="sr-only"> budget/);
+		expect(html).not.toMatch(/text-6xl[^"]*text-over/);
+	});
+
+	it("still stamps Over when a budgeted category is overspent", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="budgeted-over"
+				monthName="September"
+				amountCents={-5700}
+				rows={rows(1)}
+			/>,
+		);
+		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain(">$57</p>");
+		expect(html).toMatch(/text-6xl[^"]*text-over/);
+	});
+
+	it("still stamps Under with the unsigned amount when a budgeted category is under", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="budgeted-under"
+				monthName="September"
+				amountCents={5700}
+				rows={rows(1)}
+			/>,
+		);
+		expect(html).toMatch(/>Under<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain(">$57</p>");
+	});
+
+	it("sizes a negative result with its minus sign counted, as #514 does (#519)", () => {
+		const nine = renderToString(
+			<MonthEnd
+				chartId="nine"
+				monthName="September"
+				amountCents={-99999900}
+				rows={[]}
+			/>,
+		);
+		expect(nine).toContain(">−$999,999</p>");
+		expect(nine).toContain("max-sm:text-5xl");
+		const eight = renderToString(
+			<MonthEnd
+				chartId="eight"
+				monthName="September"
+				amountCents={-9999900}
+				rows={[]}
+			/>,
+		);
+		expect(eight).toContain(">−$99,999</p>");
+		expect(eight).not.toContain("max-sm:text-5xl");
+	});
+
 	it("never shows negative zero", () => {
 		const html = renderToString(
 			<MonthEnd
@@ -288,6 +355,7 @@ describe("MonthEnd budget bars", () => {
 				rows={[]}
 			/>,
 		);
+		expect(html).toContain(">−$0.01</p>");
 		expect(html).not.toContain("-$0");
 	});
 
