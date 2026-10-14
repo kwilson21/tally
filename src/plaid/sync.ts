@@ -117,8 +117,9 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
  * already has a row. One `?`: the pairs, a JSON array of `[Plaid name, bank text]` in the order the charges arrived.
  * When several texts share one name, no person's choice is dropped: `display_name`, `default_category_id` and
  * `not_a_bill` each come from the first text whose row holds one. The suggestion columns come from one row, the first
- * of: a decided suggestion (accepted or rejected); a waiting guess, unless a person named the merchant (a guess is
- * never copied onto a named merchant); the empty answer; nothing at all. Ties fall to the page's first text.
+ * of: a decided suggestion (accepted or rejected); a waiting guess; the empty answer; nothing at all. A waiting guess
+ * goes last of all when a person named a text in the group, so it gives way to the named merchant's own row. Ties fall
+ * to the page's first text.
  */
 const copyMerchantRowSql = (ownsLock: string) =>
 	`WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),

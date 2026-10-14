@@ -207,7 +207,7 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		});
 	});
 
-	it("never copies a waiting guess onto a merchant a person named, whichever text comes first", async () => {
+	it("never copies a waiting guess onto a merchant a person named, when the guess's text comes first", async () => {
 		const id = await addItem();
 		await env.DB.batch([
 			env.DB.prepare(
