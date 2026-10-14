@@ -89,6 +89,74 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 		expect(await linkOf(SECOND)).toBeNull();
 	});
 
+	it("counts a split refund once, by its own row, not once for each of its parts", async () => {
+		// FIRST ($45.00) is split in two parts that stay linked to the purchase; the purchase's split then unlinks it.
+		await saveSplit(
+			db,
+			FIRST,
+			[
+				{ categoryId: KIDS, amountCents: -2500 },
+				{ categoryId: HOUSEHOLD, amountCents: -2000 },
+			],
+			"test",
+		);
+		const result = await saveSplit(db, PURCHASE, PARTS, "test");
+		expect(result.unlinked).toEqual(["2026-09-05", "2026-09-06"]);
+		expect(await linkOf(FIRST)).toBeNull();
+	});
+
+	it("names a split refund linked only through one of its parts", async () => {
+		await saveSplit(
+			db,
+			FIRST,
+			[
+				{ categoryId: KIDS, amountCents: -2500 },
+				{ categoryId: HOUSEHOLD, amountCents: -2000 },
+			],
+			"test",
+		);
+		const [kids, household] = await partIds(FIRST);
+		// The refund's own row, its Kids part and the second refund are not linked.
+		// Only the Household part still points at the purchase.
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = NULL WHERE id IN (?, ?, ?)",
+				)
+				.bind(FIRST, kids, SECOND),
+			db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(PURCHASE, household),
+		]);
+		const result = await saveSplit(db, PURCHASE, PARTS, "test");
+		expect(result.unlinked).toEqual(["2026-09-05"]);
+	});
+
+	it("names a split refund once when both of its parts are linked and its own row is not", async () => {
+		await saveSplit(
+			db,
+			FIRST,
+			[
+				{ categoryId: KIDS, amountCents: -2500 },
+				{ categoryId: HOUSEHOLD, amountCents: -2000 },
+			],
+			"test",
+		);
+		const [kids, household] = await partIds(FIRST);
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = NULL WHERE id IN (?, ?)",
+				)
+				.bind(FIRST, SECOND),
+			db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id IN (?, ?)")
+				.bind(PURCHASE, kids, household),
+		]);
+		const result = await saveSplit(db, PURCHASE, PARTS, "test");
+		expect(result.unlinked).toEqual(["2026-09-05"]);
+	});
+
 	it("keeps two refunds on two different parts", async () => {
 		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
