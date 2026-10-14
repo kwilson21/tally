@@ -640,6 +640,8 @@ export type TransactionDetail = ListRow & {
 	storeName: string;
 	categorySource: "user" | "merchant_rule" | "bill" | "jev" | null;
 	merchantRuleCategoryId: number | null;
+	/** The rule's category name, archived or not (the edit panel's chips list only active ones), or null. */
+	merchantRuleCategoryName: string | null;
 	/** Jev's confidence when Jev picked (or looked at) the category; null otherwise. */
 	categoryConfidence: number | null;
 	suggestedCategoryId: number | null;
@@ -719,7 +721,7 @@ export async function getTransaction(
 	const r = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
-				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
+				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, t.own_name AS thisOwnName, ${merchantColumnSql("t", "default_category_id")} AS merchantRuleCategoryId, (SELECT rc.name FROM categories rc WHERE rc.id = ${merchantColumnSql("t", "default_category_id")}) AS merchantRuleCategoryName, ${NAME_SUGGESTION_COLUMNS}, t.note, t.parent_id AS parentId,
 				(SELECT COUNT(*) FROM transactions m WHERE m.parent_id IS NULL AND ${merchantKeySql("m")} = ${merchantKeySql("t")}) AS merchantTotal,
 				(SELECT json_group_array(json_object('name', o.own_name, 'date', o.date, 'part', o.parent_id IS NOT NULL)) FROM transactions o WHERE o.id != t.id AND o.own_name IS NOT NULL AND ${merchantKeySql("o")} = ${merchantKeySql("t")}) AS ownedJson,
 				t.note_guessed AS noteGuessed, t.kind, t.kind_guessed AS kindGuessed,
@@ -874,12 +876,17 @@ const EXCLUDE =
 /**
  * Gives a merchant's rule category to every transaction a person hasn't chosen (§7), except a split
  * purchase and a purchase a bank change sent back to its earlier category (§6.1, decision 99). Binds
- * the category, the actor and the merchant key; callers add their own last condition.
+ * the category, the actor, then what `keyCondition` binds (`= ?` for one key); callers add their own
+ * last condition.
  */
-const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+export function applyMerchantRuleSql(keyCondition: string): string {
+	return `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
 	updated_by = ?, updated_at = datetime('now')
-WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'
+WHERE ${merchantKeySql("transactions")} ${keyCondition} AND COALESCE(category_source, '') != 'user'
 	AND is_split = 0 AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`;
+}
+
+export const APPLY_MERCHANT_RULE_SQL = applyMerchantRuleSql("= ?");
 
 /**
  * What saving the edit panel did. A refund link that is more than what's left of its purchase is
@@ -1269,7 +1276,7 @@ export async function saveEdit(
 	}
 	// A one-off name makes Tally guess the category again, from the purchase's own name (decision 101): a category
 	// Tally picked, or no category at all (an unsure answer included), is cleared so the next answer can take its
-	// place, unless the same save ticks Always for this merchant, which settles the category (oneOffGuessesAgain).
+	// place, unless the same save ticks the merchant rule, which settles the category (oneOffGuessesAgain).
 	// A pending new-category suggestion the row is behind is released with it, so the row leaves the
 	// suggestion and Jev is asked again. Only on a row Jev can be asked about (jevAsksAboutSql, as the row stands
 	// once the writes above have run), which is the same test as oneOffGuessesAgain's, so the clear and the words agree.
@@ -1505,7 +1512,7 @@ export async function saveEdit(
 }
 
 /**
- * Sets a merchant's category rule the way "Always for this merchant" does, for a save that has no
+ * Sets a merchant's category rule the way the edit panel's tick does, for a save that has no
  * row of its own to skip: the rule reaches every transaction a person hasn't chosen.
  */
 export async function setMerchantRule(

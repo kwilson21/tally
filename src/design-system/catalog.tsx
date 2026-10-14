@@ -71,6 +71,7 @@ import {
 	MaybeIncome,
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
+import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
@@ -90,7 +91,7 @@ import {
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
-import { RuleOffer } from "../views/rule-offer";
+import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -568,6 +569,25 @@ const NAME_CHOICES_SPEC: UseSpecText = {
 		"A very long name wraps inside its line and is never cut off. Only the ticked choice counts: a name typed without “Type your own” is ignored, and emptying the field under it is an error, since clearing a name is the store's own name. With the names switch off, Tally's guesses are not listed, and the store's own choice turns down no guess a person can't see. A stale page can't choose a suggestion that isn't offered any more. No JavaScript: plain radio buttons and a text field in a form.",
 	words:
 		"Name · Tally's guess · From your bank · Why? · {Blue bottle cof} · The bank says {SQ *BLUE BOTTLE COF 0412} · Type your own · Your own name · Errors: Type a name here, or pick one above. · Keep the name under 80 characters. · Pick one of the names shown. · Settings: Pick a name, keep the bank's, or type your own. Never the name of the AI behind it.",
+};
+
+// The rule tick's use spec (#353, decision 101): a rule is made only when the person ticks it.
+const MERCHANT_RULE_TICK_SPEC: UseSpecText = {
+	purpose:
+		"Let a person decide, in the edit panel, whether this category becomes the store's rule for next time. Saving the panel for another reason never makes a rule.",
+	affordance:
+		"A plain row above Save, the round mark Select mode uses: an empty ring when unticked, a check in an ink ring when ticked. The words “Use this category for Local Bakery from now on” sit beside it, with a muted hint under them: “Leave it unticked to change just this one.” When a rule already matches the transaction the row opens ticked, and the hint reads “Local Bakery is always Groceries. Untick it and save to remove the rule.” The whole row is one label of 44px or more.",
+	states:
+		"Unticked (the default), ticked, and focus: the round mark takes the focus-visible ring when the checkbox has keyboard focus. The check mark shows while ticked, so the state is never color alone. Disabled and loading: none; Save shows its busy state. A linked refund has no row at all.",
+	feedback:
+		"Saving the panel says what was done in its toast, as the rest of the panel does. Without JavaScript the tick posts with Save and the panel is drawn again if a field is wrong.",
+	input:
+		"Tap anywhere on the row to tick it. Tab reaches the checkbox, Space toggles it, and the focus ring shows on the round mark. Screen reader: “Use this category for Local Bakery from now on, checkbox, not checked”, then the hint through aria-describedby.",
+	motion: "None added. Reduced motion changes nothing.",
+	edges:
+		"Ticking it on a transaction that doesn't match the rule changes the store's rule. A ticked row saved with another category changes the rule to that category, and the row opens ticked again with the new words. Unticking a matching rule and saving removes it, and the words under the row say so.",
+	words:
+		"Use this category for {Local Bakery} from now on · Leave it unticked to change just this one. · {Local Bakery} is always {Groceries}. Untick it and save to remove the rule.",
 };
 
 // The Rename list's use spec (decision 101, Name row round 2 A): every line answered before the owner signs it off.
@@ -2965,26 +2985,46 @@ function Categorization() {
 				id="rule-offer"
 				title="RuleOffer"
 				tier="visual"
-				components={["RuleOffer", "Button", "Icon"]}
-				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time."
+				components={["RuleOffer", "GroupRuleOffer", "Button", "Icon"]}
+				sentence="After a person picks one category for a merchant three times, ask whether Tally should use that category next time. After Organize saves a store, the same question appears in place of the store, with no count (#353)."
 			>
-				<div inert class="max-w-xl">
-					<RuleOffer
-						value={{
-							merchantKey: "COSTCO",
-							merchant: "Costco",
-							categoryId: 1,
-							category: "Groceries",
-							count: 3,
-							back: "/transactions",
-						}}
-					/>
-				</div>
+				<State label="Edit panel and list: after the third pick, the question over the list, with its count">
+					<div inert class="max-w-xl">
+						<RuleOffer
+							id="rule-offer-sample-title"
+							value={{
+								merchantKey: "COSTCO",
+								merchant: "Costco",
+								categoryId: 1,
+								category: "Groceries",
+								count: 3,
+								back: "/transactions",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="Organize: after Save and next, in place of the store, with Not now and Yes; Yes makes the rule for every merchant of the group">
+					<div inert class="max-w-xl">
+						<GroupRuleOffer
+							id="group-rule-offer-sample-title"
+							value={{
+								savedIds: [1, 2],
+								merchant: "Costco",
+								categoryId: 1,
+								category: "Groceries",
+							}}
+							action="/transactions/organize/rule"
+						/>
+					</div>
+				</State>
 			</Specimen>
 			<p class="mt-4 text-muted">
 				Use: the question follows every matching save until the merchant has a
 				rule. Not now closes it without saving a rule; Yes applies the existing
-				merchant rule behavior. All answers use server forms, and every swap is
+				merchant rule behavior. Organize's question is asked after each save
+				unless every merchant of the group already has that rule; Not now moves
+				on to the next store with no rule, and Yes makes the rule on each
+				merchant of the group. All answers use server forms, and every swap is
 				announced.
 			</p>
 		</Group>
@@ -3348,9 +3388,6 @@ function Controls() {
 						Checkbox chips: toggles, on and off
 					</legend>
 					<div class="mt-2 flex flex-wrap gap-2">
-						<Chip type="checkbox" name="ds-always" value="1" checked>
-							Always for this merchant
-						</Chip>
 						<Chip type="checkbox" name="ds-exclude" value="1">
 							Exclude from budget
 						</Chip>
@@ -3857,6 +3894,34 @@ function Controls() {
 				</State>
 				<UseSpec spec={NAME_CHOICES_SPEC} />
 				<UseSpec spec={RENAME_CHOICES_SPEC} />
+			</Specimen>
+			<Specimen
+				id="merchant-rule-tick"
+				title="MerchantRuleTick"
+				tier="interactive"
+				components={["MerchantRuleTick"]}
+				sentence="The edit panel's rule tick (#353, decision 101): a plain row above Save, with Select mode's round mark, in place of the pill “Always for this merchant”. Unticked, it makes no rule; ticked, it makes this category the store's rule. Unticked is the default, so saving the panel for another reason never makes a rule."
+			>
+				<State label="Unticked, for a store with no rule: the hint says leaving it unticked changes just this one">
+					<div class="max-w-xl">
+						<MerchantRuleTick
+							id="ds-rule-none"
+							merchant="Local Bakery"
+							checked={false}
+						/>
+					</div>
+				</State>
+				<State label="Ticked, because a rule already matches this transaction: the hint says what unticking does">
+					<div class="max-w-xl">
+						<MerchantRuleTick
+							id="ds-rule-matched"
+							merchant="Local Bakery"
+							checked
+							ruleCategory="Groceries"
+						/>
+					</div>
+				</State>
+				<UseSpec spec={MERCHANT_RULE_TICK_SPEC} />
 			</Specimen>
 			<Specimen
 				id="detail-row"

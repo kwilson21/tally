@@ -9,6 +9,8 @@ export type EmptyStateProps = {
 	action?: { href: string; label: string };
 	/** The screen's own action when it isn't a link, such as Accounts' script-driven Link a bank (decision 55). */
 	children?: Child;
+	/** The sentence takes focus, when an action ends the list (Organize's last answer, #353). */
+	focus?: boolean;
 };
 
 /**
@@ -21,6 +23,7 @@ export function EmptyState({
 	hint,
 	action,
 	children,
+	focus = false,
 }: EmptyStateProps) {
 	return (
 		<div class="flex flex-col items-center py-8 text-center">
@@ -56,7 +59,13 @@ export function EmptyState({
 					</g>
 				)}
 			</svg>
-			<p class="mt-3 text-lg">{sentence}</p>
+			<p
+				class="mt-3 text-lg"
+				tabindex={focus ? -1 : undefined}
+				autofocus={focus || undefined}
+			>
+				{sentence}
+			</p>
 			{hint && <p class="mt-1 max-w-xs text-muted">{hint}</p>}
 			{action && (
 				<div class="mt-4">
