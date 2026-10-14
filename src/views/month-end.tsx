@@ -336,10 +336,11 @@ export function MonthEnd({
 	amountCents: number;
 	rows: CategorySummary[];
 }) {
-	// With no budgeted category there is no budget result to stamp: no Over, and no Under either (#519).
+	// With no budgeted category there is no stamp, and a negative result keeps its minus sign in ink, like Home's Safe to spend (#519).
 	const budgeted = rows.length > 0;
 	const over = budgeted && amountCents < 0;
-	const amount = wholeUnlessTiny(Math.abs(amountCents));
+	const sign = !budgeted && amountCents < 0 ? "−" : "";
+	const amount = sign + wholeUnlessTiny(Math.abs(amountCents));
 	return (
 		<section aria-label={`${monthName} ended`}>
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>

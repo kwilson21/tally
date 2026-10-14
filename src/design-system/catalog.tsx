@@ -1179,8 +1179,8 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
-				<State label="A finished month with no budgets: the result shows with no Over or Under stamp">
-					<Picture label="September 2026 ended with no budgets set: $57 shows as the result, with no Over or Under stamp">
+				<State label="A finished month with no budgets: a negative result keeps its minus sign in ink, with no Over or Under stamp">
+					<Picture label="September 2026 ended with no budgets set: −$57 in ink as the result, with no Over or Under stamp">
 						<div class="max-w-2xl">
 							<MonthEnd
 								chartId="catalog-september-no-budgets"

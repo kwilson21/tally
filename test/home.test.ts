@@ -966,6 +966,7 @@ describe("GET / with spending and no budgets", () => {
 		).run();
 		const { html } = await homeAt("2026-09");
 		expect(html).toContain("September ended");
+		expect(html).toContain("−$45");
 		expect(html).not.toMatch(/>(?:Over|Under)<span class="sr-only"> budget/);
 	});
 });
