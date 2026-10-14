@@ -103,6 +103,16 @@ const settleReplies = async () => {
 	await Promise.all(heldReplies.splice(0));
 	await page.waitForFunction(() => !document.querySelector(".htmx-request"));
 };
+// htmx logs a request that a newer one replaces (hx-sync) as an abort. toast.js ignores that, and the steps
+// that replace requests on purpose drop only those lines; any other console error still fails.
+const dropReplacedRequestLogs = (from) => {
+	const logged = consoleErrors.splice(from);
+	consoleErrors.push(
+		...logged.filter(
+			(error) => !/^htmx: htmx:error: .*abort/i.test(error.text),
+		),
+	);
+};
 
 // Inject simulated insets into the app's same-origin stylesheet to respect its CSP.
 await page.route("**/assets/app.css", async (route) => {
@@ -548,6 +558,68 @@ await page
 assert.equal(await rows(), 1);
 step("removing the split restores the transaction");
 
+// A split of a purchase with a linked refund asks which part the refund goes with. The part labels redraw out of band as
+// the parts change, and a pick made while that redraw is held stays checked and focused. The demo's Target purchase
+// ($84.99) has a linked $24.99 refund; the sheet is cancelled, so the demo data stays as it was.
+const errorsBeforeChooser = consoleErrors.length;
+await goto(`${BASE}/transactions?q=Target&month=all`, {
+	waitUntil: "networkidle",
+});
+await page
+	.locator("#results li[data-transaction]")
+	.filter({ hasText: "$24.99 refunded" })
+	.locator("a")
+	.click();
+await page.locator('[role="dialog"]').waitFor();
+await page.getByRole("link", { name: "Split" }).click();
+const chooserAmounts = page.getByLabel(/^Part \d amount$/);
+await page.getByLabel("Part 1 category").selectOption({ label: "Kids" });
+await chooserAmounts.nth(0).fill("60.00");
+await page.getByLabel("Part 2 category").selectOption({ label: "Household" });
+await chooserAmounts.nth(1).fill("24.99");
+// The out-of-band part label lands: the radio is named by its new text, not the "Part 2" it had.
+const household = page.getByRole("radio", { name: "Household · $24.99" });
+await household.waitFor({ state: "attached" });
+await page.waitForFunction(() => !document.querySelector(".htmx-request"));
+// Hold the next answer about the chooser, and let every later one through.
+let heldLine = null;
+let lineHeld;
+const lineIsHeld = new Promise((resolve) => (lineHeld = resolve));
+const holdNextLine = (route) => {
+	if (heldLine) return route.continue();
+	heldLine = route;
+	lineHeld();
+};
+await page.route("**/split/line", holdNextLine);
+await page.evaluate(() => {
+	window.__lineEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (event.detail.ctx.request.action.includes("/split/line"))
+			window.__lineEnded = true;
+	});
+});
+await chooserAmounts.nth(0).fill("50.00");
+await lineIsHeld;
+await household.focus();
+await page.keyboard.press("Space");
+assert.equal(await household.isChecked(), true);
+await heldLine.continue();
+await page.waitForFunction(() => window.__lineEnded);
+await page.getByRole("radio", { name: "Kids · $50.00" }).waitFor({
+	state: "attached",
+});
+assert.equal(await household.isChecked(), true);
+assert.equal(
+	await household.evaluate((el) => document.activeElement === el),
+	true,
+	"the pick must keep focus through the redraw",
+);
+await page.getByRole("link", { name: "Cancel" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "hidden" });
+await page.unroute("**/split/line", holdNextLine);
+dropReplacedRequestLogs(errorsBeforeChooser);
+step("a pick made while the chooser's labels redraw stays checked and focused");
+
 // The demo's Target refund is linked to its purchase (P19): its row says so, and its panel shows the link.
 await goto(`${BASE}/transactions?q=Target&month=all`, {
 	waitUntil: "networkidle",
@@ -639,16 +711,6 @@ assert.deepEqual(
 );
 step("Move up in Settings moves Gas up one place");
 
-// htmx logs a request that a newer one replaces (hx-sync) as an abort. toast.js ignores that, and the steps
-// that replace requests on purpose drop only those lines; any other console error still fails.
-const dropReplacedRequestLogs = (from) => {
-	const logged = consoleErrors.splice(from);
-	consoleErrors.push(
-		...logged.filter(
-			(error) => !/^htmx: htmx:error: .*abort/i.test(error.text),
-		),
-	);
-};
 const slowCount = (route) => holdReply(route, 1500);
 
 // Select all from the keyboard: its link leaves with the reply, so focus must land on Set category, not the page top (#215).

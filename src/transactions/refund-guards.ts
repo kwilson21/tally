@@ -46,3 +46,83 @@ export function refundPurchaseLabel(
 ): string {
 	return `${shortDay(purchase.date, refundDate)} · ${formatCents(purchase.amountCents)} · ${purchase.categoryName ?? "No category"}`;
 }
+
+/** A refund linked to a split purchase, as the split sheet asks which part it goes with (decision 99). */
+export type SplitRefund = { id: number; date: string; amountCents: number };
+
+/**
+ * The part a split sheet's answer for a refund names: its index in the parts, or null for Not linked ("none")
+ * and for an answer that names no part (a missing, blank or out-of-range one).
+ */
+export function refundPartIndex(
+	answer: string | undefined,
+	partCount: number,
+): number | null {
+	if (answer === undefined || !/^\d+$/.test(answer)) return null;
+	const index = Number(answer);
+	return index < partCount ? index : null;
+}
+
+/**
+ * The field error on the split sheet when a linked refund has no answer yet: it must go with a part, or be
+ * Not linked. Nothing is saved until every refund is answered (decision 99).
+ */
+export function refundPickMessage(date: string, today: string): string {
+	return `Pick which part the refund on ${shortDay(date, today)} goes with, or Not linked.`;
+}
+
+/**
+ * The field error on the split sheet when a part can't take the refunds chosen for it. `count` is how many refunds are
+ * chosen for it, `totalCents` their absolute total, and `partCents` the part's own size (absolute cents).
+ */
+export function refundPartRoomMessage(
+	count: number,
+	totalCents: number,
+	partName: string,
+	partCents: number,
+): string {
+	const refunds =
+		count === 1
+			? `The refund is ${formatCents(totalCents)}`
+			: `The refunds come to ${formatCents(totalCents)}`;
+	return `${refunds}, and ${partName} is only ${formatCents(partCents)}.`;
+}
+
+/**
+ * The split sheet's refund answers, checked before the save (decision 99). `answers[refundId]` is what the sheet
+ * posted for each refund: "none" for Not linked, a part's index, or nothing when no part was chosen. Returns the first
+ * refusal in words, or null when every refund is answered and every part has room for the refunds chosen for it. The
+ * refunds chosen for a part are totalled together and checked against its own size (absolute cents, so a split's
+ * negative parts work too); the first part in sheet order that is too small is the one named.
+ */
+export function refundAnswersError(
+	refunds: SplitRefund[],
+	answers: Record<number, string | undefined>,
+	parts: { name: string; amountCents: number }[],
+	today: string,
+): string | null {
+	const open = refunds.find(
+		(refund) =>
+			answers[refund.id] !== "none" &&
+			refundPartIndex(answers[refund.id], parts.length) === null,
+	);
+	if (open) return refundPickMessage(open.date, today);
+	for (const [index, part] of parts.entries()) {
+		const chosen = refunds.filter(
+			(refund) => refundPartIndex(answers[refund.id], parts.length) === index,
+		);
+		const totalCents = chosen.reduce(
+			(sum, refund) => sum + Math.abs(refund.amountCents),
+			0,
+		);
+		const partCents = Math.abs(part.amountCents);
+		if (totalCents > partCents)
+			return refundPartRoomMessage(
+				chosen.length,
+				totalCents,
+				part.name,
+				partCents,
+			);
+	}
+	return null;
+}

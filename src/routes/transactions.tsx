@@ -25,10 +25,12 @@ import {
 	firstVisitState,
 	getTransaction,
 	type ListRow,
+	linkedRefunds,
 	listRowsByIds,
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	offeredToSplit,
 	PAGE_SIZE,
 	payingBillsCount,
 	type RefundPurchase,
@@ -76,9 +78,12 @@ import {
 	SHOWS,
 } from "../transactions/filters";
 import {
+	refundAnswersError,
+	refundPartIndex,
 	refundPartTooBigMessage,
 	refundPurchaseLabel,
 	refundTooBigMessage,
+	type SplitRefund,
 } from "../transactions/refund-guards";
 import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
@@ -163,7 +168,12 @@ import {
 	TICKS_INCLUDE,
 	TOO_MANY,
 } from "../views/selection-action-bar";
-import { SplitForm, SplitLine, type SplitValue } from "../views/split-form";
+import {
+	RefundPartLabels,
+	SplitForm,
+	SplitLine,
+	type SplitValue,
+} from "../views/split-form";
 import { TextInput } from "../views/text-input";
 import { TransactionRow } from "../views/transaction-row";
 import { ViewLinks } from "../views/view-links";
@@ -2677,6 +2687,8 @@ function SplitSheet({
 	today,
 	still,
 	correction,
+	refunds = [],
+	choices = {},
 }: {
 	tx: TransactionDetail;
 	back: string;
@@ -2687,6 +2699,9 @@ function SplitSheet({
 	/** Add a part, or an error, draws the open sheet again, so it isn't drawn arriving. */
 	still?: boolean;
 	correction?: Correction;
+	/** The linked refunds the sheet asks about, and what was answered for each (decision 99). */
+	refunds?: SplitRefund[];
+	choices?: Record<number, string | undefined>;
 }) {
 	const account = `${tx.accountName}${tx.accountMask ? ` ••${tx.accountMask}` : ""}`;
 	return (
@@ -2721,12 +2736,20 @@ function SplitSheet({
 				pendingEdit={correction?.pendingEdit}
 				categories={categories}
 				values={values}
+				refunds={refunds}
+				choices={choices}
+				today={today}
 				back={back}
 				cancelHref={withFocus(back, tx.id)}
 				error={error}
 			/>
 		</BottomSheet>
 	);
+}
+
+/** The token a split sheet posts with its line requests (SplitForm's sheet), or null when it isn't one a sheet drew. */
+function sheetToken(raw: string | null): string | null {
+	return raw !== null && /^[0-9a-f-]{36}$/.test(raw) ? raw : null;
 }
 
 /** A posted amount in cents: a whole, positive number of cents, or null. */
@@ -2765,6 +2788,35 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 		else return null;
 	}
 	return ids;
+}
+
+/**
+ * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
+ * split refund and its parts are left out, and so is a credit that no longer counts (it is unlinked, not asked about).
+ */
+async function splitRefundsOf(
+	db: D1Database,
+	parentId: number,
+): Promise<SplitRefund[]> {
+	return (await linkedRefunds(db, parentId, true))
+		.filter(offeredToSplit)
+		.map(({ id, date, amountCents }) => ({ id, date, amountCents }));
+}
+
+/**
+ * What a split sheet posted for each refund's radio: "none" for Not linked, a part's index, or nothing when no part
+ * was chosen. A redraw checks the same radios again.
+ */
+function refundAnswers(
+	refunds: SplitRefund[],
+	form: FormData,
+): Record<number, string | undefined> {
+	return Object.fromEntries(
+		refunds.map((refund) => [
+			refund.id,
+			form.get(`refund_${refund.id}`)?.toString(),
+		]),
+	);
 }
 
 async function splitContext(c: Context<App>) {
@@ -2861,6 +2913,8 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 		{ category: "", amount: "" },
 		{ category: "", amount: "" },
 	];
+	// The linked refunds ask which part they go with; nothing is chosen until a person picks (decision 99).
+	const refunds = await splitRefundsOf(c.env.DB, tx.id);
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -2869,6 +2923,7 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 				categories={categories}
 				values={values}
 				today={today}
+				refunds={refunds}
 			/>
 		),
 	});
@@ -2880,13 +2935,37 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const form = await c.req.formData();
 	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
+	const amounts = form.getAll("part_amount").map(String);
+	const categoryValues = form.getAll("part_category").map(String);
+	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
+	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
+	// A Change the parts sheet keeps its links by part, so it has no chooser. The labels belong to the drawing of the
+	// sheet that posted its token, so a reply with no valid token draws none.
+	const sheet = sheetToken(form.get("sheet")?.toString() ?? null);
+	const refunds =
+		total === null && sheet !== null
+			? await splitRefundsOf(c.env.DB, tx.id)
+			: [];
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+	).all<Category>();
 	return c.html(
-		<div id="split-line">
-			<SplitLine
-				parentCents={total ?? tx.amountCents}
-				amounts={form.getAll("part_amount").map(String)}
-			/>
-		</div>,
+		<>
+			<div id="split-line">
+				<SplitLine parentCents={total ?? tx.amountCents} amounts={amounts} />
+			</div>
+			{sheet !== null && (
+				<RefundPartLabels
+					sheet={sheet}
+					refunds={refunds}
+					values={categoryValues.map((category, index) => ({
+						category,
+						amount: amounts[index] ?? "",
+					}))}
+					categories={categories}
+				/>
+			)}
+		</>,
 	);
 });
 
@@ -2930,6 +3009,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			kept: partId === undefined ? undefined : archived.get(partId),
 		};
 	});
+	// Which part each linked refund goes with (decision 99). A Change the parts sheet keeps each part's links, so it
+	// asks nothing; a new split asks about every linked refund, and a redraw keeps the answers given.
+	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
+	const choices = refundAnswers(refunds, form);
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same
 	// sheet back, refused in words, as the other split refusals do.
 	if (tx.income)
@@ -2943,6 +3026,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error="Income can't be split."
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
@@ -2959,6 +3044,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					categories={categories}
 					values={values}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
@@ -2983,8 +3070,41 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error={parsed.error}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
+				/>
+			),
+		});
+	// Each linked refund goes with a part or Not linked, and every part has room for what is chosen for it (decision
+	// 99). Refused in words with nothing saved, and the sheet comes back with the answers given.
+	const partNames = (parts: { categoryId: number; amountCents: number }[]) =>
+		parts.map((part) => ({
+			name: categories.find((cat) => cat.id === part.categoryId)?.name ?? "",
+			amountCents: part.amountCents,
+		}));
+	const refundError = refundAnswersError(
+		refunds,
+		choices,
+		partNames(parsed.parts),
+		today,
+	);
+	if (refundError)
+		return renderList(c, today, filtersFrom(c, today, back), {
+			status: 422,
+			sheet: (_categories, today) => (
+				<SplitSheet
+					tx={tx}
+					back={back}
+					categories={categories}
+					values={values}
+					error={refundError}
+					today={today}
+					still
+					correction={correction}
+					refunds={refunds}
+					choices={choices}
 				/>
 			),
 		});
@@ -3022,14 +3142,39 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 					values={values}
 					error={error}
 					today={today}
+					refunds={refunds}
+					choices={choices}
 					still
 					correction={correction}
 				/>
 			),
 		});
 	}
-	const result = await saveSplit(c.env.DB, tx.id, parsed.parts, actor(c));
-	if (result.saved) return splitSaved(c, tx, today, back, result);
+	// The part each refund goes with, or null for Not linked (every answer was checked above).
+	const result = await saveSplit(
+		c.env.DB,
+		tx.id,
+		parsed.parts,
+		actor(c),
+		Object.fromEntries(
+			refunds.map((refund) => [
+				refund.id,
+				refundPartIndex(choices[refund.id], parsed.parts.length),
+			]),
+		),
+	);
+	if (result.saved)
+		return splitSaved(c, tx, today, back, {
+			unlinked: result.unlinked,
+			bills: result.bills,
+			moved: result.moved.map((move) => ({
+				date: move.date,
+				category:
+					categories.find(
+						(cat) => cat.id === parsed.parts[move.part]?.categoryId,
+					)?.name ?? "",
+			})),
+		});
 	// Show the bank's new amount, so the next save checks against it.
 	const fresh = (await getTransaction(c.env.DB, tx.id)) ?? tx;
 	return renderList(c, today, filtersFrom(c, today, back), {
@@ -3042,6 +3187,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				values={values}
 				error="The bank just changed this amount. Check the parts and save again."
 				today={today}
+				refunds={refunds}
+				choices={choices}
 				still
 			/>
 		),
@@ -3049,7 +3196,12 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 /** What a split change unlinked: refunds by the date of their purchase, and bill payments by bill (decision 99). */
-type SplitChange = { unlinked: string[]; bills: UnpaidBill[] };
+type SplitChange = {
+	unlinked: string[];
+	bills: UnpaidBill[];
+	/** The refunds a person chose a part for, with the category of that part (decision 99). */
+	moved?: { date: string; category: string }[];
+};
 
 /** A saved split: the list again with its toast and announcement, or a redirect for a browser without htmx. */
 function splitSaved(
@@ -3082,7 +3234,7 @@ function splitSaved(
  * linked. The Costco membership bill for 2026 is no longer paid.", or "" for none (decisions 60 and 99).
  */
 function unlinkedSentence(
-	{ unlinked, bills }: SplitChange,
+	{ unlinked, bills, moved = [] }: SplitChange,
 	today: string,
 ): string {
 	const [first] = unlinked;
@@ -3092,7 +3244,14 @@ function unlinkedSentence(
 			: unlinked.length === 1
 				? `The refund on ${shortDay(first, today)} is no longer linked.`
 				: `${unlinked.length} refunds are no longer linked.`;
-	return [refunds, unpaidBillsSentence(bills)]
+	return [
+		...moved.map(
+			(refund) =>
+				`The refund on ${shortDay(refund.date, today)} now counts with ${refund.category}.`,
+		),
+		refunds,
+		unpaidBillsSentence(bills),
+	]
 		.filter(Boolean)
 		.map((sentence) => ` ${sentence}`)
 		.join("");
