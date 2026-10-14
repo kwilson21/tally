@@ -69,11 +69,16 @@ export function rowCaption(row: ListRow): Caption {
 		row.splitRemovedFromCents !== undefined
 	) {
 		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.${unpaidBillsNote(row.splitRemovedBills)}`;
+		// A bill payment keeps its bill after the note; a categorized purchase keeps its refunds before its bill (#382).
 		return row.categoryId === null
-			? { kind: "needs", caption: note, tag: true }
+			? {
+					kind: "needs",
+					caption: [note, paidBill].filter(Boolean).join(" · "),
+					tag: true,
+				}
 			: {
 					kind: "category",
-					caption: [row.categoryName, note, paidBill]
+					caption: [row.categoryName, note, refunded(row), paidBill]
 						.filter(Boolean)
 						.join(" · "),
 					tag: false,
@@ -92,10 +97,10 @@ export function rowCaption(row: ListRow): Caption {
 			caption: [row.categoryName, pair, paidBill].filter(Boolean).join(" · "),
 			tag: false,
 		};
-	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
-	if (row.followsPurchase) return { kind: "needs", caption: pair, tag: false };
 	// A refund and the bill it paid both say so ahead of the note, in the same order as a categorized row (#313).
-	const facts = [pair, paidBill].filter(Boolean).join(" · ");
+	const facts = [pair, paidBill].filter(Boolean).join(" · ") || null;
+	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
+	if (row.followsPurchase) return { kind: "needs", caption: facts, tag: false };
 	return {
 		kind: "needs",
 		caption:

@@ -612,6 +612,27 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("says which refund and bill a TransactionRow caption keeps, in its sentence and DESIGN.md (#382)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		const sentence =
+			section.match(
+				/<p class="mt-1 max-w-prose text-muted">([^<]*)<\/p>/,
+			)?.[1] ?? "";
+		expect(sentence).toContain("“$X refunded” comes before its bill");
+		expect(sentence).toContain(
+			"a bill payment keeps “paid [bill] bill” after it",
+		);
+		expect(sentence).toContain("adds “paid [bill] bill” when it paid one");
+		expect(design).toMatch(
+			/\| TransactionRow \|[^\n]*"\$X refunded" comes before its bill/,
+		);
+		expect(design).toMatch(
+			/\| TransactionRow \|[^\n]*adds "paid \[bill\] bill" when it paid one/,
+		);
+	});
+
 	it("shows the Chip disabled, as the edit panel draws it while a refund is linked to a purchase, and DESIGN.md says how it looks", async () => {
 		const { html } = await get("/design-system");
 		const section = html.split('id="chip"')[1]?.split("</section>")[0] ?? "";
