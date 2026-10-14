@@ -37,6 +37,12 @@ export const SELECTION_BAR_OOB =
 export const FOCUS_SET_CATEGORY = "set-category-selection";
 
 /**
+ * The `focus` value the Set category sheet's close asks for: the list puts focus back on Set category, with the
+ * ticks kept. Not FOCUS_SET_CATEGORY, which also means Select all's reply and changes which rows are ticked.
+ */
+export const FOCUS_SET_CATEGORY_BACK = "set-category-back";
+
+/**
  * The `focus` value Older and Newer ask their reply for: the reply focuses the first row's tick, since
  * the page link that had focus leaves with the old list. The rows are hidden until the load ends, so toast.js
  * moves the focus to that tick then (#456).

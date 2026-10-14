@@ -86,14 +86,20 @@
 			? new ResizeObserver(measureToasts)
 			: null;
 
-	// The Transactions heading takes focus (every Transactions page has one, the first-visit page too). A page
-	// without it, a bill's page, takes focus on its own page-title.
+	// The heading that takes focus when a toast hands it back. While a sheet is open the page behind it is inert,
+	// so the sheet's own title takes it (its heading, not its first control: sheet.js's Tab goes on from the heading
+	// to the sheet's first stop). With no sheet, the Transactions heading takes it (every Transactions page has one,
+	// the first-visit page too), and a page without it, a bill's page, takes focus on its own page-title.
 	function focusHeading() {
+		const sheet = document.querySelector("section[data-sheet]");
 		const heading =
+			(sheet &&
+				document.getElementById(sheet.getAttribute("aria-labelledby"))) ??
 			document.getElementById("transactions-title") ??
 			document.getElementById("page-title");
 		if (heading) {
-			heading.setAttribute("tabindex", "-1");
+			if (!heading.hasAttribute("tabindex"))
+				heading.setAttribute("tabindex", "-1");
 			heading.focus();
 		}
 	}
@@ -103,8 +109,9 @@
 		return !active || active === document.body;
 	}
 
-	// Takes a toast off the page. Focus on the toast would be lost with it, so the heading takes it. `lostToo` also
-	// counts focus on nothing: an Undo's answer (undoDone: a restore's, or a cash or bill Undo's refusal) uses it.
+	// Takes a toast off the page. Focus on the toast would be lost with it, so the heading takes it (focusHeading: the
+	// open sheet's title, while a sheet is open). `lostToo` also counts focus on nothing: an Undo's answer (undoDone: a
+	// restore's, or a cash or bill Undo's refusal) uses it.
 	// A timer doesn't, since it would scroll the page to the heading when focus is only on the body. An answer or a
 	// failure that arrives after the time has run out still moves focus left on nothing to the heading (onToast's
 	// undoDone block and failed()).

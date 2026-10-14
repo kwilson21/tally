@@ -21,6 +21,7 @@ export function BudgetSheet({
 	averageCents,
 	transactionCount,
 	month: monthPeriod,
+	closeHref,
 	closeAttrs,
 }: {
 	/** Prefixes the ids of the heading, the amount field and Save; a drawing of three sheets gives each its own. */
@@ -34,6 +35,8 @@ export function BudgetSheet({
 	transactionCount: number;
 	/** The household's current month, YYYY-MM. */
 	month: string;
+	/** Where Cancel goes without JavaScript: the sheet's backdrop address. */
+	closeHref: string;
 	/** htmx attributes for Cancel, which closes the sheet the way its backdrop does. */
 	closeAttrs: Record<string, string>;
 }) {
@@ -84,7 +87,12 @@ export function BudgetSheet({
 					autofocus
 				/>
 				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
+					<Button
+						href={closeHref}
+						kind="secondary"
+						class="w-full"
+						{...closeAttrs}
+					>
 						Cancel
 					</Button>
 					<Button
