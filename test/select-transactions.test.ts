@@ -27,6 +27,17 @@ const firstPageIds = async () => {
 	);
 };
 
+/** The first page's ids without a refund or a split part. Saving a ticked refund sets its purchase instead, and
+ * excluding a part takes its whole purchase, so either moves a row the tick did not name; which such rows fall on
+ * page 1 depends on the date (#528). Tests that tick page 1 for a save or an exclude take theirs from here. */
+const unlinkedFirstPageIds = async () => {
+	const { results } = await env.DB.prepare(
+		"SELECT id FROM transactions WHERE refund_of_id IS NOT NULL OR parent_id IS NOT NULL",
+	).all<{ id: number }>();
+	const linked = new Set(results.map((row) => row.id));
+	return (await firstPageIds()).filter((id) => !linked.has(id));
+};
+
 describe("Set category on a refund that follows its purchase (#346, decision 99)", () => {
 	const GROCERIES = 1;
 	const EATING_OUT = 2;
@@ -1182,7 +1193,16 @@ describe("select several transactions", () => {
 		expect(selectAllLabel(html)).toBeUndefined();
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("changes exactly the rows the link ticked when an action follows", async () => {
+		// The demo seed follows the date, and on some days the page's rows add a sentence to the announce: a ticked
+		// refund moves its purchase, or three picks of one merchant offer a rule. Pinned to a day with neither (#528).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-07");
 		const ids = rowIds(await pageHtml("month=all&select=1"));
 		const before = (await snapshot()) as SnapshotRow[];
 		const res = await post(
@@ -1400,8 +1420,8 @@ describe("select several transactions", () => {
 		expect(plain).not.toContain("autofocus");
 	});
 	describe("ticks across pages (#350)", () => {
-		/** Three rows on page 1, ticked as a person's taps leave them. */
-		const pageOneTicks = async () => (await firstPageIds()).slice(0, 3);
+		/** Three rows on page 1 that link to no other row, ticked as a person's taps leave them. */
+		const pageOneTicks = async () => (await unlinkedFirstPageIds()).slice(0, 3);
 		/** Page 2's selectable rows: none of them is on page 1, so page 1's ticks are not on this page. */
 		const pageTwoRows = async () =>
 			rowIds(await pageHtml("month=all&page=2&select=1"));
