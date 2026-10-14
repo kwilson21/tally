@@ -1024,6 +1024,59 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(await paidBy(two)).toBe(newSecond);
 	});
 
+	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						await env.DB.prepare(race)
+							.bind(...bind)
+							.run();
+						return env.DB.batch(statements);
+					};
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as unknown as D1Database;
+
+	const KEEP_TWO = [
+		{ categoryId: 1, amountCents: 12000 },
+		{ categoryId: 1, amountCents: 18000 },
+	];
+
+	it("a plan that a competing save unlinks after the read stays unlinked and set aside, and the save goes through (#202)", async () => {
+		const tx = await payment(9818, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = NULL WHERE id = ?",
+			[planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(true);
+		expect(await paidBy(planId)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
+	});
+
+	it("a plan that a competing save relinks to another payment after the read stays there (#202)", async () => {
+		const tx = await payment(9820, 30000);
+		const other = await payment(9821, 18000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH, second ?? 0);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[other, planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(true);
+		expect(await paidBy(planId)).toBe(other);
+	});
+
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {
 		const tx = await payment(9808, 30000);
 		await splitInTwo(tx, 12000, 18000);

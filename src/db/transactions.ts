@@ -1834,6 +1834,8 @@ export async function saveSplit(
 						),
 				]
 			: [];
+	// A part that a kept plan still holds here is positive (a plan's payment is money out, linkPlanPayment), so no refund
+	// counts it: the refund check reads the same as without those parts.
 	const unlinkRefund = db
 		.prepare(
 			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
@@ -1855,16 +1857,27 @@ export async function saveSplit(
 				total,
 			),
 	);
-	// Each kept plan moves to the new part it was paired with, as a kept payment does (decision 99).
+	// Each kept plan moves to the new part it was paired with, as a kept payment does (decision 99). It moves only while it
+	// is still on a part of this purchase, so a plan unlinked after the read stays unlinked. The new parts hold no plan yet,
+	// so any match is an old part, and the new part is found by its place from the newest, since the old parts that held a
+	// plan still have lower ids.
 	const restorePlans = keptPlans.map((keep) =>
 		db
 			.prepare(
-				`UPDATE planned_expenses SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2)
-				WHERE id = ?3 AND transaction_id IS NULL
+				`UPDATE planned_expenses SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2)
+				WHERE id = ?3 AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?1)
 				AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?4)`,
 			)
-			.bind(parentId, keep.index, keep.item.id, total),
+			.bind(parentId, parts.length - 1 - keep.index, keep.item.id, total),
 	);
+	// The old parts that held a kept plan, which the first delete left for restorePlans: every part but the newest n, which
+	// are the new parts. Guarded like the others, so a change whose amount moved removes nothing.
+	const leftoverParts = db
+		.prepare(
+			`DELETE FROM transactions WHERE parent_id = ?1 AND id NOT IN (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id DESC LIMIT ?3)
+			AND ${unchangedNumbered}`,
+		)
+		.bind(parentId, total, parts.length);
 	const markParent = db
 		.prepare(
 			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
@@ -1929,10 +1942,16 @@ export async function saveSplit(
 			.bind(parentId, total),
 		...park,
 		// The replaced parts go with their bill payments, which are unlinked with no dismissal left (decision 105).
-		// Kept ones moved above.
+		// Kept ones moved above. A part holding a plan this save keeps stays until its new part exists, so the plan moves
+		// straight across, and a plan someone unlinked meanwhile has nothing to move.
 		db
-			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
-			.bind(parentId, parentId, total),
+			.prepare(`DELETE FROM transactions WHERE parent_id = ?1 AND id NOT IN (SELECT transaction_id FROM planned_expenses
+				WHERE id IN (SELECT value FROM json_each(?3)) AND transaction_id IS NOT NULL) AND ${unchangedNumbered}`)
+			.bind(
+				parentId,
+				total,
+				JSON.stringify(keptPlans.map((keep) => keep.item.id)),
+			),
 		// With the old parts gone and before the new ones take the parent's link: if the whole refund
 		// no longer fits its purchase, the link goes, and the new parts start unlinked.
 		unlinkRefund,
@@ -1954,8 +1973,9 @@ export async function saveSplit(
 					total,
 				),
 		),
-		...restore,
 		...restorePlans,
+		leftoverParts,
+		...restore,
 		...moveStatements.map(({ statement }) => statement),
 		sweepRefused,
 		// Each new part starts with the purchase's own Not this one (decision 105), once the kept payments are restored.
