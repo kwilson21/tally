@@ -11,8 +11,6 @@ export type HomeForecastDay = {
 	spentCents: number;
 	everydayCents: number;
 	billPaymentsCents: number;
-	/** Money out that pays a planned expense: in spending so far, never projected forward (decision 82). */
-	planPaymentsCents: number;
 	refundsCents: number;
 };
 
@@ -23,6 +21,8 @@ export async function homeForecastDays(
 	today: string,
 ): Promise<HomeForecastDay[]> {
 	const nextMonth = `${monthsBefore(month, -1)}-01`;
+	// A payment that pays a planned expense has its own role: it is in spending so far, but not in the everyday pace
+	// projected forward, so the 'plan' role stays out of everydayCents (decision 82).
 	const { results } = await db
 		.prepare(
 			`WITH classified AS (
@@ -37,7 +37,6 @@ export async function homeForecastDays(
 			SELECT day, SUM(amount_cents) AS spentCents,
 				SUM(CASE WHEN role = 'spending' THEN amount_cents ELSE 0 END) AS everydayCents,
 				SUM(CASE WHEN role = 'bill' THEN amount_cents ELSE 0 END) AS billPaymentsCents,
-				SUM(CASE WHEN role = 'plan' THEN amount_cents ELSE 0 END) AS planPaymentsCents,
 				SUM(CASE WHEN role = 'refund' THEN -amount_cents ELSE 0 END) AS refundsCents
 			FROM classified GROUP BY day ORDER BY day`,
 		)

@@ -28,19 +28,22 @@ export function plannedLine(plan: PlannedRowData, month: string) {
 /**
  * One planned expense, shaped like a bill row: the tag icon, its name, a muted line and its amount. Unpaid, it says what
  * it is set aside for; paid, it says when its payment came (P103). It is a link to its sheet when `href` is given, and
- * opens that sheet over Bills in place (as Plan an expense does), with `href` as the way in without script.
+ * opens that sheet over Bills in place (as Plan an expense does), with `href` as the way in without script. The link's
+ * id is `plan-<id>`, where the sheet's close returns focus (`autofocus`, when Bills is drawn with that focus, #87).
  */
 export function PlannedRow({
 	plan,
 	month,
 	today,
 	href,
+	autofocus = false,
 }: {
 	plan: PlannedRowData;
 	/** The household's current month, `YYYY-MM`. */
 	month: string;
 	today: string;
 	href?: string;
+	autofocus?: boolean;
 }) {
 	const content = (
 		<>
@@ -63,8 +66,10 @@ export function PlannedRow({
 		<li>
 			{href ? (
 				<a
+					id={`plan-${plan.id}`}
 					href={href}
 					class={`${look} text-ink no-underline`}
+					autofocus={autofocus}
 					{...sheetAttrs(href)}
 				>
 					{content}
@@ -172,6 +177,8 @@ export type PlanValues = { name: string; amount: string; month: string };
  * Plan an expense, or a plan's own sheet (P102): What it's for, the Amount as the big ledger field, the Month as a
  * native select, then Save, Delete and Cancel. A plan with a payment shows it with an Unlink; an unpaid one can link
  * one on its page. `deleteConfirm` redraws the sheet to ask "Delete Car registration, $180.00?" first.
+ * `opener` is true when the sheet was opened from the plan's own page (Edit planned expense), so it closes back there;
+ * otherwise a plan's sheet closes to its row on Bills, and Plan an expense to its button (#87).
  */
 export function PlanSheet({
 	plan,
@@ -180,6 +187,7 @@ export function PlanSheet({
 	errors = {},
 	paidBy,
 	deleteConfirm = false,
+	opener = false,
 }: {
 	/** The plan being edited; absent for Plan an expense. */
 	plan?: PlannedRowData;
@@ -189,14 +197,26 @@ export function PlanSheet({
 	/** The linked payment's line when the plan is paid: its name, date and amount. */
 	paidBy?: { name: string; date: string; amountCents: number };
 	deleteConfirm?: boolean;
+	opener?: boolean;
 }) {
 	const title = plan ? plan.name : "Plan an expense";
 	const action = plan ? `/plans/${plan.id}` : "/plans";
 	const amountCents = plan?.amountCents;
+	// Closing the sheet, by the backdrop or Cancel, returns focus to what opened it (#87).
+	const closeHref = !plan
+		? "/bills?focus=plan-expense"
+		: opener
+			? `/plans/${plan.id}?focus=edit-plan`
+			: `/bills?focus=plan-${plan.id}`;
+	// The sheet's own links carry the opener too, so the delete question closes to the same place.
+	const via = opener ? "?opener=plan" : "";
+	const openerField = opener && (
+		<input type="hidden" name="opener" value="plan" />
+	);
 	return (
 		<BottomSheet
 			labelledBy="plan-sheet-title"
-			closeHref="/bills"
+			closeHref={closeHref}
 			still={deleteConfirm || Object.keys(errors).length > 0}
 		>
 			<h2
@@ -232,9 +252,9 @@ export function PlanSheet({
 						</Button>
 					</form>
 					<Button
-						href={`${action}/edit`}
+						href={`${action}/edit${via}`}
 						kind="text"
-						{...sheetAttrs(`${action}/edit`, false)}
+						{...sheetAttrs(`${action}/edit${via}`, false)}
 					>
 						Cancel
 					</Button>
@@ -248,6 +268,7 @@ export function PlanSheet({
 					hx-swap="outerHTML"
 					class="flex flex-col gap-3"
 				>
+					{openerField}
 					<TextInput
 						id="plan-name"
 						name="name"
@@ -316,14 +337,14 @@ export function PlanSheet({
 						{plan && (
 							<Button
 								kind="secondary"
-								href={`${action}/delete`}
-								{...sheetAttrs(`${action}/delete`, false)}
+								href={`${action}/delete${via}`}
+								{...sheetAttrs(`${action}/delete${via}`, false)}
 								class="border-over text-over"
 							>
 								Delete
 							</Button>
 						)}
-						<Button href="/bills" kind="text">
+						<Button href={closeHref} kind="text">
 							Cancel
 						</Button>
 					</div>
@@ -348,7 +369,9 @@ export function PlanSheet({
 					hx-post={`${action}/unlink`}
 					hx-target="body"
 					hx-swap="outerHTML"
-				/>
+				>
+					{openerField}
+				</form>
 			)}
 		</BottomSheet>
 	);
@@ -364,6 +387,7 @@ export function PlanPaymentPicker({
 	amountCents,
 	candidates,
 	error,
+	focusHeading = false,
 }: {
 	planId: number;
 	name: string;
@@ -377,6 +401,8 @@ export function PlanPaymentPicker({
 		excluded: boolean;
 	}[];
 	error?: string;
+	/** The heading takes focus when the page is drawn: after an Unlink that changed nothing, which has no toast to say so. */
+	focusHeading?: boolean;
 }) {
 	const action = `/plans/${planId}/link`;
 	return (
@@ -384,7 +410,12 @@ export function PlanPaymentPicker({
 			class="mt-6 border-t border-rule pt-4"
 			aria-labelledby="plan-link-title"
 		>
-			<h2 id="plan-link-title" class="font-serif text-3xl font-semibold">
+			<h2
+				id="plan-link-title"
+				class="font-serif text-3xl font-semibold"
+				tabindex={focusHeading ? -1 : undefined}
+				autofocus={focusHeading}
+			>
 				Link a payment
 			</h2>
 			<p class="mt-2 text-lg">

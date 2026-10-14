@@ -60,6 +60,22 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			billName: "Rent",
 		},
 	},
+	{
+		label: "Payment linked to a planned expense",
+		row: {
+			...row,
+			id: 9,
+			displayName: "DMV",
+			rawName: "DMV REGISTRATION",
+			amountCents: 18000,
+			categoryId: 6,
+			categoryName: "Auto",
+			categoryIcon: "car",
+			categoryColor: "cat-slate",
+			paysPlan: true,
+			planName: "Car registration",
+		},
+	},
 	{ label: "Needs a category (unnamed merchant, raw text tidied)", row },
 	{
 		label: "Income",

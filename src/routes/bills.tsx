@@ -327,8 +327,9 @@ export async function page(
 ) {
 	// `given` is the household's date when the handler already read it, so a request reads it once.
 	const today = given ?? (await householdToday(c.env.DB));
-	// A sheet's close asks for focus on Add a bill (?focus=add-bill, #87).
-	const focusAddBill = c.req.query("focus") === "add-bill";
+	// A sheet's close asks for focus on Add a bill, Plan an expense or a planned expense's row (?focus=, #87).
+	const focus = c.req.query("focus");
+	const focusAddBill = focus === "add-bill";
 	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	// A payment at another price is offered on the row it would pay: an active bill whose shown
@@ -427,8 +428,10 @@ export async function page(
 						Add a bill
 					</Button>
 					<Button
+						id="plan-expense"
 						kind="secondary"
 						href="/plans/new"
+						autofocus={focus === "plan-expense"}
 						{...sheetAttrs("/plans/new")}
 					>
 						Plan an expense
@@ -456,6 +459,7 @@ export async function page(
 									month={month}
 									today={today}
 									href={`/plans/${plan.id}/edit`}
+									autofocus={focus === `plan-${plan.id}`}
 								/>
 							))}
 						</ul>
@@ -469,6 +473,7 @@ export async function page(
 							month={month}
 							today={today}
 							href={`/plans/${plan.id}/edit`}
+							autofocus={focus === `plan-${plan.id}`}
 						/>
 					)),
 				)}

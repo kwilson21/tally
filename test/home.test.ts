@@ -215,7 +215,6 @@ describe("GET / with the demo seed", () => {
 		try {
 			vi.setSystemTime(new Date("2026-09-30T16:00:00-04:00"));
 			await resetDemo(env.DB, "2026-09-30");
-
 			// Bills and planned expenses are set aside while the month is current; the finished month counts neither (spec §8.4).
 			await env.DB.batch([
 				env.DB.prepare("DELETE FROM bill_payments"),
@@ -223,7 +222,6 @@ describe("GET / with the demo seed", () => {
 				env.DB.prepare("DELETE FROM planned_expenses"),
 			]);
 			const whileCurrent = await home();
-
 			vi.setSystemTime(new Date("2026-10-01T00:01:00-04:00"));
 			const finished = await homeAt("2026-09");
 			const amount = (html: string) =>
@@ -733,7 +731,6 @@ describe("GET / with the demo seed", () => {
 		const billData = await loadBillRows(env.DB, today);
 		// The same bills total Home's Safe to spend subtracts, not a copy of its rule.
 		const dueBills = billTotalsForRows(month, billData.rows).soonCents;
-
 		const safe = summarizeMonth({
 			month,
 			...data,
@@ -741,7 +738,6 @@ describe("GET / with the demo seed", () => {
 			// The planned expenses Home sets aside too (decision 74).
 			unpaidPlansCents: await plansSetAsideCents(env.DB, month),
 		}).safeToSpendCents;
-
 		const budget = await env.DB.prepare(
 			"SELECT category_id AS categoryId, amount_cents AS amountCents FROM budget_amounts ORDER BY category_id LIMIT 1",
 		).first<{ categoryId: number; amountCents: number }>();

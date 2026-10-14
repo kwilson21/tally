@@ -17,8 +17,9 @@ CREATE TABLE planned_expenses (
 
 -- A payment pays a bill or a plan, never both (spec §5 and §6.1). An index can't span two tables, so each table
 -- gets a trigger pair: a write that would link a payment some linked bill or plan already pays aborts. A payment's group
--- is the transaction, its split parent and its parts (decision 82, paysBillGroupSql and paysPlanGroupSql in
--- counted-month.ts): a bill on a part and a plan on the whole payment are one payment. A dismissed bill row doesn't
+-- is the transaction, its split parent and its own parts (decision 82, paysBillGroupSql and paysPlanGroupSql in
+-- counted-month.ts): a bill on a part and a plan on the whole payment are one payment. Two parts of one split are
+-- separate money, so a bill and a plan may each take a different part, as two bills may. A dismissed bill row doesn't
 -- block a plan (only status 'linked' counts). The link step turns the abort into a field error, and the bill matcher
 -- skips plan-paid transactions, so a sync never trips these.
 CREATE TRIGGER planned_expense_not_a_bill_payment

@@ -612,6 +612,13 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows a payment linked to a planned expense in TransactionRow as DESIGN.md's example, 'Auto · paid Car registration'", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("Auto · paid Car registration");
+	});
+
 	it("says which refund and bill a TransactionRow caption keeps, in its sentence and DESIGN.md (#382)", async () => {
 		const { html } = await get("/design-system");
 		const section =

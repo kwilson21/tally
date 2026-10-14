@@ -6,6 +6,7 @@
  * a link needs beyond these checks, and the link reports which one fired.
  */
 import { monthsBefore } from "../dates";
+import { tidyName } from "../transactions/tidy-name";
 import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { merchantColumnSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
@@ -41,6 +42,21 @@ export const PLAN_UNDO_MS = 10_000;
 
 const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")})`;
 
+/**
+ * A payer's name as bills show it (bills.tsx): its own name or its merchant's, else the bank's text tidied. The bank's
+ * text is read in TypeScript, since tidyName isn't SQL; `paidRawName` is that text, null with no payment.
+ */
+function withPayerName({
+	paidRawName,
+	...plan
+}: PlannedExpense & { paidRawName: string | null }): PlannedExpense {
+	return {
+		...plan,
+		paidName:
+			plan.paidName ?? (paidRawName === null ? null : tidyName(paidRawName)),
+	};
+}
+
 /** The set-aside for a month: this month's plans and any from an earlier month not yet paid, moved or dropped. */
 export async function plansSetAsideCents(
 	db: D1Database,
@@ -60,13 +76,13 @@ export async function loadPlans(db: D1Database): Promise<PlannedExpense[]> {
 	const { results } = await db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
-					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
+					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.raw_name AS paidRawName, t.amount_cents AS paidAmountCents
 				FROM planned_expenses pe
 				LEFT JOIN transactions t ON t.id = pe.transaction_id
 				ORDER BY pe.month, pe.id`,
 		)
-		.all<PlannedExpense>();
-	return results;
+		.all<PlannedExpense & { paidRawName: string | null }>();
+	return results.map(withPayerName);
 }
 
 /** One plan, read for its sheet or its page; null when it doesn't exist. */
@@ -74,37 +90,50 @@ export async function loadPlan(
 	db: D1Database,
 	id: number,
 ): Promise<PlannedExpense | null> {
-	return db
+	const row = await db
 		.prepare(
 			`SELECT pe.id, pe.name, pe.amount_cents AS amountCents, pe.month, pe.transaction_id AS transactionId,
-					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.amount_cents AS paidAmountCents
+					t.date AS paidDate, ${PAYER_NAME} AS paidName, t.raw_name AS paidRawName, t.amount_cents AS paidAmountCents
 				FROM planned_expenses pe
 				LEFT JOIN transactions t ON t.id = pe.transaction_id
 				WHERE pe.id = ?`,
 		)
 		.bind(id)
-		.first<PlannedExpense>();
+		.first<PlannedExpense & { paidRawName: string | null }>();
+	return row ? withPayerName(row) : null;
 }
 
-/** The payments a plan could be paid by, closest amount first (decision 82, P101). */
+/** The payments a plan could be paid by, closest amount first (decision 82, P101): every one that fits, not a first page. */
 export async function planPaymentCandidates(
 	db: D1Database,
 	plan: Pick<PlannedExpense, "month" | "amountCents">,
 ): Promise<PlanPaymentCandidate[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS displayName, t.excluded AS excluded
+			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS name, t.raw_name AS rawName, t.excluded AS excluded
 			 FROM transactions t
 			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
 				AND substr(t.date, 1, 7) IN (?1, ?2)
 				AND NOT ${paysBillGroupSql("t")}
 				AND NOT ${paysPlanGroupSql("t")}
-			 ORDER BY ABS(t.amount_cents - ?3), t.date, t.id
-			 LIMIT 20`,
+			 ORDER BY ABS(t.amount_cents - ?3), t.date, t.id`,
 		)
 		.bind(plan.month, monthsBefore(plan.month, -1), plan.amountCents)
-		.all<Omit<PlanPaymentCandidate, "excluded"> & { excluded: number }>();
-	return results.map((row) => ({ ...row, excluded: row.excluded === 1 }));
+		.all<{
+			id: number;
+			date: string;
+			amountCents: number;
+			name: string | null;
+			rawName: string;
+			excluded: number;
+		}>();
+	return results.map((row) => ({
+		id: row.id,
+		date: row.date,
+		amountCents: row.amountCents,
+		displayName: row.name ?? tidyName(row.rawName),
+		excluded: row.excluded === 1,
+	}));
 }
 
 /**

@@ -21,6 +21,7 @@ import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
+import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
 const post = (path: string, form: Record<string, string>) =>
@@ -160,8 +161,6 @@ describe("planned payments in the budget", () => {
 		const after = linked.find((row) => row.day === 5);
 
 		// Still in spending so far, but no longer in the everyday pace that is projected forward.
-		expect(before?.planPaymentsCents).toBe(0);
-		expect(after?.planPaymentsCents).toBe(18000);
 		expect(after?.spentCents).toBe(before?.spentCents);
 		expect(after?.everydayCents).toBe((before?.everydayCents ?? 0) - 18000);
 	});
@@ -389,9 +388,10 @@ describe("Bills' Planned group, Band and sheet", () => {
 			await exports.default.fetch(`${BASE}/plans/${id}`)
 		).text();
 		expect(html).toContain('id="sheet"');
+		// Opened from the plan's page, so its sheet's close can name that page (opener=plan).
 		expect(html).toMatch(
 			new RegExp(
-				`<a\\b(?=[^>]*hx-get="/plans/${id}/edit")(?=[^>]*hx-target="#sheet")[^>]*>\\s*Edit planned expense\\s*</a>`,
+				`<a\\b(?=[^>]*hx-get="/plans/${id}/edit\\?opener=plan")(?=[^>]*hx-target="#sheet")[^>]*>\\s*Edit planned expense\\s*</a>`,
 			),
 		);
 	});
@@ -588,6 +588,11 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const pageHtml = await onPage.text();
 		expect(pageHtml).toContain('<h1 class="font-serif text-5xl');
 		expect(pageHtml).toContain("Link a payment");
+		// No toast and no announcement here, so the swapped page takes focus: on its Link a payment heading.
+		const linkHeading =
+			pageHtml.match(/<h2\b[^>]*id="plan-link-title"[^>]*>/)?.[0] ?? "";
+		expect(linkHeading).toContain('tabindex="-1"');
+		expect(linkHeading).toContain("autofocus");
 
 		const onSheet = await post(`/plans/${id}/unlink`, {});
 		expect(onSheet.headers.get("HX-Trigger")).toBeNull();
@@ -706,6 +711,47 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			.bind(planId)
 			.first<{ t: number | null }>();
 		expect(linked?.t).toBe(part);
+	});
+
+	it("a bill on part 1 leaves part 2 to a plan: the picker lists part 2 and not part 1, and a link to part 2 is kept", async () => {
+		const tx = await payment(9821, 30000);
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		const { results } = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+			.bind(tx)
+			.all<{ id: number }>();
+		const [part1, part2] = results.map((row) => row.id);
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9822,'Water',12000,3,'monthly','WATER FIXTURE')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9822,?,?,'user','linked')",
+		)
+			.bind(MONTH, part1)
+			.run();
+		const planId = await plan("Lawn service", 18000, MONTH);
+		const picker = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}`)
+		).text();
+		expect(picker).toContain(`value="${part2}"`);
+		expect(picker).not.toContain(`value="${part1}"`);
+
+		await post(`/plans/${planId}/link`, { transaction_id: String(part2) });
+		const linked = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+		)
+			.bind(planId)
+			.first<{ t: number | null }>();
+		expect(linked?.t).toBe(part2);
 	});
 
 	it("a re-split keeps a plan on the whole payment it pays, so it stays paid", async () => {
@@ -1223,5 +1269,96 @@ describe("excluding a payment that a bill or a plan pays", () => {
 		expect(await announced([billPaid, planPaid, unlinked])).toBe(
 			"Excluded 3 transactions. 2 still count while they pay a bill or a planned expense.",
 		);
+	});
+});
+
+describe("the plan picker lists every payment that can pay the plan", () => {
+	it("lists all 25 eligible payments in the plan's month, not only the first 20", async () => {
+		const planId = await plan("Car registration", 18000, MONTH);
+		const ids: number[] = [];
+		for (let i = 0; i < 25; i++) ids.push(await payment(9900 + i, 1000 + i));
+		const picker = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}`)
+		).text();
+		for (const id of ids) expect(picker).toContain(`value="${id}"`);
+	});
+});
+
+describe("a payer with no name of its own shows the bank's text, tidied, as bills do", () => {
+	it("names a candidate and a linked payment by the tidied bank text, never null", async () => {
+		const tidied = tidyName("DMV FIXTURE");
+		const tx = await payment(9830, 18000);
+		const planId = await plan("Car registration", 18000, MONTH);
+		const picker = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}`)
+		).text();
+		expect(picker).toContain(`${tidied} · `);
+		expect(picker).not.toContain("null");
+
+		await post(`/plans/${planId}/link`, { transaction_id: String(tx) });
+		const page = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}`)
+		).text();
+		expect(page).toContain(`Paid by ${tidied}`);
+		const edit = await (
+			await exports.default.fetch(`${BASE}/plans/${planId}/edit`)
+		).text();
+		expect(edit).toMatch(new RegExp(`Paid by</span>\\s*${tidied} · `));
+		expect(edit).not.toContain("null");
+	});
+});
+
+describe("a plan's answer names its address: Bills, or the plan's own page after an edit from it", () => {
+	it("answers with Bills' address after a create, an edit from Bills, a delete, a drop, a move and an Undo", async () => {
+		const created = await post("/plans", {
+			name: "Lawn service",
+			amount: "90",
+			month: MONTH,
+		});
+		expect(created.headers.get("HX-Push-Url")).toBe("/bills");
+
+		const id = await plan("Car registration", 18000, MONTH);
+		const edited = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: MONTH,
+		});
+		expect(edited.headers.get("HX-Push-Url")).toBe("/bills");
+
+		const deleted = await post(`/plans/${id}/delete`, {});
+		expect(deleted.headers.get("HX-Push-Url")).toBe("/bills");
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		const undone = await post("/plans/undo-delete", { token });
+		expect(undone.headers.get("HX-Push-Url")).toBe("/bills");
+
+		const dropped = await plan("Old one", 9000, LAST_MONTH);
+		expect(
+			(await post(`/plans/${dropped}/drop`, {})).headers.get("HX-Push-Url"),
+		).toBe("/bills");
+		const moved = await plan("Older one", 9000, LAST_MONTH);
+		expect(
+			(await post(`/plans/${moved}/move`, {})).headers.get("HX-Push-Url"),
+		).toBe("/bills");
+	});
+
+	it("answers with the plan's own address after an edit from its page, and with Bills' after an edit from Bills", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const fromPage = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: MONTH,
+			opener: "plan",
+		});
+		expect(fromPage.headers.get("HX-Push-Url")).toBe(`/plans/${id}`);
+		const fromBills = await post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: MONTH,
+		});
+		expect(fromBills.headers.get("HX-Push-Url")).toBe("/bills");
 	});
 });

@@ -45,9 +45,8 @@ export const paysPlanSql = (alias: string) =>
 	`EXISTS (SELECT 1 FROM planned_expenses linked_plan WHERE linked_plan.transaction_id IN (${alias}.id, ${alias}.parent_id))`;
 
 /**
- * The payment group of the transaction `alias` names: the transaction, its split parent and its parts (decision 82).
- * A whole payment and each of its parts count as one payment for the never-both checks, so a bill and a plan can't
- * both take any of them.
+ * The payment group of the transaction `alias` names: the transaction, its split parent and its own parts (decision 82).
+ * Two parts of one split are separate money, so a bill and a plan may each take a different part, as two bills may.
  */
 const paymentGroupSql = (alias: string) =>
 	`SELECT g.id FROM transactions g WHERE g.id IN (${alias}.id, ${alias}.parent_id) OR g.parent_id = ${alias}.id`;

@@ -62,6 +62,12 @@ function withToast(
 	return response;
 }
 
+/** Bills' page as a plan's answer, whose address is Bills' (as a bill's answer sets it, #87). */
+function atBills(response: Response) {
+	response.headers.set("HX-Push-Url", "/bills");
+	return response;
+}
+
 /** Bills' page with a plan's sheet over it. */
 async function sheetPage(
 	c: Context<App>,
@@ -70,11 +76,13 @@ async function sheetPage(
 		values?: PlanValues;
 		errors?: Record<string, string>;
 		deleteConfirm?: boolean;
+		/** Opened from the plan's own page, so the sheet closes back there (`opener=plan`). */
+		opener?: boolean;
 	},
 	today: string,
 ) {
 	const month = today.slice(0, 7);
-	const { plan, errors = {}, deleteConfirm = false } = options;
+	const { plan, errors = {}, deleteConfirm = false, opener = false } = options;
 	const values: PlanValues =
 		options.values ??
 		(plan
@@ -103,6 +111,7 @@ async function sheetPage(
 					errors={errors}
 					paidBy={paidBy}
 					deleteConfirm={deleteConfirm}
+					opener={opener}
 				/>
 			),
 		},
@@ -165,7 +174,7 @@ plans.post("/plans", async (c) => {
 		return sheetPage(c, { values, errors }, today);
 	await insertPlan(c.env.DB, fields, actor(c));
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
-	return withToast(await billsPage(c, undefined, today), {
+	return withToast(atBills(await billsPage(c, undefined, today)), {
 		message: `Planned ${fields.name}, ${formatCents(fields.amountCents)}.`,
 		type: "success",
 	});
@@ -182,7 +191,7 @@ plans.post("/plans/undo-delete", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	// Every answer ends the Undo toast it answers, so undoDone names its token (toast.js).
 	return withToast(
-		await billsPage(c, undefined, today),
+		atBills(await billsPage(c, undefined, today)),
 		restored
 			? {
 					message: `Restored ${restored.name}.${restored.unlinked ? " Its payment is no longer linked." : ""}`,
@@ -200,7 +209,11 @@ plans.post("/plans/undo-delete", async (c) => {
 plans.get("/plans/:id/edit", async (c) => {
 	const plan = await loadPlan(c.env.DB, Number(c.req.param("id")));
 	if (!plan) return c.notFound();
-	return sheetPage(c, { plan }, await householdToday(c.env.DB));
+	return sheetPage(
+		c,
+		{ plan, opener: c.req.query("opener") === "plan" },
+		await householdToday(c.env.DB),
+	);
 });
 
 plans.get("/plans/:id/delete", async (c) => {
@@ -208,13 +221,26 @@ plans.get("/plans/:id/delete", async (c) => {
 	if (!plan) return c.notFound();
 	return sheetPage(
 		c,
-		{ plan, deleteConfirm: true },
+		{
+			plan,
+			deleteConfirm: true,
+			opener: c.req.query("opener") === "plan",
+		},
 		await householdToday(c.env.DB),
 	);
 });
 
-/** A plan's own page, where its payment is linked (P101). */
-async function planPage(c: Context<App>, id: number, error?: string) {
+/**
+ * A plan's own page, where its payment is linked (P101). `focusEditPlan` and `focusLinkHeading` take focus when the page is
+ * drawn: Edit planned expense after its sheet's save, the Link a payment heading after an Unlink that changed nothing (#87).
+ */
+async function planPage(
+	c: Context<App>,
+	id: number,
+	error?: string,
+	focusEditPlan = false,
+	focusLinkHeading = false,
+) {
 	const plan = await loadPlan(c.env.DB, id);
 	if (!plan) return c.notFound();
 	const today = await householdToday(c.env.DB);
@@ -266,6 +292,7 @@ async function planPage(c: Context<App>, id: number, error?: string) {
 						name={plan.name}
 						amountCents={plan.amountCents}
 						error={error}
+						focusHeading={focusLinkHeading}
 						candidates={candidates.map((candidate) => ({
 							id: candidate.id,
 							date: candidate.date,
@@ -278,9 +305,11 @@ async function planPage(c: Context<App>, id: number, error?: string) {
 				)}
 				<div class="mt-3">
 					<Button
+						id="edit-plan"
 						kind="secondary"
-						href={`/plans/${plan.id}/edit`}
-						{...sheetAttrs(`/plans/${plan.id}/edit`)}
+						href={`/plans/${plan.id}/edit?opener=plan`}
+						autofocus={focusEditPlan || c.req.query("focus") === "edit-plan"}
+						{...sheetAttrs(`/plans/${plan.id}/edit?opener=plan`)}
 					>
 						Edit planned expense
 					</Button>
@@ -329,20 +358,24 @@ plans.post("/plans/:id/unlink", async (c) => {
 	const plan = await loadPlan(c.env.DB, id);
 	if (!plan) return c.notFound();
 	// The plan's own page and its sheet both unlink, and each answers with the view it came from (decision 101), as Link does.
-	const onPage = (await c.req.parseBody()).from === "plan";
+	const form = await c.req.parseBody();
+	const onPage = form.from === "plan";
+	// The sheet's own form carries the opener, so its redrawn sheet still closes to the plan's page.
+	const opener = form.opener === "plan";
 	const unlinked = await unlinkPlanPayment(c.env.DB, id);
 	const today = await householdToday(c.env.DB);
 	if (!c.req.header("HX-Request"))
 		return c.redirect(onPage ? `/plans/${id}` : "/bills", 303);
 	const toast = { message: "Payment unlinked", type: "success" };
 	// A stale sheet's second Unlink finds the plan unpaid already: the redrawn page shows it, and no toast claims an unlink.
+	// With no toast to say so, the page takes focus on its Link a payment heading instead.
 	if (onPage) {
-		const page = await planPage(c, id);
+		const page = await planPage(c, id, undefined, false, !unlinked);
 		return unlinked ? withToast(page, toast) : page;
 	}
 	// On the sheet, which stays open on the plan, now unpaid.
 	const fresh = (await loadPlan(c.env.DB, id)) ?? plan;
-	const sheet = await sheetPage(c, { plan: fresh }, today);
+	const sheet = await sheetPage(c, { plan: fresh, opener }, today);
 	return unlinked ? withToast(sheet, toast) : sheet;
 });
 
@@ -354,7 +387,7 @@ plans.post("/plans/:id/move", async (c) => {
 	const moved = plan ? await movePlanToMonth(c.env.DB, id, month) : false;
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	return withToast(
-		await billsPage(c, undefined, today),
+		atBills(await billsPage(c, undefined, today)),
 		moved && plan
 			? {
 					message: `Moved ${plan.name} to ${monthName(month)}.`,
@@ -376,7 +409,7 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const today = await householdToday(c.env.DB);
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
 	const deleted = `${verb} ${plan.name}, ${formatCents(plan.amountCents)}.`;
-	const response = await billsPage(c, undefined, today);
+	const response = atBills(await billsPage(c, undefined, today));
 	if (!token) {
 		return withToast(response, {
 			message: "That planned expense is already gone.",
@@ -406,17 +439,28 @@ plans.post("/plans/:id", async (c) => {
 	const plan = await loadPlan(c.env.DB, id);
 	if (!plan) return c.notFound();
 	const today = await householdToday(c.env.DB);
+	const form = await c.req.parseBody();
+	// A save from the plan's own page (Edit planned expense) answers with that page, as the sheet's close returns there (#87).
+	const opener = form.opener === "plan";
 	const { values, errors, fields } = planForm(
-		await c.req.parseBody(),
+		form,
 		today.slice(0, 7),
 		plan.month,
 	);
 	if (Object.keys(errors).length > 0)
-		return sheetPage(c, { plan, values, errors }, today);
+		return sheetPage(c, { plan, values, errors, opener }, today);
 	await updatePlan(c.env.DB, id, fields);
+	const message = `Saved ${fields.name}.`;
+	if (opener) {
+		if (!c.req.header("HX-Request"))
+			return c.redirect(`/plans/${id}?focus=edit-plan`, 303);
+		const page = await planPage(c, id, undefined, true);
+		page.headers.set("HX-Push-Url", `/plans/${id}`);
+		return withToast(page, { message, type: "success" });
+	}
 	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
-	return withToast(await billsPage(c, undefined, today), {
-		message: `Saved ${fields.name}.`,
+	return withToast(atBills(await billsPage(c, undefined, today)), {
+		message,
 		type: "success",
 	});
 });
