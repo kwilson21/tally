@@ -113,26 +113,49 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 // bound values in a statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
 
 /**
- * Starts the merchant row of each Plaid name from the rows saved under the bank texts it came with, unless the name
- * already has a row. One `?`: the pairs, a JSON array of `[Plaid name, bank text]` in the order the charges arrived.
- * When several texts share one name, no person's choice is dropped: `display_name`, `default_category_id` and
- * `not_a_bill` each come from the first text whose row holds one. The suggestion columns come from one row, the first
- * of: a decided suggestion (accepted or rejected); a waiting guess; the empty answer; nothing at all. A waiting guess
- * goes last of all when a person named a text in the group, so it gives way to the named merchant's own row. Ties fall
- * to the page's first text.
+ * The CASE that ranks a merchant's suggestion columns, lowest first: 0 a decided suggestion (accepted or rejected);
+ * 1 a waiting guess when nobody named the merchant, 4 when somebody did; 2 a suggested name that isn't waiting; 3
+ * nothing at all. `named` is the SQL that says a person named the merchant. The copy ranks with it on both sides of
+ * its upsert, so the two can't drift apart.
  */
-const copyMerchantRowSql = (ownsLock: string) =>
-	`WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
+const suggestionPickSql = (
+	status: string,
+	suggestedName: string,
+	named: string,
+) =>
+	`CASE WHEN ${status} IN ('accepted', 'rejected') THEN 0
+	   WHEN ${status} = 'pending' AND NOT (${named}) THEN 1
+	   WHEN ${status} = 'pending' THEN 4
+	   WHEN ${suggestedName} IS NOT NULL THEN 2
+	   ELSE 3 END`;
+
+/**
+ * Starts the merchant row of each Plaid name from the rows saved under the bank texts it came with, unless the name
+ * has a row an earlier sync made. Two `?`s: the pairs, a JSON array of `[Plaid name, bank text]` in the order the
+ * charges arrived, and this page's names that are open (see `syncItem`), a JSON array that is `[]` when none. When
+ * several texts share one name, no person's choice is dropped: `display_name`, `default_category_id` and `not_a_bill`
+ * each come from the first text whose row holds one. The suggestion columns come from one row, the first of: a decided
+ * suggestion (accepted or rejected); a waiting guess; the empty answer; nothing at all. A waiting guess goes last of all
+ * when a person named the merchant, in one of the texts or on its own row, so it gives way to the named merchant.
+ * Ties fall to the page's first text.
+ *
+ * On an open key, which only this run made, a later page fills in just the choices the row doesn't have yet and a
+ * better-ranked suggestion. The upsert needs no WHERE of its own: a conflict can only be on an open key, since the
+ * filter admits no other existing key.
+ */
+const copyMerchantRowSql = (ownsLock: string) => {
+	// A person named the merchant when one of this page's texts for it, or the merchant's own row, holds a name.
+	const namedInPage = `EXISTS (SELECT 1 FROM pair q JOIN merchants d ON d.raw_name = q.t WHERE q.k = p.k AND d.display_name IS NOT NULL)
+	   OR EXISTS (SELECT 1 FROM merchants own WHERE own.raw_name = p.k AND own.display_name IS NOT NULL)`;
+	const namedNow =
+		"merchants.display_name IS NOT NULL OR excluded.display_name IS NOT NULL";
+	const takeNew = `${suggestionPickSql("excluded.suggestion_status", "excluded.suggested_name", namedNow)} < ${suggestionPickSql("merchants.suggestion_status", "merchants.suggested_name", namedNow)}`;
+	return `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
 	 src(k, n, pick, suggested_name, suggestion_status, display_name, default_category_id, not_a_bill) AS (
-	   SELECT p.k, p.n,
-	     CASE WHEN m.suggestion_status IN ('accepted', 'rejected') THEN 0
-	       WHEN m.suggestion_status = 'pending' AND NOT EXISTS (SELECT 1 FROM pair q JOIN merchants d ON d.raw_name = q.t WHERE q.k = p.k AND d.display_name IS NOT NULL) THEN 1
-	       WHEN m.suggestion_status = 'pending' THEN 4
-	       WHEN m.suggested_name IS NOT NULL THEN 2
-	       ELSE 3 END,
+	   SELECT p.k, p.n, ${suggestionPickSql("m.suggestion_status", "m.suggested_name", namedInPage)},
 	     m.suggested_name, m.suggestion_status, m.display_name, m.default_category_id, m.not_a_bill
 	   FROM pair p JOIN merchants m ON m.raw_name = p.t
-	   WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k))
+	   WHERE (NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k) OR p.k IN (SELECT value FROM json_each(?))))
 	 INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
 	 SELECT g.k,
 	   (SELECT s.suggested_name FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
@@ -141,7 +164,14 @@ const copyMerchantRowSql = (ownsLock: string) =>
 	   (SELECT s.suggestion_status FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
 	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = g.k)
 	 FROM (SELECT DISTINCT k FROM src) g
-	 WHERE ${ownsLock}`;
+	 WHERE ${ownsLock}
+	 ON CONFLICT(raw_name) DO UPDATE SET
+	   suggested_name = CASE WHEN ${takeNew} THEN excluded.suggested_name ELSE merchants.suggested_name END,
+	   suggestion_status = CASE WHEN ${takeNew} THEN excluded.suggestion_status ELSE merchants.suggestion_status END,
+	   display_name = COALESCE(merchants.display_name, excluded.display_name),
+	   default_category_id = COALESCE(merchants.default_category_id, excluded.default_category_id),
+	   not_a_bill = MAX(merchants.not_a_bill, excluded.not_a_bill)`;
+};
 
 /**
  * Gives each Plaid name the "Never suggest" lines of the bank text it came with (decision 101), with each line's
@@ -500,6 +530,10 @@ export async function syncItem(
 		// Pending transactions the bank dropped on an earlier page of this run, and where the run's saved
 		// position is held while any waits (see below).
 		const waitingDrops = new Set<string>();
+		// The merchant keys that had no row when a page of this run first named them. A row this run makes for one is open
+		// to the later pages of the run (see the merchant copy below). A restart keeps them, since the rows an abandoned
+		// pass wrote remain.
+		const openMerchantKeys = new Set<string>();
 		let holdAt: { cursor: string | null } | null = null;
 
 		for (;;) {
@@ -860,8 +894,9 @@ export async function syncItem(
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
 			// starts from the rows saved under the bank texts it came with, if there are any: its name, rule and Not
 			// a bill come from the first text that has each, and its suggestion from one row (see copyMerchantRowSql).
-			// The first copy wins, and a later edit to the old row never reaches the new one. A guess Workers AI made
-			// for the bank text is cleared again below when Plaid's name is only that text (spec §7, decision 79).
+			// The first sync's copy wins, and a later edit to the old row never reaches the new one. Within one sync, a later
+			// page also fills in a choice the new row doesn't have yet (see openMerchantKeys). A guess Workers AI made for
+			// the bank text is cleared again below when Plaid's name is only that text (spec §7, decision 79).
 			// One statement for the page's charges.
 			const pairs = new Map<string, [string, string]>();
 			for (const transaction of [...added, ...page.modified]) {
@@ -873,9 +908,23 @@ export async function syncItem(
 				]);
 			}
 			if (pairs.size > 0) {
+				// Read before the batch, so it sees only the rows of earlier pages and syncs: the names with no row yet.
+				// This run's copy and suggestPlaidNamesSql make rows for this page's names, and suggestNewestPlaidNamesSql
+				// for names a stored charge already carries, whose row the page that stored the charge made. So a row this
+				// run makes is for a name read here or on an earlier page. A sync that resumes from a saved cursor is a
+				// separate run: it opens no names, and the rows an earlier run made are never filled.
+				const pairKeys = [...new Set([...pairs.values()].map(([key]) => key))];
+				const fresh = await env.DB.prepare(
+					"SELECT value FROM json_each(?) WHERE value NOT IN (SELECT raw_name FROM merchants)",
+				)
+					.bind(JSON.stringify(pairKeys))
+					.all<{ value: string }>();
+				for (const { value } of fresh.results) openMerchantKeys.add(value);
+				const open = pairKeys.filter((key) => openMerchantKeys.has(key));
 				statements.push(
 					env.DB.prepare(copyMerchantRowSql(OWNS_LOCK)).bind(
 						JSON.stringify([...pairs.values()]),
+						JSON.stringify(open),
 						itemRowId,
 						lockId,
 					),
