@@ -68,20 +68,26 @@ export const paysBillOrPlanSql = (alias: string) =>
  * it pays a bill or a planned expense. A payment linked to a bill counts in Spent whatever its exclusion, so the bill counts
  * once; its exclusion is never written over by the link, so it is as it was when the link goes. A split
  * part counts on its own link or its parent's (the parent itself never counts once split, so a bank
- * transaction is counted by its parts once). Alias `t`.
+ * transaction is counted by its parts once). Alias `t`. `paysBill` is the SQL that says the row pays a bill or a
+ * planned expense: a merge passes the link it is about to give the row, and the default is the row's own links.
  */
-export const includedSql = (alias: string) =>
-	`(${alias}.excluded = 0 OR ${paysBillOrPlanSql(alias)})`;
+export const includedSql = (
+	alias: string,
+	paysBill = paysBillOrPlanSql(alias),
+) => `(${alias}.excluded = 0 OR ${paysBill})`;
 
 /**
  * Whether Jev can be asked about the category of the row `alias` names, as jevAsksAbout (rename.ts) says for a
  * row as a save leaves it: included, not a split, not income, and not a refund that follows its purchase. This
  * is the rows pendingForJev classifies (NEEDS_JEV_CLASSIFICATION and NOT FOLLOWS_PURCHASE in
  * src/db/transactions.ts); keep it in step with them, and with jevAsksAbout. Qualify every column: INCLUDED_ROW
- * is unqualified, so it is ambiguous inside an UPDATE ... FROM transactions AS p.
+ * is unqualified, so it is ambiguous inside an UPDATE ... FROM transactions AS p. `paysBill` is as includedSql's.
  */
-export const jevAsksAboutSql = (alias: string) =>
-	`(${includedSql(alias)} AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0
+export const jevAsksAboutSql = (
+	alias: string,
+	paysBill = paysBillOrPlanSql(alias),
+) =>
+	`(${includedSql(alias, paysBill)} AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0
 		AND NOT (${alias}.amount_cents < 0 AND COALESCE(${alias}.credit_reviewed, 0) = 1
 			AND EXISTS (SELECT 1 FROM transactions jrp WHERE jrp.id = ${alias}.refund_of_id AND jrp.excluded = 0)))`;
 

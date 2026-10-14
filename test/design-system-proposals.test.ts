@@ -4,12 +4,42 @@ import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
+import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
 	return { res, html: await res.text() };
 };
 const notDemo = { ...env, DEMO: "false" } as unknown as Env;
+// A picture of a screen, as the proposals draw it (labelled, inert).
+const PICTURE = /role="img" aria-label="[^"]*, on (a phone|desktop)"/g;
+
+/** A proposal's section, up to the next section (sections don't nest in the drawings). */
+const block = (html: string, id: string) => {
+	const start = html.indexOf(`<section id="${id}"`);
+	expect(start, id).toBeGreaterThan(-1);
+	const next = html.indexOf("<section ", start + 1);
+	return html.slice(start, next < 0 ? undefined : next);
+};
+
+/** One option of a block: its heading, up to the next heading. Names are as the HTML spells them. */
+const optionOf = (chunk: string, name: string) => {
+	const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+	const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+	expect(at, name).toBeDefined();
+	const end = heads.find((i) => i > (at ?? 0));
+	return chunk.slice(at, end);
+};
+
+/** A block's options in drawing order, each with its name and whether its heading carries the Picked pill. */
+const optionPicks = (chunk: string) =>
+	[...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map((m) => {
+		const heading = m[1] ?? "";
+		return {
+			name: heading.split("<")[0] ?? "",
+			picked: heading.includes(">Picked<"),
+		};
+	});
 
 // Elements HTML never closes, so they don't open a level in actions() below.
 const VOID = new Set([
@@ -127,6 +157,41 @@ function firesByItself(html: string): string[] {
 				names.some((p) => name.startsWith(p)),
 			),
 		);
+}
+
+/**
+ * Every element a keyboard can reach (a link with an href, a button, a form control, a summary, anything with a
+ * tabindex) that sits inside a picture (role="img") and outside any inert element. A picture is one labelled image,
+ * so nothing inside it may take focus. Walks the tags as actions() does, so a wrong nesting fails.
+ */
+function reachableInPictures(html: string): string[] {
+	const open: { tag: string; inert: boolean; picture: boolean }[] = [];
+	const found: string[] = [];
+	const markup = html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+	for (const match of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+		const raw = match[0];
+		const tag = (match[1] ?? "").toLowerCase();
+		if (raw.startsWith("</")) {
+			expect(open.pop()?.tag, raw).toBe(tag);
+			continue;
+		}
+		const attrs = attributes(raw);
+		const inert = attrs.has("inert") || open.some((o) => o.inert);
+		const picture = attrs.get("role") === "img" || open.some((o) => o.picture);
+		const reachable =
+			(tag === "a" && attrs.has("href")) ||
+			["button", "input", "select", "textarea", "summary"].includes(tag) ||
+			attrs.has("tabindex");
+		if (reachable && picture && !inert) found.push(raw);
+		if (!raw.endsWith("/>") && !VOID.has(tag))
+			open.push({
+				tag,
+				inert: attrs.has("inert"),
+				picture: attrs.get("role") === "img",
+			});
+	}
+	expect(open).toEqual([]);
+	return found;
 }
 
 describe("actions()", () => {
@@ -279,7 +344,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P117 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P124 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -288,9 +353,9 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P117 is drawn, and each id is used once.
+		// Every proposal from P23 to P124 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 117; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 124; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -305,36 +370,82 @@ describe("GET /design-system/proposals", () => {
 			const section = html.slice(start, next === -1 ? undefined : next);
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
-			expect(section.match(/text-muted">Why: /g)?.length ?? 0).toBe(
-				recommended,
-			);
-			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options.
+			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
+			const eachOption = id === "p118-rows" || id === "p119-saved";
+			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
+			expect([id, reasons]).toEqual([
+				id,
+				eachOption ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
+			]);
+			// P34 on mark the owner's pick (decisions 72–86), and P118 to P124 mark the owner's picks (decision 111).
+			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
-			const expected =
-				n < 34
-					? 0
-					: id === "p60-bills-total" || id === "p111-delete-cash"
-						? 2
-						: 1;
+			const twoPicks = [
+				"p60-bills-total",
+				"p111-delete-cash",
+				"p118-rows",
+				"p120-panel",
+				"p121-header",
+			];
+			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
+			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
+			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
+			// screen per step or per state (decision 47), P120 and P121 with two or three. P119's options are rows of
+			// stills, checked in its own test, so they count none here. Counted per option, so one option can't lose
+			// its picture while another gains one, and every picture in the proposal must sit inside an option.
+			const drawn = section
+				.split("<h4 ")
+				.slice(1)
+				.map((option) => option.match(PICTURE)?.length ?? 0);
+			expect([
+				id,
+				drawn.every((count) =>
+					id === "p119-saved"
+						? count === 0
+						: n >= 120
+							? count >= 1
+							: count === 1,
+				),
+			]).toEqual([id, true]);
+			expect([id, section.match(PICTURE)?.length ?? 0]).toEqual([
+				id,
+				drawn.reduce((sum, count) => sum + count, 0),
+			]);
 		}
-		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
-		const options = html.match(/<h4 /g)?.length ?? 0;
-		const pictures =
-			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
-				?.length ?? 0;
-		expect(pictures).toBe(options);
-		// …and each picture has something drawn in it, not an empty frame.
-		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
-			options,
-		);
+		// P119's options are rows of stills (checked in its own test), so they draw no picture above.
+		expect((block(html, "p119-saved").match(/<h4 /g) ?? []).length).toBe(3);
+		// …and each picture box has something drawn in it, not an empty frame. The boxes don't add up to the
+		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
+		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(72);
+		expect(DECIDED.length).toBe(79);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
+	});
+
+	it("lists P118 to P124 as decided, each with its issue and decision 111", () => {
+		const shipped: [string, number][] = [
+			["P118 ·", 497],
+			["P119 ·", 71],
+			["P120 ·", 498],
+			["P121 ·", 84],
+			["P122 ·", 499],
+			["P123 ·", 530],
+			["P124 ·", 501],
+		];
+		for (const [prefix, issue] of shipped) {
+			const entry = DECIDED.find((d) => d.title.startsWith(prefix));
+			expect(entry, prefix).toBeDefined();
+			expect(entry?.issue, prefix).toBe(issue);
+			expect(entry?.outcome, prefix).toContain("decision 111");
+		}
+		const firstVisit = DECIDED.find((d) => d.title.startsWith("P124 ·"));
+		expect(firstVisit?.outcome).toContain("for the demo only");
+		expect(firstVisit?.outcome).toContain("first week was sent back");
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -738,6 +849,618 @@ describe("GET /design-system/proposals", () => {
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
+	it("marks the owner's picks for P118 to P124 (decision 111): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
+		const { html } = await get("/design-system/proposals");
+		const picks = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start, id).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return optionPicks(html.slice(start, next < 0 ? undefined : next))
+				.filter((option) => option.picked)
+				.map((option) => option.name);
+		};
+		expect(picks("p118-rows")).toEqual([
+			"A · Quiet chevron",
+			"Desktop · A · Quiet chevron",
+		]);
+		expect(picks("p119-saved")).toEqual(["A · Auditor&#39;s tick"]);
+		expect(picks("p120-panel")).toEqual([
+			"B · Category leads, folds when set",
+			"At 1280: B · Category leads, folds when set",
+		]);
+		expect(picks("p121-header")).toEqual([
+			"A · Filters fold away",
+			"At 1280: A · Filters fold away",
+		]);
+		expect(picks("p122-more")).toEqual(["Option A · Contents page"]);
+		expect(picks("p123-feedback")).toEqual(["Option A · In the top line"]);
+		expect(picks("p124-first-visit")).toEqual(["Option A · The first page"]);
+	});
+
+	describe("P118 and P119 · the polish track, picked (#497, #71, decision 111)", () => {
+		it("opens the page with its own section, ahead of the polish pass's picks", async () => {
+			const { html } = await get("/design-system/proposals");
+			const open = html.indexOf('<section aria-labelledby="polish2-title"');
+			expect(open).toBeGreaterThan(-1);
+			expect(open).toBeLessThan(
+				html.indexOf('<section aria-labelledby="polish-title"'),
+			);
+			expect(html).toContain('id="polish2-title"');
+			expect(html).toContain("Picked: the polish track, rows and saves");
+			expect(html).toContain(
+				"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: how a row shows it opens, and how the row you just saved shows it changed.",
+			);
+		});
+
+		it("draws P118's options: today's rows as the real components, and each option a copy that changes only its own part", async () => {
+			const { html } = await get("/design-system/proposals");
+			const p118 = block(html, "p118-rows");
+			expect(p118).toContain("P118 · How a row shows it opens");
+			expect(p118).not.toContain("how loud Needs category is");
+			expect(p118).toContain("rows open their sheet (decisions 38, 80)");
+			expect(p118).toContain(
+				"In both options, the filled pill becomes quiet words beside the bank text.",
+			);
+			// Today: the real TransactionRow (its filled pill, no chevron) and ProgressRow (its brick bar).
+			const today = optionOf(p118, "Today (current)");
+			expect(today).toContain('data-transaction="2005"');
+			expect(today).toContain("bg-band px-2 text-sm text-ink");
+			expect(today).toContain("fill-over");
+			expect(today).not.toContain('data-icon="chevron-right"');
+			expect(today).not.toContain("bg-press");
+			// A: a chevron after each amount, the words in muted, and no press (the press is the pressed group's alone).
+			const quiet = optionOf(p118, "A · Quiet chevron");
+			expect(quiet).toContain('data-icon="chevron-right"');
+			// Needs category is quiet words, never cut off, then one space each side of the dot and the bank text.
+			expect(quiet).toContain(
+				'<span class="shrink-0 text-muted">Needs category</span>',
+			);
+			expect(quiet).toContain(" · DD *DOORDASH TACO");
+			expect(quiet).not.toContain("bg-band px-2 text-sm text-ink");
+			expect(quiet).not.toContain("bg-press");
+			expect(quiet).toContain(">Recommended<");
+			expect(quiet).toContain(
+				"Every row that opens ends in the same small muted arrow Settings already uses.",
+			);
+			// The budget chevron sits on the name's line, Eating Out included.
+			expect(quiet).toContain("self-start mt-1 size-5 shrink-0 -ml-3 -mr-2");
+			expect(quiet).not.toContain("self-center");
+			expect(p118).not.toContain("Ledger line");
+			expect(p118).not.toContain("font-serif italic");
+			// B · Say it once: no arrows on rows; the words muted; one plain sentence above each list.
+			const say = optionOf(p118, "B · Say it once");
+			expect(say).toContain(
+				'<p class="pb-2 text-sm text-muted">Choose a transaction to change it.</p>',
+			);
+			expect(say).toContain(
+				'<p class="mt-1 text-sm text-muted">Choose a budget to change it.</p>',
+			);
+			expect(say).not.toContain('data-icon="chevron-right"');
+			expect(say).toContain(
+				'<span class="shrink-0 text-muted">Needs category</span>',
+			);
+			expect(say).not.toContain("bg-press");
+			// Each option that changes the row says why, and only A is recommended.
+			expect(p118.match(/>Recommended</g)?.length).toBe(1);
+			expect(p118.match(/text-muted">Why: /g)?.length).toBe(2);
+			// A quiet Home screen label sits in a dashed rule, above the budget part, in each frame.
+			expect(p118.match(/border-t border-dashed border-rule/g)?.length).toBe(3);
+			expect(p118).toContain('<p class="text-sm text-muted">Home</p>');
+		});
+
+		it("draws P118's desktop pair and its pressed group (the press, the tick and Select mode's tick)", async () => {
+			const { html } = await get("/design-system/proposals");
+			const p118 = block(html, "p118-rows");
+			expect(optionOf(p118, "Desktop · Today (current)")).toContain(
+				"w-[722px]",
+			);
+			const desktopA = optionOf(p118, "Desktop · A · Quiet chevron");
+			expect(desktopA).toContain('data-icon="chevron-right"');
+			expect(desktopA).not.toContain("bg-press");
+			expect(optionOf(p118, "Today, pressed")).not.toContain("bg-press");
+			expect(optionOf(p118, "A, pressed")).toContain("bg-press");
+			// The press tint is drawn only in the pressed group: one held row.
+			expect(p118.match(/bg-press/g)?.length).toBe(1);
+			const select = optionOf(p118, "Select mode, Local Bakery ticked");
+			expect(select).toContain("peer-checked:border-ink");
+			expect(select).toContain("checked");
+			expect(select).not.toContain('data-icon="chevron-right"');
+		});
+
+		it("draws P119's saved-row stills for each option (0 s, 1 s, the end, a replay or a keyboard ring, and the Home still), with the words each toast says", async () => {
+			const { html } = await get("/design-system/proposals");
+			const p119 = block(html, "p119-saved");
+			expect(p119).toContain(
+				"P119 · How the row you just saved shows it changed",
+			);
+			expect(p119).toContain("Saved Local Bakery");
+			expect(p119).toContain("Eating Out");
+			expect(p119).toContain("$12.00");
+			expect(p119).toContain("Saved the Groceries budget");
+			expect(p119).toContain("$395 of $650");
+			const today = optionOf(p119, "Today (current)");
+			expect(today).toContain("outline-accent");
+			expect(today).not.toContain("proposal-saved");
+			expect(today).not.toContain("bg-press");
+			expect(today).not.toContain("self-center");
+			// The tick: a filled, tapered mark (no stroke), drawn from the left, short at 0 s, in a box turned −8°.
+			const tick = optionOf(p119, "A · Auditor&#39;s tick");
+			expect(tick).not.toContain("bg-press");
+			expect(tick).not.toContain("self-center");
+			expect(tick).toContain("proposal-saved-tick");
+			expect(tick).toContain("proposal-saved-chevron");
+			expect(tick).toContain("proposal-saved-toast");
+			expect(tick).toContain("proposal-saved-loop");
+			expect(tick).toContain("[clip-path:inset(0_63%_0_0)]");
+			expect(tick).toContain("-rotate-[8deg]");
+			expect(tick).toContain(
+				'd="M3.59 13.65L8.98 18.66L19.88 5.53L19.12 4.87L8.93 16.27L5.41 11.95Z"',
+			);
+			expect(tick).not.toContain("stroke-dasharray");
+			expect(tick).toContain(">Recommended<");
+			expect(tick).toContain(
+				"One new drawn mark; the row&#39;s arrow is hidden while the toast is up.",
+			);
+			expect(tick).toContain(
+				"Motion, not illustration: a 150 ms confirmation, so the tally mark still appears once per screen.",
+			);
+			expect(tick).toContain(
+				"The toast and the announcer carry the words, so the mark is never the only sign.",
+			);
+			expect(tick).toContain(
+				"It sits where P118 A&#39;s arrow is, so it pairs with it.",
+			);
+			expect(tick).toContain(
+				"Keyboard: the focus ring as today, plus the tick.",
+			);
+			expect(tick).toContain(
+				"If the row leaves a filtered list: the toast only; focus goes to the result count.",
+			);
+			expect(tick).toContain("Desktop: the same, beside the open edit panel.");
+			// B · Let go: the saved row fills with the press tint, held and then faded, on the quiet rows.
+			const letGo = optionOf(p119, "B · Let go");
+			expect(letGo).toContain("proposal-saved-press");
+			expect(letGo).toContain("bg-press");
+			expect(letGo).toContain(
+				"The row stays pressed for a moment after the sheet closes, then fades.",
+			);
+			expect(letGo).toContain("A new 1.3-second hold.");
+			expect(letGo).toContain(
+				"Keyboard: the focus ring as today, plus the press.",
+			);
+			expect(letGo).toContain('data-icon="chevron-right"');
+			expect(p119).not.toContain("Ruled off");
+			expect(p119).not.toContain("proposal-saved-rule");
+			expect(p119).not.toContain("proposal-saved-band");
+			// Each option is three stills, a fourth (replay or keyboard) and the Home still.
+			for (const name of [
+				"Today (current)",
+				"A · Auditor&#39;s tick",
+				"B · Let go",
+			])
+				expect(
+					optionOf(p119, name).match(/role="img" aria-label="/g)?.length,
+					name,
+				).toBe(5);
+			// Each option says why, and only A is recommended.
+			expect(p119.match(/>Recommended</g)?.length).toBe(1);
+			expect(p119.match(/text-muted">Why: /g)?.length).toBe(2);
+			// The demo's Band totals after matching: 10 need a category and $211, not 12 and $228.
+			expect(p119).toContain("$211 of this month&#39;s spending");
+			expect(p119).toMatch(
+				/10(<span class="sr-only"> transactions<\/span>)? need a category/,
+			);
+			expect(p119).not.toContain("$228");
+			expect(p119).not.toContain("12 transactions need a category");
+		});
+
+		it("draws the real tab bar in every P119 still, with the toast 12px above it and the crops sized so no drawn row sits under a toast (decision 101)", async () => {
+			const { html } = await get("/design-system/proposals");
+			const p119 = block(html, "p119-saved");
+			// Fifteen stills (three options of four crops, and three Home stills), each with BottomTabs drawn inert.
+			expect(p119.match(/<nav /g)?.length).toBe(15);
+			expect(
+				p119.match(
+					/<div inert="" class="absolute inset-x-0 bottom-0 \[&amp;_nav\]:static \[&amp;_nav\]:block"><nav /g,
+				)?.length,
+			).toBe(15);
+			// The toast sits 12px (0.75rem) above that bar. Twelve stills have one: nine crops and the three Home stills.
+			expect(
+				p119.match(/bottom-\[calc\(var\(--tabs-height\)\+0\.75rem\)\]/g)
+					?.length,
+			).toBe(12);
+			expect(p119.match(/role="status"/g)?.length).toBe(12);
+			// The 4 s still has no toast: each of the three ends a crop without one.
+			const stills = p119.split('role="img" aria-label="').slice(1);
+			const ends = stills.filter((s) =>
+				(s.split('"')[0] ?? "").endsWith("4 seconds, the toast gone"),
+			);
+			expect(ends.length).toBe(3);
+			for (const end of ends) expect(end).not.toContain('role="status"');
+			// The 0 s toast is drawn whole: no fade or nudge on any still.
+			expect(p119).not.toContain("translate-y-[2px]");
+			expect(p119).not.toContain("opacity-75");
+			// The Transactions crop is 438px and the Home crop 608px, so no drawn row sits under a toast.
+			expect(p119.match(/h-\[438px\]/g)?.length).toBe(12);
+			expect(p119.match(/h-\[608px\]/g)?.length).toBe(3);
+		});
+
+		it("draws the demo's water bill as City Water, paid Water bill, so the caption never says the word twice", async () => {
+			const { html } = await get("/design-system/proposals");
+			expect(html).toContain("City Water");
+			expect(html).toContain("Household · paid Water bill");
+			expect(html).not.toContain("Water bill bill");
+			expect(html).not.toContain("Google youtube");
+			expect(block(html, "p121-header")).toContain("City Water");
+			expect(block(html, "p121-header")).toContain(
+				"Household · paid Water bill",
+			);
+		});
+	});
+
+	it("keeps every link and button inside a picture inside an inert element, so a picture has nothing to Tab to (#95)", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(reachableInPictures(html)).toEqual([]);
+	});
+
+	it("opens the page with the picked polish choices P122–P124 (issues #499, #95 and #501): each option named and drawn, A recommended and picked, the demo's first visit only", async () => {
+		const { html } = await get("/design-system/proposals");
+		// The new section comes first, above the Picked polish pass, and says what it is for.
+		const first = html.indexOf('<section aria-labelledby="polish4-title"');
+		expect(first).toBeGreaterThan(-1);
+		expect(first).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish-title"'),
+		);
+		expect(html).toContain(
+			'<h2 id="polish4-title" class="font-serif text-3xl font-semibold">Picked: the polish track, More, Feedback and the first visit</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what More shows, where Feedback lives, and what a first visit shows and teaches.",
+		);
+		// P124 A is the pick for the demo's first visit; the family's first week is still being redrawn.
+		expect(html).toContain(
+			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is being redrawn.",
+		);
+		const section = (id: string) => {
+			const start = html.indexOf(`<section id="${id}"`);
+			expect(start, id).toBeGreaterThan(-1);
+			const next = html.indexOf('<section id="p', start + 1);
+			return html.slice(start, next === -1 ? undefined : next);
+		};
+		const names = (chunk: string) =>
+			[...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map((m) => m[1] ?? "");
+		const pictures = (chunk: string) =>
+			chunk.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g) ?? [];
+		const option = (chunk: string, name: string) => {
+			const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+			const at = heads.find((i) =>
+				chunk.slice(i, i + 300).includes(`>${name}`),
+			);
+			expect(at, name).toBeDefined();
+			const end = heads.find((i) => i > (at ?? 0));
+			return chunk.slice(at, end);
+		};
+
+		const more = section("p122-more");
+		expect(names(more)).toEqual([
+			"Today (current)",
+			"Option A · Contents page",
+			"Option B · Plain index",
+		]);
+		expect(option(more, "Option A · Contents page")).toContain(">Recommended<");
+		expect(more.match(/>Recommended</g)?.length).toBe(1);
+		// Each place with its icon, what it holds, and a count that says when it needs you.
+		for (const text of [
+			"3 accounts",
+			"3 to check",
+			"Needs attention",
+			"None linked yet",
+			"Balances, net worth and your banks",
+			"Categories, rules, your household and your data",
+			"What each number means, with the Riveras&#39; numbers",
+			"Tally demo · resets every night",
+			"Trade-off: Two small live counts on More.",
+			"Calm and clear; matches the sidebar.",
+		])
+			expect(more, text).toContain(text);
+		expect(pictures(more)).toHaveLength(5);
+		// Each option's own pictures: Today one, A three (the Accounts entry with a bank to sign in, and before a bank), B one.
+		const drawnBy = (chunk: string, name: string) =>
+			pictures(option(chunk, name)).length;
+		expect(drawnBy(more, "Today (current)")).toBe(1);
+		expect(drawnBy(more, "Option A · Contents page")).toBe(3);
+		expect(drawnBy(more, "Option B · Plain index")).toBe(1);
+		// Before a bank is linked, Accounts says so in muted words with no alert icon: the alert is Needs attention's alone.
+		const bankless = option(more, "Option A · Contents page");
+		const beforeBankAt = bankless.indexOf(
+			'aria-label="Option A, before a bank is linked, on a phone"',
+		);
+		expect(beforeBankAt).toBeGreaterThan(-1);
+		const beforeBank = bankless.slice(beforeBankAt);
+		expect(beforeBank).toContain("None linked yet");
+		expect(beforeBank).not.toContain('data-icon="alert"');
+		expect(beforeBank).not.toContain("text-over");
+
+		const feedback = section("p123-feedback");
+		expect(names(feedback)).toEqual([
+			"Today (current)",
+			"Option A · In the top line",
+			"Option B · In More and the sidebar",
+		]);
+		expect(option(feedback, "Option A · In the top line")).toContain(
+			">Recommended<",
+		);
+		expect(feedback.match(/>Recommended</g)?.length).toBe(1);
+		// Today's pill sits over a number and a button; A's sits in the top line and leaves the page alone.
+		expect(option(feedback, "Today (current)")).toContain("Childcare");
+		expect(option(feedback, "Today (current)")).toContain('href="/feedback"');
+		expect(feedback).toContain(
+			"Feedback moves to More and the sidebar, one tap from every page.",
+		);
+		expect(feedback).toContain("Something confusing, broken or missing");
+		expect(feedback).toContain("Off in the demo; you can still see the form");
+		expect(feedback).toContain("Tell us what happened");
+		expect(feedback).toContain("Keeps decision 59&#39;s");
+		expect(pictures(feedback)).toHaveLength(11);
+		// Today's Home, Settings and desktop; A's and B's four each (A adds the masthead's Home at the top).
+		expect(drawnBy(feedback, "Today (current)")).toBe(3);
+		expect(drawnBy(feedback, "Option A · In the top line")).toBe(4);
+		expect(drawnBy(feedback, "Option B · In More and the sidebar")).toBe(4);
+
+		const firstVisit = section("p124-first-visit");
+		expect(names(firstVisit)).toEqual([
+			"Today (current)",
+			"Option A · The first page",
+			"Option B · One next step",
+			"Option C · The page total",
+		]);
+		expect(option(firstVisit, "Option A · The first page")).toContain(
+			">Recommended<",
+		);
+		expect(firstVisit.match(/>Recommended</g)?.length).toBe(1);
+		for (const text of [
+			"Today (after #519)",
+			"A family with no budgets sees −$2,140 in ink, since #519.",
+			"−$2,140",
+			"Start here",
+			"Three lines of 42 so far",
+			"ACME CORP PAYROLL",
+			"Without Tally, the paycheck and the transfer would both count as spending.",
+			"See every line without Tally",
+			"Three things to try",
+			"Not worked out yet",
+			"This fills in once your budgets are set.",
+			"86 need a category",
+			"Start from September",
+			"These budgets add up to $3,840 a month.",
+			"Use these budgets",
+			"The Riveras&#39; tally",
+			"Named 38 stores",
+			"Sorted 196 into categories",
+			"Set 3 transfers aside",
+			"Found 2 paychecks",
+			"Your first page",
+			"What&#39;s left of October&#39;s budget after its spending so far, bills due and savings.",
+			"Everything resets every night, so try anything.",
+			"AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today.",
+			"The family&#39;s first Home: the figure in ink (today), a dash (B), a blank ledger line (A) or Your first page (C).",
+		])
+			expect(firstVisit, text).toContain(text);
+		// The seeded October count is 42, as test/demo-raw-view.test.ts pins it and P121's drawing shows it.
+		expect(firstVisit).not.toContain("of 47");
+		// The family's first page is the only one drawn on a desktop, and only for the recommended option.
+		expect(
+			pictures(firstVisit).filter((p) => p.includes("on desktop")),
+		).toHaveLength(1);
+		expect(pictures(firstVisit)).toHaveLength(20);
+		expect(drawnBy(firstVisit, "Today (current)")).toBe(4);
+		expect(drawnBy(firstVisit, "Option A · The first page")).toBe(7);
+		expect(drawnBy(firstVisit, "Option B · One next step")).toBe(4);
+		expect(drawnBy(firstVisit, "Option C · The page total")).toBe(5);
+		// "See every line without Tally" opens the raw view, as the catalog's ViewLinks and Without Tally do.
+		expect(option(firstVisit, "Option A · The first page")).toContain(
+			'<a href="/transactions?raw=1" class="inline-flex min-h-11 items-center">See every line without Tally</a>',
+		);
+		expect(firstVisit).not.toContain(
+			'href="/transactions" class="inline-flex min-h-11 items-center">See every line without Tally',
+		);
+
+		// Each assertion below is scoped to the picture it is about, from its label to the next figure (whose
+		// caption, which may name another picture's words, sits before that figure's picture).
+		const picture = (chunk: string, label: string) => {
+			const start = chunk.indexOf(`aria-label="${label}"`);
+			expect(start, label).toBeGreaterThan(-1);
+			const end = chunk.indexOf("<figure", start);
+			return chunk.slice(start, end === -1 ? undefined : end);
+		};
+		// The phone's top line: the wordmark's row, from its class to the row's closing tag.
+		const masthead = (screen: string) => {
+			const start = screen.indexOf(
+				"mb-4 flex items-center justify-between gap-3",
+			);
+			expect(start).toBeGreaterThan(-1);
+			return screen.slice(start, screen.indexOf("</div>", start));
+		};
+		// The desktop sidebar's second group, under its rule: How Tally works and Feedback.
+		const secondGroup = (desk: string) => {
+			const start = desk.indexOf(
+				"mt-3 flex flex-col gap-1 border-t border-rule pt-3",
+			);
+			expect(start).toBeGreaterThan(-1);
+			return desk.slice(start, desk.indexOf("</ul>", start));
+		};
+
+		// P122 · More: the contents page's rows, leader and colophon.
+		expect(more).toContain(
+			"grid min-h-16 grid-cols-[1.5rem_1fr] items-start gap-x-4 py-3",
+		);
+		expect(more).toContain("border-dotted border-rule");
+		expect(more).toContain(
+			"mt-10 flex items-center justify-center gap-2 text-sm text-muted",
+		);
+
+		// P123 · Today: the pill is drawn over a row's amount on Home and over Move down in Settings.
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("bottom-[6.5rem]");
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("Childcare");
+		// Childcare's numbers are the demo seed's: a $1,040 budget, and $480 from the two Fridays of October so far (Oct 2 and 9).
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("$480 of $1,040");
+		// Settings draws Gas's open row in the app's order (category-row.tsx): the Name field, then Save, Cancel and
+		// Archive, then Move up and Move down. The pill sits over Move down, so the picture has to reach it.
+		const todaySettings = picture(
+			feedback,
+			"Today (current), Settings, on a phone",
+		);
+		expect(todaySettings).toContain("bottom-[6.5rem]");
+		expect(todaySettings).toContain("3 suggestions to check");
+		expect(todaySettings).toContain("$1,040");
+		const marks = [
+			">Name</label>",
+			">Save<",
+			">Cancel<",
+			">Archive<",
+			">Move up<",
+			">Move down<",
+		].map((mark) => {
+			const at = todaySettings.indexOf(mark);
+			expect(at, mark).toBeGreaterThan(-1);
+			return at;
+		});
+		expect(marks).toEqual([...marks].sort((a, b) => a - b));
+		expect(option(feedback, "Today (current)")).toContain(
+			"In Settings it sits over Move down",
+		);
+		expect(picture(feedback, "Today (current), on desktop")).toContain(
+			"bottom-6 right-6",
+		);
+		// P123 · Option A: the pill sits in the top line of a screen's first phone, and nothing floats.
+		const aTop = picture(feedback, "Option A, Home at the top, on a phone");
+		expect(masthead(aTop)).toContain('href="/feedback"');
+		expect(masthead(aTop)).toContain('aria-label="Tally home"');
+		const aSettings = picture(feedback, "Option A, Settings, on a phone");
+		expect(masthead(aSettings)).toContain('href="/feedback"');
+		const aScrolled = picture(feedback, "Option A, Home scrolled, on a phone");
+		expect(aScrolled).not.toContain('href="/feedback"');
+		for (const screen of [aTop, aSettings, aScrolled])
+			expect(screen).not.toContain("bottom-[6.5rem]");
+		// P123 · Options A and B on desktop: the second sidebar group under a rule, and Home's How this works link.
+		for (const label of ["Option A, on desktop", "Option B, on desktop"]) {
+			const desk = picture(feedback, label);
+			expect(secondGroup(desk)).toContain('href="/how-it-works"');
+			expect(secondGroup(desk)).toContain("How Tally works");
+			expect(secondGroup(desk)).toContain('href="/feedback"');
+			expect(secondGroup(desk)).toContain("Feedback");
+			expect(desk).toContain("How this works");
+			expect(desk).not.toContain("bottom-6 right-6");
+		}
+		// P123 · Option B: no pill on any phone; Feedback is a row in More.
+		for (const label of [
+			"Option B, Home scrolled, on a phone",
+			"Option B, Settings, on a phone",
+		])
+			expect(picture(feedback, label)).not.toContain('href="/feedback"');
+		expect(picture(feedback, "Option B, More, on a phone")).toContain(
+			'href="/feedback"',
+		);
+
+		// P124 · Today's family Home is main after #519: the figure in ink with No budgets set yet., no over-budget words.
+		const todayFamily = picture(
+			firstVisit,
+			"Today (current), the family&#39;s Home, on a phone",
+		);
+		expect(todayFamily).toContain("−$2,140");
+		expect(todayFamily).toContain("No budgets set yet.");
+		expect(todayFamily).not.toContain("text-over");
+		expect(todayFamily).not.toContain("Over budget");
+
+		// P124 · Option A: Start here is the one ink link, and Home's footnote carries How this works.
+		const aFirst = picture(firstVisit, "Option A, Home top, on a phone");
+		expect(aFirst).toContain(
+			'class="inline-flex min-h-11 items-center font-medium text-ink underline underline-offset-4">Start here</a>',
+		);
+		expect(aFirst).not.toContain("How this works");
+		const aFirstVisit = option(firstVisit, "Option A · The first page");
+		expect(aFirstVisit).toContain("w-12 border-t border-muted");
+		// The bank's line is struck once, in the story; Tally's row under it does not repeat the bank's text.
+		expect(aFirstVisit.split("SQ *LOCAL BAKERY 4432").length - 1).toBe(1);
+		expect(aFirstVisit).toContain("Local Bakery");
+		expect(aFirstVisit).toContain("Needs category");
+		// P124 · Option B: How this works is muted and underlined on both Home pictures, and the sheet names its sample.
+		const bOption = option(firstVisit, "Option B · One next step");
+		expect(bOption).toContain(
+			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
+		);
+		const bFamily = picture(
+			firstVisit,
+			"Option B, the family&#39;s Home, on a phone",
+		);
+		expect(bFamily).toContain("No budgets set yet.");
+		expect(bFamily).toContain("Start your budgets from September");
+		expect(bFamily).toContain("Not set yet");
+		expect(bFamily).toContain(
+			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
+		);
+		const sheet = picture(firstVisit, "Option B, starting budgets, on a phone");
+		// The sheet's closing line states the total; the note that five of the 14 are drawn sits in the caption, outside the sheet.
+		expect(sheet).toContain("These budgets add up to $3,840 a month.");
+		expect(sheet).not.toContain("Drawn with five of the 14 categories.");
+		expect(firstVisit).toContain(
+			'<figcaption class="text-sm text-muted">Start from September: the sheet the step opens. Drawn with five of the 14 categories.</figcaption>',
+		);
+		// Money reads as the rest of the page does: "$1,600", not "$1600", in each row's last-month line.
+		expect(sheet).toContain("Last month $1,600 · starts at $1,600");
+		expect(sheet).not.toMatch(/\$\d{4}\b/);
+		// P124 · Option C: How this works is a pencil note, on Home's top and at its foot.
+		const cOption = option(firstVisit, "Option C · The page total");
+		expect(cOption).toContain("border-l border-muted pl-3 text-sm text-muted");
+		expect(cOption).toContain(
+			'class="text-muted underline underline-offset-4">How this works</a>',
+		);
+		// The demo's Band totals after matching: 10 need a category and $211 (decision 82 keeps 12 and $228 on the older proposals).
+		for (const part of [feedback, firstVisit]) {
+			expect(part).toContain("10 need a category");
+			expect(part).toContain("$211 of this month&#39;s spending");
+			expect(part).not.toContain("12 need a category");
+			expect(part).not.toContain("$228");
+		}
+		expect(
+			picture(firstVisit, "Today (current), Home top, on a phone"),
+		).toContain("10 need a category");
+		expect(
+			picture(firstVisit, "Today (current), Home top, on a phone"),
+		).toContain("$211 of this month&#39;s spending");
+		// P124 A's story names the paycheck as the seed does, not by its bank text.
+		expect(
+			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
+		).toContain("Paycheck, Acme Corp");
+		expect(
+			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
+		).toContain("Demo data. Nothing here is real.");
+		// The page keeps its How Tally works heading above Start here, as the route has it (test/how-it-works-route.test.ts:99).
+		const story = picture(
+			firstVisit,
+			"Option A, How Tally works, the story, on a phone",
+		);
+		expect(story).toMatch(/<h1[^>]*>How Tally works<\/h1>/);
+		expect(story.indexOf("How Tally works</h1>")).toBeLessThan(
+			story.indexOf(">Start here</h2>"),
+		);
+		// The lower shots are drawn as scrolled: no banner and no wordmark, since they are not the top of the page.
+		for (const label of [
+			"Option A, How Tally works, the total, on a phone",
+			"Option C, How it&#39;s built, last, on a phone",
+		]) {
+			const screen = picture(firstVisit, label);
+			expect(screen, label).not.toContain("Demo data. Nothing here is real.");
+			expect(screen, label).not.toContain('aria-label="Tally home"');
+		}
+	});
+
 	it("is linked from the catalog", async () => {
 		const { html } = await get("/design-system");
 		expect(html).toContain('href="/design-system/proposals"');
@@ -750,5 +1473,270 @@ describe("GET /design-system/proposals", () => {
 			notDemo,
 		);
 		expect(res.status).toBe(404);
+	});
+});
+
+// P120 and P121 (#84 and #498): the edit panel's layouts and the Transactions header's filters, drawn for the owner's pick.
+describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
+	const section = (html: string, id: string) => {
+		const start = html.indexOf(`<section id="${id}"`);
+		expect(start, id).toBeGreaterThan(-1);
+		const next = html.indexOf('<section id="p', start + 1);
+		return html.slice(start, next === -1 ? undefined : next);
+	};
+	// One option's heading and everything drawn under it, up to the next option's heading.
+	const option = (sectionHtml: string, name: string) => {
+		const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) =>
+			sectionHtml.slice(i, i + 400).includes(`>${name}`),
+		);
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return sectionHtml.slice(at, next);
+	};
+	// Each picture under an option, from its label on, up to the next picture's label.
+	const pictures = (chunk: string) =>
+		chunk.split('role="img" aria-label="').slice(1);
+
+	it("opens the page with its section first, titled and dated as the brief asks", async () => {
+		const { html } = await get("/design-system/proposals");
+		const first = html.indexOf('<section aria-labelledby="polish3-title"');
+		expect(first).toBeGreaterThan(-1);
+		expect(first).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish-title"'),
+		);
+		expect(html).toContain('<h2 id="polish3-title"');
+		expect(html).toContain(
+			"Picked: the polish track, the edit panel and the list&#39;s top",
+		);
+		expect(html).toContain(
+			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what the edit panel leads with, and how much of Transactions&#39; first screen goes to filters.",
+		);
+	});
+
+	it("draws P120's four panel options with B recommended, and two pictures for each of A, C and Today", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"Today (current)",
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			expect(option(s, name), name).toContain(`>${name}`);
+		}
+		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
+		expect(option(s, "B · Category leads, folds when set")).toContain(
+			">Recommended<",
+		);
+		expect(pictures(option(s, "Today (current)"))).toHaveLength(2);
+		expect(pictures(option(s, "A · Category first"))).toHaveLength(2);
+		expect(pictures(option(s, "C · Ruled ledger"))).toHaveLength(2);
+		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
+		expect(s).toContain(
+			'aria-label="At 1280: B · Category leads, folds when set, on desktop"',
+		);
+	});
+
+	it("spaces P120's desktop B like its phone picture, so the bank's text and Category don't touch", async () => {
+		const { html } = await get("/design-system/proposals");
+		const desk = option(
+			section(html, "p120-panel"),
+			"At 1280: B · Category leads, folds when set",
+		);
+		expect(desk).toContain('<div class="flex shrink-0 flex-col gap-5">');
+		expect(desk.indexOf("SQ *LOCAL BAKERY 4432")).toBeLessThan(
+			desk.indexOf(">Category</legend>"),
+		);
+	});
+
+	it("draws Exclude from budget as a switch and the rule as a plain unticked row in A, B and C", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			const chunk = option(s, name);
+			expect(chunk, name).toContain('role="switch"');
+			expect(chunk, name).toContain("Exclude from budget");
+			expect(chunk, name).toContain(
+				"It won&#39;t count in Spent or any budget.",
+			);
+			expect(chunk, name).toContain(
+				"Use this category for Local Bakery from now on",
+			);
+			expect(chunk, name).toContain(
+				"Leave it unticked to change just this one.",
+			);
+		}
+	});
+
+	it("draws Today's panel with the explanation and How this works on its first screen, and no category choices", async () => {
+		const { html } = await get("/design-system/proposals");
+		const today = option(section(html, "p120-panel"), "Today (current)");
+		expect(today).toContain("From Northline Card Services.");
+		expect(today).toContain("How this works");
+		expect(today).toContain(">Split</");
+		expect(today).not.toContain(">Category</legend>");
+		expect(today).not.toContain("Count as income");
+	});
+
+	it("puts the explanation under the switches in A, B and C, and keeps New category last in the grid", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			for (const picture of pictures(option(s, name))) {
+				expect(
+					picture.indexOf("From Northline Card Services."),
+					name,
+				).toBeGreaterThan(picture.indexOf("Count as income"));
+			}
+		}
+		const first = pictures(option(s, "A · Category first"))[0] ?? "";
+		expect(first).toContain("grid grid-cols-2");
+		expect(first.indexOf("New category")).toBeGreaterThan(
+			first.indexOf("Rent</label>"),
+		);
+	});
+
+	it("folds B's Trader Joe's category into one row, and draws a third picture of it opened", async () => {
+		const { html } = await get("/design-system/proposals");
+		const b = option(
+			section(html, "p120-panel"),
+			"B · Category leads, folds when set",
+		);
+		const all = pictures(b);
+		expect(all).toHaveLength(3);
+		expect(all[1]).toContain("Picked by Tally · 92% sure");
+		expect(all[1]).not.toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(all[2]).toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(all[2]).toContain("Picked by Tally · 92% sure");
+	});
+
+	it("draws C's Local Bakery category open and Trader Joe's closed with its source", async () => {
+		const { html } = await get("/design-system/proposals");
+		const [lb = "", tj = ""] = pictures(
+			option(section(html, "p120-panel"), "C · Ruled ledger"),
+		);
+		expect(lb).toContain('<details class="group border-b border-rule" open=""');
+		expect(tj).not.toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(tj).toContain("Picked by Tally · 92% sure");
+	});
+
+	it("draws P121's three header options with A recommended, its Filters as a closed pill, and B's filters in one strip", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		for (const name of [
+			"Today (current)",
+			"A · Filters fold away",
+			"B · One filter strip",
+		]) {
+			expect(option(s, name), name).toContain(`>${name}`);
+		}
+		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
+		expect(option(s, "A · Filters fold away")).toContain(">Recommended<");
+		const [closed = "", open = ""] = pictures(
+			option(s, "A · Filters fold away"),
+		);
+		expect(closed).toContain("Filters</summary>");
+		expect(closed).not.toContain('<details class="group open:w-full" open=""');
+		expect(open).toContain('<details class="group open:w-full" open=""');
+		expect(open).toContain("All accounts");
+		const b = option(s, "B · One filter strip");
+		expect(b).toContain("flex gap-2 overflow-x-auto px-5 py-1");
+		expect(b.indexOf("Needs category (")).toBeLessThan(b.indexOf("October"));
+	});
+
+	it("draws B's phone strip scrolled a little, so All categories shows cut off under the paper fade", async () => {
+		const { html } = await get("/design-system/proposals");
+		const b = option(section(html, "p121-header"), "B · One filter strip");
+		// The first pill starts past the strip's left edge; the third pill follows October and sits under the
+		// fade that closes the strip on the right.
+		expect(b).toContain('<span class="shrink-0 -ml-8">');
+		expect(b.indexOf("October")).toBeLessThan(b.indexOf("All categories"));
+		expect(b.indexOf("All categories")).toBeLessThan(
+			b.indexOf("pointer-events-none absolute inset-y-0 right-0 w-16"),
+		);
+	});
+
+	it("says in P121's sentence that A also shows its Filters pill open", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(section(html, "p121-header")).toContain(
+			"A also shows its Filters pill open.",
+		);
+	});
+
+	it("notes under P121's Fixed line that decision 111 moved How this works to the page foot, before the first option", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		const note =
+			'<span class="font-medium">Replaced by decision 111: </span>Since P124 A (decision 111), How this works sits at the foot of the page, not beside Add cash; Add cash keeps its own line.';
+		expect(s).toContain(note);
+		expect(s.indexOf(note)).toBeLessThan(s.indexOf(">Today (current)"));
+		expect(s).not.toContain("further down");
+		expect(s).not.toContain("decision 82");
+	});
+
+	it("keeps P46's Replaced note on decision 82 with its pointer further down", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p46-past-months");
+		expect(s).toContain(
+			'<span class="font-medium">Replaced by decision 82: </span>',
+		);
+		expect(s).toContain("See P91 to P93, further down.");
+	});
+
+	it("lists the sidebar and the tabs in the pictures from nav.tsx's own items, in order", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		const inOrder = (chunk: string, labels: string[]) => {
+			let at = -1;
+			for (const label of labels) {
+				const next = chunk.indexOf(`${label}</span>`, at + 1);
+				expect(next, label).toBeGreaterThan(at);
+				at = next;
+			}
+		};
+		inOrder(
+			option(s, "At 1280: Today (current)"),
+			SIDEBAR_ITEMS.map((item) => item.label),
+		);
+		inOrder(
+			pictures(option(s, "Today (current)"))[0] ?? "",
+			TAB_ITEMS.map((item) => item.label),
+		);
+	});
+
+	it("draws each P121 phone with the demo banner and the tab bar, and a desktop picture for each option", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		// The cut-short picture of A's open Filters has no tab bar (it stops above it), so it's not one of these.
+		const phones = pictures(s).filter(
+			(p) => p.includes(", on a phone") && !p.includes("pill open"),
+		);
+		expect(phones).toHaveLength(3);
+		for (const picture of phones) {
+			expect(picture).toContain("Demo data. Nothing here is real.");
+			expect(picture).toContain(">Transactions</span>");
+		}
+		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
+		expect(s).toContain(
+			'aria-label="At 1280: A · Filters fold away, on desktop"',
+		);
+		expect(s).toContain(
+			'aria-label="At 1280: B · One filter strip, on desktop"',
+		);
 	});
 });

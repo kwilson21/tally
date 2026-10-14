@@ -27,7 +27,7 @@ export const SIDEBAR_ITEMS: NavItem[] = [
 	{ key: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 
-const TAB_ITEMS: NavItem[] = [
+export const TAB_ITEMS: NavItem[] = [
 	...SIDEBAR_ITEMS.slice(0, 4),
 	{ key: "more", label: "More", href: "/more", icon: "more" },
 ];

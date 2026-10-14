@@ -2316,21 +2316,113 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(panel.html).not.toContain("Change the parts");
 	});
 
-	it("keeps the Change the parts sheet, with its new total, when a save is refused because the entry became income", async () => {
-		const { id, a, b } = await splitCash("Income refusal");
+	it("saves Change the parts on a split cash entry marked as income, with its parts' amounts and categories, and it stays income", async () => {
+		const { id, a, b } = await splitCash("Income correction");
 		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
 			.bind(id)
 			.run();
-		const { res, html } = await correction(id, savedParts(a, b));
+		const { res } = await correction(id, [
+			[String(a), "5", "70.00"],
+			[String(b), "1", "30.00"],
+		]);
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents, is_split AS isSplit, flag_income AS income FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000, isSplit: 1, income: 1 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 5, amountCents: 7000 },
+			{ id: b, categoryId: 1, amountCents: 3000 },
+		]);
+		expect(
+			await env.DB.prepare(
+				"SELECT refund_of_id AS refundOfId FROM transactions WHERE raw_name='Part refund'",
+			).first(),
+		).toEqual({ refundOfId: b });
+	});
+
+	it("offers Change the parts from the panel for a split cash entry marked as income, and its sheet saves the corrected parts", async () => {
+		const { id, a, b } = await splitCash("Income panel");
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const panel = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "100.00"],
+			["income", "1"],
+			["income_was", "1"],
+			["back", "/transactions"],
+		]);
+		expect(panel.res.status).toBe(422);
+		expect(panel.html).toMatch(
+			/<button(?=[^>]*name="change_parts")(?=[^>]*value="1")[^>]*>Change the parts<\/button>/,
+		);
+		const sheet = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "100.00"],
+			["income", "1"],
+			["income_was", "1"],
+			["change_parts", "1"],
+			["back", "/transactions"],
+		]);
+		expect(sheet.res.status).toBe(200);
+		expect(sheet.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		const saved = await correction(id, [
+			[String(a), "5", "70.00"],
+			[String(b), "1", "30.00"],
+		]);
+		expect(saved.res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT amount_cents AS amountCents, flag_income AS income FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({ amountCents: 10000, income: 1 });
+		expect(await partsOf(id)).toEqual([
+			{ id: a, categoryId: 5, amountCents: 7000 },
+			{ id: b, categoryId: 1, amountCents: 3000 },
+		]);
+	});
+
+	it("still refuses a new split of a split cash entry marked as income, in words, and saves nothing", async () => {
+		const { id } = await splitCash("Income new split");
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const before = await partsOf(id);
+		const { res, html } = await post(`/transactions/${id}/split`, [
+			["back", "/transactions"],
+			["part_category", "1"],
+			["part_category", "5"],
+			["part_amount", "60.00"],
+			["part_amount", "30.00"],
+		]);
 		expect(res.status).toBe(422);
 		expect(html).toContain("Income can&#39;t be split.");
-		expect(html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
-		expect(html).toMatch(/<input[^>]*name="amount_was"[^>]*value="9000"/);
-		// The amount under the title is the new total, as on the sheet that was posted.
-		const shown = html.match(
-			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
-		)?.[1];
-		expect(shown).toBe(formatCents(10000, { signed: true }));
+		expect(await partsOf(id)).toEqual(before);
+	});
+
+	it("draws the Change the parts sheet for a split cash entry marked as income, with its new total, and no new split", async () => {
+		const { id } = await splitCash("Income sheet");
+		await env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+			.bind(id)
+			.run();
+		const corrected = await request(
+			`/transactions/${id}/split?total=10000&back=%2Ftransactions`,
+		);
+		expect(corrected.res.status).toBe(200);
+		expect(corrected.html).toMatch(/<input[^>]*name="total"[^>]*value="10000"/);
+		expect(shownTotal(corrected.html)).toBe(
+			formatCents(10000, { signed: true }),
+		);
+		const fresh = await request(
+			`/transactions/${id}/split?back=%2Ftransactions`,
+		);
+		expect(fresh.res.status).toBe(404);
 	});
 
 	it("opens the split with the new total, the saved parts and the mismatch and live lines", async () => {

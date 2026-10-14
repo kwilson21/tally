@@ -175,6 +175,21 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 		expect(await linkOf(SECOND)).toBeNull();
 	});
 
+	it("counts two plain refunds that Not linked unlinks in the toast", async () => {
+		const { res } = await post(
+			`/transactions/${PURCHASE}/split`,
+			parts(["refund_9202", "none"], ["refund_9203", "none"]),
+		);
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+		};
+		expect(trigger.toast.message).toContain("2 refunds are no longer linked.");
+		expect(trigger.toast.message).not.toContain("The refund on");
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBeNull();
+	});
+
 	it("redraws only the part labels out of band, so no reply can uncheck or revert a pick", async () => {
 		const token = tokenOf(await drawSheet());
 		const { res, html } = await post(`/transactions/${PURCHASE}/split/line`, [

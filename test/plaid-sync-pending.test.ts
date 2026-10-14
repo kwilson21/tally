@@ -160,14 +160,17 @@ async function addRefund(purchase: number, cents = -300) {
 	return result?.id as number;
 }
 
-async function addBillLinkedTo(transactionId: number) {
+async function addBillLinkedTo(
+	transactionId: number,
+	status: "linked" | "dismissed" = "linked",
+) {
 	await env.DB.batch([
 		env.DB.prepare(
 			"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (700, 'Phone', 1234, 28, 'monthly', 1, 'Not a match')",
 		),
 		env.DB.prepare(
-			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', 'linked')",
-		).bind(transactionId),
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', ?)",
+		).bind(transactionId, status),
 	]);
 }
 
@@ -2437,6 +2440,70 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				own_name: "Dog bed",
 				excluded: 1,
 				excluded_source: "user",
+				...keptAnswer,
+			});
+		});
+
+		it("clears the posted row's Jev answer when the pending row's bill payment moves onto it and counts it, so the night run asks again with the name (#408)", async () => {
+			const item = await addItem();
+			const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+			const ids = await bothStored(item, loan);
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			// A bill with no category: the link's trigger gives a row a bill's category only when it has one, so
+			// the clear is what changes the posted row's guess.
+			await env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO bills (id, name, amount_cents, due_day, frequency, merchant_raw_name) VALUES (700, 'Card', 1234, 28, 'monthly', 'Not a match')",
+				),
+				env.DB.prepare(
+					"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (700, '2026-09', ?, 'user', 'linked')",
+				).bind(ids.pending),
+			]);
+			await jevAnswer(ids.posted);
+			await post(item, loan);
+			// Plaid excluded the posted card payment, so the bill payment moving onto it is what counts it.
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "plaid",
+				category_id: null,
+				category_source: null,
+				category_confidence: null,
+				jev_category_id: null,
+			});
+			expect((await pendingForJev(env.DB, 10)).map((r) => r.id)).toContain(
+				ids.posted,
+			);
+		});
+
+		it("keeps the posted row's Jev answer when a dismissed bill payment moves onto it and it stays out of the budget (#408)", async () => {
+			const item = await addItem();
+			const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+			const ids = await bothStored(item, loan);
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			await addBillLinkedTo(ids.pending, "dismissed");
+			await jevAnswer(ids.posted);
+			await post(item, loan);
+			// The dismissal moves, but a dismissed payment doesn't count the row, so Plaid's exclusion still stands.
+			expect(
+				(
+					await env.DB.prepare(
+						"SELECT transaction_id, status FROM bill_payments",
+					).all()
+				).results,
+			).toEqual([{ transaction_id: ids.posted, status: "dismissed" }]);
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "plaid",
 				...keptAnswer,
 			});
 		});
