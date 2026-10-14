@@ -304,7 +304,7 @@ export async function askAgainMany(
 	if (!env.JEV_API_KEY || !ids.length) return;
 	try {
 		await env.DB.prepare(
-			`UPDATE transactions SET category_confidence = NULL
+			`UPDATE transactions SET category_confidence = NULL, jev_mixed = NULL, jev_also_category_id = NULL
 			 WHERE id IN (SELECT value FROM json_each(?)) AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NOT NULL`,
 		)
 			.bind(JSON.stringify(ids))

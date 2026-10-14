@@ -13,7 +13,8 @@
  *   clears the posted row's Jev answer, since that answer was for the old name, so the night run asks again
  *   with the name; it clears only where Jev can be asked about the row (jevAsksAboutSql), so a row a person or
  *   Plaid took out of the budget keeps its answer. A merchant rule's pick doesn't move: rules run on the posted
- *   row as on any new one.
+ *   row as on any new one. Jev's pick, none-fit and mixed-trip reading also move onto a posted row that keeps a category of its
+ *   own (a rule's or a person's) but has no Jev answer; never onto a split purchase.
  *   An exclusion Plaid put on the posted row is not an answer of its own (spec section 8.5): Jev's exclusion
  *   of the pending row moves over it and
  *   keeps its source, as it does when the pending row simply takes the posted id, so it still holds
@@ -117,9 +118,9 @@ const PERSON_TAKEN = takesDetailSql(
 /** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
 const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
 	AND COALESCE(t.category_source, '') != 'user'`;
-/** Mirrors Jev's category statement: Jev's answer moves onto a posted row with no category, at the same amount. */
+/** Mirrors Jev's category statement: Jev's answer moves onto a posted row with no category, at the same amount, never a split. */
 const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
-	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL`;
+	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL AND t.is_split = 0`;
 /** Mirrors the split statement that takes the pre-split category when the amount changed. */
 const LOG_SPLIT_CATEGORY = `p.is_split = 1 AND p.amount_cents != ?3
 	AND t.is_split = 0 AND t.split_removed_from_cents IS NULL AND COALESCE(t.category_source, '') != 'user'`;
@@ -209,7 +210,7 @@ const STATEMENTS = [
 	// since a linked payment can take an excluded row into the budget (#408); the pending row is judged as it stands, before
 	// they move off it. It runs before the name moves, since moving the name is the condition it reads.
 	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
-		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
+		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, jev_mixed = NULL, jev_also_category_id = NULL
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
 	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
 		AND transactions.category_source IS NULL))
@@ -221,12 +222,21 @@ const STATEMENTS = [
 	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
 	// amount is a new question, as for any bank correction.
 	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
+	// A split purchase takes none of Jev's answers, here or in the statement below.
 	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
 		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id,
-		jev_none_fit = p.jev_none_fit
+		jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed, jev_also_category_id = p.jev_also_category_id
 	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
-	 AND transactions.category_confidence IS NULL`,
+	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
+	// Jev's pick, none-fit and mixed-trip reading move onto a posted row with a category of its own and no Jev answer, which
+	// the category statement above leaves alone. A split purchase keeps no mixed-trip reading, so it takes none. It moves no category, so it needs no ai_log arm.
+	`UPDATE transactions SET jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
+		jev_also_category_id = p.jev_also_category_id
+	 ${FROM_PENDING} AND p.amount_cents = ?3
+	 AND (p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
+	 AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL
+	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
@@ -306,7 +316,7 @@ const STATEMENTS = [
 	 WHERE ne.id = ${POSTED} AND transactions.parent_id = pe.id AND ${READY}
 	 AND pe.is_split = 1 AND pe.amount_cents = ?3 AND ne.is_split = 0
 	 AND NOT EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ne.id)`,
-	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL
+	`UPDATE transactions SET is_split = 1, split_removed_from_cents = NULL, split_removed_bills = NULL, jev_mixed = NULL, jev_also_category_id = NULL
 	 WHERE id = ${POSTED} AND is_split = 0 AND ${READY}
 	 AND EXISTS (SELECT 1 FROM transactions part WHERE part.parent_id = ${POSTED})`,
 	// When the amount changed instead, the posted row says its split was removed (the parts go with the pending row),
@@ -321,7 +331,9 @@ const STATEMENTS = [
 		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE NULL END,
 		category_suggestion_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_suggestion_id ELSE NULL END,
 		jev_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_category_id ELSE NULL END,
-		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END
+		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END,
+		jev_mixed = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_mixed ELSE NULL END,
+		jev_also_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_also_category_id ELSE NULL END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
 	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending

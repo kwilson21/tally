@@ -73,6 +73,8 @@ const clearJevAnswersOnAmountChange = (changed: string) =>
 	 category_suggestion_id = CASE WHEN ${changed} THEN NULL ELSE category_suggestion_id END,
 	 jev_none_fit = CASE WHEN ${changed} THEN 0 ELSE jev_none_fit END,
 	 jev_category_id = CASE WHEN ${changed} THEN NULL ELSE jev_category_id END,
+	 jev_mixed = CASE WHEN ${changed} THEN NULL ELSE jev_mixed END,
+	 jev_also_category_id = CASE WHEN ${changed} THEN NULL ELSE jev_also_category_id END,
 	 income_confidence = CASE WHEN ${changed} THEN NULL ELSE income_confidence END,
 	 transfer_confidence = CASE WHEN ${changed} THEN NULL ELSE transfer_confidence END`;
 
@@ -848,6 +850,8 @@ export async function syncItem(
 						cents,
 						cents,
 						newKey,
+						cents,
+						cents,
 						cents,
 						cents,
 						cents,

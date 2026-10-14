@@ -18,6 +18,7 @@ import {
 	likelyStill,
 	likelyTransactions,
 } from "../db/likely-transactions";
+import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
 import {
 	correctCashSplit,
@@ -123,6 +124,7 @@ import {
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
 import { MerchantRuleTick } from "../views/merchant-rule-tick";
+import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
@@ -169,6 +171,8 @@ import {
 	TOO_MANY,
 } from "../views/selection-action-bar";
 import {
+	isGuessedPart,
+	PartCategory,
 	RefundPartLabels,
 	SplitForm,
 	SplitLine,
@@ -1459,6 +1463,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 		merchant: tx.storeName,
 		category: cat.name,
 		back: address,
+		transactionId: found.transactionId,
 	};
 	const announce = ruleOfferAnnouncement(value, message);
 	c.header(
@@ -1654,6 +1659,8 @@ function EditSheet({
 		linkedPurchase && followsPurchaseAfterSave(tx, values)
 			? linkedPurchase
 			: undefined;
+	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
+	const mixed = mixedCategories(tx);
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -2145,6 +2152,14 @@ function EditSheet({
 							checked={!purchase && values.newCategory === true}
 						/>
 					</div>
+					{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
+					{!purchase && mixed && (
+						<MixedTripLine
+							first={mixed.first.name}
+							second={mixed.second.name}
+							href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+						/>
+					)}
 					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
 					<NewCategoryName
 						id="new-category-name"
@@ -2569,6 +2584,7 @@ transactions.post("/transactions/cash", async (c) => {
 					merchant: savedTx?.displayName || tidyName(saved.merchant),
 					category: categoryName,
 					back: address,
+					transactionId: saved.id,
 				}
 			: null;
 	// With JavaScript off the reply is a whole page, so the question is drawn as one; a save with no question redirects.
@@ -2699,6 +2715,12 @@ type Correction = {
 	pendingEdit?: string;
 };
 
+/** "Groceries and Household" when Jev says the trip looks mixed (#233), else undefined: the split's guess line. */
+function guessLabelOf(tx: TransactionDetail): string | undefined {
+	const guess = mixedCategories(tx);
+	return guess ? `${guess.first.name} and ${guess.second.name}` : undefined;
+}
+
 function SplitSheet({
 	tx,
 	back,
@@ -2752,6 +2774,7 @@ function SplitSheet({
 			<SplitForm
 				id={tx.id}
 				parentCents={tx.amountCents}
+				guessLabel={guessLabelOf(tx)}
 				totalCents={correction?.totalCents}
 				amountWas={correction?.amountWas}
 				pendingEdit={correction?.pendingEdit}
@@ -2809,6 +2832,36 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 		else return null;
 	}
 	return ids;
+}
+
+/**
+ * The split sheet's rows as the form posted them (#233): each row's category and amount, its saved part's id and
+ * kept category (`archived`, for a correction), and Tally's guess while the trip still looks mixed. A save and the
+ * live line both read the rows here, so a part is a guess the same way in each. A part stays a guess only while its
+ * category is the one Tally guessed and its amount is empty (isGuessedPart), so typing or picking makes it solid.
+ */
+function postedSplitValues(
+	tx: TransactionDetail,
+	form: FormData,
+	partIds: (number | undefined)[],
+	archived: Map<number, { id: number; name: string }>,
+): SplitValue[] {
+	const guessing = mixedCategories(tx) !== null;
+	const guesses = form.getAll("part_guess").map(String);
+	const amounts = form.getAll("part_amount").map(String);
+	return form
+		.getAll("part_category")
+		.map(String)
+		.map((category, i) => {
+			const partId = partIds[i];
+			return {
+				category,
+				amount: amounts[i] ?? "",
+				partId,
+				kept: partId === undefined ? undefined : archived.get(partId),
+				guess: guessing ? guesses[i] || undefined : undefined,
+			};
+		});
 }
 
 /**
@@ -2932,10 +2985,26 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	if (total !== null) return changePartsList(c, tx, back, today, total);
 	// Income is never split (decision 62's review): no form for it either.
 	if (tx.income) return c.notFound();
-	const values: SplitValue[] = [
-		{ category: "", amount: "" },
-		{ category: "", amount: "" },
-	];
+	// A trip that looks mixed opens with Jev's two categories as Tally's guess: dashed, amounts empty (#233).
+	// The amounts are always a person's, so nothing here reads one from the database.
+	const guess = mixedCategories(tx);
+	const values: SplitValue[] = guess
+		? [
+				{
+					category: String(guess.first.id),
+					amount: "",
+					guess: String(guess.first.id),
+				},
+				{
+					category: String(guess.second.id),
+					amount: "",
+					guess: String(guess.second.id),
+				},
+			]
+		: [
+				{ category: "", amount: "" },
+				{ category: "", amount: "" },
+			];
 	// The linked refunds ask which part they go with; nothing is chosen until a person picks (decision 99).
 	const refunds = await splitRefundsOf(c.env.DB, tx.id);
 	return renderList(c, today, filtersFrom(c, today, back), {
@@ -2953,13 +3022,23 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
-	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	const { tx, categories } = await splitContext(c);
 	if (!tx) return c.notFound();
 	const form = await c.req.formData();
 	// A Change the parts sheet counts against its new total, when the total posted is one for this entry.
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
+	const partIds = partIdsOf(form.getAll("part_id").map(String));
+	if (partIds === null) return c.notFound();
 	const amounts = form.getAll("part_amount").map(String);
-	const categoryValues = form.getAll("part_category").map(String);
+	// A trip that looks mixed draws the parts a person has touched again out of band: one that was Tally's guess when the
+	// sheet last drew it and is not one now turns solid, once, and its guess marker is cleared with it (#233). A part still
+	// a guess, or already solid, is left as it is. Its parts are never saved ones, so none has a kept category.
+	const values = postedSplitValues(tx, form, partIds, new Map());
+	const touched = values.flatMap((value, index) =>
+		value.guess !== undefined && !isGuessedPart(value)
+			? [{ value, index }]
+			: [],
+	);
 	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
 	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
 	// A Change the parts sheet keeps its links by part, so it has no chooser. The labels belong to the drawing of the
@@ -2969,22 +3048,19 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 		total === null && sheet !== null
 			? await splitRefundsOf(c.env.DB, tx.id)
 			: [];
-	const { results: categories } = await c.env.DB.prepare(
-		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
-	).all<Category>();
 	return c.html(
 		<>
 			<div id="split-line">
 				<SplitLine parentCents={total ?? tx.amountCents} amounts={amounts} />
 			</div>
+			{touched.map(({ value, index }) => (
+				<PartCategory index={index} value={value} categories={categories} oob />
+			))}
 			{sheet !== null && (
 				<RefundPartLabels
 					sheet={sheet}
 					refunds={refunds}
-					values={categoryValues.map((category, index) => ({
-						category,
-						amount: amounts[index] ?? "",
-					}))}
+					values={values}
 					categories={categories}
 				/>
 			)}
@@ -3023,15 +3099,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const archived = correction
 		? await archivedPartCategories(c.env.DB, tx.id)
 		: new Map<number, Category>();
-	const values: SplitValue[] = categoryValues.map((category, i) => {
-		const partId = partIds[i];
-		return {
-			category,
-			amount: amountValues[i] ?? "",
-			partId,
-			kept: partId === undefined ? undefined : archived.get(partId),
-		};
-	});
+	const values = postedSplitValues(tx, form, partIds, archived);
 	// Which part each linked refund goes with (decision 99). A Change the parts sheet keeps each part's links, so it
 	// asks nothing; a new split asks about every linked refund, and a redraw keeps the answers given.
 	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
@@ -3659,6 +3727,7 @@ async function savePanel(
 					merchant: storeName,
 					category: offerCategory.name,
 					back,
+					transactionId: tx.id,
 				}
 			: undefined;
 	// A clearer name or a note, added to a transaction that still needs a category, makes Tally ask
@@ -3883,6 +3952,9 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 	// The row that was saved, when a save named one: its answer returns focus to that row (#87).
 	const saved = Number(form.get("saved"));
 	const savedId = Number.isInteger(saved) && saved > 0 ? saved : undefined;
+	// The trip the question was asked about (decision 113): Yes makes the rule only while it still counts as this store's
+	// pick of this category and doesn't look mixed, the test that asked the question.
+	const trip = Number(form.get("trip"));
 	const today = await householdToday(c.env.DB);
 	const validCategory = await c.env.DB.prepare(
 		"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
@@ -3898,16 +3970,17 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 				.first<{ displayName: string | null }>()
 		: null;
 	const offer =
-		validCategory && merchantKey
-			? await categoryRuleOffer(c.env.DB, merchantKey, categoryId)
+		yes && validCategory && merchantKey && Number.isInteger(trip) && trip > 0
+			? await ruleOfferForTransaction(c.env.DB, trip, categoryId)
 			: null;
+	const rule = offer !== null && offer.merchantKey === merchantKey;
 	const message =
-		yes && offer && validCategory
+		yes && rule && validCategory
 			? `Always use ${validCategory.name} for ${askedName || merchantName?.displayName || tidyName(merchantKey)}.`
 			: validCategory
 				? `Saved as ${validCategory.name}.`
 				: "Saved.";
-	if (yes && offer && validCategory)
+	if (yes && rule && validCategory)
 		await setMerchantRule(c.env.DB, merchantKey, categoryId, actor(c));
 	if (!c.req.header("HX-Request"))
 		return c.redirect(

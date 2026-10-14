@@ -40,6 +40,15 @@ export type JevResult =
 const NOTE_WORTH_QUESTION =
 	"Could a short \"what it was\" line say something useful that the store's name doesn't already say? Yes for a purchase whose store name hides what it was, such as an app or iCloud subscription from APPLE.COM/BILL; no when the store's name already says it, such as CVS Pharmacy.";
 
+/**
+ * Asked with the category (#233): whether the trip spans more than one of the active categories, and the one
+ * other category Jev names. Jev names the categories itself; code never reads a runner-up from probabilities.
+ */
+const MIXED_QUESTION =
+	"Does this trip look like it spans more than one of these categories, such as a store trip for groceries and household items?";
+const ALSO_CATEGORY_QUESTION =
+	"If this trip spans more than one of these categories, which other one is it, besides the category you picked? Choose none if the trip is all one category.";
+
 const FLAG_QUESTIONS: Record<Flag, string> = {
 	transfer:
 		"Is this a transfer between the household's own accounts, rather than spending?",
@@ -89,6 +98,16 @@ export async function askJev(
 								...Object.fromEntries(categories.map((name) => [name, null])),
 								[NONE_FIT]:
 									"None of these categories fits this transaction, so a person should decide.",
+							},
+						},
+						mixed: { type: "noul", instructions: MIXED_QUESTION },
+						also_category: {
+							type: "choice",
+							instructions: ALSO_CATEGORY_QUESTION,
+							criteria: {
+								...Object.fromEntries(categories.map((name) => [name, null])),
+								[NONE_FIT]:
+									"No other category fits: the trip is all one category.",
 							},
 						},
 					}
@@ -221,6 +240,14 @@ function parseAnswer(
 	const forPerson = choice("for_person", people);
 	if (kinds.length && !kind) return null;
 	if (people.length && !forPerson) return null;
+	// The mixed-trip reading (#233) is kept only when its probability and the other category both came back; a
+	// missing or unknown one leaves it out and never fails the category answer, as the note answer does.
+	const alsoCategory = choice("also_category", options);
+	const mixedNoul = (answers?.mixed as { noul?: unknown } | undefined)?.noul;
+	const mixed =
+		alsoCategory && isProbability(mixedNoul)
+			? { probability: mixedNoul, also: alsoCategory.label }
+			: undefined;
 	const noteWorth = (
 		answers?.note_worth_writing as { noul?: unknown } | undefined
 	)?.noul;
@@ -234,6 +261,7 @@ function parseAnswer(
 		flags,
 		...(kind ? { kind } : {}),
 		...(forPerson ? { forPerson } : {}),
+		...(mixed ? { mixed } : {}),
 		...(asksNote && isProbability(noteWorth)
 			? { noteWorthWriting: noteWorth }
 			: {}),
