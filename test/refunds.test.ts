@@ -1271,6 +1271,40 @@ describe("splits unlink their refunds", () => {
 		);
 	});
 
+	it("names a split refund linked only through one of its parts when removing a split", async () => {
+		// The $20 refund is split in two $10 parts, linked to the Household part of the split purchase.
+		await link(REFUND, PART_HOUSEHOLD);
+		await post(`/transactions/${REFUND}/split`, [
+			["part_category", String(KIDS)],
+			["part_category", String(GAS)],
+			["part_amount", "10"],
+			["part_amount", "10"],
+			["back", "/transactions"],
+		]);
+		const { results } = await db
+			.prepare("SELECT id FROM transactions WHERE parent_id = ? ORDER BY id")
+			.bind(REFUND)
+			.all<{ id: number }>();
+		const [kids, gas] = results.map((row) => row.id);
+		// Only the Gas part still points at the Household part; the refund's own row and its Kids part do not.
+		await db.batch([
+			db
+				.prepare(
+					"UPDATE transactions SET refund_of_id = NULL WHERE id IN (?, ?)",
+				)
+				.bind(REFUND, kids),
+			db
+				.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+				.bind(PART_HOUSEHOLD, gas),
+		]);
+		const { trigger } = await post(`/transactions/${SPLIT}/split/remove`, [
+			["back", "/transactions"],
+		]);
+		expect(trigger?.toast.message).toBe(
+			"Removed split from Refund Shop. The refund on Sep 10 is no longer linked.",
+		);
+	});
+
 	it("names a split refund once, not once for each of its parts, when a purchase split unlinks it", async () => {
 		// The $20 refund is split in two $10 parts, and both stay linked to the $50 purchase.
 		await link(REFUND, PURCHASE);

@@ -1533,15 +1533,16 @@ export async function setMerchantRule(
 }
 
 /**
- * A refund linked to a purchase or one of its parts. A split refund's own row is `isSplit`; its parts are the refunds,
- * marked `isPart`. `follows` is FOLLOWS_PURCHASE: a credit that still counts against its purchase.
+ * A refund linked to a purchase or one of its parts. A split refund's own row is `isSplit`; a part of a split refund
+ * has that refund's id as `parentId` (null for a top-level row). `follows` is FOLLOWS_PURCHASE: a credit that still
+ * counts against its purchase.
  */
 export type LinkedRefund = {
 	id: number;
 	date: string;
 	amountCents: number;
 	isSplit: boolean;
-	isPart: boolean;
+	parentId: number | null;
 	follows: boolean;
 };
 
@@ -1557,7 +1558,7 @@ export async function linkedRefunds(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.is_split AS isSplit,
-				t.parent_id IS NOT NULL AS isPart, ${FOLLOWS_PURCHASE} AS follows
+				t.parent_id AS parentId, ${FOLLOWS_PURCHASE} AS follows
 			FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id
 			WHERE t.refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1${self ? " OR id = ?1" : ""})
 			ORDER BY t.date, t.id`,
@@ -1568,7 +1569,7 @@ export async function linkedRefunds(
 			date: string;
 			amountCents: number;
 			isSplit: number;
-			isPart: number;
+			parentId: number | null;
 			follows: number;
 		}>();
 	return results.map((row) => ({
@@ -1576,19 +1577,37 @@ export async function linkedRefunds(
 		date: row.date,
 		amountCents: row.amountCents,
 		isSplit: row.isSplit === 1,
-		isPart: row.isPart === 1,
+		parentId: row.parentId,
 		follows: row.follows === 1,
 	}));
 }
 
 /**
+ * The dates of the refunds a split change unlinked, each refund once. A split refund's parts share its date, and a
+ * change can return its own row, one part or several, so each row is keyed by its root (its parent, or its own id
+ * for a top-level row): a split refund is named once, however many of its rows were unlinked.
+ */
+function unlinkedDates(
+	rows: { id: number; date: string; parentId: number | null }[],
+): string[] {
+	const byRoot = new Map<number, string>();
+	for (const row of [...rows].sort(
+		(a, b) => a.date.localeCompare(b.date) || a.id - b.id,
+	)) {
+		const root = row.parentId ?? row.id;
+		if (!byRoot.has(root)) byRoot.set(root, row.date);
+	}
+	return [...byRoot.values()];
+}
+
+/**
  * Whether the split sheet asks which part a linked refund goes with, and saveSplit moves it (decision 99): a plain
- * refund that still follows its purchase. A split refund's own row is never offered, nor are its parts, since its
- * parts are what count. A credit that no longer follows (income, unreviewed, or on an excluded purchase) isn't asked
- * about: a split unlinks it, and the toast names it.
+ * refund that still follows its purchase. A split refund's own row is never offered, nor are its parts, since the
+ * split refund is one unit with them. A credit that no longer follows (income, unreviewed, or on an excluded
+ * purchase) isn't asked about: a split unlinks it, and the toast names it.
  */
 export const offeredToSplit = (refund: LinkedRefund) =>
-	!refund.isSplit && !refund.isPart && refund.follows;
+	!refund.isSplit && refund.parentId === null && refund.follows;
 
 /**
  * The bills the linked payments of a purchase's parts pay, oldest payment first. Read before a change
@@ -1693,7 +1712,8 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * there in this batch. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
  * is named in neither list. One that was parked but doesn't move is unlinked, and is listed in `unlinked` like any
  * other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked` lists the refunds
- * this save unlinked, by date. A split refund is listed once, by its own row, never once more for each of its parts.
+ * this save unlinked, by date, each refund once: a split refund's parts share its date, so it is listed once however
+ * many of its rows were unlinked (its own row, a part, or both).
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1883,8 +1903,8 @@ export async function saveSplit(
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
 	const changed = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.meta.changes ?? 0) > 0;
-	// The rows a statement returned with RETURNING: the refunds it changed. A split refund's parts share its date, so
-	// only a refund's own row (parentId null) is counted in the unlinked list; its parts are left out.
+	// The rows a statement returned with RETURNING: the refunds it changed, a refund's own row or one of its parts
+	// (parentId is the refund's id for a part). unlinkedDates counts each refund once.
 	const returnedRows = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.results ?? []) as {
 			id: number;
@@ -1898,10 +1918,10 @@ export async function saveSplit(
 		unlinked: !saved
 			? []
 			: !linkedPurchase?.refundOfId
-				? [...returnedRows(unlinkLinked), ...returnedRows(sweepRefused)]
-						.filter((row) => row.parentId === null)
-						.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
-						.map((row) => row.date)
+				? unlinkedDates([
+						...returnedRows(unlinkLinked),
+						...returnedRows(sweepRefused),
+					])
 				: refundUnlinked
 					? [linkedPurchase.date]
 					: [],
@@ -2099,16 +2119,14 @@ export async function correctCashSplit(
  * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
  * the bills still unpaid after it, by name (decision 105). A split refund's parent is whole again and counts by
  * its own link, so that link is checked like a new one (src/db/refunded.ts) and dropped if the refund no longer
- * fits; its date is returned too. A split refund is returned once, by its own row, not once for each of its parts.
+ * fits; its date is returned too. A split refund is returned once, however many of its rows were linked to the split.
  */
 export async function removeSplit(
 	db: D1Database,
 	parentId: number,
 	by: string,
 ): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
-	const unlinked = (await linkedRefunds(db, parentId, false))
-		.filter((refund) => !refund.isPart)
-		.map((refund) => refund.date);
+	const unlinked = unlinkedDates(await linkedRefunds(db, parentId, false));
 	const bills = await partBills(db, parentId);
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")
