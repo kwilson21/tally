@@ -346,7 +346,7 @@ describe("GET /design-system/proposals", () => {
 		const pictures =
 			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
 				?.length ?? 0;
-		expect(savedOptions).toBe(4);
+		expect(savedOptions).toBe(3);
 		expect(pictures).toBe(options - savedOptions);
 		// …and each picture has something drawn in it, not an empty frame.
 		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
@@ -773,17 +773,19 @@ describe("GET /design-system/proposals", () => {
 			expect(html).toContain('id="polish2-title"');
 			expect(html).toContain("Open: the polish track, rows and saves");
 			expect(html).toContain(
-				"Drawn Oct 13 for the owner&#39;s pick: how a row shows it opens, how loud Needs category is, and how the row you just saved shows it changed.",
+				"Drawn Oct 13 for the owner&#39;s pick: how a row shows it opens, and how the row you just saved shows it changed.",
 			);
 		});
 
 		it("draws P118's options: today's rows as the real components, and each option a copy that changes only its own part", async () => {
 			const { html } = await get("/design-system/proposals");
 			const p118 = block(html, "p118-rows");
-			expect(p118).toContain(
-				"P118 · How a row shows it opens, and how loud Needs category is",
-			);
+			expect(p118).toContain("P118 · How a row shows it opens");
+			expect(p118).not.toContain("how loud Needs category is");
 			expect(p118).toContain("rows open their sheet (decisions 38, 80)");
+			expect(p118).toContain(
+				"In both options, the filled pill becomes quiet words beside the bank text.",
+			);
 			// Today: the real TransactionRow (its filled pill, no chevron) and ProgressRow (its brick bar).
 			const today = optionOf(p118, "Today (current)");
 			expect(today).toContain('data-transaction="2005"');
@@ -791,34 +793,44 @@ describe("GET /design-system/proposals", () => {
 			expect(today).toContain("fill-over");
 			expect(today).not.toContain('data-icon="chevron-right"');
 			expect(today).not.toContain("bg-press");
-			// A: a chevron after each amount, the words in muted, and the pressed box on Local Bakery.
+			// A: a chevron after each amount, the words in muted, and no press (the press is the pressed group's alone).
 			const quiet = optionOf(p118, "A · Quiet chevron");
 			expect(quiet).toContain('data-icon="chevron-right"');
+			// Needs category is quiet words, never cut off, then one space each side of the dot and the bank text.
 			expect(quiet).toContain(
 				'<span class="shrink-0 text-muted">Needs category</span>',
 			);
+			expect(quiet).toContain(" · DD *DOORDASH TACO");
 			expect(quiet).not.toContain("bg-band px-2 text-sm text-ink");
-			expect(quiet).toContain("bg-press");
+			expect(quiet).not.toContain("bg-press");
 			expect(quiet).toContain(">Recommended<");
 			expect(quiet).toContain(
 				"Every row that opens ends in the same small muted arrow Settings already uses.",
 			);
-			// B: two lines, the amount on the name's line and the arrow at the end of the caption.
-			const ledger = optionOf(p118, "B · Ledger line");
-			expect(ledger).toContain("font-serif italic text-muted");
-			expect(ledger).toContain("ml-auto -mr-2 shrink-0 text-muted size-5");
-			expect(ledger).toContain("bg-press");
-			// C: no arrows on rows; one plain sentence above each list.
-			const say = optionOf(p118, "C · Say it once");
-			expect(say).toContain("Tap a transaction to change it.");
-			expect(say).toContain("Tap a budget to change it.");
+			// The budget chevron sits on the name's line, Eating Out included.
+			expect(quiet).toContain("self-start mt-1 size-5 shrink-0 -ml-3 -mr-2");
+			expect(quiet).not.toContain("self-center");
+			expect(p118).not.toContain("Ledger line");
+			expect(p118).not.toContain("font-serif italic");
+			// B · Say it once: no arrows on rows; the words muted; one plain sentence above each list.
+			const say = optionOf(p118, "B · Say it once");
+			expect(say).toContain(
+				'<p class="pb-2 text-sm text-muted">Choose a transaction to change it.</p>',
+			);
+			expect(say).toContain(
+				'<p class="mt-1 text-sm text-muted">Choose a budget to change it.</p>',
+			);
 			expect(say).not.toContain('data-icon="chevron-right"');
 			expect(say).toContain(
-				'<span class="shrink-0 text-ink">Needs category</span>',
+				'<span class="shrink-0 text-muted">Needs category</span>',
 			);
+			expect(say).not.toContain("bg-press");
 			// Each option that changes the row says why, and only A is recommended.
 			expect(p118.match(/>Recommended</g)?.length).toBe(1);
-			expect(p118.match(/text-muted">Why: /g)?.length).toBe(3);
+			expect(p118.match(/text-muted">Why: /g)?.length).toBe(2);
+			// A quiet Home screen label sits in a dashed rule, above the budget part, in each frame.
+			expect(p118.match(/border-t border-dashed border-rule/g)?.length).toBe(3);
+			expect(p118).toContain('<p class="text-sm text-muted">Home</p>');
 		});
 
 		it("draws P118's desktop pair and its pressed group (the press, the tick and Select mode's tick)", async () => {
@@ -827,11 +839,13 @@ describe("GET /design-system/proposals", () => {
 			expect(optionOf(p118, "Desktop · Today (current)")).toContain(
 				"w-[722px]",
 			);
-			expect(optionOf(p118, "Desktop · A · Quiet chevron")).toContain(
-				'data-icon="chevron-right"',
-			);
+			const desktopA = optionOf(p118, "Desktop · A · Quiet chevron");
+			expect(desktopA).toContain('data-icon="chevron-right"');
+			expect(desktopA).not.toContain("bg-press");
 			expect(optionOf(p118, "Today, pressed")).not.toContain("bg-press");
 			expect(optionOf(p118, "A, pressed")).toContain("bg-press");
+			// The press tint is drawn only in the pressed group: one held row.
+			expect(p118.match(/bg-press/g)?.length).toBe(1);
 			const select = optionOf(p118, "Select mode, Local Bakery ticked");
 			expect(select).toContain("peer-checked:border-ink");
 			expect(select).toContain("checked");
@@ -852,23 +866,58 @@ describe("GET /design-system/proposals", () => {
 			const today = optionOf(p119, "Today (current)");
 			expect(today).toContain("outline-accent");
 			expect(today).not.toContain("proposal-saved");
+			// The tick: a filled, tapered mark (no stroke), drawn from the left, short at 0 s, in a box turned −8°.
 			const tick = optionOf(p119, "A · Auditor&#39;s tick");
 			expect(tick).toContain("proposal-saved-tick");
 			expect(tick).toContain("proposal-saved-chevron");
 			expect(tick).toContain("proposal-saved-toast");
 			expect(tick).toContain("proposal-saved-loop");
+			expect(tick).toContain("[clip-path:inset(0_63%_0_0)]");
+			expect(tick).toContain("-rotate-[8deg]");
 			expect(tick).toContain(
-				'd="M4.5 12.8c1.7 1.1 3.2 2.7 4.4 4.7 2.6-5 6.4-9.3 10.6-12.3"',
+				'd="M3.59 13.65L8.98 18.66L19.88 5.53L19.12 4.87L8.93 16.27L5.41 11.95Z"',
 			);
+			expect(tick).not.toContain("stroke-dasharray");
 			expect(tick).toContain(">Recommended<");
-			expect(optionOf(p119, "B · Ruled off")).toContain("proposal-saved-rule");
-			expect(optionOf(p119, "C · Let go")).toContain("proposal-saved-band");
+			expect(tick).toContain(
+				"One new drawn mark; the row&#39;s arrow is hidden while the toast is up.",
+			);
+			expect(tick).toContain(
+				"Motion, not illustration: a 150 ms confirmation, so the tally mark still appears once per screen.",
+			);
+			expect(tick).toContain(
+				"The toast and the announcer carry the words, so the mark is never the only sign.",
+			);
+			expect(tick).toContain(
+				"It sits where P118 A&#39;s arrow is, so it pairs with it.",
+			);
+			expect(tick).toContain(
+				"Keyboard: the focus ring as today, plus the tick.",
+			);
+			expect(tick).toContain(
+				"If the row leaves a filtered list: the toast only; focus goes to the result count.",
+			);
+			expect(tick).toContain("Desktop: the same, beside the open edit panel.");
+			// B · Let go: the saved row fills with the press tint, held and then faded, on the quiet rows.
+			const letGo = optionOf(p119, "B · Let go");
+			expect(letGo).toContain("proposal-saved-press");
+			expect(letGo).toContain("bg-press");
+			expect(letGo).toContain(
+				"The row stays pressed for a moment after the sheet closes, then fades.",
+			);
+			expect(letGo).toContain("A new 1.3-second hold.");
+			expect(letGo).toContain(
+				"Keyboard: the focus ring as today, plus the press.",
+			);
+			expect(letGo).toContain('data-icon="chevron-right"');
+			expect(p119).not.toContain("Ruled off");
+			expect(p119).not.toContain("proposal-saved-rule");
+			expect(p119).not.toContain("proposal-saved-band");
 			// Each option is three stills, a fourth (replay or keyboard) and the Home still.
 			for (const name of [
 				"Today (current)",
 				"A · Auditor&#39;s tick",
-				"B · Ruled off",
-				"C · Let go",
+				"B · Let go",
 			])
 				expect(
 					optionOf(p119, name).match(/role="img" aria-label="/g)?.length,
@@ -876,7 +925,15 @@ describe("GET /design-system/proposals", () => {
 				).toBe(5);
 			// Each option says why, and only A is recommended.
 			expect(p119.match(/>Recommended</g)?.length).toBe(1);
-			expect(p119.match(/text-muted">Why: /g)?.length).toBe(3);
+			expect(p119.match(/text-muted">Why: /g)?.length).toBe(2);
+		});
+
+		it("draws the demo's water bill as City Water, paid Water bill, so the caption never says the word twice", async () => {
+			const { html } = await get("/design-system/proposals");
+			expect(html).toContain("City Water");
+			expect(html).toContain("Household · paid Water bill");
+			expect(html).not.toContain("Water bill bill");
+			expect(html).not.toContain("Google youtube");
 		});
 	});
 

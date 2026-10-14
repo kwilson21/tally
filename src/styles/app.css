@@ -625,38 +625,39 @@ html:not(.js) [data-money-js] {
 
 /*
  * Proposals only (P119): the replay of a saved row, none of it in the app yet. A save plays in a loop of
- * five seconds, --loop (the toast's four-second stay and a second more). The tick or the ruled line draws
- * in 150 ms, 3% of the loop, and the toast arrives in the same 150 ms, holds its four seconds and leaves
- * between 80% and 83%. A let-go row holds 1.3 seconds (to 26%) and fades to paper in 200 ms (to 30%). The
- * tick's arrow comes back as the tick fades (30% to 33%). Each keyframe names its share of the loop, so the
- * frozen stills in the picture and the replay show the same moments. The base classes in the picture are
- * the end state, so under reduced motion the loop stops and rests there: the arrow back, nothing else.
+ * five seconds, --loop (the toast's four-second stay and a second more). The toast arrives in 150 ms (3% of
+ * the loop), holds to 80% and leaves between 80% and 83%, the toast's own stops as a share of its stay. The
+ * tick draws in the same 150 ms, holds for as long as the toast does, and lifts with it between 80% and 83%,
+ * when the arrow comes back. A let-go row keeps its press tint to 26% (1.3 seconds) and fades to none by 30%
+ * (200 ms). Each keyframe names its share of the loop, so the frozen stills in the picture and the replay show
+ * the same moments. The base classes in the picture are the end state, so under reduced motion the loop stops
+ * and rests there: the arrow back, nothing else.
  */
 .proposal-saved-loop {
 	--loop: calc(var(--duration-toast) * 1.25);
 }
 @keyframes replay-tick {
 	0% {
-		stroke-dashoffset: 1;
+		clip-path: inset(0 100% 0 0);
 		opacity: 1;
 	}
 	3%,
-	30% {
-		stroke-dashoffset: 0;
+	80% {
+		clip-path: inset(0 0 0 0);
 		opacity: 1;
 	}
-	33%,
+	83%,
 	100% {
-		stroke-dashoffset: 0;
+		clip-path: inset(0 0 0 0);
 		opacity: 0;
 	}
 }
 @keyframes replay-chevron {
 	0%,
-	30% {
+	80% {
 		opacity: 0;
 	}
-	33%,
+	83%,
 	100% {
 		opacity: 1;
 	}
@@ -680,26 +681,10 @@ html:not(.js) [data-money-js] {
 		transform: none;
 	}
 }
-@keyframes replay-rule {
-	0% {
-		opacity: 1;
-		scale: 0 1;
-	}
-	3%,
-	80% {
-		opacity: 1;
-		scale: 1 1;
-	}
-	83%,
-	100% {
-		opacity: 0;
-		scale: 1 1;
-	}
-}
-@keyframes replay-band {
+@keyframes replay-press {
 	0%,
 	26% {
-		background-color: var(--color-band);
+		background-color: var(--color-press);
 	}
 	30%,
 	100% {
@@ -707,7 +692,6 @@ html:not(.js) [data-money-js] {
 	}
 }
 .proposal-saved-tick {
-	stroke-dasharray: 1;
 	animation: replay-tick var(--loop) linear infinite;
 }
 .proposal-saved-chevron {
@@ -716,18 +700,14 @@ html:not(.js) [data-money-js] {
 .proposal-saved-toast {
 	animation: replay-toast var(--loop) linear infinite;
 }
-.proposal-saved-rule {
-	animation: replay-rule var(--loop) linear infinite;
-}
-.proposal-saved-band {
-	animation: replay-band var(--loop) linear infinite;
+.proposal-saved-press {
+	animation: replay-press var(--loop) linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
 	.proposal-saved-tick,
 	.proposal-saved-chevron,
 	.proposal-saved-toast,
-	.proposal-saved-rule,
-	.proposal-saved-band {
+	.proposal-saved-press {
 		animation: none;
 	}
 }

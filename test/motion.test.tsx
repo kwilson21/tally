@@ -600,17 +600,16 @@ describe("the proposals page's drawings", () => {
 				.map((m) => m[1]),
 		);
 		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), and
-		// P118 and P119's saved-row replays (the tick, the ruled line, the let-go band and the toast).
+		// P118 and P119's saved-row replays (the tick, the let-go press and the toast).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
 				"proposal-cut",
 				"proposal-loop",
 				"proposal-morph",
-				"proposal-saved-band",
 				"proposal-saved-chevron",
 				"proposal-saved-loop",
-				"proposal-saved-rule",
+				"proposal-saved-press",
 				"proposal-saved-tick",
 				"proposal-saved-toast",
 				"proposal-slide-in",
@@ -686,8 +685,7 @@ describe("the proposals page's drawings", () => {
 			".proposal-saved-tick",
 			".proposal-saved-chevron",
 			".proposal-saved-toast",
-			".proposal-saved-rule",
-			".proposal-saved-band",
+			".proposal-saved-press",
 		]) {
 			expect(
 				rules.some(

@@ -446,8 +446,8 @@ export function Proposals() {
 					Open: the polish track, rows and saves
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 13 for the owner's pick: how a row shows it opens, how loud
-					Needs category is, and how the row you just saved shows it changed.
+					Drawn Oct 13 for the owner's pick: how a row shows it opens, and how
+					the row you just saved shows it changed.
 				</p>
 				<PolishRoundAProposals />
 			</section>
