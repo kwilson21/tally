@@ -263,9 +263,7 @@ export function SelectAllOnPage({
 					hx-get={`${selectModeHref(back, NO_SELECTION)}&focus=${FOCUS_SET_CATEGORY}`}
 					{...LIST_LOAD_PAUSE}
 					hx-include={TICKS}
-					// Queues behind a count still in flight instead of replacing it: a replaced count frees the filters' queue
-					// while this list is held, so a search typed then would run beside it and could land last (#471).
-					hx-sync="#filters:queue last"
+					hx-sync="#filters:replace"
 					hx-target="#results"
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}
@@ -288,8 +286,7 @@ export function SelectAllOnPage({
 					hx-get={`${selectModeHref(back, { ticks: [], held: [], all: true, unticked: [] })}&focus=${FOCUS_SET_CATEGORY}`}
 					{...LIST_LOAD_PAUSE}
 					hx-include={TICKS}
-					// As the page link: it queues behind a count in flight (#471).
-					hx-sync="#filters:queue last"
+					hx-sync="#filters:replace"
 					hx-target="#results"
 					hx-select="#results > *"
 					hx-select-oob={SELECTION_BAR_OOB}
