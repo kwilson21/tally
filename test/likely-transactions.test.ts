@@ -8,7 +8,7 @@ import {
 	likelyTransactions,
 } from "../src/db/likely-transactions";
 import { resetDemo } from "../src/demo/reset";
-import { TransactionRow } from "../src/views/transaction-row";
+import { rowCaption, TransactionRow } from "../src/views/transaction-row";
 
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
@@ -330,6 +330,37 @@ describe("likelyTransactions", () => {
 			billName: "Vet plan",
 			countsInMonth: LAST,
 		});
+	});
+
+	it("names the planned expense a payment pays, so its row says what it paid rather than Excluded (Codex 4277155943)", async () => {
+		const payment = await tx(
+			`${THIS}-06`,
+			9000,
+			"BANFIELD PET HOSPITAL",
+			"Banfield Pet Hospital",
+		);
+		await env.DB.prepare("UPDATE transactions SET excluded = 1 WHERE id = ?")
+			.bind(payment)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 9000, ?, ?, 'demo')",
+		)
+			.bind(THIS, payment)
+			.run();
+
+		const rows = await likelyTransactions(env.DB, saved, "Pet Care", TODAY);
+		const row = rows.find((found) => found.id === payment);
+
+		expect(row).toMatchObject({
+			paysPlan: true,
+			planName: "Car registration",
+		});
+		const caption = rowCaption(row as LikelyRow);
+		expect(caption.kind).not.toBe("excluded");
+		expect(caption.caption).toContain("paid Car registration");
+		const html = await TransactionRow({ row: row as LikelyRow }).toString();
+		expect(html).toContain("paid Car registration");
+		expect(html).not.toContain("Excluded");
 	});
 });
 
