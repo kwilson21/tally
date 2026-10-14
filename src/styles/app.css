@@ -43,6 +43,8 @@
 	--color-muted: #4a4a4a;
 	--color-rule: #e8e3da;
 	--color-accent: #ae5534;
+	/* A pressed row's box, and a row whose sheet is loading: ink at 6% over paper (#EDEAE4). */
+	--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);
 
 	--color-ok: #2f7a4f;
 	--color-over: #a93226;
@@ -205,6 +207,28 @@
 		[class*=":rounded-bl-sheet"] {
 			corner-shape: squircle;
 		}
+	}
+}
+
+/*
+ * A row that opens its sheet or page (P118 A, decision 111) shows the press tint, the one pressed state
+ * an iPhone draws for a link: the tap flash, which Tailwind's preflight turns off, so this sets it. A
+ * mouse gets the same tint while its button is down, and the tint stays while the row's request loads,
+ * so a sheet that takes a moment still shows what was tapped (htmx 4 puts htmx-request on the element
+ * that makes a request when it names no indicator). Square corners, between the row's rules, no
+ * transition. Rows that end in terracotta words ("Set a goal") don't get the class.
+ */
+@layer components {
+	.row-opens {
+		-webkit-tap-highlight-color: var(--color-press);
+	}
+	@media (hover: hover) {
+		.row-opens:active {
+			background-color: var(--color-press);
+		}
+	}
+	.row-opens.htmx-request {
+		background-color: var(--color-press);
 	}
 }
 

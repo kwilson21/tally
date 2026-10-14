@@ -4,7 +4,7 @@ import { formatCents } from "../money";
 import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
 import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
-import { Icon } from "./icons";
+import { Icon, ROW_OPENS, RowArrow } from "./icons";
 
 type Props = {
 	name: string;
@@ -49,7 +49,12 @@ function Wrap({
 }) {
 	const box = `flex items-start py-3 text-ink no-underline ${adjusting ? "min-w-0 flex-1 gap-3" : "gap-4"}`;
 	return href ? (
-		<a href={href} autofocus={autofocus} class={box} {...attrs}>
+		<a
+			href={href}
+			autofocus={autofocus}
+			class={`${box} ${ROW_OPENS}`}
+			{...attrs}
+		>
 			{children}
 		</a>
 	) : (
@@ -185,6 +190,8 @@ export function ProgressRow({
 					)}
 					{href && <span class="sr-only">, change the budget</span>}
 				</div>
+				{/* Hung in the margin, outside the text column, so every bar keeps its length. Adjust mode's − and + take its place. */}
+				{href && !nudge && <RowArrow class="self-start mt-1" />}
 			</Wrap>
 			{nudgeProps && <Nudge direction="up" {...nudgeProps} />}
 		</li>

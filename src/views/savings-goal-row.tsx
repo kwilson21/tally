@@ -1,5 +1,5 @@
 import { formatCents } from "../money";
-import { Icon } from "./icons";
+import { Icon, ROW_OPENS, RowArrow } from "./icons";
 
 export function SavingsGoalRow({
 	amountCents,
@@ -12,6 +12,8 @@ export function SavingsGoalRow({
 	attrs?: Record<string, string>;
 	autofocus?: boolean;
 }) {
+	// Set a goal ends in terracotta words, so only a set goal's row takes the arrow and the press (P118 A).
+	const goalSet = amountCents !== null && amountCents > 0;
 	const content = (
 		<>
 			<span class="shrink-0 text-ink">
@@ -33,9 +35,7 @@ export function SavingsGoalRow({
 						</span>
 					)}
 				</div>
-				{amountCents !== null && amountCents > 0 && (
-					<p class="text-muted">Set aside from Safe to spend</p>
-				)}
+				{goalSet && <p class="text-muted">Set aside from Safe to spend</p>}
 			</div>
 		</>
 	);
@@ -45,10 +45,11 @@ export function SavingsGoalRow({
 				<a
 					href={href}
 					autofocus={autofocus}
-					class="flex min-h-11 items-start gap-4 py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+					class={`flex min-h-11 items-start gap-4 py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent${goalSet ? ` ${ROW_OPENS}` : ""}`}
 					{...attrs}
 				>
 					{content}
+					{goalSet && <RowArrow class="self-start mt-1" />}
 				</a>
 			) : (
 				<div class="flex min-h-11 items-start gap-4 py-3 text-ink">

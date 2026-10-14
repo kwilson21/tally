@@ -287,3 +287,17 @@ export function Icon({ name, class: className = "size-6" }: IconProps) {
 		</svg>
 	);
 }
+
+/** A row that opens its sheet or page: the press tint, and its arrow turns ink on desktop hover (the link is the group). */
+export const ROW_OPENS = "group row-opens";
+
+/**
+ * The arrow a row that opens ends in (P118 A): muted, hung into the right margin so its tip is the content's edge.
+ * It is an Icon, so it is hidden from assistive technology; the row's own words say what it opens.
+ */
+export function RowArrow({ class: extra }: { class?: string }) {
+	const base = "size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink";
+	return (
+		<Icon name="chevron-right" class={extra ? `${base} ${extra}` : base} />
+	);
+}

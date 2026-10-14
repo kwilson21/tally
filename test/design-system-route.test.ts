@@ -87,6 +87,13 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("shows the rows that open with their arrow, a held press, and Needs category in words (P118 A)", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('data-icon="chevron-right"');
+		expect(html).toContain("bg-press");
+		expect(html).toContain("Needs category\u00a0·\u00a0");
+	});
+
 	it("shows every component in DESIGN.md's table", async () => {
 		const { html } = await get("/design-system");
 		const shown = specimens(html)
@@ -209,11 +216,15 @@ describe("GET /design-system in the demo", () => {
 			ErrorPage({ kind: "500" }),
 			Sidebar({}),
 			BottomTabs({}),
-			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),
+			...PROGRESS_ROWS.map((s) =>
+				ProgressRow({ ...s.props, href: "#progress-row" }),
+			),
 			...ADJUST_ROWS.map((row) => ProgressRow(row)),
 			AdjustLink({ adjusting: false, href: "#adjust-on" }),
 			AdjustLink({ adjusting: true, href: "#adjust-off" }),
-			...TRANSACTION_ROWS.map((s) => TransactionRow({ row: s.row })),
+			...TRANSACTION_ROWS.map((s) =>
+				TransactionRow({ row: s.row, href: "#transaction-row" }),
+			),
 			EmptyState({
 				kind: "search",
 				sentence: "No transactions match these filters.",

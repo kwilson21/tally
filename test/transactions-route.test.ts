@@ -197,6 +197,16 @@ beforeEach(async () => {
 });
 
 describe("GET /transactions", () => {
+	it("ends each row that opens in its arrow, and says Needs category in words (P118 A)", async () => {
+		const { html } = await get("/transactions");
+		expect(html).toMatch(
+			/<a href="\/transactions\/\d+[^"]*" class="[^"]*\brow-opens\b/,
+		);
+		expect(html).toContain('data-icon="chevron-right"');
+		expect(html).toContain("Needs category");
+		expect(html).not.toContain("rounded-control bg-band px-2 text-sm text-ink");
+	});
+
 	it.each([
 		["monthly", null, "2026-08"],
 		["yearly", 8, "2026"],

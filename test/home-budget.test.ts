@@ -63,6 +63,14 @@ describe("Home's budget rows", () => {
 		expect(textOf(html)).not.toContain("Add a budget");
 	});
 
+	it("end each row that opens in its arrow, marked so the press shows (P118 A)", async () => {
+		const { html } = await get("/");
+		expect(html).toMatch(/<a href="\/budget\/1" class="[^"]*\brow-opens\b/);
+		expect(html).toMatch(
+			/<svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink self-start mt-1"[^>]*data-icon="chevron-right"/,
+		);
+	});
+
 	it("list a category with no budget under Not budgeted", async () => {
 		await env.DB.prepare(
 			"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Travel', 'tag', 'cat-blue', 9)",

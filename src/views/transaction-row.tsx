@@ -3,7 +3,7 @@ import { shortDay } from "../dates";
 import type { ListRow } from "../db/transactions";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
-import { Icon } from "./icons";
+import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -163,6 +163,8 @@ export function TransactionRow({
 			: kind === "needs" && tag && maybeCategoryName
 				? { name: maybeCategoryName, kind: "category" as const }
 				: null;
+	// Needs category is said in words, in place of the pill (P118 A); a Maybe guess keeps its dashed tag instead.
+	const needsWords = tag && !maybeCategory;
 	// "Counts in …" shows when a bill moved the month, except where a refund's caption already names it.
 	const countsIn =
 		row.countsInMonth &&
@@ -192,7 +194,7 @@ export function TransactionRow({
 			<Row
 				href={href}
 				autofocus={autofocus}
-				class="flex h-16 items-center gap-4 text-ink no-underline"
+				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}`}
 				{...attrs}
 			>
 				<RowIcon row={row} kind={kind} />
@@ -218,7 +220,7 @@ export function TransactionRow({
 					<span class="flex min-w-0 items-center gap-2 leading-6">
 						{pendingFirst && (
 							<span class="shrink-0 text-muted">
-								Pending{(caption || countsIn) && " ·"}
+								Pending{(caption || countsIn || needsWords) && " ·"}
 							</span>
 						)}
 						{maybeIncomeVisible(row) ? (
@@ -228,6 +230,23 @@ export function TransactionRow({
 								name={maybeCategory.name}
 								kind={maybeCategory.kind}
 							/>
+						) : needsWords ? (
+							<span class="flex min-w-0">
+								{/* The words never shrink; the dot's spaces are no-break, so the space after it is never lost. */}
+								<span class="shrink-0 text-muted">
+									Needs category{caption && "\u00a0·\u00a0"}
+								</span>
+								{caption && (
+									<span
+										class={`truncate text-muted ${guessedNoteShown ? SUGGESTED_NAME_CLASS : ""}`}
+									>
+										{guessedNoteShown && (
+											<span class="sr-only">Tally's guess: </span>
+										)}
+										{caption}
+									</span>
+								)}
+							</span>
 						) : (
 							caption && (
 								<span
@@ -243,7 +262,7 @@ export function TransactionRow({
 						{/* A linked refund's caption names its purchase; the month shows only when a bill moved it. */}
 						{countsIn && (
 							<span class="shrink-0 text-muted">
-								{caption && "· "}Counts in{" "}
+								{(caption || needsWords) && "· "}Counts in{" "}
 								{new Intl.DateTimeFormat("en-US", {
 									month: "long",
 									timeZone: "UTC",
@@ -251,16 +270,12 @@ export function TransactionRow({
 							</span>
 						)}
 						{pendingLast && <span class="shrink-0 text-muted">· Pending</span>}
-						{tag && !maybeCategory && (
-							<span class="shrink-0 rounded-control bg-band px-2 text-sm text-ink">
-								Needs category
-							</span>
-						)}
 					</span>
 				</span>
 				<span class="shrink-0 text-lg">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
+				{href && <RowArrow />}
 			</Row>
 		</>
 	);

@@ -44,6 +44,13 @@ export const COLOR_TOKENS = [
 		contrast: "4.8",
 	},
 	{
+		name: "press",
+		hex: "color-mix(in srgb, var(--color-ink) 6%, transparent)",
+		swatch: "bg-press",
+		use: "a pressed row, and a row whose sheet is loading (ink at 6% over paper, #EDEAE4)",
+		contrast: "16.1 (ink text on it)",
+	},
+	{
 		name: "ok",
 		hex: "#2f7a4f",
 		swatch: "bg-ok",

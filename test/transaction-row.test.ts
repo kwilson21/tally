@@ -4,6 +4,7 @@ import type { ListRow } from "../src/db/transactions";
 import { Chip } from "../src/views/chip";
 import { FormField } from "../src/views/form-field";
 import { MaybeCategory } from "../src/views/maybe-category";
+import { SelectableTransactionRow } from "../src/views/selectable-transaction-row";
 import { rowCaption, TransactionRow } from "../src/views/transaction-row";
 
 const base: ListRow = {
@@ -688,13 +689,54 @@ describe("TransactionRow", () => {
 		expect(html.match(/<a /g)).toHaveLength(1);
 	});
 
-	it("has one fixed height, with the Needs category tag on the caption line", async () => {
+	it("has one fixed height, with Needs category in words on the caption line", async () => {
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).toMatch(/<div class="[^"]*\bh-16\b/);
-		// Two lines only: the name, then the caption with the tag beside it.
+		// Two lines only: the name, then the caption, which says Needs category in words before the bank text.
 		expect(html).toMatch(
-			/<span class="flex[^"]*"><span class="truncate[^"]*">SQ \*LOCAL BAKERY 4432<\/span><span[^>]*>Needs category<\/span><\/span>/,
+			/<span class="flex min-w-0 items-center gap-2 leading-6"><span class="flex min-w-0"><span class="shrink-0 text-muted">Needs category\u00a0·\u00a0<\/span><span class="truncate text-muted ?">SQ \*LOCAL BAKERY 4432<\/span><\/span><\/span>/,
 		);
+	});
+
+	it("says Needs category in words, and the dot has one space each side, with no pill", async () => {
+		const html = await TransactionRow({ row: base }).toString();
+		expect(html).toContain("Needs category\u00a0·\u00a0");
+		expect(html).not.toContain("bg-band");
+		expect(html).not.toContain("rounded-control");
+	});
+
+	it("says only Needs category, with no dot, when the row has no other caption", async () => {
+		const html = await TransactionRow({
+			row: { ...base, displayName: "SQ *LOCAL BAKERY 4432" },
+		}).toString();
+		expect(html).toContain(
+			'<span class="shrink-0 text-muted">Needs category</span>',
+		);
+		expect(html).not.toContain("·");
+	});
+
+	it("reads Pending · Needs category when the bank text goes", async () => {
+		const html = await TransactionRow({
+			row: { ...base, pending: true },
+		}).toString();
+		expect(html).toContain(
+			'<span class="shrink-0 text-muted">Pending ·</span>',
+		);
+		expect(html.indexOf("Pending ·")).toBeLessThan(
+			html.indexOf("Needs category"),
+		);
+		expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
+	});
+
+	it("keeps a Maybe guess's dashed tag instead of the words", async () => {
+		const html = await TransactionRow({
+			row: {
+				...base,
+				maybeCategoryName: "Groceries",
+			},
+		}).toString();
+		expect(html).toContain("Maybe");
+		expect(html).not.toContain("Needs category");
 	});
 
 	it("truncates an unbroken merchant name inside the fixed-height row", async () => {
@@ -762,6 +804,40 @@ describe("TransactionRow", () => {
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).not.toContain("<a ");
 		expect(html).toContain('data-transaction="7"');
+	});
+});
+
+describe("a TransactionRow that opens", () => {
+	it("ends in the muted arrow after the amount, hung into the margin", async () => {
+		const html = await TransactionRow({
+			row: base,
+			href: "/transactions/7",
+		}).toString();
+		expect(html).toMatch(
+			/<span class="shrink-0 text-lg">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
+		);
+	});
+
+	it("is marked as opening, so it takes the press tint and its arrow turns ink on hover", async () => {
+		const html = await TransactionRow({
+			row: base,
+			href: "/transactions/7",
+		}).toString();
+		expect(html).toContain(
+			'class="flex h-16 items-center gap-4 text-ink no-underline group row-opens"',
+		);
+	});
+
+	it("has no arrow and no press on a row that opens nothing, in Select mode or as a split parent", async () => {
+		const plain = await TransactionRow({ row: base }).toString();
+		const selectable = await SelectableTransactionRow({
+			row: base,
+			today: "2026-09-22",
+		}).toString();
+		for (const html of [plain, selectable]) {
+			expect(html).not.toContain("chevron-right");
+			expect(html).not.toContain("row-opens");
+		}
 	});
 });
 

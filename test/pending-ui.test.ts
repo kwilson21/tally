@@ -60,12 +60,12 @@ describe("Pending on a row's caption line", () => {
 	});
 
 	it("takes the bank text's place on a row that needs a category", async () => {
-		expect(await caption(base)).toEqual(["Pending", "Needs category"]);
+		expect(await caption(base)).toEqual(["Pending ·", "Needs category"]);
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).not.toContain("TST* LUPITAS TAQ");
 		// Nothing to take the place of when the bank text is the name.
 		expect(await caption({ ...base, displayName: base.rawName })).toEqual([
-			"Pending",
+			"Pending ·",
 			"Needs category",
 		]);
 	});
@@ -118,14 +118,14 @@ describe("Pending on a row's caption line", () => {
 			{ splitRemovedFromCents: 1234 },
 			[
 				"Pending ·",
+				"Needs category\u00a0·\u00a0",
 				"The bank changed this from $12.34, so its split was removed.",
-				"Needs category",
 			],
 		],
 		[
 			"a refund waiting on its purchase's category",
 			{ refundOfId: 3, refundPurchaseDate: "2026-10-01" },
-			["Pending ·", "Refund for Oct 1", "Needs category"],
+			["Pending ·", "Needs category\u00a0·\u00a0", "Refund for Oct 1"],
 		],
 	] as const)(
 		"goes first when the caption already says more: %s",

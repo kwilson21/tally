@@ -115,7 +115,7 @@ describe("savings goal routes", () => {
 		expect(goalRow).not.toContain("bar-fill");
 		expect(goalRow).not.toContain("nudge-");
 		expect(goalRow).toMatch(
-			/<a href="\/savings-goal"[^>]*class="flex min-h-11 items-start gap-4 py-3[^"]*focus-visible:outline-accent"[^>]*>[\s\S]*Set aside from Safe to spend<\/p><\/div><\/a>/,
+			/<a href="\/savings-goal"[^>]*class="flex min-h-11 items-start gap-4 py-3[^"]*focus-visible:outline-accent group row-opens"[^>]*>[\s\S]*Set aside from Safe to spend<\/p><\/div><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover:text-ink self-start mt-1"[\s\S]*<\/svg><\/a>/,
 		);
 		expect(goalRow).toContain('class="size-7"');
 
