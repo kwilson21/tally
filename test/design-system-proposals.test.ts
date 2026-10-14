@@ -902,12 +902,12 @@ describe("GET /design-system/proposals", () => {
 			expect(p118).toContain(
 				"In both options, the filled pill becomes quiet words beside the bank text.",
 			);
-			// Today: the real TransactionRow (its filled pill, no chevron) and ProgressRow (its brick bar).
+			// Today: the real TransactionRow as the app draws it now (A is built: the arrow, Needs category in words) and ProgressRow (its brick bar).
 			const today = optionOf(p118, "Today (current)");
 			expect(today).toContain('data-transaction="2005"');
-			expect(today).toContain("bg-band px-2 text-sm text-ink");
+			expect(today).not.toContain("bg-band px-2 text-sm text-ink");
 			expect(today).toContain("fill-over");
-			expect(today).not.toContain('data-icon="chevron-right"');
+			expect(today).toContain('data-icon="chevron-right"');
 			expect(today).not.toContain("bg-press");
 			// A: a chevron after each amount, the words in muted, and no press (the press is the pressed group's alone).
 			const quiet = optionOf(p118, "A · Quiet chevron");
