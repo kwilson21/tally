@@ -162,7 +162,10 @@ export type RenameFacts = {
 	tallyCategory: boolean;
 	/** Whether Exclude changes whether Jev can be asked about the row: false for a payment linked to a bill, which counts whatever its exclusion. */
 	excludeCounts: boolean;
-	/** Whether a linked purchase that isn't excluded is drawn: then the review chip decides whether the refund follows it, so it folds the note. */
+	/**
+	 * Whether the review chip decides how the row counts: a linked purchase that isn't excluded is drawn (the refund follows
+	 * it), or an exclusion Plaid set is drawn (a review lifts it). Then the chip folds the note.
+	 */
 	reviewCounts: boolean;
 	/** Today's date, for the dates of the other own names. */
 	today: string;
@@ -187,8 +190,8 @@ export type RenameFacts = {
  * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion.
  * - income (a checkbox): covered here, both ways. income_was is the state it was drawn in, so it needs no hook.
  * - refund_of (a radio): covered here. A link also includes the row (excludedNow) and reviews the credit.
- * - creditReviewed (a checkbox): REVIEW_FOLDS, while reviewCounts holds (a linked purchase that isn't excluded). A new
- *   link already folds through refund_of. creditReviewed_was is the state it was drawn in, and creditReviewedVisible
+ * - creditReviewed (a checkbox): REVIEW_FOLDS, while reviewCounts holds (a linked purchase that isn't excluded, or a Plaid
+ *   exclusion a review lifts). A new link already folds through refund_of. creditReviewed_was is the state it was drawn in, and creditReviewedVisible
  *   only says the chip was drawn, so neither needs a hook.
  * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
  * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
@@ -216,7 +219,7 @@ const EXCLUDE_FOLDS = [
 	"group-has-[input[name=excluded]:checked:not([checked])]/edit:hidden",
 	"group-has-[input[name=excluded][checked]:not(:checked)]/edit:hidden",
 ];
-/** The review chip decides whether a linked refund follows its purchase, so it counts while a purchase is linked (reviewCounts). */
+/** The review chip decides whether a linked refund follows its purchase, or lifts Plaid's exclusion, so the note folds on it (reviewCounts). */
 const REVIEW_FOLDS = [
 	"group-has-[input[name=creditReviewed]:checked:not([checked])]/edit:hidden",
 	"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",

@@ -1342,3 +1342,143 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		);
 	});
 });
+
+describe("a review as a non-income credit lifts Plaid's exclusion (decision 70)", () => {
+	const firstCategory = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+	/** The bakery row as a bank credit that Plaid excluded (or, with `source`, someone else did), its category picked by Tally. */
+	const excludedCredit = (categoryId: number, source = "plaid") =>
+		db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -650, excluded = 1, excluded_source = ?, category_id = ?, category_source = 'jev', category_confidence = 0.95 WHERE id = ?",
+			)
+			.bind(source, categoryId, bakery)
+			.run();
+	/** The panel's fields for a one-off name under This one only, with the exclusion chip and the review chip as given. */
+	const renamed = (review: "0" | "1") => ({
+		category: "",
+		name_pick: "own",
+		merchant: "Dog bed",
+		name_scope: "one",
+		excluded: "1",
+		income: "0",
+		income_was: "0",
+		creditReviewed: review,
+		creditReviewed_was: "0",
+	});
+	const panelHtml = async () =>
+		(
+			await transactions.request(
+				`/transactions/${bakery}?month=all`,
+				{},
+				{ ...env, JEV_API_KEY: "jev-key" },
+				ctx(),
+			)
+		).text();
+
+	it("guesses the category again when the same save renames the credit and reviews it, and says it counts again", async () => {
+		await excludedCredit(await firstCategory());
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, renamed("1"));
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(jev.bodies[0]?.state).toMatchObject({ merchant: "Dog bed" });
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: null,
+			category_source: null,
+		});
+		expect(
+			await db
+				.prepare("SELECT excluded FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first<{ excluded: number }>(),
+		).toMatchObject({ excluded: 0 });
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe(
+			"Saved Dog bed. Tally guesses its category again. It counts in the budget again.",
+		);
+	});
+
+	it("keeps the category when the same save renames the credit without the review, since it stays excluded", async () => {
+		const category = await firstCategory();
+		await excludedCredit(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, renamed("0"));
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed.");
+	});
+
+	it("keeps the category when the review is ticked but the exclusion is the person's, since only Plaid's exclusion lifts", async () => {
+		const category = await firstCategory();
+		await excludedCredit(category, "user");
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, renamed("1"));
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed.");
+	});
+
+	it("counts a Plaid-excluded credit marked income in the same save, and keeps its category, since income is not asked about", async () => {
+		const category = await firstCategory();
+		await excludedCredit(category);
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			...renamed("0"),
+			income: "1",
+			income_was: "0",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(0);
+		expect(await rowOf(bakery)).toMatchObject({
+			category_id: category,
+			category_source: "jev",
+		});
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed. It counts in the budget again.");
+	});
+
+	it("draws the note on a 422 redraw that posts the review, and folds it when the review is unticked", async () => {
+		await excludedCredit(await firstCategory());
+		fakeJev();
+		const { response, html } = await save(bakery, {
+			...renamed("1"),
+			merchant: "",
+		});
+		expect(response.status).toBe(422);
+		expect(html).toContain("Tally guesses its category again.");
+		const note = html.match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toContain(
+			"group-has-[input[name=creditReviewed][checked]:not(:checked)]/edit:hidden",
+		);
+	});
+
+	it("draws no note on the credit as it stands, since the exclusion still holds until the review", async () => {
+		await excludedCredit(await firstCategory());
+		expect(await panelHtml()).not.toContain(
+			"Tally guesses its category again.",
+		);
+	});
+});

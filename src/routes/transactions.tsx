@@ -11,7 +11,7 @@ import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { FOLLOWS_PURCHASE } from "../db/counted-month";
+import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
 import {
 	addLikely,
 	type LikelyRow,
@@ -61,6 +61,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	excludedAfterSave,
 	FOR_PERSON_ERROR,
 	followsPurchaseAfterSave,
 	parseEdit,
@@ -1898,7 +1899,10 @@ function EditSheet({
 										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: !values.excluded || tx.paysBill === true,
+										included: isIncluded(
+											excludedAfterSave(tx, values),
+											tx.paysBill === true,
+										),
 										isSplit: tx.isSplit === true,
 										income: values.income,
 										followsPurchase: purchase !== undefined,
@@ -1906,8 +1910,13 @@ function EditSheet({
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
 								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
-								reviewCounts: linkedPurchase !== undefined,
+								// against (followsPurchaseAfterSave), and so is an exclusion Plaid set, which a review lifts
+								// (excludedAfterSave). The chip folds the note only where one of them is drawn.
+								reviewCounts:
+									linkedPurchase !== undefined ||
+									(tx.excluded &&
+										tx.excludedSource === "plaid" &&
+										tx.amountCents < 0),
 								today,
 								scope: nameScope,
 							}}
@@ -3654,11 +3663,8 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
+	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
+	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
@@ -3669,7 +3675,7 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: !excludedNow || tx.paysBill === true,
+			included: isIncluded(excludedNow, tx.paysBill === true),
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
