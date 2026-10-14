@@ -128,11 +128,13 @@ import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
+	LINKED_PURCHASE_CLASS,
 	NameChoices,
 	OWN_VALUE,
 	pickValue,
 	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
+	TALLY_CATEGORY_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import {
@@ -1722,6 +1724,9 @@ function CategoryChoice({
 									? purchase.categoryId === cat.id
 									: values.categoryId === cat.id
 							}
+							inputClass={
+								cat.id === tx.categoryId ? TALLY_CATEGORY_CLASS : undefined
+							}
 							icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
 						>
 							{cat.name}
@@ -1838,10 +1843,18 @@ function EditSheet({
 			}
 		: {};
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
+	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
+	// panel's hooks need even after a redraw that posted Exclude off or Income on.
 	const countsIfReviewed = (creditReviewed: boolean) =>
 		isIncluded(
-			excludedAfterSave(tx, { ...values, creditReviewed }),
+			excludedAfterSave(tx, {
+				...values,
+				excluded: true,
+				income: false,
+				refundOfId: tx.refundOfId ?? null,
+				creditReviewed,
+			}),
 			tx.paysBill === true,
 		);
 	return (
@@ -2086,33 +2099,30 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
-								// tick, keeps the category (rename.ts).
+								// The note is drawn as if every control the edit reads were off, and the hooks hide it while one of them blocks the
+								// guess (name-choices.tsx). So a purchase link counts as Not linked, and what stays out is only a split row, or a
+								// category someone else set. linkHolds is the drawn purchase that keeps the refund following it with Reviewed off,
+								// which Jev's review does; reviewLifts is whether ticking Reviewed lifts Plaid's exclusion, which Exclude's hook
+								// reads. The hooks fold on both.
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
-									values.newCategory !== true &&
-									values.alwaysForMerchant !== true &&
-									(values.categoryId === null ||
-										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: isIncluded(
-											excludedAfterSave(tx, values),
-											tx.paysBill === true,
-										),
+										included: true,
 										isSplit: tx.isSplit === true,
-										income: values.income,
-										followsPurchase: purchase !== undefined,
+										income: false,
+										followsPurchase: false,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// The review chip folds the note where the review decides whether the row counts: a Plaid
-								// exclusion it lifts, not on a bill payment and not once Exclude is off. A linked purchase is
-								// one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
-								reviewCounts:
-									linkedPurchase !== undefined ||
-									countsIfReviewed(true) !== countsIfReviewed(false),
+								linkHolds:
+									linkedPurchase !== undefined &&
+									followsPurchaseAfterSave(tx, {
+										...values,
+										income: false,
+										creditReviewed: false,
+									}),
+								reviewLifts: countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -2323,6 +2333,7 @@ function EditSheet({
 										name="refund_of"
 										value={String(p.id)}
 										checked={values.refundOfId === p.id}
+										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
 									>
 										{refundPurchaseLabel(p, tx.date)}
 									</Chip>
