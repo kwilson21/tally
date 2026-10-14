@@ -50,11 +50,16 @@ function partLabel(
 		: `Part ${index + 1}`;
 }
 
+/** The id of a part's label on the refund chooser: /split/line redraws it out of band, by refund and part. */
+const partLabelId = (refundId: number, index: number) =>
+	`refund-${refundId}-part-${index}`;
+
 /**
  * The linked refunds of a split purchase (decision 99): for each, "The refund on Oct 5 goes with", one radio chip
- * per part, then Not linked. Nothing is chosen when the sheet opens. It is its own element, so a change to a part's
- * category or amount can draw it again out of band (/split/line, with `oob`). `choices` is what the sheet posted,
- * so a redraw keeps the answers given: "none" for Not linked, or a part's index.
+ * per part, then Not linked. Nothing is chosen when the sheet opens. A part's chip text is its own span, which
+ * /split/line redraws out of band (RefundPartLabels); the radios are never redrawn, so a pick made meanwhile stays
+ * checked and focused. `choices` is what the sheet posted, so a redraw of the whole sheet keeps the answers given:
+ * "none" for Not linked, or a part's index.
  */
 export function RefundChoices({
 	refunds,
@@ -62,21 +67,15 @@ export function RefundChoices({
 	categories,
 	today,
 	choices,
-	oob = false,
 }: {
 	refunds: SplitRefund[];
 	values: SplitValue[];
 	categories: Category[];
 	today: string;
 	choices: Record<number, string | undefined>;
-	oob?: boolean;
 }) {
 	return (
-		<div
-			id="refund-choices"
-			hx-swap-oob={oob ? "true" : undefined}
-			class="flex flex-col gap-4"
-		>
+		<div id="refund-choices" class="flex flex-col gap-4">
 			{refunds.map((refund) => (
 				<fieldset class="flex flex-col gap-2">
 					<legend class="text-sm text-muted">
@@ -90,7 +89,9 @@ export function RefundChoices({
 								value={String(index)}
 								checked={choices[refund.id] === String(index)}
 							>
-								{partLabel(value, index, categories)}
+								<span id={partLabelId(refund.id, index)}>
+									{partLabel(value, index, categories)}
+								</span>
 							</Chip>
 						))}
 						<Chip
@@ -105,6 +106,32 @@ export function RefundChoices({
 				</fieldset>
 			))}
 		</div>
+	);
+}
+
+/**
+ * The refund chooser's part labels, redrawn out of band by /split/line as the parts' categories and amounts are typed
+ * (decision 99). Each one replaces the text of one chip, found by its id; the radios are not in the reply.
+ */
+export function RefundPartLabels({
+	refunds,
+	values,
+	categories,
+}: {
+	refunds: SplitRefund[];
+	values: SplitValue[];
+	categories: Category[];
+}) {
+	return (
+		<>
+			{refunds.flatMap((refund) =>
+				values.map((value, index) => (
+					<span id={partLabelId(refund.id, index)} hx-swap-oob="true">
+						{partLabel(value, index, categories)}
+					</span>
+				)),
+			)}
+		</>
 	);
 }
 

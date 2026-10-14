@@ -72,23 +72,28 @@ export function refundPickMessage(date: string, today: string): string {
 }
 
 /**
- * The field error on the split sheet when a part can't take the refunds chosen for it. `leftCents` is what the part
- * has left for this refund: its own amount, less the refunds already chosen for it.
+ * The field error on the split sheet when a part can't take the refunds chosen for it. `count` is how many refunds are
+ * chosen for it, `totalCents` their absolute total, and `partCents` the part's own size (absolute cents).
  */
 export function refundPartRoomMessage(
-	refundCents: number,
+	count: number,
+	totalCents: number,
 	partName: string,
-	leftCents: number,
+	partCents: number,
 ): string {
-	return `The refund is ${formatCents(Math.abs(refundCents))}, so it can't go with ${partName}'s ${formatCents(leftCents)}.`;
+	const refunds =
+		count === 1
+			? `The refund is ${formatCents(totalCents)}`
+			: `The refunds come to ${formatCents(totalCents)}`;
+	return `${refunds}, and ${partName} is only ${formatCents(partCents)}.`;
 }
 
 /**
  * The split sheet's refund answers, checked before the save (decision 99). `answers[refundId]` is what the sheet
  * posted for each refund: "none" for Not linked, a part's index, or nothing when no part was chosen. Returns the first
- * refusal in words, or null when every refund is answered and every part has room for the refunds chosen for it. A
- * part's room is what is left of its size after the refunds before it in `refunds`, so two on one part are checked
- * together. A split's parts can be negative (a split refund), so a part's size is its absolute cents.
+ * refusal in words, or null when every refund is answered and every part has room for the refunds chosen for it. The
+ * refunds chosen for a part are totalled together and checked against its own size (absolute cents, so a split's
+ * negative parts work too); the first part in sheet order that is too small is the one named.
  */
 export function refundAnswersError(
 	refunds: SplitRefund[],
@@ -102,18 +107,22 @@ export function refundAnswersError(
 			refundPartIndex(answers[refund.id], parts.length) === null,
 	);
 	if (open) return refundPickMessage(open.date, today);
-	const taken = parts.map(() => 0);
-	for (const refund of refunds) {
-		const index = refundPartIndex(answers[refund.id], parts.length);
-		const part = index === null ? undefined : parts[index];
-		if (index === null || part === undefined) continue;
-		const left = leftToRefundCents(
-			Math.abs(part.amountCents),
-			taken[index] ?? 0,
+	for (const [index, part] of parts.entries()) {
+		const chosen = refunds.filter(
+			(refund) => refundPartIndex(answers[refund.id], parts.length) === index,
 		);
-		const cents = Math.abs(refund.amountCents);
-		if (cents > left) return refundPartRoomMessage(cents, part.name, left);
-		taken[index] = (taken[index] ?? 0) + cents;
+		const totalCents = chosen.reduce(
+			(sum, refund) => sum + Math.abs(refund.amountCents),
+			0,
+		);
+		const partCents = Math.abs(part.amountCents);
+		if (totalCents > partCents)
+			return refundPartRoomMessage(
+				chosen.length,
+				totalCents,
+				part.name,
+				partCents,
+			);
 	}
 	return null;
 }

@@ -4295,7 +4295,7 @@ function Controls() {
 						/>
 					</div>
 				</State>
-				<State label="A refund too big for its part: the $45.00 refund can't go with Household's $40.00">
+				<State label="A refund too big for its part: the refund is $45.00, and Household is only $40.00">
 					<div inert>
 						<SplitForm
 							id={1}
@@ -4312,7 +4312,7 @@ function Controls() {
 							choices={{ 1: "1" }}
 							today="2026-10-14"
 							back="/transactions"
-							error="The refund is $45.00, so it can't go with Household's $40.00."
+							error="The refund is $45.00, and Household is only $40.00."
 						/>
 					</div>
 				</State>

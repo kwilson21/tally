@@ -47,11 +47,11 @@ describe("refundAnswersError", () => {
 	it("refuses a refund bigger than the part it is chosen for, in the refund guards' words", () => {
 		// $45.00 does not fit the $40.00 Household part.
 		expect(refundAnswersError([FIRST], { [FIRST.id]: "1" }, PARTS, TODAY)).toBe(
-			"The refund is $45.00, so it can't go with Household's $40.00.",
+			"The refund is $45.00, and Household is only $40.00.",
 		);
 	});
 
-	it("checks every refund chosen for a part together, against what is left of it", () => {
+	it("checks every refund chosen for a part together, against the part's own size", () => {
 		// $45.00 fits the $60.00 Kids part, but $20.00 more would make $65.00.
 		expect(
 			refundAnswersError(
@@ -60,7 +60,7 @@ describe("refundAnswersError", () => {
 				PARTS,
 				TODAY,
 			),
-		).toBe("The refund is $20.00, so it can't go with Kids's $15.00.");
+		).toBe("The refunds come to $65.00, and Kids is only $60.00.");
 		expect(
 			refundAnswersError(
 				[FIRST, SECOND],

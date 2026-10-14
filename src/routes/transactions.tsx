@@ -30,6 +30,7 @@ import {
 	listTransactions,
 	monthsWithTransactions,
 	needsCategoryCount,
+	offeredToSplit,
 	PAGE_SIZE,
 	payingBillsCount,
 	type RefundPurchase,
@@ -167,7 +168,7 @@ import {
 	TOO_MANY,
 } from "../views/selection-action-bar";
 import {
-	RefundChoices,
+	RefundPartLabels,
 	SplitForm,
 	SplitLine,
 	type SplitValue,
@@ -2746,15 +2747,15 @@ function partIdsOf(raw: string[]): (number | undefined)[] | null {
 }
 
 /**
- * The refunds a split sheet asks which part they go with (decision 99): the plain refunds linked to the purchase or to
- * its parts. A split refund's own row is left out, since its parts are the refunds that count.
+ * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
+ * split refund and its parts are left out, and so is a credit that no longer counts (it is unlinked, not asked about).
  */
 async function splitRefundsOf(
 	db: D1Database,
 	parentId: number,
 ): Promise<SplitRefund[]> {
 	return (await linkedRefunds(db, parentId, true))
-		.filter((refund) => !refund.isSplit)
+		.filter(offeredToSplit)
 		.map(({ id, date, amountCents }) => ({ id, date, amountCents }));
 }
 
@@ -2892,10 +2893,10 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 	const total = correctionTotal(tx, form.get("total")?.toString() ?? null);
 	const amounts = form.getAll("part_amount").map(String);
 	const categoryValues = form.getAll("part_category").map(String);
-	// The refund chooser follows the parts' categories and amounts, out of band (decision 99). A Change the parts
-	// sheet keeps its links by part, so it has no chooser.
+	// The refund chooser's part labels follow the parts' categories and amounts, out of band (decision 99). Only the
+	// labels are redrawn, never the radios, so a pick made while this request is in flight stays checked and focused.
+	// A Change the parts sheet keeps its links by part, so it has no chooser.
 	const refunds = total === null ? await splitRefundsOf(c.env.DB, tx.id) : [];
-	const today = await householdToday(c.env.DB);
 	const { results: categories } = await c.env.DB.prepare(
 		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 	).all<Category>();
@@ -2904,16 +2905,13 @@ transactions.post("/transactions/:id{[0-9]+}/split/line", async (c) => {
 			<div id="split-line">
 				<SplitLine parentCents={total ?? tx.amountCents} amounts={amounts} />
 			</div>
-			<RefundChoices
-				oob
+			<RefundPartLabels
 				refunds={refunds}
 				values={categoryValues.map((category, index) => ({
 					category,
 					amount: amounts[index] ?? "",
 				}))}
 				categories={categories}
-				today={today}
-				choices={refundAnswers(refunds, form)}
 			/>
 		</>,
 	);
