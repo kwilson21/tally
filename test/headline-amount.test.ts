@@ -55,10 +55,20 @@ describe("HomeTop Safe to spend", () => {
 			}),
 		);
 
+	// Home's amount sits in a nowrap run (#500), so the headline's class is the one before that run.
+	const headlineClassOf = (html: string, text: string) =>
+		html.match(
+			new RegExp(
+				`class="([^"]*)"><span class="whitespace-nowrap">${quoteForRegExp(text)}<`,
+			),
+		)?.[1];
+
 	it("steps a 9-character amount down and keeps the base size for 8", async () => {
-		expect(classOf(await top(100000000), "$1,000,000")).toContain(RULE);
-		expect(classOf(await top(-99999900), "−$999,999")).toContain(RULE);
-		expect(classOf(await top(99999900), "$999,999")).not.toContain("max-sm");
+		expect(headlineClassOf(await top(100000000), "$1,000,000")).toContain(RULE);
+		expect(headlineClassOf(await top(-99999900), "−$999,999")).toContain(RULE);
+		expect(headlineClassOf(await top(99999900), "$999,999")).not.toContain(
+			"max-sm",
+		);
 	});
 });
 

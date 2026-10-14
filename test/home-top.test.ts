@@ -41,7 +41,16 @@ describe("HomeTop", () => {
 		expect(html).toMatch(
 			/<h1 class="font-serif text-2xl[^"]*">September<\/h1>/,
 		);
-		expect(html).toMatch(/class="font-serif text-6xl[^"]*">\$283</);
+		expect(html).toMatch(
+			/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">\$283<\/span>/,
+		);
+	});
+
+	// Issue #500: the minus sign and the number are one unbreakable run, so a phone never sets the
+	// minus alone on the line above the amount.
+	it("keeps a negative amount's minus sign and number in one unbreakable run", async () => {
+		const html = await top({ safeToSpendCents: -999900 });
+		expect(html).toContain('<span class="whitespace-nowrap">−$9,999</span>');
 	});
 
 	it("keeps the label and Why? link when safe to spend is negative", async () => {

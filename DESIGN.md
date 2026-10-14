@@ -83,7 +83,7 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 |---|---|
 | Page title / month | font-serif, 5xl, semibold, tight tracking. The Transactions page heading can wrap beside Select. |
 | Section title | font-serif, 3xl, semibold |
-| Headline amount | font-serif, 6xl–7xl, semibold, tabular. An amount 9 or more characters long (−$999,999, $1,000,000) is one size smaller, 5xl, on phones under 640px (decision 110). |
+| Headline amount | font-serif, 6xl–7xl, semibold, tabular. An amount 9 or more characters long (−$999,999, $1,000,000) is one size smaller, 5xl, on phones under 640px (decision 110). Home's Safe to spend keeps a negative sign and its number in one nowrap run, so the minus never sits alone above the number (#500). |
 | Sheet title and amount | font-serif, 4xl, semibold (the edit panel's name and amount) |
 | Ledger sheet title | font-serif, 2xl, semibold, tight tracking (a ledger-form sheet's title, P72 A, so its amount, which keeps 4xl, is the one big serif) |
 | Status sentence | font-serif italic, lg |

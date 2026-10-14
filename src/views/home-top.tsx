@@ -65,7 +65,8 @@ export function HomeTop({
 					<p
 						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 					>
-						{amount}
+						{/* One unbreakable run, so a minus sign never sets alone above its number (#500). */}
+						<span class="whitespace-nowrap">{amount}</span>
 						{currentMonth && bankDate && (
 							<span class="ml-3 inline-flex min-h-8 items-center rounded-full border border-dashed border-muted px-3 align-middle font-sans text-sm font-normal text-muted">
 								as of {bankDate}

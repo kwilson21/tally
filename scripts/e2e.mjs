@@ -1455,6 +1455,50 @@ await assertHeadlineFitsPhone(
 	"Net worth",
 );
 step("a seven-figure Net worth fits a 320px phone one size smaller");
+// #500: a negative Safe to spend keeps its minus sign on the number's line at 390px. Safe to spend falls by exactly the
+// savings goal, so this month's goal is raised by what takes the amount Home shows down to −$9,999; the demo reset below restores it.
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+const safeToSpend = page.locator("p.text-6xl").first();
+await safeToSpend.waitFor();
+const shownDollars = (text) => {
+	const match = text.match(/^([−-]?)\$([\d,]+)/);
+	assert(match, `Home's Safe to spend shows no amount: ${text}`);
+	return (match[1] ? -1 : 1) * Number(match[2].replaceAll(",", ""));
+};
+const shownNow = shownDollars(await safeToSpend.textContent());
+assert(
+	shownNow + 9999 >= 0,
+	`Safe to spend is already below −$9,999: ${shownNow}`,
+);
+const goalMonth = now.toISOString().slice(0, 7);
+writeLocalD1(
+	`INSERT OR REPLACE INTO savings_goal_amounts (effective_month, amount_cents) SELECT '${goalMonth}', COALESCE((SELECT amount_cents FROM savings_goal_amounts WHERE effective_month <= '${goalMonth}' ORDER BY effective_month DESC LIMIT 1), 0) + ${(shownNow + 9999) * 100}`,
+);
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+assert.equal(
+	(await safeToSpend.textContent()).slice(0, 7),
+	"−$9,999",
+	"Safe to spend did not reach −$9,999",
+);
+const [minusTop, dollarTop] = await safeToSpend.evaluate((el) => {
+	const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+	const topOf = (start) => {
+		const range = document.createRange();
+		range.setStart(text, start);
+		range.setEnd(text, start + 1);
+		return range.getBoundingClientRect().top;
+	};
+	return [topOf(0), topOf(1)];
+});
+assert(
+	Math.abs(minusTop - dollarTop) < 1,
+	`the minus sign and the number are on different lines at 390px (tops ${minusTop} and ${dollarTop})`,
+);
+step(
+	"a negative Safe to spend keeps its minus sign on the number's line at 390px",
+);
 // #534: Organize's Save is disabled while it posts (hx-disable), so a double click files the group once and the
 // question keeps its own address. Each Save is held for a moment, so the second click lands while the first is in flight.
 await page.setViewportSize({ width: 390, height: 844 });

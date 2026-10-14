@@ -210,7 +210,7 @@ describe("GET /how-it-works in the demo", () => {
 		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
 		const shown = homeHtml.match(
-			/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
+			/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([−-]?)\$([\d,]+)/,
 		);
 		expect(shown).not.toBeNull();
 		// Home's headline is formatCents in whole dollars, so the example is rounded the same way.
