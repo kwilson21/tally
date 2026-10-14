@@ -16,7 +16,8 @@ import { Chip } from "../views/chip";
 import { DetailRow } from "../views/detail-row";
 import { FilterSelect } from "../views/filter-select";
 import { HowLink } from "../views/how-link";
-import { Icon, type IconName } from "../views/icons";
+import { Icon } from "../views/icons";
+import { SIDEBAR_ITEMS, TAB_ITEMS } from "../views/nav";
 import { NewCategoryChip } from "../views/new-category-choice";
 import { Switch } from "../views/switch";
 import { TransactionRow } from "../views/transaction-row";
@@ -93,24 +94,16 @@ const LIST_ROWS: ListRow[] = [
 // Pictures: a phone's first screen (PhoneFrame), a phone cut short or with its tab bar (Glass), and
 // the desktop pictures (Desk, DeskPanel). Glass is PhoneFrame with the height and tab bar left open.
 
-const TABS: [string, IconName, boolean][] = [
-	["Home", "home", false],
-	["Transactions", "list", true],
-	["Bills", "bills", false],
-	["Trends", "trends", false],
-	["More", "more", false],
-];
-
-/** The phone's tab bar, at the foot of its picture; Transactions is the current one. */
+/** The phone's tab bar, at the foot of its picture, from nav.tsx's own tab list; Transactions is the current one. */
 function TabBar() {
 	return (
 		<div class="absolute inset-x-0 bottom-0 grid h-14 grid-cols-5 border-t border-rule bg-paper">
-			{TABS.map(([label, icon, current]) => (
+			{TAB_ITEMS.map((item) => (
 				<span
-					class={`flex flex-col items-center justify-center gap-1 text-xs ${current ? "text-accent" : "text-muted"}`}
+					class={`flex flex-col items-center justify-center gap-1 text-xs ${item.key === "transactions" ? "text-accent" : "text-muted"}`}
 				>
-					<Icon name={icon} />
-					{label}
+					<Icon name={item.icon} />
+					{item.label}
 				</span>
 			))}
 		</div>
@@ -154,26 +147,17 @@ function Glass({
 	);
 }
 
-const SIDEBAR: [string, IconName][] = [
-	["Home", "home"],
-	["Transactions", "list"],
-	["Bills", "bills"],
-	["Trends", "trends"],
-	["Accounts", "accounts"],
-	["Settings", "settings"],
-];
-
-/** A 1280-wide desktop window cropped to the picture: the sidebar, and the main column beside it. */
+/** A 1280-wide desktop window cropped to the picture: the sidebar from nav.tsx's own list, and the main column beside it. */
 function Desk({ children }: { children?: Child }) {
 	return (
 		<div class="-mx-[104px] flex h-[528px] w-[720px]">
 			<div class="flex w-[160px] shrink-0 flex-col border-r border-rule px-3 pt-1">
-				{SIDEBAR.map(([label, icon]) => (
+				{SIDEBAR_ITEMS.map((item) => (
 					<span
-						class={`flex min-h-11 items-center gap-2 text-sm ${label === "Transactions" ? "font-semibold text-ink" : "text-muted"}`}
+						class={`flex min-h-11 items-center gap-2 text-sm ${item.key === "transactions" ? "font-semibold text-ink" : "text-muted"}`}
 					>
-						<Icon name={icon} class="size-5" />
-						{label}
+						<Icon name={item.icon} class="size-5" />
+						{item.label}
 					</span>
 				))}
 			</div>
@@ -751,7 +735,12 @@ function FoldedPage({ p, open = false }: { p: string; open?: boolean }) {
 	);
 }
 
-/** B: the Needs category chip and the four filters in one row that scrolls sideways, with a paper fade at its edge; `wrap` draws it in two lines instead (desktop). */
+/**
+ * B: the Needs category chip and the four filters in one row that scrolls sideways, with a paper fade at its
+ * edge; `wrap` draws it in two lines instead (desktop). The phone's row is drawn 32px scrolled, so the Needs
+ * chip starts a little past the left edge and All categories shows cut off under the fade, where a person can
+ * tell there is more.
+ */
 function StripPage({ p, wrap = false }: { p: string; wrap?: boolean }) {
 	return (
 		<>
@@ -771,7 +760,7 @@ function StripPage({ p, wrap = false }: { p: string; wrap?: boolean }) {
 			) : (
 				<div class="relative -mx-5 mt-3">
 					<div class="flex gap-2 overflow-x-auto px-5 py-1">
-						<span class="shrink-0">{needsChip(p)}</span>
+						<span class="shrink-0 -ml-8">{needsChip(p)}</span>
 						{filterList(p).map((item) => (
 							<span class="shrink-0">{item}</span>
 						))}
@@ -956,7 +945,9 @@ const panelDesktop: Option[] = [
 		desktop: true,
 		screen: (
 			<DeskPanel>
-				<OpenPanel id="p120-desk-b" row={BAKERY} />
+				<PanelBody>
+					<OpenPanel id="p120-desk-b" row={BAKERY} />
+				</PanelBody>
 			</DeskPanel>
 		),
 	},
@@ -1062,7 +1053,7 @@ export function PolishRoundBProposals() {
 				id="p121-header"
 				title="P121 · How much of Transactions' first screen goes to filters"
 				tier="visual"
-				sentence="How many filters stay in view at the top of Transactions. Pick one. Each is a phone's first screen at 390 wide, with the tab bar, and a desktop picture under it."
+				sentence="How many filters stay in view at the top of Transactions. Pick one. Each is a phone's first screen at 390 wide, with the tab bar, and a desktop picture under it. A also shows its Filters pill open."
 			>
 				<Fixed>
 					FilterSelect's pill look (P63 A, P64 B); the count says what's shown

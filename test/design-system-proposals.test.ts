@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
+import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
@@ -320,13 +321,15 @@ describe("GET /design-system/proposals", () => {
 						: 1;
 			expect([id, picked]).toEqual([id, expected]);
 		}
-		// Every option is a picture of a screen: labelled, and nothing inside to Tab to. An option can draw
-		// more than one picture (P120's pairs, P121's open Filters), so there are at least as many as options.
+		// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Most options draw one
+		// picture; six more are drawn on purpose: P120's Today, A and C each draw two phones and B draws three
+		// (the opened Trader Joe's is the third), five more in all, and P121's A draws its Filters open as a
+		// second picture, one more.
 		const options = html.match(/<h4 /g)?.length ?? 0;
 		const pictures =
 			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
 				?.length ?? 0;
-		expect(pictures).toBeGreaterThanOrEqual(options);
+		expect(pictures).toBe(options + 6);
 		// …and each picture has something drawn in it, not an empty frame.
 		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
 			options,
@@ -812,6 +815,22 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		expect(pictures(option(s, "Today (current)"))).toHaveLength(2);
 		expect(pictures(option(s, "A · Category first"))).toHaveLength(2);
 		expect(pictures(option(s, "C · Ruled ledger"))).toHaveLength(2);
+		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
+		expect(s).toContain(
+			'aria-label="At 1280: B · Category leads, folds when set, on desktop"',
+		);
+	});
+
+	it("spaces P120's desktop B like its phone picture, so the bank's text and Category don't touch", async () => {
+		const { html } = await get("/design-system/proposals");
+		const desk = option(
+			section(html, "p120-panel"),
+			"At 1280: B · Category leads, folds when set",
+		);
+		expect(desk).toContain('<div class="flex shrink-0 flex-col gap-5">');
+		expect(desk.indexOf("SQ *LOCAL BAKERY 4432")).toBeLessThan(
+			desk.indexOf(">Category</legend>"),
+		);
 	});
 
 	it("draws Exclude from budget as a switch and the rule as a plain unticked row in A, B and C", async () => {
@@ -921,6 +940,46 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		const b = option(s, "B · One filter strip");
 		expect(b).toContain("flex gap-2 overflow-x-auto px-5 py-1");
 		expect(b.indexOf("Needs category (")).toBeLessThan(b.indexOf("October"));
+	});
+
+	it("draws B's phone strip scrolled a little, so All categories shows cut off under the paper fade", async () => {
+		const { html } = await get("/design-system/proposals");
+		const b = option(section(html, "p121-header"), "B · One filter strip");
+		// The first pill starts past the strip's left edge; the third pill follows October and sits under the
+		// fade that closes the strip on the right.
+		expect(b).toContain('<span class="shrink-0 -ml-8">');
+		expect(b.indexOf("October")).toBeLessThan(b.indexOf("All categories"));
+		expect(b.indexOf("All categories")).toBeLessThan(
+			b.indexOf("pointer-events-none absolute inset-y-0 right-0 w-16"),
+		);
+	});
+
+	it("says in P121's sentence that A also shows its Filters pill open", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(section(html, "p121-header")).toContain(
+			"A also shows its Filters pill open.",
+		);
+	});
+
+	it("lists the sidebar and the tabs in the pictures from nav.tsx's own items, in order", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		const inOrder = (chunk: string, labels: string[]) => {
+			let at = -1;
+			for (const label of labels) {
+				const next = chunk.indexOf(`${label}</span>`, at + 1);
+				expect(next, label).toBeGreaterThan(at);
+				at = next;
+			}
+		};
+		inOrder(
+			option(s, "At 1280: Today (current)"),
+			SIDEBAR_ITEMS.map((item) => item.label),
+		);
+		inOrder(
+			pictures(option(s, "Today (current)"))[0] ?? "",
+			TAB_ITEMS.map((item) => item.label),
+		);
 	});
 
 	it("draws each P121 phone with the demo banner and the tab bar, and a desktop picture for each option", async () => {
