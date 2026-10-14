@@ -1400,6 +1400,31 @@ describe("a new category the family already has is added to, and the button says
 		expect(textOf(html)).not.toContain("Yes, add to");
 		expect(textOf(html)).not.toContain("Yes, create");
 	});
+
+	it("reads 'Yes, add to' with the active category's name when an archived one differs only in an accent (migration 0052)", async () => {
+		const ids = await oneOfEach();
+		await db
+			.prepare("UPDATE category_suggestions SET name = 'École' WHERE id = ?")
+			.bind(ids.suggestion)
+			.run();
+		// The archived 'École' has the lower id, as the 0052 backfill left it, and the active 'école' is the one to add to.
+		const archived = (
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 99) RETURNING id",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		await setArchived(db, archived, true, "2026-07-15");
+		await db
+			.prepare(
+				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('école', 'école', 'tag', 'cat-blue', 100)",
+			)
+			.run();
+		const { html } = await newCategoryPage(ids);
+		expect(textOf(html)).toContain("Yes, add to école");
+		expect(textOf(html)).not.toContain("Yes, restore");
+	});
 });
 
 describe("Yes on an archived category restores it, with the ticked purchases (decision 110)", () => {

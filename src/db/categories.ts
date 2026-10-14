@@ -54,12 +54,17 @@ export async function settingsCategories(
 	};
 }
 
-/** Every category's name, archived ones too, for the form's checks. */
+/**
+ * Every category's name, archived ones too, for the form's checks. Active ones come first, so a lookup by name
+ * finds an active category before an archived one with the same name (migration 0052 kept some Unicode-case duplicates).
+ */
 export async function categoryNames(
 	db: D1Database,
 ): Promise<{ id: number; name: string; archived: boolean }[]> {
 	const { results } = await db
-		.prepare("SELECT id, name, archived FROM categories")
+		.prepare(
+			"SELECT id, name, archived FROM categories ORDER BY archived, sort_order, id",
+		)
 		.all<{ id: number; name: string; archived: number }>();
 	return results.map((c) => ({ ...c, archived: c.archived === 1 }));
 }

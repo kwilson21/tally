@@ -1533,6 +1533,344 @@ describe("createFromSuggestion", () => {
 				expect(await row(tx)).toMatchObject({ category_id: school });
 			expect(await suggestion(id)).toMatchObject({ status: "created" });
 		});
+		// The choice is made inside the write (decision 110): active first, then the one the read saw, and an archived
+		// one comes back only when no active one has the name. Another member's writes land between the read and the write.
+		type Setup = { id: number; made: number[]; cats: Record<string, number> };
+		type Filed = {
+			ok: true;
+			name: string;
+			moved: number;
+			leftOut: number[];
+			attached: boolean;
+			restored: boolean;
+		};
+		type Refused = { ok: false; reason: "invalid"; error: string };
+		type Decision = {
+			name: string;
+			/** The family's categories and the suggestion as the page was drawn. */
+			arrange: () => Promise<Setup>;
+			/** Another member's writes, landing between this save's read and its batch. */
+			between?: (s: Setup) => (() => Promise<unknown>)[];
+			result: (s: Setup, today: string) => Filed | Refused;
+			/** The category the two ticks land in, by name after the save; null when nothing is filed. */
+			ticksIn: string | null;
+			/** Each named category's archived flag after the save. */
+			archived: Record<string, 0 | 1>;
+			/** Categories added, by the save or by another member, against the count before the save. */
+			added: number;
+			/** Each named category's archive periods after the save. */
+			periods: Record<
+				string,
+				(today: string) => { archived_on: string; restored_on: string | null }[]
+			>;
+			status: "created" | "pending";
+		};
+		const FULL_RESTORE =
+			"Tally has room for 50 categories. Archive one to restore another.";
+		const FULL_ADD =
+			"Tally has room for 50 categories. Archive one to add another.";
+		const filed = (
+			s: Setup,
+			name: string,
+			how: { attached?: boolean; restored?: boolean } = {},
+		): Filed => ({
+			ok: true,
+			name,
+			moved: 2,
+			leftOut: s.made.slice(2),
+			attached: how.attached ?? false,
+			restored: how.restored ?? false,
+		});
+		const refused = (error: string): Refused => ({
+			ok: false,
+			reason: "invalid",
+			error,
+		});
+		const insertCategory = async (name: string, key: string, sort: number) =>
+			(
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?) RETURNING id",
+					)
+					.bind(name, key, sort)
+					.first<{ id: number }>()
+			)?.id as number;
+		it.each<Decision>([
+			{
+				name: "no category has the name: Create makes one with the ticks",
+				arrange: async () => ({ ...(await petCare()), cats: {} }),
+				result: (s) => filed(s, "Pet Care"),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0 },
+				added: 1,
+				periods: { "Pet Care": () => [] },
+				status: "created",
+			},
+			{
+				name: "an active Pet Care: Add to files the ticks in it",
+				arrange: async () => {
+					const s = await petCare();
+					await insertCategory("Pet Care", "pet care", 40);
+					return { ...s, cats: {} };
+				},
+				result: (s) => filed(s, "Pet Care", { attached: true }),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0 },
+				added: 0,
+				periods: { "Pet Care": () => [] },
+				status: "created",
+			},
+			{
+				name: "an archived Pet Care: restores it with the ticks",
+				arrange: async () => {
+					const s = await petCare();
+					const archived = await archivedPetCare();
+					return { ...s, cats: { archived } };
+				},
+				result: (s) => filed(s, "Pet Care", { restored: true }),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0 },
+				added: 0,
+				periods: {
+					"Pet Care": (today) => [
+						{ archived_on: "2026-07-15", restored_on: today },
+					],
+				},
+				status: "created",
+			},
+			{
+				name: "an archived École and an active école: Add to the active one, and the archived one stays archived",
+				arrange: async () => {
+					const s = await ecole();
+					await archivedEcole("École");
+					await insertCategory("école", "école", 100);
+					return { ...s, cats: {} };
+				},
+				result: (s) => filed(s, "école", { attached: true }),
+				ticksIn: "école",
+				archived: { École: 1, école: 0 },
+				added: 0,
+				periods: {
+					École: () => [{ archived_on: "2026-07-15", restored_on: null }],
+					école: () => [],
+				},
+				status: "created",
+			},
+			{
+				name: "as above, with 50 active: still Add to, not refused",
+				arrange: async () => {
+					const s = await ecole();
+					await archivedEcole("École");
+					await insertCategory("école", "école", 100);
+					await fillTo(50);
+					return { ...s, cats: {} };
+				},
+				result: (s) => filed(s, "école", { attached: true }),
+				ticksIn: "école",
+				archived: { École: 1, école: 0 },
+				added: 0,
+				periods: {
+					École: () => [{ archived_on: "2026-07-15", restored_on: null }],
+					école: () => [],
+				},
+				status: "created",
+			},
+			{
+				name: "only an archived École at the read, and an active école added before the write: Add to that one",
+				arrange: async () => {
+					const s = await ecole();
+					await archivedEcole("École");
+					return { ...s, cats: {} };
+				},
+				between: () => [() => insertCategory("école", "école", 100)],
+				result: (s) => filed(s, "école", { attached: true }),
+				ticksIn: "école",
+				archived: { École: 1, école: 0 },
+				added: 1,
+				periods: {
+					École: () => [{ archived_on: "2026-07-15", restored_on: null }],
+					école: () => [],
+				},
+				status: "created",
+			},
+			{
+				name: "an active Pet Care that another member archives before the write: restores it (#522)",
+				arrange: async () => {
+					const s = await petCare();
+					const pet = await insertCategory("Pet Care", "pet care", 40);
+					return { ...s, cats: { pet } };
+				},
+				between: (s) => [
+					() => setArchived(db, s.cats.pet as number, true, "2026-09-01"),
+				],
+				result: (s) => filed(s, "Pet Care", { restored: true }),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0 },
+				added: 0,
+				periods: {
+					"Pet Care": (today) => [
+						{ archived_on: "2026-09-01", restored_on: today },
+					],
+				},
+				status: "created",
+			},
+			{
+				name: "an archived Pet Care that another member restores before the write: Add to it, with one period",
+				arrange: async () => {
+					const s = await petCare();
+					const archived = await archivedPetCare();
+					return { ...s, cats: { archived } };
+				},
+				between: (s) => [
+					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
+				],
+				result: (s) => filed(s, "Pet Care", { attached: true }),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0 },
+				added: 0,
+				periods: {
+					"Pet Care": () => [
+						{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+					],
+				},
+				status: "created",
+			},
+			{
+				name: "an archived Pet Care restored and renamed to Pets before the write: Create makes a new Pet Care",
+				arrange: async () => {
+					const s = await petCare();
+					const archived = await archivedPetCare();
+					return { ...s, cats: { archived } };
+				},
+				between: (s) => [
+					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
+					() => saveCategory(db, s.cats.archived as number, { name: "Pets" }),
+				],
+				result: (s) => filed(s, "Pet Care"),
+				ticksIn: "Pet Care",
+				archived: { "Pet Care": 0, Pets: 0 },
+				added: 1,
+				periods: {
+					"Pet Care": () => [],
+					Pets: () => [
+						{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+					],
+				},
+				status: "created",
+			},
+			{
+				name: "an archived Pet Care with 50 active: refused at the read, nothing filed",
+				arrange: async () => {
+					const s = await petCare();
+					await archivedPetCare();
+					await fillTo(50);
+					return { ...s, cats: {} };
+				},
+				result: () => refused(FULL_RESTORE),
+				ticksIn: null,
+				archived: { "Pet Care": 1 },
+				added: 0,
+				periods: {
+					"Pet Care": () => [{ archived_on: "2026-07-15", restored_on: null }],
+				},
+				status: "pending",
+			},
+			{
+				name: "an archived Pet Care with 49 active, and one more added before the write: refused, nothing filed",
+				arrange: async () => {
+					const s = await petCare();
+					await archivedPetCare();
+					await fillTo(49);
+					return { ...s, cats: {} };
+				},
+				between: () => [() => insertCategory("Concurrent", "concurrent", 999)],
+				result: () => refused(FULL_RESTORE),
+				ticksIn: null,
+				archived: { "Pet Care": 1 },
+				added: 1,
+				periods: {
+					"Pet Care": () => [{ archived_on: "2026-07-15", restored_on: null }],
+				},
+				status: "pending",
+			},
+			{
+				name: "an active Pet Care archived and replaced by another member's category before the write: refused, nothing filed (#522)",
+				arrange: async () => {
+					const s = await petCare();
+					const pet = await insertCategory("Pet Care", "pet care", 40);
+					await fillTo(50);
+					return { ...s, cats: { pet } };
+				},
+				between: (s) => [
+					() => setArchived(db, s.cats.pet as number, true, "2026-09-01"),
+					() => insertCategory("Replacement", "replacement", 999),
+				],
+				result: () => refused(FULL_RESTORE),
+				ticksIn: null,
+				archived: { "Pet Care": 1, Replacement: 0 },
+				added: 1,
+				periods: {
+					"Pet Care": () => [{ archived_on: "2026-09-01", restored_on: null }],
+				},
+				status: "pending",
+			},
+			{
+				name: "an archived Pet Care with 49 active, restored and renamed to Pets before the write, which fills the list: refused for the add",
+				arrange: async () => {
+					const s = await petCare();
+					const archived = await archivedPetCare();
+					await fillTo(49);
+					return { ...s, cats: { archived } };
+				},
+				between: (s) => [
+					() => setArchived(db, s.cats.archived as number, false, "2026-09-01"),
+					() => saveCategory(db, s.cats.archived as number, { name: "Pets" }),
+				],
+				result: () => refused(FULL_ADD),
+				ticksIn: null,
+				archived: { Pets: 0 },
+				added: 0,
+				periods: {
+					Pets: () => [
+						{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
+					],
+				},
+				status: "pending",
+			},
+		])("$name", async (d) => {
+			const s = await d.arrange();
+			const today = await householdToday(db);
+			const before = (await categories()).length;
+
+			const result = await createFromSuggestion(
+				racing(...(d.between?.(s) ?? [])),
+				s.id,
+				{ ticked: s.made.slice(0, 2), shown: s.made, notes: {} },
+				"person@example.com",
+			);
+
+			expect(result).toEqual(d.result(s, today));
+			expect(JSON.stringify(result)).not.toContain("Tick at least one");
+			const after = await categories();
+			expect(after.length).toBe(before + d.added);
+			const idNamed = (name: string) =>
+				after.find((c) => c.name === name)?.id ?? 0;
+			for (const tx of s.made.slice(0, 2)) {
+				const landed = await row(tx);
+				if (d.ticksIn === null)
+					expect(landed).toMatchObject({ category_id: null });
+				else
+					expect(landed).toMatchObject({
+						category_id: idNamed(d.ticksIn),
+						category_source: "user",
+					});
+			}
+			for (const [name, flag] of Object.entries(d.archived))
+				expect(after.find((c) => c.name === name)?.archived).toBe(flag);
+			for (const [name, expected] of Object.entries(d.periods))
+				expect(await periods(idNamed(name))).toEqual(expected(today));
+			expect(await suggestion(s.id)).toMatchObject({ status: d.status });
+		});
 	});
 
 	it("adds the ticked ones to the active category with that name, in any capitals, instead of making one", async () => {
@@ -1660,9 +1998,10 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toMatchObject({ ok: true, moved: 1 });
-		// 14 counts the restore and the create, both always in the write so the path is decided at write time
-		// (decision 110); the archive-period close is one statement either way.
-		expect(statements).toBeLessThanOrEqual(14);
+		// 15 counts the restore and the create, both always in the write so the path is decided at write time
+		// (decision 110); the archive-period close is one statement either way, and the household's time zone is
+		// read on every save, since any save may restore a category. None of it grows with the notes.
+		expect(statements).toBeLessThanOrEqual(15);
 		expect((await row(made[300] as number))?.note).toBe(
 			`Note for ${made[300]}`,
 		);
