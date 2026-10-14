@@ -97,8 +97,10 @@ describe("askJev", () => {
 		const body = JSON.parse(String(call?.init.body));
 		expect(body.model).toBe("jev-latest");
 		expect(Object.keys(body.questions).sort()).toEqual([
+			"also_category",
 			"category",
 			"income",
+			"mixed",
 			"reimbursement",
 			"transfer",
 		]);
@@ -113,11 +115,11 @@ describe("askJev", () => {
 		}
 	});
 
-	it("keeps the no-history request byte-for-byte equal to the origin/main body", async () => {
+	it("keeps the no-history request byte-for-byte: the category, its two mixed-trip questions (#233), then the flags", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(input, categories, "k", fetchImpl);
 		expect(String(calls[0]?.init.body)).toBe(
-			'{"model":"jev-latest","state":{"bank_description":"SQ *LOCAL BAKERY 4432","merchant":"Local Bakery","amount_cents":1200,"direction":"money out","account_type":"credit"},"questions":{"category":{"type":"choice","instructions":"Which of this household\'s budget categories does this bank transaction belong to?","criteria":{"Groceries":null,"Eating Out":null,"Gas":null,"None of these fit":"None of these categories fits this transaction, so a person should decide."}},"transfer":{"type":"noul","instructions":"Is this a transfer between the household\'s own accounts, rather than spending?"},"reimbursement":{"type":"noul","instructions":"Is this money paid back to the household for an earlier expense, such as a reimbursement?"},"income":{"type":"noul","instructions":"Is this income, such as pay, a salary, or interest?"}}}',
+			'{"model":"jev-latest","state":{"bank_description":"SQ *LOCAL BAKERY 4432","merchant":"Local Bakery","amount_cents":1200,"direction":"money out","account_type":"credit"},"questions":{"category":{"type":"choice","instructions":"Which of this household\'s budget categories does this bank transaction belong to?","criteria":{"Groceries":null,"Eating Out":null,"Gas":null,"None of these fit":"None of these categories fits this transaction, so a person should decide."}},"mixed":{"type":"noul","instructions":"Does this trip look like it spans more than one of these categories, such as a store trip for groceries and household items?"},"also_category":{"type":"choice","instructions":"If this trip spans more than one of these categories, which other one is it, besides the category you picked? Choose none if the trip is all one category.","criteria":{"Groceries":null,"Eating Out":null,"Gas":null,"None of these fit":"No other category fits: the trip is all one category."}},"transfer":{"type":"noul","instructions":"Is this a transfer between the household\'s own accounts, rather than spending?"},"reimbursement":{"type":"noul","instructions":"Is this money paid back to the household for an earlier expense, such as a reimbursement?"},"income":{"type":"noul","instructions":"Is this income, such as pay, a salary, or interest?"}}}',
 		);
 	});
 
@@ -358,6 +360,118 @@ describe("askJev", () => {
 			const { fetchImpl } = fakeFetch(() => ok(goodBody));
 			const result = await askJev(input, categories, "k", fetchImpl);
 			expect(result.ok && "noteWorthWriting" in result.answer).toBe(false);
+		});
+	});
+
+	describe("the mixed-trip questions (#233)", () => {
+		it("asks whether the trip spans more than one category, and which other one, in the same call as the category", async () => {
+			const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+			await askJev(input, categories, "k", fetchImpl);
+			expect(calls).toHaveLength(1);
+			const body = JSON.parse(String(calls[0]?.init.body));
+			expect(body.questions.mixed.type).toBe("noul");
+			expect(body.questions.mixed.instructions).toContain(
+				"more than one of these categories",
+			);
+			expect(body.questions.also_category.type).toBe("choice");
+			expect(Object.keys(body.questions.also_category.criteria)).toEqual([
+				...categories,
+				NONE_FIT,
+			]);
+			expect(body.questions.also_category.criteria[NONE_FIT]).toMatch(
+				/no other category/i,
+			);
+		});
+
+		it("asks neither mixed-trip question when there are no categories to name", async () => {
+			const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+			await askJev(input, [], "k", fetchImpl);
+			const body = JSON.parse(String(calls[0]?.init.body));
+			expect(body.questions.mixed).toBeUndefined();
+			expect(body.questions.also_category).toBeUndefined();
+		});
+
+		it("reads Jev's probability that the trip is mixed, and the other category it names", async () => {
+			const { fetchImpl } = fakeFetch(() =>
+				ok({
+					...goodBody,
+					answers: {
+						...goodBody.answers,
+						mixed: { type: "noul", noul: 0.91 },
+						also_category: {
+							type: "choice",
+							choice: "Gas",
+							confidence: 0.6,
+							probabilities: {},
+						},
+					},
+				}),
+			);
+			expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
+				ok: true,
+				answer: {
+					category: { label: "Eating Out", confidence: 0.93 },
+					flags: { transfer: 0.02, reimbursement: 0.01, income: 0.03 },
+					mixed: { probability: 0.91, also: "Gas" },
+				},
+			});
+		});
+
+		it("reads none as no other category, which the mixed answer keeps as None of these fit", async () => {
+			const { fetchImpl } = fakeFetch(() =>
+				ok({
+					...goodBody,
+					answers: {
+						...goodBody.answers,
+						mixed: { type: "noul", noul: 0.1 },
+						also_category: {
+							type: "choice",
+							choice: NONE_FIT,
+							confidence: 0.9,
+						},
+					},
+				}),
+			);
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result.ok && result.answer.mixed).toEqual({
+				probability: 0.1,
+				also: NONE_FIT,
+			});
+		});
+
+		it("leaves the mixed reading out, without failing the answer, when the other category isn't one offered or a mixed answer is missing", async () => {
+			const unknownOther = fakeFetch(() =>
+				ok({
+					...goodBody,
+					answers: {
+						...goodBody.answers,
+						mixed: { type: "noul", noul: 0.95 },
+						also_category: {
+							type: "choice",
+							choice: "Travel",
+							confidence: 0.9,
+						},
+					},
+				}),
+			);
+			const unknownResult = await askJev(
+				input,
+				categories,
+				"k",
+				unknownOther.fetchImpl,
+			);
+			expect(unknownResult.ok && "mixed" in unknownResult.answer).toBe(false);
+			expect(unknownResult.ok).toBe(true);
+
+			const missing = fakeFetch(() => ok(goodBody));
+			const missingResult = await askJev(
+				input,
+				categories,
+				"k",
+				missing.fetchImpl,
+			);
+			expect(missingResult.ok && "mixed" in missingResult.answer).toBe(false);
+			expect(missingResult.ok).toBe(true);
 		});
 	});
 

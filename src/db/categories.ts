@@ -134,7 +134,7 @@ export async function unmakeCategory(
 	await db
 		.prepare(
 			`DELETE FROM categories WHERE id = ?1
-				AND NOT EXISTS (SELECT 1 FROM transactions WHERE category_id = ?1 OR jev_category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM transactions WHERE category_id = ?1 OR jev_category_id = ?1 OR jev_also_category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM merchants WHERE default_category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM bills WHERE category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM budget_amounts WHERE category_id = ?1)
