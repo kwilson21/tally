@@ -351,7 +351,7 @@ type ChoiceProps = {
  * Options' markup (proposal-parts.tsx), kept here because one of these options draws several pictures
  * and a longer note, which Options (one picture, one screen) cannot take.
  */
-function Choice({
+export function Choice({
 	name,
 	note,
 	cost,
@@ -386,7 +386,7 @@ function Choice({
 }
 
 /** An option's cards side by side, as Options lays them out. */
-function Choices({ children }: { children?: Child }) {
+export function Choices({ children }: { children?: Child }) {
 	return <div class="flex flex-wrap gap-8">{children}</div>;
 }
 

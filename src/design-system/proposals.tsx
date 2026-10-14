@@ -24,6 +24,7 @@ import { PolishRoundAProposals } from "./proposals-polish-2";
 import { PolishRoundBProposals } from "./proposals-polish-3";
 import { PolishRoundCProposals } from "./proposals-polish-4";
 import { RulesProposals } from "./proposals-rules";
+import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
 // What the owner decided from 2026-09-26 on (decisions 46 to 111), and the issue each ships in.
 export const DECIDED: readonly {
@@ -485,6 +486,17 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="p127-title" class="mt-10">
+				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
+					Open: Safe to spend on a small phone
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 14 for issue #500: what Home's Safe to spend row does when
+					the amount needs the room.
+				</p>
+				<SafeToSpendSmallProposal />
+			</section>
 
 			<section aria-labelledby="p126-title" class="mt-10">
 				<h2 id="p126-title" class="font-serif text-3xl font-semibold">
