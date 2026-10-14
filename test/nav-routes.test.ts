@@ -10,6 +10,9 @@ const DESTINATIONS = [
 	["/accounts", "Accounts"],
 	["/settings", "Settings"],
 	["/more", "More"],
+	// The sidebar's second group, under its rule (P123 A).
+	["/how-it-works", "How Tally works"],
+	["/feedback", "Feedback"],
 ] as const;
 
 describe("navigation destinations", () => {
