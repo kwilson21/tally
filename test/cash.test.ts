@@ -265,7 +265,8 @@ describe("adding cash", () => {
 		const sheet = await request(
 			`/transactions/cash/new?back=${encodeURIComponent("/transactions?category=1&month=all")}`,
 		);
-		expect(sheet.html).toContain(`href="${back}"`);
+		// Closing, or Cancel, returns focus to Add cash (#87).
+		expect(sheet.html).toContain(`href="${back}&amp;focus=add-cash"`);
 		expect(sheet.html).toContain(`name="back" value="${back}"`);
 		const { res } = await request("/transactions/cash", {
 			method: "POST",

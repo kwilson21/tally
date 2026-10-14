@@ -50,6 +50,7 @@ export function SplitForm({
 	categories,
 	values,
 	back,
+	cancelHref = back,
 	error,
 }: {
 	id: number;
@@ -60,6 +61,8 @@ export function SplitForm({
 	categories: Category[];
 	values: SplitValue[];
 	back: string;
+	/** Where Cancel goes, when it is not the list the form returns to (a sheet's close asks for focus). */
+	cancelHref?: string;
 	error?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
@@ -158,7 +161,7 @@ export function SplitForm({
 				</div>
 			))}
 			<div class="grid grid-cols-2 gap-3">
-				<Button href={back} kind="secondary">
+				<Button href={cancelHref} kind="secondary">
 					Cancel
 				</Button>
 				<Button type="submit">Save split</Button>

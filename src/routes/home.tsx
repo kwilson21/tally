@@ -67,8 +67,11 @@ const openAttrs = (href: string) => ({
 	"hx-push-url": "true",
 });
 
+// Where the savings goal sheet's close goes: Home, with focus on the Savings row. Its htmx close and its plain
+// link (Cancel and the backdrop without JavaScript) both use it.
+const SAVINGS_GOAL_CLOSE_HREF = "/?focus=savings-goal";
 const closeSavingsGoalAttrs = {
-	"hx-get": "/?focus=savings-goal",
+	"hx-get": SAVINGS_GOAL_CLOSE_HREF,
 	"hx-target": "#page",
 	"hx-select": "#page",
 	"hx-swap": "outerHTML",
@@ -499,9 +502,11 @@ async function renderHome(
 	);
 }
 
-// Closing a budget sheet swaps Home back in with focus on that category's row, so the change is announced.
+// Closing a budget sheet goes back to Home with focus on that category's row: its plain link (Cancel and the
+// backdrop without JavaScript) and its htmx swap, which announces the change.
+const budgetCloseHref = (categoryId: number) => `/?focus=${categoryId}`;
 const closeBudgetAttrs = (categoryId: number) => ({
-	"hx-get": `/?focus=${categoryId}`,
+	"hx-get": budgetCloseHref(categoryId),
 	"hx-target": "#page",
 	"hx-select": "#page",
 	"hx-swap": "outerHTML",
@@ -571,7 +576,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 		sheet: (spent, _savingsGoal, transactionCount) => (
 			<BottomSheet
 				labelledBy="budget-sheet-title"
-				closeHref="/"
+				closeHref={budgetCloseHref(category.id)}
 				closeAttrs={closeAttrs}
 			>
 				<BudgetSheet
@@ -586,6 +591,7 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 					averageCents={average}
 					transactionCount={transactionCount(category.id)}
 					month={month}
+					closeHref={budgetCloseHref(category.id)}
 					closeAttrs={closeAttrs}
 				/>
 			</BottomSheet>
@@ -599,7 +605,7 @@ home.get("/savings-goal", async (c) => {
 		sheet: (_spent, amountCents) => (
 			<BottomSheet
 				labelledBy="savings-goal-sheet-title"
-				closeHref="/"
+				closeHref={SAVINGS_GOAL_CLOSE_HREF}
 				closeAttrs={closeSavingsGoalAttrs}
 			>
 				<SavingsGoalSheet
@@ -609,6 +615,7 @@ home.get("/savings-goal", async (c) => {
 							: ""
 					}
 					month={monthName(today.slice(0, 7))}
+					closeHref={SAVINGS_GOAL_CLOSE_HREF}
 					closeAttrs={closeSavingsGoalAttrs}
 				/>
 			</BottomSheet>
@@ -636,7 +643,7 @@ home.post("/savings-goal", async (c) => {
 			sheet: () => (
 				<BottomSheet
 					labelledBy="savings-goal-sheet-title"
-					closeHref="/"
+					closeHref={SAVINGS_GOAL_CLOSE_HREF}
 					closeAttrs={closeSavingsGoalAttrs}
 					still
 				>
@@ -644,6 +651,7 @@ home.post("/savings-goal", async (c) => {
 						value={typed}
 						error={parsed.error}
 						month={monthName(month)}
+						closeHref={SAVINGS_GOAL_CLOSE_HREF}
 						closeAttrs={closeSavingsGoalAttrs}
 					/>
 				</BottomSheet>
@@ -684,7 +692,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 			sheet: (spent, _savingsGoal, transactionCount) => (
 				<BottomSheet
 					labelledBy="budget-sheet-title"
-					closeHref="/"
+					closeHref={budgetCloseHref(category.id)}
 					closeAttrs={closeAttrs}
 					still
 				>
@@ -697,6 +705,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 						averageCents={average}
 						transactionCount={transactionCount(category.id)}
 						month={month}
+						closeHref={budgetCloseHref(category.id)}
 						closeAttrs={closeAttrs}
 					/>
 				</BottomSheet>

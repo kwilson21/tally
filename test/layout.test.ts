@@ -38,6 +38,11 @@ describe("app shell", () => {
 		expect(html).toContain('src="/js/toast.js"');
 	});
 
+	it("loads sheet.js on every page, deferred, so an open sheet is a modal (decision 109)", async () => {
+		const html = await home();
+		expect(html).toContain('<script src="/js/sheet.js" defer=""></script>');
+	});
+
 	it("links the tally-mark favicon, so browsers don't request a missing /favicon.ico", async () => {
 		const html = await home();
 		expect(html).toContain(

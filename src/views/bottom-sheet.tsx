@@ -36,7 +36,9 @@ type Props = {
 
 /**
  * A page region over the list: a bottom sheet on phones, a right-hand panel on desktop.
- * Not a modal: focus moves in via autofocus, and Cancel or the dimmed backdrop (links) close it.
+ * Focus moves in via autofocus, and Cancel or the dimmed backdrop (links) close it. With sheet.js
+ * (decision 109) it is a modal: Escape closes it, Tab stays inside it, and the page behind is inert.
+ * Without the script it is only a page region. The markers below are how sheet.js finds it.
  * It arrives in 200 ms (decisions 76 and 80): the backdrop fades in, and the sheet rises (the panel
  * slides in from the right); both are classes in app.css, which still them for reduced motion. They
  * are classes on the elements, so a swap that draws the open sheet again would play them again; the
@@ -57,6 +59,7 @@ export function BottomSheet({
 				href={closeHref}
 				aria-label="Close"
 				tabindex={-1}
+				data-sheet-close=""
 				class={`${still ? "" : "fade-in "}fixed inset-0 z-40 bg-ink/30`}
 				{...closeAttrs}
 			/>
@@ -64,6 +67,7 @@ export function BottomSheet({
 				<section
 					role="dialog"
 					aria-labelledby={labelledBy}
+					data-sheet=""
 					class={`${arrival}fixed inset-x-0 bottom-0 z-50 flex max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] flex-col rounded-t-sheet bg-paper lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet`}
 				>
 					<div class="min-h-0 flex-1 overflow-y-auto p-5 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))]">
@@ -77,6 +81,7 @@ export function BottomSheet({
 				<section
 					role="dialog"
 					aria-labelledby={labelledBy}
+					data-sheet=""
 					class={`${arrival}fixed inset-x-0 bottom-0 z-50 max-h-[min(90vh,calc(100svh-var(--safe-area-top)-var(--toast-top-room)))] overflow-y-auto rounded-t-sheet bg-paper p-5 pb-[calc(1.25rem+var(--safe-area-bottom))] pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:inset-y-0 lg:left-auto lg:max-h-none lg:w-[28rem] lg:rounded-none lg:rounded-l-sheet`}
 				>
 					{children}
