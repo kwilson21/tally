@@ -350,6 +350,22 @@ describe("searching the Transactions list", () => {
 		expect((await found("0412")).sort()).toEqual([named, plain].sort());
 	});
 
+	it("finds nothing by a name a person chose for the merchant when the row's own name hides it, and still finds that row by its bank text", async () => {
+		const named = await charge();
+		const plain = await charge();
+		await suggest(RAW, "Blue Bottle Coffee", "accepted", "Blue Bottle Coffee");
+		await db
+			.prepare("UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?")
+			.bind(named)
+			.run();
+		expect(await rowOf(named)).toMatchObject({ displayName: "Dog bed" });
+		expect(await rowOf(plain)).toMatchObject({
+			displayName: "Blue Bottle Coffee",
+		});
+		expect(await found("Blue Bottle Coffee")).toEqual([plain]);
+		expect((await found("0412")).sort()).toEqual([named, plain].sort());
+	});
+
 	it("finds nothing by a suggestion a split part hides behind its purchase's own name", async () => {
 		const part = await splitPart();
 		await suggest(RAW, "Blue Bottle Coffee");
