@@ -213,6 +213,11 @@ describe("merchant category rule offer", () => {
 			index: 3,
 			mark: "excluded = 1, excluded_source = 'plaid', flag_transfer = 0",
 		},
+		{
+			source: "Plaid category, excluded again by the person",
+			index: 3,
+			mark: "plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'user', flag_transfer = 0",
+		},
 	])(
 		"a pick on a transfer still left out of the budget doesn't count ($source)",
 		async ({ index, mark }) => {
@@ -228,6 +233,27 @@ describe("merchant category rule offer", () => {
 			expect(save.html).not.toContain(QUESTION);
 		},
 	);
+
+	it("a Plaid transfer included and then excluded again by the person doesn't count toward the picks", async () => {
+		await setCategory([ids[0]], groceries, "user");
+		// Plaid excluded it as a transfer. The person includes it with a pick, then excludes it again.
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'plaid', flag_transfer = 0 WHERE id = ?",
+		)
+			.bind(ids[1])
+			.run();
+		await post(`/transactions/${ids[1]}`, edit(groceries));
+		await post(`/transactions/${ids[1]}`, {
+			...edit(groceries),
+			excluded: "1",
+		});
+		// Only ids[0] counts so far. Were the excluded transfer counted, this save would be the third pick and be asked.
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		// ids[0] and ids[2] are two counted picks, so ids[3] is the third and is asked.
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+	});
 
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
