@@ -419,12 +419,33 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(72);
+		expect(DECIDED.length).toBe(79);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
 			if (d.issue) expect(html).toContain(`/issues/${d.issue}"`);
 		}
+	});
+
+	it("lists P118 to P124 as decided, each with its issue and decision 111", () => {
+		const shipped: [string, number][] = [
+			["P118 ·", 497],
+			["P119 ·", 71],
+			["P120 ·", 498],
+			["P121 ·", 84],
+			["P122 ·", 499],
+			["P123 ·", 530],
+			["P124 ·", 501],
+		];
+		for (const [prefix, issue] of shipped) {
+			const entry = DECIDED.find((d) => d.title.startsWith(prefix));
+			expect(entry, prefix).toBeDefined();
+			expect(entry?.issue, prefix).toBe(issue);
+			expect(entry?.outcome, prefix).toContain("decision 111");
+		}
+		const firstVisit = DECIDED.find((d) => d.title.startsWith("P124 ·"));
+		expect(firstVisit?.outcome).toContain("for the demo only");
+		expect(firstVisit?.outcome).toContain("first week was sent back");
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -1133,6 +1154,7 @@ describe("GET /design-system/proposals", () => {
 			"3 accounts",
 			"3 to check",
 			"Needs attention",
+			"None linked yet",
 			"Balances, net worth and your banks",
 			"Categories, rules, your household and your data",
 			"What each number means, with the Riveras&#39; numbers",
@@ -1141,13 +1163,23 @@ describe("GET /design-system/proposals", () => {
 			"Calm and clear; matches the sidebar.",
 		])
 			expect(more, text).toContain(text);
-		expect(pictures(more)).toHaveLength(4);
-		// Each option's own pictures: Today one, A two (the Accounts entry with a bank to sign in), B one.
+		expect(pictures(more)).toHaveLength(5);
+		// Each option's own pictures: Today one, A three (the Accounts entry with a bank to sign in, and before a bank), B one.
 		const drawnBy = (chunk: string, name: string) =>
 			pictures(option(chunk, name)).length;
 		expect(drawnBy(more, "Today (current)")).toBe(1);
-		expect(drawnBy(more, "Option A · Contents page")).toBe(2);
+		expect(drawnBy(more, "Option A · Contents page")).toBe(3);
 		expect(drawnBy(more, "Option B · Plain index")).toBe(1);
+		// Before a bank is linked, Accounts says so in muted words with no alert icon: the alert is Needs attention's alone.
+		const bankless = option(more, "Option A · Contents page");
+		const beforeBankAt = bankless.indexOf(
+			'aria-label="Option A, before a bank is linked, on a phone"',
+		);
+		expect(beforeBankAt).toBeGreaterThan(-1);
+		const beforeBank = bankless.slice(beforeBankAt);
+		expect(beforeBank).toContain("None linked yet");
+		expect(beforeBank).not.toContain('data-icon="alert"');
+		expect(beforeBank).not.toContain("text-over");
 
 		const feedback = section("p123-feedback");
 		expect(names(feedback)).toEqual([
@@ -1208,6 +1240,7 @@ describe("GET /design-system/proposals", () => {
 			"Set 3 transfers aside",
 			"Found 2 paychecks",
 			"Your first page",
+			"What&#39;s left of October&#39;s budget after its spending so far, bills due and savings.",
 			"Everything resets every night, so try anything.",
 			"AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today.",
 			"The family&#39;s first Home: the figure in ink (today), a dash (B), a blank ledger line (A) or Your first page (C).",

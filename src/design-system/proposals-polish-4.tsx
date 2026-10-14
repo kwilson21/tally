@@ -3,8 +3,9 @@
 // labelled, like the rest of the page. Where the app's markup is the same at a phone's size (the
 // Wordmark, Band, WhyLink, ProgressRow, TransactionRow, FeedbackButton, LedgerIllustration, Icon),
 // the real component draws it; where an option changes a screen, that screen is a prototype in
-// tokens. The demo is the Riveras in October (Safe to spend $1,240); the family's numbers are
-// the ones they see once a bank is linked: 86 need a category, $2,140 spent, no budgets yet.
+// tokens. The demo is the Riveras in October (Safe to spend $1,240). The family pictures use
+// made-up sample numbers for a new household once a bank is linked (86 need a category, $2,140
+// spent, no budgets yet), never a real household's.
 
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
@@ -510,7 +511,7 @@ function HomeScrolled() {
 	);
 }
 
-/** The family's Home before any budget is set, with a bank linked and 86 transactions needing a category. */
+/** A new family's Home before any budget is set, in made-up sample numbers: a bank linked and 86 transactions needing a category. */
 function FamilyHome({
 	amount,
 	status,
@@ -556,6 +557,10 @@ const NEEDS_ATTENTION = (
 		<Icon name="alert" class="size-4" />
 		Needs attention
 	</span>
+);
+
+const NONE_LINKED = (
+	<span class="shrink-0 text-sm text-muted">None linked yet</span>
 );
 
 /** The places More holds, each with what it holds and, where it has one, a folio. */
@@ -948,8 +953,8 @@ const storyTotal = (
 			</div>
 			<div class="mt-1 border-b-[3px] border-double border-ink" />
 			<p class="mt-2 text-sm text-muted">
-				What's left of October's budget after bills due and savings. It's the
-				big number on Home.
+				What's left of October's budget after its spending so far, bills due and
+				savings. It's the big number on Home.
 			</p>
 		</div>
 		<h3 class="mt-8 font-serif text-2xl font-semibold">Three things to try</h3>
@@ -1226,6 +1231,24 @@ export function PolishRoundCProposals() {
 												<Entry
 													place={{ ...ACCOUNTS, folio: NEEDS_ATTENTION }}
 												/>
+											</li>
+										</ul>
+									</div>
+								</div>
+							</div>
+							<div
+								role="img"
+								aria-label="Option A, before a bank is linked, on a phone"
+								class="w-[392px] max-w-full rounded-control border border-ink bg-paper px-5 py-2"
+							>
+								<div inert>
+									<div data-screen="picture">
+										<p class="text-sm text-muted">
+											The same place, before a bank is linked
+										</p>
+										<ul class="mt-2 border-y border-rule">
+											<li>
+												<Entry place={{ ...ACCOUNTS, folio: NONE_LINKED }} />
 											</li>
 										</ul>
 									</div>

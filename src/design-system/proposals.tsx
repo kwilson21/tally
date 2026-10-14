@@ -24,7 +24,7 @@ import { PolishRoundBProposals } from "./proposals-polish-3";
 import { PolishRoundCProposals } from "./proposals-polish-4";
 import { RulesProposals } from "./proposals-rules";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 82), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 111), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -423,6 +423,48 @@ export const DECIDED: readonly {
 		outcome:
 			"Option A: Jev says when a trip looks mixed, using this household's categories and transaction details; “Split this one?” appears only for that trip, and suggested category parts start dashed with empty amounts (decision 89, pictures 14–16).",
 		issue: 233,
+	},
+	{
+		title: "P118 · How a row shows it opens",
+		outcome:
+			"Option A: every row that opens ends in Settings' small muted arrow; “Needs category” becomes quiet muted words at the start of the caption instead of a filled pill; and a pressed row shows the new press tint (ink at 6%) under the finger and while its sheet loads (decision 111).",
+		issue: 497,
+	},
+	{
+		title: "P119 · How the row you just saved shows it changed",
+		outcome:
+			"Option A: after a save, a hand-drawn pencil tick takes the saved row's arrow's place for as long as the toast stays, then the arrow comes back; only a save's own reply marks a row. This replaces #71's first idea of a band tint fading over 1.5 s (decision 111).",
+		issue: 71,
+	},
+	{
+		title: "P120 · What the edit panel leads with",
+		outcome:
+			"Option B: the edit panel leads with its category: the name is the one headline, the categories come first in two columns when one is needed and fold to one line once it is set, and Exclude and Count as income become switches; the detail rows follow the category, and the panel's own How this works link goes (decision 111, with #84).",
+		issue: 498,
+	},
+	{
+		title: "P121 · How much of Transactions' first screen goes to filters",
+		outcome:
+			"Option A: Transactions' four filters fold behind one Filters pill, with search and Needs category still in view; its How this works link moves to the page's foot with P124 A (decision 111).",
+		issue: 84,
+	},
+	{
+		title: "P122 · What More shows",
+		outcome:
+			"Option A: More becomes a contents page: each place's icon, what it holds, and a live count on a dotted leader (“3 accounts”, “3 to check”, “Needs attention” when a bank needs signing in, “None linked yet” before a bank), with a small colophon (decision 111).",
+		issue: 499,
+	},
+	{
+		title: "P123 · Where Feedback lives",
+		outcome:
+			"Option A: the Feedback pill moves into the top line beside the wordmark on every page (the sidebar on desktop) and scrolls away, so it never covers a row; this replaces decision 59's place above the tab bar (decision 111).",
+		issue: 530,
+	},
+	{
+		title: "P124 · What a first visit shows and teaches",
+		outcome:
+			"Option A, for the demo only: the banner's “Start here” opens How Tally works' new first section, Tally's story in three struck-through bank lines with Tally's rows and the total under a double rule; Things to try leaves Home, each screen's How this works moves to its page's foot, and How it's built moves last (#502). The family's first week was sent back for a more creative design (#95) (decision 111).",
+		issue: 501,
 	},
 ];
 
