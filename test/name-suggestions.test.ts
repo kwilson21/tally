@@ -213,6 +213,7 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 		["AT&T", "AT&T", "ATT"],
 		["TRADER JOE'S #552", "Trader joe's", "Trader Joes"],
 		["BLUE BOTTLE COF", "Blue bottle cof", "Blue-Bottle Cof"],
+		["7-ELEVEN", "7-eleven", "7 Eleven"],
 	])(
 		"is not offered beside %j (shown as %j) when the guess is %j",
 		(raw, tidied, guess) => {
@@ -241,6 +242,23 @@ describe("a Tally guess that differs from the shown text only by punctuation, sp
 		expect(offeredNames(merchant, "TRADER JOE'S #552")).toEqual([
 			"Trader Joe's Market",
 		]);
+	});
+
+	it("still offers a Tally guess with different digits, since Motel 8 is not Motel 6", () => {
+		const merchant = {
+			stored: "Motel 8",
+			status: "pending",
+			key: "MOTEL 6",
+			namesOn: true,
+		};
+		expect(offeredNames(merchant, "MOTEL 6")).toEqual(["Motel 8"]);
+		expect(
+			shownName({ ...merchant, chosen: null, rawName: "MOTEL 6" }),
+		).toEqual({
+			name: "Motel 8",
+			suggested: true,
+			fromBank: false,
+		});
 	});
 
 	it("keeps the bank's own name offered when it only differs by punctuation (P87 B)", () => {

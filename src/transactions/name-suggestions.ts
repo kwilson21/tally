@@ -77,18 +77,24 @@ export const wordsOf = (text: string) =>
 export const runsOf = (text: string) =>
 	text.toLowerCase().split(/\s+/).filter(Boolean);
 
+const stripped = (text: string, dropped: RegExp) => text.replace(dropped, "");
+
 /** A run with its punctuation removed: "at&t" is "att", "joe's" is "joes", and "#552" is nothing. */
-export const joinedOf = (run: string) => run.replace(/[^\p{L}]/gu, "");
+export const joinedOf = (run: string) => stripped(run, /[^\p{L}]/gu);
+
+/** A name with its punctuation and spacing removed but its digits kept, so "7-eleven" is "7eleven" and "Motel 6" is "motel6". */
+const spelledOf = (text: string) => stripped(text, /[^\p{L}\p{N}]/gu);
 
 /**
  * True when a suggestion repeats the shown text: exactly, or a Tally guess that differs from it only in
- * capitals, punctuation or spacing, so "ATT" beside "AT&T" (decision 103, #412). The bank's own name is never
- * dropped for that, since the bank sent it (P87 B).
+ * capitals, punctuation or spacing, so "ATT" beside "AT&T" (decision 103, #412). Digits count, so "Motel 8"
+ * beside "Motel 6" is still offered (#412, Codex review). The bank's own name is never dropped for that,
+ * since the bank sent it (P87 B).
  */
 const repeatsShown = (name: string, key: string, tidied: string) =>
 	name === tidied ||
 	(!isBankName(name, key) &&
-		joinedOf(name.toLowerCase()) === joinedOf(tidied.toLowerCase()));
+		spelledOf(name.toLowerCase()) === spelledOf(tidied.toLowerCase()));
 
 /**
  * What a transaction's name reads as: a person's chosen name, else the first pending suggestion that
