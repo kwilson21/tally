@@ -55,6 +55,30 @@ describe("HomeTop", () => {
 		expect(html).not.toContain("Everything is on track");
 	});
 
+	// Issue #519: with no budgeted category, a negative number is not over budget. It keeps its ink
+	// colour and the status sentence (Home passes "No budgets set yet.") shows instead.
+	it("is never over budget when no category has a budget", async () => {
+		const html = await top({
+			safeToSpendCents: -4500,
+			hasBudgets: false,
+			status: "No budgets set yet.",
+		});
+		expect(html).toContain("−$45");
+		expect(html).toContain("No budgets set yet.");
+		expect(html).not.toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+		expect(html).not.toMatch(/text-6xl[^"]*text-over/);
+	});
+
+	it("shows today's over-budget state when hasBudgets is true", async () => {
+		const html = await top({ safeToSpendCents: -4500, hasBudgets: true });
+		expect(html).toMatch(/text-6xl[^"]*text-over/);
+		expect(html).toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+	});
+
 	it("shows a bank alert before the forecast", async () => {
 		const html = await top({ bankLine: ["Chase stopped updating Oct 2"] });
 		expect(html.indexOf("Chase stopped updating Oct 2")).toBeLessThan(

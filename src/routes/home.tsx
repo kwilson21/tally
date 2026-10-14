@@ -241,7 +241,11 @@ async function renderHome(
 		refundsCents,
 		billsStillDueCents: billTotals?.stillToPayCents ?? 0,
 	});
-	const showForecast = current && day >= FORECAST_START_DAY && forecast.visible;
+	// Any budget this month, the same test statusSentence uses. With none, Home is never over budget (#519).
+	const hasBudgets = summary.categories.length > 0;
+	// With no budget the forecast would measure spending against $0 and draw it over budget, so it waits for one.
+	const showForecast =
+		current && hasBudgets && day >= FORECAST_START_DAY && forecast.visible;
 	const dailySpending = Array.from(
 		{ length: day },
 		(_, index) =>
@@ -284,6 +288,7 @@ async function renderHome(
 									/>
 								}
 								safeToSpendCents={summary.safeToSpendCents}
+								hasBudgets={hasBudgets}
 								status={statusSentence(summary.categories)}
 								bankLine={bankNotice?.words}
 								bankDate={bankNotice?.asOf}
