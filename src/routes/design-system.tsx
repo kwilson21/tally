@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { Catalog, SheetSpecimen } from "../design-system/catalog";
+import {
+	Catalog,
+	LedgerSheetSpecimen,
+	SheetSpecimen,
+} from "../design-system/catalog";
 import { Proposals } from "../design-system/proposals";
 import { Layout } from "../views/layout";
 
@@ -33,6 +37,18 @@ designSystem.get("/design-system/bottom-sheet", (c) =>
 			currentPath={c.req.path}
 		>
 			<SheetSpecimen />
+		</Layout>,
+	),
+);
+
+designSystem.get("/design-system/ledger-sheet", (c) =>
+	c.html(
+		<Layout
+			title="Ledger sheet · Design system · Tally"
+			demo
+			currentPath={c.req.path}
+		>
+			<LedgerSheetSpecimen />
 		</Layout>,
 	),
 );

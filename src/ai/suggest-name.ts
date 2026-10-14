@@ -145,7 +145,8 @@ export function restatesStore(
 
 /**
  * Workers AI's short, one-line guess for what a purchase was, from only the bank text. Code then drops a line
- * that only restates the store, by the bank text or the merchant's names (decision 103); those names are never sent.
+ * that only restates the store, by the bank text, the merchant's names or the row's own name (decision 103, #426);
+ * those names are never sent.
  */
 export async function suggestNote(
 	ai: Ai,

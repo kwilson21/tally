@@ -257,7 +257,8 @@ export function filterMatch(
 			// The raw text also matches with each * read as a space, as its tidied name shows it (#93):
 			// "google youtube" finds "GOOGLE *YOUTUBE". A name the row shows as a suggestion matches too,
 			// while it is offered (the bank's own always, Tally's guesses while the names switch is on), so what a
-			// row says can be searched for.
+			// row says can be searched for. A row with its own name shows that instead (shownName), so neither its
+			// suggestion nor its merchant's chosen name matches: the chosen name reads own name first, as the list does (#414).
 			// A search also finds a category by its name (#211), and an amount (decision 79). A plain whole
 			// number matches its amount and the words, so "42" finds "STORE 42" as well as $42.00 to $42.99;
 			// with a "$" or a decimal point the search is the amount alone.
@@ -268,17 +269,9 @@ export function filterMatch(
 			if (amount === null || amount.plain) {
 				categoryPattern = pattern;
 				alternatives.push(
-					`(COALESCE(${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR ${suggestedNameMatch(namesOn)} OR ${ownNameSql("t")} LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\')`,
+					`(COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}, t.raw_name) LIKE ? ESCAPE '\\' OR t.raw_name LIKE ? ESCAPE '\\' OR REPLACE(REPLACE(REPLACE(t.raw_name, '*', ' '), '  ', ' '), '  ', ' ') LIKE ? ESCAPE '\\' OR COALESCE(${visibleNoteSql(detailsOn)}, '') LIKE ? ESCAPE '\\' OR (${ownNameSql("t")} IS NULL AND ${suggestedNameMatch(namesOn)}) OR c.name LIKE ? ESCAPE '\\')`,
 				);
-				args.push(
-					pattern,
-					pattern,
-					pattern,
-					pattern,
-					pattern,
-					pattern,
-					pattern,
-				);
+				args.push(pattern, pattern, pattern, pattern, pattern, pattern);
 			}
 			if (amount) {
 				alternatives.push("ABS(t.amount_cents) BETWEEN ? AND ?");
@@ -2296,9 +2289,10 @@ export async function saveJevDetails(
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent. A row with `note_tried_at`
- * set is left out: Workers AI answered it, even with no note, or a person saved its note empty. A row whose call failed
- * (`note_failed_at`) stays in, but after the rows that never failed.
+ * text, Plaid's merchant name, the names the row can show, and its own name (`ownName`, #426). Only the bank
+ * text is sent. A row with `note_tried_at` set is left out: Workers AI answered it, even with no note, or a
+ * person saved its note empty. A row whose call failed (`note_failed_at`) stays in, but after the rows that
+ * never failed.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -2309,6 +2303,7 @@ export async function transactionsNeedingNoteGuess(
 		rawName: string;
 		merchantName: string | null;
 		displayName: string | null;
+		ownName: string | null;
 		suggestedNames: string | null;
 		suggestionStatus: string | null;
 		merchantKey: string;
@@ -2317,7 +2312,7 @@ export async function transactionsNeedingNoteGuess(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
-				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
+				${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
 			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
@@ -2329,6 +2324,7 @@ export async function transactionsNeedingNoteGuess(
 			rawName: string;
 			merchantName: string | null;
 			displayName: string | null;
+			ownName: string | null;
 			suggestedNames: string | null;
 			suggestionStatus: string | null;
 			merchantKey: string;
