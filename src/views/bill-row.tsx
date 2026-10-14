@@ -173,10 +173,13 @@ export function BillRow({
 	bill,
 	today,
 	href,
+	autofocus = false,
 }: {
 	bill: BillRowData;
 	today: string;
 	href?: string;
+	/** Focus this row's link: the bill whose sheet was just closed (#87). */
+	autofocus?: boolean;
 }) {
 	const offer = bill.priceOffer;
 	const content = (
@@ -204,7 +207,11 @@ export function BillRow({
 	return (
 		<li>
 			{href ? (
-				<a href={href} class={`${look} text-ink no-underline`}>
+				<a
+					href={href}
+					class={`${look} text-ink no-underline`}
+					autofocus={autofocus}
+				>
 					{content}
 				</a>
 			) : (

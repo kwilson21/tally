@@ -160,6 +160,16 @@ describe("merchant category rule offer", () => {
 		);
 	});
 
+	it("closes its question back to the transaction that was saved, so focus returns to its row (#87)", async () => {
+		await post(`/transactions/${ids[0]}`, edit(groceries));
+		await post(`/transactions/${ids[1]}`, edit(groceries));
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		const close = third.html.match(
+			/<a href="([^"]*)" aria-label="Close"[^>]*data-sheet-close/,
+		)?.[1];
+		expect(close?.replaceAll("&amp;", "&")).toContain(`focus=${ids[2]}`);
+	});
+
 	it("still offers when the store also has another category's picks (decision 90: nothing counts a store's categories)", async () => {
 		await setCategory([ids[0]], household, "user");
 		await setCategory([ids[1], ids[2]], groceries, "user");

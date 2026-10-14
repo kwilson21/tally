@@ -323,6 +323,10 @@ async function page(
 	given?: string,
 ) {
 	const today = given ?? (await householdToday(c.env.DB));
+	// A sheet's close asks for focus on its bill's row, or on Add a bill (?focus=, #87).
+	const focus = c.req.query("focus");
+	const focusAddBill = focus === "add-bill";
+	const focusBillId = Number(focus);
 	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);
 	// A payment at another price is offered on the row it would pay: an active bill whose shown
@@ -365,8 +369,10 @@ async function page(
 				<HowLink section="bills" />
 				<div class="mt-3">
 					<Button
+						id="add-bill"
 						kind="secondary"
 						href="/bills/new"
+						autofocus={focusAddBill}
 						{...sheetAttrs("/bills/new")}
 					>
 						Add a bill
@@ -400,6 +406,7 @@ async function page(
 												bill={bill}
 												today={today}
 												href={`/bills/${bill.id}`}
+												autofocus={bill.id === focusBillId}
 											/>
 										))}
 									</ul>
@@ -409,7 +416,10 @@ async function page(
 					)
 				)}
 				{inactive.length > 0 && (
-					<details class="group mt-2 border-t border-rule">
+					<details
+						class="group mt-2 border-t border-rule"
+						open={inactive.some((bill) => bill.id === focusBillId)}
+					>
 						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 text-accent [&::-webkit-details-marker]:hidden">
 							<span class="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
 								<Icon name="chevron-right" class="size-5" />
@@ -418,7 +428,12 @@ async function page(
 						</summary>
 						<ul class="divide-y divide-rule">
 							{inactive.map((bill) => (
-								<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
+								<BillRow
+									bill={bill}
+									today={today}
+									href={`/bills/${bill.id}`}
+									autofocus={bill.id === focusBillId}
+								/>
 							))}
 						</ul>
 					</details>
@@ -525,6 +540,8 @@ function BillSheet({
 	keptCents?: number;
 }) {
 	const action = bill ? `/bills/${bill.id}` : "/bills";
+	// Closing the sheet, by the backdrop or Cancel, returns focus to this bill's row, or to Add a bill (#87).
+	const closeHref = bill ? `/bills?focus=${bill.id}` : "/bills?focus=add-bill";
 	// Once a name has been refused, Reactivate also sends the Name field, so renaming the bill is how
 	// to get it back (P45 A's duplicate name has no other way out).
 	const activeAction = bill
@@ -534,7 +551,7 @@ function BillSheet({
 		// A field's error draws the open sheet again.
 		<BottomSheet
 			labelledBy="bill-sheet-title"
-			closeHref="/bills"
+			closeHref={closeHref}
 			still={Object.keys(errors).length > 0}
 		>
 			<h2
@@ -760,7 +777,7 @@ function BillSheet({
 				/>
 				<div class="flex items-center justify-between gap-3">
 					<div class="flex gap-3">
-						<Button href="/bills" kind="secondary">
+						<Button href={closeHref} kind="secondary">
 							Cancel
 						</Button>
 						<Button type="submit" busyLabel="Saving…">

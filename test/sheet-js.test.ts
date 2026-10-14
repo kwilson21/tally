@@ -1,0 +1,372 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// sheet.js is a classic script with no exports, so it runs against a small stand-in for the page, as
+// toast-js.test.ts does. htmx's events bubble, so the test sends them to document the way htmx does.
+
+const load = Object.values(import.meta.glob("../public/js/sheet.js"))[0] as
+	| (() => Promise<unknown>)
+	| undefined;
+
+/** The document the script is running against, so a node that is focused becomes its activeElement. */
+let activeDocument: { activeElement: unknown } | null = null;
+
+/** One simple selector: an optional tag, then [attribute] or [attribute=value] parts. */
+function matchesSimple(node: FakeNode, selector: string) {
+	const [, tag = "", conditions = ""] =
+		selector.trim().match(/^(\w*)((?:\[[^\]]+\])*)$/) ?? [];
+	if (!tag && !conditions) return false;
+	if (tag && node.tag !== tag) return false;
+	return [...conditions.matchAll(/\[([^=\]]+)(?:=([^\]]+))?\]/g)].every(
+		([, name = "", value]) =>
+			node.attrs.has(name) &&
+			(value === undefined || node.attrs.get(name) === value),
+	);
+}
+
+class FakeNode extends EventTarget {
+	children: FakeNode[] = [];
+	parentElement: FakeNode | null = null;
+	attrs = new Map<string, string>();
+	id = "";
+	disabled = false;
+	/** A node with display: none has no boxes, so it can't take focus. */
+	hidden = false;
+	tabIndex: number;
+	/** How many times the node was clicked, by the script or by a test. */
+	clicks = 0;
+	constructor(readonly tag: string) {
+		super();
+		this.tabIndex = [
+			"a",
+			"button",
+			"input",
+			"select",
+			"textarea",
+			"summary",
+		].includes(tag)
+			? 0
+			: -1;
+	}
+	setAttribute(name: string, value: string) {
+		this.attrs.set(name, value);
+		if (name === "id") this.id = value;
+	}
+	getAttribute(name: string) {
+		return this.attrs.get(name) ?? null;
+	}
+	hasAttribute(name: string) {
+		return this.attrs.has(name);
+	}
+	removeAttribute(name: string) {
+		this.attrs.delete(name);
+	}
+	append(...nodes: FakeNode[]) {
+		for (const node of nodes) {
+			node.remove();
+			node.parentElement = this;
+			this.children.push(node);
+		}
+	}
+	remove() {
+		const parent = this.parentElement;
+		if (parent) parent.children.splice(parent.children.indexOf(this), 1);
+		this.parentElement = null;
+	}
+	/** Every node under this one, in document order. */
+	descendants(): FakeNode[] {
+		return this.children.flatMap((child) => [child, ...child.descendants()]);
+	}
+	querySelectorAll(selector: string): FakeNode[] {
+		const parts = selector.split(",");
+		return this.descendants().filter((node) =>
+			parts.some((part) => matchesSimple(node, part)),
+		);
+	}
+	querySelector(selector: string): FakeNode | null {
+		return this.querySelectorAll(selector)[0] ?? null;
+	}
+	/** As a browser does: a click on a link or button runs its handler, which a test counts. */
+	click() {
+		this.clicks += 1;
+	}
+	focus() {
+		if (activeDocument) activeDocument.activeElement = this;
+	}
+	getClientRects() {
+		return this.hidden ? [] : [{}];
+	}
+}
+
+function el(tag: string, attrs: Record<string, string> = {}) {
+	const node = new FakeNode(tag);
+	for (const [name, value] of Object.entries(attrs))
+		node.setAttribute(name, value);
+	return node;
+}
+
+/** A sheet as BottomSheet draws it: its backdrop link, then the section with a heading, a field and Save. */
+function drawSheet(sheetSlot: FakeNode) {
+	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
+	const section = el("section", { "data-sheet": "" });
+	const title = el("h2", { tabindex: "-1" });
+	title.tabIndex = -1;
+	const field = el("input");
+	const save = el("button");
+	section.append(title, field, save);
+	sheetSlot.append(backdrop, section);
+	return { backdrop, section, title, field, save };
+}
+
+/**
+ * A page as Layout draws it: body > [skip link, the frame (aside and main), the tab bar, the feedback
+ * button, #toasts, #announcer]. The main holds the header, the list and #sheet, where a sheet sits.
+ * The tab bar is inert before the script runs, as a page drawn that way is.
+ */
+function drawPage({ sheet = true }: { sheet?: boolean } = {}) {
+	const documentElement = el("html");
+	const body = el("body");
+	documentElement.append(body);
+	const skip = el("a", { href: "#main" });
+	const aside = el("aside");
+	const header = el("h1");
+	const list = el("ul");
+	const row = el("a", { href: "/transactions/1" });
+	list.append(row);
+	const sheetSlot = el("div", { id: "sheet" });
+	const main = el("main", { id: "main" });
+	main.append(header, list, sheetSlot);
+	const frame = el("div");
+	frame.append(aside, main);
+	const tabs = el("nav");
+	tabs.setAttribute("inert", "");
+	const feedback = el("button");
+	const toasts = el("div", { id: "toasts" });
+	const undo = el("button");
+	toasts.append(undo);
+	const announcer = el("div", { id: "announcer" });
+	body.append(skip, frame, tabs, feedback, toasts, announcer);
+	const drawn = sheet ? drawSheet(sheetSlot) : null;
+	return {
+		documentElement,
+		body,
+		skip,
+		aside,
+		header,
+		list,
+		row,
+		main,
+		sheetSlot,
+		frame,
+		tabs,
+		feedback,
+		toasts,
+		undo,
+		announcer,
+		drawn,
+	};
+}
+
+type Page = ReturnType<typeof drawPage>;
+
+/**
+ * Runs sheet.js against a page, as the page's document, and returns the page with its document.
+ * `beforeScript` runs first, so a test can put another keydown handler ahead of the script's.
+ */
+async function sheetPage(
+	options: { sheet?: boolean; beforeScript?: (doc: EventTarget) => void } = {},
+) {
+	const parts = drawPage({ sheet: options.sheet });
+	const doc = Object.assign(new EventTarget(), {
+		body: parts.body,
+		documentElement: parts.documentElement,
+		activeElement: parts.row as unknown,
+		querySelector: (selector: string) => parts.body.querySelector(selector),
+		querySelectorAll: (selector: string) =>
+			parts.body.querySelectorAll(selector),
+	});
+	vi.stubGlobal("document", doc);
+	activeDocument = doc;
+	options.beforeScript?.(doc);
+	vi.resetModules();
+	await load?.();
+	return { ...parts, document: doc };
+}
+
+/** The page after a sheet is drawn in it again: a field's error redraws the open sheet in its place. */
+function redrawSheet(parts: Page) {
+	parts.drawn?.backdrop.remove();
+	parts.drawn?.section.remove();
+	return drawSheet(parts.sheetSlot);
+}
+
+/** The sheet leaves the page, as the close swap takes it out, and htmx reports the swap. */
+function closeSheet(parts: Page & { document: EventTarget }) {
+	for (const child of [...parts.sheetSlot.children]) child.remove();
+	settle(parts.document);
+}
+
+function settle(doc: EventTarget) {
+	doc.dispatchEvent(new Event("htmx:after:settle", { bubbles: true }));
+}
+
+function keydown(
+	doc: EventTarget,
+	key: string,
+	init: { shiftKey?: boolean; isComposing?: boolean } = {},
+) {
+	const event = Object.assign(new Event("keydown", { cancelable: true }), {
+		key,
+		shiftKey: init.shiftKey ?? false,
+		isComposing: init.isComposing ?? false,
+	});
+	doc.dispatchEvent(event);
+	return event;
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	activeDocument = null;
+});
+
+describe("sheet.js: an open sheet is a modal", () => {
+	it("sets aria-modal on the sheet, and inert on the page around it but not on the sheet, its backdrop, the toasts or the announcer", async () => {
+		const parts = await sheetPage();
+		const section = parts.drawn?.section;
+		expect(section?.getAttribute("aria-modal")).toBe("true");
+		for (const outside of [
+			parts.skip,
+			parts.aside,
+			parts.header,
+			parts.list,
+			parts.tabs,
+			parts.feedback,
+		]) {
+			expect(outside.hasAttribute("inert")).toBe(true);
+		}
+		for (const kept of [
+			section,
+			parts.drawn?.backdrop,
+			parts.toasts,
+			parts.announcer,
+			parts.main,
+			parts.sheetSlot,
+			parts.frame,
+		]) {
+			expect(kept?.hasAttribute("inert")).toBe(false);
+		}
+	});
+
+	it("takes inert off exactly what it set when the sheet leaves, and leaves an element that was inert before untouched", async () => {
+		const parts = await sheetPage();
+		closeSheet(parts);
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(parts.header.hasAttribute("inert")).toBe(false);
+		expect(parts.aside.hasAttribute("inert")).toBe(false);
+		expect(parts.tabs.hasAttribute("inert")).toBe(true);
+		expect(parts.tabs.hasAttribute("data-sheet-inert")).toBe(false);
+	});
+
+	it("keeps the page inert, without doubling up, when a redrawn sheet replaces the open one", async () => {
+		const parts = await sheetPage();
+		const redrawn = redrawSheet(parts);
+		settle(parts.document);
+		expect(redrawn.section.getAttribute("aria-modal")).toBe("true");
+		expect(parts.list.hasAttribute("inert")).toBe(true);
+		expect(parts.toasts.hasAttribute("inert")).toBe(false);
+		closeSheet(parts);
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(parts.tabs.hasAttribute("inert")).toBe(true);
+	});
+
+	it("releases marks a page snapshot carried over from a sheet that was open when it was taken", async () => {
+		const parts = await sheetPage({ sheet: false });
+		parts.list.setAttribute("inert", "");
+		parts.list.setAttribute("data-sheet-inert", "");
+		settle(parts.document);
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(parts.list.hasAttribute("data-sheet-inert")).toBe(false);
+	});
+
+	it("does nothing to a page with no sheet", async () => {
+		const parts = await sheetPage({ sheet: false });
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(parts.body.querySelectorAll("[inert]")).toEqual([parts.tabs]);
+	});
+});
+
+describe("sheet.js: Escape", () => {
+	it("clicks the sheet's backdrop link, so it closes the way Cancel and the backdrop do", async () => {
+		const parts = await sheetPage();
+		const event = keydown(parts.document, "Escape");
+		expect(parts.drawn?.backdrop.clicks).toBe(1);
+		expect(event.defaultPrevented).toBe(true);
+	});
+
+	it("does nothing when no sheet is open", async () => {
+		const parts = await sheetPage({ sheet: false });
+		const event = keydown(parts.document, "Escape");
+		expect(event.defaultPrevented).toBe(false);
+		expect(parts.list.clicks).toBe(0);
+	});
+
+	it("leaves a key another handler already took alone", async () => {
+		const parts = await sheetPage({
+			beforeScript: (doc) =>
+				doc.addEventListener("keydown", (event) => event.preventDefault()),
+		});
+		keydown(parts.document, "Escape");
+		expect(parts.drawn?.backdrop.clicks).toBe(0);
+	});
+
+	it("leaves Escape alone while an input method is composing text", async () => {
+		const parts = await sheetPage();
+		keydown(parts.document, "Escape", { isComposing: true });
+		expect(parts.drawn?.backdrop.clicks).toBe(0);
+	});
+
+	it("leaves every other key alone", async () => {
+		const parts = await sheetPage();
+		const event = keydown(parts.document, "a");
+		expect(event.defaultPrevented).toBe(false);
+		expect(parts.drawn?.backdrop.clicks).toBe(0);
+	});
+});
+
+describe("sheet.js: Tab stays inside the sheet", () => {
+	it("wraps from the last control to the first, and from the first back to the last", async () => {
+		const parts = await sheetPage();
+		const field = parts.drawn?.field;
+		const save = parts.drawn?.save;
+		save?.focus();
+		const forward = keydown(parts.document, "Tab");
+		expect(forward.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(field);
+		const backward = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(backward.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(save);
+	});
+
+	it("leaves Tab alone between two controls inside the sheet", async () => {
+		const parts = await sheetPage();
+		parts.drawn?.field.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("counts a disclosure's summary as a stop, so Shift+Tab from it is left to the browser", async () => {
+		const parts = await sheetPage();
+		const summary = el("summary");
+		parts.drawn?.section.append(summary);
+		summary.focus();
+		const event = keydown(parts.document, "Tab", { shiftKey: true });
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("brings focus back into the sheet from outside it, such as a toast's Undo", async () => {
+		const parts = await sheetPage();
+		parts.undo.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+});
