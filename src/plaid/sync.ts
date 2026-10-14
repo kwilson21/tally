@@ -107,10 +107,10 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 	return name;
 }
 
-// The names a page saves for its merchants are a few statements for the whole page, never one per charge
-// (D1 allows 1,000 queries in one invocation, and each charge already costs about six). Each reads its
-// charges from one JSON array through `json_each`, since D1 also allows only 100 bound values in a
-// statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
+// The names a page saves for its merchants are a few statements for the whole page, never one per charge: the
+// page's statements go in one D1 batch, which must finish within D1's 30-second limit on a whole batch call, so
+// they are kept few. Each reads its charges from one JSON array through `json_each`, since D1 allows only 100
+// bound values in a statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
 
 /**
  * Starts the merchant row of each Plaid name from a copy of the row saved under the bank text it came with,
@@ -494,6 +494,8 @@ export async function syncItem(
 					"/transactions/sync",
 					{
 						access_token: accessToken,
+						// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
+						count: 100,
 						...(cursor === null ? {} : { cursor }),
 					},
 					fetchImpl,
@@ -543,11 +545,15 @@ export async function syncItem(
 			];
 			const existingTransactionIds = new Set<string>();
 			if (added.length > 0) {
-				const placeholders = added.map(() => "?").join(", ");
+				// One JSON array, read by json_each: a bind per row would pass D1's 100 values past 100 rows.
 				const existing = await env.DB.prepare(
-					`SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IN (${placeholders})`,
+					"SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id IN (SELECT value FROM json_each(?))",
 				)
-					.bind(...added.map((transaction) => transaction.transaction_id))
+					.bind(
+						JSON.stringify(
+							added.map((transaction) => transaction.transaction_id),
+						),
+					)
 					.all<{ plaid_transaction_id: string }>();
 				for (const row of existing.results) {
 					existingTransactionIds.add(row.plaid_transaction_id);
@@ -894,11 +900,10 @@ export async function syncItem(
 					(id) => !added.some((twin) => twin.pending_transaction_id === id),
 				);
 				if (unsettled.length > 0) {
-					const marks = unsettled.map(() => "?").join(", ");
 					const pendingDrops = await env.DB.prepare(
-						`SELECT plaid_transaction_id FROM transactions WHERE pending = 1 AND plaid_transaction_id IN (${marks})`,
+						"SELECT plaid_transaction_id FROM transactions WHERE pending = 1 AND plaid_transaction_id IN (SELECT value FROM json_each(?))",
 					)
-						.bind(...unsettled)
+						.bind(JSON.stringify(unsettled))
 						.all<{ plaid_transaction_id: string }>();
 					for (const { plaid_transaction_id } of pendingDrops.results) {
 						waitingDrops.add(plaid_transaction_id);

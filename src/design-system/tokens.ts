@@ -201,6 +201,11 @@ export const TYPE_ROLES = [
 		sample: "Local Bakery",
 	},
 	{
+		role: "Ledger sheet title",
+		classes: "font-serif text-2xl font-semibold tracking-tight",
+		sample: "Add a bill",
+	},
+	{
 		role: "Status sentence",
 		classes: "font-serif text-lg italic",
 		sample: "You're on track, with $1,284 safe to spend.",
