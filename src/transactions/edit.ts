@@ -146,6 +146,21 @@ export function postedCredit(
 	};
 }
 
+/** Whether the review chip was changed from the state the panel showed (saveEdit's creditReviewChanged). */
+function reviewWasChanged(
+	stored: { creditReviewedByUser: boolean },
+	edit: Pick<
+		Edit,
+		"creditReviewed" | "creditReviewedWas" | "creditReviewedProvided"
+	>,
+): boolean {
+	return (
+		edit.creditReviewedProvided !== false &&
+		edit.creditReviewed !==
+			(edit.creditReviewedWas ?? stored.creditReviewedByUser)
+	);
+}
+
 /**
  * Whether a linked credit counts with its purchase once this edit is saved, so the edit panel's lock and
  * "Counts in" line and the route's category drop say how the row will really count. saveEdit writes only the
@@ -176,10 +191,7 @@ export function followsPurchaseAfterSave(
 		typeof edit.refundOfId === "number" &&
 		edit.refundOfId !== (stored.refundOfId ?? null);
 	const incomeChanged = edit.income !== (edit.incomeWas ?? stored.income);
-	const reviewChanged =
-		edit.creditReviewedProvided !== false &&
-		edit.creditReviewed !==
-			(edit.creditReviewedWas ?? stored.creditReviewedByUser);
+	const reviewChanged = reviewWasChanged(stored, edit);
 	// A review ticked as not income turns income off whatever the panel drew (saveEdit's flag_income).
 	const reviewedAsNotIncome =
 		reviewChanged && edit.creditReviewed && !edit.income;
@@ -198,6 +210,48 @@ export function followsPurchaseAfterSave(
 			(reviewChanged && edit.creditReviewed) ||
 			(stored.creditReviewed && !reviewCleared && !unreviewedByIncome),
 	});
+}
+
+/**
+ * Whether a row is excluded from the budget once this edit is saved. The panel posts its Exclude chip as it was drawn,
+ * so this is what the save leaves, not what was posted: a new link includes the row (saveEdit writes excluded = 0),
+ * and a save lifts Plaid's exclusion off a credit it reviews as not income or marks as income (saveEdit's lift,
+ * decision 70). A person's or Jev's exclusion is never lifted. Keep it in step with saveEdit's exclusion writes;
+ * a bill payment counts whatever its exclusion, which isIncluded (src/db/counted-month.ts) reads.
+ */
+export function excludedAfterSave(
+	stored: {
+		amountCents: number;
+		excluded: boolean;
+		excludedSource: string | null;
+		refundOfId?: number | null;
+		income: boolean;
+		creditReviewedByUser: boolean;
+	},
+	edit: Pick<
+		Edit,
+		| "excluded"
+		| "refundOfId"
+		| "income"
+		| "creditReviewed"
+		| "creditReviewedWas"
+		| "creditReviewedProvided"
+	>,
+): boolean {
+	const linking =
+		typeof edit.refundOfId === "number" &&
+		edit.refundOfId !== (stored.refundOfId ?? null);
+	if (linking || !edit.excluded) return false;
+	// The lift's two triggers, as saveEdit writes them: a review ticked as not income, or income turned on.
+	const reviewedAsNotIncome =
+		reviewWasChanged(stored, edit) && edit.creditReviewed && !edit.income;
+	const incomeTurnedOn = edit.income && !stored.income;
+	const lifted =
+		stored.excluded &&
+		stored.excludedSource === "plaid" &&
+		stored.amountCents < 0 &&
+		(reviewedAsNotIncome || incomeTurnedOn);
+	return !lifted;
 }
 
 /** Reads the edit form. Category ids must be live categories; lengths are limited. */

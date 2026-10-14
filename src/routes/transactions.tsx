@@ -11,7 +11,7 @@ import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
 import { accountChoices } from "../db/accounts";
 import { readAiSwitches } from "../db/ai-switches";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { FOLLOWS_PURCHASE } from "../db/counted-month";
+import { FOLLOWS_PURCHASE, isIncluded } from "../db/counted-month";
 import {
 	addLikely,
 	type LikelyRow,
@@ -62,6 +62,7 @@ import {
 import {
 	type Edit,
 	type EditErrors,
+	excludedAfterSave,
 	FOR_PERSON_ERROR,
 	followsPurchaseAfterSave,
 	parseEdit,
@@ -1651,6 +1652,12 @@ function EditSheet({
 		(cat) => cat.id === purchase?.categoryId,
 	);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
+	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	const countsIfReviewed = (creditReviewed: boolean) =>
+		isIncluded(
+			excludedAfterSave(tx, { ...values, creditReviewed }),
+			tx.paysBill === true,
+		);
 	return (
 		<BottomSheet
 			labelledBy="edit-title"
@@ -1904,16 +1911,22 @@ function EditSheet({
 										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: !values.excluded || tx.paysBill === true,
+										included: isIncluded(
+											excludedAfterSave(tx, values),
+											tx.paysBill === true,
+										),
 										isSplit: tx.isSplit === true,
 										income: values.income,
 										followsPurchase: purchase !== undefined,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), so the chip folds the note only where one is drawn.
-								reviewCounts: linkedPurchase !== undefined,
+								// The review chip folds the note where the review decides whether the row counts: a Plaid
+								// exclusion it lifts, not on a bill payment and not once Exclude is off. A linked purchase is
+								// one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
+								reviewCounts:
+									linkedPurchase !== undefined ||
+									countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -3689,17 +3702,15 @@ async function savePanel(
 			? tx.merchantName
 			: parsed.value.displayName) ??
 		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
-	// Linking a refund includes it, whatever the Exclude chip held.
-	const excludedNow =
-		refundOfId !== null && refundOfId !== current
-			? false
-			: parsed.value.excluded;
-	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts
-	// while excluded, and a bill's payment counts whatever its exclusion (COUNTED_PICKS_SQL), so neither is a new pick.
-	const putBackInBudget =
-		tx.markedTransfer && tx.excluded && !excludedNow && tx.paysBill !== true;
-	// The question follows a new pick: a category picked, or a transfer put back in the budget. The post-save lookup drops it when the store
-	// already has that rule, including one this save made or kept (decision 101).
+	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
+	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
+	const countedBefore = isIncluded(tx.excluded, tx.paysBill === true);
+	const countsNow = isIncluded(excludedNow, tx.paysBill === true);
+	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts while
+	// excluded, so putting it back adds no pick (COUNTED_PICKS_SQL).
+	const putBackInBudget = tx.markedTransfer && countsNow && !countedBefore;
+	// The question follows a new pick: a category picked, or a transfer put back in the budget. The post-save lookup
+	// drops it when the store already has that rule, including one this save made or kept (decision 101).
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
 		(parsed.value.categoryId === tx.categoryId && !putBackInBudget)
@@ -3742,7 +3753,7 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: !excludedNow || tx.paysBill === true,
+			included: isIncluded(excludedNow, tx.paysBill === true),
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
@@ -3797,14 +3808,15 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
+	// A bill payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
 	const exclusion =
-		excludedNow === tx.excluded
-			? ""
-			: excludedNow
-				? tx.paysBill
-					? " It still counts while it pays a bill."
-					: " It's excluded from the budget."
-				: " It counts in the budget again.";
+		excludedNow && !tx.excluded
+			? tx.paysBill
+				? " It still counts while it pays a bill."
+				: " It's excluded from the budget."
+			: countsNow && !countedBefore
+				? " It counts in the budget again."
+				: "";
 	const keptWords = unnamed
 		? "Kept the details."
 		: guessAgain

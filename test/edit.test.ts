@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	excludedAfterSave,
 	followsPurchaseAfterSave,
 	parseEdit,
 	safeBack,
@@ -339,5 +340,98 @@ describe("followsPurchaseAfterSave: whether a linked credit counts with its purc
 				{ ...unchanged, creditReviewed: false, creditReviewedWas: true },
 			),
 		).toBe(true);
+	});
+});
+
+describe("excludedAfterSave: whether a row is excluded once saved, with a review lifting Plaid's exclusion (decision 70)", () => {
+	// A credit Plaid excluded, as the panel first drew it: the Exclude chip on, and no review.
+	const stored = {
+		amountCents: -650,
+		excluded: true,
+		excludedSource: "plaid" as string | null,
+		refundOfId: null as number | null,
+		income: false,
+		creditReviewedByUser: false,
+	};
+	// The panel's answers when nothing was changed.
+	const unchanged = {
+		excluded: true,
+		refundOfId: null as number | null,
+		income: false,
+		creditReviewed: false,
+		creditReviewedWas: false,
+		creditReviewedProvided: true,
+	};
+
+	it("keeps a Plaid exclusion the panel left as it was", () => {
+		expect(excludedAfterSave(stored, unchanged)).toBe(true);
+	});
+
+	it("lifts a Plaid exclusion when the credit is reviewed as not income", () => {
+		expect(
+			excludedAfterSave(stored, { ...unchanged, creditReviewed: true }),
+		).toBe(false);
+	});
+
+	it("lifts a Plaid exclusion when the credit is marked income", () => {
+		expect(excludedAfterSave(stored, { ...unchanged, income: true })).toBe(
+			false,
+		);
+	});
+
+	it("counts a row whose Exclude chip is unticked, whatever the review, since the person chose that", () => {
+		expect(
+			excludedAfterSave(stored, {
+				...unchanged,
+				excluded: false,
+				creditReviewed: true,
+			}),
+		).toBe(false);
+	});
+
+	it("keeps an exclusion the person set, since only Plaid's exclusion is lifted", () => {
+		expect(
+			excludedAfterSave(
+				{ ...stored, excludedSource: "user" },
+				{ ...unchanged, creditReviewed: true },
+			),
+		).toBe(true);
+	});
+
+	it("keeps an exclusion Jev set", () => {
+		expect(
+			excludedAfterSave(
+				{ ...stored, excludedSource: "jev" },
+				{ ...unchanged, creditReviewed: true },
+			),
+		).toBe(true);
+	});
+
+	it("keeps the exclusion of an income credit reviewed as income, since that is not a non-income review", () => {
+		expect(
+			excludedAfterSave(
+				{ ...stored, income: true },
+				{
+					...unchanged,
+					creditReviewed: true,
+					income: true,
+				},
+			),
+		).toBe(true);
+	});
+
+	it("keeps a Plaid exclusion on a debit, which a review cannot make", () => {
+		expect(
+			excludedAfterSave(
+				{ ...stored, amountCents: 650 },
+				{ ...unchanged, creditReviewed: true },
+			),
+		).toBe(true);
+	});
+
+	it("includes a row a new link refunds, whatever the chip held", () => {
+		expect(excludedAfterSave(stored, { ...unchanged, refundOfId: 9001 })).toBe(
+			false,
+		);
 	});
 });
