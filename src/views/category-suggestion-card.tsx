@@ -12,16 +12,18 @@ export function CategorySuggestionCard({
 	ticked,
 	notes,
 	existing,
+	archived,
 }: {
 	suggestion: PendingSuggestion;
 	error?: string;
 	ticked?: number[];
 	notes?: Record<number, string>;
 	/**
-	 * The name of the family's active category with this name, as stored. When set, the ticked transactions are
-	 * added to it (decision 101), and the button names it.
+	 * The name of the family's category with this name, as stored. When set, the ticked transactions are added to it
+	 * (decision 101), and the button names it; when `archived`, they bring it back instead (decision 110).
 	 */
 	existing?: string;
+	archived?: boolean;
 }) {
 	return (
 		<details
@@ -84,7 +86,11 @@ export function CategorySuggestionCard({
 				</ul>
 				<div class="flex flex-wrap items-center gap-2 py-3">
 					<Button kind="secondary" type="submit" name="action" value="create">
-						{existing ? `Add to ${existing}` : `Create ${suggestion.name}`}
+						{existing
+							? archived
+								? `Restore ${existing}`
+								: `Add to ${existing}`
+							: `Create ${suggestion.name}`}
 					</Button>
 					<Button
 						kind="text"
