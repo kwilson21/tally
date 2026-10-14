@@ -13,7 +13,7 @@ export function MerchantRuleTick({
 	ruleCategory,
 	id = "merchant-rule",
 }: {
-	/** The store's name as the panel shows it. */
+	/** The store's name (tx.storeName), never a transaction's own name: the rule is the store's. */
 	merchant: string;
 	/** Ticked when a rule already matches this transaction, or when a person ticks it. */
 	checked: boolean;

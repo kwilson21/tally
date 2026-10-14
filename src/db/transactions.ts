@@ -878,7 +878,7 @@ const EXCLUDE =
  * purchase and a purchase a bank change sent back to its earlier category (§6.1, decision 99). Binds
  * the category, the actor and the merchant key; callers add their own last condition.
  */
-const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
+export const APPLY_MERCHANT_RULE_SQL = `UPDATE transactions SET category_id = ?, category_source = 'merchant_rule', category_confidence = NULL,
 	updated_by = ?, updated_at = datetime('now')
 WHERE ${merchantKeySql("transactions")} = ? AND COALESCE(category_source, '') != 'user'
 	AND is_split = 0 AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)`;

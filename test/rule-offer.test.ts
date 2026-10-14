@@ -530,6 +530,7 @@ describe("merchant category rule offer", () => {
 			merchant_keys: JSON.stringify([merchant]),
 			merchant,
 			category: String(groceries),
+			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
 		});
 		expect(yes.res.status).toBe(200);
 		const rule = await env.DB.prepare(

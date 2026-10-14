@@ -744,6 +744,50 @@ describe("GET /transactions/:id", () => {
 		);
 	});
 
+	it("a ticked row saved with another category changes the rule to that category (decision 101)", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: "3",
+			always: "1",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+			always_was: "1",
+			rule_category_was: "2",
+		});
+		expect(res.status).toBe(200);
+		expect(
+			await env.DB.prepare(
+				"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+			)
+				.bind(merchantKey)
+				.first(),
+		).toEqual({ default_category_id: 3 });
+		expect(
+			await env.DB.prepare("SELECT category_id FROM transactions WHERE id = ?")
+				.bind(bakery)
+				.first(),
+		).toEqual({ category_id: 3 });
+	});
+
 	it("unticks the toggle for another selected category and ticking saves that category as the rule", async () => {
 		const merchantKey = (
 			await env.DB.prepare(
@@ -818,6 +862,74 @@ describe("GET /transactions/:id", () => {
 		});
 		expect(ticked.res.status).toBe(200);
 		expect((await rule())?.default_category_id).toBe(2);
+	});
+
+	it("names the store in the rule tick and its hint, never a transaction's own name (#353)", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key as string;
+		const savedName = (
+			await env.DB.prepare("SELECT name FROM categories WHERE id = 2").first<{
+				name: string;
+			}>()
+		)?.name;
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES (?, 'Amazon') ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
+			).bind(merchantKey),
+			env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed', is_split = 1 WHERE id = ?",
+			).bind(bakery),
+		]);
+		const part = (await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, parent_id) VALUES (1, '2026-10-02', 300, 'SQ *LOCAL BAKERY 4432', ?) RETURNING id",
+		)
+			.bind(bakery)
+			.first<{ id: number }>()) as { id: number };
+
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toContain("Use this category for Amazon from now on");
+		expect(sheet).not.toContain("Use this category for Dog bed");
+
+		const partHtml = (await get(`/transactions/${part.id}`)).html;
+		expect(partHtml.slice(partHtml.indexOf('role="dialog"'))).toContain(
+			"Use this category for Amazon from now on",
+		);
+
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+			).bind(bakery),
+			env.DB.prepare(
+				"UPDATE merchants SET default_category_id = 2 WHERE raw_name = ?",
+			).bind(merchantKey),
+		]);
+		const matched = (await get(`/transactions/${bakery}`)).html;
+		const matchedSheet = matched.slice(matched.indexOf('role="dialog"'));
+		expect(matchedSheet).toContain(
+			`Amazon is always ${savedName}. Untick it and save to remove the rule.`,
+		);
+		expect(matchedSheet).not.toContain("Dog bed is always");
+
+		const { res, html: refused } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "2",
+			merchant: "Amazon",
+			note: "x".repeat(501),
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		expect(refused).toContain("Use this category for Amazon from now on");
+		expect(refused).not.toContain("Use this category for Dog bed");
 	});
 
 	it("tidies an unnamed merchant's raw text for the heading, showing the raw text underneath and as the input placeholder", async () => {

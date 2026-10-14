@@ -4,6 +4,8 @@ import { Icon } from "./icons";
 export type GroupRuleOfferValue = {
 	/** The group's merchant keys: Yes makes the rule on each of them. */
 	merchantKeys: string[];
+	/** The charges the save filed: Yes applies the rule only while they still hold the category (a person's choice). */
+	savedIds: number[];
 	/** The store's name as Organize shows it after the save. */
 	merchant: string;
 	categoryId: number;
@@ -58,6 +60,11 @@ export function GroupRuleOffer({
 					type="hidden"
 					name="merchant_keys"
 					value={JSON.stringify(value.merchantKeys)}
+				/>
+				<input
+					type="hidden"
+					name="saved"
+					value={JSON.stringify(value.savedIds)}
 				/>
 				<input type="hidden" name="merchant" value={value.merchant} />
 				<input type="hidden" name="category" value={String(value.categoryId)} />

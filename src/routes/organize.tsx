@@ -267,19 +267,20 @@ organize.post("/transactions/organize", async (c) => {
 	if (!chosen) return renderOrganize(c, values, 422);
 
 	const currentGroup = group;
-	const count = await saveOrganizeGroup(
+	const filed = await saveOrganizeGroup(
 		c.env.DB,
 		currentGroup.merchantKeys,
 		chosen.id,
 		name && name !== currentGroup.name ? name : null,
 		actor(c),
 	);
-	if (count === 0) {
+	if (filed.length === 0) {
 		// Another request categorized this group after it was read, so nothing was filed: a category made
 		// here goes too, and the answer is the one for a merchant that already has a category.
 		if (madeId !== null) await unmakeCategory(c.env.DB, madeId);
 		return alreadyCategorized();
 	}
+	const count = filed.length;
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
 	// The save makes no rule. Organize asks #209's question after it (#353), unless every merchant of the group
 	// has this rule already; then it moves on as it always did.
@@ -291,6 +292,7 @@ organize.post("/transactions/organize", async (c) => {
 	const rule: GroupRuleOfferValue | undefined = asks
 		? {
 				merchantKeys: currentGroup.merchantKeys,
+				savedIds: filed,
 				merchant: name || currentGroup.name,
 				categoryId: chosen.id,
 				category: chosen.name,
@@ -307,16 +309,17 @@ organize.post("/transactions/organize", async (c) => {
 	return renderOrganize(c, undefined, 200, true, rule);
 });
 
-/** The merchant keys the question posts back: a JSON array of strings, and anything else posts none. */
-function merchantKeysFrom(value: unknown): string[] {
-	// JSON.parse throws on anything but JSON, and a file upload reads as "[object File]": both post no keys.
+/**
+ * The items a question posts back as a JSON array, keeping only the ones `keep` accepts. Anything else posts none:
+ * JSON.parse throws on what is not JSON, and a file upload reads as "[object File]".
+ */
+function postedItems<T>(
+	value: unknown,
+	keep: (item: unknown) => item is T,
+): T[] {
 	try {
-		const keys: unknown = JSON.parse(String(value ?? "[]"));
-		return Array.isArray(keys)
-			? keys.filter(
-					(key): key is string => typeof key === "string" && key.length > 0,
-				)
-			: [];
+		const items: unknown = JSON.parse(String(value ?? "[]"));
+		return Array.isArray(items) ? items.filter(keep) : [];
 	} catch {
 		return [];
 	}
@@ -330,7 +333,15 @@ organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
 	const url = new URL(c.req.url);
 	const next = `/transactions/organize${url.search}`;
-	const keys = merchantKeysFrom(form.get("merchant_keys"));
+	const keys = postedItems(
+		form.get("merchant_keys"),
+		(key): key is string => typeof key === "string" && key.length > 0,
+	);
+	const savedIds = postedItems(
+		form.get("saved"),
+		(id): id is number =>
+			typeof id === "number" && Number.isInteger(id) && id > 0,
+	);
 	const categoryId = Number(form.get("category"));
 	const category =
 		Number.isInteger(categoryId) && categoryId > 0
@@ -341,10 +352,21 @@ organize.post("/transactions/organize/rule", async (c) => {
 					.first<{ id: number; name: string }>()
 			: null;
 	const ruled =
-		form.get("answer") === "yes" && category && keys.length > 0
+		form.get("answer") === "yes" &&
+		category &&
+		keys.length > 0 &&
+		savedIds.length > 0
 			? category
 			: null;
-	const written = ruled ? await setOrganizeRule(c.env.DB, keys, ruled.id) : 0;
+	const written = ruled
+		? await setOrganizeRule(
+				c.env.DB,
+				keys,
+				ruled.id,
+				JSON.stringify(savedIds),
+				actor(c),
+			)
+		: 0;
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
 	if (ruled && written > 0) {

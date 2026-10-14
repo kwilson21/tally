@@ -988,12 +988,12 @@ describe("what the Jev run and the names write", () => {
 		const groupId = category?.id as number;
 		expect(
 			await saveOrganizeGroup(db, ["ORG*BANK"], groupId, "ORG*BANK", "test"),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual([]);
 
 		expect(
 			await saveOrganizeGroup(db, ["ORG*SHOP"], groupId, "Org Shop", "test"),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual(["ORG*SHOP"]);
 	});
 
@@ -1015,7 +1015,7 @@ describe("what the Jev run and the names write", () => {
 		// A first save files ORG*FIRST with no name, so its suggestion stays pending.
 		expect(
 			await saveOrganizeGroup(db, ["ORG*FIRST"], groupId, null, "test"),
-		).toBe(1);
+		).toHaveLength(1);
 
 		// ORG*FIRST's charge is filed already, so only ORG*SECOND's is changed and only it is named and logged.
 		expect(
@@ -1026,7 +1026,7 @@ describe("what the Jev run and the names write", () => {
 				"Org Pick",
 				"test",
 			),
-		).toBe(1);
+		).toHaveLength(1);
 		expect(await logNames()).toEqual(["ORG*SECOND"]);
 		expect(
 			await db
@@ -1060,7 +1060,7 @@ describe("what the Jev run and the names write", () => {
 				"Group Shop",
 				"test",
 			),
-		).toBe(5);
+		).toHaveLength(5);
 
 		const day = await householdToday(db);
 		const rows = await db
@@ -1115,7 +1115,7 @@ describe("what the Jev run and the names write", () => {
 				"Big Shop",
 				"test",
 			),
-		).toBe(600);
+		).toHaveLength(600);
 		expect(statements).toBeLessThan(D1_STATEMENT_LIMIT);
 		expect(await logNames()).toHaveLength(600);
 		const categorized = await db

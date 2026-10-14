@@ -585,7 +585,7 @@ const MERCHANT_RULE_TICK_SPEC: UseSpecText = {
 		"Tap anywhere on the row to tick it. Tab reaches the checkbox, Space toggles it, and the focus ring shows on the round mark. Screen reader: “Use this category for Local Bakery from now on, checkbox, not checked”, then the hint through aria-describedby.",
 	motion: "None added. Reduced motion changes nothing.",
 	edges:
-		"Ticking it on a transaction that doesn't match the rule changes the store's rule. Unticking a matching rule and saving removes it, and the words under the row say so.",
+		"Ticking it on a transaction that doesn't match the rule changes the store's rule. A ticked row saved with another category changes the rule to that category, and the row opens ticked again with the new words. Unticking a matching rule and saving removes it, and the words under the row say so.",
 	words:
 		"Use this category for {Local Bakery} from now on · Leave it unticked to change just this one. · {Local Bakery} is always {Groceries}. Untick it and save to remove the rule.",
 };
@@ -3009,6 +3009,7 @@ function Categorization() {
 							id="group-rule-offer-sample-title"
 							value={{
 								merchantKeys: ["COSTCO WHSE #0431", "COSTCO GAS"],
+								savedIds: [1, 2],
 								merchant: "Costco",
 								categoryId: 1,
 								category: "Groceries",

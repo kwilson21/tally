@@ -2247,7 +2247,7 @@ function EditSheet({
 				{tx.refundOfId == null && (
 					<div class="border-t border-rule pt-3">
 						<MerchantRuleTick
-							merchant={tx.displayName}
+							merchant={tx.storeName}
 							checked={values.alwaysForMerchant}
 							ruleCategory={
 								values.alwaysWas

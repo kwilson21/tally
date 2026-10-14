@@ -9,6 +9,7 @@ import {
 } from "../db/counted-month";
 import { merchantColumnSql, merchantKeySql } from "../db/merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "../db/merchant-names";
+import { APPLY_MERCHANT_RULE_SQL } from "../db/transactions";
 import { nameSource } from "./name-suggestions";
 import { tidyName } from "./tidy-name";
 
@@ -120,6 +121,7 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 /**
  * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
  * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
+ * Returns the ids of the charges it filed, which the question carries back so Yes can tell whether they still hold it.
  */
 export async function saveOrganizeGroup(
 	db: D1Database,
@@ -127,9 +129,9 @@ export async function saveOrganizeGroup(
 	categoryId: number,
 	displayName: string | null,
 	updatedBy: string,
-): Promise<number> {
+): Promise<number[]> {
 	const names = [...new Set(merchantKeys)];
-	if (names.length === 0) return 0;
+	if (names.length === 0) return [];
 	let saved = 0;
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
 		const chunk = names.slice(offset, offset + CHUNK_SIZE);
@@ -143,7 +145,7 @@ export async function saveOrganizeGroup(
 		saved += count?.n ?? 0;
 	}
 	// A stale form files nothing after another request categorized the group.
-	if (saved === 0) return 0;
+	if (saved === 0) return [];
 
 	const updates: D1PreparedStatement[] = [];
 	for (let offset = 0; offset < names.length; offset += CHUNK_SIZE) {
@@ -154,7 +156,8 @@ export async function saveOrganizeGroup(
 				.prepare(
 					`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 						updated_by = ?, updated_at = datetime('now')
-					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})`,
+					WHERE ${NEEDS_CATEGORY_UPDATE} AND ${KEY_UPDATE} IN (${marks})
+					RETURNING id`,
 				)
 				.bind(categoryId, updatedBy, ...chunk),
 		);
@@ -196,7 +199,9 @@ export async function saveOrganizeGroup(
 	// Only the update statements count: the logged rows and upserts ahead of them are skipped.
 	return results
 		.slice(settles.length)
-		.reduce((changed, result) => changed + result.meta.changes, 0);
+		.flatMap((result) =>
+			(result.results as { id: number }[]).map((row) => row.id),
+		);
 }
 
 /**
@@ -226,26 +231,43 @@ export async function groupHasRule(
 
 /**
  * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key, creating the
- * `merchants` rows that don't exist yet, so later charges follow. A key gets the rule only where a charge a person
- * filed in `categoryId` carries it, so a posted key that has no such charge sets nothing. Like the save that filed
- * the group, it changes no charge: the rule reaches the next ones. Returns how many rules were written, so a
- * caller can tell whether there is a rule to name.
+ * `merchants` rows that don't exist yet, and applies it to the store's transactions a person hasn't chosen, as
+ * setMerchantRule (#209's Yes) does, so later ones follow. It acts only while the rows that Save filed (`savedIds`,
+ * a JSON array) still hold `categoryId` as a person's choice: a stale Yes makes no rule and changes no charge. A key
+ * gets the rule only where one of those rows carries it, so a posted key with no such row sets nothing. Returns how
+ * many rules were written, so a caller can tell whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
 	merchantKeys: string[],
 	categoryId: number,
+	savedIds: string,
+	actor: string,
 ): Promise<number> {
-	const statements = [...new Set(merchantKeys)].map((merchantKey) =>
-		db
-			.prepare(
-				`INSERT INTO merchants (raw_name, default_category_id)
-				SELECT ?, ? WHERE EXISTS (SELECT 1 FROM transactions WHERE ${KEY_UPDATE} = ? AND category_id = ? AND category_source = 'user')
+	const statements = [...new Set(merchantKeys)].flatMap((merchantKey) => {
+		// Both statements of a key carry this guard, so the rule and its charges move together or not at all.
+		const stillFiled = `EXISTS (SELECT 1 FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND ${merchantKeySql("s")} = ? AND s.category_id = ? AND s.category_source = 'user')
+			AND NOT EXISTS (SELECT 1 FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND (s.category_id IS NOT ? OR s.category_source IS NOT 'user'))`;
+		const guard = [savedIds, merchantKey, categoryId, savedIds, categoryId];
+		return [
+			db
+				.prepare(
+					`INSERT INTO merchants (raw_name, default_category_id)
+				SELECT ?, ? WHERE ${stillFiled}
 				ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id`,
-			)
-			.bind(merchantKey, categoryId, merchantKey, categoryId),
-	);
+				)
+				.bind(merchantKey, categoryId, ...guard),
+			db
+				.prepare(`${APPLY_MERCHANT_RULE_SQL} AND ${stillFiled}`)
+				.bind(categoryId, actor, merchantKey, ...guard),
+		];
+	});
 	if (statements.length === 0) return 0;
 	const results = await db.batch(statements);
-	return results.reduce((written, result) => written + result.meta.changes, 0);
+	// Each key's rule write is the statement at an even index, and its apply the one after it.
+	return results.reduce(
+		(written, result, index) =>
+			index % 2 === 0 ? written + result.meta.changes : written,
+		0,
+	);
 }

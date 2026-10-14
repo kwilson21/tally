@@ -21,6 +21,10 @@ const ruleOf = async (key: string) =>
 			.first<{ category: number | null }>()
 	)?.category ?? null;
 
+/** The ids of the charges a save filed, as the question's hidden `saved` field carries them back (JSON). */
+const savedIdsIn = (html: string) =>
+	html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]";
+
 async function get(path = "/transactions/organize") {
 	const res = await exports.default.fetch(BASE + path);
 	return { res, html: await res.text() };
@@ -203,13 +207,18 @@ describe("POST /transactions/organize", () => {
 
 	it("Yes makes the rule on the group's merchant, then redirects to the next store (JavaScript off)", async () => {
 		const rawNames = ["SQ *LOCAL BAKERY 4432"];
-		await post({ category: "2", name: "The Bakery", group: "Local Bakery" });
+		const save = await post({
+			category: "2",
+			name: "The Bakery",
+			group: "Local Bakery",
+		});
 		const { res } = await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(rawNames),
 				merchant: "The Bakery",
 				category: "2",
+				saved: savedIdsIn(save.html),
 			},
 			"/transactions/organize/rule",
 		);
@@ -246,7 +255,7 @@ describe("POST /transactions/organize", () => {
 				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
 			).bind(todayIn(DEFAULT_TIME_ZONE)),
 		]);
-		await post(
+		const save = await post(
 			{ category: "2", name: "Target", group: "Target" },
 			undefined,
 			true,
@@ -257,6 +266,7 @@ describe("POST /transactions/organize", () => {
 				merchant_keys: JSON.stringify(["RAW ONE", "RAW TWO"]),
 				merchant: "Target",
 				category: "2",
+				saved: savedIdsIn(save.html),
 			},
 			"/transactions/organize/rule",
 			true,
@@ -294,13 +304,14 @@ describe("POST /transactions/organize", () => {
 	});
 
 	it("a Yes for a merchant with no charge filed in that category makes no rule for it", async () => {
-		await post({ category: "2", name: "", group: "Local Bakery" });
+		const save = await post({ category: "2", name: "", group: "Local Bakery" });
 		await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(["FORGED MERCHANT"]),
 				merchant: "Forged",
 				category: "2",
+				saved: savedIdsIn(save.html),
 			},
 			"/transactions/organize/rule",
 		);
@@ -327,7 +338,7 @@ describe("POST /transactions/organize", () => {
 	});
 
 	it("a Yes after the group's charges were filed elsewhere makes no rule, moves on silently and sends focus to the next store (htmx)", async () => {
-		await post(
+		const save = await post(
 			{ category: "2", name: "", group: "Local Bakery" },
 			undefined,
 			true,
@@ -341,6 +352,7 @@ describe("POST /transactions/organize", () => {
 				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
 				merchant: "Local Bakery",
 				category: "2",
+				saved: savedIdsIn(save.html),
 			},
 			"/transactions/organize/rule",
 			true,
@@ -420,13 +432,18 @@ describe("POST /transactions/organize", () => {
 			);
 		}
 		await env.DB.batch(statements);
-		await post({ category: "2", name: "", group: "Bulk merchant" });
+		const save = await post({
+			category: "2",
+			name: "",
+			group: "Bulk merchant",
+		});
 		const { res } = await post(
 			{
 				answer: "yes",
 				merchant_keys: JSON.stringify(keys),
 				merchant: "Bulk merchant",
 				category: "2",
+				saved: savedIdsIn(save.html),
 			},
 			"/transactions/organize/rule",
 		);
@@ -435,6 +452,148 @@ describe("POST /transactions/organize", () => {
 			"SELECT COUNT(*) AS n FROM merchants WHERE raw_name LIKE 'BULK MERCHANT%' AND default_category_id = 2",
 		).first<{ n: number }>();
 		expect(count?.n).toBe(150);
+	});
+
+	it("a Yes after the charges Save filed were changed makes no rule, even with an older charge filed in that category (#353)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, '2026-08-01', 900, 'SQ *LOCAL BAKERY 4432', 2, 'user')",
+		).run();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const saved = savedIdsIn(save.html);
+		expect(JSON.parse(saved).length).toBeGreaterThan(0);
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 3 WHERE id IN (SELECT value FROM json_each(?))",
+		)
+			.bind(saved)
+			.run();
+		const jev = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 700, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.first<{ id: number }>();
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved,
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(html).not.toContain("rule-offer-title");
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+		expect(html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
+		// A stale Yes applies nothing, so a charge of the store that a person did not choose keeps its category.
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+			)
+				.bind(jev?.id)
+				.first(),
+		).toEqual({ category_id: 3, category_source: "jev" });
+	});
+
+	it("a Yes makes no rule once any charge Save filed has changed, even while the others still hold the category (#353)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'SQ *LOCAL BAKERY 4432')",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.run();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const saved = JSON.parse(savedIdsIn(save.html)) as number[];
+		expect(saved.length).toBeGreaterThan(1);
+		await env.DB.prepare("UPDATE transactions SET category_id = 3 WHERE id = ?")
+			.bind(saved[0])
+			.run();
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: JSON.stringify(saved),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBeNull();
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+	});
+
+	it("a Yes applies the rule to the store's charges a person hasn't chosen, and leaves a person's choice alone (#353)", async () => {
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const uncategorized = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 1200, 'SQ *LOCAL BAKERY 4432') RETURNING id",
+		)
+			.bind(today)
+			.first<{ id: number }>();
+		const jev = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1300, 'SQ *LOCAL BAKERY 4432', 3, 'jev') RETURNING id",
+		)
+			.bind(today)
+			.first<{ id: number }>();
+		const user = await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 1400, 'SQ *LOCAL BAKERY 4432', 4, 'user') RETURNING id",
+		)
+			.bind(today)
+			.first<{ id: number }>();
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: {
+				message: `Local Bakery is always ${await categoryName(2)} now.`,
+			},
+		});
+		expect(html).not.toContain("rule-offer-title");
+		const charge = (id: number | undefined) =>
+			env.DB.prepare(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+			)
+				.bind(id)
+				.first();
+		expect(await charge(uncategorized?.id)).toEqual({
+			category_id: 2,
+			category_source: "merchant_rule",
+		});
+		expect(await charge(jev?.id)).toEqual({
+			category_id: 2,
+			category_source: "merchant_rule",
+		});
+		expect(await charge(user?.id)).toEqual({
+			category_id: 4,
+			category_source: "user",
+		});
 	});
 
 	it("returns 422 with a fieldset alert when category is missing", async () => {
