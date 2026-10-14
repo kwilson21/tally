@@ -443,7 +443,7 @@ function Shell() {
 				title="Layout, Sidebar and BottomTabs"
 				tier="visual"
 				components={["Layout", "Sidebar", "BottomTabs"]}
-				sentence="Every page's shell: banner, navigation, main, toast and announce regions. The same destinations are a sidebar on desktop and four tabs plus More on phones."
+				sentence="Every page's shell: banner, navigation, main, toast and announce regions. The same destinations are a sidebar on desktop and four tabs plus More on phones. The desktop sidebar's second group, under a rule, holds How Tally works and Feedback; on a phone, Feedback sits in the top line beside the wordmark."
 			>
 				<p class="max-w-prose">
 					This page is drawn inside the real Layout, so its demo banner,
@@ -453,9 +453,10 @@ function Shell() {
 				</p>
 				<p class="max-w-prose">
 					On phones, keyboard scrolling and the bottom of main use the same
-					room, calculated from the fixed tabs, Feedback pill, focus gap and
-					safe-area inset, so the last row or form can clear both controls.
-					Desktop keeps its existing main spacing.
+					room, calculated from the fixed tabs, focus gap and safe-area inset,
+					so the last row or form can clear the tabs. Feedback scrolls away with
+					the page, so it takes no room. Desktop keeps its existing main
+					spacing.
 				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,
@@ -677,7 +678,7 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry, or a payment a person said Not this one to, adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early, except by its own answer: a restore's “… is back.” toast or a refused Undo ends the toast it answers.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too) or, on a bill's page, to its page title, and an answer or failed request that arrives after its ten seconds ran out still moves focus left on nothing there (#444); after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends; after an Undo of a Not this one, focus is on that month's Not this one button. Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too) or, on a bill's page, to its page title, and an answer or failed request that arrives after its ten seconds ran out still moves focus left on nothing there (#444); after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends; after an Undo of a Not this one, focus is on that month's Not this one button. Taps pass through the toast, so a Save under it can be tapped again.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up, with focus back on it unless the person has moved focus elsewhere. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
@@ -4461,15 +4462,16 @@ function Feedback() {
 				title="FeedbackButton"
 				tier="visual"
 				components={["FeedbackButton"]}
-				sentence="A fixed, shadowless pill links to the feedback form, which records the page it came from."
+				sentence="A shadowless pill links to the feedback form, which records the page it came from. On a phone it sits in the top line beside the wordmark; on desktop it is in the sidebar."
 			>
 				<p class="text-muted">
-					The real component is fixed at the bottom-right of this catalog page;
-					this specimen is shown in place.
+					The real button sits in this page's top line on a phone, beside the
+					wordmark, and in the sidebar on desktop; this specimen is shown in
+					place.
 				</p>
-				{/* Only a picture here: the working button is the fixed one. */}
+				{/* Only a picture here: the working button is in the top line. */}
 				<div inert>
-					<FeedbackButton fixed={false} />
+					<FeedbackButton />
 				</div>
 			</Specimen>
 			<Specimen
