@@ -205,3 +205,74 @@ describe("shownName", () => {
 		});
 	});
 });
+
+// A Tally guess that differs from the shown text only in punctuation, spacing or capitals repeats it, so it is not
+// offered; the bank's own name is kept, as it is for capitals (P87 B) (#412).
+describe("a Tally guess that differs from the shown text only by punctuation, spacing or capitals (#412)", () => {
+	it.each([
+		["AT&T", "AT&T", "ATT"],
+		["TRADER JOE'S #552", "Trader joe's", "Trader Joes"],
+		["BLUE BOTTLE COF", "Blue bottle cof", "Blue-Bottle Cof"],
+		["7-ELEVEN", "7-eleven", "7 Eleven"],
+	])(
+		"is not offered beside %j (shown as %j) when the guess is %j",
+		(raw, tidied, guess) => {
+			const merchant = {
+				stored: guess,
+				status: "pending",
+				key: raw,
+				namesOn: true,
+			};
+			expect(offeredNames(merchant, raw)).toEqual([]);
+			expect(shownName({ ...merchant, chosen: null, rawName: raw })).toEqual({
+				name: tidied,
+				suggested: false,
+				fromBank: false,
+			});
+		},
+	);
+
+	it("still offers a Tally guess that says a different word", () => {
+		const merchant = {
+			stored: "Trader Joe's Market\nTrader Joes",
+			status: "pending",
+			key: "TRADER JOE'S #552",
+			namesOn: true,
+		};
+		expect(offeredNames(merchant, "TRADER JOE'S #552")).toEqual([
+			"Trader Joe's Market",
+		]);
+	});
+
+	it("still offers a Tally guess with different digits, since Motel 8 is not Motel 6", () => {
+		const merchant = {
+			stored: "Motel 8",
+			status: "pending",
+			key: "MOTEL 6",
+			namesOn: true,
+		};
+		expect(offeredNames(merchant, "MOTEL 6")).toEqual(["Motel 8"]);
+		expect(
+			shownName({ ...merchant, chosen: null, rawName: "MOTEL 6" }),
+		).toEqual({
+			name: "Motel 8",
+			suggested: true,
+			fromBank: false,
+		});
+	});
+
+	it("keeps the bank's own name offered when it only differs by punctuation (P87 B)", () => {
+		const bank = {
+			stored: "ATT",
+			status: "pending",
+			key: "ATT",
+			namesOn: true,
+		};
+		expect(offeredNames(bank, "AT&T")).toEqual(["ATT"]);
+		expect(shownName({ ...bank, chosen: null, rawName: "AT&T" })).toEqual({
+			name: "ATT",
+			suggested: true,
+			fromBank: true,
+		});
+	});
+});
