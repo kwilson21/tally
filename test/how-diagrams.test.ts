@@ -117,6 +117,23 @@ describe("BudgetDiagram", () => {
 		expect(html).toContain("stroke-over");
 		expect(html).not.toContain("stroke-ok");
 	});
+
+	it("takes an id, so two drawings on one page can each name their own title and description", async () => {
+		const html = await render(BudgetDiagram({ ...demo, id: "x" }));
+		expect(html).toContain('aria-labelledby="x-title x-desc"');
+		expect(html).toContain('<title id="x-title">');
+		expect(html).toContain('<desc id="x-desc">');
+		expect(html).not.toContain('id="budget-diagram-');
+	});
+
+	it("keeps the app's own title and description ids when no id is given", async () => {
+		const html = await render(BudgetDiagram(demo));
+		expect(html).toContain(
+			'aria-labelledby="budget-diagram-title budget-diagram-desc"',
+		);
+		expect(html).toContain('<title id="budget-diagram-title">');
+		expect(html).toContain('<desc id="budget-diagram-desc">');
+	});
 });
 
 describe("TransactionsDiagram", () => {

@@ -287,3 +287,40 @@ export function Icon({ name, class: className = "size-6" }: IconProps) {
 		</svg>
 	);
 }
+
+/**
+ * A row that opens its sheet or page: the press tint, and its arrow turns ink on desktop hover. The link is the named
+ * group `row`, so a `<details class="group">` around the rows never turns their arrows.
+ */
+export const ROW_OPENS = "group/row row-opens";
+
+/** The box a row's arrow fills, shared with RowArrowSpace so the two always take the same room in a flex row (P118 A). */
+export const ROW_ARROW_BOX = "size-5 shrink-0 -ml-3 -mr-2";
+
+/**
+ * The arrow a row that opens ends in (P118 A): muted, hung into the right margin so its tip is the content's edge.
+ * It is an Icon, so it is hidden from assistive technology; the row's own words say what it opens.
+ */
+export function RowArrow({ class: extra }: { class?: string }) {
+	const base = `${ROW_ARROW_BOX} text-muted group-hover/row:text-ink`;
+	return (
+		<Icon name="chevron-right" class={extra ? `${base} ${extra}` : base} />
+	);
+}
+
+/**
+ * The same empty box, for a row in a list whose other rows open but which has nothing to open: it keeps the bars'
+ * column the same width as the rows that end in an arrow.
+ */
+export function RowArrowSpace({ class: extra }: { class?: string }) {
+	return (
+		<span
+			aria-hidden="true"
+			class={
+				extra
+					? `${ROW_ARROW_BOX} invisible ${extra}`
+					: `${ROW_ARROW_BOX} invisible`
+			}
+		/>
+	);
+}
