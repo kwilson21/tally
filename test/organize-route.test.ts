@@ -335,6 +335,60 @@ describe("POST /transactions/organize", () => {
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 	});
 
+	it("a Yes makes no rule once a key of the group has its name cleared and its tidied key names another store, and says nothing (htmx, #353)", async () => {
+		// A cleared key shows its tidied key, so the store the question names must not be the one that key tidies to.
+		expect(tidyName("RAW TWO")).not.toBe("Target");
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW TWO', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 30000, 'RAW ONE', 3, 'jev')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const save = await post(
+			{ category: "2", name: "Target", group: "Target" },
+			undefined,
+			true,
+		);
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = NULL WHERE raw_name = 'RAW TWO'",
+		).run();
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["RAW ONE", "RAW TWO"]),
+				merchant: "Target",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("RAW ONE")).toBeNull();
+		expect(await ruleOf("RAW TWO")).toBeNull();
+		// The apply statement is guarded too: the Jev charge keeps its category.
+		expect(
+			await env.DB.prepare(
+				"SELECT category_id AS category, category_source AS source FROM transactions WHERE raw_name = 'RAW ONE' AND category_source = 'jev'",
+			).first(),
+		).toEqual({ category: 3, source: "jev" });
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(html).not.toContain("is always");
+		expect(html).not.toContain("rule-offer-title");
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+	});
+
 	it("a Yes makes the rule on a key with no name that tidies to the store's name, beside a named key (htmx, #353)", async () => {
 		// No merchants row for TARGET 5678, so it is named by tidyName, as the group is (organizeGroups).
 		expect(tidyName("TARGET 5678")).toBe("Target");

@@ -1131,17 +1131,19 @@ describe("what the Jev run and the names write", () => {
 	});
 
 	it("a Yes on a group of 600 merchants sets their rule within D1's statement limit (#353)", async () => {
+		// Numbered 101 to 700: tidyName drops a trailing three-digit store number, so every key tidies to "Rule shop",
+		// the name the question offers, and the group is one store (a shorter number would stay in the name).
 		await db.batch([
 			db.prepare(
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
 				 INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-				 SELECT 'RULE SHOP ' || i, 'Rule Shop', 'pending' FROM n`,
+				 SELECT 'RULE SHOP ' || (i + 100), 'Rule Shop', 'pending' FROM n`,
 			),
 			db
 				.prepare(
 					`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600)
 				 INSERT INTO transactions (account_id, date, amount_cents, raw_name, updated_by)
-				 SELECT 1, ?, 650, 'RULE SHOP ' || i, 'test' FROM n`,
+				 SELECT 1, ?, 650, 'RULE SHOP ' || (i + 100), 'test' FROM n`,
 				)
 				.bind(TODAY),
 		]);
@@ -1151,7 +1153,7 @@ describe("what the Jev run and the names write", () => {
 			)
 			.first<{ id: number }>();
 		const categoryId = category?.id as number;
-		const keys = Array.from({ length: 600 }, (_, i) => `RULE SHOP ${i + 1}`);
+		const keys = Array.from({ length: 600 }, (_, i) => `RULE SHOP ${i + 101}`);
 		const savedIds = await saveOrganizeGroup(
 			db,
 			keys,

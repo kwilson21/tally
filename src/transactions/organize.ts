@@ -32,16 +32,20 @@ export const savedStillHoldArgs = (savedIds: string, categoryId: number) => [
 	categoryId,
 ];
 /**
- * No saved charge's key carries a display name other than the one the question offered (#353). A key with no name
- * passes, since tidyName names it, as organizeGroups does; only compared, never written. Its binds, in order, are
- * `savedStillNamedArgs`.
+ * Every saved charge's key still shows the name the question offered (#353): its display name, or with none, its
+ * tidied key, as organizeOffer names it (an empty display name is none, as `||` reads it). Only compared, never
+ * written. A key with no `merchants` row has no name either. Its binds, in order, are `savedStillNamedArgs`.
  */
-export const SAVED_STILL_NAMED_SQL = `NOT EXISTS (SELECT 1 FROM transactions s2 JOIN merchants m ON m.raw_name = ${merchantKeySql("s2")} WHERE s2.id IN (SELECT value FROM json_each(?)) AND m.display_name IS NOT NULL AND m.display_name != ?)`;
-/** The binds for SAVED_STILL_NAMED_SQL's `?`s: the saved list, then the name the question offered. */
-export const savedStillNamedArgs = (savedIds: string, merchant: string) => [
-	savedIds,
-	merchant,
-];
+export const SAVED_STILL_NAMED_SQL = `NOT EXISTS (SELECT 1 FROM transactions s2 LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("s2")} WHERE s2.id IN (SELECT value FROM json_each(?)) AND CASE WHEN NULLIF(m.display_name, '') IS NULL THEN ${merchantKeySql("s2")} NOT IN (SELECT value FROM json_each(?)) ELSE m.display_name != ? END)`;
+/**
+ * The binds for SAVED_STILL_NAMED_SQL's `?`s: the saved list, the tidied keys (a JSON array of the saved keys whose
+ * tidied name is the question's), then the name the question offered.
+ */
+export const savedStillNamedArgs = (
+	savedIds: string,
+	tidyKeys: string,
+	merchant: string,
+) => [savedIds, tidyKeys, merchant];
 
 export type OrganizeGroup = {
 	name: string;
@@ -260,8 +264,9 @@ export async function groupHasRule(
  * recategorized row makes the Yes stale (no rule, no charge changed, no toast). A pending charge that sync merges into
  * its posted row (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit
  * panel's tick can still make the rule. `merchant` is the store's name the question offered: a key whose display name is
- * another name makes the Yes stale too, so the toast can't name a store the rule doesn't cover. The name is only compared,
- * never written. Returns the keys whose rule was written, so a caller can tell whether there is a rule to name.
+ * another name, or whose cleared name tidies to another, makes the Yes stale too, so the toast can't name a store the rule
+ * doesn't cover. The name is only compared, never written. Returns the keys whose rule was written, so a caller can tell
+ * whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
@@ -271,6 +276,19 @@ export async function setOrganizeRule(
 	actor: string,
 ): Promise<string[]> {
 	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
+	// SQL can't tidy a name, so the saved keys that tidy to the offered name are read here, once, and the guard that
+	// uses them stays inside both statements below. An empty list (no saved key tidies to it) fails a cleared key.
+	const { results: keyRows } = await db
+		.prepare(
+			`SELECT DISTINCT ${merchantKeySql("s")} AS merchantKey FROM transactions s WHERE s.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(savedIds)
+		.all<{ merchantKey: string }>();
+	const tidyKeys = JSON.stringify(
+		keyRows
+			.map((row) => row.merchantKey)
+			.filter((key) => tidyName(key) === merchant),
+	);
 	// Two statements whatever the group's size, and both carry the guard, so the rules and the charges they name
 	// move together or not at all.
 	const rule = db
@@ -285,7 +303,7 @@ export async function setOrganizeRule(
 			savedIds,
 			categoryId,
 			...savedStillHoldArgs(savedIds, categoryId),
-			...savedStillNamedArgs(savedIds, merchant),
+			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
 		);
 	const apply = db
 		.prepare(
@@ -297,7 +315,7 @@ export async function setOrganizeRule(
 			savedIds,
 			categoryId,
 			...savedStillHoldArgs(savedIds, categoryId),
-			...savedStillNamedArgs(savedIds, merchant),
+			...savedStillNamedArgs(savedIds, tidyKeys, merchant),
 		);
 	// Only the rule's statement returns rows: the keys it wrote.
 	const [written] = await db.batch([rule, apply]);
