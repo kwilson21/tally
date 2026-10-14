@@ -17,12 +17,15 @@ CREATE TABLE planned_expenses (
 
 -- A payment pays a bill or a plan, never both (spec §5 and §6.1). An index can't span two tables, so each table
 -- gets a trigger pair: a write that would link a transaction a linked bill payment or a plan already holds aborts.
--- A dismissed bill row doesn't block a plan (only status 'linked' counts). The link step turns the abort into a
--- field error, and the bill matcher skips plan-linked transactions, so a sync never trips these.
+-- A split part is its parent's payment too (decision 82, paysPlanSql and paysBillSql), so each check reads the
+-- transaction and its split parent (`IN (id, parent_id)`), as the route checks do. A dismissed bill row doesn't block
+-- a plan (only status 'linked' counts). The link step turns the abort into a field error, and the bill matcher skips
+-- plan-paid transactions, so a sync never trips these.
 CREATE TRIGGER planned_expense_not_a_bill_payment
 BEFORE INSERT ON planned_expenses
 WHEN NEW.transaction_id IS NOT NULL
-	AND EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id = NEW.transaction_id AND status = 'linked')
+	AND EXISTS (SELECT 1 FROM transactions pt JOIN bill_payments bp ON bp.transaction_id IN (pt.id, pt.parent_id)
+		WHERE pt.id = NEW.transaction_id AND bp.status = 'linked')
 BEGIN
   SELECT RAISE(ABORT, 'That payment already pays a bill.');
 END;
@@ -30,7 +33,8 @@ END;
 CREATE TRIGGER planned_expense_not_a_bill_payment_on_update
 BEFORE UPDATE OF transaction_id ON planned_expenses
 WHEN NEW.transaction_id IS NOT NULL
-	AND EXISTS (SELECT 1 FROM bill_payments WHERE transaction_id = NEW.transaction_id AND status = 'linked')
+	AND EXISTS (SELECT 1 FROM transactions pt JOIN bill_payments bp ON bp.transaction_id IN (pt.id, pt.parent_id)
+		WHERE pt.id = NEW.transaction_id AND bp.status = 'linked')
 BEGIN
   SELECT RAISE(ABORT, 'That payment already pays a bill.');
 END;
@@ -38,7 +42,8 @@ END;
 CREATE TRIGGER bill_payment_not_a_planned_expense
 BEFORE INSERT ON bill_payments
 WHEN NEW.status = 'linked'
-	AND EXISTS (SELECT 1 FROM planned_expenses WHERE transaction_id = NEW.transaction_id)
+	AND EXISTS (SELECT 1 FROM transactions pt JOIN planned_expenses pe ON pe.transaction_id IN (pt.id, pt.parent_id)
+		WHERE pt.id = NEW.transaction_id)
 BEGIN
   SELECT RAISE(ABORT, 'That payment already pays a planned expense.');
 END;
@@ -47,7 +52,8 @@ END;
 CREATE TRIGGER bill_payment_not_a_planned_expense_on_update
 BEFORE UPDATE OF transaction_id, status ON bill_payments
 WHEN NEW.status = 'linked'
-	AND EXISTS (SELECT 1 FROM planned_expenses WHERE transaction_id = NEW.transaction_id)
+	AND EXISTS (SELECT 1 FROM transactions pt JOIN planned_expenses pe ON pe.transaction_id IN (pt.id, pt.parent_id)
+		WHERE pt.id = NEW.transaction_id)
 BEGIN
   SELECT RAISE(ABORT, 'That payment already pays a planned expense.');
 END;

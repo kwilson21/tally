@@ -19,6 +19,7 @@ import {
 	plansSetAsideCents,
 	restorePlanDelete,
 } from "../src/db/planned-expenses";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
@@ -110,6 +111,18 @@ describe("Safe to spend with planned expenses", () => {
 		expect(summary.safeToSpendCents).toBe(51800);
 
 		expect(summary.savingsGoalCents).toBe(10000);
+	});
+
+	it("takes a $180 plan out of Safe to spend with no savings goal: $1,400 - $460 - $142 - $180 = $618", () => {
+		const summary = summarizeMonth({
+			month: MONTH,
+			categories: [{ id: 1, name: "Groceries" }],
+			amounts: [{ categoryId: 1, effectiveMonth: MONTH, amountCents: 140000 }],
+			transactions: [{ categoryId: 1, amountCents: 46000, income: false }],
+			unpaidDueBillsCents: 14200,
+			unpaidPlansCents: 18000,
+		});
+		expect(summary.safeToSpendCents).toBe(61800);
 	});
 
 	it("counts this month's unpaid plans and earlier unpaid ones, but not one linked to a payment", async () => {
@@ -288,6 +301,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(band).toContain(`Move to ${shortMonthName(MONTH)}`);
 		expect(band).toContain(`action="/plans/${id}/drop"`);
 		expect(band.match(/size-2\.5 rounded-full/g)).toHaveLength(2);
+		expect(band).toContain("1 of 2 planned expenses that weren&#39;t paid");
 	});
 
 	it("a planned row opens its sheet in place, as Plan an expense does", async () => {
@@ -464,9 +478,285 @@ describe("Bills' Planned group, Band and sheet", () => {
 		});
 		expect(await billed.text()).toContain("can&#39;t be linked");
 	});
+
+	it("unlinks from the plan's own page, which answers with that page, unpaid, and says Payment unlinked", async () => {
+		const id = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9753, 18000),
+		);
+		const page = await post(`/plans/${id}/unlink`, { from: "plan" });
+		expect(page.headers.get("HX-Trigger")).toContain("Payment unlinked");
+		const html = await page.text();
+		expect(html).toContain('<h1 class="font-serif text-5xl');
+		expect(html).toContain("Link a payment");
+		expect(html).not.toContain("Paid by");
+
+		const plain = await exports.default.fetch(`${BASE}/plans/${id}/unlink`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({ from: "plan" }),
+		});
+		expect(plain.status).toBe(303);
+		expect(plain.headers.get("location")).toBe(`/plans/${id}`);
+	});
+
+	it("unlinks from the paid sheet, which answers with Bills and the sheet open, now unpaid", async () => {
+		const id = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9754, 18000),
+		);
+		const sheet = await post(`/plans/${id}/unlink`, {});
+		expect(sheet.headers.get("HX-Trigger")).toContain("Payment unlinked");
+		const html = await sheet.text();
+		expect(html).toContain('id="plan-sheet-title"');
+		expect(html).not.toContain("Paid by");
+		expect(html).toContain('id="page"');
+
+		const plain = await exports.default.fetch(`${BASE}/plans/${id}/unlink`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({}),
+		});
+		expect(plain.headers.get("location")).toBe("/bills");
+	});
+
+	it("restores a plan unpaid, and returns its name, when a bill took its payment during the Undo window", async () => {
+		const tx = await payment(9755, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const now = Date.now();
+		const token = await holdPlanDelete(env.DB, id, now);
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9755, 'Club', 1800, 1, 'monthly', 1, 'CLUB')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9755, ?, ?, 'user', 'linked')",
+			).bind(MONTH, tx),
+		]);
+		expect(await restorePlanDelete(env.DB, token ?? "", now)).toEqual({
+			name: "Car registration",
+			unlinked: true,
+		});
+		const restored = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
+		).first<{ t: number | null }>();
+		expect(restored?.t).toBeNull();
+	});
+
+	it("restores a plan with its payment, unlinked: false, when nothing took the payment", async () => {
+		const tx = await payment(9758, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const now = Date.now();
+		const token = await holdPlanDelete(env.DB, id, now);
+		expect(await restorePlanDelete(env.DB, token ?? "", now)).toEqual({
+			name: "Car registration",
+			unlinked: false,
+		});
+	});
+
+	it("an Undo that brings a plan back unpaid says so in its toast and announcement", async () => {
+		const tx = await payment(9770, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const deleted = await post(`/plans/${id}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO bills (id, name, amount_cents, due_day, frequency, category_id, merchant_raw_name) VALUES (9771, 'Club', 1800, 1, 'monthly', 1, 'CLUB')",
+			),
+			env.DB.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (9771, ?, ?, 'user', 'linked')",
+			).bind(MONTH, tx),
+		]);
+		const restored = await post("/plans/undo-delete", { token });
+		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+		const words = "Restored Car registration. Its payment is no longer linked.";
+		expect(trigger.toast.message).toBe(words);
+		expect(trigger.announce).toBe(words);
+	});
+
+	it("an Undo that keeps a plan's payment says only Restored, with no payment line", async () => {
+		const tx = await payment(9772, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const deleted = await post(`/plans/${id}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		const restored = await post("/plans/undo-delete", { token });
+		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Restored Car registration.");
+		expect(trigger.announce).toBe("Restored Car registration.");
+	});
 });
 
 describe("a bill can't take a payment a plan pays", () => {
+	// A $300 payment pays a $180 plan. Splitting it keeps the plan on the payment (decision 82: a split part counts as its
+	// parent's payment), so the parts are not free to pay a bill, by hand, in the picker, through the matcher or in the DB.
+	async function splitPlanPayment() {
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9711,'Registration fee',12000,3,'monthly','DMV FIXTURE')",
+		).run();
+		const tx = await payment(9712, 30000);
+		const planId = await plan("Car registration", 18000, MONTH, tx);
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		const parts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id",
+		)
+			.bind(tx)
+			.all<{ id: number }>();
+		return { tx, planId, part: parts.results[0]?.id ?? 0 };
+	}
+
+	it("keeps the plan on the split payment, and refuses a bill's link to one of its parts", async () => {
+		const { tx, planId, part } = await splitPlanPayment();
+		const kept = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+		)
+			.bind(planId)
+			.first<{ t: number }>();
+		expect(kept?.t).toBe(tx);
+
+		const refused = await post("/bills/9711/link", {
+			transaction_id: String(part),
+			period: MONTH,
+			opened_period: MONTH,
+		});
+		expect(await refused.text()).toContain("already pays a planned expense");
+		const linked = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=?",
+		)
+			.bind(part)
+			.first<{ n: number }>();
+		expect(linked?.n).toBe(0);
+	});
+
+	it("the database refuses a bill payment on a part of a payment a plan pays", async () => {
+		const { part } = await splitPlanPayment();
+		await expect(
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9711,?,?,'user','linked')",
+			)
+				.bind(MONTH, part)
+				.run(),
+		).rejects.toThrow("already pays a planned expense");
+	});
+
+	it("the database refuses a plan on a part of a payment a bill pays", async () => {
+		const tx = await payment(9713, 30000);
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9714,'Gym',12000,3,'monthly','GYM FIXTURE')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9714,?,?,'user','linked')",
+		)
+			.bind(MONTH, tx)
+			.run();
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		const part = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id DESC LIMIT 1",
+		)
+			.bind(tx)
+			.first<{ id: number }>();
+		// The bill is linked to the whole payment, which the split leaves on its parent (paysBillSql), so every part is paid.
+		await expect(
+			env.DB.prepare(
+				"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Lawn service',9000,?,?,'demo')",
+			)
+				.bind(MONTH, part?.id ?? 0)
+				.run(),
+		).rejects.toThrow("already pays a bill");
+	});
+
+	it("refuses a plan's link by hand to a part of a payment a bill pays", async () => {
+		const tx = await payment(9715, 30000);
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9716,'Gym',12000,3,'monthly','GYM FIXTURE')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9716,?,?,'user','linked')",
+		)
+			.bind(MONTH, tx)
+			.run();
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+		const part = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1",
+		)
+			.bind(tx)
+			.first<{ id: number }>();
+		const planId = await plan("Lawn service", 9000, MONTH);
+		const refused = await post(`/plans/${planId}/link`, {
+			transaction_id: String(part?.id ?? 0),
+		});
+		expect(await refused.text()).toContain("can&#39;t be linked");
+		const linked = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id IS NOT NULL",
+		).first<{ n: number }>();
+		expect(linked?.n).toBe(0);
+	});
+
+	it("the bill matcher and the picker skip a part of a payment a plan pays", async () => {
+		const { part } = await splitPlanPayment();
+		await matchBillPayments(env.DB, TODAY);
+		const matched = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id=?",
+		)
+			.bind(part)
+			.first<{ n: number }>();
+		expect(matched?.n).toBe(0);
+
+		// Another plan's picker never lists the part either, and linking it there is refused.
+		const other = await plan("Lawn service", 12000, MONTH);
+		const picker = await (
+			await exports.default.fetch(`${BASE}/plans/${other}`)
+		).text();
+		expect(picker).not.toContain(`value="${part}"`);
+		const refused = await post(`/plans/${other}/link`, {
+			transaction_id: String(part),
+		});
+		expect(await refused.text()).toContain("can&#39;t be linked");
+	});
+
 	it("refuses the bill's link by hand, with the planned expense's words", async () => {
 		await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9709,'Registration fee',18000,3,'monthly','DMV FIXTURE')",
@@ -495,6 +785,28 @@ describe("a payment that pays a planned expense, on its own page and in the list
 		).text();
 		expect(html).toContain(
 			"It pays a planned expense, so it counts in the budget.",
+		);
+	});
+
+	it("says in the save toast that an excluded payment still counts while it pays a planned expense", async () => {
+		const tx = await payment(9765, 18000);
+		await plan("Car registration", 18000, MONTH, tx);
+		const saved = await exports.default.fetch(`${BASE}/transactions/${tx}`, {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				excluded: "1",
+				note: "",
+				back: "/transactions",
+			}),
+		});
+		const trigger = JSON.parse(saved.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.announce).toContain(
+			"It still counts while it pays a planned expense.",
 		);
 	});
 

@@ -50,7 +50,11 @@ import {
 } from "../dates";
 
 import { amountRowsByBill } from "../db/bill-amounts";
-import { billPeriodMonth, type CountedBill } from "../db/counted-month";
+import {
+	billPeriodMonth,
+	type CountedBill,
+	paysPlanSql,
+} from "../db/counted-month";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -1446,7 +1450,7 @@ async function billPage(
 		// A payment the person turned away for this month stays listed, last, under "You said not this one" (#340).
 		candidates = (
 			await c.env.DB.prepare(
-				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT EXISTS(SELECT 1 FROM planned_expenses pe WHERE pe.transaction_id=t.id) ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents,t.raw_name,COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS display_name,t.excluded,CASE WHEN ${isMerchantTextSql("t")} THEN 1 ELSE 0 END AS sameMerchant,EXISTS(SELECT 1 FROM bill_payments dismissed WHERE dismissed.bill_id=? AND dismissed.period=? AND dismissed.transaction_id=t.id AND dismissed.status='dismissed' AND dismissed.matched_by='user') AS turnedAway FROM transactions t WHERE abs(julianday(t.date)-julianday(?))<=? AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT ${paysPlanSql("t")} ORDER BY turnedAway, sameMerchant DESC, abs(t.amount_cents-?), abs(julianday(t.date)-julianday(?)), t.id`,
 			)
 				.bind(
 					...merchantTextArgs(bill),
@@ -1746,10 +1750,11 @@ bills.post("/bills/:id/link", async (c) => {
 			today,
 		);
 
-	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053): the picker never lists it, and a
-	// request that names one anyway is refused here, rather than by the trigger's error.
+	// A payment that pays a planned expense can't pay a bill too (spec §5, migration 0053), and a split part is its parent's
+	// payment (paysPlanSql): the picker never lists it, and a request that names one anyway is refused here, rather than by
+	// the trigger's error.
 	const plannedAlready = await c.env.DB.prepare(
-		"SELECT 1 FROM planned_expenses WHERE transaction_id=?",
+		`SELECT 1 FROM transactions t WHERE t.id=? AND ${paysPlanSql("t")}`,
 	)
 		.bind(transaction)
 		.first();

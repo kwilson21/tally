@@ -6,6 +6,7 @@
  * a link needs beyond these checks, and the link reports which one fired.
  */
 import { monthsBefore } from "../dates";
+import { paysBillSql, paysPlanSql } from "./counted-month";
 import { merchantColumnSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
 
@@ -96,8 +97,8 @@ export async function planPaymentCandidates(
 			 FROM transactions t
 			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
 				AND substr(t.date, 1, 7) IN (?1, ?2)
-				AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = t.id AND bp.status = 'linked')
-				AND NOT EXISTS (SELECT 1 FROM planned_expenses pe WHERE pe.transaction_id = t.id)
+				AND NOT ${paysBillSql("t")}
+				AND NOT ${paysPlanSql("t")}
 			 ORDER BY ABS(t.amount_cents - ?3), t.date, t.id
 			 LIMIT 20`,
 		)
@@ -121,9 +122,8 @@ export async function linkPlanPayment(
 			 WHERE id = ?2 AND transaction_id IS NULL
 				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND t.amount_cents > 0 AND t.is_split = 0
 					AND t.flag_income = 0
-					AND substr(t.date, 1, 7) IN (planned_expenses.month, substr(date(planned_expenses.month || '-01', '+1 month'), 1, 7)))
-				AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = ?1 AND bp.status = 'linked')
-				AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = ?1)`,
+					AND substr(t.date, 1, 7) IN (planned_expenses.month, substr(date(planned_expenses.month || '-01', '+1 month'), 1, 7))
+					AND NOT ${paysBillSql("t")} AND NOT ${paysPlanSql("t")})`,
 		)
 		.bind(transactionId, planId)
 		.run();
@@ -219,13 +219,15 @@ export async function holdPlanDelete(
 
 /**
  * Writes a deleted plan back, once, within its ten seconds. Returns the restored plan's name, or null when the token
- * is unknown, already used or too old. The payment comes back only if it is still free to pay a plan.
+ * is unknown, already used or too old. The payment comes back only if it is still free to pay a plan; when a bill or
+ * another plan took it meanwhile, the plan comes back unpaid and set aside again, and `unlinked` says so (true only
+ * when the deleted plan had a payment and lost it).
  */
 export async function restorePlanDelete(
 	db: D1Database,
 	token: string,
 	now: number = Date.now(),
-): Promise<{ name: string; relinked: boolean } | null> {
+): Promise<{ name: string; unlinked: boolean } | null> {
 	const hold = await db
 		.prepare(
 			"SELECT name, transaction_id AS transactionId FROM planned_delete_holds WHERE token = ? AND created_ms > ?",
@@ -239,9 +241,8 @@ export async function restorePlanDelete(
 				`INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by)
 				 SELECT h.name, h.amount_cents, h.month,
 					CASE WHEN h.transaction_id IS NOT NULL
-						AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = h.transaction_id)
-						AND NOT EXISTS (SELECT 1 FROM bill_payments bp WHERE bp.transaction_id = h.transaction_id AND bp.status = 'linked')
-						AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id = h.transaction_id)
+						AND EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = h.transaction_id
+							AND NOT ${paysBillSql("pt")} AND NOT ${paysPlanSql("pt")})
 					THEN h.transaction_id END,
 					h.created_by
 				 FROM planned_delete_holds h WHERE h.token = ?1 AND h.created_ms > ?2`,
@@ -258,6 +259,6 @@ export async function restorePlanDelete(
 		.first<{ transactionId: number | null }>();
 	return {
 		name: hold.name,
-		relinked: hold.transactionId !== null && restored?.transactionId != null,
+		unlinked: hold.transactionId !== null && restored?.transactionId === null,
 	};
 }

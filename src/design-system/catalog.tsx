@@ -2097,6 +2097,7 @@ function Rows() {
 				components={[
 					"PlannedRow",
 					"PlannedHeading",
+					"BillStatusHeading",
 					"PlanBand",
 					"PlanSheet",
 					"PlanPaymentPicker",
@@ -2139,6 +2140,7 @@ function Rows() {
 				</State>
 				<State label="Paid this month, with a check in its heading">
 					<div class="max-w-xl">
+						<BillStatusHeading status="paid" totalCents={18000} />
 						<ul>
 							<PlannedRow
 								plan={{

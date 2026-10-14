@@ -180,7 +180,7 @@ plans.post("/plans/undo-delete", async (c) => {
 		await billsPage(c, undefined, today),
 		restored
 			? {
-					message: `Restored ${restored.name}.`,
+					message: `Restored ${restored.name}.${restored.unlinked ? " Its payment is no longer linked." : ""}`,
 					type: "success",
 					undoDone: token,
 				}
@@ -240,8 +240,12 @@ async function planPage(c: Context<App>, id: number, error?: string) {
 					<form
 						method="post"
 						action={`/plans/${plan.id}/unlink`}
+						hx-post={`/plans/${plan.id}/unlink`}
+						hx-target="body"
+						hx-swap="outerHTML"
 						class="mt-6 flex items-center justify-between gap-3 border-t border-rule pt-4"
 					>
+						<input type="hidden" name="from" value="plan" />
 						<p>
 							Paid by {plan.paidName} ·{" "}
 							{shortDay(plan.paidDate ?? today, today)} ·{" "}
@@ -311,15 +315,17 @@ plans.post("/plans/:id/unlink", async (c) => {
 	const id = Number(c.req.param("id"));
 	const plan = await loadPlan(c.env.DB, id);
 	if (!plan) return c.notFound();
+	// The plan's own page and its sheet both unlink, and each answers with the view it came from (decision 101), as Link does.
+	const onPage = (await c.req.parseBody()).from === "plan";
 	await unlinkPlanPayment(c.env.DB, id);
 	const today = await householdToday(c.env.DB);
-	if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
-	// Unlinking happens on the sheet, which stays open on the plan, now unpaid.
+	if (!c.req.header("HX-Request"))
+		return c.redirect(onPage ? `/plans/${id}` : "/bills", 303);
+	const toast = { message: "Payment unlinked", type: "success" };
+	if (onPage) return withToast(await planPage(c, id), toast);
+	// On the sheet, which stays open on the plan, now unpaid.
 	const fresh = (await loadPlan(c.env.DB, id)) ?? plan;
-	return withToast(await sheetPage(c, { plan: fresh }, today), {
-		message: "Payment unlinked",
-		type: "success",
-	});
+	return withToast(await sheetPage(c, { plan: fresh }, today), toast);
 });
 
 plans.post("/plans/:id/move", async (c) => {
