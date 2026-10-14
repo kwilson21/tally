@@ -1808,12 +1808,6 @@ export async function saveSplit(
 		parts,
 		used,
 	);
-	const linkedPurchase = await db
-		.prepare(
-			"SELECT refund_of_id AS refundOfId, date FROM transactions WHERE id = ?",
-		)
-		.bind(parentId)
-		.first<{ refundOfId: number | null; date: string }>();
 	const inheritedRefundLink =
 		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
 	// A kept payment is parked on the purchase as dismissed, out of the way of the parts it leaves, and moved to its
@@ -1834,11 +1828,14 @@ export async function saveSplit(
 						),
 				]
 			: [];
+	// The purchase's own refund link is cleared only when the refund no longer fits (unlinkSplitOverRefundedSql), and the
+	// new parts keep it otherwise. RETURNING names it when it goes, alongside the refunds unlinked from the purchase and parts.
 	// A part that a kept plan still holds here is positive (a plan's payment is money out, linkPlanPayment), so no refund
 	// counts it: the refund check reads the same as without those parts.
 	const unlinkRefund = db
 		.prepare(
-			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)`,
+			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)
+			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total);
 	// Each kept payment moves to the new part at its position in the sheet, which the new parts' ids follow.
@@ -1988,8 +1985,6 @@ export async function saveSplit(
 	const results = await db.batch(statements);
 	const saved =
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
-	const changed = (statement: D1PreparedStatement) =>
-		(results[statements.indexOf(statement)]?.meta.changes ?? 0) > 0;
 	// The rows a statement returned with RETURNING: the refunds it changed, a refund's own row or one of its parts
 	// (parentId is the refund's id for a part). unlinkedDates counts each refund once.
 	const returnedRows = (statement: D1PreparedStatement) =>
@@ -1998,20 +1993,15 @@ export async function saveSplit(
 			date: string;
 			parentId: number | null;
 		}[];
-	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
-	const refundUnlinked = changed(unlinkRefund);
 	return {
 		saved,
 		unlinked: !saved
 			? []
-			: !linkedPurchase?.refundOfId
-				? unlinkedDates([
-						...returnedRows(unlinkLinked),
-						...returnedRows(sweepRefused),
-					])
-				: refundUnlinked
-					? [linkedPurchase.date]
-					: [],
+			: unlinkedDates([
+					...returnedRows(unlinkRefund),
+					...returnedRows(unlinkLinked),
+					...returnedRows(sweepRefused),
+				]),
 		// Only the bills a person's split change unlinked and that are still unpaid are named (decisions 99 and 105).
 		bills: saved
 			? unpaidBillsFrom(results[statements.indexOf(stillUnpaid)])

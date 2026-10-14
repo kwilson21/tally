@@ -1848,7 +1848,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -1863,11 +1863,29 @@ function Rows() {
 						</div>
 					</div>
 				</State>
+				<State label="Pressed, held still: the press tint on a bill that opens its page, as it stays while the page loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						<BillRow
+							today="2026-10-04"
+							href="#bill-row"
+							bill={{
+								id: 2,
+								name: "Internet",
+								amountCents: 7999,
+								status: "due",
+								dueDate: "2026-10-09",
+								icon: "bills",
+								color: "cat-blue",
+							}}
+						/>
+					</ul>
+				</State>
 				<State label="Overdue">
 					<div class="max-w-xl">
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 1,
@@ -1887,6 +1905,7 @@ function Rows() {
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-05"
 								bill={{
 									id: 6,
@@ -1907,6 +1926,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 3,
@@ -1926,6 +1946,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 3,
@@ -1947,6 +1968,7 @@ function Rows() {
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-09"
 								bill={{
 									id: 3,
@@ -1968,6 +1990,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-05"
 								bill={{
 									id: 8,
@@ -2009,6 +2032,7 @@ function Rows() {
 						<BillStatusHeading status="paid" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 5,
@@ -2029,6 +2053,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 8,
@@ -2050,6 +2075,7 @@ function Rows() {
 						<BillStatusHeading status="paid" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 2,
@@ -2316,15 +2342,37 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet; here they don't link anywhere."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet, so it ends in the chevron on its name line and takes the press tint as it opens; here each row links to this section, and a pressed row is held still in its own state. Beside rows that open, an archived category keeps the arrow’s space, so the bars end together."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
-							<ProgressRow {...s.props} />
+							<ProgressRow {...s.props} href="#progress-row" />
 						</ul>
 					</State>
 				))}
+				<State label="Beside rows that open, an archived category keeps the arrow's space, so the bars end together">
+					<ul class="max-w-xl">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} href="#progress-row" />
+						))}
+						<ProgressRow
+							name="Kids"
+							icon="kids"
+							color="cat-ochre"
+							spentCents={12000}
+							budgetCents={20000}
+							reserveArrow
+						/>
+					</ul>
+				</State>
+				<State label="Pressed, held still: the press tint on a row that opens while its sheet loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} href="#progress-row" />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="not-budgeted-row"
@@ -2391,11 +2439,16 @@ function Rows() {
 				title="SavingsGoalRow"
 				tier="visual"
 				components={["SavingsGoalRow"]}
-				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category."
+				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category. A set goal ends in the chevron and takes the press tint as it opens; “Set a goal” ends in terracotta words, so it has neither."
 			>
+				<State label="Pressed, held still: the press tint on a set goal as its sheet loads">
+					<ul class="max-w-xl divide-y divide-rule [&_.row-opens]:bg-press">
+						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
+					</ul>
+				</State>
 				<State label="Goal set">
 					<ul class="max-w-xl divide-y divide-rule">
-						<SavingsGoalRow amountCents={50000} href="#" />
+						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
 						{PROGRESS_ROWS.slice(0, 1).map((row) => (
 							<ProgressRow {...row.props} />
 						))}
@@ -2405,7 +2458,7 @@ function Rows() {
 					<div>
 						<h3 class="text-sm text-muted">Not budgeted</h3>
 						<ul class="max-w-xl divide-y divide-rule">
-							<SavingsGoalRow amountCents={null} href="#" />
+							<SavingsGoalRow amountCents={null} href="#savings-goal-row" />
 						</ul>
 					</div>
 				</State>
@@ -2467,7 +2520,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; a payment linked to a planned expense says “paid [plan name]” the same way; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; a payment linked to a planned expense says “paid [plan name]” the same way; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
@@ -2479,7 +2532,7 @@ function Rows() {
 							{TRANSACTION_ROWS.filter((state) => state.row.nameSuggested)
 								.slice(0, 1)
 								.map((state) => (
-									<TransactionRow row={state.row} />
+									<TransactionRow row={state.row} href="#transaction-row" />
 								))}
 						</ul>
 					</div>
@@ -2487,10 +2540,17 @@ function Rows() {
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
-							<TransactionRow row={s.row} />
+							<TransactionRow row={s.row} href="#transaction-row" />
 						</ul>
 					</State>
 				))}
+				<State label="Pressed, held still: the press tint on a row that opens while its edit panel loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						{TRANSACTION_ROWS.slice(0, 1).map((s) => (
+							<TransactionRow row={s.row} href="#transaction-row" />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="pending-note"
