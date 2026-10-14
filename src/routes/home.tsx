@@ -6,7 +6,6 @@ import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
-	type BudgetCategory,
 	budgetCategory,
 	lastMonthSpentCents,
 	nudgeBudget,
@@ -30,13 +29,11 @@ import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
-import { Button } from "../views/button";
-import { CategoryIcon } from "../views/category";
+import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { Layout } from "../views/layout";
-import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
@@ -44,7 +41,6 @@ import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { ThingsToTry } from "../views/things-to-try";
-import { TransactionsButton } from "../views/transactions-button";
 import { loadBillRows } from "./bills";
 
 type App = { Bindings: Env };
@@ -492,104 +488,14 @@ async function renderHome(
 	);
 }
 
-/** The budget sheet: one amount, from this month on, with the money input's helpers. */
-function BudgetSheet({
-	category,
-	value,
-	error,
-	spentCents,
-	lastMonthCents,
-	averageCents,
-	transactionCount,
-	month: monthPeriod,
-}: {
-	category: BudgetCategory;
-	value: string;
-	error?: string;
-	spentCents: number;
-	lastMonthCents: number;
-	averageCents: number | null;
-	transactionCount: number;
-	/** The household's current month, YYYY-MM. */
-	month: string;
-}) {
-	const month = monthName(monthPeriod);
-	const transactionsHref = `/transactions?${new URLSearchParams({
-		category: String(category.id),
-		month: monthPeriod,
-		show: "spending",
-	})}`;
-	// Closing swaps Home back in with focus on the row, so the change is announced.
-	const closeAttrs = {
-		"hx-get": `/?focus=${category.id}`,
-		"hx-target": "#page",
-		"hx-select": "#page",
-		"hx-swap": "outerHTML",
-		"hx-push-url": "/",
-	};
-	return (
-		<BottomSheet
-			labelledBy="budget-sheet-title"
-			closeHref="/"
-			closeAttrs={closeAttrs}
-			// A refused amount draws the open sheet again.
-			still={error !== undefined}
-		>
-			<div class="flex items-center gap-3">
-				<CategoryIcon icon={category.icon} color={category.color} />
-				<h2
-					id="budget-sheet-title"
-					class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"
-					tabindex={-1}
-				>
-					{category.name}
-				</h2>
-			</div>
-			<p class="mt-1 text-muted">
-				{/* The same net amount as the Home row: refunds reduce spending (spec §6). */}
-				{spentCents < 0
-					? `${formatCents(-spentCents)} more refunded than spent in ${month}`
-					: `${formatCents(spentCents)} spent so far in ${month}`}
-			</p>
-			<TransactionsButton href={transactionsHref} count={transactionCount} />
-			<form
-				method="post"
-				action={`/budget/${category.id}`}
-				class="mt-4 flex flex-col gap-4 border-t border-rule pt-4"
-				hx-post={`/budget/${category.id}`}
-				hx-disable="findAll button[type=submit]"
-				hx-indicator="#budget-save"
-				hx-target="#page"
-				hx-select="#page"
-				hx-swap="outerHTML"
-			>
-				<MoneyInput
-					id="budget"
-					name="budget"
-					label={`Budget from ${month} on`}
-					value={value}
-					error={error}
-					lastMonthCents={lastMonthCents}
-					averageCents={averageCents}
-					autofocus
-				/>
-				<div class="mt-2 grid grid-cols-2 gap-3">
-					<Button href="/" kind="secondary" class="w-full" {...closeAttrs}>
-						Cancel
-					</Button>
-					<Button
-						id="budget-save"
-						type="submit"
-						class="w-full"
-						busyLabel="Saving…"
-					>
-						Save
-					</Button>
-				</div>
-			</form>
-		</BottomSheet>
-	);
-}
+// Closing a budget sheet swaps Home back in with focus on that category's row, so the change is announced.
+const closeBudgetAttrs = (categoryId: number) => ({
+	"hx-get": `/?focus=${categoryId}`,
+	"hx-target": "#page",
+	"hx-select": "#page",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/",
+});
 
 const idOf = (c: Context<App>) => Number(c.req.param("id"));
 /**
@@ -649,21 +555,29 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 		category.id,
 		month,
 	);
+	const closeAttrs = closeBudgetAttrs(category.id);
 	return renderHome(c, today, {
 		sheet: (spent, _savingsGoal, transactionCount) => (
-			<BudgetSheet
-				category={category}
-				value={
-					category.budgetCents === null
-						? ""
-						: centsToAmount(category.budgetCents)
-				}
-				spentCents={spent(category.id)}
-				lastMonthCents={lastMonth}
-				averageCents={average}
-				transactionCount={transactionCount(category.id)}
-				month={month}
-			/>
+			<BottomSheet
+				labelledBy="budget-sheet-title"
+				closeHref="/"
+				closeAttrs={closeAttrs}
+			>
+				<BudgetSheet
+					category={category}
+					value={
+						category.budgetCents === null
+							? ""
+							: centsToAmount(category.budgetCents)
+					}
+					spentCents={spent(category.id)}
+					lastMonthCents={lastMonth}
+					averageCents={average}
+					transactionCount={transactionCount(category.id)}
+					month={month}
+					closeAttrs={closeAttrs}
+				/>
+			</BottomSheet>
 		),
 	});
 });
@@ -752,19 +666,29 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 			category.id,
 			month,
 		);
+		const closeAttrs = closeBudgetAttrs(category.id);
+		// A refused amount draws the open sheet again, without its arrival.
 		return renderHome(c, today, {
 			status: 422,
 			sheet: (spent, _savingsGoal, transactionCount) => (
-				<BudgetSheet
-					category={category}
-					value={typed}
-					error={parsed.error}
-					spentCents={spent(category.id)}
-					lastMonthCents={lastMonth}
-					averageCents={average}
-					transactionCount={transactionCount(category.id)}
-					month={month}
-				/>
+				<BottomSheet
+					labelledBy="budget-sheet-title"
+					closeHref="/"
+					closeAttrs={closeAttrs}
+					still
+				>
+					<BudgetSheet
+						category={category}
+						value={typed}
+						error={parsed.error}
+						spentCents={spent(category.id)}
+						lastMonthCents={lastMonth}
+						averageCents={average}
+						transactionCount={transactionCount(category.id)}
+						month={month}
+						closeAttrs={closeAttrs}
+					/>
+				</BottomSheet>
 			),
 		});
 	}
