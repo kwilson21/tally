@@ -1,6 +1,7 @@
 // Recategorize, exclude, and change a budget amount (the sheet and Adjust mode) end to end (spec §11): Home's band → the Needs category list → the edit sheet → save → Home updates.
 // Resets the demo data first, and fails on any console error.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL ?? "http://127.0.0.1:8787";
@@ -1170,6 +1171,63 @@ await page.getByText("Needs category (8)", { exact: true }).waitFor();
 step(
 	"selecting two rows sets Groceries and lowers the uncategorized count by two",
 );
+
+// Seven-figure amounts on a 320px phone (decision 110). The writes go to the local D1 after everything
+// above has run, so no earlier step sees them; the demo reset below puts the seed's numbers back.
+const writeLocalD1 = (sql) =>
+	execFileSync(
+		"npx",
+		["wrangler", "d1", "execute", "DB", "--local", "--command", sql],
+		{ stdio: "pipe" },
+	);
+const now = new Date();
+const finishedMonth = new Date(
+	Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1),
+)
+	.toISOString()
+	.slice(0, 7);
+writeLocalD1(
+	`INSERT OR REPLACE INTO budget_amounts (category_id, effective_month, amount_cents) SELECT id, '${finishedMonth}', 200000000 FROM categories WHERE name = 'Groceries'; UPDATE accounts SET balance_cents = balance_cents + 100000000 WHERE is_liability = 0`,
+);
+await page.setViewportSize({ width: 320, height: 844 });
+// A headline of 9 or more characters is one size smaller under 640px, 48px here, and nothing scrolls sideways.
+const assertHeadlineFitsPhone = async (headline, what) => {
+	await headline.waitFor();
+	assert(
+		(await headline.innerText()).length >= 9,
+		`${what} should show a seven-figure amount`,
+	);
+	const fontSize = await headline.evaluate(
+		(el) => getComputedStyle(el).fontSize,
+	);
+	assert.equal(fontSize, "48px", `${what} is not one size smaller at 320px`);
+	const scrollWidth = await page.evaluate(
+		() => document.documentElement.scrollWidth,
+	);
+	assert(
+		scrollWidth <= 320,
+		`${what} scrolls sideways at 320px: ${scrollWidth}px`,
+	);
+};
+await goto(`${BASE}/?month=${finishedMonth}`, { waitUntil: "networkidle" });
+await assertHeadlineFitsPhone(
+	page.locator('section[aria-label$=" ended"]').locator("p.whitespace-nowrap"),
+	"a finished month's result",
+);
+step(
+	"a finished month's seven-figure result fits a 320px phone one size smaller",
+);
+await goto(`${BASE}/accounts`, { waitUntil: "networkidle" });
+await assertHeadlineFitsPhone(
+	page
+		.getByText("Net worth", { exact: true })
+		.first()
+		.locator("xpath=following-sibling::p[1]"),
+	"Net worth",
+);
+step("a seven-figure Net worth fits a 320px phone one size smaller");
+const restored = await fetch(`${BASE}/cdn-cgi/handler/scheduled`);
+assert.equal(restored.status, 200, "restoring the demo data failed");
 
 await browser.close();
 // Tie the two intentional failed saves to their resource URLs; unrelated 422s cannot substitute.

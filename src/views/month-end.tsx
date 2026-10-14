@@ -3,6 +3,7 @@ import { formatCents } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
 import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
+import { headlineAmountClass } from "./headline-amount";
 
 const wholeUnlessTiny = (cents: number) =>
 	formatCents(cents, {
@@ -336,14 +337,15 @@ export function MonthEnd({
 	rows: CategorySummary[];
 }) {
 	const over = amountCents < 0;
+	const amount = wholeUnlessTiny(Math.abs(amountCents));
 	return (
 		<section aria-label={`${monthName} ended`}>
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<p
-					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""}`}
+					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 				>
-					{wholeUnlessTiny(Math.abs(amountCents))}
+					{amount}
 				</p>
 				<span
 					class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
