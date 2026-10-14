@@ -2102,7 +2102,7 @@ function Rows() {
 					"PlanSheet",
 					"PlanPaymentPicker",
 				]}
-				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with Move to Nov (this month's short name) or Drop (decision 101)."
+				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with a Move to Nov button (this month's short name) and a Drop button (decision 101)."
 			>
 				<State label="Planned, with this month's total">
 					<div class="max-w-xl">

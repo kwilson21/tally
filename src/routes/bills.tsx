@@ -48,7 +48,6 @@ import {
 	shortDay,
 	shortMonthName,
 } from "../dates";
-
 import { amountRowsByBill } from "../db/bill-amounts";
 import {
 	billPeriodMonth,
@@ -312,8 +311,6 @@ export async function loadBillRows(db: D1Database, today: string) {
 	return { today, rows: result };
 }
 
-// `given` is the household's date when the handler already read it, so a request reads it once.
-
 /** Bills' page, with an optional sheet over it: a bill's, or a planned expense's (`plan`, drawn by plans.tsx). */
 export async function page(
 	c: Context<App>,
@@ -326,6 +323,7 @@ export async function page(
 	},
 	given?: string,
 ) {
+	// `given` is the household's date when the handler already read it, so a request reads it once.
 	const today = given ?? (await householdToday(c.env.DB));
 	const { rows: loaded } = await loadBillRows(c.env.DB, today);
 	const suggestions = await loadBillSuggestions(c.env.DB, today);

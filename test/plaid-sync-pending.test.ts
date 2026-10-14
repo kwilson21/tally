@@ -1695,6 +1695,105 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		).toEqual([{ bill_id: 701, transaction_id: ids.posted }]);
 	});
 
+	/** A plan paid by the given payment, as a person links it (decision 82). */
+	async function planPaidBy(transactionId: number, name = "Car registration") {
+		const row = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES (?, 1234, '2026-09', ?, 'demo') RETURNING id",
+		)
+			.bind(name, transactionId)
+			.first<{ id: number }>();
+		return row?.id as number;
+	}
+
+	const planPayer = async (planId: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+			)
+				.bind(planId)
+				.first<{ t: number | null }>()
+		)?.t ?? null;
+
+	it("moves a planned expense's payment onto the posted row, as a bill's payment moves", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const plan = await planPaidBy(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBe(ids.posted);
+	});
+
+	it("leaves a planned expense's payment on the pending row when the posted one already pays a bill, so the plan is unpaid and the bill keeps its payment", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await addBillLinkedTo(ids.posted);
+		const plan = await planPaidBy(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBeNull();
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id = ? AND status = 'linked'",
+				ids.posted,
+			),
+		).toBe(1);
+	});
+
+	it("leaves a bill's payment on the pending row when the posted one already pays a planned expense, and the plan stays paid", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const plan = await planPaidBy(ids.posted);
+		await addBillLinkedTo(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBe(ids.posted);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 700",
+			),
+		).toBe(0);
+	});
+
+	it("keeps a planned expense's payment on a pending part on the posted part with the same amount and category", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await planPayer(plan)).toBe(own[0]);
+	});
+
+	it("does not keep a planned expense's payment on a posted part that already pays another plan, and unlinks it", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const other = await planPaidBy(own[0] ?? 0, "Gym");
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await planPayer(other)).toBe(own[0]);
+		expect(await planPayer(plan)).toBeNull();
+	});
+
+	it("moves only one of two planned expenses on pending parts that match the same posted part, and the other is set aside", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		// The second pending part matches the first's amount and category, so both could take the one posted part.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 600, category_id = 1 WHERE id = ?",
+		)
+			.bind(pending[1] ?? 0)
+			.run();
+		const first = await planPaidBy(pending[0] ?? 0, "Gym");
+		const second = await planPaidBy(pending[1] ?? 0, "Lawn service");
+
+		await post(item);
+
+		const payers = [await planPayer(first), await planPayer(second)];
+		expect(payers.filter((payer) => payer === own[0])).toHaveLength(1);
+		expect(payers).toContain(null);
+	});
+
 	it("moves refund links both ways", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);

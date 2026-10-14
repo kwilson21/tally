@@ -454,7 +454,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(row?.a).toBe(18000);
 	});
 
-	it("links a payment from the plan's page, and says why a payment that pays a bill can't be linked", async () => {
+	it("links a payment from the plan's page, and says which bill or plan a payment that can't be linked already pays", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		await payment(9706, 18000);
 		const ok = await post(`/plans/${id}/link`, { transaction_id: "9706" });
@@ -470,7 +470,9 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const refused = await post(`/plans/${other}/link`, {
 			transaction_id: "9706",
 		});
-		expect(await refused.text()).toContain("can&#39;t be linked");
+		expect(await refused.text()).toContain(
+			"That payment already pays a planned expense.",
+		);
 		const bill = await env.DB.prepare(
 			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9708,'Gym',9000,3,'monthly','GYM FIXTURE') RETURNING id",
 		).first();
@@ -484,7 +486,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 		const billed = await post(`/plans/${other}/link`, {
 			transaction_id: "9707",
 		});
-		expect(await billed.text()).toContain("can&#39;t be linked");
+		expect(await billed.text()).toContain("That payment already pays a bill.");
 	});
 
 	it("unlinks from the plan's own page, which answers with that page, unpaid, and says Payment unlinked", async () => {
@@ -840,9 +842,16 @@ describe("a split keeps a plan and a bill on parts, and Undo or Remove split lea
 	it("a bill's link that loses a race to a plan's link is refused in its field, not as a failed request", async () => {
 		const tx = await payment(9820, 18000);
 		await insertBill(9821, "Registration fee", 18000);
-		// The plan's link lands after the link's check and before its batch: the trigger refuses the bill's payment there.
+		// The plan's link lands after the link's check and before its batch, and the migration's trigger then refuses the
+		// bill's payment. The stand-in trigger raises the migration's own message, which the test reads from the schema, so
+		// the route's catch and the words it shows stay tied to the real trigger.
+		const live = await env.DB.prepare(
+			"SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'bill_payment_not_a_planned_expense'",
+		).first<{ sql: string }>();
+		const message = /RAISE\(ABORT, '([^']+)'\)/.exec(live?.sql ?? "")?.[1];
+		expect(message).toBe("That payment already pays a planned expense.");
 		await env.DB.prepare(
-			"CREATE TRIGGER race_plan_link BEFORE INSERT ON bill_payments WHEN NEW.transaction_id = 9820 BEGIN SELECT RAISE(ABORT, 'That payment already pays a planned expense.'); END",
+			`CREATE TRIGGER race_plan_link BEFORE INSERT ON bill_payments WHEN NEW.transaction_id = 9820 BEGIN SELECT RAISE(ABORT, '${message}'); END`,
 		).run();
 		try {
 			const refused = await post("/bills/9821/link", {
@@ -982,7 +991,7 @@ describe("a bill can't take a payment a plan pays", () => {
 		const refused = await post(`/plans/${planId}/link`, {
 			transaction_id: String(part?.id ?? 0),
 		});
-		expect(await refused.text()).toContain("can&#39;t be linked");
+		expect(await refused.text()).toContain("That payment already pays a bill.");
 		const linked = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM planned_expenses WHERE transaction_id IS NOT NULL",
 		).first<{ n: number }>();
@@ -1008,7 +1017,9 @@ describe("a bill can't take a payment a plan pays", () => {
 		const refused = await post(`/plans/${other}/link`, {
 			transaction_id: String(part),
 		});
-		expect(await refused.text()).toContain("can&#39;t be linked");
+		expect(await refused.text()).toContain(
+			"That payment already pays a planned expense.",
+		);
 	});
 
 	it("refuses the bill's link by hand, with the planned expense's words", async () => {

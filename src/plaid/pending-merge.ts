@@ -31,8 +31,9 @@
  *   leaves the posted row in Needs category with the note. A refund of one of its parts is unlinked with the
  *   purchase's date (decision 99). When the posted row keeps its own split, a pending part's bill payment stays paid on
  *   the posted part with the same amount and category, and otherwise it is unlinked, with no dismissal, so the matcher
- *   may link it again when it still matches (decisions 99 and 105). A person's own Not this one on a pending part moves
- *   to the posted row, and each posted part starts with it.
+ *   may link it again when it still matches (decisions 99 and 105). A planned expense on a pending part moves the same way,
+ *   to the posted part with the same amount and category that no bill or plan pays; otherwise it is set aside again.
+ *   A person's own Not this one on a pending part moves to the posted row, and each posted part starts with it.
  * - Tally's AI log of what it did (spec section 5) follows the category it counts: its row moves to the posted row
  *   only when the pending row's category moves with it, so a person's later change is counted only on a category
  *   Tally still holds. Otherwise the row keeps counting with no transaction. An income row always moves.
@@ -47,7 +48,11 @@ import {
 	purchaseDismissalsToPartsSql,
 } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
-import { jevAsksAboutSql, paysPlanGroupSql } from "../db/counted-month";
+import {
+	jevAsksAboutSql,
+	paysBillGroupSql,
+	paysPlanGroupSql,
+} from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -115,6 +120,16 @@ const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
 	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
 	AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
 	AND NOT ${paysPlanGroupSql("part")}
+	ORDER BY part.id LIMIT 1)`;
+
+/**
+ * The posted row's part a pending part's planned expense moves to: KEEP_PART's twin for a plan (decision 82). A part is
+ * picked only when no bill or plan already pays its payment group, so the never-both triggers hold.
+ */
+const KEEP_PLAN_PART = `(SELECT part.id FROM transactions part, transactions pp
+	WHERE pp.id = planned_expenses.transaction_id AND part.parent_id = ${POSTED}
+	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
+	AND NOT ${paysBillGroupSql("part")} AND NOT ${paysPlanGroupSql("part")}
 	ORDER BY part.id LIMIT 1)`;
 
 const STATEMENTS = [
@@ -218,20 +233,23 @@ const STATEMENTS = [
 	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),
 		transfer_maybe_declined = MAX(transactions.transfer_maybe_declined, p.transfer_maybe_declined)
 	 ${FROM_PENDING} AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
-
 	// A bill payment (and a dismissal) moves, unless the posted row already pays a bill or a planned expense (a payment pays
 	// one of them, never both: migration 0053's triggers would refuse the move, so it is checked here first).
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
-	WHERE transaction_id = ${PENDING} AND ${READY}
-	AND (status = 'dismissed' OR (NOT EXISTS (
-	SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
-	AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})))`,
+	 WHERE transaction_id = ${PENDING} AND ${READY}
+	 AND (status = 'dismissed' OR (NOT EXISTS (
+	 SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
+	 AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})))`,
 	// A planned expense's payment moves the same way (spec section 5, every link moves to the posted row), unless the posted
-	// row already pays a bill or another plan.
-	`UPDATE planned_expenses SET transaction_id = ${POSTED}
-	WHERE transaction_id = ${PENDING} AND ${READY}
-	AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
-	AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})`,
+	// row already pays a bill or another plan. One on a pending part moves to the part KEEP_PLAN_PART picks, or stays on the
+	// part and is set aside when the delete below removes it. OR IGNORE keeps a UNIQUE clash from failing the whole page: a
+	// plan that finds its part taken stays on its own part, as a bill's payment does (KEEP_PART).
+	`UPDATE OR IGNORE planned_expenses SET transaction_id = COALESCE(CASE WHEN transaction_id = ${PENDING} THEN ${POSTED} END, ${KEEP_PLAN_PART})
+	WHERE ${READY} AND (
+		(transaction_id = ${PENDING}
+		 AND NOT EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
+		 AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP}))
+		OR (transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${KEEP_PLAN_PART} IS NOT NULL))`,
 
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}

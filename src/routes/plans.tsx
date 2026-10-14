@@ -10,6 +10,7 @@ import {
 	PLAN_UNDO_MS,
 	type PlanFields,
 	type PlannedExpense,
+	paysBillOrPlan,
 	planPaymentCandidates,
 	restorePlanDelete,
 	unlinkPlanPayment,
@@ -304,6 +305,14 @@ plans.post("/plans/:id/link", async (c) => {
 			message: "Payment linked",
 			type: "success",
 		});
+	// The refusal names what the payment already pays, in the bill side's words (decision 82).
+	const paid = Number.isInteger(transaction)
+		? await paysBillOrPlan(c.env.DB, transaction)
+		: null;
+	if (paid === "bill")
+		return planPage(c, id, "That payment already pays a bill.");
+	if (paid === "plan")
+		return planPage(c, id, "That payment already pays a planned expense.");
 	return planPage(
 		c,
 		id,

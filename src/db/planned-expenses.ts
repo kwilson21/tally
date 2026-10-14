@@ -130,6 +130,24 @@ export async function linkPlanPayment(
 	return result.meta.changes === 1;
 }
 
+/**
+ * What a payment already pays, if anything, for a link refusal to name (decision 82): the payment's group, the payment,
+ * its split parent and its parts, pays a bill or a planned expense. Null when neither does.
+ */
+export async function paysBillOrPlan(
+	db: D1Database,
+	transactionId: number,
+): Promise<"bill" | "plan" | null> {
+	const paid = await db
+		.prepare(
+			`SELECT ${paysBillGroupSql("t")} AS bill, ${paysPlanGroupSql("t")} AS plan FROM transactions t WHERE t.id = ?`,
+		)
+		.bind(transactionId)
+		.first<{ bill: number; plan: number }>();
+	if (paid?.bill) return "bill";
+	return paid?.plan ? "plan" : null;
+}
+
 /** Unlinks a plan's payment, which sets the plan aside again. */
 export async function unlinkPlanPayment(
 	db: D1Database,
