@@ -534,9 +534,11 @@ suggestions.post(PATH, async (c) => {
 					(work) => c.executionCtx.waitUntil(work),
 				);
 				const after = await suggestionQueue(db);
-				const message = result.attached
-					? `Added ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"} to ${result.name}.`
-					: `Made ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`;
+				const message = result.restored
+					? `Restored ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`
+					: result.attached
+						? `Added ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"} to ${result.name}.`
+						: `Made ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`;
 				return done(message, after, leftOutSentence(result.leftOut.length));
 			}
 			if (answer === "no") {
