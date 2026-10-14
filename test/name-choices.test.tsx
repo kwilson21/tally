@@ -21,6 +21,7 @@ const rename: RenameFacts = {
 	tallyCategory: true,
 	excludeCounts: true,
 	linkHolds: false,
+	reviewLifts: false,
 	today: "2026-10-11",
 	scope: "one",
 };
@@ -32,6 +33,10 @@ const REVIEW_HOLD =
 	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden";
 /** A linked purchase ticked hides the note while the drawn link holds (Jev's review, linkHolds). */
 const LINK_HOLDS = "group-has-[.linked-purchase:checked]/edit:hidden";
+/** Exclude hides the note only while Reviewed is unticked, where the review lifts Plaid's exclusion (reviewLifts). */
+const EXCLUDE_UNLESS_REVIEWED =
+	"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden";
+const EXCLUDE_PLAIN = "group-has-[input[name=excluded]:checked]/edit:hidden";
 
 /** The one radio whose value is `value`, as its opening tag. */
 function radio(html: string, value: string): string {
@@ -175,6 +180,27 @@ describe("the re-guess note follows the edit form's controls", () => {
 		);
 		expect(paysBill).toContain("input[name=category]");
 		expect(paysBill).not.toContain("input[name=excluded]");
+	});
+
+	it("where ticking Reviewed lifts Plaid's exclusion, Exclude hides the note only while Reviewed is unticked", () => {
+		const note = folds(
+			guessAgainClass(markup({ ...rename, reviewLifts: true })),
+		);
+		expect(note).toContain(EXCLUDE_UNLESS_REVIEWED);
+		expect(note).not.toContain(EXCLUDE_PLAIN);
+	});
+
+	it("where Reviewed doesn't lift the exclusion, Exclude hides the note while it is ticked, whatever Reviewed is", () => {
+		const note = folds(guessAgainClass(markup(rename)));
+		expect(note).toContain(EXCLUDE_PLAIN);
+		expect(note).not.toContain(EXCLUDE_UNLESS_REVIEWED);
+	});
+
+	it("a bill payment has no Exclude hook at all, even where Reviewed would lift an exclusion", () => {
+		const note = guessAgainClass(
+			markup({ ...rename, reviewLifts: true, excludeCounts: false }),
+		);
+		expect(note).not.toContain("input[name=excluded]");
 	});
 
 	it("draws no note when Tally did not pick the category", () => {

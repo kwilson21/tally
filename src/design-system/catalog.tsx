@@ -73,6 +73,7 @@ import {
 } from "../views/maybe-category";
 import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
+import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -442,7 +443,7 @@ function Shell() {
 				title="Layout, Sidebar and BottomTabs"
 				tier="visual"
 				components={["Layout", "Sidebar", "BottomTabs"]}
-				sentence="Every page's shell: banner, navigation, main, toast and announce regions. The same destinations are a sidebar on desktop and four tabs plus More on phones."
+				sentence="Every page's shell: banner, navigation, main, toast and announce regions. The same destinations are a sidebar on desktop and four tabs plus More on phones. The desktop sidebar's second group, under a rule, holds How Tally works and Feedback; on a phone, Feedback sits in the top line beside the wordmark."
 			>
 				<p class="max-w-prose">
 					This page is drawn inside the real Layout, so its demo banner,
@@ -452,9 +453,10 @@ function Shell() {
 				</p>
 				<p class="max-w-prose">
 					On phones, keyboard scrolling and the bottom of main use the same
-					room, calculated from the fixed tabs, Feedback pill, focus gap and
-					safe-area inset, so the last row or form can clear both controls.
-					Desktop keeps its existing main spacing.
+					room, calculated from the fixed tabs, focus gap and safe-area inset,
+					so the last row or form can clear the tabs. Feedback scrolls away with
+					the page, so it takes no room. Desktop keeps its existing main
+					spacing.
 				</p>
 				<MotionSpec>
 					Pages cross-fade in 150 ms through the browser's own View Transitions,
@@ -676,7 +678,7 @@ const TOAST_SPEC: UseSpecText = {
 	states:
 		"Success: the words. A deleted cash entry, or a payment a person said Not this one to, adds a 44px Undo button for the time left on its ten-second server token. Error: the alert icon, then the words. Other messages stay for 4 seconds. Only the newest plain or error toast shows; an Undo toast is never removed early, except by its own answer: a restore's “… is back.” toast or a refused Undo ends the toast it answers.",
 	feedback:
-		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too) or, on a bill's page, to its page title, and an answer or failed request that arrives after its ten seconds ran out still moves focus left on nothing there (#444); after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends; after an Undo of a Not this one, focus is on that month's Not this one button. Taps pass through the toast, so a Save under it can be tapped again. On a phone the Feedback pill steps aside while a toast shows, unless it has focus.",
+		"It appears after an HTMX change (HX-Trigger toast) or a failed request, and the announcer says the same words (announce), so a screen reader hears it. Focus stays where it was, except for three Undo rules: when an Undo toast appears (after a delete), focus moves to its Undo button; when it ends with focus still on Undo, focus moves to the Transactions heading (on the first-visit page too) or, on a bill's page, to its page title, and an answer or failed request that arrives after its ten seconds ran out still moves focus left on nothing there (#444); after a restore, focus is on the restored entry's row when the list shows it, and otherwise the heading takes it as the Deleted toast ends; after an Undo of a Not this one, focus is on that month's Not this one button. Taps pass through the toast, so a Save under it can be tapped again.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard; while its request is in flight it is off, and a request that fails turns it back on while the toast is still up, with focus back on it unless the person has moved focus elsewhere. Other toast content takes no focus. Screen reader: success is role=status and errors role=alert; the announcer region says the HX-Trigger announce text.",
 	motion:
@@ -1841,7 +1843,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -1856,11 +1858,29 @@ function Rows() {
 						</div>
 					</div>
 				</State>
+				<State label="Pressed, held still: the press tint on a bill that opens its page, as it stays while the page loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						<BillRow
+							today="2026-10-04"
+							href="#bill-row"
+							bill={{
+								id: 2,
+								name: "Internet",
+								amountCents: 7999,
+								status: "due",
+								dueDate: "2026-10-09",
+								icon: "bills",
+								color: "cat-blue",
+							}}
+						/>
+					</ul>
+				</State>
 				<State label="Overdue">
 					<div class="max-w-xl">
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 1,
@@ -1880,6 +1900,7 @@ function Rows() {
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-05"
 								bill={{
 									id: 6,
@@ -1900,6 +1921,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 3,
@@ -1919,6 +1941,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 3,
@@ -1940,6 +1963,7 @@ function Rows() {
 						<BillStatusHeading status="overdue" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-09"
 								bill={{
 									id: 3,
@@ -1961,6 +1985,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-05"
 								bill={{
 									id: 8,
@@ -2002,6 +2027,7 @@ function Rows() {
 						<BillStatusHeading status="paid" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 5,
@@ -2022,6 +2048,7 @@ function Rows() {
 						<BillStatusHeading status="due" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 8,
@@ -2043,6 +2070,7 @@ function Rows() {
 						<BillStatusHeading status="paid" />
 						<ul>
 							<BillRow
+								href="#bill-row"
 								today="2026-10-04"
 								bill={{
 									id: 2,
@@ -2137,15 +2165,37 @@ function Rows() {
 				title="ProgressRow"
 				tier="visual"
 				components={["ProgressRow"]}
-				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet; here they don't link anywhere."
+				sentence="One category: icon, name, “spent of budget,” and a 4px bar; at 80% the bar turns amber, a net refund is green with an empty bar and its budget under the name, and over budget it is full and brick with an alert icon and the amount over in words. In the app each row opens its budget sheet, so it ends in the chevron on its name line and takes the press tint as it opens; here each row links to this section, and a pressed row is held still in its own state. Beside rows that open, an archived category keeps the arrow’s space, so the bars end together."
 			>
 				{PROGRESS_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
-							<ProgressRow {...s.props} />
+							<ProgressRow {...s.props} href="#progress-row" />
 						</ul>
 					</State>
 				))}
+				<State label="Beside rows that open, an archived category keeps the arrow's space, so the bars end together">
+					<ul class="max-w-xl">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} href="#progress-row" />
+						))}
+						<ProgressRow
+							name="Kids"
+							icon="kids"
+							color="cat-ochre"
+							spentCents={12000}
+							budgetCents={20000}
+							reserveArrow
+						/>
+					</ul>
+				</State>
+				<State label="Pressed, held still: the press tint on a row that opens while its sheet loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow {...s.props} href="#progress-row" />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="not-budgeted-row"
@@ -2212,11 +2262,16 @@ function Rows() {
 				title="SavingsGoalRow"
 				tier="visual"
 				components={["SavingsGoalRow"]}
-				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category."
+				sentence="Home's first Budget row: the bank icon and Savings, its monthly amount with “a month” muted and “Set aside from Safe to spend” under it; before a goal is set, the row moves under Not budgeted as “Set a goal”. It has no bar and isn't a category. A set goal ends in the chevron and takes the press tint as it opens; “Set a goal” ends in terracotta words, so it has neither."
 			>
+				<State label="Pressed, held still: the press tint on a set goal as its sheet loads">
+					<ul class="max-w-xl divide-y divide-rule [&_.row-opens]:bg-press">
+						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
+					</ul>
+				</State>
 				<State label="Goal set">
 					<ul class="max-w-xl divide-y divide-rule">
-						<SavingsGoalRow amountCents={50000} href="#" />
+						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
 						{PROGRESS_ROWS.slice(0, 1).map((row) => (
 							<ProgressRow {...row.props} />
 						))}
@@ -2226,7 +2281,7 @@ function Rows() {
 					<div>
 						<h3 class="text-sm text-muted">Not budgeted</h3>
 						<ul class="max-w-xl divide-y divide-rule">
-							<SavingsGoalRow amountCents={null} href="#" />
+							<SavingsGoalRow amountCents={null} href="#savings-goal-row" />
 						</ul>
 					</div>
 				</State>
@@ -2288,7 +2343,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here the rows don't link anywhere."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
@@ -2300,7 +2355,7 @@ function Rows() {
 							{TRANSACTION_ROWS.filter((state) => state.row.nameSuggested)
 								.slice(0, 1)
 								.map((state) => (
-									<TransactionRow row={state.row} />
+									<TransactionRow row={state.row} href="#transaction-row" />
 								))}
 						</ul>
 					</div>
@@ -2308,10 +2363,17 @@ function Rows() {
 				{TRANSACTION_ROWS.map((s) => (
 					<State label={s.label}>
 						<ul class="max-w-xl">
-							<TransactionRow row={s.row} />
+							<TransactionRow row={s.row} href="#transaction-row" />
 						</ul>
 					</State>
 				))}
+				<State label="Pressed, held still: the press tint on a row that opens while its edit panel loads">
+					<ul class="max-w-xl [&_.row-opens]:bg-press">
+						{TRANSACTION_ROWS.slice(0, 1).map((s) => (
+							<TransactionRow row={s.row} href="#transaction-row" />
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="pending-note"
@@ -3001,6 +3063,7 @@ function Categorization() {
 								category: "Groceries",
 								count: 3,
 								back: "/transactions",
+								transactionId: 1,
 							}}
 						/>
 					</div>
@@ -3837,6 +3900,7 @@ function Controls() {
 								tallyCategory: false,
 								excludeCounts: true,
 								linkHolds: false,
+								reviewLifts: false,
 								today: "2026-10-11",
 								scope: "one",
 								scopeName: "ds-rename-one-scope",
@@ -3868,6 +3932,7 @@ function Controls() {
 								tallyCategory: true,
 								excludeCounts: true,
 								linkHolds: false,
+								reviewLifts: false,
 								today: "2026-10-11",
 								scope: "one",
 								scopeName: "ds-rename-excluded-scope",
@@ -3893,6 +3958,7 @@ function Controls() {
 								tallyCategory: true,
 								excludeCounts: true,
 								linkHolds: false,
+								reviewLifts: false,
 								today: "2026-10-11",
 								scope: "all",
 								scopeName: "ds-rename-all-scope",
@@ -3918,6 +3984,7 @@ function Controls() {
 								tallyCategory: false,
 								excludeCounts: true,
 								linkHolds: false,
+								reviewLifts: false,
 								today: "2026-10-11",
 								scope: "all",
 								scopeName: "ds-rename-both-scope",
@@ -4305,6 +4372,44 @@ function Controls() {
 						/>
 					</div>
 				</State>
+				<State label="A trip that looks mixed: Tally's guess, Groceries and Household, both parts dashed, the amounts empty and $214.36 left to assign">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={21436}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "", guess: "1" },
+								{ category: "5", amount: "", guess: "5" },
+							]}
+							today="2026-10-14"
+							back="/transactions"
+							guessLabel="Groceries and Household"
+						/>
+					</div>
+				</State>
+				<State label="The same split once Household's amount is typed: Household is solid, Groceries is still Tally's guess">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={21436}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "", guess: "1" },
+								{ category: "5", amount: "70.00" },
+							]}
+							today="2026-10-14"
+							back="/transactions"
+							guessLabel="Groceries and Household"
+						/>
+					</div>
+				</State>
 				<State label="A split with two linked refunds: the first is answered, Kids; the second is still open">
 					<div inert>
 						<SplitForm
@@ -4351,6 +4456,23 @@ function Controls() {
 				</State>
 			</Specimen>
 			<Specimen
+				tier="visual"
+				id="mixed-trip-line"
+				title="Split this one? (a trip that looks mixed)"
+				components={["MixedTripLine", "Button"]}
+				sentence="The quiet line under the edit panel's category chips on a trip Jev says looks mixed and no person has categorized: the two categories Jev named, then Split this one? in terracotta. Its link opens the split with Tally's guesses above."
+			>
+				<State label="Under the category chips: This trip looks like Groceries and Household. Split this one?">
+					<div inert>
+						<MixedTripLine
+							first="Groceries"
+							second="Household"
+							href="/transactions"
+						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
 				id="money-input"
 				title="MoneyInput"
 				tier="interactive"
@@ -4375,15 +4497,16 @@ function Feedback() {
 				title="FeedbackButton"
 				tier="visual"
 				components={["FeedbackButton"]}
-				sentence="A fixed, shadowless pill links to the feedback form, which records the page it came from."
+				sentence="A shadowless pill links to the feedback form, which records the page it came from. On a phone it sits in the top line beside the wordmark; on desktop it is in the sidebar."
 			>
 				<p class="text-muted">
-					The real component is fixed at the bottom-right of this catalog page;
-					this specimen is shown in place.
+					The real button sits in this page's top line on a phone, beside the
+					wordmark, and in the sidebar on desktop; this specimen is shown in
+					place.
 				</p>
-				{/* Only a picture here: the working button is the fixed one. */}
+				{/* Only a picture here: the working button is in the top line. */}
 				<div inert>
-					<FeedbackButton fixed={false} />
+					<FeedbackButton />
 				</div>
 			</Specimen>
 			<Specimen

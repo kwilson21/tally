@@ -54,6 +54,7 @@ function offerFields(html: string): Record<string, string> {
 				"count",
 				"back",
 				"saved",
+				"trip",
 			].includes(match[1] ?? ""),
 		)
 		.reduce<Record<string, string>>((fields, match) => {
@@ -212,6 +213,11 @@ describe("merchant category rule offer", () => {
 			index: 3,
 			mark: "excluded = 1, excluded_source = 'plaid', flag_transfer = 0",
 		},
+		{
+			source: "Plaid category, excluded again by the person",
+			index: 3,
+			mark: "plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'user', flag_transfer = 0",
+		},
 	])(
 		"a pick on a transfer still left out of the budget doesn't count ($source)",
 		async ({ index, mark }) => {
@@ -227,6 +233,27 @@ describe("merchant category rule offer", () => {
 			expect(save.html).not.toContain(QUESTION);
 		},
 	);
+
+	it("a Plaid transfer included and then excluded again by the person doesn't count toward the picks", async () => {
+		await setCategory([ids[0]], groceries, "user");
+		// Plaid excluded it as a transfer. The person includes it with a pick, then excludes it again.
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'plaid', flag_transfer = 0 WHERE id = ?",
+		)
+			.bind(ids[1])
+			.run();
+		await post(`/transactions/${ids[1]}`, edit(groceries));
+		await post(`/transactions/${ids[1]}`, {
+			...edit(groceries),
+			excluded: "1",
+		});
+		// Only ids[0] counts so far. Were the excluded transfer counted, this save would be the third pick and be asked.
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		// ids[0] and ids[2] are two counted picks, so ids[3] is the third and is asked.
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+	});
 
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
@@ -983,17 +1010,100 @@ describe("merchant category rule offer", () => {
 			"SELECT raw_name FROM merchants WHERE raw_name = 'cash-only-store'",
 		).first();
 		expect(before).toBeNull();
+		// The trip the question was asked about is the cash entry that was just saved, the newest row.
+		const saved = await env.DB.prepare(
+			"SELECT MAX(id) AS id FROM transactions",
+		).first<{ id: number }>();
 		const yes = await post("/transactions/rule-offer", {
 			merchant_key: "cash-only-store",
 			category: String(groceries),
 			count: "3",
 			back: "/transactions",
+			trip: String(saved?.id),
 		});
 		expect(yes.res.status).toBe(200);
 		const rule = await env.DB.prepare(
 			"SELECT default_category_id FROM merchants WHERE raw_name = 'cash-only-store'",
 		).first<{ default_category_id: number | null }>();
 		expect(rule?.default_category_id).toBe(groceries);
+	});
+});
+
+describe("Yes checks the trip the question was asked about (decision 113)", () => {
+	/** Marks a row as a trip Jev says looks mixed, Groceries and Household. */
+	const markMixed = (id: number) =>
+		env.DB.prepare(
+			"UPDATE transactions SET jev_mixed = 0.9, jev_category_id = ?, jev_also_category_id = ? WHERE id = ?",
+		)
+			.bind(groceries, household, id)
+			.run();
+
+	/** Yes, as the question posts it, with the trip it names (if any). */
+	const yes = (fields: Record<string, string> = {}) =>
+		post("/transactions/rule-offer", {
+			merchant_key: merchant,
+			merchant,
+			category: String(groceries),
+			count: "3",
+			back: "/transactions",
+			...fields,
+		});
+
+	const ruleOfMerchant = () =>
+		env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+
+	it("makes no rule when the trip it names looks mixed, and says only Saved as Groceries", async () => {
+		await setCategory(ids, groceries, "user");
+		await markMixed(ids[3] ?? 0);
+		const reply = await yes({ trip: String(ids[3]) });
+		expect((await ruleOfMerchant())?.default_category_id ?? null).toBeNull();
+		expect(announced(reply.res)).toBe("Saved as Groceries.");
+	});
+
+	it("makes the rule when the trip it names is still a plain counted pick", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const third = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(third.html).toContain(`name="trip" value="${ids[2]}"`);
+		const reply = await post(
+			"/transactions/rule-offer",
+			offerFields(third.html),
+		);
+		expect((await ruleOfMerchant())?.default_category_id).toBe(groceries);
+		expect(announced(reply.res)).toContain("Always use Groceries");
+	});
+
+	it("makes no rule from an Organize question whose charges now include a trip that looks mixed", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const organized = await post("/transactions/organize", {
+			category: String(groceries),
+			group: merchant,
+			name: merchant,
+		});
+		expect(organized.html).toContain(QUESTION);
+		await markMixed(ids[2] ?? 0);
+		await post("/transactions/organize/rule", {
+			answer: "yes",
+			merchant_keys: JSON.stringify([merchant]),
+			merchant,
+			category: String(groceries),
+			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
+		});
+		expect((await ruleOfMerchant())?.default_category_id ?? null).toBeNull();
+	});
+
+	it("makes no rule without a trip, or with one from another store", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		const other = await addPicks("other-store", 3, groceries);
+		const none = await yes();
+		expect((await ruleOfMerchant())?.default_category_id ?? null).toBeNull();
+		expect(announced(none.res)).toBe("Saved as Groceries.");
+		const elsewhere = await yes({ trip: String(other[0]) });
+		expect((await ruleOfMerchant())?.default_category_id ?? null).toBeNull();
+		expect(announced(elsewhere.res)).toBe("Saved as Groceries.");
 	});
 });
 

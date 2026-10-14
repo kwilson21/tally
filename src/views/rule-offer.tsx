@@ -85,6 +85,8 @@ export type RuleOfferValue = {
 	category: string;
 	count: number;
 	back: string;
+	/** The trip the question was asked about. Yes makes the rule only while it still counts as this store's pick (decision 113). */
+	transactionId: number;
 };
 
 /** What the screen reader hears when the offer appears: the save's own words, then the question. */
@@ -148,6 +150,11 @@ export function RuleOffer({
 					/>
 					<input type="hidden" name="count" value={String(value.count)} />
 					<input type="hidden" name="back" value={value.back} />
+					<input
+						type="hidden"
+						name="trip"
+						value={String(value.transactionId)}
+					/>
 					{savedId !== undefined && (
 						<input type="hidden" name="saved" value={String(savedId)} />
 					)}
@@ -172,6 +179,11 @@ export function RuleOffer({
 					/>
 					<input type="hidden" name="count" value={String(value.count)} />
 					<input type="hidden" name="back" value={value.back} />
+					<input
+						type="hidden"
+						name="trip"
+						value={String(value.transactionId)}
+					/>
 					{savedId !== undefined && (
 						<input type="hidden" name="saved" value={String(savedId)} />
 					)}

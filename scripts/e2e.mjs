@@ -54,12 +54,8 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 					`unnamed <${el.tagName.toLowerCase()}>`,
 				bottom: rect?.bottom,
 				isTab: !!el?.closest('nav[aria-label="Tabs"]'),
-				isFeedback: el?.matches('a[href="/feedback"]'),
 				tabTop: document
 					.querySelector('nav[aria-label="Tabs"]')
-					?.getBoundingClientRect().top,
-				feedbackTop: document
-					.querySelector('a[href="/feedback"]')
 					?.getBoundingClientRect().top,
 			};
 		});
@@ -67,11 +63,10 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 			focusLeftPage = true;
 			break;
 		}
-		if (focused.key && !focused.isTab && !focused.isFeedback) {
+		if (focused.key && !focused.isTab) {
 			assert(
-				focused.bottom <=
-					Math.min(focused.tabTop, focused.feedbackTop ?? Infinity),
-				`${path}: focused item ${focused.key} overlaps phone tabs or Feedback`,
+				focused.bottom <= focused.tabTop,
+				`${path}: focused item ${focused.key} overlaps the phone tabs`,
 			);
 			seen.add(focused.key);
 		}
@@ -79,13 +74,23 @@ const assertPhoneFocusClearsFixedControls = async (path) => {
 	assert(focusLeftPage, `${path}: focus never left the page`);
 	assert(seen.size > 0, `${path}: no page controls received focus`);
 };
+// htmx is a deferred script, so a page reads "interactive" before htmx has run, and a click or fill that lands then
+// reaches no htmx listener. A step waits for htmx on each page it opens, before it types or clicks there.
+const htmxReady = () => page.waitForFunction(() => Boolean(window.htmx));
 // A link opens its page with a 150 ms cross-fade (decision 76). A page.goto while it runs makes the
 // browser cancel it and log an error, so wait for it to end first, as a person would.
 const goto = async (url, options) => {
 	await page.waitForFunction(
 		() => !document.documentElement.matches(":active-view-transition"),
 	);
-	return page.goto(url, options);
+	await page.goto(url, options);
+	await htmxReady();
+};
+// click() doesn't wait for the page a plain link opens, so this takes that page's load event first. The listener is
+// set before the click, and load fires after htmx has run; then htmx is awaited as goto does.
+const followLink = async (link) => {
+	await Promise.all([page.waitForEvent("load"), link.click()]);
+	await htmxReady();
 };
 // A slowed reply is let go after its delay, and each release is kept here. settleReplies waits for every kept release, so a
 // step waits for the replies it slowed to be answered or dropped, rather than for a guessed time.
@@ -125,13 +130,9 @@ await page.route("**/assets/app.css", async (route) => {
 });
 
 await assertPhoneFocusClearsFixedControls("/transactions?uncategorized=1");
-step(
-	"Tab keeps every focused transaction control above the phone tabs and Feedback",
-);
+step("Tab keeps every focused transaction control above the phone tabs");
 await assertPhoneFocusClearsFixedControls("/settings");
-step(
-	"Tab keeps every focused Settings control above the phone tabs and Feedback",
-);
+step("Tab keeps every focused Settings control above the phone tabs");
 
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");
@@ -158,7 +159,8 @@ const shellInsets = await page.evaluate(() => {
 			right: style('nav[aria-label="Tabs"]').paddingRight,
 			rect: rect('nav[aria-label="Tabs"]'),
 		},
-		feedback: rect('a[href="/feedback"]'),
+		feedback: rect('#top-line a[href="/feedback"]'),
+		feedbackPosition: style('#top-line a[href="/feedback"]').position,
 	};
 });
 assert.equal(shellInsets.bodyTop, "59px");
@@ -167,7 +169,9 @@ assert.equal(shellInsets.page.right, "64px");
 assert.equal(shellInsets.tabs.bottom, "34px");
 assert.equal(shellInsets.tabs.left, "44px");
 assert.equal(shellInsets.tabs.right, "44px");
-assert(shellInsets.feedback.bottom <= shellInsets.tabs.rect.top - 16);
+// The pill sits in the phone's top line, beside the wordmark, below the notch and never fixed (P123 A).
+assert.notEqual(shellInsets.feedbackPosition, "fixed");
+assert(shellInsets.feedback.top >= 59);
 assert(shellInsets.feedback.right <= 390 - 44);
 step("phone shell controls stay clear of simulated safe areas");
 
@@ -520,7 +524,7 @@ await goto(`${BASE}/transactions?q=Local+Bakery`, {
 	waitUntil: "networkidle",
 });
 await page.getByRole("link", { name: /Local Bakery/ }).click();
-await page.getByRole("link", { name: "Split" }).click();
+await followLink(page.getByRole("link", { name: "Split" }));
 let lineAnswers = 0;
 const slowFirstLine = async (route) => {
 	if (++lineAnswers === 1) return holdReply(route, 1500);
@@ -571,7 +575,7 @@ await page
 	.locator("a")
 	.click();
 await page.locator('[role="dialog"]').waitFor();
-await page.getByRole("link", { name: "Split" }).click();
+await followLink(page.getByRole("link", { name: "Split" }));
 const chooserAmounts = page.getByLabel(/^Part \d amount$/);
 await page.getByLabel("Part 1 category").selectOption({ label: "Kids" });
 await chooserAmounts.nth(0).fill("60.00");
@@ -718,7 +722,7 @@ const keyboardErrors = consoleErrors.length;
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 const selectAll = page.getByRole("link", { name: /^Select all \d+$/ });
 await selectAll.focus();
@@ -921,7 +925,7 @@ await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
 await page.route("**/transactions/select/count*", slowCount);
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 await page.getByRole("link", { name: /^Select all \d+$/ }).click();
 // The Select all list replaces the count still in flight: settle waits for that count to be let go, and for the list to land.
@@ -955,7 +959,7 @@ errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await page.route(
 	"**/transactions?*focus=set-category-selection*",
 	slowSelectAll,
@@ -998,7 +1002,7 @@ const holdCount = (route) => {
 	countHeld();
 };
 await page.route("**/transactions/select/count*", holdCount);
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await countIsHeld;
 let heldSelectAll = null;
 let selectAllHeld;
@@ -1065,7 +1069,7 @@ await page.route("**/transactions/select/count*", (route) => {
 	tickHeldCounts.push(route);
 	tickFirstCountHeld();
 });
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await tickFirstCountIsHeld;
 let tickHeldSelectAll = null;
 let tickSelectAllHeld;
@@ -1122,7 +1126,7 @@ step("a tick made while Select all is held, then a search: the search stays");
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
 await page.route("**/transactions/select/count*", slowCount);
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 await page.locator("#selection-form label:has(input[name=ids])").nth(0).click();
 await page.locator('a[rel="next"]').click();
 // The Next list replaces the count still in flight: settle waits for that count to be let go and for the list to land.
@@ -1149,7 +1153,7 @@ step("Next while a count loads gives page 2 its own ids");
 // A tap during a Select-mode list load does nothing: the rows and actions are out of reach, and no count starts from the page that is leaving (#215).
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 const pausedRows = page.locator("#selection-form label:has(input[name=ids])");
 await pausedRows.nth(0).click();
 await page.getByText("1 selected", { exact: true }).waitFor();
@@ -1372,7 +1376,7 @@ assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
 });
-await page.getByRole("link", { name: "Select" }).click();
+await followLink(page.getByRole("link", { name: "Select" }));
 // The checkbox is visually hidden, so tap the row (its label) as a person would.
 const selections = page.locator("#selection-form label:has(input[name=ids])");
 await selections.nth(0).click();

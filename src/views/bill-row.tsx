@@ -8,7 +8,7 @@ import {
 import { dayLabel, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
-import { Icon } from "./icons";
+import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import { WhyLink } from "./why-link";
 
 export type BillRowData = {
@@ -204,8 +204,9 @@ export function BillRow({
 	return (
 		<li>
 			{href ? (
-				<a href={href} class={`${look} text-ink no-underline`}>
+				<a href={href} class={`${look} text-ink no-underline ${ROW_OPENS}`}>
 					{content}
+					<RowArrow />
 				</a>
 			) : (
 				<span class={look}>{content}</span>

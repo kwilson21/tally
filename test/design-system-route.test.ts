@@ -87,6 +87,13 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("shows the rows that open with their arrow, a held press, and Needs category in words (P118 A)", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('data-icon="chevron-right"');
+		expect(html).toContain("bg-press");
+		expect(html).toContain("Needs category\u00a0·\u00a0");
+	});
+
 	it("shows every component in DESIGN.md's table", async () => {
 		const { html } = await get("/design-system");
 		const shown = specimens(html)
@@ -209,11 +216,15 @@ describe("GET /design-system in the demo", () => {
 			ErrorPage({ kind: "500" }),
 			Sidebar({}),
 			BottomTabs({}),
-			...PROGRESS_ROWS.map((s) => ProgressRow(s.props)),
+			...PROGRESS_ROWS.map((s) =>
+				ProgressRow({ ...s.props, href: "#progress-row" }),
+			),
 			...ADJUST_ROWS.map((row) => ProgressRow(row)),
 			AdjustLink({ adjusting: false, href: "#adjust-on" }),
 			AdjustLink({ adjusting: true, href: "#adjust-off" }),
-			...TRANSACTION_ROWS.map((s) => TransactionRow({ row: s.row })),
+			...TRANSACTION_ROWS.map((s) =>
+				TransactionRow({ row: s.row, href: "#transaction-row" }),
+			),
 			EmptyState({
 				kind: "search",
 				sentence: "No transactions match these filters.",
@@ -1008,18 +1019,21 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
-	it("renders one fixed Feedback button and makes the visual form inert", async () => {
+	it("renders one Feedback button, never fixed, and makes the visual form inert", async () => {
 		const { html } = await get("/design-system");
 		const button = html.slice(html.indexOf('id="feedback-button"'));
 		// The link sits inside the inert wrapper: no </div> between the wrapper and the link.
 		expect(button.slice(0, button.indexOf("<section"))).toMatch(
 			/<div inert[^>]*>(?:(?!<\/div>)[\s\S])*href="\/feedback"/,
 		);
-		expect(
-			html.match(
-				/fixed bottom-\[calc\(var\(--feedback-bottom\)\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
-			),
-		).toHaveLength(1);
+		// Every Feedback link is in the top line or the sidebar, and none is fixed (P123 A).
+		const feedbackLinks = [
+			...html.matchAll(/<a href="\/feedback" class="([^"]*)"/g),
+		];
+		expect(feedbackLinks.length).toBeGreaterThan(0);
+		for (const [, classes] of feedbackLinks) {
+			expect(classes).not.toMatch(/\bfixed\b/);
+		}
 		const formSpecimen = specimens(html).find((tag) =>
 			tag.includes('id="feedback-form"'),
 		);

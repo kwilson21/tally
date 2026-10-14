@@ -486,3 +486,43 @@ describe("a chosen refund moves only while it is still linked to the purchase wh
 		expect(await linkOf(9105)).toBeNull();
 	});
 });
+
+describe("a purchase with a dormant refund link of its own still names the refunds a split unlinks", () => {
+	beforeEach(async () => {
+		// PURCHASE was a refund of OTHER before its bank amount turned positive, so its own link is dormant: the parts keep it.
+		await db
+			.prepare(`INSERT INTO transactions
+			(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
+			(${OTHER}, 3, '2026-09-01', 10000, 'OTHER SHOP', ${GROCERIES}, 'user', 0, NULL)`)
+			.run();
+		await db
+			.prepare("UPDATE transactions SET refund_of_id = ? WHERE id = ?")
+			.bind(OTHER, PURCHASE)
+			.run();
+	});
+
+	it("names every linked refund a person answers Not linked", async () => {
+		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
+			[FIRST]: null,
+			[SECOND]: null,
+		});
+		expect(result).toEqual({
+			saved: true,
+			unlinked: ["2026-09-05", "2026-09-06"],
+			bills: [],
+			moved: [],
+		});
+		expect(await linkOf(FIRST)).toBeNull();
+		expect(await linkOf(SECOND)).toBeNull();
+	});
+
+	it("names the one refund answered Not linked, and moves the other to its part", async () => {
+		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
+			[FIRST]: 0,
+			[SECOND]: null,
+		});
+		expect(result.moved).toEqual([{ date: "2026-09-05", part: 0 }]);
+		expect(result.unlinked).toEqual(["2026-09-06"]);
+		expect(await linkOf(SECOND)).toBeNull();
+	});
+});

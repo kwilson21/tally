@@ -1,5 +1,7 @@
 import { INCLUDED_ROW, markedTransferSql } from "../db/counted-month";
 import { merchantKeySql } from "../db/merchant-key";
+import { jevSaysMixedSql } from "../db/mixed-trip";
+import { isPlaidTransferSql } from "../db/plaid-transfers";
 
 export type RuleOffer = {
 	merchantKey: string;
@@ -10,14 +12,16 @@ export type RuleOffer = {
 /**
  * The picks that count toward an offer (decision 79): a person's own pick of the category, on a whole
  * unsplit purchase of money out, for a merchant without a rule. A pick on a transfer counts only once it
- * is back in the budget. Nothing counts a store's categories or months (decision 90), so a store that
- * also has other categories' picks is still offered. It names the table `transactions`, so the query it
- * is in reads that table without an alias. Binds the category id.
+ * is back in the budget. A transfer is one Tally or the bank marked, or one whose Plaid category is a
+ * transfer, so a person who includes a Plaid transfer and excludes it again still leaves it out. Nothing
+ * counts a store's categories or months (decision 90), so a store that also has other categories' picks
+ * is still offered. It names the table `transactions`, so the query it is in reads that table without an
+ * alias. Binds the category id.
  */
 const COUNTED_PICKS_SQL = `parent_id IS NULL AND amount_cents > 0
 	AND category_source = 'user' AND category_id = ? AND flag_income = 0 AND is_split = 0
 	AND NOT EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("transactions")} AND m.default_category_id IS NOT NULL)
-	AND (${INCLUDED_ROW} OR NOT ${markedTransferSql("transactions")})`;
+	AND (${INCLUDED_ROW} OR NOT (${markedTransferSql("transactions")} OR COALESCE(${isPlaidTransferSql("transactions.plaid_category")}, 0)))`;
 
 /**
  * Counts a person's picks of `categoryId` for the merchant, in its own transaction history, using its
@@ -60,6 +64,8 @@ export async function firstRuleOfferAmong(
 				FROM transactions
 				WHERE id IN (SELECT value FROM json_each(?)) AND ${COUNTED_PICKS_SQL}
 				GROUP BY ${merchantKeySql("transactions")}
+				-- A store with a selected trip that looks mixed is never asked (decision 113).
+				HAVING SUM(CASE WHEN ${jevSaysMixedSql("transactions")} THEN 1 ELSE 0 END) = 0
 			)
 			SELECT s.merchantKey AS merchantKey, s.transactionId AS transactionId, COUNT(*) AS count
 			FROM selected s
@@ -89,7 +95,8 @@ export async function ruleOfferForTransaction(
 ): Promise<RuleOffer | null> {
 	const row = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ? AND ${COUNTED_PICKS_SQL}`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey FROM transactions WHERE id = ? AND ${COUNTED_PICKS_SQL}
+				AND NOT ${jevSaysMixedSql("transactions")}`,
 		)
 		.bind(transactionId, categoryId)
 		.first<{ merchantKey: string }>();

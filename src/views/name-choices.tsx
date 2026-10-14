@@ -181,6 +181,11 @@ export type RenameFacts = {
 	 * unlinking changes that. Then a purchase ticked holds the note (LINK_HOLDS_FOLDS).
 	 */
 	linkHolds: boolean;
+	/**
+	 * Whether ticking Reviewed lifts Plaid's exclusion so the row counts (#407, excludedAfterSave): then Exclude hides the note
+	 * only while Reviewed is unticked.
+	 */
+	reviewLifts: boolean;
 	/** Today's date, for the dates of the other own names. */
 	today: string;
 	/** The scope that is ticked: "all" when the merchant is renamed, otherwise "this one only". */
@@ -205,13 +210,15 @@ export type RenameFacts = {
  *   row's own category (TALLY_CATEGORY_CLASS). A disabled category (a refund that follows its purchase) posts nothing, so
  *   `:enabled` exempts it: its drawn chip is the purchase's category, not the row's. new_category_name counts only while
  *   category is "new", so the same hook covers it.
- * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion.
+ * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion. With
+ *   reviewLifts the hook steps aside while Reviewed is ticked, since the review lifts Plaid's exclusion and the row counts.
  * - income (a checkbox): covered here, while it is ticked.
  * - refund_of (a radio): covered here. A purchase that isn't excluded (LINKED_PURCHASE_CLASS) is what the refund follows,
  *   and linking one includes the row. Choosing a purchase other than the one drawn hides the note; "Not linked" never
  *   does, so picking it shows the note again. While the drawn link holds (linkHolds), any purchase ticked hides it.
  * - creditReviewed (a checkbox): covered here, and only with a linked purchase ticked: a refund that isn't linked doesn't
- *   follow, whatever its review. creditReviewed_was is the state it was drawn in, so it needs no hook.
+ *   follow, whatever its review. On a Plaid-excluded credit, ticking it shows the note again through Exclude's hook
+ *   (reviewLifts). creditReviewed_was is the state it was drawn in, so it needs no hook.
  * - name_pick (a radio): covered here, by the choice SAME_NAME_CLASS marks. Ticking another name brings the note back.
  * - merchant (the typed name under Type your own): no hook. CSS can't read typed text, so retyping the row's own name
  *   keeps the note, and the save is still right: the route keeps the row's name. This is the one known limit.
@@ -234,6 +241,13 @@ const GUESS_AGAIN_FOLDS = [
 ];
 /** Exclude blocks the guess unless the row pays a bill (excludeCounts). */
 const EXCLUDE_FOLDS = ["group-has-[input[name=excluded]:checked]/edit:hidden"];
+/**
+ * Where ticking Reviewed lifts Plaid's exclusion (reviewLifts), Exclude blocks the guess only while Reviewed is unticked, since a
+ * ticked review makes the row count. It replaces EXCLUDE_FOLDS there, it doesn't add to it.
+ */
+const EXCLUDE_FOLDS_UNLESS_REVIEWED = [
+	"group-has-[input[name=excluded]:checked]/edit:group-has-[input[name=creditReviewed]:not(:checked)]/edit:hidden",
+];
 /** While the drawn link holds (linkHolds), any linked purchase ticked is the refund following it, so it hides the note. */
 const LINK_HOLDS_FOLDS = ["group-has-[.linked-purchase:checked]/edit:hidden"];
 
@@ -241,10 +255,15 @@ const LINK_HOLDS_FOLDS = ["group-has-[.linked-purchase:checked]/edit:hidden"];
 function guessAgainFolds({
 	excludeCounts,
 	linkHolds,
-}: Pick<RenameFacts, "excludeCounts" | "linkHolds">): string {
+	reviewLifts,
+}: Pick<RenameFacts, "excludeCounts" | "linkHolds" | "reviewLifts">): string {
 	return [
 		...GUESS_AGAIN_FOLDS,
-		...(excludeCounts ? EXCLUDE_FOLDS : []),
+		...(excludeCounts
+			? reviewLifts
+				? EXCLUDE_FOLDS_UNLESS_REVIEWED
+				: EXCLUDE_FOLDS
+			: []),
 		...(linkHolds ? LINK_HOLDS_FOLDS : []),
 	].join(" ");
 }
@@ -264,6 +283,7 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 		tallyCategory,
 		excludeCounts,
 		linkHolds,
+		reviewLifts,
 		today,
 		scope,
 		scopeName = "name_scope",
@@ -285,7 +305,11 @@ export function RenameChoices({ rename }: { rename: RenameFacts }) {
 							? [
 									{
 										text: "Tally guesses its category again.",
-										class: guessAgainFolds({ excludeCounts, linkHolds }),
+										class: guessAgainFolds({
+											excludeCounts,
+											linkHolds,
+											reviewLifts,
+										}),
 									},
 								]
 							: []),

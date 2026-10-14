@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import design from "../DESIGN.md?raw";
 import {
 	COLOR_TOKENS,
 	DURATION_TOKENS,
-	PROPOSED_COLOR_TOKENS,
 	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
 } from "../src/design-system/tokens";
+import tokensSource from "../src/design-system/tokens.ts?raw";
 import css from "../src/styles/app.css?raw";
 import { Chip } from "../src/views/chip";
 
@@ -299,7 +300,7 @@ function problems(file: string, text: string): string[] {
 }
 
 describe("design tokens (DESIGN.md)", () => {
-	it("keeps focused content clear of the phone tab bar and Feedback button", () => {
+	it("keeps focused content clear of the phone tab bar, the only fixed control at the foot (P123 A)", () => {
 		const scrollRules = cssRules(css).filter(
 			({ selector, body }) =>
 				selector === "html" && body.includes("scroll-padding-bottom"),
@@ -313,29 +314,17 @@ describe("design tokens (DESIGN.md)", () => {
 			/scroll-padding-bottom:\s*var\(--focus-scroll-room\)/,
 		);
 		expect(css).toMatch(
-			/--focus-scroll-room:\s*calc\(\s*max\(\s*var\(--tabs-height\),\s*calc\(var\(--feedback-bottom\)\s*\+\s*var\(--feedback-height\)\)\s*\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
+			/--focus-scroll-room:\s*calc\(\s*var\(--tabs-height\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\);/,
 		);
 		expect(css).toContain("--tabs-height: calc(3.5rem + 1px)");
-		expect(css).toContain("--feedback-bottom: 6.5rem");
-		expect(css).toContain("--feedback-height: 2.75rem");
+		// The pill's fixed offset and height went with it (P123 A): nothing reads them now.
+		expect(css).not.toContain("--feedback-bottom");
+		expect(css).not.toContain("--feedback-height");
 		expect(css).toContain("--focus-scroll-gap: 0.5rem");
-		const rem = (token: string) => {
-			const value = css.match(new RegExp(`${token}: ([0-9.]+)rem`))?.[1];
-			expect(value, `${token} is a rem token`).toBeDefined();
-			return Number(value);
-		};
-		const feedbackTopOffset =
-			rem("--feedback-bottom") + rem("--feedback-height");
-		const scrollPadding =
-			Math.max(3.5 + 1 / 16, feedbackTopOffset) + rem("--focus-scroll-gap");
-		expect(scrollPadding).toBeGreaterThanOrEqual(
-			feedbackTopOffset + rem("--focus-scroll-gap"),
-		);
 		const nav = SOURCES["../src/views/nav.tsx"];
 		const feedback = SOURCES["../src/views/feedback-button.tsx"];
 		expect(nav).toContain("var(--tabs-height)");
-		expect(feedback).toContain("var(--feedback-bottom)");
-		expect(feedback).toContain("var(--feedback-height)");
+		expect(feedback).not.toContain("var(--feedback-");
 	});
 
 	it("reads the views, routes and scripts", () => {
@@ -719,9 +708,12 @@ describe("design tokens (DESIGN.md)", () => {
 	});
 
 	it("lists every color token in the catalog, with app.css's value", () => {
-		const theme = [...css.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6})/gi)].map(
-			([, name, hex]) => [name, (hex ?? "").toLowerCase()],
-		);
+		// A token is a hex value, or a colour mix (press: ink at 6%, which has no hex of its own).
+		const theme = [
+			...css.matchAll(
+				/--color-([\w-]+):\s*(#[0-9a-f]{6}|color-mix\([^;]*\))\s*;/gi,
+			),
+		].map(([, name, value]) => [name, (value ?? "").toLowerCase()]);
 		expect(theme.length).toBeGreaterThan(10);
 		expect(COLOR_TOKENS.map((t) => [t.name, t.hex.toLowerCase()])).toEqual(
 			theme,
@@ -734,18 +726,6 @@ describe("design tokens (DESIGN.md)", () => {
 		);
 		expect(theme.length).toBeGreaterThan(5);
 		expect(DURATION_TOKENS.map((t) => [t.name, t.value])).toEqual(theme);
-	});
-
-	it("proposes --color-press (P118) as ink at 6% on paper, marked as not used by the app yet, and lists it with its contrast", () => {
-		expect(css).toContain(
-			"--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);",
-		);
-		expect(css).toContain("proposed in P118, not used by the app yet");
-		// Its value is not hex, so it is listed apart from the catalog's colours, which the test above matches to app.css.
-		expect(PROPOSED_COLOR_TOKENS).toEqual([
-			expect.objectContaining({ name: "press", contrast: "16.1" }),
-		]);
-		expect(COLOR_TOKENS.map((t) => t.name)).not.toContain("press");
 	});
 
 	it("lists the swipe easing and distance as app.css tokens", () => {
@@ -763,5 +743,45 @@ describe("design tokens (DESIGN.md)", () => {
 				use: "the dark finished-month chart arrow",
 			},
 		]);
+	});
+});
+
+describe("the press token and the rows that open (P118 A)", () => {
+	it("is ink at 6% over paper, in app.css, the catalog's colours and DESIGN.md's tokens, with its contrast", () => {
+		expect(css).toContain(
+			"--color-press: color-mix(in srgb, var(--color-ink) 6%, transparent);",
+		);
+		expect(COLOR_TOKENS).toContainEqual(
+			expect.objectContaining({
+				name: "press",
+				contrast: "16.1 (ink text on it)",
+			}),
+		);
+		expect(design).toMatch(
+			/^\| press \| .* \| a pressed row, and a row whose sheet is loading \| 16\.1 \(ink text on it\) \|$/m,
+		);
+	});
+
+	it("holds the press token once in DESIGN.md and app.css, with the proposal's wording gone from DESIGN.md, app.css and tokens.ts", () => {
+		expect(design.match(/^\| press\b/gm)).toHaveLength(1);
+		expect(css.match(/--color-press:/g)).toHaveLength(1);
+		for (const source of [design, css, tokensSource]) {
+			expect(source).not.toContain("proposed in P118");
+			expect(source).not.toContain("not used by the app yet");
+			expect(source).not.toContain("PROPOSED_COLOR_TOKENS");
+		}
+	});
+
+	it("gives a row that opens the tap flash, the mouse press and the loading tint, and no transition", () => {
+		expect(css).toMatch(
+			/\.row-opens \{\s*-webkit-tap-highlight-color: var\(--color-press\);\s*\}/,
+		);
+		expect(css).toMatch(
+			/@media \(hover: hover\) \{\s*\.row-opens:active \{\s*background-color: var\(--color-press\);\s*\}\s*\}/,
+		);
+		expect(css).toMatch(
+			/\.row-opens\.htmx-request \{\s*background-color: var\(--color-press\);\s*\}/,
+		);
+		expect(css).not.toMatch(/\.row-opens[^{]*\{[^}]*transition/);
 	});
 });
