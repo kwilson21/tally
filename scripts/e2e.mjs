@@ -902,6 +902,70 @@ await page.unroute(
 dropReplacedRequestLogs(errorsBefore);
 step("Select all, then a filter change before it returns, keeps the filter");
 
+// Select all while its count is still loading, then a search typed before Select all's reply comes back (#471). The
+// Select all click replaces the count in flight, and the search must still replace Select all: its held reply must
+// not land over the search. Both requests are held, and each wait is on the request's own effect, never a sleep.
+errorsBefore = consoleErrors.length;
+await goto(`${BASE}/transactions?uncategorized=1`, {
+	waitUntil: "networkidle",
+});
+let heldCount = null;
+let countHeld;
+const countIsHeld = new Promise((resolve) => (countHeld = resolve));
+const holdCount = (route) => {
+	heldCount = route;
+	countHeld();
+};
+await page.route("**/transactions/select/count*", holdCount);
+await page.getByRole("link", { name: "Select" }).click();
+await countIsHeld;
+let heldSelectAll = null;
+let selectAllHeld;
+const selectAllIsHeld = new Promise((resolve) => (selectAllHeld = resolve));
+const holdSelectAll = (route) => {
+	heldSelectAll = route;
+	selectAllHeld();
+};
+await page.route(
+	"**/transactions?*focus=set-category-selection*",
+	holdSelectAll,
+);
+await page.evaluate(() => {
+	window.__selectAllEnded = false;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (
+			event.detail.ctx.request.action.includes("focus=set-category-selection")
+		)
+			window.__selectAllEnded = true;
+	});
+});
+await page.getByRole("link", { name: /^Select all \d+$/ }).click();
+await selectAllIsHeld;
+await page.getByLabel("Search transactions").fill("Local Bakery");
+await page.waitForFunction(() => location.search.includes("q=Local"));
+await heldSelectAll.continue().catch(() => {}); // the page may already have aborted it, as the search replaces it
+await page.waitForFunction(() => window.__selectAllEnded);
+assert.match(
+	page.url(),
+	/[?&]q=Local/,
+	"the search must be the list that stays",
+);
+assert.equal(
+	await page.locator("#selection-form input[name=ids]:checked").count(),
+	0,
+	"the Select all list must not come back ticked over the search",
+);
+await heldCount.continue().catch(() => {});
+await page.unroute("**/transactions/select/count*", holdCount);
+await page.unroute(
+	"**/transactions?*focus=set-category-selection*",
+	holdSelectAll,
+);
+dropReplacedRequestLogs(errorsBefore);
+step(
+	"Select all with its count still loading, then a search: the search stays",
+);
+
 // Next while a count is still loading: page 2 must get its own ids, not page 1's (#215).
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?month=all`, { waitUntil: "networkidle" });
