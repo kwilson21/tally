@@ -168,6 +168,18 @@ export const SHADOW_TOKENS = [
 	},
 ] as const;
 
+// Proposed tokens (P118): drawn on the proposals page, not used by the app yet. Kept apart from
+// COLOR_TOKENS, whose hex values test/design-tokens.test.ts matches to app.css; a proposed token's
+// value is a colour mix. Its contrast is ink text on the tint.
+export const PROPOSED_COLOR_TOKENS = [
+	{
+		name: "press",
+		value: "ink at 6% over paper (#EDEAE4)",
+		use: "a pressed row's box, held still (P118); not used by the app yet",
+		contrast: "16.1",
+	},
+] as const;
+
 export const CATEGORY_COLORS = COLOR_TOKENS.filter((t) =>
 	t.name.startsWith("cat-"),
 ).map((t) => t.name);
