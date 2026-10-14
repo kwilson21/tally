@@ -242,13 +242,6 @@ howItWorks.get("/how-it-works", async (c) => {
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					How Tally works
 				</h1>
-				{demo && (
-					<StartHere
-						monthName={monthLabel}
-						rows={startRows}
-						safeToSpendCents={summary.safeToSpendCents}
-					/>
-				)}
 				<p class="mt-4 text-lg">
 					Tally is a small family budgeting app. One server builds every page
 					and a database keeps the numbers.{" "}
@@ -262,6 +255,14 @@ howItWorks.get("/how-it-works", async (c) => {
 						This demo has no bank connection. It runs on a made-up household,
 						the Riveras, and resets every night.
 					</p>
+				)}
+
+				{demo && (
+					<StartHere
+						monthName={monthLabel}
+						rows={startRows}
+						safeToSpendCents={summary.safeToSpendCents}
+					/>
 				)}
 
 				<Section id="budget" title="Budget and safe to spend">
