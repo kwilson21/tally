@@ -225,6 +225,24 @@ describe("a guess made for a bank text does not wait on the merchant Plaid names
 		});
 	});
 
+	it("never copies a waiting guess onto a merchant a person named, when the named text holds only the empty answer", async () => {
+		const id = await addItem();
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES (?, ?, 'pending')",
+			).bind(T1, GUESSES),
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name, suggested_name, suggestion_status) VALUES (?, 'My coffee', '', 'none')",
+			).bind(T2),
+		]);
+		await sync(id, [transaction("a", T1, PLAID), transaction("b", T2, PLAID)]);
+		expect(await row(PLAID)).toEqual({
+			suggested_name: "",
+			display_name: "My coffee",
+			suggestion_status: "none",
+		});
+	});
+
 	it("clears the guess copied from a text's row, whichever text comes first", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
