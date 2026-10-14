@@ -1,4 +1,4 @@
-// P125 (#95): a new family's first week, four ways, drawn for the owner's pick (proposal only: nothing in the
+// P125 (#95): a new family's first week, five ways, drawn for the owner's pick (proposal only: nothing in the
 // app changes). Every picture is the family's app, with no demo banner, on one sample household: Chase linked
 // Tue Oct 13 at 7 p.m., today Wed Oct 14, Eastern time. Where the app's own components draw the same at a
 // phone's size they are used as they are (Band, ProgressRow, CategoryIcon, FoldedRow,
@@ -488,9 +488,9 @@ function Notebook({
 	ink?: boolean;
 	/** C's replay: all five strokes ink in from pencil, and the fifth draws across the four. */
 	replay?: boolean;
-	/** E's replay: the last stroke draws a beat after its line, and the strokes before it are already ink. */
+	/** E's replay: the last stroke is drawn in pencil and inks late in the loop; the strokes before it are already ink. */
 	drawLast?: boolean;
-	/** The notebook's box: size-32 by default, size-12 beside a question. */
+	/** The notebook's box: size-32 by default, size-12 beside a question, size-20 at the top of E's replay. */
 	size?: string;
 }) {
 	const lineClass = (i: number) => {
@@ -499,7 +499,7 @@ function Notebook({
 		}
 		if (drawLast) {
 			return i === strokes - 1
-				? "stroke-ink proposal-first-stroke proposal-first-cross proposal-first-stroke-after"
+				? "stroke-ink proposal-first-draw"
 				: "stroke-ink";
 		}
 		return ink ? "stroke-ink" : "stroke-muted";
@@ -679,7 +679,7 @@ function PencilTop({
 }
 
 // ---------------------------------------------------------------------------------------------
-// Option A · The Opening Entry (recommended): the first page of the books, written from the last 90 days.
+// Option A · The Opening Entry: the first page of the books, written from the last 90 days.
 
 const aBefore = (
 	<>
@@ -1390,18 +1390,10 @@ function FirstPage({
 }
 
 /** The small notebook beside a question page's headline, with what it counts. */
-function SmallNotebook({
-	strokes,
-	text,
-	drawLast = false,
-}: {
-	strokes: number;
-	text: string;
-	drawLast?: boolean;
-}) {
+function SmallNotebook({ strokes, text }: { strokes: number; text: string }) {
 	return (
 		<div class="flex items-center gap-2">
-			<Notebook strokes={strokes} ink drawLast={drawLast} size="size-12" />
+			<Notebook strokes={strokes} ink size="size-12" />
 			<p class="text-sm text-muted">{text}</p>
 		</div>
 	);
@@ -1770,19 +1762,52 @@ const eFive = (
 	/>
 );
 
-/** Option E's replay, 6 s: the bills line writes in, then its stroke draws and inks, on the budgets page narrowed to the bills answer. */
+/**
+ * Option E's replay, 6 s: the bills question is answered (its button presses, the question fades to 40%), the
+ * Bills line writes in, and the third stroke is drawn in pencil and inks as the counter goes from 2 of 5 to 3 of 5.
+ * The Bills line and the third stroke keep their places before they show, so nothing moves in the loop.
+ */
 const eReplay = (
 	<>
 		<div class="flex items-center justify-between gap-3">
 			<h1 class="text-lg font-semibold">Your first page</h1>
-			<SmallNotebook strokes={3} text="3 of 5" drawLast />
+			<div class="flex items-center gap-3">
+				<Notebook strokes={3} drawLast size="size-20" />
+				<span class="grid text-base">
+					<span class="col-start-1 row-start-1 opacity-0 proposal-first-counter-before">
+						2 of 5
+					</span>
+					<span class="col-start-1 row-start-1 proposal-first-counter-after">
+						3 of 5
+					</span>
+				</span>
+			</div>
 		</div>
 		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
 			<li class="py-2 text-ink">Pay · Acme Corp, $2,450 every other Friday</li>
-			<li class="py-2 text-ink proposal-first-line">
+			<li class="py-2 text-ink proposal-first-bills">
 				Bills · 8 kept, about $2,062 a month
 			</li>
 		</ul>
+		<div class="mt-6 text-muted opacity-40 proposal-first-answer">
+			<p class="text-base">
+				Your bank shows 8 charges that come back every month, about $2,062 in
+				all: Harbor Property $1,600, Geico $142, Spectrum $70 and 5 more.
+			</p>
+			<h2 class="mt-3 font-serif text-2xl font-semibold">
+				Keep these 8 as bills?
+			</h2>
+			<div class="mt-4">
+				<Button type="button" class="w-full proposal-first-press">
+					Keep these 8
+				</Button>
+			</div>
+			<div class="mt-1">
+				<Button kind="text" type="button">
+					Choose which
+				</Button>
+			</div>
+		</div>
 	</>
 );
 
@@ -2162,9 +2187,9 @@ export function PolishRoundDProposals() {
 							{eFive}
 						</Phone>
 					</Shot>
-					<Shot caption="Replay, every 6 seconds: an answer writes its ledger line, then its stroke inks in.">
+					<Shot caption="Replay, every 6 seconds: you answer the bills question, its line is written in, and its stroke inks in the notebook.">
 						<Phone
-							label="Option E, replay: an answer writes its line, then its stroke inks in"
+							label="Option E, replay: the bills question is answered, its line writes in, and its stroke inks in the notebook"
 							demo={false}
 							tab="home"
 						>

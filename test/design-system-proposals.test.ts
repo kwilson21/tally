@@ -1998,7 +1998,6 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		"proposal-first-later",
 		"proposal-first-last",
 		"proposal-first-second-round",
-		"proposal-first-stroke-after",
 	];
 	const OPTIONS = [
 		"Option A · The Opening Entry",
@@ -2400,6 +2399,14 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			"proposal-first-line": { not: ["opacity-0", "translate-y-1"] },
 			"proposal-first-rule": { not: ["scale-x-0"] },
 			"proposal-first-amount": { not: ["opacity-0"] },
+			// Option E: the answered question rests at 40% in muted words, its button at rest, the Bills line in,
+			// the third stroke drawn and inked, and the counter at 3 of 5 (2 of 5 hidden).
+			"proposal-first-answer": { must: ["opacity-40", "text-muted"] },
+			"proposal-first-press": { must: ["bg-ink", "text-paper"] },
+			"proposal-first-bills": { not: ["opacity-0", "translate-y-1"] },
+			"proposal-first-draw": { must: ["stroke-ink"] },
+			"proposal-first-counter-before": { must: ["opacity-0"] },
+			"proposal-first-counter-after": { not: ["opacity-0"] },
 		};
 		const used = new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []);
 		for (const step of STEP_CLASSES) used.delete(step);
@@ -2944,13 +2951,45 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		expect(notebookStrokes(thursday)).toBe(5);
 		const replay = picture(
 			chunk,
-			"Option E, replay: an answer writes its line, then its stroke inks in",
+			"Option E, replay: the bills question is answered, its line writes in, and its stroke inks in the notebook",
 		);
-		expect(replay).toContain("proposal-first-line");
-		expect(replay).toContain("proposal-first-cross");
-		expect(replay).toContain("proposal-first-stroke-after");
-		expect(replay).toContain("Bills · 8 kept, about $2,062 a month");
+		// The replay is one phone: the notebook at size-20 beside the headline, its counter going from 2 of 5 to 3 of 5.
+		expect(replay).toContain("Your first page");
+		expect(replay).toContain("size-20");
+		expect(replay).not.toContain("size-12");
+		expect(replay).toContain("2 of 5");
+		expect(replay).toContain("3 of 5");
 		expect(notebookStrokes(replay)).toBe(3);
+		// The ledger: Pay is there, and the Bills line writes in after it.
+		expect(replay).toContain("Pay · Acme Corp, $2,450 every other Friday");
+		expect(replay).toContain("Bills · 8 kept, about $2,062 a month");
+		// The bills question as it was answered: the muted sentence, its heading, the primary button and the quiet one.
+		expect(replay).toContain(
+			"Your bank shows 8 charges that come back every month, about $2,062 in all: Harbor Property $1,600, Geico $142, Spectrum $70 and 5 more.",
+		);
+		expect(replay).toContain("Keep these 8 as bills?");
+		expect(replay).toContain("Keep these 8");
+		expect(replay).toContain("Choose which");
+		// Each moving part is a replay class of its own, and the answer's stroke is drawn, not a stroke-after delay.
+		for (const cls of [
+			"proposal-first-answer",
+			"proposal-first-press",
+			"proposal-first-bills",
+			"proposal-first-draw",
+			"proposal-first-counter-before",
+			"proposal-first-counter-after",
+		]) {
+			expect(replay, cls).toContain(cls);
+		}
+		expect(replay).not.toContain("proposal-first-stroke-after");
+		expect(replay).not.toContain("proposal-first-cross");
+	});
+
+	it("captions Option E's replay in words, every 6 seconds, as the brief words it", async () => {
+		const chunk = section(await drawn());
+		expect(chunk).toContain(
+			"Replay, every 6 seconds: you answer the bills question, its line is written in, and its stroke inks in the notebook.",
+		);
 	});
 
 	it("gives the Recommended pill to option E alone, and takes it off option A", async () => {

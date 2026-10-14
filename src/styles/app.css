@@ -777,8 +777,9 @@ html:not(.js) [data-money-js] {
  * bank's line (struck through) with Tally's name fade in. Lines 2 to 4 have keyframes of their own, which their step classes name, so each turns found at its own point. B (5 s): the pencilled amount inks
  * in over 150 ms, its dashed rule turns solid, and the two bars fill. C (6 s): the fifth stroke draws across the
  * four in 200 ms, and all five turn from pencil to ink in 150 ms. D (6 s): the new answer's line fades in and rises
- * 4 px in 200 ms, the double rule draws from the left, and the amount fades in. E (6 s): the new ledger line fades in
- * and rises 4 px, and its stroke draws 200 ms after it (.proposal-first-stroke-after) and inks in.
+ * 4 px in 200 ms, the double rule draws from the left, and the amount fades in. E (6 s): the answered question fades
+ * to 40% in muted words from 18% to 20.5%, its Bills line writes in from 20%, the third stroke draws in pencil from
+ * 25% and inks from 30%, and the counter turns from 2 of 5 to 3 of 5 over the same 30% to 32.5%.
  */
 @keyframes replay-first-ink-text {
 	0%,
@@ -920,6 +921,123 @@ html:not(.js) [data-money-js] {
 .proposal-first-amount {
 	--loop: calc(var(--duration-rising) * 30);
 	animation: replay-first-amount var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+/* E's replay (6 s). None of these shares a stop with the keyframes above, so each has its own: the stops are
+ * percentages of the loop, and a class's before-state holds from 0% to its first stop. */
+@keyframes replay-first-answer {
+	0%,
+	18% {
+		opacity: 1;
+		color: var(--color-ink);
+	}
+	20.5%,
+	100% {
+		opacity: 0.4;
+		color: var(--color-muted);
+	}
+}
+@keyframes replay-first-press {
+	0%,
+	15% {
+		background-color: var(--color-ink);
+		color: var(--color-paper);
+	}
+	17.5%,
+	20% {
+		background-color: var(--color-press);
+		color: var(--color-ink);
+	}
+	22.5%,
+	100% {
+		background-color: var(--color-ink);
+		color: var(--color-paper);
+	}
+}
+@keyframes replay-first-bills {
+	0%,
+	20% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	23.33%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-draw {
+	0%,
+	25% {
+		stroke-dashoffset: 23;
+	}
+	28.33%,
+	100% {
+		stroke-dashoffset: 0;
+	}
+}
+@keyframes replay-first-stroke-late {
+	0%,
+	30% {
+		stroke: var(--color-muted);
+	}
+	32.5%,
+	100% {
+		stroke: var(--color-ink);
+	}
+}
+@keyframes replay-first-counter-before {
+	0%,
+	30% {
+		opacity: 1;
+	}
+	32.5%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-counter-after {
+	0%,
+	30% {
+		opacity: 0;
+	}
+	32.5%,
+	100% {
+		opacity: 1;
+	}
+}
+.proposal-first-answer {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-answer var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-press {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-press var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-bills {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-bills var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+/* The third stroke is the illustration's vertical line, 22 units long: a dash of 23 is blank at its start and drawn at its end. */
+.proposal-first-draw {
+	--loop: calc(var(--duration-rising) * 30);
+	stroke-dasharray: 23;
+	animation:
+		replay-first-draw var(--loop) linear infinite,
+		replay-first-stroke-late var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-counter-before {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-counter-before var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-counter-after {
+	--loop: calc(var(--duration-rising) * 30);
+	animation: replay-first-counter-after var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);
 }
 @keyframes replay-first-promise-line2 {
@@ -1259,10 +1377,6 @@ html:not(.js) [data-money-js] {
 	--kf-strike: replay-first-strike-line2;
 	--kf-name: replay-first-name-line2;
 }
-/* E's last stroke draws a beat after its ledger line (200 ms, one --duration-rising): the same draw and ink keyframes, started later. */
-.proposal-first-stroke-after {
-	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising));
-}
 
 @media (prefers-reduced-motion: reduce) {
 	.proposal-first-status-first,
@@ -1283,7 +1397,13 @@ html:not(.js) [data-money-js] {
 	.proposal-first-cross,
 	.proposal-first-line,
 	.proposal-first-rule,
-	.proposal-first-amount {
+	.proposal-first-amount,
+	.proposal-first-answer,
+	.proposal-first-press,
+	.proposal-first-bills,
+	.proposal-first-draw,
+	.proposal-first-counter-before,
+	.proposal-first-counter-after {
 		animation: none;
 	}
 }
