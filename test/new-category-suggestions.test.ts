@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { setArchived } from "../src/db/categories";
 import { resetDemo } from "../src/demo/reset";
 
 const BASE = "http://tally.test";
@@ -164,5 +165,158 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		const after = await get();
 		expect(after.html).toContain(">Add to pet care<");
 		expect(after.html).not.toContain(">Add to Pet Care<");
+	});
+});
+
+describe("Settings' Suggested card for an archived category with that name (decision 110)", () => {
+	/** Pet Care as the family had it: its own icon and colour, archived on July 15 (its archive period open). */
+	async function archivePetCare(): Promise<number> {
+		const id = (
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 99) RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		await setArchived(env.DB, id, true, "2026-07-15");
+		return id;
+	}
+
+	it("says Restore Pet Care, and neither Create nor Add to", async () => {
+		await archivePetCare();
+
+		const { html } = await get();
+
+		expect(html).toContain("Suggested: Pet Care");
+		expect(html).toContain(">Restore Pet Care<");
+		expect(html).not.toContain(">Create Pet Care<");
+		expect(html).not.toContain(">Add to Pet Care<");
+	});
+
+	it("Restore brings the category back with the ticked purchases in it, and the toast counts them", async () => {
+		const id = await archivePetCare();
+
+		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
+			["shown", String(first)],
+			["shown", String(second)],
+			["ids", String(first)],
+			["ids", String(second)],
+		]);
+
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Restored Pet Care with 2 transactions");
+		expect(trigger.announce).toContain(
+			"Restored Pet Care with 2 transactions.",
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT name, icon, color, archived FROM categories WHERE id = ?",
+			)
+				.bind(id)
+				.first(),
+		).toEqual({
+			name: "Pet Care",
+			icon: "home",
+			color: "cat-plum",
+			archived: 0,
+		});
+		expect(
+			await env.DB.prepare(
+				"SELECT archived_on, restored_on FROM category_archive_periods WHERE category_id = ?",
+			)
+				.bind(id)
+				.all(),
+		).toMatchObject({
+			results: [{ archived_on: "2026-07-15", restored_on: TODAY }],
+		});
+		const filed = await env.DB.prepare(
+			"SELECT id, category_id AS categoryId, category_source AS source FROM transactions WHERE id IN (?, ?) ORDER BY id",
+		)
+			.bind(first, second)
+			.all<{
+				id: number;
+				categoryId: number | null;
+				source: string | null;
+			}>();
+		expect(filed.results).toEqual([
+			{ id: first, categoryId: id, source: "user" },
+			{ id: second, categoryId: id, source: "user" },
+		]);
+		const status = await env.DB.prepare(
+			"SELECT status FROM category_suggestions WHERE id = ?",
+		)
+			.bind(suggestion)
+			.first<{ status: string }>();
+		expect(status?.status).toBe("created");
+	});
+
+	it("says 1 transaction when only one is ticked", async () => {
+		await archivePetCare();
+
+		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
+			["shown", String(first)],
+			["shown", String(second)],
+			["ids", String(first)],
+		]);
+
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Restored Pet Care with 1 transaction");
+	});
+
+	it("refuses while 50 categories are active, with the restore words, and leaves it archived", async () => {
+		const id = await archivePetCare();
+		const have = (
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+			).first<{ n: number }>()
+		)?.n as number;
+		for (let i = have; i < 50; i++)
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+			)
+				.bind(`Filler ${i}`, 200 + i)
+				.run();
+
+		const { res, html } = await post(
+			`/settings/suggestions/${suggestion}/create`,
+			[
+				["shown", String(first)],
+				["shown", String(second)],
+				["ids", String(first)],
+			],
+		);
+
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Tally has room for 50 categories. Archive one to restore another.",
+		);
+		expect(html).toContain(">Restore Pet Care<");
+		expect(
+			await env.DB.prepare("SELECT archived FROM categories WHERE id = ?")
+				.bind(id)
+				.first<{ archived: number }>(),
+		).toEqual({ archived: 1 });
+	});
+
+	it("becomes Add to, with no second restore, when someone restored it after the page was drawn", async () => {
+		const id = await archivePetCare();
+		await setArchived(env.DB, id, false, TODAY);
+
+		const { res } = await post(`/settings/suggestions/${suggestion}/create`, [
+			["shown", String(first)],
+			["shown", String(second)],
+			["ids", String(first)],
+			["ids", String(second)],
+		]);
+
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Added 2 transactions to Pet Care");
+		expect(
+			await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM category_archive_periods WHERE category_id = ?",
+			)
+				.bind(id)
+				.first<{ n: number }>(),
+		).toEqual({ n: 1 });
 	});
 });
