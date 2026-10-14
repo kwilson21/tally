@@ -20,10 +20,18 @@ const rename: RenameFacts = {
 	thisOwn: null,
 	tallyCategory: true,
 	excludeCounts: true,
-	reviewCounts: true,
+	linkHolds: false,
 	today: "2026-10-11",
 	scope: "one",
 };
+
+/** The class list of a note's hooks, one token per hook, so a hook is matched whole, never as part of another. */
+const folds = (note: string): string[] => note.split(" ");
+/** Reviewed ticked hides the note only with a linked purchase ticked too: the review alone doesn't make a refund follow. */
+const REVIEW_HOLD =
+	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden";
+/** A linked purchase ticked hides the note while the drawn link holds (Jev's review, linkHolds). */
+const LINK_HOLDS = "group-has-[.linked-purchase:checked]/edit:hidden";
 
 /** The one radio whose value is `value`, as its opening tag. */
 function radio(html: string, value: string): string {
@@ -111,12 +119,12 @@ describe("the re-guess note follows the edit form's controls", () => {
 	});
 
 	// One row per posted field the re-guess reads (name-choices.tsx lists them, and says which are hidden or
-	// need no hook). A ticked checkbox hides the note; a radio hides it when it is ticked but was drawn unticked.
+	// need no hook). A ticked checkbox hides the note; a category hides it while any other choice is ticked.
 	it.each([
 		{
 			field: "category",
 			hooks: [
-				"group-has-[input[name=category]:checked:not([checked])]/edit:hidden",
+				"group-has-[input[name=category]:checked:not(.tally-category)]/edit:hidden",
 			],
 		},
 		{
@@ -130,12 +138,12 @@ describe("the re-guess note follows the edit form's controls", () => {
 		{
 			field: "refund_of",
 			hooks: [
-				"group-has-[input[name=refund\\_of]:checked:not([checked])]/edit:hidden",
+				"group-has-[.linked-purchase:checked:not([checked])]/edit:hidden",
 			],
 		},
 		{
 			field: "creditReviewed",
-			hooks: ["group-has-[input[name=creditReviewed]:checked]/edit:hidden"],
+			hooks: [REVIEW_HOLD],
 		},
 		{
 			field: "always",
@@ -175,13 +183,19 @@ describe("the re-guess note follows the edit form's controls", () => {
 		);
 	});
 
-	it("hides the note on the review chip only while a linked purchase is there to count", () => {
-		expect(guessAgainClass(markup(rename))).toContain(
+	it("hides the note on the review chip only while a linked purchase is ticked too, since Reviewed alone can't make a refund follow", () => {
+		const note = guessAgainClass(markup(rename));
+		expect(folds(note)).toContain(REVIEW_HOLD);
+		expect(folds(note)).not.toContain(
 			"group-has-[input[name=creditReviewed]:checked]/edit:hidden",
 		);
+	});
+
+	it("hides the note while the drawn link holds, and only while a purchase stays ticked, so Not linked brings it back", () => {
 		expect(
-			guessAgainClass(markup({ ...rename, reviewCounts: false })),
-		).not.toContain("input[name=creditReviewed]");
+			folds(guessAgainClass(markup({ ...rename, linkHolds: true }))),
+		).toContain(LINK_HOLDS);
+		expect(folds(guessAgainClass(markup(rename)))).not.toContain(LINK_HOLDS);
 	});
 });
 

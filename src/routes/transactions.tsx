@@ -126,11 +126,13 @@ import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
+	LINKED_PURCHASE_CLASS,
 	NameChoices,
 	OWN_VALUE,
 	pickValue,
 	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
+	TALLY_CATEGORY_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import {
@@ -1887,33 +1889,28 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note is drawn wherever a guess could happen in this edit (rename.ts), and the hooks hide it while
-								// Exclude, Income, the review chip or Always blocks it. So the controls are read as if they were
-								// all off, and what stays out is what no control here changes: a split row, a refund the review
-								// chip can't stop following, a category someone else set, or a category the person has changed.
+								// The note is drawn as if every control the edit reads were off, and the hooks hide it while one of them blocks the
+								// guess (name-choices.tsx). So a purchase link counts as Not linked, and what stays out is only a split row, or a
+								// category someone else set. linkHolds is the drawn purchase that keeps the refund following it with Reviewed off,
+								// which Jev's review does; the hooks fold on it.
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
-									values.newCategory !== true &&
-									(values.categoryId === null ||
-										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
 										included: true,
 										isSplit: tx.isSplit === true,
 										income: false,
-										followsPurchase:
-											linkedPurchase !== undefined &&
-											followsPurchaseAfterSave(tx, {
-												...values,
-												income: false,
-												creditReviewed: false,
-											}),
+										followsPurchase: false,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// A linked purchase that isn't excluded is what the review chip decides the refund's counting
-								// against (followsPurchaseAfterSave), so the chip hides the note only where one is drawn.
-								reviewCounts: linkedPurchase !== undefined,
+								linkHolds:
+									linkedPurchase !== undefined &&
+									followsPurchaseAfterSave(tx, {
+										...values,
+										income: false,
+										creditReviewed: false,
+									}),
 								today,
 								scope: nameScope,
 							}}
@@ -2121,6 +2118,9 @@ function EditSheet({
 										? purchase.categoryId === cat.id
 										: values.categoryId === cat.id
 								}
+								inputClass={
+									cat.id === tx.categoryId ? TALLY_CATEGORY_CLASS : undefined
+								}
 								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
 							>
 								{cat.name}
@@ -2204,6 +2204,7 @@ function EditSheet({
 										name="refund_of"
 										value={String(p.id)}
 										checked={values.refundOfId === p.id}
+										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
 									>
 										{refundPurchaseLabel(p, tx.date)}
 									</Chip>
