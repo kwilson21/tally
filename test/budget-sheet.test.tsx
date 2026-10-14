@@ -20,6 +20,7 @@ const base: Props = {
 	averageCents: 60245,
 	transactionCount: 12,
 	month: "2026-10",
+	closeHref: "/?focus=1",
 	closeAttrs: { "hx-get": "/?focus=1", "hx-push-url": "/" },
 };
 const render = (props: Partial<Props> = {}) =>
@@ -86,6 +87,12 @@ describe("BudgetSheet", () => {
 
 	it("closes with the links it is given, on Cancel", () => {
 		expect(render()).toMatch(/<a[^>]*hx-get="\/\?focus=1"[^>]*>\s*Cancel/);
+	});
+
+	it("links Cancel to the sheet's close address, so it works without JavaScript", () => {
+		expect(render({ closeHref: "/?focus=2" })).toMatch(
+			/<a href="\/\?focus=2"[^>]*>\s*Cancel/,
+		);
 	});
 
 	it("takes an id prefix, so the catalog can draw three sheets on one page", () => {

@@ -139,6 +139,7 @@ export function SplitForm({
 	categories,
 	values,
 	back,
+	cancelHref = back,
 	error,
 	guessLabel,
 }: {
@@ -150,6 +151,8 @@ export function SplitForm({
 	categories: Category[];
 	values: SplitValue[];
 	back: string;
+	/** Where Cancel goes, when it is not the list the form returns to (a sheet's close asks for focus). */
+	cancelHref?: string;
 	error?: string;
 	/** Jev's two categories, as "Groceries and Household", when the trip looks mixed (#233); shown while a part is still a guess. */
 	guessLabel?: string;
@@ -238,7 +241,7 @@ export function SplitForm({
 				</div>
 			))}
 			<div class="grid grid-cols-2 gap-3">
-				<Button href={back} kind="secondary">
+				<Button href={cancelHref} kind="secondary">
 					Cancel
 				</Button>
 				<Button type="submit">Save split</Button>

@@ -130,7 +130,7 @@ describe("savings goal routes", () => {
 			"Set aside from Safe to spend at the start of every month.",
 		);
 		expect(sheetHtml).toMatch(
-			/<a href="\/" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
+			/<a href="\/\?focus=savings-goal" hx-get="\/\?focus=savings-goal" hx-target="#page" hx-select="#page" hx-swap="outerHTML" hx-push-url="\/"[^>]*>Cancel<\/a>/,
 		);
 		const cancelled = await homeRoutes.fetch(
 			new Request("http://tally.test/?focus=savings-goal", {
