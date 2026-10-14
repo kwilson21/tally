@@ -2573,6 +2573,16 @@ function Rows() {
 						/>
 					</div>
 				</State>
+				<State label="An archived category has this name: Restore Pet Care">
+					<div class="max-w-xl" inert>
+						<CategorySuggestionCard
+							suggestion={CATEGORY_SUGGESTION}
+							existing="Pet Care"
+							archived
+							ticked={[31, 32, 33]}
+						/>
+					</div>
+				</State>
 				<State label="The family already has this category: Add to Pet Care">
 					<div class="max-w-xl" inert>
 						<CategorySuggestionCard
@@ -2923,6 +2933,7 @@ const reviewItems: Record<string, SuggestionItem> = {
 		suggestionId: 4,
 		name: "Pet Care",
 		existing: null,
+		archived: false,
 		date: "2026-10-02",
 		rows: [
 			{
@@ -3018,6 +3029,24 @@ function SuggestionsReview() {
 							/>
 						</div>
 					))}
+					<State label="An archived category has this name: Yes, restore Pet Care">
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={{
+									...(reviewItems.newCategory as Extract<
+										SuggestionItem,
+										{ kind: "new_category" }
+									>),
+									existing: "Pet Care",
+									archived: true,
+								}}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=income-1"
+								categories={reviewCategories}
+							/>
+						</div>
+					</State>
 					<State label="The family already has this category: Yes, add to Pet Care">
 						<div class="max-w-md">
 							<SuggestionCard

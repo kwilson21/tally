@@ -367,32 +367,35 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							budgetsOob={view.budgetsOob}
 						/>
 					))}
-					{/* A suggestion whose name an active category already has is added to it, not made again (decision 101). */}
-					{categorySuggestions.map((suggestion) => (
-						<CategorySuggestionCard
-							suggestion={suggestion}
-							existing={
-								active.find((cat) =>
-									sameName(cat.name, tidyName(suggestion.name)),
-								)?.name
-							}
-							error={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionError
-									: undefined
-							}
-							ticked={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionValues.ticked
-									: undefined
-							}
-							notes={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionValues.notes
-									: undefined
-							}
-						/>
-					))}
+					{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
+					{categorySuggestions.map((suggestion) => {
+						// Add to the active category with the suggested name, or Restore the archived one (decisions 101, 110).
+						const named = [...active, ...archived].find((cat) =>
+							sameName(cat.name, tidyName(suggestion.name)),
+						);
+						return (
+							<CategorySuggestionCard
+								suggestion={suggestion}
+								existing={named?.name}
+								archived={named !== undefined && archived.includes(named)}
+								error={
+									view.suggestionValues?.id === suggestion.id
+										? view.suggestionError
+										: undefined
+								}
+								ticked={
+									view.suggestionValues?.id === suggestion.id
+										? view.suggestionValues.ticked
+										: undefined
+								}
+								notes={
+									view.suggestionValues?.id === suggestion.id
+										? view.suggestionValues.notes
+										: undefined
+								}
+							/>
+						);
+					})}
 					{categorySuggestions.more > 0 && (
 						<p class="py-2 text-sm text-muted">
 							{categorySuggestions.more} more suggestions will show once you
@@ -678,9 +681,11 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	);
 	const count = result.moved;
 	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
-	const message = result.attached
-		? `Added ${transactions} to ${result.name}`
-		: `Created ${result.name} with ${transactions}`;
+	const message = result.restored
+		? `Restored ${result.name} with ${transactions}`
+		: result.attached
+			? `Added ${transactions} to ${result.name}`
+			: `Created ${result.name} with ${transactions}`;
 	const left = leftOutSentence(result.leftOut.length);
 	return done(c, message, `${message}.${left ? ` ${left}` : ""}`, {
 		hash: "categories",
