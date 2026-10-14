@@ -1259,6 +1259,7 @@ describe("splits unlink their refunds", () => {
 			["part_category", String(GAS)],
 			["part_amount", "15"],
 			["part_amount", "15"],
+			["refund_9002", "none"],
 			["back", "/transactions"],
 		]);
 		expect(res.status).toBe(200);
