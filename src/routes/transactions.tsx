@@ -2897,18 +2897,20 @@ async function changePartsList(
 
 transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 	const { tx, categories } = await splitContext(c);
-	// Income is never split (decision 62's review): no form for it either.
-	if (!tx || tx.parentId !== null || tx.income) return c.notFound();
+	if (!tx || tx.parentId !== null) return c.notFound();
 	const url = new URL(c.req.url);
 	const back = safeBack(url.searchParams.get("back"));
 	const today = await householdToday(c.env.DB);
-	// Change the parts: the saved parts filled in, each with its id, against the new total.
+	// Change the parts: the saved parts filled in, each with its id, against the new total. Income is corrected
+	// this way too (#366).
 	const correcting = url.searchParams.has("total");
 	const total = correcting
 		? correctionTotal(tx, url.searchParams.get("total"))
 		: null;
 	if (correcting && total === null) return c.notFound();
 	if (total !== null) return changePartsList(c, tx, back, today, total);
+	// Income is never split (decision 62's review): no form for it either.
+	if (tx.income) return c.notFound();
 	const values: SplitValue[] = [
 		{ category: "", amount: "" },
 		{ category: "", amount: "" },
@@ -3014,8 +3016,9 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const refunds = correction ? [] : await splitRefundsOf(c.env.DB, tx.id);
 	const choices = refundAnswers(refunds, form);
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same
-	// sheet back, refused in words, as the other split refusals do.
-	if (tx.income)
+	// sheet back, refused in words, as the other split refusals do. A Change the parts correction (#366) is
+	// not a new split: it keeps the entry's split, income or not, so only a new split is refused.
+	if (tx.income && !correction)
 		return renderList(c, today, filtersFrom(c, today, back), {
 			status: 422,
 			sheet: (_categories, today) => (
