@@ -907,10 +907,13 @@ const thingsPhone = (
 	</section>
 );
 
-/** How Tally works' opening, as the story (A): the bank's line, struck, and Tally's row under it. */
+/** How Tally works' opening, as the story (A): the page's title, then the bank's line, struck, and Tally's row under it. */
 const storyHead = (
 	<>
-		<div class="flex items-center justify-between gap-4">
+		<h1 class="font-serif text-5xl font-semibold tracking-tight">
+			How Tally works
+		</h1>
+		<div class="mt-8 flex items-center justify-between gap-4">
 			<h2 class="font-serif text-3xl font-semibold">Start here</h2>
 			<div class="shrink-0 [&>svg]:size-24">
 				<LedgerIllustration />
@@ -920,7 +923,7 @@ const storyHead = (
 			The Riveras are a made-up family. Here's what their bank sent this
 			October, and what Tally wrote down.
 		</p>
-		<h3 class="mt-6 font-medium text-muted">Three lines of 47 so far</h3>
+		<h3 class="mt-6 font-medium text-muted">Three lines of 42 so far</h3>
 		<div class="mt-3 flex flex-col gap-4">
 			{BANK_LINES.map(({ bank, row }) => (
 				<div>

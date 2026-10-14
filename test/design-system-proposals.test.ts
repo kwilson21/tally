@@ -1223,7 +1223,7 @@ describe("GET /design-system/proposals", () => {
 			"A family with no budgets sees −$2,140 in ink, since #519.",
 			"−$2,140",
 			"Start here",
-			"Three lines of 47 so far",
+			"Three lines of 42 so far",
 			"ACME CORP PAYROLL",
 			"Without Tally, the paycheck and the transfer would both count as spending.",
 			"See every line without Tally",
@@ -1246,6 +1246,8 @@ describe("GET /design-system/proposals", () => {
 			"The family&#39;s first Home: the figure in ink (today), a dash (B), a blank ledger line (A) or Your first page (C).",
 		])
 			expect(firstVisit, text).toContain(text);
+		// The seeded October count is 42, as test/demo-raw-view.test.ts pins it and P121's drawing shows it.
+		expect(firstVisit).not.toContain("of 47");
 		// The family's first page is the only one drawn on a desktop, and only for the recommended option.
 		expect(
 			pictures(firstVisit).filter((p) => p.includes("on desktop")),
@@ -1439,6 +1441,15 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
 		).toContain("Demo data. Nothing here is real.");
+		// The page keeps its How Tally works heading above Start here, as the route has it (test/how-it-works-route.test.ts:99).
+		const story = picture(
+			firstVisit,
+			"Option A, How Tally works, the story, on a phone",
+		);
+		expect(story).toMatch(/<h1[^>]*>How Tally works<\/h1>/);
+		expect(story.indexOf("How Tally works</h1>")).toBeLessThan(
+			story.indexOf(">Start here</h2>"),
+		);
 		// The lower shots are drawn as scrolled: no banner and no wordmark, since they are not the top of the page.
 		for (const label of [
 			"Option A, How Tally works, the total, on a phone",
