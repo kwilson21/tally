@@ -1451,6 +1451,34 @@ await assertHeadlineFitsPhone(
 	"Net worth",
 );
 step("a seven-figure Net worth fits a 320px phone one size smaller");
+// #534: Organize's Save is disabled while it posts (hx-disable), so a double click files the group once and the
+// question keeps its own address. Each Save is held for a moment, so the second click lands while the first is in flight.
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/transactions/organize`, { waitUntil: "networkidle" });
+const organizeSaves = [];
+const isOrganizeSave = (url) => url.pathname === "/transactions/organize";
+const holdOrganizeSave = (route) => {
+	if (route.request().method() !== "POST") return route.continue();
+	organizeSaves.push(route.request().url());
+	return holdReply(route, 400);
+};
+await page.route(isOrganizeSave, holdOrganizeSave);
+await page.getByText("Groceries", { exact: true }).click();
+await page.getByRole("button", { name: "Save and next" }).dblclick();
+await until(() => organizeSaves.length >= 1, "the Save to reach the server");
+await page.getByRole("heading", { name: /^Always use Groceries/ }).waitFor();
+await settleReplies();
+await settle();
+assert.equal(organizeSaves.length, 1, "a double click sends one Save");
+assert(
+	new URL(page.url()).searchParams.has("saved"),
+	`the question keeps its own address: ${page.url()}`,
+);
+await page.unroute(isOrganizeSave);
+step(
+	"a double click on Organize's Save files the group once, and the question keeps its address",
+);
+
 const restored = await fetch(`${BASE}/cdn-cgi/handler/scheduled`);
 assert.equal(restored.status, 200, "restoring the demo data failed");
 
