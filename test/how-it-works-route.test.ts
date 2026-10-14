@@ -532,7 +532,7 @@ describe("links in the demo", () => {
 
 	it("More lists How Tally works", async () => {
 		expect((await get("/more")).html).toMatch(
-			/<a href="\/how-it-works"[^>]*>How Tally works<\/a>/,
+			/<a href="\/how-it-works"[\s\S]*?>How Tally works<\/span>/,
 		);
 	});
 
