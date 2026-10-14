@@ -113,19 +113,34 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 // bound values in a statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
 
 /**
- * Starts the merchant row of each Plaid name from a copy of the row saved under the bank text it came with,
- * unless the name already has a row. One `?`: the pairs, a JSON array of `[Plaid name, bank text]` in
- * the order the charges arrived. When several texts share one name, the first of them that has a row is
- * the one copied.
+ * Starts the merchant row of each Plaid name from the rows saved under the bank texts it came with, unless the name
+ * already has a row. One `?`: the pairs, a JSON array of `[Plaid name, bank text]` in the order the charges arrived.
+ * When several texts share one name, no person's choice is dropped: `display_name`, `default_category_id` and
+ * `not_a_bill` each come from the first text whose row holds one. The suggestion columns come from one row, the first
+ * of: a decided suggestion (accepted or rejected); a waiting guess, unless a person named the merchant (a guess is
+ * never copied onto a named merchant); the empty answer; nothing at all. Ties fall to the page's first text.
  */
 const copyMerchantRowSql = (ownsLock: string) =>
-	`WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?))
+	`WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
+	 src(k, n, pick, suggested_name, suggestion_status, display_name, default_category_id, not_a_bill) AS (
+	   SELECT p.k, p.n,
+	     CASE WHEN m.suggestion_status IN ('accepted', 'rejected') THEN 0
+	       WHEN m.suggestion_status = 'pending' AND NOT EXISTS (SELECT 1 FROM pair q JOIN merchants d ON d.raw_name = q.t WHERE q.k = p.k AND d.display_name IS NOT NULL) THEN 1
+	       WHEN m.suggestion_status = 'pending' THEN 4
+	       WHEN m.suggested_name IS NOT NULL THEN 2
+	       ELSE 3 END,
+	     m.suggested_name, m.suggestion_status, m.display_name, m.default_category_id, m.not_a_bill
+	   FROM pair p JOIN merchants m ON m.raw_name = p.t
+	   WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k))
 	 INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
-	 SELECT p.k, m.suggested_name, m.display_name, m.default_category_id, m.suggestion_status, m.not_a_bill
-	 FROM pair p JOIN merchants m ON m.raw_name = p.t
-	 WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k)
-	   AND p.n = (SELECT MIN(q.n) FROM pair q JOIN merchants r ON r.raw_name = q.t WHERE q.k = p.k)
-	   AND ${ownsLock}`;
+	 SELECT g.k,
+	   (SELECT s.suggested_name FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
+	   (SELECT s.display_name FROM src s WHERE s.k = g.k AND s.display_name IS NOT NULL ORDER BY s.n LIMIT 1),
+	   (SELECT s.default_category_id FROM src s WHERE s.k = g.k AND s.default_category_id IS NOT NULL ORDER BY s.n LIMIT 1),
+	   (SELECT s.suggestion_status FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
+	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = g.k)
+	 FROM (SELECT DISTINCT k FROM src) g
+	 WHERE ${ownsLock}`;
 
 /**
  * Gives each Plaid name the "Never suggest" lines of the bank text it came with (decision 101), with each line's
@@ -842,11 +857,11 @@ export async function syncItem(
 				);
 			}
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row
-			// starts as a copy of the row saved under the bank text, if there is one: its name, rule and Not a
-			// bill carry over. The first copy wins, and a later edit to the old row never reaches the new one. The
-			// copy comes with whatever the old row suggests, and a guess Workers AI made for the bank text is
-			// cleared again below when Plaid's name is only that text (spec §7, decision 79). One statement for
-			// the page's charges.
+			// starts from the rows saved under the bank texts it came with, if there are any: its name, rule and Not
+			// a bill come from the first text that has each, and its suggestion from one row (see copyMerchantRowSql).
+			// The first copy wins, and a later edit to the old row never reaches the new one. A guess Workers AI made
+			// for the bank text is cleared again below when Plaid's name is only that text (spec §7, decision 79).
+			// One statement for the page's charges.
 			const pairs = new Map<string, [string, string]>();
 			for (const transaction of [...added, ...page.modified]) {
 				const key = merchantNameOf(transaction);
