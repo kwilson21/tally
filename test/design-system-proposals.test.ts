@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
+import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
@@ -323,12 +324,13 @@ describe("GET /design-system/proposals", () => {
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
+			const eachOption = id === "p118-rows" || id === "p119-saved";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
-				n >= 118 ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
+				eachOption ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
 			]);
-			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options. P118 and P119 are open.
+			// P34 on mark the owner's pick (decisions 72–86); P60 and P111 took two options. P118 to P121 are open (no pick yet), so they mark none.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const expected =
 				n < 34 || n >= 118
@@ -338,16 +340,18 @@ describe("GET /design-system/proposals", () => {
 						: 1;
 			expect([id, picked]).toEqual([id, expected]);
 		}
-		// Every option is a picture of a screen: labelled, and nothing inside to Tab to.
-		// P119's options are drawn as rows of stills (below), not one phone or desktop picture each.
+		// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Most options draw one
+		// picture. P119's options are rows of stills (below), so they draw none here. P120's Today, A and C
+		// each draw two phones, B draws three (the opened Trader Joe's is the third), and P121's A draws its
+		// Filters open as a second picture: six more than one per option, on purpose.
 		const savedOptions = (block(html, "p119-saved").match(/<h4 /g) ?? [])
 			.length;
+		expect(savedOptions).toBe(3);
 		const options = html.match(/<h4 /g)?.length ?? 0;
 		const pictures =
 			html.match(/role="img" aria-label="[^"]*, on (a phone|desktop)"/g)
 				?.length ?? 0;
-		expect(savedOptions).toBe(3);
-		expect(pictures).toBe(options - savedOptions);
+		expect(pictures).toBe(options - savedOptions + 6);
 		// …and each picture has something drawn in it, not an empty frame.
 		expect(html.match(/<div data-screen="picture">/g)?.length ?? 0).toBe(
 			options,
@@ -968,7 +972,9 @@ describe("GET /design-system/proposals", () => {
 			expect(html).toContain("City Water");
 			expect(html).toContain("Household · paid Water bill");
 			expect(html).not.toContain("Water bill bill");
-			expect(html).not.toContain("Google youtube");
+			// P120's panel draws a YouTube charge of its own, so the bank's raw water name is checked in P118 and P119 only.
+			expect(block(html, "p118-rows")).not.toContain("Google youtube");
+			expect(block(html, "p119-saved")).not.toContain("Google youtube");
 		});
 	});
 
@@ -984,5 +990,250 @@ describe("GET /design-system/proposals", () => {
 			notDemo,
 		);
 		expect(res.status).toBe(404);
+	});
+});
+
+// P120 and P121 (#84 and #498): the edit panel's layouts and the Transactions header's filters, drawn for the owner's pick.
+describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
+	const section = (html: string, id: string) => {
+		const start = html.indexOf(`<section id="${id}"`);
+		expect(start, id).toBeGreaterThan(-1);
+		const next = html.indexOf('<section id="p', start + 1);
+		return html.slice(start, next === -1 ? undefined : next);
+	};
+	// One option's heading and everything drawn under it, up to the next option's heading.
+	const option = (sectionHtml: string, name: string) => {
+		const heads = [...sectionHtml.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) =>
+			sectionHtml.slice(i, i + 400).includes(`>${name}`),
+		);
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return sectionHtml.slice(at, next);
+	};
+	// Each picture under an option, from its label on, up to the next picture's label.
+	const pictures = (chunk: string) =>
+		chunk.split('role="img" aria-label="').slice(1);
+
+	it("opens the page with its section first, titled and dated as the brief asks", async () => {
+		const { html } = await get("/design-system/proposals");
+		const first = html.indexOf('<section aria-labelledby="polish3-title"');
+		expect(first).toBeGreaterThan(-1);
+		expect(first).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish-title"'),
+		);
+		expect(html).toContain('<h2 id="polish3-title"');
+		expect(html).toContain(
+			"Open: the polish track, the edit panel and the list&#39;s top",
+		);
+		expect(html).toContain(
+			"Drawn Oct 13 for the owner&#39;s pick: what the edit panel leads with, and how much of Transactions&#39; first screen goes to filters.",
+		);
+	});
+
+	it("draws P120's four panel options with B recommended, and two pictures for each of A, C and Today", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"Today (current)",
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			expect(option(s, name), name).toContain(`>${name}`);
+		}
+		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
+		expect(option(s, "B · Category leads, folds when set")).toContain(
+			">Recommended<",
+		);
+		expect(pictures(option(s, "Today (current)"))).toHaveLength(2);
+		expect(pictures(option(s, "A · Category first"))).toHaveLength(2);
+		expect(pictures(option(s, "C · Ruled ledger"))).toHaveLength(2);
+		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
+		expect(s).toContain(
+			'aria-label="At 1280: B · Category leads, folds when set, on desktop"',
+		);
+	});
+
+	it("spaces P120's desktop B like its phone picture, so the bank's text and Category don't touch", async () => {
+		const { html } = await get("/design-system/proposals");
+		const desk = option(
+			section(html, "p120-panel"),
+			"At 1280: B · Category leads, folds when set",
+		);
+		expect(desk).toContain('<div class="flex shrink-0 flex-col gap-5">');
+		expect(desk.indexOf("SQ *LOCAL BAKERY 4432")).toBeLessThan(
+			desk.indexOf(">Category</legend>"),
+		);
+	});
+
+	it("draws Exclude from budget as a switch and the rule as a plain unticked row in A, B and C", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			const chunk = option(s, name);
+			expect(chunk, name).toContain('role="switch"');
+			expect(chunk, name).toContain("Exclude from budget");
+			expect(chunk, name).toContain(
+				"It won&#39;t count in Spent or any budget.",
+			);
+			expect(chunk, name).toContain(
+				"Use this category for Local Bakery from now on",
+			);
+			expect(chunk, name).toContain(
+				"Leave it unticked to change just this one.",
+			);
+		}
+	});
+
+	it("draws Today's panel with the explanation and How this works on its first screen, and no category choices", async () => {
+		const { html } = await get("/design-system/proposals");
+		const today = option(section(html, "p120-panel"), "Today (current)");
+		expect(today).toContain("From Northline Card Services.");
+		expect(today).toContain("How this works");
+		expect(today).toContain(">Split</");
+		expect(today).not.toContain(">Category</legend>");
+		expect(today).not.toContain("Count as income");
+	});
+
+	it("puts the explanation under the switches in A, B and C, and keeps New category last in the grid", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p120-panel");
+		for (const name of [
+			"A · Category first",
+			"B · Category leads, folds when set",
+			"C · Ruled ledger",
+		]) {
+			for (const picture of pictures(option(s, name))) {
+				expect(
+					picture.indexOf("From Northline Card Services."),
+					name,
+				).toBeGreaterThan(picture.indexOf("Count as income"));
+			}
+		}
+		const first = pictures(option(s, "A · Category first"))[0] ?? "";
+		expect(first).toContain("grid grid-cols-2");
+		expect(first.indexOf("New category")).toBeGreaterThan(
+			first.indexOf("Rent</label>"),
+		);
+	});
+
+	it("folds B's Trader Joe's category into one row, and draws a third picture of it opened", async () => {
+		const { html } = await get("/design-system/proposals");
+		const b = option(
+			section(html, "p120-panel"),
+			"B · Category leads, folds when set",
+		);
+		const all = pictures(b);
+		expect(all).toHaveLength(3);
+		expect(all[1]).toContain("Picked by Tally · 92% sure");
+		expect(all[1]).not.toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(all[2]).toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(all[2]).toContain("Picked by Tally · 92% sure");
+	});
+
+	it("draws C's Local Bakery category open and Trader Joe's closed with its source", async () => {
+		const { html } = await get("/design-system/proposals");
+		const [lb = "", tj = ""] = pictures(
+			option(section(html, "p120-panel"), "C · Ruled ledger"),
+		);
+		expect(lb).toContain('<details class="group border-b border-rule" open=""');
+		expect(tj).not.toContain(
+			'<details class="group border-b border-rule" open=""',
+		);
+		expect(tj).toContain("Picked by Tally · 92% sure");
+	});
+
+	it("draws P121's three header options with A recommended, its Filters as a closed pill, and B's filters in one strip", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		for (const name of [
+			"Today (current)",
+			"A · Filters fold away",
+			"B · One filter strip",
+		]) {
+			expect(option(s, name), name).toContain(`>${name}`);
+		}
+		expect(s.match(/>Recommended</g)?.length ?? 0).toBe(1);
+		expect(option(s, "A · Filters fold away")).toContain(">Recommended<");
+		const [closed = "", open = ""] = pictures(
+			option(s, "A · Filters fold away"),
+		);
+		expect(closed).toContain("Filters</summary>");
+		expect(closed).not.toContain('<details class="group open:w-full" open=""');
+		expect(open).toContain('<details class="group open:w-full" open=""');
+		expect(open).toContain("All accounts");
+		const b = option(s, "B · One filter strip");
+		expect(b).toContain("flex gap-2 overflow-x-auto px-5 py-1");
+		expect(b.indexOf("Needs category (")).toBeLessThan(b.indexOf("October"));
+	});
+
+	it("draws B's phone strip scrolled a little, so All categories shows cut off under the paper fade", async () => {
+		const { html } = await get("/design-system/proposals");
+		const b = option(section(html, "p121-header"), "B · One filter strip");
+		// The first pill starts past the strip's left edge; the third pill follows October and sits under the
+		// fade that closes the strip on the right.
+		expect(b).toContain('<span class="shrink-0 -ml-8">');
+		expect(b.indexOf("October")).toBeLessThan(b.indexOf("All categories"));
+		expect(b.indexOf("All categories")).toBeLessThan(
+			b.indexOf("pointer-events-none absolute inset-y-0 right-0 w-16"),
+		);
+	});
+
+	it("says in P121's sentence that A also shows its Filters pill open", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(section(html, "p121-header")).toContain(
+			"A also shows its Filters pill open.",
+		);
+	});
+
+	it("lists the sidebar and the tabs in the pictures from nav.tsx's own items, in order", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		const inOrder = (chunk: string, labels: string[]) => {
+			let at = -1;
+			for (const label of labels) {
+				const next = chunk.indexOf(`${label}</span>`, at + 1);
+				expect(next, label).toBeGreaterThan(at);
+				at = next;
+			}
+		};
+		inOrder(
+			option(s, "At 1280: Today (current)"),
+			SIDEBAR_ITEMS.map((item) => item.label),
+		);
+		inOrder(
+			pictures(option(s, "Today (current)"))[0] ?? "",
+			TAB_ITEMS.map((item) => item.label),
+		);
+	});
+
+	it("draws each P121 phone with the demo banner and the tab bar, and a desktop picture for each option", async () => {
+		const { html } = await get("/design-system/proposals");
+		const s = section(html, "p121-header");
+		// The cut-short picture of A's open Filters has no tab bar (it stops above it), so it's not one of these.
+		const phones = pictures(s).filter(
+			(p) => p.includes(", on a phone") && !p.includes("pill open"),
+		);
+		expect(phones).toHaveLength(3);
+		for (const picture of phones) {
+			expect(picture).toContain("Demo data. Nothing here is real.");
+			expect(picture).toContain(">Transactions</span>");
+		}
+		expect(s).toContain('aria-label="At 1280: Today (current), on desktop"');
+		expect(s).toContain(
+			'aria-label="At 1280: A · Filters fold away, on desktop"',
+		);
+		expect(s).toContain(
+			'aria-label="At 1280: B · One filter strip, on desktop"',
+		);
 	});
 });
