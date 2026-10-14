@@ -2635,6 +2635,50 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		).toEqual({ refundOfId: b });
 	});
 
+	it("saves a pending edit's date and exclusion on a part the correction adds, as on the saved parts", async () => {
+		const { id, a, b } = await splitCash("Panel and new part");
+		const earlier = shiftDay(today(), -2);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", earlier],
+			["amount", "100.00"],
+			["name_pick", "own"],
+			["merchant", "Corner Market"],
+			["note", "Farmers market"],
+			["excluded", "1"],
+		]).toString();
+
+		const saved = await correction(
+			id,
+			[
+				[String(a), "1", "60.00"],
+				[String(b), "5", "30.00"],
+				["", "2", "10.00"],
+			],
+			{ extra: [["pending_edit", pending]] },
+		);
+		expect(saved.res.status).toBe(200);
+		expect(await parentOf(id)).toMatchObject({
+			amountCents: 10000,
+			date: earlier,
+			note: "Farmers market",
+			excluded: 1,
+		});
+		expect(
+			(
+				await env.DB.prepare(
+					"SELECT category_id AS categoryId, amount_cents AS amountCents, date, excluded FROM transactions WHERE parent_id = ? ORDER BY id",
+				)
+					.bind(id)
+					.all()
+			).results,
+		).toEqual([
+			{ categoryId: 1, amountCents: 6000, date: earlier, excluded: 1 },
+			{ categoryId: 5, amountCents: 3000, date: earlier, excluded: 1 },
+			{ categoryId: 2, amountCents: 1000, date: earlier, excluded: 1 },
+		]);
+	});
+
 	it("Change the parts with an amount that already matches the parts saves the panel as usual", async () => {
 		const { id } = await splitCash("Matching amount");
 		const { res, html } = await post(`/transactions/${id}`, [
@@ -2770,6 +2814,50 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		}
 		expect(await parentOf(id)).toEqual(before);
 		expect(await partsOf(id)).toEqual(partsBefore);
+	});
+
+	it("refuses a pending edit with its correction when the entry was corrected elsewhere and a refund no longer fits its part, and saves neither", async () => {
+		const { id, a, b } = await splitCash("Corrected elsewhere");
+		// Another save already set the entry to $100.00 (parts $60.00 and $40.00) and linked a $65.00 refund to part
+		// A, which is only $60.00. The sheet was drawn at $90.00, so the correction is refused, and the note must be too.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 10000 WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 4000 WHERE id = ?",
+		)
+			.bind(b)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,refund_of_id,credit_reviewed) SELECT account_id,date,-6500,'Part A refund',?,1 FROM transactions WHERE id=?",
+		)
+			.bind(a, id)
+			.run();
+		const before = await stateOf(id);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", today()],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Race note"],
+		]).toString();
+
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $65.00, so part 1 can&#39;t be less than that.",
+		);
+		expect(pendingIn(html)).toEqual([pending]);
+		expect(
+			await env.DB.prepare("SELECT note FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ note: null });
+		expect(await stateOf(id)).toEqual(before);
 	});
 
 	it("a pending edit's rule tick comes back ticked, with its rule's hint, when the panel refuses it, and nothing is saved", async () => {
@@ -3359,6 +3447,34 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
 		);
 		expect(html).not.toContain("Change the parts");
+		expect(await stateOf(id)).toEqual(before);
+	});
+
+	it("draws the split sheet with the posted parts, not the edit panel, when a pending edit's total is below the refunds linked to the entry and its parts, and saves nothing", async () => {
+		const { id, a, b } = await splitCash("Pending refund sheet");
+		await linkEntryRefund(id);
+		const before = await stateOf(id);
+		const pending = new URLSearchParams([
+			["back", "/transactions"],
+			["date", today()],
+			["amount", "100.00"],
+			["merchant", "Corner Market"],
+			["note", "Refund sheet note"],
+		]).toString();
+		const { res, html } = await correction(id, savedParts(a, b), {
+			extra: [["pending_edit", pending]],
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"Linked refunds add up to $105.00, so the amount can&#39;t be less than that.",
+		);
+		expect(html).toContain('name="part_amount"');
+		expect(pendingIn(html)).toEqual([pending]);
+		expect(
+			await env.DB.prepare("SELECT note FROM transactions WHERE id = ?")
+				.bind(id)
+				.first(),
+		).toEqual({ note: null });
 		expect(await stateOf(id)).toEqual(before);
 	});
 

@@ -3779,7 +3779,9 @@ async function savePanel(
 			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 			...(cashParsed?.errors ?? {}),
 		});
-	if (cashParsed && tx.isSplit) {
+	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
+	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
+	if (cashParsed && tx.isSplit && !correction) {
 		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
 		// is checked first.
 		const linked = await c.env.DB.prepare(
@@ -3796,8 +3798,7 @@ async function savePanel(
 		)
 			.bind(tx.id)
 			.first<{ cents: number }>();
-		// A correction makes the parts add up to the amount in the same batch, so they are not checked before it.
-		if (!correction && parts && parts.cents !== cashParsed.amountCents)
+		if (parts && parts.cents !== cashParsed.amountCents)
 			return partsBroken(cashParsed.amountCents, parts.cents);
 	}
 	let edit: Edit = parsed.value;
