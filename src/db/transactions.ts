@@ -1745,7 +1745,8 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * split) that follows the purchase (FOLLOWS_PURCHASE), and the whole refund still fits that part (refundFitsSql),
  * counting the refunds already moved there in this batch. A split refund's parts that still follow its link are
  * parked with it and move to the same part right after it, so they count there once each; a part linked elsewhere
- * keeps its link. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
+ * keeps its link. A split refund with no part still following its link is refused, like any other, and unlinked and
+ * named. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
  * is named in neither list. One that was parked but doesn't move is unlinked, and is listed in `unlinked` like any
  * other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked` lists the refunds
  * this save unlinked, by date, each refund once: a split refund's parts share its date, so it is listed once however
@@ -1862,8 +1863,10 @@ export async function saveSplit(
 	// A chosen refund moves onto its part once the parts exist. It moves only if it is still on the purchase (parked
 	// above), still a top-level refund of the kind it was read as (a split refund stays split) that follows the purchase
 	// (a competing save can split or change the credit after the read), and the whole refund still fits that part
-	// (refundFitsSql), counting the refunds moved before it in this batch. A refusal leaves it on the purchase, where the
-	// sweep below unlinks it. RETURNING gives the row it moved, with the date the save wrote it.
+	// (refundFitsSql), counting the refunds moved before it in this batch. A split refund also needs one of its parts
+	// still following the purchase (?5 = 0 for a plain refund, which has no parts): with none, nothing counts for it.
+	// A refusal leaves it on the purchase, where the sweep below unlinks it. RETURNING gives the row it moved, with the
+	// date the save wrote it.
 	const moveStatements = moves.map((move) => ({
 		move,
 		statement: db
@@ -1871,6 +1874,7 @@ export async function saveSplit(
 				`UPDATE transactions SET refund_of_id = ${partAt("?4")}
 				WHERE id = ?3 AND refund_of_id = ?1 AND ${refundFitsSql("?3", partAt("?4"))} AND ${unchangedNumbered}
 				AND EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?3 AND ${FOLLOWS_PURCHASE} AND t.is_split = ?5 AND t.parent_id IS NULL)
+				AND (?5 = 0 OR EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.parent_id = ?3 AND t.refund_of_id = ?1 AND ${FOLLOWS_PURCHASE}))
 				RETURNING id, date, parent_id AS parentId`,
 			)
 			.bind(parentId, total, move.refundId, move.part, move.isSplit ? 1 : 0),
