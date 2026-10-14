@@ -1082,8 +1082,21 @@ async function save(c: Context<App>, id?: number) {
 		});
 	await matchBillPayments(c.env.DB, today);
 	const message = id ? "Bill saved" : "Bill added";
+	// A saved edit returns to its bill's page, with focus on Edit bill, as the sheet's Cancel does (#87).
 	if (c.req.header("HX-Request")) {
-		const res = await page(c, undefined, today);
+		const res = id
+			? await billPage(
+					c,
+					id,
+					undefined,
+					undefined,
+					undefined,
+					today,
+					false,
+					undefined,
+					true,
+				)
+			: await page(c, undefined, today);
 		res.headers.set(
 			"HX-Trigger",
 			JSON.stringify({
@@ -1091,10 +1104,10 @@ async function save(c: Context<App>, id?: number) {
 				announce: message,
 			}),
 		);
-		res.headers.set("HX-Push-Url", "/bills");
+		res.headers.set("HX-Push-Url", id ? `/bills/${id}` : "/bills");
 		return res;
 	}
-	return c.redirect("/bills", 303);
+	return c.redirect(id ? `/bills/${id}?focus=edit-bill` : "/bills", 303);
 }
 bills.post("/bills", (c) => save(c));
 bills.post("/bills/:id", (c) => save(c, Number(c.req.param("id"))));
@@ -1348,6 +1361,8 @@ async function billPage(
 	rerender = false,
 	// The occurrence whose Not this one takes focus, when an Undo has just linked it again (#340).
 	focusTransactionId?: number,
+	// The bill's Edit bill button takes focus, when a save of its edit has just returned here (#87).
+	focusEditBill = false,
 ) {
 	const bill = await dbBill(c, id);
 	if (!bill) return c.notFound();
@@ -1600,7 +1615,7 @@ async function billPage(
 						id="edit-bill"
 						kind="secondary"
 						href={`/bills/${id}/edit`}
-						autofocus={c.req.query("focus") === "edit-bill"}
+						autofocus={focusEditBill || c.req.query("focus") === "edit-bill"}
 						{...sheetAttrs(`/bills/${id}/edit`)}
 					>
 						Edit bill

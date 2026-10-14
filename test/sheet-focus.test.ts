@@ -28,6 +28,37 @@ async function post(path: string, fields: URLSearchParams) {
 	return res.text();
 }
 
+/** A save as the Bills sheet sends it, returning the response itself so its headers can be read. */
+async function postResponse(
+	path: string,
+	fields: URLSearchParams,
+	htmx = true,
+) {
+	return exports.default.fetch(BASE + path, {
+		method: "POST",
+		redirect: "manual",
+		headers: {
+			"content-type": "application/x-www-form-urlencoded",
+			...(htmx ? { "HX-Request": "true" } : {}),
+			Origin: BASE,
+		},
+		body: fields,
+	});
+}
+
+/** A valid bill form, as bills.test.ts posts one: the sheet's own fields, under the given name. */
+function billFields(name: string) {
+	return new URLSearchParams({
+		name,
+		amount: "3.99",
+		due_day: "4",
+		frequency: "monthly",
+		anchor_month: "1",
+		category_id: "5",
+		merchant_raw_name: "APPLE.COM/BILL",
+	});
+}
+
 /** The address of a sheet's backdrop link, decoded from the attribute. */
 function backdropHref(html: string) {
 	const href =
@@ -186,6 +217,44 @@ describe("Bills: a sheet's close returns focus to its bill, or to Add a bill", (
 		expect(addLinkFor(drawn, rawName)).toContain("autofocus");
 		const other = await get("/bills/find?focus=NOPE");
 		expect(other).not.toContain("autofocus");
+	});
+
+	it("saving an edit with htmx lands on the bill's page, with focus on Edit bill and no sheet", async () => {
+		const id = await firstBillId();
+		const res = await postResponse(
+			`/bills/${id}`,
+			billFields("Sheet focus bill"),
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Push-Url")).toBe(`/bills/${id}`);
+		expect(res.headers.get("HX-Trigger")).toContain('"announce":"Bill saved"');
+		const html = await res.text();
+		expect(tagWithId(html, "edit-bill")).toContain("autofocus");
+		expect(html).not.toContain('role="dialog"');
+	});
+
+	it("saving an edit without JavaScript redirects to the bill's page, with focus on Edit bill", async () => {
+		const id = await firstBillId();
+		const res = await postResponse(
+			`/bills/${id}`,
+			billFields("Sheet focus bill plain"),
+			false,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe(`/bills/${id}?focus=edit-bill`);
+	});
+
+	it("saving a new bill still goes to the Bills list, with htmx and without it", async () => {
+		const htmx = await postResponse("/bills", billFields("Sheet focus gym"));
+		expect(htmx.status).toBe(200);
+		expect(htmx.headers.get("HX-Push-Url")).toBe("/bills");
+		const plain = await postResponse(
+			"/bills",
+			billFields("Sheet focus pool"),
+			false,
+		);
+		expect(plain.status).toBe(303);
+		expect(plain.headers.get("location")).toBe("/bills");
 	});
 });
 
