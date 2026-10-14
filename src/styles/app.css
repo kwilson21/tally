@@ -357,6 +357,39 @@ html:not(.js) [data-money-js] {
 	.bill-anchor-date {
 	display: block;
 }
+/* DueRow (the Add a bill sentence, P72 A): the form carries every frequency's pickers, and only the
+ * chosen frequency's show. The frequency picker is the select, so it follows what is chosen. */
+.due-row
+:is(
+	.due-lead-the,
+	.due-lead-on,
+	.due-weekly,
+	.due-biweekly,
+	.due-day,
+	.due-month,
+	.due-quarter-word,
+	.due-year-word
+) {
+	display: none;
+}
+.due-row:has(select[name="frequency"] option[value="weekly"]:checked)
+	:is(.due-lead-on, .due-weekly),
+.due-row:has(select[name="frequency"] option[value="biweekly"]:checked)
+	:is(.due-lead-on, .due-biweekly),
+.due-row:has(select[name="frequency"] option[value="monthly"]:checked)
+	:is(.due-lead-the, .due-day),
+.due-row:has(select[name="frequency"] option[value="quarterly"]:checked)
+	:is(.due-lead-the, .due-day, .due-quarter-word),
+.due-row:has(select[name="frequency"] option[value="yearly"]:checked)
+	:is(.due-lead-the, .due-day, .due-year-word) {
+	display: inline-block;
+}
+.due-row:has(select[name="frequency"] option[value="quarterly"]:checked)
+	.due-month,
+.due-row:has(select[name="frequency"] option[value="yearly"]:checked)
+	.due-month {
+	display: flex;
+}
 
 /*
  * Quiet confirmations (decision 76, P74 A; decision 80, P85 A). Four moves, each over in 150 to 200 ms,
