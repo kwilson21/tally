@@ -3,7 +3,7 @@
 // suggested for them (decision 30). Nothing moves until a person adds them (addLikely).
 import { STILL_UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { monthsBefore } from "../dates";
-import { sameName } from "../settings/category-form";
+import { nameKey, sameName } from "../settings/category-form";
 import { shownName } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 import { readAiSwitches } from "./ai-switches";
@@ -86,6 +86,14 @@ const LIKELY_WHERE = `WHERE ${NEEDS_CATEGORY} AND t.id <> src.id AND t.parent_id
 		SELECT sug.id FROM category_suggestions sug WHERE sug.status = 'pending' AND sug.id IN (SELECT value FROM json_each(?4))))`;
 
 /**
+ * The category the panel files into is still active and still has the name the panel matched by (?5 its id, ?6 and ?7
+ * that name's key and name, compared as createFromSuggestion compares names). A rename since the panel was read fails
+ * it inside the same statement, so nothing files into the renamed category.
+ */
+const PANEL_CATEGORY_SQL =
+	"EXISTS (SELECT 1 FROM categories WHERE id = ?5 AND archived = 0 AND (name_key = ?6 OR name = ?7 COLLATE NOCASE))";
+
+/**
  * The pending suggestions a category named `categoryName` takes in: the same name in any capitals or accents, as
  * createFromSuggestion matches them (sameName, since SQL NOCASE folds ASCII only).
  */
@@ -119,6 +127,24 @@ async function likelyBinds(
 		thisMonth,
 		monthsBefore(thisMonth, 1),
 		JSON.stringify(await matchingSuggestionIds(db, categoryName)),
+	];
+}
+
+/** The ?1-?7 parameters the panel's count and Add bind: likelyBinds, then the category's id, its name's key and its name. */
+async function panelBinds(
+	db: D1Database,
+	input: {
+		savedId: number;
+		categoryId: number;
+		categoryName: string;
+		today: string;
+	},
+) {
+	return [
+		...(await likelyBinds(db, input.savedId, input.categoryName, input.today)),
+		input.categoryId,
+		nameKey(input.categoryName),
+		input.categoryName,
 	];
 }
 
@@ -183,13 +209,14 @@ export async function likelyTransactions(
 }
 
 /**
- * The ticked ids that Add would still file for a category named `categoryName`, made from `savedId`, as of
- * `today`: the same rules as addLikely, with no six-row limit, so the Add count matches what Add files.
+ * The ticked ids that Add would still file into the category `categoryId` made as `categoryName`, from `savedId`,
+ * as of `today`: the same rules as addLikely, with no six-row limit, so the Add count matches what Add files.
  */
 export async function likelyStill(
 	db: D1Database,
 	input: {
 		savedId: number;
+		categoryId: number;
 		categoryName: string;
 		today: string;
 		ticked: number[];
@@ -200,17 +227,9 @@ export async function likelyStill(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id AS id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
-				AND t.id IN (SELECT value FROM json_each(?5))`,
+				AND ${PANEL_CATEGORY_SQL} AND t.id IN (SELECT value FROM json_each(?8))`,
 		)
-		.bind(
-			...(await likelyBinds(
-				db,
-				input.savedId,
-				input.categoryName,
-				input.today,
-			)),
-			JSON.stringify(ids),
-		)
+		.bind(...(await panelBinds(db, input)), JSON.stringify(ids))
 		.all<{ id: number }>();
 	return results.map((row) => row.id);
 }
@@ -220,7 +239,9 @@ export async function likelyStill(
  * and leaves every other row as it was. Only rows the panel's rules still allow can move (still needing a
  * category, this month or last, same merchant or a matching pending guess), whatever the six-row limit now
  * shows, so a ticked row that is no longer eligible (already categorized, too old, or never offered) is
- * ignored. Returns how many moved.
+ * ignored. The category must still be active and still have `categoryName`, the name the panel matched by, or
+ * nothing moves (a rename or an archive since the panel was read). Returns how many moved and the category's stored
+ * name, which is null when nothing moved.
  */
 export async function addLikely(
 	db: D1Database,
@@ -232,32 +253,25 @@ export async function addLikely(
 		today: string;
 		actor: string;
 	},
-): Promise<number> {
+): Promise<{ moved: number; name: string | null }> {
 	const ids = tickedIds(input.ticked);
-	if (ids.length === 0) return 0;
-	// The write applies the panel's own rules, in the same statement, so a row that changed since the
-	// read (excluded, income, pending, or its guess withdrawn) is left alone, and so is every row when the
-	// category was archived since the read. ?1-?4 are the panel's parameters (likelyBinds), ?5 and ?6 the
-	// category and actor (?5 is checked live in the same statement too), and ?7 the ticked ids as JSON.
-	const result = await db
+	if (ids.length === 0) return { moved: 0, name: null };
+	// The write applies the panel's own rules, in the same statement, so a row that changed since the read
+	// (excluded, income, pending, or its guess withdrawn) is left alone, and so is every row when the category
+	// was archived or renamed since the read. ?1-?7 are the panel's parameters and category (panelBinds), ?8 the
+	// ticked ids as JSON and ?9 the actor. RETURNING reads the category's stored name back for the toast.
+	const { results } = await db
 		.prepare(
 			`UPDATE transactions SET category_id = ?5, category_source = 'user', category_confidence = NULL,
-				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?6, updated_at = datetime('now')
-			WHERE category_id IS NULL AND EXISTS (SELECT 1 FROM categories WHERE id = ?5 AND archived = 0) AND id IN (
+				jev_none_fit = 0, category_suggestion_id = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?9, updated_at = datetime('now')
+			WHERE category_id IS NULL AND ${PANEL_CATEGORY_SQL} AND id IN (
 				SELECT t.id FROM transactions t ${COUNTED_JOINS} JOIN transactions src ON src.id = ?1 ${LIKELY_WHERE}
-				AND t.id IN (SELECT value FROM json_each(?7)))`,
+				AND t.id IN (SELECT value FROM json_each(?8)))
+			RETURNING (SELECT name FROM categories WHERE id = ?5) AS name`,
 		)
-		.bind(
-			...(await likelyBinds(
-				db,
-				input.savedId,
-				input.categoryName,
-				input.today,
-			)),
-			input.categoryId,
-			input.actor,
-			JSON.stringify(ids),
-		)
-		.run();
-	return result.meta.changes;
+		.bind(...(await panelBinds(db, input)), JSON.stringify(ids), input.actor)
+		.all<{ name: string }>();
+	const [stored] = results;
+	if (!stored) return { moved: 0, name: null };
+	return { moved: results.length, name: stored.name };
 }

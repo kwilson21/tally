@@ -2347,6 +2347,21 @@ export async function saveJevDetails(
 	void result;
 }
 
+/** The columns a note is checked against, read the way the list reads a row's name (#426, #412). */
+const NOTE_NAME_COLUMNS = `t.raw_name AS rawName, t.merchant_name AS merchantName,
+	${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}`;
+
+export type NoteNameRow = {
+	id: number;
+	rawName: string;
+	merchantName: string | null;
+	displayName: string | null;
+	ownName: string | null;
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
+	merchantKey: string;
+};
+
 /**
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
@@ -2359,38 +2374,37 @@ export async function saveJevDetails(
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
 	limit: number,
-): Promise<
-	{
-		id: number;
-		rawName: string;
-		merchantName: string | null;
-		displayName: string | null;
-		ownName: string | null;
-		suggestedNames: string | null;
-		suggestionStatus: string | null;
-		merchantKey: string;
-	}[]
-> {
+): Promise<NoteNameRow[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
-				${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}
+			`SELECT t.id, ${NOTE_NAME_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
 			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
 			 ORDER BY t.note_failed_at IS NOT NULL, t.note_failed_at, t.date DESC, t.id DESC LIMIT ?`,
 		)
 		.bind(limit)
-		.all<{
-			id: number;
-			rawName: string;
-			merchantName: string | null;
-			displayName: string | null;
-			ownName: string | null;
-			suggestedNames: string | null;
-			suggestionStatus: string | null;
-			merchantKey: string;
-		}>();
+		.all<NoteNameRow>();
+	return results;
+}
+
+/**
+ * The same name columns as `transactionsNeedingNoteGuess`, for these charges as they stand now. A person may name
+ * a charge or its merchant while a note's call is out, so a note is checked against these, read just before it is
+ * saved (#412). One query for any number of ids.
+ */
+export async function noteNameRows(
+	db: D1Database,
+	ids: number[],
+): Promise<NoteNameRow[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, ${NOTE_NAME_COLUMNS}
+			 FROM transactions t
+			 WHERE t.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify(ids))
+		.all<NoteNameRow>();
 	return results;
 }
 

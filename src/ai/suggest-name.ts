@@ -1,7 +1,12 @@
 // The only place Tally talks to Workers AI (CLAUDE.md, spec §7): it suggests up to three plain names for
 // a merchant from the bank's text, and decides nothing. Code checks every name it gets back
 // (`cleanSuggestedNames`), a person chooses one or none, and nothing is renamed until they do.
-import { MAX_SUGGESTED_NAMES } from "../transactions/name-suggestions";
+import {
+	joinedOf,
+	MAX_SUGGESTED_NAMES,
+	runsOf,
+	wordsOf,
+} from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 
 /**
@@ -108,20 +113,6 @@ const GENERIC_NOTE_WORDS = new Set([
 	"our",
 ]);
 
-/** A name's letter runs, so "AT&T" gives "at" and "t", and "APPLE.COM/BILL" gives "apple", "com" and "bill". */
-const wordsOf = (text: string) =>
-	text
-		.toLowerCase()
-		.split(/[^\p{L}]+/u)
-		.filter(Boolean);
-
-/** A name's whitespace-separated runs, so a run never joins the next word: "Trader Joe's" gives "trader" and "joe's". */
-const runsOf = (text: string) =>
-	text.toLowerCase().split(/\s+/).filter(Boolean);
-
-/** A run with its punctuation removed: "at&t" is "att", "joe's" is "joes", and "#552" is nothing. */
-const joinedOf = (run: string) => run.replace(/[^\p{L}]/gu, "");
-
 /**
  * True when every word of a "what it was" line is in the store's name, with or without its inner punctuation (so
  * "AT&T" matches "ATT"), or is a generic word such as "purchase" (decision 103).
@@ -144,14 +135,14 @@ export function restatesStore(
 }
 
 /**
- * Workers AI's short, one-line guess for what a purchase was, from only the bank text. Code then drops a line
- * that only restates the store, by the bank text, the merchant's names or the row's own name (decision 103, #426);
- * those names are never sent.
+ * Workers AI's short, one-line guess for what a purchase was, from only the bank text, which is the only text
+ * sent. Code drops a line that only restates the bank text here. A line that restates a name the row shows is
+ * dropped when the note is saved, against the names as they are then (decision 103, #426; #412), since a person
+ * may set one while the call is out.
  */
 export async function suggestNote(
 	ai: Ai,
 	rawName: string,
-	shownNames: (string | null)[] = [],
 ): Promise<{ ok: true; note: string | null } | { ok: false }> {
 	try {
 		const answer = await ai.run(
@@ -187,7 +178,7 @@ export async function suggestNote(
 				note.length >= 2 &&
 				note.length <= 80 &&
 				!/https?:|www\.|\d{3,}|[$#]/i.test(note) &&
-				!restatesStore(note, [rawName, ...shownNames])
+				!restatesStore(note, [rawName])
 					? note
 					: null,
 		};
