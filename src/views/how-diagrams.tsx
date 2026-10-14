@@ -136,7 +136,7 @@ export function BudgetDiagram(
 		| "totalSpentCents"
 		| "safeToSpendCents"
 		| "savingsGoalCents"
-	>,
+	> & { id?: string },
 ) {
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
 	const billsCents =
@@ -166,7 +166,7 @@ export function BudgetDiagram(
 			: "";
 	return (
 		<Figure
-			id="budget-diagram"
+			id={s.id ?? "budget-diagram"}
 			title="How safe to spend is worked out"
 			desc={`The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills}${savings} leaves ${money(s.safeToSpendCents)} safe to spend.`}
 			width={width}

@@ -388,8 +388,7 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			const expected =
-				n < 34 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			const expected = n < 34 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -506,12 +505,6 @@ describe("GET /design-system/proposals", () => {
 		);
 		const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 		expect(duplicates).toEqual([
-			// BudgetDiagram hard-codes its title and description ids (src/views/how-diagrams.tsx), so P126's two widths of
-			// the real diagram repeat them, as does Home's drawing of it further down (#202, P126).
-			"budget-diagram-title",
-			"budget-diagram-desc",
-			"budget-diagram-title",
-			"budget-diagram-desc",
 			"p27-file",
 			"p27-file-hint",
 			"p27-note",
@@ -1505,7 +1498,7 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		// Nothing else is drawn between the page's title and this section.
 		expect(html.slice(top, start)).not.toContain("<section");
 		expect(start).toBeLessThan(
-			html.indexOf('<section aria-labelledby="polish-title"'),
+			html.indexOf('<section aria-labelledby="polish4-title"'),
 		);
 		expect(html).toContain(
 			'<h2 id="p126-title" class="font-serif text-3xl font-semibold">Open: the Budget diagram with Planned</h2>',
@@ -1533,15 +1526,18 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 	});
 
 	it("draws today's four boxes with the real BudgetDiagram at 1280 and at 390, and no Planned box", async () => {
-		const [today = ""] = options(section(await drawn()));
+		const html = await drawn();
+		const [today = ""] = options(section(html));
 		expect(today).toContain(
 			'aria-label="Reference · Today on main: four boxes, on desktop"',
 		);
 		expect(today).toContain(
 			'aria-label="Reference · Today on main: four boxes, on a phone"',
 		);
-		// The real component: its own title and description, drawn twice, one per width.
-		expect(count(today, '<title id="budget-diagram-title">')).toBe(2);
+		// The real component, drawn once per width: each drawing has its own title and description ids.
+		expect(count(today, '<title id="p126-today-1280-title">')).toBe(1);
+		expect(count(today, '<title id="p126-today-390-title">')).toBe(1);
+		expect(html).not.toContain('id="budget-diagram-title"');
 		expect(today).toContain(
 			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due leaves $342.51 safe to spend.",
 		);
@@ -1553,7 +1549,8 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		const [, branch = ""] = options(section(await drawn()));
 		expect(count(branch, 'viewBox="0 0 550 68"')).toBe(2);
 		expect(count(branch, 'width="92" height="60"')).toBe(10);
-		expect(count(branch, "leaves $72.51 safe to spend.")).toBe(2);
+		// Each drawing's <desc> and its frame's hidden sum read the sentence: two of each, one per width.
+		expect(count(branch, "leaves $72.51 safe to spend.")).toBe(4);
 		expect(branch).toContain(
 			"minus $270.00 for planned expenses leaves $72.51",
 		);
@@ -1624,14 +1621,13 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 
 	it("draws each option's pictures inside its own box: two for each reference and three for option A", async () => {
 		const chunk = section(await drawn());
-		const picture = /role="img" aria-label="[^"]*, on (a phone|desktop)"/g;
-		expect(chunk.match(picture)?.length ?? 0).toBe(7);
+		expect(chunk.match(PICTURE)?.length ?? 0).toBe(7);
 		expect(
-			(chunk.match(picture) ?? []).filter((p) => p.endsWith('on desktop"'))
+			(chunk.match(PICTURE) ?? []).filter((p) => p.endsWith('on desktop"'))
 				.length,
 		).toBe(3);
 		expect(
-			options(chunk).map((option) => option.match(picture)?.length ?? 0),
+			options(chunk).map((option) => option.match(PICTURE)?.length ?? 0),
 		).toEqual([2, 2, 3]);
 		expect(count(chunk, 'data-screen="picture"')).toBe(3);
 		// Each picture is the Budget section as How Tally works draws it: its heading, then the diagram.
@@ -1641,6 +1637,68 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 				'<h2 class="font-serif text-3xl font-semibold">Budget and safe to spend</h2>',
 			),
 		).toBe(7);
+	});
+
+	it("gives each picture's outer role=img the whole sum, in a hidden span its aria-describedby names", async () => {
+		const html = await drawn();
+		const today =
+			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due leaves $342.51 safe to spend.";
+		const safe =
+			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due minus $270.00 for planned expenses leaves $72.51 safe to spend.";
+		const six =
+			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due minus $270.00 for planned expenses minus $50.00 for the savings goal leaves $22.51 safe to spend.";
+		const pictures: [label: string, frame: string, sum: string][] = [
+			[
+				"Reference · Today on main: four boxes, on desktop",
+				"p126-today-1280-frame",
+				today,
+			],
+			[
+				"Reference · Today on main: four boxes, on a phone",
+				"p126-today-390-frame",
+				today,
+			],
+			[
+				"Reference · PR #545 as built: five boxes in one row, on desktop",
+				"p126-545-1280-frame",
+				safe,
+			],
+			[
+				"Reference · PR #545 as built: five boxes in one row, on a phone",
+				"p126-545-390-frame",
+				safe,
+			],
+			[
+				"Option A · Today&#39;s box size, wrapping after Bills due, on desktop",
+				"p126-a-1280-frame",
+				safe,
+			],
+			[
+				"Option A · Today&#39;s box size, wrapping after Bills due, on a phone",
+				"p126-a-390-frame",
+				safe,
+			],
+			["Option A with a savings goal, on a phone", "p126-a-six-frame", six],
+		];
+		// Each picture's labelled frame, then the hidden sum it describes itself with, then its inert drawing.
+		for (const [label, frame, sum] of pictures) {
+			const at = html.indexOf(
+				`role="img" aria-label="${label}" aria-describedby="${frame}-sum"`,
+			);
+			expect(at, frame).toBeGreaterThan(-1);
+			const inert = html.indexOf("<div inert", at);
+			expect(inert, frame).toBeGreaterThan(at);
+			expect(html.slice(at, inert), frame).toContain(
+				`<span id="${frame}-sum" hidden="">${sum}</span>`,
+			);
+		}
+		// Seven pictures, seven distinct sums: each frame's description names its own element.
+		const described = [
+			...html.matchAll(/aria-describedby="(p126-[^"]+-sum)"/g),
+		].map((m) => m[1]);
+		expect(described).toHaveLength(7);
+		expect(new Set(described).size).toBe(7);
+		expect(described).toEqual(pictures.map(([, frame]) => `${frame}-sum`));
 	});
 });
 

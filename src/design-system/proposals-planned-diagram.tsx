@@ -29,14 +29,29 @@ const money = (cents: number) => formatCents(cents);
  * A desktop picture: the Budget section in How Tally works' real column (lg:max-w-3xl, 768 px), in a
  * frame as wide as this page's column (824 px), so the frame never runs past the page.
  */
-function WideFrame({ name, children }: { name: string; children?: Child }) {
+function WideFrame({
+	id,
+	name,
+	sum,
+	children,
+}: {
+	id: string;
+	name: string;
+	/** The whole sum, read aloud as the picture's description; its drawing is inert. */
+	sum: string;
+	children?: Child;
+}) {
 	return (
 		<div class="overflow-x-auto">
 			<div
 				role="img"
 				aria-label={`${name}, on desktop`}
+				aria-describedby={`${id}-sum`}
 				class="h-[240px] w-[824px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
+				<span id={`${id}-sum`} hidden>
+					{sum}
+				</span>
 				<div inert class="mx-auto w-[768px] pt-8">
 					{children}
 				</div>
@@ -50,14 +65,29 @@ function WideFrame({ name, children }: { name: string; children?: Child }) {
  * 788 tall because it leaves room for the tab bar, which these pictures don't draw. Scrolled to the
  * Budget section, so the demo banner and the wordmark are not drawn. The content column is 350 px.
  */
-function PhonePicture({ name, children }: { name: string; children?: Child }) {
+function PhonePicture({
+	id,
+	name,
+	sum,
+	children,
+}: {
+	id: string;
+	name: string;
+	/** The whole sum, read aloud as the picture's description; its drawing is inert. */
+	sum: string;
+	children?: Child;
+}) {
 	return (
 		<div class="overflow-x-auto">
 			<div
 				role="img"
 				aria-label={`${name}, on a phone`}
+				aria-describedby={`${id}-sum`}
 				class="h-[846px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
+				<span id={`${id}-sum`} hidden>
+					{sum}
+				</span>
 				<div inert class="px-5 pt-6">
 					{children}
 				</div>
@@ -297,6 +327,7 @@ const ROW_TWO_WITH_GOAL: Cell[] = [
 const SUM = `The ${money(BUDGET)} budget minus ${money(SPENT)} spent minus ${money(BILLS)} for bills due minus ${money(PLANNED)} for planned expenses`;
 const SAFE_DESC = `${SUM} leaves ${money(SAFE)} safe to spend.`;
 const SIX_DESC = `${SUM} minus ${money(SAVINGS)} for the savings goal leaves ${money(SIX_SAFE)} safe to spend.`;
+const TODAY_DESC = `The ${money(BUDGET)} budget minus ${money(SPENT)} spent minus ${money(BILLS)} for bills due leaves ${money(TODAY_SAFE)} safe to spend.`;
 
 /**
  * PR #545's BudgetDiagram for five boxes, copied from its branch: one row 550 wide, so the five boxes
@@ -399,9 +430,14 @@ export function PlannedDiagramProposal() {
 				note="The diagram as main draws it now: four boxes with the demo's numbers and no Planned box."
 			>
 				<Column caption="At 1280: one row">
-					<WideFrame name="Reference · Today on main: four boxes">
+					<WideFrame
+						id="p126-today-1280-frame"
+						name="Reference · Today on main: four boxes"
+						sum={TODAY_DESC}
+					>
 						<BudgetPicture>
 							<BudgetDiagram
+								id="p126-today-1280"
 								totalBudgetCents={BUDGET}
 								totalSpentCents={SPENT}
 								safeToSpendCents={TODAY_SAFE}
@@ -411,9 +447,14 @@ export function PlannedDiagramProposal() {
 					</WideFrame>
 				</Column>
 				<Column caption="At 390: one row, scaled down">
-					<PhonePicture name="Reference · Today on main: four boxes">
+					<PhonePicture
+						id="p126-today-390-frame"
+						name="Reference · Today on main: four boxes"
+						sum={TODAY_DESC}
+					>
 						<BudgetPicture>
 							<BudgetDiagram
+								id="p126-today-390"
 								totalBudgetCents={BUDGET}
 								totalSpentCents={SPENT}
 								safeToSpendCents={TODAY_SAFE}
@@ -428,14 +469,22 @@ export function PlannedDiagramProposal() {
 				note="Planned as a fifth box in the same row. All five share one width, so every box and label shrinks."
 			>
 				<Column caption="At 1280: one row, scaled down">
-					<WideFrame name="Reference · PR #545 as built: five boxes in one row">
+					<WideFrame
+						id="p126-545-1280-frame"
+						name="Reference · PR #545 as built: five boxes in one row"
+						sum={SAFE_DESC}
+					>
 						<BudgetPicture>
 							<BranchFiveBoxes id="p126-545-1280" />
 						</BudgetPicture>
 					</WideFrame>
 				</Column>
 				<Column caption="At 390: the labels shrink to fit one row">
-					<PhonePicture name="Reference · PR #545 as built: five boxes in one row">
+					<PhonePicture
+						id="p126-545-390-frame"
+						name="Reference · PR #545 as built: five boxes in one row"
+						sum={SAFE_DESC}
+					>
 						<BudgetPicture>
 							<BranchFiveBoxes id="p126-545-390" />
 						</BudgetPicture>
@@ -451,7 +500,11 @@ export function PlannedDiagramProposal() {
 				recommended
 			>
 				<Column caption="At 1280: one row">
-					<WideFrame name="Option A · Today's box size, wrapping after Bills due">
+					<WideFrame
+						id="p126-a-1280-frame"
+						name="Option A · Today's box size, wrapping after Bills due"
+						sum={SAFE_DESC}
+					>
 						<BudgetPicture>
 							<BudgetBoxes
 								id="p126-a-1280"
@@ -462,7 +515,11 @@ export function PlannedDiagramProposal() {
 					</WideFrame>
 				</Column>
 				<Column caption="At 390: the row wraps after Bills due">
-					<PhonePicture name="Option A · Today's box size, wrapping after Bills due">
+					<PhonePicture
+						id="p126-a-390-frame"
+						name="Option A · Today's box size, wrapping after Bills due"
+						sum={SAFE_DESC}
+					>
 						<BudgetPicture>
 							<BudgetBoxes
 								id="p126-a-390"
@@ -473,7 +530,11 @@ export function PlannedDiagramProposal() {
 					</PhonePicture>
 				</Column>
 				<Column caption="With a savings goal too: six boxes, the same rule">
-					<PhonePicture name="Option A with a savings goal">
+					<PhonePicture
+						id="p126-a-six-frame"
+						name="Option A with a savings goal"
+						sum={SIX_DESC}
+					>
 						<BudgetPicture>
 							<BudgetBoxes
 								id="p126-a-six"
