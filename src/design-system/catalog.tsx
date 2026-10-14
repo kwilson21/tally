@@ -44,11 +44,13 @@ import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { DetailRow } from "../views/detail-row";
+import { DueRow } from "../views/due-row";
 import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FilterSelect } from "../views/filter-select";
+import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
@@ -62,6 +64,7 @@ import {
 import { HowLink } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import {
 	MaybeCategory,
@@ -93,6 +96,7 @@ import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
+import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
@@ -167,6 +171,7 @@ const SECTIONS = [
 	["categorization", "Categorization"],
 	["suggestions-review", "Suggestions review"],
 	["controls", "Controls"],
+	["ledger-form", "Ledger form"],
 	["feedback", "Feedback and sheets"],
 	["demo", "Guidance"],
 	["diagrams", "Diagrams"],
@@ -3046,6 +3051,84 @@ const LIKELY_SPEC: UseSpecText = {
 		"Reasons are plain facts (Same merchant as Sep 14, $189.00) or Tally's guess with a Why? link; the panel never names the sorting engine.",
 };
 
+// The ledger form's four pieces (P72 A, decisions 75, 79 and 80; spec §8.7): each one's use spec, with
+// the words it uses, for sign-off beside its specimen.
+const LEDGER_FIELD_SPEC: UseSpecText = {
+	purpose:
+		"Take one typed thing in a form, a name or a plain amount, with nothing around it but a line, so the form reads like a ledger page.",
+	affordance:
+		"A small muted label above, then the text on a bottom rule in the muted token (a 3:1 edge that marks where to type), with no box. The big variant, for an amount, puts a muted $ before serif 4xl tabular figures: the one big thing on its sheet.",
+	states:
+		"Empty: the label and the line. Filled: the text on the line. Focus: the accent ring around the line. Error: the line turns brick, the field shakes once, and the reason is under it in words, in role=alert. Hover, disabled and loading: not used; the form's Save carries the busy state.",
+	feedback:
+		"What's typed shows on the line. A refused save draws the form again with the error under the field and focus in it, so a screen reader hears the field and why.",
+	input:
+		"Touch: the field is at least 44px tall (56px for the big one) and its label is tied to it. Keyboard: Tab reaches it; nothing else is special. Screen reader: the label names it, aria-describedby reads its hint and error, and aria-invalid marks an error. The amount uses inputmode=decimal, so a phone shows a number pad.",
+	motion:
+		"Only the error's shake, FormField's field-shake (#69); reduced motion turns it off. The focus ring appears at once.",
+	edges:
+		"A long value scrolls inside the line. The $ is hidden from screen readers, since the label says it's an amount. Without JavaScript it is a plain field in a form that posts.",
+	words:
+		"The label is a noun (Amount, Name, Where). A hint says what Tally does with it. An error says what to change, in the server's own words.",
+};
+
+const DUE_ROW_SPEC: UseSpecText = {
+	purpose:
+		"Say when a bill is due as one sentence of pickers, so there's nothing to type or parse.",
+	affordance:
+		"A sentence with native pickers on muted lines: “Due on the 1st every month”. Weekly reads “Due on Fridays every week”, every two weeks “Due on [a date] every two weeks”, quarterly “Due on the 15th every quarter” with “starting in January” under it, and yearly “Due on the 14th every year” with “in March” under it.",
+	states:
+		"One per frequency: the form carries every picker and CSS shows only the chosen frequency's. Focus: each picker's ring. Error: the form's error line under the sentence, in role=alert. Hover, disabled and loading: not used.",
+	feedback:
+		"Choosing how often swaps which pickers show, at once, with no request. The choice posts with the form.",
+	input:
+		"Touch: each picker is at least 44px tall and opens the phone's own wheel or calendar. Keyboard: Tab goes through the shown pickers in reading order; hidden ones are out of the Tab order. Screen reader: a group named “When it's due”, and each picker named by what it picks.",
+	motion: "None: the pickers swap at once.",
+	edges:
+		"On a narrow phone the sentence wraps between pickers, never inside one. Hidden pickers still post, and the server reads only the chosen frequency's. It uses no JavaScript, so nothing changes without it.",
+	words:
+		"“Due on the”, ordinal days (1st, 22nd), weekdays as plurals (Fridays), “every month”, “every week”, “every two weeks”, “every quarter”, “every year”, “starting in”, “in”.",
+};
+
+const FOLDED_ROW_SPEC: UseSpecText = {
+	purpose:
+		"Keep a choice that's usually settled, like a bill's category or the bank's text it matches, out of the way until someone wants to change it.",
+	affordance:
+		"A row at least 48px tall under a rule: its name in muted words, what it holds at the right (a category's icon and name) or under its name when long, and a chevron that turns when it opens.",
+	states:
+		"Closed: the name, what it holds and the chevron. Open: the chevron turned and the controls under the row. Error: it opens itself and the field inside shows the error. Focus: the ring on the row. Hover, disabled and loading: not used.",
+	feedback:
+		"Tapping the row opens it in place, and tapping it again closes it. What it shows is what was saved or posted; after a new pick, the controls inside show the choice until the form is drawn again.",
+	input:
+		"Touch: the whole row is the target. Keyboard: Tab reaches the row, and Enter or Space opens and closes it. Screen reader: a disclosure that says whether it's expanded, named by its words.",
+	motion:
+		"The chevron turns in 150 ms; reduced motion turns it at once. What's inside appears at once.",
+	edges:
+		"Closed, its controls still post with the form. A long value sits under the name on one line, cut with an ellipsis, and shows in full inside. It is a native details element, so it works without JavaScript.",
+	words:
+		"The row's name is its field's (Category, Match payments from). An empty one says so in words, such as “None yet”, with a line saying how it gets filled.",
+};
+
+// The sheet's footer is drawn as the SavingsGoalSheet is (Visual: its Save posts, which the catalog's
+// CSP refuses, and its Cancel is a link), so its use spec is the same eight answers without the
+// interactive tier.
+const SHEET_FOOTER_SPEC: UseSpecText = {
+	purpose:
+		"Keep a sheet's Cancel and its one main action on screen however long the form is, so a phone never scrolls to reach Save.",
+	affordance:
+		"Cancel (secondary) and the primary side by side, each half the width and 44px tall, under a rule at the bottom of the sheet. The form above it scrolls; the footer doesn't.",
+	states:
+		"Rest. Busy: the primary shows its busy label and is off while the form posts, as Save does today. The form names it by id in its hx-indicator and hx-disable, since the button sits outside the form. Focus: each button's ring. Hover: the buttons' own.",
+	feedback:
+		"Cancel closes the sheet the way the backdrop does, with focus back on the row it came from. The primary posts the form, and the sheet answers as it does today (a toast and an announcement, or the error in the form).",
+	input:
+		"Touch: both are 44px tall and half the sheet wide. Keyboard: the Tab order is the form's fields, then Cancel, then the primary. Screen reader: two buttons named by their words; the primary belongs to the form through its form attribute.",
+	motion: "None of its own: it arrives with the sheet.",
+	edges:
+		"The sheet grows with its form up to its usual height (90% of a phone's screen, leaving room for the toasts), then the middle scrolls; the footer keeps the bottom safe-area padding. A sheet without a footer is drawn exactly as before. Without JavaScript, Cancel is a link and the primary posts the form.",
+	words: "Cancel, and the main action's verb: Save, Add, Send.",
+};
+
 function Controls() {
 	return (
 		<Group id="controls" title="Controls">
@@ -5175,6 +5258,291 @@ function TrendsGroup() {
 	);
 }
 
+// The ledger form's sample data, specimen-only (kept here, not in mock.ts): 50 categories, as the
+// Add a bill sheet lists them, each with a line icon and a category color.
+const LEDGER_CATEGORY_NAMES = [
+	"Groceries",
+	"Eating Out",
+	"Gas",
+	"Kids",
+	"Household",
+	"Car",
+	"Rent",
+	"Utilities",
+	"Subscriptions",
+	"Shopping",
+	"Personal Care",
+	"Health",
+	"Entertainment",
+	"Date Night",
+	"Donations",
+	"Clothing",
+	"Pets",
+	"Gifts",
+	"Travel",
+	"Phone",
+	"Internet",
+	"Insurance",
+	"Medical",
+	"Dentist",
+	"Pharmacy",
+	"School",
+	"Books",
+	"Hobbies",
+	"Sports",
+	"Music",
+	"Movies",
+	"Coffee",
+	"Takeout",
+	"Parking",
+	"Transit",
+	"Tolls",
+	"Laundry",
+	"Repairs",
+	"Garden",
+	"Furniture",
+	"Toys",
+	"Birthdays",
+	"Holidays",
+	"Charity",
+	"Savings",
+	"Fees",
+	"Taxes",
+	"Vacation",
+	"Office",
+	"Other",
+];
+const LEDGER_ICONS = [
+	"groceries",
+	"eating-out",
+	"gas",
+	"kids",
+	"household",
+	"car",
+	"rent",
+	"utilities",
+	"shopping",
+	"health",
+	"entertainment",
+	"donations",
+	"tag",
+	"bank",
+];
+const LEDGER_CATEGORIES = LEDGER_CATEGORY_NAMES.map((name, i) => ({
+	name,
+	icon: LEDGER_ICONS[i % LEDGER_ICONS.length] ?? "tag",
+	color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] ?? "cat-blue",
+}));
+const LEDGER_EATING_OUT = LEDGER_CATEGORIES[1] ?? LEDGER_CATEGORIES[0];
+const LEDGER_GROCERIES = LEDGER_CATEGORIES[0];
+const LEDGER_BANK_TEXT = "CITY WATER AUTOPAY 0093 REF";
+
+/** A category as a row shows it: its icon and name, so the row says what's chosen. */
+function LedgerChoice({
+	category,
+}: {
+	category?: (typeof LEDGER_CATEGORIES)[number];
+}) {
+	if (!category) return null;
+	return (
+		<>
+			<CategoryIcon icon={category.icon} color={category.color} />
+			<span class="truncate text-lg">{category.name}</span>
+		</>
+	);
+}
+
+/** The categories as the real Chip radios, the way a ledger form's Category row holds them. */
+function LedgerChips({
+	name,
+	selected,
+	categories = LEDGER_CATEGORIES,
+}: {
+	name: string;
+	selected: string;
+	categories?: (typeof LEDGER_CATEGORIES)[number][];
+}) {
+	return (
+		<fieldset class="pb-3">
+			<legend class="sr-only">Category</legend>
+			<div class="flex flex-wrap gap-2">
+				{categories.map((c) => (
+					<Chip
+						type="radio"
+						name={name}
+						value={c.name}
+						checked={c.name === selected}
+						icon={<CategoryIcon icon={c.icon} color={c.color} />}
+					>
+						{c.name}
+					</Chip>
+				))}
+			</div>
+		</fieldset>
+	);
+}
+
+/**
+ * The quiet ledger form's four pieces (P72 A, decisions 75, 79 and 80), each in its states with its
+ * use spec, then the ledger sheet they make: Cancel and the one primary pinned under the scrolling
+ * middle (gap E8). The sheet is its own page, linked here.
+ */
+function LedgerForm() {
+	return (
+		<Group id="ledger-form" title="Ledger form">
+			<p class="mt-2 max-w-prose text-muted">
+				One column of small muted labels over ledger lines, the amount as the
+				one big thing, a due date as one sentence of pickers, and settled
+				choices folded into rows that open in place. On a sheet, Cancel and the
+				one primary stay pinned under the middle, which scrolls.
+			</p>
+			<p class="mt-3">
+				<Button kind="text" href="/design-system/ledger-sheet">
+					Open the ledger sheet
+				</Button>
+			</p>
+			<Specimen
+				id="ledger-field"
+				title="LedgerField"
+				tier="interactive"
+				components={["LedgerField"]}
+				sentence="A labeled field on a bottom rule with no box, with a big variant for an amount and its error in words."
+			>
+				<State label="Rest">
+					<LedgerField
+						id="ledger-field-rest"
+						name="ledger-field-rest"
+						label="Name"
+						value=""
+						hint="The name you'll see on the bill."
+					/>
+				</State>
+				<State label="Filled">
+					<LedgerField
+						id="ledger-field-filled"
+						name="ledger-field-filled"
+						label="Name"
+						value="City Water"
+					/>
+				</State>
+				<State label="Big amount, with its $ and cents">
+					<LedgerField
+						id="ledger-field-amount"
+						name="ledger-field-amount"
+						label="Amount"
+						value="1500.00"
+						big
+						prefix="$"
+						inputmode="decimal"
+					/>
+				</State>
+				<State label="Error">
+					<LedgerField
+						id="ledger-field-error"
+						name="ledger-field-error"
+						label="Name"
+						value=""
+						error="Enter a name for the bill."
+					/>
+				</State>
+				<UseSpec spec={LEDGER_FIELD_SPEC} />
+			</Specimen>
+			<Specimen
+				id="due-row"
+				title="DueRow"
+				tier="interactive"
+				components={["DueRow"]}
+				sentence="When a bill is due, as one sentence of native pickers: the form carries every frequency's and shows the chosen one's."
+			>
+				<State label="Monthly: Due on the 1st every month">
+					<DueRow frequency="monthly" dueDay={1} />
+				</State>
+				<State label="Weekly: Due on Fridays every week">
+					<DueRow frequency="weekly" dueDay={5} />
+				</State>
+				<State label="Every two weeks: Due on a date, every two weeks">
+					<DueRow frequency="biweekly" dueDay={1} anchorDate="2026-10-03" />
+				</State>
+				<State label="Quarterly: Due on the 15th every quarter, starting in January">
+					<DueRow frequency="quarterly" dueDay={15} anchorMonth={1} />
+				</State>
+				<State label="Yearly: Due on the 14th every year, in March">
+					<DueRow frequency="yearly" dueDay={14} anchorMonth={3} />
+				</State>
+				<UseSpec spec={DUE_ROW_SPEC} />
+			</Specimen>
+			<Specimen
+				id="folded-row"
+				title="FoldedRow"
+				tier="interactive"
+				components={["FoldedRow"]}
+				sentence="A settled choice folded into a row under a rule: its name, what it holds, and a chevron that turns when it opens in place."
+			>
+				<State label="Closed, with a category">
+					<FoldedRow
+						label="Category"
+						value={<LedgerChoice category={LEDGER_EATING_OUT} />}
+					>
+						<LedgerChips
+							name="ledger-folded-closed"
+							selected={LEDGER_EATING_OUT?.name ?? ""}
+							categories={LEDGER_CATEGORIES.slice(0, 8)}
+						/>
+					</FoldedRow>
+				</State>
+				<State label="Closed, with a long bank text under its name">
+					<FoldedRow label="Match payments from" sub={LEDGER_BANK_TEXT}>
+						<LedgerField
+							id="ledger-folded-match"
+							name="ledger-folded-match"
+							label="Match payments from"
+							hideLabel
+							value={LEDGER_BANK_TEXT}
+							hint="How your bank writes it. Tally uses it to match payments to this bill."
+						/>
+					</FoldedRow>
+				</State>
+				<State label="Open, with Category to choose">
+					<FoldedRow
+						label="Category"
+						open
+						value={<LedgerChoice category={LEDGER_GROCERIES} />}
+					>
+						<LedgerChips
+							name="ledger-folded-open"
+							selected={LEDGER_GROCERIES?.name ?? ""}
+							categories={LEDGER_CATEGORIES.slice(0, 8)}
+						/>
+					</FoldedRow>
+				</State>
+				<UseSpec spec={FOLDED_ROW_SPEC} />
+			</Specimen>
+			<Specimen
+				id="sheet-footer"
+				title="SheetFooter"
+				tier="visual"
+				components={["SheetFooter"]}
+				sentence="A sheet's pinned footer: Cancel and the one primary side by side, under a rule, outside the part of the sheet that scrolls."
+			>
+				<State label="Rest, inside a sheet drawn as the savings sheet is">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<SheetFooter>
+							<SheetCancel href="/design-system/ledger-sheet" />
+							<SheetPrimary id="ledger-footer-save" form="ledger-footer-form">
+								Save
+							</SheetPrimary>
+						</SheetFooter>
+					</div>
+				</State>
+				<UseSpec spec={SHEET_FOOTER_SPEC} />
+			</Specimen>
+		</Group>
+	);
+}
+
 /** The whole catalog page body. */
 export function Catalog() {
 	return (
@@ -5191,6 +5559,7 @@ export function Catalog() {
 			<Categorization />
 			<SuggestionsReview />
 			<Controls />
+			<LedgerForm />
 			<Feedback />
 			<Demo />
 			<Diagrams />
@@ -5250,6 +5619,104 @@ export function SheetSpecimen() {
 					>
 						Cancel
 					</Button>
+				</BottomSheet>
+			</div>
+		</>
+	);
+}
+
+/**
+ * The ledger form on a sheet, with its footer pinned (P72 A, decision 80; gap E8): Category is open
+ * with every category as a chip, so the middle scrolls, and Cancel and Save stay in view.
+ */
+export function LedgerSheetSpecimen() {
+	return (
+		<>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">
+				Ledger sheet
+			</h1>
+			<p class="mt-2 text-muted">
+				Visual: the ledger form on a sheet, with Category open so the middle is
+				long. Cancel or the backdrop go back to the Ledger form group. The
+				middle scrolls; Cancel and Save stay in view on a phone and on desktop.
+				Save is drawn only: the catalog's CSP lets no form post.
+			</p>
+			<ul class="mt-6 max-w-xl">
+				{PROGRESS_ROWS.map((s) => (
+					<ProgressRow {...s.props} />
+				))}
+			</ul>
+			<div hx-ignore="">
+				<BottomSheet
+					labelledBy="ledger-sheet-title"
+					closeHref="/design-system#ledger-form"
+					footer={
+						<SheetFooter>
+							<SheetCancel href="/design-system#ledger-form" />
+							<SheetPrimary
+								id="ledger-sheet-save"
+								form="ledger-sheet-form"
+								busyLabel="Saving…"
+							>
+								Save
+							</SheetPrimary>
+						</SheetFooter>
+					}
+				>
+					<h2
+						id="ledger-sheet-title"
+						class="font-serif text-2xl font-semibold tracking-tight"
+						tabindex={-1}
+					>
+						Add a bill
+					</h2>
+					<form
+						id="ledger-sheet-form"
+						method="post"
+						action="/design-system/ledger-sheet"
+						class="mt-4 flex flex-col gap-5"
+						hx-disable="#ledger-sheet-save"
+						hx-indicator="#ledger-sheet-save"
+					>
+						<LedgerField
+							id="ledger-sheet-amount"
+							name="amount"
+							label="Amount"
+							value="1500.00"
+							big
+							prefix="$"
+							inputmode="decimal"
+						/>
+						<LedgerField
+							id="ledger-sheet-name"
+							name="name"
+							label="Name"
+							value="City Water"
+						/>
+						<DueRow frequency="monthly" dueDay={1} />
+						<div class="border-t border-rule">
+							<FoldedRow
+								label="Category"
+								open
+								value={<LedgerChoice category={LEDGER_GROCERIES} />}
+							>
+								<LedgerChips
+									name="ledger-sheet-category"
+									selected={LEDGER_GROCERIES?.name ?? ""}
+								/>
+							</FoldedRow>
+							<FoldedRow label="Match payments from" sub={LEDGER_BANK_TEXT}>
+								<LedgerField
+									id="ledger-sheet-match"
+									name="merchant_raw_name"
+									label="Match payments from"
+									hideLabel
+									value={LEDGER_BANK_TEXT}
+									hint="How your bank writes it. Tally uses it to match payments to this bill."
+								/>
+							</FoldedRow>
+						</div>
+					</form>
 				</BottomSheet>
 			</div>
 		</>

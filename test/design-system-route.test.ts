@@ -1063,9 +1063,145 @@ describe("GET /design-system in the demo", () => {
 	});
 });
 
+describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
+	it.each(["ledger-field", "due-row", "folded-row", "sheet-footer"])(
+		"gives %s its whole use spec, beside its specimen",
+		async (id) => {
+			const { html } = await get("/design-system");
+			expect(specimens(html).some((tag) => tag.includes(`id="${id}"`))).toBe(
+				true,
+			);
+			const section = html.split(`id="${id}"`)[1]?.split("</section>")[0] ?? "";
+			for (const [, label] of USE_SPEC_PARTS) {
+				expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+			}
+		},
+	);
+
+	it("shows each piece in its component's own tag, with the states the form needs", async () => {
+		const { html } = await get("/design-system");
+		const tagOf = (id: string) =>
+			specimens(html).find((tag) => tag.includes(`id="${id}"`)) ?? "";
+		expect(tagOf("ledger-field")).toContain('data-ds-components="LedgerField"');
+		expect(tagOf("due-row")).toContain('data-ds-components="DueRow"');
+		expect(tagOf("folded-row")).toContain('data-ds-components="FoldedRow"');
+		expect(tagOf("sheet-footer")).toContain('data-ds-components="SheetFooter"');
+		// The footer is drawn as the savings sheet is: a visual, inert sheet, since its buttons post.
+		expect(tagOf("sheet-footer")).toContain('data-ds-tier="visual"');
+		const field =
+			html.split('id="ledger-field"')[1]?.split("</section>")[0] ?? "";
+		expect(field).toContain('aria-invalid="true"');
+		expect(field).toMatch(/role="alert"[^>]*>Enter a name for the bill\./);
+		const due = html.split('id="due-row"')[1]?.split("</section>")[0] ?? "";
+		for (const words of [
+			"Due on the 1st every month",
+			"Due on Fridays every week",
+			"starting in",
+			"in",
+		]) {
+			expect(due).toContain(words);
+		}
+		const folded =
+			html.split('id="folded-row"')[1]?.split("</section>")[0] ?? "";
+		expect(folded.match(/<details/g)).toHaveLength(3);
+		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(1);
+	});
+
+	it("links the ledger sheet page from its group, and the page is a catalog page", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('href="/design-system/ledger-sheet"');
+		expect(html).toContain('href="#ledger-form"');
+		const { res, html: page } = await get("/design-system/ledger-sheet");
+		expect(res.status).toBe(200);
+		expect(page).toContain(
+			"<title>Ledger sheet · Design system · Tally</title>",
+		);
+	});
+
+	it("pins Cancel and Save under the middle of the sheet, which scrolls (gap E8)", async () => {
+		const { res, html } = await get("/design-system/ledger-sheet");
+		expect(res.status).toBe(200);
+		expect(html).toContain('role="dialog"');
+		expect(html).toContain('aria-labelledby="ledger-sheet-title"');
+		expect(html).toMatch(
+			/<h2 id="ledger-sheet-title" class="font-serif text-2xl font-semibold tracking-tight"[^>]*>\s*Add a bill\s*<\/h2>/,
+		);
+		const scroller = html.indexOf("min-h-0 flex-1 overflow-y-auto");
+		const form = html.indexOf('<form id="ledger-sheet-form"');
+		const formEnd = html.indexOf("</form>");
+		const footer = html.indexOf("shrink-0 border-t border-rule");
+		const save = html.indexOf('id="ledger-sheet-save"');
+		expect(scroller).toBeGreaterThan(0);
+		expect(form).toBeGreaterThan(scroller);
+		expect(formEnd).toBeGreaterThan(form);
+		expect(footer).toBeGreaterThan(formEnd);
+		expect(save).toBeGreaterThan(footer);
+		const saveTag =
+			html.match(/<button [^>]*id="ledger-sheet-save"[^>]*>/)?.[0] ?? "";
+		expect(saveTag).toContain('type="submit"');
+		expect(saveTag).toContain('form="ledger-sheet-form"');
+		expect(html.slice(footer, save)).toContain(
+			'href="/design-system#ledger-form"',
+		);
+		const csp = res.headers.get("content-security-policy") ?? "";
+		expect(csp).toContain("form-action 'none'");
+	});
+
+	it("turns the footer's Save off while the form posts: the form names it by id, since it sits outside the form", async () => {
+		const { html } = await get("/design-system/ledger-sheet");
+		const formTag = html.match(/<form id="ledger-sheet-form"[^>]*>/)?.[0] ?? "";
+		expect(formTag).toContain('hx-disable="#ledger-sheet-save"');
+		expect(formTag).toContain('hx-indicator="#ledger-sheet-save"');
+		const saveTag =
+			html.match(/<button [^>]*id="ledger-sheet-save"[^>]*>/)?.[0] ?? "";
+		expect(saveTag).toContain('form="ledger-sheet-form"');
+		expect(html.slice(html.indexOf(saveTag))).toContain("Saving…");
+	});
+
+	it("says the page's Save is drawn only, and the footer spec keeps its busy and off wording", async () => {
+		const { html } = await get("/design-system/ledger-sheet");
+		expect(html).toContain("Save is drawn only");
+		const { html: catalog } = await get("/design-system");
+		const footer =
+			catalog.split('id="sheet-footer"')[1]?.split("</section>")[0] ?? "";
+		expect(footer).toContain("is off while the form posts");
+	});
+
+	it("opens Category with all 50 categories as chips, and keeps Match payments from closed", async () => {
+		const { html } = await get("/design-system/ledger-sheet");
+		expect(html.match(/name="ledger-sheet-category"/g)).toHaveLength(50);
+		expect(html).toMatch(
+			/<details class="group border-b border-rule" open=""><summary[\s\S]*?<span class="text-muted">Category<\/span>/,
+		);
+		expect(html).toMatch(
+			/<details class="group border-b border-rule"><summary[\s\S]*?<span class="text-muted">Match payments from<\/span>/,
+		);
+		expect(html).toContain('<span class="text-muted">Category</span>');
+	});
+
+	it("documents the pieces, the ledger title role and the pattern in DESIGN.md (P72 A)", () => {
+		expect(design).toMatch(
+			/\| Sheet title and amount \|[^\n]*\n\| Ledger sheet title \| font-serif, 2xl, semibold, tight tracking/,
+		);
+		expect(design).toMatch(
+			/\| BottomSheet \|[^\n]*an optional pinned footer \(SheetFooter\)/,
+		);
+		expect(design).toMatch(
+			/\| BottomSheet \|[^\n]*\n\| LedgerField \|[^\n]*\n\| DueRow \|[^\n]*\n\| FoldedRow \|[^\n]*\n\| SheetFooter \|/,
+		);
+		expect(design).toMatch(
+			/Ledger form \(P72 A, decisions 75, 79, 80\)[^\n]*one column of small muted labels/,
+		);
+	});
+});
+
 describe("the catalog outside the demo", () => {
 	it("doesn't exist in production", async () => {
-		for (const path of ["/design-system", "/design-system/bottom-sheet"]) {
+		for (const path of [
+			"/design-system",
+			"/design-system/bottom-sheet",
+			"/design-system/ledger-sheet",
+		]) {
 			const res = await designSystem.request(path, {}, notDemo);
 			expect(res.status).toBe(404);
 		}

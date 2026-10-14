@@ -2296,9 +2296,10 @@ export async function saveJevDetails(
  * The bounded set of note guesses for this run. Only a transaction Jev said a what-it-was line could help with
  * (`note_worth_writing = 1`, decision 103) is sent to Workers AI, so a no, an unanswered one and every one from
  * before that answer existed are never sent. Each row carries the names a guess is checked against: the bank
- * text, Plaid's merchant name, and the names the row can show. Only the bank text is sent. A row with `note_tried_at`
- * set is left out: Workers AI answered it, even with no note, or a person saved its note empty. A row whose call failed
- * (`note_failed_at`) stays in, but after the rows that never failed.
+ * text, Plaid's merchant name, the names the row can show, and its own name (`ownName`, #426). Only the bank
+ * text is sent. A row with `note_tried_at` set is left out: Workers AI answered it, even with no note, or a
+ * person saved its note empty. A row whose call failed (`note_failed_at`) stays in, but after the rows that
+ * never failed.
  */
 export async function transactionsNeedingNoteGuess(
 	db: D1Database,
@@ -2309,6 +2310,7 @@ export async function transactionsNeedingNoteGuess(
 		rawName: string;
 		merchantName: string | null;
 		displayName: string | null;
+		ownName: string | null;
 		suggestedNames: string | null;
 		suggestionStatus: string | null;
 		merchantKey: string;
@@ -2317,7 +2319,7 @@ export async function transactionsNeedingNoteGuess(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, t.merchant_name AS merchantName,
-				${merchantColumnSql("t", "display_name")} AS displayName, ${NAME_SUGGESTION_COLUMNS}
+				${merchantColumnSql("t", "display_name")} AS displayName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}
 			 FROM transactions t
 			 WHERE t.details_asked = 1 AND t.note_worth_writing = 1 AND t.note_dismissed = 0 AND t.note_tried_at IS NULL AND ${EMPTY_NOTE}
 			 -- Never-failed first, then longest-ago failures, so a failing one can't block the rest.
@@ -2329,6 +2331,7 @@ export async function transactionsNeedingNoteGuess(
 			rawName: string;
 			merchantName: string | null;
 			displayName: string | null;
+			ownName: string | null;
 			suggestedNames: string | null;
 			suggestionStatus: string | null;
 			merchantKey: string;
