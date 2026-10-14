@@ -1024,6 +1024,13 @@ describe("GET /design-system/proposals", () => {
 			// Each option says why, and only A is recommended.
 			expect(p119.match(/>Recommended</g)?.length).toBe(1);
 			expect(p119.match(/text-muted">Why: /g)?.length).toBe(2);
+			// The demo's Band totals after matching: 10 need a category and $211, not 12 and $228.
+			expect(p119).toContain("$211 of this month&#39;s spending");
+			expect(p119).toMatch(
+				/10(<span class="sr-only"> transactions<\/span>)? need a category/,
+			);
+			expect(p119).not.toContain("$228");
+			expect(p119).not.toContain("12 transactions need a category");
 		});
 
 		it("draws the real tab bar in every P119 still, with the toast 12px above it and the crops sized so no drawn row sits under a toast (decision 101)", async () => {
@@ -1062,9 +1069,11 @@ describe("GET /design-system/proposals", () => {
 			expect(html).toContain("City Water");
 			expect(html).toContain("Household · paid Water bill");
 			expect(html).not.toContain("Water bill bill");
-			// P120's panel draws a YouTube charge of its own, so the bank's raw water name is checked in P118 and P119 only.
-			expect(block(html, "p118-rows")).not.toContain("Google youtube");
-			expect(block(html, "p119-saved")).not.toContain("Google youtube");
+			expect(html).not.toContain("Google youtube");
+			expect(block(html, "p121-header")).toContain("City Water");
+			expect(block(html, "p121-header")).toContain(
+				"Household · paid Water bill",
+			);
 		});
 	});
 
@@ -1377,6 +1386,35 @@ describe("GET /design-system/proposals", () => {
 		expect(cOption).toContain(
 			'class="text-muted underline underline-offset-4">How this works</a>',
 		);
+		// The demo's Band totals after matching: 10 need a category and $211 (decision 82 keeps 12 and $228 on the older proposals).
+		for (const part of [feedback, firstVisit]) {
+			expect(part).toContain("10 need a category");
+			expect(part).toContain("$211 of this month&#39;s spending");
+			expect(part).not.toContain("12 need a category");
+			expect(part).not.toContain("$228");
+		}
+		expect(
+			picture(firstVisit, "Today (current), Home top, on a phone"),
+		).toContain("10 need a category");
+		expect(
+			picture(firstVisit, "Today (current), Home top, on a phone"),
+		).toContain("$211 of this month&#39;s spending");
+		// P124 A's story names the paycheck as the seed does, not by its bank text.
+		expect(
+			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
+		).toContain("Paycheck, Acme Corp");
+		expect(
+			picture(firstVisit, "Option A, How Tally works, the story, on a phone"),
+		).toContain("Demo data. Nothing here is real.");
+		// The lower shots are drawn as scrolled: no banner and no wordmark, since they are not the top of the page.
+		for (const label of [
+			"Option A, How Tally works, the total, on a phone",
+			"Option C, How it&#39;s built, last, on a phone",
+		]) {
+			const screen = picture(firstVisit, label);
+			expect(screen, label).not.toContain("Demo data. Nothing here is real.");
+			expect(screen, label).not.toContain('aria-label="Tally home"');
+		}
 	});
 
 	it("is linked from the catalog", async () => {

@@ -86,7 +86,7 @@ const LIST_ROWS: ListRow[] = [
 	tx(43, NOW, "Doordash taco", 3107, undefined, {
 		rawName: "DD *DOORDASH TACO",
 	}),
-	tx(44, NOW, "Google youtube", 1399, HOUSEHOLD, {
+	tx(44, NOW, "City Water", 1399, HOUSEHOLD, {
 		paysBill: true,
 		billName: "Water",
 	}),

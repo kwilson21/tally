@@ -677,9 +677,9 @@ function savedHome(option: Option) {
 			<div class="mt-3">
 				<Band
 					href="/transactions/organize"
-					detail="$228 of this month's spending"
+					detail="$211 of this month's spending"
 				>
-					12 transactions need a category
+					10<span class="sr-only"> transactions</span> need a category
 				</Band>
 			</div>
 			<BudgetBlock>

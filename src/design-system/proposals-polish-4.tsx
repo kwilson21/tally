@@ -119,7 +119,7 @@ const BANK_LINES = [
 			...tx(901, "2026-10-01", "ACME CORP PAYROLL", -245000, undefined, {
 				income: true,
 			}),
-			displayName: "Paycheck",
+			displayName: "Paycheck, Acme Corp",
 		},
 	},
 	{
@@ -404,8 +404,8 @@ function Amount({ tone = "", children }: { tone?: string; children?: Child }) {
 }
 
 const DEMO_BAND = (
-	<Band href="/transactions/organize" detail="$228 of this month's spending">
-		12 need a category
+	<Band href="/transactions/organize" detail="$211 of this month's spending">
+		10 need a category
 	</Band>
 );
 
@@ -1448,7 +1448,11 @@ export function PolishRoundCProposals() {
 							</Phone>
 						</Shot>
 						<Shot caption="How Tally works, the total and the things to try">
-							<Phone label="Option A, How Tally works, the total" tab="more">
+							<Phone
+								label="Option A, How Tally works, the total"
+								scrolled
+								tab="more"
+							>
 								{storyTotal}
 							</Phone>
 						</Shot>
@@ -1588,7 +1592,7 @@ export function PolishRoundCProposals() {
 							</Phone>
 						</Shot>
 						<Shot caption="How Tally works, its end: How it's built, last">
-							<Phone label="Option C, How it's built, last" tab="more">
+							<Phone label="Option C, How it's built, last" scrolled tab="more">
 								<section>
 									<h2 class="font-serif text-3xl font-semibold">
 										How it's built
