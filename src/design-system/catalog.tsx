@@ -1014,6 +1014,20 @@ function HomeTopGroup() {
 						/>
 					</Picture>
 				</State>
+				<State label="No budget yet: Safe to spend stays in ink, the status says No budgets set yet., and there is no forecast">
+					<Picture
+						label={`Home's top before any budget is set, with no forecast: ${HOME_TOP.month}. Safe to spend −$45. No budgets set yet. How this works. ${HOME_TOP.band.text}, ${HOME_TOP.band.detail}.`}
+					>
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							safeToSpendCents={-4500}
+							status="No budgets set yet."
+							hasBudgets={false}
+							forecast={undefined}
+						/>
+					</Picture>
+				</State>
 			</Specimen>
 			<Specimen
 				id="home-month-history"
@@ -1161,6 +1175,18 @@ function HomeTopGroup() {
 										over: false,
 									},
 								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="A finished month with no budgets: a negative result keeps its minus sign in ink, with no Over or Under stamp">
+					<Picture label="September 2026 ended with no budgets set: −$57 in ink as the result, with no Over or Under stamp">
+						<div class="max-w-2xl">
+							<MonthEnd
+								chartId="catalog-september-no-budgets"
+								monthName="September"
+								amountCents={-5700}
+								rows={[]}
 							/>
 						</div>
 					</Picture>
