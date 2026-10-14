@@ -845,6 +845,23 @@ describe("the Feedback item on its own page", () => {
 		});
 	});
 
+	it("keeps the page on the sidebar link when the form comes back with an error", async () => {
+		const response = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "",
+				from: "/settings?open=3",
+				return_to: "/settings?open=3",
+			}),
+		);
+		expect(response.status).toBe(422);
+		expect(await response.text()).toContain(
+			'<a href="/feedback?return_to=%2Fsettings%3Fopen%3D3" aria-current="page"',
+		);
+	});
+
 	it("never records /feedback as the page, even when the Referer is /feedback with no return page", async () => {
 		const html = await (
 			await productionApp().fetch("/feedback", {
