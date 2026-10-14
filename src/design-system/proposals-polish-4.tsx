@@ -39,7 +39,10 @@ type Budget = {
 	budgetCents: number;
 };
 
-/** The demo's October budgets in Settings' order: Eating Out is $36 over, Gas nearly spent. */
+/**
+ * The demo's October budgets in Settings' order: Eating Out is $36 over, Gas nearly spent. Childcare's
+ * $1,040 budget and $480 spent (two $240 Fridays, Oct 2 and 9, by Oct 13) are the seed's own (src/demo/seed.ts).
+ */
 const BUDGETS: Budget[] = [
 	{
 		name: "Groceries",
@@ -73,8 +76,8 @@ const BUDGETS: Budget[] = [
 		name: "Childcare",
 		icon: "kids",
 		color: "cat-blue",
-		spentCents: 42000,
-		budgetCents: 45000,
+		spentCents: 48000,
+		budgetCents: 104000,
 	},
 ];
 
@@ -84,7 +87,7 @@ const SETTINGS = [
 	{ name: "Eating Out", icon: "eating-out", color: "cat-plum", budget: "$250" },
 	{ name: "Gas", icon: "gas", color: "cat-slate", budget: "$200" },
 	{ name: "Kids", icon: "kids", color: "cat-ochre", budget: "$300" },
-	{ name: "Childcare", icon: "kids", color: "cat-blue", budget: "$450" },
+	{ name: "Childcare", icon: "kids", color: "cat-blue", budget: "$1,040" },
 ];
 
 const DEMO_STATUS = "Eating Out is $36 over. Everything else is on track.";
@@ -523,12 +526,9 @@ function FamilyHome({
 	);
 }
 
-/** Today's family Home: a negative amount in brick, the sentence that goes with it (bug #519). */
+/** Today's family Home as main draws it after #519: a negative amount in ink, and no budget yet, so no over-budget words. */
 const TODAY_FAMILY = (
-	<FamilyHome
-		amount={<Amount tone="text-over">−$2,140</Amount>}
-		status="Over budget this month. Spending more takes it further over."
-	/>
+	<FamilyHome amount={<Amount>−$2,140</Amount>} status="No budgets set yet." />
 );
 
 /** The family's blank ledger line, before any budget: a dashed rule where the amount goes. */
@@ -969,7 +969,9 @@ const howTodayTop = (
 		</h1>
 		<p class="mt-4 text-lg">
 			Tally is a small family budgeting app. One server builds every page and a
-			database keeps the numbers. Code does all the math.
+			database keeps the numbers. AI helps with names and categories: Jev picks
+			categories today, and Workers AI suggests merchant names today. Code does
+			all the math.
 		</p>
 		<p class="mt-2 text-muted">
 			This demo has no bank connection. It runs on a made-up household, the
@@ -1040,10 +1042,7 @@ const startSheet = (
 				</li>
 			))}
 		</ul>
-		<p class="text-muted">
-			Five of the 14 categories are shown. Together they start at $3,840 a
-			month.
-		</p>
+		<p class="text-muted">These budgets add up to $3,840 a month.</p>
 		<div class="grid grid-cols-2 gap-3">
 			<Button kind="secondary" type="button" class="w-full">
 				Cancel
@@ -1231,7 +1230,7 @@ export function PolishRoundCProposals() {
 					</Choice>
 					<Choice
 						name="Option B · Plain index"
-						note="More looks like the sidebar, with one line saying what each place holds. Calm and clear, and it matches the sidebar."
+						note="More looks like the sidebar, with one line saying what each place holds. Calm and clear; matches the sidebar."
 						cost="None beyond the words."
 					>
 						<MoreScreen label="Option B, More">{indexMore}</MoreScreen>
@@ -1324,7 +1323,8 @@ export function PolishRoundCProposals() {
 					<Choice
 						name="Option B · In More and the sidebar"
 						width="w-[800px]"
-						note="No pill anywhere. Feedback is a row in More and the sidebar's second group, one tap from every page. The 500 error page gets a terracotta 'Tell us what happened' line. Nothing floats over the page at all."
+						note="Feedback moves to More and the sidebar, one tap from every page."
+						extra="No pill anywhere, and nothing floats over the page at all. The 500 error page gets a terracotta 'Tell us what happened' line."
 						cost="It changes decision 59 from always visible to always reachable; fewer people may notice it."
 					>
 						<div class="flex min-w-0 max-w-full flex-wrap items-start gap-4">
@@ -1357,7 +1357,7 @@ export function PolishRoundCProposals() {
 				id="p124-first-visit"
 				title="P124 · What a first visit shows and teaches"
 				tier="visual"
-				sentence="A first visit shows the demo's Home, How Tally works and, for the family, a Home with no budgets. Pick what it shows and teaches. Each option is drawn as those screens."
+				sentence="A first visit shows the demo's Home, How Tally works and, for the family, a Home with no budgets. Pick what it shows and teaches. Each option is drawn as those screens. The family's first Home: the figure in ink (today), a dash (B), a blank ledger line (A) or Your first page (C)."
 			>
 				<Fixed>
 					anything onboarding teaches stays reachable later (How Tally works);
@@ -1369,7 +1369,7 @@ export function PolishRoundCProposals() {
 					<Choice
 						name="Today (current)"
 						width="w-full"
-						note="How this works sits under the number, Things to try sits under the Budget list, and How Tally works opens with How it's built. A family with no budgets saw −$2,140 before #519."
+						note="How this works sits under the number, Things to try sits under the Budget list, and How Tally works opens with How it's built. A family with no budgets sees −$2,140 in ink, since #519."
 					>
 						<Shot caption="The demo's Home: top to the Band and the first two rows">
 							<Phone label="Today (current), Home top" tab="home">
@@ -1387,7 +1387,7 @@ export function PolishRoundCProposals() {
 								{howTodayTop}
 							</Phone>
 						</Shot>
-						<Shot caption="before #519 (fixed on main)">
+						<Shot caption="Today (after #519)">
 							<Phone
 								label="Today (current), the family's Home"
 								demo={false}
@@ -1528,7 +1528,7 @@ export function PolishRoundCProposals() {
 								{familyBehind}
 							</Phone>
 						</Shot>
-						<Shot caption="Start from September: the sheet the step opens">
+						<Shot caption="Start from September: the sheet the step opens. Drawn with five of the 14 categories.">
 							<Phone label="Option B, starting budgets" demo={false} tab="home">
 								<Sheet behind={familyBehind} top="top-40">
 									{startSheet}

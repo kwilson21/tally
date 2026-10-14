@@ -842,6 +842,7 @@ describe("GET /design-system/proposals", () => {
 			"What each number means, with the Riveras&#39; numbers",
 			"Tally demo · resets every night",
 			"Trade-off: Two small live counts on More.",
+			"Calm and clear; matches the sidebar.",
 		])
 			expect(more, text).toContain(text);
 		expect(pictures(more)).toHaveLength(4);
@@ -865,6 +866,9 @@ describe("GET /design-system/proposals", () => {
 		// Today's pill sits over a number and a button; A's sits in the top line and leaves the page alone.
 		expect(option(feedback, "Today (current)")).toContain("Childcare");
 		expect(option(feedback, "Today (current)")).toContain('href="/feedback"');
+		expect(feedback).toContain(
+			"Feedback moves to More and the sidebar, one tap from every page.",
+		);
 		expect(feedback).toContain("Something confusing, broken or missing");
 		expect(feedback).toContain("Off in the demo; you can still see the form");
 		expect(feedback).toContain("Tell us what happened");
@@ -887,8 +891,8 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(firstVisit.match(/>Recommended</g)?.length).toBe(1);
 		for (const text of [
-			"before #519 (fixed on main)",
-			"A family with no budgets saw −$2,140 before #519.",
+			"Today (after #519)",
+			"A family with no budgets sees −$2,140 in ink, since #519.",
 			"−$2,140",
 			"Start here",
 			"Three lines of 47 so far",
@@ -900,8 +904,7 @@ describe("GET /design-system/proposals", () => {
 			"This fills in once your budgets are set.",
 			"86 need a category",
 			"Start from September",
-			"Five of the 14 categories are shown.",
-			"Together they start at $3,840 a month.",
+			"These budgets add up to $3,840 a month.",
 			"Use these budgets",
 			"The Riveras&#39; tally",
 			"Named 38 stores",
@@ -910,6 +913,8 @@ describe("GET /design-system/proposals", () => {
 			"Found 2 paychecks",
 			"Your first page",
 			"Everything resets every night, so try anything.",
+			"AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today.",
+			"The family&#39;s first Home: the figure in ink (today), a dash (B), a blank ledger line (A) or Your first page (C).",
 		])
 			expect(firstVisit, text).toContain(text);
 		// The family's first page is the only one drawn on a desktop, and only for the recommended option.
@@ -963,6 +968,10 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("Childcare");
+		// Childcare's numbers are the demo seed's: a $1,040 budget, and $480 from the two Fridays of October so far (Oct 2 and 9).
+		expect(
+			picture(feedback, "Today (current), Home scrolled, on a phone"),
+		).toContain("$480 of $1,040");
 		// Settings draws Gas's open row in the app's order (category-row.tsx): the Name field, then Save, Cancel and
 		// Archive, then Move up and Move down. The pill sits over Move down, so the picture has to reach it.
 		const todaySettings = picture(
@@ -971,6 +980,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(todaySettings).toContain("bottom-[6.5rem]");
 		expect(todaySettings).toContain("3 suggestions to check");
+		expect(todaySettings).toContain("$1,040");
 		const marks = [
 			">Name</label>",
 			">Save<",
@@ -1020,6 +1030,16 @@ describe("GET /design-system/proposals", () => {
 			'href="/feedback"',
 		);
 
+		// P124 · Today's family Home is main after #519: the figure in ink with No budgets set yet., no over-budget words.
+		const todayFamily = picture(
+			firstVisit,
+			"Today (current), the family&#39;s Home, on a phone",
+		);
+		expect(todayFamily).toContain("−$2,140");
+		expect(todayFamily).toContain("No budgets set yet.");
+		expect(todayFamily).not.toContain("text-over");
+		expect(todayFamily).not.toContain("Over budget");
+
 		// P124 · Option A: Start here is the one ink link, and Home's footnote carries How this works.
 		const aFirst = picture(firstVisit, "Option A, Home top, on a phone");
 		expect(aFirst).toContain(
@@ -1048,11 +1068,15 @@ describe("GET /design-system/proposals", () => {
 			"inline-flex min-h-11 items-center text-sm text-muted underline underline-offset-4",
 		);
 		const sheet = picture(firstVisit, "Option B, starting budgets, on a phone");
-		expect(sheet).toContain("Five of the 14 categories are shown.");
+		// The sheet's closing line states the total; the note that five of the 14 are drawn sits in the caption, outside the sheet.
+		expect(sheet).toContain("These budgets add up to $3,840 a month.");
+		expect(sheet).not.toContain("Drawn with five of the 14 categories.");
+		expect(firstVisit).toContain(
+			'<figcaption class="text-sm text-muted">Start from September: the sheet the step opens. Drawn with five of the 14 categories.</figcaption>',
+		);
 		// Money reads as the rest of the page does: "$1,600", not "$1600", in each row's last-month line.
 		expect(sheet).toContain("Last month $1,600 · starts at $1,600");
 		expect(sheet).not.toMatch(/\$\d{4}\b/);
-		expect(sheet).not.toContain("Budgets add up to");
 		// P124 · Option C: How this works is a pencil note, on Home's top and at its foot.
 		const cOption = option(firstVisit, "Option C · The page total");
 		expect(cOption).toContain("border-l border-muted pl-3 text-sm text-muted");
