@@ -918,6 +918,59 @@ describe("GET / with no data", () => {
 	});
 });
 
+// Issue #519: categories and spending, but no budget yet (every new database). Home is never in the
+// over state, and its forecast (which would draw a $0 budget as over) is left out.
+describe("GET / with spending and no budgets", () => {
+	afterEach(() => vi.useRealTimers());
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-20T12:00:00-04:00"));
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (1, '2026-10-05', 4500, 'GROCERIES', 1, 0)",
+		).run();
+	});
+
+	it("says No budgets set yet., with no over-budget words, colour or forecast", async () => {
+		const { res, html } = await home();
+		expect(res.status).toBe(200);
+		expect(html).toContain("−$45");
+		expect(html).toContain("No budgets set yet.");
+		expect(html).not.toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+		expect(html).not.toMatch(/text-6xl[^"]*text-over/);
+		expect(html).not.toContain("at this pace");
+		expect(html).not.toContain("stroke-over");
+	});
+
+	it("is back to the over-budget state once a category has a budget", async () => {
+		await setBudget(env.DB, 1, 1000, "2026-10");
+		const { html } = await home();
+		expect(html).toContain(
+			"Over budget this month. Spending more takes it further over.",
+		);
+		expect(html).toMatch(/text-6xl[^"]*text-over/);
+		expect(html).not.toContain("No budgets set yet.");
+		expect(html).toContain("at this pace");
+	});
+
+	it("does not stamp a finished month Over when it had no budgets", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, credit_reviewed) VALUES (1, '2026-09-05', 4500, 'GROCERIES', 1, 0)",
+		).run();
+		const { html } = await homeAt("2026-09");
+		expect(html).toContain("September ended");
+		expect(html).toContain("−$45");
+		expect(html).not.toMatch(/>(?:Over|Under)<span class="sr-only"> budget/);
+	});
+});
+
 describe("GET / with no categories", () => {
 	beforeEach(async () => {
 		await env.DB.batch([

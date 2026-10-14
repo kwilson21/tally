@@ -873,15 +873,23 @@ describe("GET /design-system in the demo", () => {
 			.map((m) => m[1] ?? "")
 			// The pictures of Home itself, not others that mention it ("Go to Home" on the 404 page).
 			.filter((l) => l.startsWith("Home"));
-		expect(labels).toHaveLength(4);
-		for (const label of labels) {
+		// The no-budget picture (#519) has its own numbers, so the four examples of October are checked apart from it.
+		const noBudget =
+			labels.find((l) => l.includes("before any budget is set")) ?? "";
+		const examples = labels.filter((l) => l !== noBudget);
+		expect(labels).toHaveLength(5);
+		expect(examples).toHaveLength(4);
+		for (const label of examples) {
 			expect(label).toContain("Safe to spend $283");
 			expect(label).toContain("Eating Out is $36 over");
 		}
-		expect(labels[0]).toContain("12 need a category");
-		expect(labels[0]).toContain("Groceries $412 of $700");
-		expect(labels[3]).not.toContain("need a category");
-		expect(labels[1]).toContain("About $15.03 a day for the 27 days left");
+		expect(examples[0]).toContain("12 need a category");
+		expect(examples[0]).toContain("Groceries $412 of $700");
+		expect(examples[3]).not.toContain("need a category");
+		expect(examples[1]).toContain("About $15.03 a day for the 27 days left");
+		expect(noBudget).toContain("Safe to spend −$45");
+		expect(noBudget).toContain("No budgets set yet.");
+		expect(noBudget).not.toContain("Over budget");
 	});
 
 	it("draws the bottom sheet on its own page", async () => {
