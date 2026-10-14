@@ -35,11 +35,7 @@ import { trends } from "./routes/trends";
 import { webhooks } from "./routes/webhooks";
 import { type Deadline, runTimeBudgetMs, sortTimeBudgetMs } from "./run-budget";
 import { sameOrigin, security } from "./security";
-import {
-	nameCallLimit,
-	suggestMerchantNames,
-	suggestTransactionNotes,
-} from "./suggest-names-pending";
+import { suggestNightlyNames } from "./suggest-names-pending";
 
 type AppEnv = Env & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
@@ -200,14 +196,13 @@ async function sortWithJev(
 }
 
 /**
- * Workers AI suggests names for the bank texts Plaid didn't name (spec §7, §9), while the names switch is
- * on: up to 100 texts at about three queries each, starting no request after `deadline`. Nothing here
- * changes a name, and a failure never stops what the run does next.
+ * The night's Workers AI notes and merchant names (spec §7, §9), up to 100 calls between them, starting no request
+ * after `deadline` (see suggestNightlyNames for how they share the calls). Nothing here changes a name, and a
+ * failure never stops what the run does next.
  */
 async function nameMerchants(env: ScheduledEnv, deadline: Deadline) {
 	try {
-		const notes = await suggestTransactionNotes(env, nameCallLimit, deadline);
-		await suggestMerchantNames(env, nameCallLimit - notes.asked, deadline);
+		await suggestNightlyNames(env, deadline);
 	} catch (error) {
 		console.error(
 			`workers-ai: names step failed ${error instanceof Error ? error.name : "unknown"}`,
@@ -229,10 +224,11 @@ async function suggestCategories(env: ScheduledEnv, deadline: Deadline) {
  * Production's 09:20 run, the first sort and the names (decision 56). It asks Jev about up to
  * `FIRST_SORT_MAX_CALLS`, 200, within what the day's 500 still allows, starting no call after the sort
  * budget (9 minutes), so a slow Jev can't leave the names no time and the calls it didn't ask are given
- * back to the day. Then it makes the night's names (spec §7) up to 100, starting no request after the run
- * budget (13 minutes). The sort comes first, so a slow Workers AI never delays it; 200 calls and 100 names
- * are about 900 queries, under D1's 1,000 for one invocation. It never syncs or resets. It applies the
- * merchant rules itself before Jev, which also covers a sync at 09:00 whose own rules step failed.
+ * back to the day. Then it makes the night's notes and names (spec §7), up to 100 Workers AI calls between
+ * them, starting no request after the run budget (13 minutes). The sort comes first, so a slow Workers AI never
+ * delays it; 200 calls and 100 names are about 900 queries, under D1's 1,000 for one invocation. It never
+ * syncs or resets. It applies the merchant rules itself before Jev, which also covers a sync at 09:00 whose own
+ * rules step failed.
  */
 export async function runFirstSort(
 	env: ScheduledEnv,

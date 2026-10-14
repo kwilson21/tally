@@ -366,6 +366,71 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("keeps a categorized purchase's refund and bill beside its bank-change note (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				...kids,
+				splitRemovedFromCents: 1234,
+				refundedCents: 2499,
+				paysBill: true,
+				billName: "Electric",
+			}),
+		).toEqual({
+			kind: "category",
+			caption:
+				"Kids · The bank changed this from $12.34, so its split was removed. · $24.99 refunded · paid Electric bill",
+			tag: false,
+		});
+	});
+
+	it("keeps an uncategorized bill payment's refund and bill after its bank-change note (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. · paid Electric bill",
+			tag: true,
+		});
+		expect(
+			rowCaption({
+				...base,
+				paysBill: true,
+				billName: "Electric",
+				splitRemovedFromCents: 1234,
+				refundedCents: 1500,
+			}),
+		).toEqual({
+			kind: "needs",
+			caption:
+				"The bank changed this from $12.34, so its split was removed. · $15.00 refunded · paid Electric bill",
+			tag: true,
+		});
+	});
+
+	it("keeps a refund that follows its purchase beside the bill it paid (#382)", () => {
+		expect(
+			rowCaption({
+				...base,
+				refundOfId: 3,
+				refundPurchaseDate: "2026-09-05",
+				followsPurchase: true,
+				paysBill: true,
+				billName: "Electric",
+			}),
+		).toEqual({
+			kind: "needs",
+			caption: "Refund for Sep 5 · paid Electric bill",
+			tag: false,
+		});
+	});
+
 	it("names a split part's category next to its parent", () => {
 		expect(
 			rowCaption({
