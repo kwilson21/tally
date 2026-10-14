@@ -3285,3 +3285,108 @@ describe("refund guards", () => {
 		});
 	});
 });
+
+describe("the category lock redraws when Count as income or Reviewed changes", () => {
+	/** The fields the open panel posts as drawn. A locked category is disabled, so a browser sends none: see `lockedFields`. */
+	const panel = async (id: number) =>
+		drawnFields((await get(`/transactions/${id}`)).html, id);
+	/** The fields as a browser sends them from a panel whose category is locked: the disabled category is not posted. */
+	const lockedFields = (fields: [string, string][]) =>
+		fields.filter(([name]) => name !== "category");
+	const redraw = (id: number, fields: [string, string][]) =>
+		post(`/transactions/${id}/category/lock`, fields);
+	/** The Category fieldset's opening tag in a redraw, which is the reply's only fieldset. */
+	const fieldsetTag = (html: string) =>
+		html.slice(
+			html.indexOf("<fieldset"),
+			html.indexOf(">", html.indexOf("<fieldset")) + 1,
+		);
+
+	it("unlocks the category when Count as income is ticked on a linked credit, and says so", async () => {
+		await link(REFUND, PURCHASE);
+		const { res, html, trigger } = await redraw(
+			REFUND,
+			edited(lockedFields(await panel(REFUND)), { income: "1" }),
+		);
+		expect(res.status).toBe(200);
+		expect(fieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(html).not.toContain("with the Aug 20 purchase.");
+		expect(trigger?.announce).toBe("Pick a category.");
+		// Only the category part is drawn again, so the toggles and the rest of the sheet stay as they are.
+		expect(html).toContain('id="edit-category"');
+		expect(html).not.toContain('name="income"');
+		expect(html).not.toContain("edit-title");
+	});
+
+	it("unlocks the category when Reviewed is unticked on a linked credit", async () => {
+		await link(REFUND, PURCHASE);
+		const { html, trigger } = await redraw(
+			REFUND,
+			edited(lockedFields(await panel(REFUND)), {
+				creditReviewed: undefined,
+			}),
+		);
+		expect(fieldsetTag(html)).not.toContain("disabled");
+		expect(html).toMatch(/name="category" value="1"[^>]*checked/);
+		expect(trigger?.announce).toBe("Pick a category.");
+	});
+
+	it("locks the category again when Count as income is unticked, with the purchase's category and its Counts in line", async () => {
+		await link(REFUND, PURCHASE);
+		await db
+			.prepare(
+				"UPDATE transactions SET flag_income = 1, income_source = 'user' WHERE id = ?",
+			)
+			.bind(REFUND)
+			.run();
+		const { html, trigger } = await redraw(
+			REFUND,
+			edited(await panel(REFUND), {
+				income: undefined,
+				category: String(GAS),
+			}),
+		);
+		expect(fieldsetTag(html)).toContain("disabled");
+		expect(html).toMatch(/name="category" value="4"[^>]*checked/);
+		expect(html).not.toMatch(/name="category" value="3"[^>]*checked/);
+		expect(html).toContain("Counts in Kids with the Aug 20 purchase.");
+		expect(trigger?.announce).toBe("Counts in Kids with the Aug 20 purchase.");
+	});
+
+	it("saves the category picked after the redraw unlocks it", async () => {
+		await link(REFUND, PURCHASE);
+		const { html } = await redraw(
+			REFUND,
+			edited(lockedFields(await panel(REFUND)), {
+				creditReviewed: undefined,
+			}),
+		);
+		expect(fieldsetTag(html)).not.toContain("disabled");
+		const saved = await post(`/transactions/${REFUND}`, [
+			["back", "/transactions"],
+			["merchant", "Refund Shop"],
+			...edited(await panel(REFUND), {
+				creditReviewed: undefined,
+				category: String(GAS),
+			}),
+		]);
+		expect(saved.res.status).toBe(200);
+		expect(await ownCategory(REFUND)).toBe(GAS);
+		expect(await refundOf(REFUND)).toBe(PURCHASE);
+	});
+
+	it("draws the toggles that redraw the category, and only for a linked credit", async () => {
+		await link(REFUND, PURCHASE);
+		const linked = (await get(`/transactions/${REFUND}`)).html;
+		const route = `hx-post="/transactions/${REFUND}/category/lock"`;
+		expect(linked.split(route).length - 1).toBe(2);
+		const unlinked = (await get(`/transactions/${OTHER_MERCHANT}`)).html;
+		expect(unlinked).not.toContain("/category/lock");
+	});
+
+	it("is not found for a transaction that does not exist", async () => {
+		const { res } = await redraw(999999, []);
+		expect(res.status).toBe(404);
+	});
+});

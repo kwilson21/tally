@@ -1606,6 +1606,158 @@ function listCloseAttrs(back: string, id: number): Record<string, string> {
 	};
 }
 
+/**
+ * The purchase a linked refund is linked to (`linked`), and the one its category is locked to (`locked`): the
+ * refund counts with that purchase once the panel is saved (followsPurchaseAfterSave), so its category is the
+ * purchase's and the panel's category choice is disabled.
+ */
+function linkedPurchases(
+	tx: TransactionDetail,
+	values: Pick<
+		Edit,
+		| "refundOfId"
+		| "income"
+		| "incomeWas"
+		| "creditReviewed"
+		| "creditReviewedWas"
+		| "creditReviewedProvided"
+	>,
+	refunds: RefundPurchase[],
+) {
+	const linked = refunds.find((p) => p.id === values.refundOfId && !p.excluded);
+	return {
+		linked,
+		locked: linked && followsPurchaseAfterSave(tx, values) ? linked : undefined,
+	};
+}
+
+/** The lock's sentence: where a linked refund counts, named by its purchase's category while that category exists. */
+function countsWithPurchase(
+	purchase: RefundPurchase,
+	categories: Category[],
+	date: string,
+) {
+	const category = categories.find((cat) => cat.id === purchase.categoryId);
+	const day = shortDay(purchase.date, date);
+	return category
+		? `Counts in ${category.name} with the ${day} purchase.`
+		: `Counts with the ${day} purchase.`;
+}
+
+/** The purchase the panel's "This refunds…" answer names: a field left out keeps the saved link, an empty one unlinks. */
+function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
+	const current = tx.refundOfId ?? null;
+	const posted = form.get("refund_of");
+	return posted === null ? current : posted === "" ? null : Number(posted);
+}
+
+/**
+ * The panel's category choice (spec §8). A linked refund that counts with its purchase is locked: the choice is
+ * disabled, drawn with the purchase's category and the "Counts in" line. The choice sits in its own wrapper, which
+ * the category lock route draws again when Count as income or Reviewed changes.
+ */
+function CategoryChoice({
+	tx,
+	categories,
+	values,
+	errors = {},
+	purchase,
+}: {
+	tx: TransactionDetail;
+	categories: Category[];
+	values: Pick<Edit, "categoryId" | "newCategory" | "newCategoryName">;
+	errors?: EditErrors;
+	purchase?: RefundPurchase;
+}) {
+	return (
+		<div id="edit-category">
+			<fieldset
+				class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+				disabled={purchase !== undefined}
+				aria-describedby={errors.category ? "category-error" : undefined}
+			>
+				<legend class="flex items-center gap-1 text-base text-ink">
+					Category
+					{tx.categorySource === "bill" && (
+						<>
+							<span aria-hidden="true">·</span>
+							<WhyLink section="categorization" topic="this category" />
+						</>
+					)}
+				</legend>
+				<div class="flex flex-wrap items-start gap-2">
+					{!purchase &&
+						tx.categorySource !== "jev" &&
+						tx.maybeCategoryName &&
+						!tx.maybeCategoryNew &&
+						tx.suggestedCategoryId !== null &&
+						tx.suggestedCategoryName &&
+						tx.categoryConfidence !== null &&
+						tx.categoryConfidence < JEV_THRESHOLD && (
+							<SuggestedCategoryChip
+								name={tx.suggestedCategoryName}
+								value={String(tx.suggestedCategoryId)}
+								sure={Math.round(tx.categoryConfidence * 100)}
+								transactionId={tx.id}
+							/>
+						)}
+					{categories.map((cat) => (
+						<Chip
+							type="radio"
+							name="category"
+							value={String(cat.id)}
+							checked={
+								purchase
+									? purchase.categoryId === cat.id
+									: values.categoryId === cat.id
+							}
+							icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+						>
+							{cat.name}
+						</Chip>
+					))}
+					<NewCategoryChip checked={!purchase && values.newCategory === true} />
+				</div>
+				{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
+				<NewCategoryName
+					id="new-category-name"
+					value={values.newCategoryName ?? ""}
+					hint="Added to your categories and used for this transaction."
+					error={errors.newCategory}
+				/>
+				{purchase && (
+					<p class="text-sm text-muted">
+						{countsWithPurchase(purchase, categories, tx.date)}
+					</p>
+				)}
+				{!purchase &&
+					tx.categorySource === "jev" &&
+					tx.categoryConfidence !== null && (
+						<p class="text-sm text-muted">
+							Picked by Tally · {Math.round(tx.categoryConfidence * 100)}% sure
+						</p>
+					)}
+				{!purchase &&
+					tx.categorySource !== "jev" &&
+					tx.maybeCategoryName &&
+					!tx.maybeCategoryNew &&
+					tx.suggestedCategoryName &&
+					tx.categoryConfidence !== null &&
+					tx.categoryConfidence < JEV_THRESHOLD && (
+						<p class="text-sm text-muted">
+							Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
+						</p>
+					)}
+				{errors.category && (
+					<p id="category-error" role="alert" class="text-sm text-over">
+						{errors.category}
+					</p>
+				)}
+			</fieldset>
+		</div>
+	);
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1634,16 +1786,23 @@ function EditSheet({
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
 	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
 	// "Counts in" line say how the row really counts.
-	const linkedPurchase = refunds.find(
-		(p) => p.id === values.refundOfId && !p.excluded,
+	const { linked: linkedPurchase, locked: purchase } = linkedPurchases(
+		tx,
+		values,
+		refunds,
 	);
-	const purchase =
-		linkedPurchase && followsPurchaseAfterSave(tx, values)
-			? linkedPurchase
-			: undefined;
-	const purchaseCategory = categories.find(
-		(cat) => cat.id === purchase?.categoryId,
-	);
+	// Count as income and Reviewed lock a linked credit's category, so a change draws that choice again (/category/lock).
+	const lockRedraw = linkedPurchase
+		? {
+				"hx-post": `/transactions/${tx.id}/category/lock`,
+				"hx-trigger": "change",
+				"hx-target": "#edit-category",
+				"hx-select": "#edit-category > *",
+				"hx-swap": "innerHTML",
+				"hx-sync": "#edit-category:queue last",
+				"hx-include": "closest form",
+			}
+		: {};
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
 	return (
 		<BottomSheet
@@ -2075,94 +2234,13 @@ function EditSheet({
 						</p>
 					</div>
 				)}
-				<fieldset
-					class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
-					disabled={purchase !== undefined}
-					aria-describedby={errors.category ? "category-error" : undefined}
-				>
-					<legend class="flex items-center gap-1 text-base text-ink">
-						Category
-						{tx.categorySource === "bill" && (
-							<>
-								<span aria-hidden="true">·</span>
-								<WhyLink section="categorization" topic="this category" />
-							</>
-						)}
-					</legend>
-					<div class="flex flex-wrap items-start gap-2">
-						{!purchase &&
-							tx.categorySource !== "jev" &&
-							tx.maybeCategoryName &&
-							!tx.maybeCategoryNew &&
-							tx.suggestedCategoryId !== null &&
-							tx.suggestedCategoryName &&
-							tx.categoryConfidence !== null &&
-							tx.categoryConfidence < JEV_THRESHOLD && (
-								<SuggestedCategoryChip
-									name={tx.suggestedCategoryName}
-									value={String(tx.suggestedCategoryId)}
-									sure={Math.round(tx.categoryConfidence * 100)}
-									transactionId={tx.id}
-								/>
-							)}
-						{categories.map((cat) => (
-							<Chip
-								type="radio"
-								name="category"
-								value={String(cat.id)}
-								checked={
-									purchase
-										? purchase.categoryId === cat.id
-										: values.categoryId === cat.id
-								}
-								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
-							>
-								{cat.name}
-							</Chip>
-						))}
-						<NewCategoryChip
-							checked={!purchase && values.newCategory === true}
-						/>
-					</div>
-					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
-					<NewCategoryName
-						id="new-category-name"
-						value={values.newCategoryName ?? ""}
-						hint="Added to your categories and used for this transaction."
-						error={errors.newCategory}
-					/>
-					{purchase && (
-						<p class="text-sm text-muted">
-							{purchaseCategory
-								? `Counts in ${purchaseCategory.name} with the ${shortDay(purchase.date, tx.date)} purchase.`
-								: `Counts with the ${shortDay(purchase.date, tx.date)} purchase.`}
-						</p>
-					)}
-					{!purchase &&
-						tx.categorySource === "jev" &&
-						tx.categoryConfidence !== null && (
-							<p class="text-sm text-muted">
-								Picked by Tally · {Math.round(tx.categoryConfidence * 100)}%
-								sure
-							</p>
-						)}
-					{!purchase &&
-						tx.categorySource !== "jev" &&
-						tx.maybeCategoryName &&
-						!tx.maybeCategoryNew &&
-						tx.suggestedCategoryName &&
-						tx.categoryConfidence !== null &&
-						tx.categoryConfidence < JEV_THRESHOLD && (
-							<p class="text-sm text-muted">
-								Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
-							</p>
-						)}
-					{errors.category && (
-						<p id="category-error" role="alert" class="text-sm text-over">
-							{errors.category}
-						</p>
-					)}
-				</fieldset>
+				<CategoryChoice
+					tx={tx}
+					categories={categories}
+					values={values}
+					errors={errors}
+					purchase={purchase}
+				/>
 				{/* An error keeps the section, even when no purchase is offered any more. */}
 				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
@@ -2233,7 +2311,7 @@ function EditSheet({
 					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
-					<div class="flex flex-wrap gap-2">
+					<div class="flex flex-wrap gap-2" {...lockRedraw}>
 						<Chip
 							type="checkbox"
 							name="income"
@@ -2261,7 +2339,10 @@ function EditSheet({
 					)}
 				</div>
 				{tx.amountCents < 0 && (
-					<div class="flex flex-col gap-2 border-t border-rule pt-3">
+					<div
+						class="flex flex-col gap-2 border-t border-rule pt-3"
+						{...lockRedraw}
+					>
 						<input type="hidden" name="creditReviewedVisible" value="1" />
 						<input
 							type="hidden"
@@ -3285,6 +3366,48 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	return renderList(c, today, filtersFrom(c, today, back), { focusId: tx.id });
 });
 
+/**
+ * A linked credit's category choice, drawn again as its Count as income or Reviewed toggle changes (decision 99): the
+ * purchase's category while the credit counts with it, open otherwise. The reply is the choice alone, so the toggle
+ * keeps focus, and the lock is announced in words.
+ */
+transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const { linked, locked } = linkedPurchases(
+		tx,
+		{ refundOfId: postedRefundOf(tx, form), ...postedCredit(form) },
+		await refundPurchases(c.env.DB, tx),
+	);
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+	).all<Category>();
+	if (linked)
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				announce: locked
+					? countsWithPurchase(locked, categories, tx.date)
+					: "Pick a category.",
+			}),
+		);
+	// A locked category is disabled, so the browser posts none: the row's own category is then the one drawn.
+	const posted = form.get("category");
+	return c.html(
+		<CategoryChoice
+			tx={tx}
+			categories={categories}
+			values={{
+				categoryId: posted === null ? tx.categoryId : Number(posted) || null,
+				newCategory: posted === "new",
+				newCategoryName: form.get("new_category_name")?.toString() ?? "",
+			}}
+			purchase={locked}
+		/>,
+	);
+});
+
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -3348,9 +3471,7 @@ async function savePanel(
 		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
 		: undefined;
 	const current = tx.refundOfId ?? null;
-	const posted = form.get("refund_of");
-	const refundOfId =
-		posted === null ? current : posted === "" ? null : Number(posted);
+	const refundOfId = postedRefundOf(tx, form);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
 	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
