@@ -21,6 +21,7 @@ import { removeSplit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
+import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
@@ -1129,6 +1130,52 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
 		expect(result.saved).toBe(true);
 		expect(await paidBy(planId)).toBe(other);
+	});
+
+	it("refuses a re-split when a competing save links a plan to an old part after the read, and changes nothing (Codex 4277155952)", async () => {
+		const tx = await payment(9824, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const before = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[second ?? 0, planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		// The plan keeps its old part, and no part was added or removed, so the parent wasn't re-marked either.
+		expect(await paidBy(planId)).toBe(second);
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("a re-split after that refusal keeps the plan on the new part of its amount, so it stays paid (Codex 4277155952)", async () => {
+		const tx = await payment(9825, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 18000, MONTH);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[second ?? 0, planId],
+		);
+		await saveSplit(racing, tx, KEEP_TWO, "demo");
+
+		const retry = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(retry.saved).toBe(true);
+		expect(retry.planLinked).toBeUndefined();
+		const [, newSecond] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newSecond);
+	});
+
+	it("says a split refused because a plan was linked to a part is not an amount change (Codex 4277155952)", () => {
+		expect(splitRefusedError(true)).toBe(
+			"A planned expense was just linked to one of these parts. Check the parts and save again.",
+		);
+		expect(splitRefusedError(false)).toBe(
+			"The bank just changed this amount. Check the parts and save again.",
+		);
 	});
 
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {
