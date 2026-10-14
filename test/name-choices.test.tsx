@@ -124,7 +124,7 @@ describe("the re-guess note follows the edit form's controls", () => {
 		{
 			field: "category",
 			hooks: [
-				"group-has-[input[name=category]:checked:not(.tally-category)]/edit:hidden",
+				"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 			],
 		},
 		{

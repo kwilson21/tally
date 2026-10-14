@@ -202,7 +202,9 @@ export type RenameFacts = {
  * Every posted field the re-guess reads at save time (oneOffGuessesAgain, the route's `row`, followsPurchaseAfterSave
  * and parseEdit), and the hook that covers it or why it needs none:
  * - category (a radio; NewCategoryChip and SuggestedCategoryChip post it too): covered here, by any choice other than the
- *   row's own category (TALLY_CATEGORY_CLASS). new_category_name counts only while category is "new", so the same hook covers it.
+ *   row's own category (TALLY_CATEGORY_CLASS). A disabled category (a refund that follows its purchase) posts nothing, so
+ *   `:enabled` exempts it: its drawn chip is the purchase's category, not the row's. new_category_name counts only while
+ *   category is "new", so the same hook covers it.
  * - excluded (a checkbox): EXCLUDE_FOLDS, while excludeCounts holds. A bill payment counts whatever its exclusion.
  * - income (a checkbox): covered here, while it is ticked.
  * - refund_of (a radio): covered here. A purchase that isn't excluded (LINKED_PURCHASE_CLASS) is what the refund follows,
@@ -223,7 +225,7 @@ export type RenameFacts = {
  *   doesn't feed the re-guess.
  */
 const GUESS_AGAIN_FOLDS = [
-	"group-has-[input[name=category]:checked:not(.tally-category)]/edit:hidden",
+	"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 	"group-has-[input[name=income]:checked]/edit:hidden",
 	"group-has-[.linked-purchase:checked:not([checked])]/edit:hidden",
 	"group-has-[input[name=creditReviewed]:checked]/edit:group-has-[.linked-purchase:checked]/edit:hidden",

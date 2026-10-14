@@ -584,7 +584,7 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
 		expect(note).toContain(
-			"group-has-[input[name=category]:checked:not(.tally-category)]/edit:hidden",
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 		);
 		// The category Tally picked is the chip the hook doesn't count; a chip Tally didn't pick is.
 		expect(inputTag(html, "category", String(await firstCategory()))).toContain(
@@ -628,9 +628,9 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
 		)?.[1];
 		expect(note).toContain(
-			"group-has-[input[name=category]:checked:not(.tally-category)]/edit:hidden",
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
 		);
-		expect(html).toMatch(new RegExp(`<input[^>]*value="${other}"[^>]*checked`));
+		expect(inputTag(html, "category", String(other))).toContain("checked");
 	});
 
 	it("keeps the note on a 422 redraw that posts the row's own category", async () => {
@@ -1142,6 +1142,42 @@ describe("a one-off name on a category Tally picked (decision 101)", () => {
 			"linked-purchase",
 		);
 		expect(inputTag(html, "refund_of", "")).not.toContain("linked-purchase");
+	});
+
+	// A refund that follows its purchase disables the category fieldset, and its drawn chip is the purchase's category, not
+	// the row's own. A disabled chip posts nothing, so it must not fold the note at open: `:enabled` exempts it, so the
+	// note stays drawn for the person to reveal by unlinking or unticking Reviewed.
+	it("keeps the note on a refund that follows a purchase whose category differs from the row's, since the disabled category can't block it", async () => {
+		const category = await firstCategory();
+		const other = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 AND id != ? ORDER BY id LIMIT 1",
+				)
+				.bind(category)
+				.first<{ id: number }>()
+		)?.id as number;
+		await pickedByTally(category);
+		await creditLinked(true);
+		await db
+			.prepare(
+				"UPDATE transactions SET credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			)
+			.bind(bakery)
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ? WHERE id = (SELECT refund_of_id FROM transactions WHERE id = ?)",
+			)
+			.bind(other, bakery)
+			.run();
+		const html = await panel({ JEV_API_KEY: "jev-key" });
+		expect(html).toMatch(/<fieldset[^>]*\bdisabled\b/);
+		expect(inputTag(html, "category", String(other))).toContain("checked");
+		expect(html).toContain("Tally guesses its category again.");
+		expect(folds(html)).toContain(
+			"group-has-[input[name=category]:checked:enabled:not(.tally-category)]/edit:hidden",
+		);
 	});
 
 	it("draws no link hold on a linked credit whose review the person has not ticked, so the note shows", async () => {
