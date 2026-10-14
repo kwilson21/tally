@@ -744,6 +744,60 @@ describe("GET /transactions/:id", () => {
 		);
 	});
 
+	it("a refused save's redraw names the rule the panel posted, not one another tab set since it opened", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, 2) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey)
+			.run();
+		// Another tab sets the store's rule to category 3 after this panel opened.
+		await env.DB.prepare(
+			"UPDATE merchants SET default_category_id = 3 WHERE raw_name = ?",
+		)
+			.bind(merchantKey)
+			.run();
+		const categoryName = async (id: number) =>
+			(
+				await env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+					.bind(id)
+					.first<{ name: string }>()
+			)?.name;
+		const postedName = await categoryName(2);
+		const otherTabName = await categoryName(3);
+		expect(postedName).not.toBe(otherTabName);
+
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: "2",
+			always: "1",
+			always_was: "1",
+			rule_category_was: "2",
+			merchant: "Local Bakery",
+			note: "x".repeat(501),
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			`Local Bakery is always ${postedName}. Untick it and save to remove the rule.`,
+		);
+		expect(html).not.toContain(`Local Bakery is always ${otherTabName}.`);
+		expect(html).toMatch(/name="always_was" value="1"/);
+		expect(html).toMatch(/name="rule_category_was" value="2"/);
+	});
+
 	it("a ticked row saved with another category changes the rule to that category (decision 101)", async () => {
 		const merchantKey = (
 			await env.DB.prepare(

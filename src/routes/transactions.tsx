@@ -1540,6 +1540,11 @@ type SheetProps = {
 	/** Jev answers categories now, so a one-off name's Rename list says Tally guesses again (decision 101). */
 	jevCategories?: boolean;
 	/**
+	 * The rule's category name as the posted panel showed it, passed only on a refused save's redraw; a first
+	 * draw uses tx.merchantRuleCategoryName. For display only: the save never reads it.
+	 */
+	ruleCategoryName?: string;
+	/**
 	 * The panel is already open and is drawn again where it is, so it isn't drawn arriving: Keep it,
 	 * after the delete question. A field's error and the question itself are known from the props.
 	 */
@@ -1585,6 +1590,7 @@ function EditSheet({
 	nameWas = null,
 	nameScope = "one",
 	jevCategories = false,
+	ruleCategoryName,
 	still = false,
 }: SheetProps) {
 	const editHref = `/transactions/${tx.id}${back.includes("?") ? back.slice(back.indexOf("?")) : ""}`;
@@ -2251,7 +2257,9 @@ function EditSheet({
 							checked={values.alwaysForMerchant}
 							ruleCategory={
 								values.alwaysWas
-									? (tx.merchantRuleCategoryName ?? undefined)
+									? (ruleCategoryName ??
+										tx.merchantRuleCategoryName ??
+										undefined)
 									: undefined
 							}
 						/>
@@ -3218,7 +3226,7 @@ async function savePanel(
 	// The panel again, as the person left it, with what's wrong (422). `changePartsTotalCents` is set only
 	// when the amount broke its parts, so the panel offers Change the parts for that amount. `shownPeople`
 	// is the household as it is now, used when a For person was removed during the save.
-	const showErrors = (
+	const showErrors = async (
 		errors: EditErrors,
 		changePartsTotalCents?: number,
 		shownPeople: HouseholdPerson[] = people,
@@ -3250,6 +3258,14 @@ async function savePanel(
 				: tx.forPersonId,
 			forPersonIdWas: Number(form.get("for_person_id_was")) || null,
 		};
+		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
+		// save clears only the rule posted (saveEdit), so the hint must not name the rule the store has now.
+		const postedRule =
+			values.alwaysWas && values.merchantRuleWas
+				? await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
+						.bind(values.merchantRuleWas)
+						.first<{ name: string }>()
+				: null;
 		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
@@ -3266,6 +3282,7 @@ async function savePanel(
 					nameWas={form.get("merchant_was")?.toString() ?? null}
 					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
 					jevCategories={jevCategories}
+					ruleCategoryName={postedRule?.name}
 					cashValues={cashValues}
 					changePartsTotalCents={changePartsTotalCents}
 				/>
