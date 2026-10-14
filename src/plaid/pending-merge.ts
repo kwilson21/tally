@@ -169,7 +169,7 @@ const STATEMENTS = [
 	// one as they now stand, after the person's exclusion, income and review moves above: a row taken out of the
 	// budget keeps its answer. It runs before the name moves, since moving the name is the condition it reads.
 	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
-		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0
+		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, jev_mixed = NULL, jev_also_category_id = NULL
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
 	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
 		AND transactions.category_source IS NULL))
@@ -183,7 +183,7 @@ const STATEMENTS = [
 	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
 	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
 		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id,
-		jev_none_fit = p.jev_none_fit
+		jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed, jev_also_category_id = p.jev_also_category_id
 	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
 	 AND transactions.category_confidence IS NULL`,
@@ -268,7 +268,9 @@ const STATEMENTS = [
 		category_confidence = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_confidence ELSE NULL END,
 		category_suggestion_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.category_suggestion_id ELSE NULL END,
 		jev_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_category_id ELSE NULL END,
-		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END
+		jev_none_fit = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_none_fit ELSE 0 END,
+		jev_mixed = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_mixed ELSE NULL END,
+		jev_also_category_id = CASE WHEN COALESCE(transactions.category_source, '') = 'user' THEN transactions.jev_also_category_id ELSE NULL END
 	 ${FROM_PENDING} AND p.is_split = 1 AND p.amount_cents != ?3
 	 AND transactions.is_split = 0 AND transactions.split_removed_from_cents IS NULL`,
 	// A refund of one of those parts is unlinked, and its row says which purchase changed, with the pending

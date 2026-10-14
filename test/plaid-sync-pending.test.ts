@@ -1279,6 +1279,31 @@ describe("when the posted transaction is already stored as the link arrives", ()
 			});
 		});
 
+		it("moves a mixed-trip answer with its category, so the posted row keeps its split line (#233)", async () => {
+			const item = await addItem();
+			const ids = await bothStored(item);
+			const [pick, other] = (
+				await env.DB.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 2",
+				).all<{ id: number }>()
+			).results.map((row) => row.id);
+			await env.DB.prepare(
+				"UPDATE transactions SET category_confidence = 0.95, jev_category_id = ?, jev_mixed = 0.9, jev_also_category_id = ? WHERE id = ?",
+			)
+				.bind(pick, other, ids.pending)
+				.run();
+			await post(item);
+			expect(
+				await env.DB.prepare(
+					"SELECT jev_mixed, jev_also_category_id, jev_category_id FROM transactions WHERE plaid_transaction_id = 'posted-1'",
+				).first(),
+			).toEqual({
+				jev_mixed: 0.9,
+				jev_also_category_id: other,
+				jev_category_id: pick,
+			});
+		});
+
 		it("moves a none-fit answer with its confidence, so the posted row still counts toward a suggested category (#51)", async () => {
 			const item = await addItem();
 			const ids = await bothStored(item);

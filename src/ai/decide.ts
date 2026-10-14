@@ -14,6 +14,11 @@ export type JevAnswer = {
 	forPerson?: { label: string; confidence: number };
 	/** Jev's yes-probability that a "what it was" line could say more than the store's name (decision 103). */
 	noteWorthWriting?: number;
+	/**
+	 * Jev's probability that the trip spans more than one category, and the other category it named (#233): a
+	 * category label, or NONE_FIT when it named none. Absent when Jev wasn't asked (no categories).
+	 */
+	mixed?: { probability: number; also: string };
 };
 
 export type Decision = {
@@ -28,6 +33,10 @@ export type Decision = {
 	/** Jev's raw yes-probabilities for flags, retained for below-threshold suggestions. */
 	flagConfidence?: Record<Flag, number>;
 	flags: Record<Flag, boolean>;
+	/** Jev's probability the trip spans more than one category, stored as given (#233); absent or null when not asked. */
+	mixedProbability?: number | null;
+	/** The other active category Jev named, or null when it named none, or none is active (#233). */
+	alsoCategoryId?: number | null;
 };
 
 /**
@@ -50,8 +59,20 @@ export function decide(
 		answer.category.confidence,
 		threshold,
 	);
+	// The mixed-trip reading belongs to the categories switch, as the category answer does (#233). Absent when
+	// Jev gave none, so a decision without one reads as it always did.
+	const mixed = categoriesOn ? answer.mixed : undefined;
 	return {
 		noneFit: answer.category.label === NONE_FIT && categoriesOn,
+		...(mixed
+			? {
+					mixedProbability: mixed.probability,
+					alsoCategoryId:
+						mixed.also !== NONE_FIT
+							? (categories.find((c) => c.name === mixed.also)?.id ?? null)
+							: null,
+				}
+			: {}),
 		categoryId: match && confident ? match.id : null,
 		suggestedCategoryId: match ? match.id : null,
 		confidence: answer.category.confidence,

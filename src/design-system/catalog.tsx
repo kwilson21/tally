@@ -73,6 +73,7 @@ import {
 } from "../views/maybe-category";
 import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
+import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -4265,6 +4266,59 @@ function Controls() {
 							]}
 							back="/transactions"
 							error="Linked refunds add up to $85.00, so the amount can't be less than that."
+						/>
+					</div>
+				</State>
+				<State label="A trip that looks mixed: Tally's guess, Groceries and Household, both parts dashed, the amounts empty and $214.36 left to assign">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={21436}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "", guess: "1" },
+								{ category: "5", amount: "", guess: "5" },
+							]}
+							back="/transactions"
+							guessLabel="Groceries and Household"
+						/>
+					</div>
+				</State>
+				<State label="The same split once Household's amount is typed: Household is solid, Groceries is still Tally's guess">
+					<div inert>
+						<SplitForm
+							id={1}
+							parentCents={21436}
+							categories={[
+								{ id: 1, name: "Groceries" },
+								{ id: 5, name: "Household" },
+							]}
+							values={[
+								{ category: "1", amount: "", guess: "1" },
+								{ category: "5", amount: "70.00" },
+							]}
+							back="/transactions"
+							guessLabel="Groceries and Household"
+						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				tier="visual"
+				id="mixed-trip-line"
+				title="Split this one? (a trip that looks mixed)"
+				components={["MixedTripLine", "Button"]}
+				sentence="The quiet line under the edit panel's category chips on a trip Jev says looks mixed and no person has categorized: the two categories Jev named, then Split this one? in terracotta. Its link opens the split with Tally's guesses above."
+			>
+				<State label="Under the category chips: This trip looks like Groceries and Household. Split this one?">
+					<div inert>
+						<MixedTripLine
+							first="Groceries"
+							second="Household"
+							href="/transactions"
 						/>
 					</div>
 				</State>

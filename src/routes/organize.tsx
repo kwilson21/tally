@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
@@ -352,11 +353,10 @@ organize.post("/transactions/organize", async (c) => {
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
 	// The save makes no rule. Organize asks #209's question after it (#353), unless every merchant of the group
 	// has this rule already; then it moves on as it always did.
-	const asks = !(await groupHasRule(
-		c.env.DB,
-		currentGroup.merchantKeys,
-		chosen.id,
-	));
+	// No question when a trip it filed looks mixed (decision 113): a rule is never offered across categories.
+	const asks =
+		!(await groupHasRule(c.env.DB, currentGroup.merchantKeys, chosen.id)) &&
+		!(await jevSaysMixedAmong(c.env.DB, filed));
 	const rule: GroupRuleOfferValue | undefined = asks
 		? {
 				savedIds: filed,

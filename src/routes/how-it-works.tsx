@@ -454,7 +454,17 @@ howItWorks.get("/how-it-works", async (c) => {
 					<p class="mt-3">
 						After a person picks the same category for the same merchant three
 						times, Tally asks whether to always use it. Yes makes it the
-						merchant's rule, and Not now changes nothing.
+						merchant's rule, and Not now changes nothing. Tally doesn't ask on a
+						trip that looks mixed, or on an Organize save that filed one.
+					</p>
+					<p class="mt-3">
+						A trip looks mixed when {ai} says it spans more than one category,
+						and the other category it names is one of this household's. Its line
+						under the category says so, with “Split this one?”, which opens a
+						split with those two categories as Tally's guess: dashed, with the
+						amounts empty, since the bank sends only the total. Tally never
+						fills in an amount, and the split saves only when its parts add up
+						exactly. Once a person picks the trip's category, the line goes.
 					</p>
 					<p class="mt-3">
 						See every rule in Settings under Tally's rules. Removing a rule

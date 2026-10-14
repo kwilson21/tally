@@ -18,6 +18,7 @@ import {
 	likelyStill,
 	likelyTransactions,
 } from "../db/likely-transactions";
+import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
 import {
 	correctCashSplit,
@@ -118,6 +119,7 @@ import {
 	SuggestedCategoryChip,
 } from "../views/maybe-category";
 import { MerchantRuleTick } from "../views/merchant-rule-tick";
+import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
@@ -1606,6 +1608,8 @@ function EditSheet({
 		linkedPurchase && followsPurchaseAfterSave(tx, values)
 			? linkedPurchase
 			: undefined;
+	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
+	const mixed = mixedCategories(tx);
 	const purchaseCategory = categories.find(
 		(cat) => cat.id === purchase?.categoryId,
 	);
@@ -2089,6 +2093,14 @@ function EditSheet({
 							checked={!purchase && values.newCategory === true}
 						/>
 					</div>
+					{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
+					{!purchase && mixed && (
+						<MixedTripLine
+							first={mixed.first.name}
+							second={mixed.second.name}
+							href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+						/>
+					)}
 					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
 					<NewCategoryName
 						id="new-category-name"
@@ -2635,6 +2647,12 @@ type Correction = {
 	pendingEdit?: string;
 };
 
+/** "Groceries and Household" when Jev says the trip looks mixed (#233), else undefined: the split's guess line. */
+function guessLabelOf(tx: TransactionDetail): string | undefined {
+	const guess = mixedCategories(tx);
+	return guess ? `${guess.first.name} and ${guess.second.name}` : undefined;
+}
+
 function SplitSheet({
 	tx,
 	back,
@@ -2678,6 +2696,7 @@ function SplitSheet({
 			<SplitForm
 				id={tx.id}
 				parentCents={tx.amountCents}
+				guessLabel={guessLabelOf(tx)}
 				totalCents={correction?.totalCents}
 				amountWas={correction?.amountWas}
 				pendingEdit={correction?.pendingEdit}
@@ -2818,10 +2837,26 @@ transactions.get("/transactions/:id{[0-9]+}/split", async (c) => {
 		: null;
 	if (correcting && total === null) return c.notFound();
 	if (total !== null) return changePartsList(c, tx, back, today, total);
-	const values: SplitValue[] = [
-		{ category: "", amount: "" },
-		{ category: "", amount: "" },
-	];
+	// A trip that looks mixed opens with Jev's two categories as Tally's guess: dashed, amounts empty (#233).
+	// The amounts are always a person's, so nothing here reads one from the database.
+	const guess = mixedCategories(tx);
+	const values: SplitValue[] = guess
+		? [
+				{
+					category: String(guess.first.id),
+					amount: "",
+					guess: String(guess.first.id),
+				},
+				{
+					category: String(guess.second.id),
+					amount: "",
+					guess: String(guess.second.id),
+				},
+			]
+		: [
+				{ category: "", amount: "" },
+				{ category: "", amount: "" },
+			];
 	return renderList(c, today, filtersFrom(c, today, back), {
 		sheet: (_categories, today) => (
 			<SplitSheet
@@ -2882,6 +2917,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 	const archived = correction
 		? await archivedPartCategories(c.env.DB, tx.id)
 		: new Map<number, Category>();
+	// Tally's guess survives a redraw only on a trip that still looks mixed; a part stays a guess only while its
+	// category is the one Tally guessed and its amount is empty (isGuessedPart), so typing or picking makes it solid.
+	const guessing = mixedCategories(tx) !== null;
+	const guesses = form.getAll("part_guess").map(String);
 	const values: SplitValue[] = categoryValues.map((category, i) => {
 		const partId = partIds[i];
 		return {
@@ -2889,6 +2928,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			amount: amountValues[i] ?? "",
 			partId,
 			kept: partId === undefined ? undefined : archived.get(partId),
+			guess: guessing ? guesses[i] || undefined : undefined,
 		};
 	});
 	// Income is never split. A row that a bank change made income after the sheet opened gets the same

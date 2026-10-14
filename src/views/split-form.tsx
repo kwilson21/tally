@@ -3,18 +3,32 @@ import { splitStatus } from "../transactions/split";
 import { Button } from "./button";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
+import { WhyLink } from "./why-link";
 
 type Category = { id: number; name: string };
 /**
  * A part row. `partId` is the saved part a correction updates; a new row has none. `kept` is that part's
- * own category when it is archived: the row's select offers it, and no other row does.
+ * own category when it is archived: the row's select offers it, and no other row does. `guess` is the category
+ * id Tally guessed for this part (#233, decision 64), or empty; it stays a guess only while its category is
+ * unchanged and its amount empty, so a part turns solid once a person types an amount or picks a category.
  */
 export type SplitValue = {
 	category: string;
 	amount: string;
 	partId?: number;
 	kept?: Category;
+	guess?: string;
 };
+
+/** Whether a part is still Tally's guess: dashed, with its category and no amount typed (#233). */
+export function isGuessedPart(value: SplitValue): boolean {
+	return (
+		value.guess !== undefined &&
+		value.guess !== "" &&
+		value.category === value.guess &&
+		value.amount === ""
+	);
+}
 
 export function SplitLine({
 	parentCents,
@@ -51,6 +65,7 @@ export function SplitForm({
 	values,
 	back,
 	error,
+	guessLabel,
 }: {
 	id: number;
 	parentCents: number;
@@ -61,8 +76,11 @@ export function SplitForm({
 	values: SplitValue[];
 	back: string;
 	error?: string;
+	/** Jev's two categories, as "Groceries and Household", when the trip looks mixed (#233); shown while a part is still a guess. */
+	guessLabel?: string;
 }) {
 	const correcting = totalCents !== undefined && amountWas !== undefined;
+	const guessing = values.some(isGuessedPart);
 	return (
 		<form
 			method="post"
@@ -105,58 +123,71 @@ export function SplitForm({
 					{error}
 				</p>
 			)}
-			{values.map((value, index) => (
-				<div
-					class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
-				>
-					{correcting && (
-						<input
-							type="hidden"
-							name="part_id"
-							value={value.partId === undefined ? "" : String(value.partId)}
-						/>
-					)}
-					<label for={`part-category-${index}`} class="sr-only">
-						Part {index + 1} category
-					</label>
-					<select
-						id={`part-category-${index}`}
-						name="part_category"
-						class="min-h-11 rounded-full border border-rule bg-paper px-3"
-						autofocus={index === values.length - 1 && values.length > 2}
-						required
-					>
-						<option value="">Pick a category</option>
-						{[...categories, ...(value.kept ? [value.kept] : [])].map((cat) => (
-							<option
-								value={cat.id}
-								selected={value.category === String(cat.id)}
-							>
-								{cat.name}
-							</option>
-						))}
-					</select>
+			{guessing && guessLabel && (
+				<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+					{`Tally's guess: ${guessLabel} · `}
+					<WhyLink section="categorization" topic="Tally's guess" />
+				</p>
+			)}
+			{values.map((value, index) => {
+				const guessed = isGuessedPart(value);
+				return (
 					<div
-						hx-post={`/transactions/${id}/split/line`}
-						hx-trigger="input delay:300ms"
-						// Every part shares one queue: a request waits for the one in flight, and only the newest
-						// waiting one is sent, so the last answer is always about the newest amounts. Nothing is
-						// cancelled, so htmx logs no error.
-						hx-sync="#split-line:queue last"
-						hx-target="#split-line"
-						hx-select="#split-line > *"
-						hx-swap="innerHTML"
-						hx-include="closest form"
+						class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
 					>
-						<MoneyInput
-							id={`part-amount-${index}`}
-							name="part_amount"
-							label={`Part ${index + 1} amount`}
-							value={value.amount}
-						/>
+						{correcting && (
+							<input
+								type="hidden"
+								name="part_id"
+								value={value.partId === undefined ? "" : String(value.partId)}
+							/>
+						)}
+						{/* Posted back so a redraw knows which categories were Tally's guess (#233). */}
+						<input type="hidden" name="part_guess" value={value.guess ?? ""} />
+						<label for={`part-category-${index}`} class="sr-only">
+							{`Part ${index + 1} category${guessed ? ", Tally's guess" : ""}`}
+						</label>
+						<select
+							id={`part-category-${index}`}
+							name="part_category"
+							class={`min-h-11 rounded-full border ${guessed ? "border-dashed border-ink" : "border-rule"} bg-paper px-3`}
+							autofocus={index === values.length - 1 && values.length > 2}
+							required
+						>
+							<option value="">Pick a category</option>
+							{[...categories, ...(value.kept ? [value.kept] : [])].map(
+								(cat) => (
+									<option
+										value={cat.id}
+										selected={value.category === String(cat.id)}
+									>
+										{cat.name}
+									</option>
+								),
+							)}
+						</select>
+						<div
+							hx-post={`/transactions/${id}/split/line`}
+							hx-trigger="input delay:300ms"
+							// Every part shares one queue: a request waits for the one in flight, and only the newest
+							// waiting one is sent, so the last answer is always about the newest amounts. Nothing is
+							// cancelled, so htmx logs no error.
+							hx-sync="#split-line:queue last"
+							hx-target="#split-line"
+							hx-select="#split-line > *"
+							hx-swap="innerHTML"
+							hx-include="closest form"
+						>
+							<MoneyInput
+								id={`part-amount-${index}`}
+								name="part_amount"
+								label={`Part ${index + 1} amount`}
+								value={value.amount}
+							/>
+						</div>
 					</div>
-				</div>
-			))}
+				);
+			})}
 			<div class="grid grid-cols-2 gap-3">
 				<Button href={back} kind="secondary">
 					Cancel
