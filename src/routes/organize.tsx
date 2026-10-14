@@ -145,6 +145,7 @@ async function renderOrganize(
 							method="post"
 							action={action}
 							hx-post={action}
+							hx-disable="findAll button[type=submit]"
 							hx-target="#organize-page"
 							hx-select="#organize-page"
 							hx-swap="outerHTML"

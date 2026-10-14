@@ -48,7 +48,7 @@ import {
 	purchaseDismissalsToPartsSql,
 } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
-import { jevAsksAboutSql } from "../db/counted-month";
+import { jevAsksAboutSql, paysBillSql } from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -64,6 +64,13 @@ const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 
 /** A person's choice, as the posted row `transactions` takes it from the pending row `p`. */
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;
+
+/**
+ * Whether the posted row pays a bill once the pending row's bill payments have moved onto it (the bill statement below):
+ * it pays one already, or a linked payment of the pending row moves to it. A dismissed payment moves too but doesn't pay.
+ */
+const POSTED_PAYS_ONCE_MOVED = `(${paysBillSql("transactions")} OR EXISTS (
+	SELECT 1 FROM bill_payments moved WHERE moved.status = 'linked' AND moved.transaction_id = ${PENDING}))`;
 
 // A split part (`transactions`) has a choice of its own only when a person made it on that part (its source
 // is 'user', as saving the edit panel on the part records it) and it differs from the pending purchase's
@@ -168,13 +175,15 @@ const STATEMENTS = [
 	// name, so the night run asks again with it. Only Jev's pick and an empty category (an unsure answer included):
 	// a person's pick and a merchant rule's stay. Only where Jev can be asked about the posted row and the pending
 	// one as they now stand, after the person's exclusion, income and review moves above: a row taken out of the
-	// budget keeps its answer. It runs before the name moves, since moving the name is the condition it reads.
+	// budget keeps its answer. The posted row is judged as the bill payments below will leave it (POSTED_PAYS_ONCE_MOVED),
+	// since a linked payment can take an excluded row into the budget (#408); the pending row is judged as it stands, before
+	// they move off it. It runs before the name moves, since moving the name is the condition it reads.
 	`UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL,
 		category_suggestion_id = NULL, jev_category_id = NULL, jev_none_fit = 0, jev_mixed = NULL, jev_also_category_id = NULL
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL
 	 AND (transactions.category_source = 'jev' OR (transactions.category_id IS NULL
 		AND transactions.category_source IS NULL))
-	 AND ${jevAsksAboutSql("transactions")} AND ${jevAsksAboutSql("p")}`,
+	 AND ${jevAsksAboutSql("transactions", POSTED_PAYS_ONCE_MOVED)} AND ${jevAsksAboutSql("p")}`,
 	// This one only (decision 101): a name a person gave the pending row alone is kept, unless the posted row has its own.
 	`UPDATE transactions SET own_name = p.own_name
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
