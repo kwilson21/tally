@@ -783,7 +783,7 @@ async function renderList(
 						class="selection-list pb-40"
 						hx-get="/transactions/select/count"
 						hx-trigger="load, change"
-						// A list change (filter, page or Select all) replaces any count in flight, so an older count can't overwrite the newer list's bar. A list load pauses the ticks, so no count can start from a page that is leaving.
+						// A list change (filter or page) replaces any count in flight, and Select all waits for one, so an older count can't overwrite the newer list's bar. A list load pauses the ticks, so no count can start from a page that is leaving.
 						hx-sync="#filters:queue last"
 						// The count's own indicator: marking the form would pause the ticks during every count.
 						hx-indicator="#selected-count"

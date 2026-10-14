@@ -902,9 +902,10 @@ await page.unroute(
 dropReplacedRequestLogs(errorsBefore);
 step("Select all, then a filter change before it returns, keeps the filter");
 
-// Select all while its count is still loading, then a search typed before Select all's reply comes back (#471). The
-// Select all click replaces the count in flight, and the search must still replace Select all: its held reply must
-// not land over the search. Both requests are held, and each wait is on the request's own effect, never a sleep.
+// Select all pressed while its count is still loading, then a search typed before Select all's reply comes back (#471).
+// Select all queues behind the count, so its own request goes out only when the count lands, and a search typed while
+// that request is held must replace it: its held reply must not land over the search. Both requests are held, and each
+// wait is on the request's own effect, never a sleep.
 errorsBefore = consoleErrors.length;
 await goto(`${BASE}/transactions?uncategorized=1`, {
 	waitUntil: "networkidle",
@@ -940,6 +941,8 @@ await page.evaluate(() => {
 	});
 });
 await page.getByRole("link", { name: /^Select all \d+$/ }).click();
+// Select all waits behind the count in flight, so its own request goes out once the count lands: release the count, then hold Select all's request.
+await heldCount.continue().catch(() => {}); // a count the page has already dropped can't be released, and needn't be
 await selectAllIsHeld;
 await page.getByLabel("Search transactions").fill("Local Bakery");
 await page.waitForFunction(() => location.search.includes("q=Local"));
@@ -955,7 +958,6 @@ assert.equal(
 	0,
 	"the Select all list must not come back ticked over the search",
 );
-await heldCount.continue().catch(() => {});
 await page.unroute("**/transactions/select/count*", holdCount);
 await page.unroute(
 	"**/transactions?*focus=set-category-selection*",

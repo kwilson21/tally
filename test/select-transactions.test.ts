@@ -1099,13 +1099,15 @@ describe("select several transactions", () => {
 	it("puts the Select all link and the count on the list's filter queue, and leaves the buttons off it", async () => {
 		const html = await pageHtml("month=all&select=1");
 		const ids = rowIds(html);
+		// Select all queues behind a count still in flight rather than replacing it: a replaced count's finally
+		// frees the queue's slot while Select all holds it, so a search typed then would run beside Select all (#471).
 		const selectAll = html.match(/<a [^>]*>Select all \d+<\/a>/)?.[0];
-		expect(selectAll).toContain('hx-sync="#filters:replace"');
+		expect(selectAll).toContain('hx-sync="#filters:queue last"');
 		const form = html.match(/<form[^>]*id="selection-form"[^>]*>/)?.[0];
 		expect(form).toContain('hx-sync="#filters:queue last"');
 		const oneOff = await countFragment(ids.slice(1), ids);
 		expect(oneOff.match(/<a [^>]*>Select all \d+<\/a>/)?.[0]).toContain(
-			'hx-sync="#filters:replace"',
+			'hx-sync="#filters:queue last"',
 		);
 		for (const id of ["set-category-selection", "exclude-selection"]) {
 			const button = html.match(
