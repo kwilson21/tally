@@ -1507,9 +1507,9 @@ export async function saveEdit(
 		);
 		if (!correction.saved) return { saved: false, split: correction };
 	}
-	// Once the correction has saved, the edit's own gates all pass for a split cash entry (its cash gate reads the
-	// corrected parts, and no link can be made to a split), except the split review's (splitReview), which reads the
-	// corrected parts' refunds. A refusal there leaves the correction saved: the batch can't undo a statement's refusal.
+	// Once the correction has saved, the edit's own gates pass for a split cash entry: its cash gate reads the
+	// corrected parts, a split can't be linked as a refund, and a cash entry is money out, so the split review
+	// (splitReview) never refuses its parts.
 	// The edit's own results, after the correction's.
 	const own = results.slice(correctionCount);
 	// A split review with a part that doesn't fit its own purchase is refused by the parts check, which leaves
@@ -2040,7 +2040,7 @@ export async function correctCashSplit(
  * correctCashSplit's statements, not yet run, so the edit panel's pending save can share their batch (saveEdit).
  * `finish` takes their results in order and says what was saved, or why not.
  */
-export async function prepareCashSplitCorrection(
+async function prepareCashSplitCorrection(
 	db: D1Database,
 	parentId: number,
 	edit: CashSplitEdit,
