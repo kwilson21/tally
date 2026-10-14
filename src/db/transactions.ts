@@ -1693,7 +1693,7 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * there in this batch. A chosen refund that a competing save relinked or unlinked since the read stays as it is, and
  * is named in neither list. One that was parked but doesn't move is unlinked, and is listed in `unlinked` like any
  * other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked` lists the refunds
- * this save unlinked, by date.
+ * this save unlinked, by date. A split refund is listed once, by its own row, never once more for each of its parts.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1812,7 +1812,7 @@ export async function saveSplit(
 				`UPDATE transactions SET refund_of_id = ${partAt("?4")}
 				WHERE id = ?3 AND refund_of_id = ?1 AND ${refundFitsSql("?3", partAt("?4"))} AND ${unchangedNumbered}
 				AND EXISTS (SELECT 1 FROM transactions t JOIN transactions rp ON rp.id = t.refund_of_id WHERE t.id = ?3 AND ${FOLLOWS_PURCHASE} AND t.is_split = 0 AND t.parent_id IS NULL)
-				RETURNING id, date`,
+				RETURNING id, date, parent_id AS parentId`,
 			)
 			.bind(parentId, total, move.refundId, move.part),
 	}));
@@ -1821,7 +1821,7 @@ export async function saveSplit(
 		.prepare(
 			`UPDATE transactions SET refund_of_id = NULL
 			WHERE id IN (SELECT value FROM json_each(?3)) AND refund_of_id = ?1 AND ${unchangedNumbered}
-			RETURNING id, date`,
+			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total, chosenIds);
 	// Every refund still linked to the purchase or its parts is unlinked, except the chosen ones, which are parked
@@ -1830,7 +1830,7 @@ export async function saveSplit(
 		.prepare(
 			`UPDATE transactions SET refund_of_id = NULL
 			WHERE refund_of_id IN (SELECT id FROM transactions WHERE parent_id = ?1 OR id = ?1) AND id NOT IN (SELECT value FROM json_each(?3)) AND ${unchangedNumbered}
-			RETURNING id, date`,
+			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total, chosenIds);
 	const statements = [
@@ -1883,11 +1883,13 @@ export async function saveSplit(
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
 	const changed = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.meta.changes ?? 0) > 0;
-	// The rows a statement returned with RETURNING: the refunds it changed.
+	// The rows a statement returned with RETURNING: the refunds it changed. A split refund's parts share its date, so
+	// only a refund's own row (parentId null) is counted in the unlinked list; its parts are left out.
 	const returnedRows = (statement: D1PreparedStatement) =>
 		(results[statements.indexOf(statement)]?.results ?? []) as {
 			id: number;
 			date: string;
+			parentId: number | null;
 		}[];
 	// A refund's own link is kept by its new parts, unless it no longer fit: then it is the one unlinked.
 	const refundUnlinked = changed(unlinkRefund);
@@ -1897,6 +1899,7 @@ export async function saveSplit(
 			? []
 			: !linkedPurchase?.refundOfId
 				? [...returnedRows(unlinkLinked), ...returnedRows(sweepRefused)]
+						.filter((row) => row.parentId === null)
 						.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
 						.map((row) => row.date)
 				: refundUnlinked
@@ -2096,16 +2099,16 @@ export async function correctCashSplit(
  * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
  * the bills still unpaid after it, by name (decision 105). A split refund's parent is whole again and counts by
  * its own link, so that link is checked like a new one (src/db/refunded.ts) and dropped if the refund no longer
- * fits; its date is returned too.
+ * fits; its date is returned too. A split refund is returned once, by its own row, not once for each of its parts.
  */
 export async function removeSplit(
 	db: D1Database,
 	parentId: number,
 	by: string,
 ): Promise<{ unlinked: string[]; bills: UnpaidBill[] }> {
-	const unlinked = (await linkedRefunds(db, parentId, false)).map(
-		(refund) => refund.date,
-	);
+	const unlinked = (await linkedRefunds(db, parentId, false))
+		.filter((refund) => !refund.isPart)
+		.map((refund) => refund.date);
 	const bills = await partBills(db, parentId);
 	const parent = await db
 		.prepare("SELECT date FROM transactions WHERE id = ?")

@@ -89,6 +89,22 @@ describe("saveSplit keeps a linked refund on the part it is chosen for", () => {
 		expect(await linkOf(SECOND)).toBeNull();
 	});
 
+	it("counts a split refund once, by its own row, not once for each of its parts", async () => {
+		// FIRST ($45.00) is split in two parts that stay linked to the purchase; the purchase's split then unlinks it.
+		await saveSplit(
+			db,
+			FIRST,
+			[
+				{ categoryId: KIDS, amountCents: -2500 },
+				{ categoryId: HOUSEHOLD, amountCents: -2000 },
+			],
+			"test",
+		);
+		const result = await saveSplit(db, PURCHASE, PARTS, "test");
+		expect(result.unlinked).toEqual(["2026-09-05", "2026-09-06"]);
+		expect(await linkOf(FIRST)).toBeNull();
+	});
+
 	it("keeps two refunds on two different parts", async () => {
 		const result = await saveSplit(db, PURCHASE, PARTS, "test", {
 			[FIRST]: 0,
