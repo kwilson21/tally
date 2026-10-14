@@ -30,8 +30,10 @@ export function SheetCancel({
 
 /**
  * The one primary: a submit button that posts the form it names by id (`form`), so it can sit in
- * the footer, outside the form. Its busy label shows while the form posts, as Save does today, when
- * the form's `hx-indicator` names this button by `id` (the savings sheet does the same).
+ * the footer, outside the form. The form must carry `hx-indicator="#<id>"`, so the busy label shows
+ * while it posts, and `hx-disable="#<id>"`, so the primary is off then and a double tap posts once.
+ * Both name it by id: `findAll` searches only inside the form, and a bare `#id` reaches the button
+ * outside it.
  */
 export function SheetPrimary({
 	id,

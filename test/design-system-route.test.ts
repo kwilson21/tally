@@ -1053,6 +1053,26 @@ describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
 		expect(csp).toContain("form-action 'none'");
 	});
 
+	it("turns the footer's Save off while the form posts: the form names it by id, since it sits outside the form", async () => {
+		const { html } = await get("/design-system/ledger-sheet");
+		const formTag = html.match(/<form id="ledger-sheet-form"[^>]*>/)?.[0] ?? "";
+		expect(formTag).toContain('hx-disable="#ledger-sheet-save"');
+		expect(formTag).toContain('hx-indicator="#ledger-sheet-save"');
+		const saveTag =
+			html.match(/<button [^>]*id="ledger-sheet-save"[^>]*>/)?.[0] ?? "";
+		expect(saveTag).toContain('form="ledger-sheet-form"');
+		expect(html.slice(html.indexOf(saveTag))).toContain("Saving…");
+	});
+
+	it("says the page's Save is drawn only, and the footer spec keeps its busy and off wording", async () => {
+		const { html } = await get("/design-system/ledger-sheet");
+		expect(html).toContain("Save is drawn only");
+		const { html: catalog } = await get("/design-system");
+		const footer =
+			catalog.split('id="sheet-footer"')[1]?.split("</section>")[0] ?? "";
+		expect(footer).toContain("is off while the form posts");
+	});
+
 	it("opens Category with all 50 categories as chips, and keeps Match payments from closed", async () => {
 		const { html } = await get("/design-system/ledger-sheet");
 		expect(html.match(/name="ledger-sheet-category"/g)).toHaveLength(50);

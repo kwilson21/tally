@@ -2995,15 +2995,16 @@ const FOLDED_ROW_SPEC: UseSpecText = {
 		"The row's name is its field's (Category, Match payments from). An empty one says so in words, such as “None yet”, with a line saying how it gets filled.",
 };
 
-// The sheet's footer is drawn as the SavingsGoalSheet is (Visual: its Cancel and Save post, which the
-// catalog's CSP refuses), so its use spec is the same eight answers without the interactive tier.
+// The sheet's footer is drawn as the SavingsGoalSheet is (Visual: its Save posts, which the catalog's
+// CSP refuses, and its Cancel is a link), so its use spec is the same eight answers without the
+// interactive tier.
 const SHEET_FOOTER_SPEC: UseSpecText = {
 	purpose:
 		"Keep a sheet's Cancel and its one main action on screen however long the form is, so a phone never scrolls to reach Save.",
 	affordance:
 		"Cancel (secondary) and the primary side by side, each half the width and 44px tall, under a rule at the bottom of the sheet. The form above it scrolls; the footer doesn't.",
 	states:
-		"Rest. Busy: the primary shows its busy label while the form posts, because the form's hx-indicator names it by id, as the savings sheet's Save does. It is not turned off while the form posts yet; that wiring comes with the first form that uses the footer. Focus: each button's ring. Hover: the buttons' own.",
+		"Rest. Busy: the primary shows its busy label and is off while the form posts, as Save does today. The form names it by id in its hx-indicator and hx-disable, since the button sits outside the form. Focus: each button's ring. Hover: the buttons' own.",
 	feedback:
 		"Cancel closes the sheet the way the backdrop does, with focus back on the row it came from. The primary posts the form, and the sheet answers as it does today (a toast and an announcement, or the error in the form).",
 	input:
@@ -5401,6 +5402,7 @@ export function LedgerSheetSpecimen() {
 				Visual: the ledger form on a sheet, with Category open so the middle is
 				long. Cancel or the backdrop go back to the Ledger form group. The
 				middle scrolls; Cancel and Save stay in view on a phone and on desktop.
+				Save is drawn only: the catalog's CSP lets no form post.
 			</p>
 			<ul class="mt-6 max-w-xl">
 				{PROGRESS_ROWS.map((s) => (
@@ -5414,7 +5416,11 @@ export function LedgerSheetSpecimen() {
 					footer={
 						<SheetFooter>
 							<SheetCancel href="/design-system#ledger-form" />
-							<SheetPrimary id="ledger-sheet-save" form="ledger-sheet-form">
+							<SheetPrimary
+								id="ledger-sheet-save"
+								form="ledger-sheet-form"
+								busyLabel="Saving…"
+							>
 								Save
 							</SheetPrimary>
 						</SheetFooter>
@@ -5432,6 +5438,8 @@ export function LedgerSheetSpecimen() {
 						method="post"
 						action="/design-system/ledger-sheet"
 						class="mt-4 flex flex-col gap-5"
+						hx-disable="#ledger-sheet-save"
+						hx-indicator="#ledger-sheet-save"
 					>
 						<LedgerField
 							id="ledger-sheet-amount"
