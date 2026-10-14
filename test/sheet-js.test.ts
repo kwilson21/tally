@@ -23,6 +23,13 @@ function matchesSimple(node: FakeNode, selector: string) {
 	);
 }
 
+/** A node's tab index without a tabindex attribute: 0 for a control or link, -1 for anything else. */
+function defaultTabIndex(tag: string) {
+	return ["a", "button", "input", "select", "textarea", "summary"].includes(tag)
+		? 0
+		: -1;
+}
+
 class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parentElement: FakeNode | null = null;
@@ -36,25 +43,18 @@ class FakeNode extends EventTarget {
 	name = "";
 	checked = false;
 	form: FakeNode | null = null;
+	/** As a browser keeps it: the tabindex attribute sets it, and removing the attribute restores the default. */
 	tabIndex: number;
 	/** How many times the node was clicked, by the script or by a test. */
 	clicks = 0;
 	constructor(readonly tag: string) {
 		super();
-		this.tabIndex = [
-			"a",
-			"button",
-			"input",
-			"select",
-			"textarea",
-			"summary",
-		].includes(tag)
-			? 0
-			: -1;
+		this.tabIndex = defaultTabIndex(tag);
 	}
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 		if (name === "id") this.id = value;
+		if (name === "tabindex") this.tabIndex = Number(value);
 	}
 	getAttribute(name: string) {
 		return this.attrs.get(name) ?? null;
@@ -64,6 +64,7 @@ class FakeNode extends EventTarget {
 	}
 	removeAttribute(name: string) {
 		this.attrs.delete(name);
+		if (name === "tabindex") this.tabIndex = defaultTabIndex(this.tag);
 	}
 	/** Whether the node is the given one or holds it, as a real node's contains() does. */
 	contains(node: unknown): boolean {
@@ -134,7 +135,6 @@ function drawSheet(sheetSlot: FakeNode, { autofocus = false } = {}) {
 		"aria-labelledby": "sheet-title",
 	});
 	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
-	title.tabIndex = -1;
 	const field = el("input", autofocus ? { autofocus: "" } : {});
 	const save = el("button");
 	section.append(title, field, save);
@@ -154,7 +154,6 @@ function drawRadioSheet(
 		"aria-labelledby": "sheet-title",
 	});
 	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
-	title.tabIndex = -1;
 	const save = el("button");
 	form.append(...radios);
 	section.append(title, form, save);
@@ -377,6 +376,22 @@ describe("sheet.js: focus goes into the sheet", () => {
 	it("gives focus to the sheet's [autofocus] field, not its title, when the page loads", async () => {
 		const parts = await sheetPage({ autofocus: true });
 		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+		expect(parts.drawn?.field.hasAttribute("tabindex")).toBe(false);
+	});
+
+	it("keeps the [autofocus] field in the Tab order: Tab from it reaches Save, and Tab from Save returns to it", async () => {
+		const parts = await sheetPage({ autofocus: true });
+		parts.undo.hidden = true;
+		const field = parts.drawn?.field;
+		const save = parts.drawn?.save;
+		// Two stops in one region, so sheet.js leaves Tab to the browser, which moves focus to Save.
+		const forward = keydown(parts.document, "Tab");
+		expect(forward.defaultPrevented).toBe(false);
+		// Save is the last stop, so Tab from it wraps to the first, the field.
+		save?.focus();
+		const wrapped = keydown(parts.document, "Tab");
+		expect(wrapped.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(field);
 	});
 
 	it("moves focus from a control the redraw removed to the redrawn sheet's [autofocus] field", async () => {

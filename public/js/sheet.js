@@ -15,7 +15,8 @@
 	// Focus on nothing in the sheet (the body, or a row the sheet now covers) moves into it: to its [autofocus] field,
 	// or else to its title. Focus that is already in the sheet stays, and so does focus on an Undo toast, which toast.js
 	// put there on purpose. The field comes before the title, since on a full page load the browser skips its own
-	// autofocus once something has focus, so focusing the title first would take the field's place.
+	// autofocus once something has focus, so focusing the title first would take the field's place. Only the title
+	// ever gets a tabindex added: a field with one would drop out of the Tab order.
 	function takeFocus(sheet) {
 		const active = document.activeElement;
 		if (
@@ -23,12 +24,17 @@
 			document.getElementById("toasts")?.contains(active)
 		)
 			return;
-		const target =
-			sheet.querySelector("[autofocus]") ??
-			document.getElementById(sheet.getAttribute("aria-labelledby"));
-		if (!target) return;
-		if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
-		target.focus();
+		const field = sheet.querySelector("[autofocus]");
+		if (field) {
+			field.focus();
+			return;
+		}
+		const title = document.getElementById(
+			sheet.getAttribute("aria-labelledby"),
+		);
+		if (!title) return;
+		if (!title.hasAttribute("tabindex")) title.setAttribute("tabindex", "-1");
+		title.focus();
 	}
 
 	// Takes off every inert mark this script set, then marks the page outside the sheet again. The marks
