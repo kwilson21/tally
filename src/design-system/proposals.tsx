@@ -21,6 +21,7 @@ import { Phase35StatesProposals } from "./proposals-phase35-states";
 import { PolishProposals } from "./proposals-polish";
 import { PolishRoundAProposals } from "./proposals-polish-2";
 import { PolishRoundBProposals } from "./proposals-polish-3";
+import { PolishRoundCProposals } from "./proposals-polish-4";
 import { RulesProposals } from "./proposals-rules";
 
 // What the owner decided from 2026-09-26 on (decisions 46 to 82), and the issue each ships in.
@@ -442,7 +443,18 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="polish3-title" class="mt-10">
+			<section aria-labelledby="polish4-title" class="mt-10">
+				<h2 id="polish4-title" class="font-serif text-3xl font-semibold">
+					Open: the polish track, More, Feedback and the first visit
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 13 for the owner's pick: what More shows, where Feedback
+					lives, and what a first visit shows and teaches.
+				</p>
+				<PolishRoundCProposals />
+			</section>
+
+			<section aria-labelledby="polish3-title" class="mt-12">
 				<h2 id="polish3-title" class="font-serif text-3xl font-semibold">
 					Open: the polish track, the edit panel and the list's top
 				</h2>
