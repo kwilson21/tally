@@ -769,6 +769,19 @@ describe("a split keeps a plan and a bill on parts, and Undo or Remove split lea
 		expect(await paidBy(planId)).toBe(tx);
 	});
 
+	it("Remove split with a plan on each part resolves: one plan takes the whole payment, and the other is unlinked", async () => {
+		const tx = await payment(9812, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const one = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const two = await plan("Car registration", 18000, MONTH, second ?? 0);
+
+		await expect(removeSplit(env.DB, tx, "demo")).resolves.toBeDefined();
+		const payers = [await paidBy(one), await paidBy(two)];
+		expect(payers.filter((t) => t === tx)).toHaveLength(1);
+		expect(payers).toContain(null);
+	});
+
 	it("an Undo after a split with a bill on a part brings the plan back unpaid, never on the bill's money", async () => {
 		const tx = await payment(9810, 30000);
 		const planId = await plan("Car registration", 18000, MONTH, tx);

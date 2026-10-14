@@ -2035,12 +2035,13 @@ export async function removeSplit(
 		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105).
 		db.prepare(movePartDismissalsSql("?1", "?1", "1")).bind(parentId),
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
-		// A plan on a part goes back to the whole payment, which the part's delete would otherwise unlink (decision 82).
+		// A plan on a part goes back to the whole payment, which the part's delete would otherwise unlink (decision 82). One
+		// payment pays one plan, so the first plan by part takes it; a second one stays unlinked with its part (ON DELETE SET NULL).
 		db
 			.prepare(
-				"UPDATE planned_expenses SET transaction_id = ?1 WHERE id IN (SELECT value FROM json_each(?2)) AND transaction_id IS NULL",
+				"UPDATE planned_expenses SET transaction_id = ?1 WHERE id = ?2 AND transaction_id IS NULL",
 			)
-			.bind(parentId, JSON.stringify(planIds)),
+			.bind(parentId, planIds[0] ?? 0),
 		db
 			.prepare(
 				"UPDATE transactions SET is_split = 0, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
