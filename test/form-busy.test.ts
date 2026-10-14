@@ -86,6 +86,13 @@ describe("htmx posting forms", () => {
 		}
 	});
 
+	it("drops a second Save on Organize while the first is posting, so a double tap files once", async () => {
+		const forms = htmxForms(await get("/transactions/organize"));
+		expect(forms).toHaveLength(1);
+		expect(forms[0]).toContain('hx-post="/transactions/organize"');
+		expect(forms[0]).toContain('hx-disable="findAll button[type=submit]"');
+	});
+
 	it("disables the transaction editor submit button and labels its save", async () => {
 		const transaction = await env.DB.prepare(
 			"SELECT id FROM transactions LIMIT 1",
