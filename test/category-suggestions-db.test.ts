@@ -485,7 +485,7 @@ describe("saveSuggestion", () => {
 		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
 	});
 
-	it("refuses a name that differs only in accented capitals and was taken during the write", async () => {
+	it("adds the ticks to the active name that differs only in accented capitals and was taken during the write, instead of refusing", async () => {
 		const made = [
 			await add(),
 			await add({ rawName: "HULU" }),
@@ -494,7 +494,8 @@ describe("saveSuggestion", () => {
 		];
 		// tidyName reads "École" as it is, so the suggestion keeps its capital; the other save files "école".
 		const id = (await saveSuggestion(db, "École", made)) as number;
-		// The other save files "école" (its key is "école"), after the form's check and before this one.
+		// The other save files an active "école" (its key is "école") after the page was drawn and before this write.
+		// The write finds it by its key, as the read would have, so the ticks join it (decision 101) instead of failing.
 		await db
 			.prepare(
 				`CREATE TRIGGER take_accent_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN INSERT INTO categories(name,name_key,icon,color,sort_order) VALUES('école','école','tag','cat-blue',99); END`,
@@ -512,9 +513,12 @@ describe("saveSuggestion", () => {
 			await db.prepare("DROP TRIGGER take_accent_during_create").run();
 		}
 		expect(result).toEqual({
-			ok: false,
-			reason: "invalid",
-			error: "That name is taken.",
+			ok: true,
+			name: "école",
+			moved: 4,
+			leftOut: [],
+			attached: true,
+			restored: false,
 		});
 	});
 
@@ -999,7 +1003,7 @@ describe("createFromSuggestion", () => {
 			const id = (
 				await db
 					.prepare(
-						"INSERT INTO categories (name, icon, color, sort_order) VALUES ('Pet Care', 'home', 'cat-plum', 40) RETURNING id",
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Pet Care', 'pet care', 'home', 'cat-plum', 40) RETURNING id",
 					)
 					.first<{ id: number }>()
 			)?.id as number;
@@ -1362,6 +1366,171 @@ describe("createFromSuggestion", () => {
 				{ archived_on: "2026-07-15", restored_on: "2026-09-01" },
 				{ archived_on: "2026-09-02", restored_on: null },
 			]);
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		/** The École suggestion with three purchases, saved before any École exists (namesToAvoid keeps archived names out). */
+		async function ecole(name = "École") {
+			const made: number[] = [];
+			for (let i = 0; i < 3; i++)
+				made.push(
+					await add({ rawName: `CAFE ${i}`, date: `2026-09-${10 + i}` }),
+				);
+			const id = (await saveSuggestion(db, name, made)) as number;
+			return { id, made };
+		}
+		/** École archived on July 15 under the given name key: the key a save, or the 0052 backfill, left it with. */
+		async function archivedEcole(key: string): Promise<number> {
+			const id = (
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', ?, 'home', 'cat-plum', 40) RETURNING id",
+					)
+					.bind(key)
+					.first<{ id: number }>()
+			)?.id as number;
+			await setArchived(db, id, true, "2026-07-15");
+			return id;
+		}
+
+		it("brings it back when it was renamed from École to école between the read and the write, and files the ticks in it", async () => {
+			const { id, made } = await ecole();
+			const archived = await archivedEcole("école");
+			const count = (await categories()).length;
+			const today = await householdToday(db);
+
+			const result = await createFromSuggestion(
+				racing(() => saveCategory(db, archived, { name: "école" })),
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person@example.com",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "école",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: false,
+				restored: true,
+			});
+			expect((await categories()).length).toBe(count);
+			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
+				{ name: "école", archived: 0 },
+			);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: today },
+			]);
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({
+					category_id: archived,
+					category_source: "user",
+					updated_by: "person@example.com",
+				});
+			expect(await row(made[2] as number)).toMatchObject({ category_id: null });
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("makes a new École, and leaves Ecole archived, when it was renamed to Ecole between the read and the write", async () => {
+			const { id, made } = await ecole();
+			const archived = await archivedEcole("école");
+			const count = (await categories()).length;
+
+			const result = await createFromSuggestion(
+				racing(() => saveCategory(db, archived, { name: "Ecole" })),
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "École",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: false,
+				restored: false,
+			});
+			expect((await categories()).length).toBe(count + 1);
+			const madeNew = (await categories()).find((c) => c.name === "École");
+			expect(madeNew).toMatchObject({ archived: 0 });
+			expect(madeNew?.id).not.toBe(archived);
+			expect(
+				await db
+					.prepare("SELECT name_key FROM categories WHERE id = ?")
+					.bind(madeNew?.id)
+					.first(),
+			).toEqual({ name_key: "école" });
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({ category_id: madeNew?.id });
+			expect((await categories()).find((c) => c.id === archived)).toMatchObject(
+				{ name: "Ecole", archived: 1 },
+			);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("restores an archived École still under the key lower() left it with, with no race", async () => {
+			const { id, made } = await ecole();
+			const archived = await archivedEcole("École");
+			const count = (await categories()).length;
+			const today = await householdToday(db);
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "École",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: false,
+				restored: true,
+			});
+			expect((await categories()).length).toBe(count);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: today },
+			]);
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({ category_id: archived });
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("files the ticks into an active École still under the key lower() left it with, for the suggestion école", async () => {
+			const { id, made } = await ecole("école");
+			const school = (
+				await db
+					.prepare(
+						"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 100) RETURNING id",
+					)
+					.first<{ id: number }>()
+			)?.id;
+			const count = (await categories()).length;
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made.slice(0, 2), shown: made, notes: {} },
+				"person",
+			);
+
+			expect(result).toEqual({
+				ok: true,
+				name: "École",
+				moved: 2,
+				leftOut: [made[2]],
+				attached: true,
+				restored: false,
+			});
+			expect((await categories()).length).toBe(count);
+			for (const tx of made.slice(0, 2))
+				expect(await row(tx)).toMatchObject({ category_id: school });
 			expect(await suggestion(id)).toMatchObject({ status: "created" });
 		});
 	});

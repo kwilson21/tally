@@ -314,7 +314,8 @@ export async function createFromSuggestion(
 	const categories = await categoryNames(db);
 	const existing = categories.find((c) => sameName(c.name, name));
 	const active = categories.filter((c) => !c.archived).length;
-	// Every write below names the category as the family stored it, so its NOCASE lookups find that row.
+	// Every write below finds the category by `named` (defined with the writes), so it finds the row the family stored,
+	// whatever capitals or accents the suggestion has now.
 	const target = existing?.name ?? name;
 	if (existing?.archived) {
 		const problem = restoreProblem(categories);
@@ -337,6 +338,12 @@ export async function createFromSuggestion(
 		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='pending' AND decided_at=?)";
 	const createdGate =
 		"EXISTS (SELECT 1 FROM category_suggestions WHERE id=? AND status='created' AND decided_at=?)";
+	// A category has the suggested name when its key matches (migration 0052) or, for a key still as 0052's lower() left
+	// it, its stored name matches ignoring A to Z case (migration 0005): the two names the insert's unique indexes refuse.
+	const named = "(name_key = ? OR name = ? COLLATE NOCASE)";
+	const namedBinds = [nameKey(target), target];
+	// The archived category the read saw under the name, pinned by id so no other row is restored or closed.
+	const archivedId = existing?.archived ? existing.id : null;
 	// Both statements are in every write, the restore first, so the path is decided inside the write (decision
 	// 110). The restore brings an archived category back, to the end of the list with its icon, colour and budget
 	// as they were (setArchived's restore, with the same gate and ticks as the create), only while it is still
@@ -346,20 +353,13 @@ export async function createFromSuggestion(
 		.prepare(
 			`UPDATE categories SET archived = 0, archived_on = NULL,
 				sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE archived = 0)
-				WHERE id = ? AND archived = 1 AND name = ? COLLATE NOCASE AND ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived = 0) < ${MAX_ACTIVE}
+				WHERE id = ? AND archived = 1 AND ${named} AND ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived = 0) < ${MAX_ACTIVE}
 				AND EXISTS (SELECT 1 FROM transactions WHERE category_suggestion_id = ? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 		)
-		.bind(
-			existing?.archived ? existing.id : null,
-			target,
-			id,
-			token,
-			id,
-			JSON.stringify(ticked),
-		);
+		.bind(archivedId, ...namedBinds, id, token, id, JSON.stringify(ticked));
 	const create = db
 		.prepare(
-			`INSERT INTO categories (name,name_key,icon,color,sort_order) SELECT ?,?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE name=? COLLATE NOCASE) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
+			`INSERT INTO categories (name,name_key,icon,color,sort_order) SELECT ?,?,'tag',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM categories) WHERE ${gate} AND (SELECT COUNT(*) FROM categories WHERE archived=0)<50 AND NOT EXISTS(SELECT 1 FROM categories WHERE ${named}) AND EXISTS(SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 		)
 		.bind(
 			target,
@@ -369,7 +369,7 @@ export async function createFromSuggestion(
 			],
 			id,
 			token,
-			target,
+			...namedBinds,
 			id,
 			JSON.stringify(ticked),
 		);
@@ -383,27 +383,35 @@ export async function createFromSuggestion(
 				.bind(token, id),
 			restore,
 			create,
-			// Closes the archive period a restore opened, as setArchived's restore does. With no restore (restoredOn is null)
+			// Closes the archive period a restore opened, as setArchived's restore does. With no restore (archivedId is null)
 			// it sets nothing new.
 			db
 				.prepare(
 					`UPDATE category_archive_periods SET restored_on = ?
-					WHERE category_id = (SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND archived = 0)
-					AND restored_on IS NULL AND ${gate}`,
+					WHERE category_id = ? AND restored_on IS NULL
+					AND EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0) AND ${gate}`,
 				)
-				.bind(restoredOn, target, id, token),
+				.bind(restoredOn, archivedId, archivedId, id, token),
 			db
 				.prepare(
 					`UPDATE category_suggestions SET status='created' WHERE id=? AND status='pending' AND decided_at=?
-					AND EXISTS (SELECT 1 FROM categories WHERE name=? COLLATE NOCASE AND archived=0)
+					AND EXISTS (SELECT 1 FROM categories WHERE ${named} AND archived=0)
 					AND EXISTS (SELECT 1 FROM transactions WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0)`,
 				)
-				.bind(id, token, target, id, JSON.stringify(ticked)),
+				.bind(id, token, ...namedBinds, id, JSON.stringify(ticked)),
 			db
 				.prepare(
-					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE name=? COLLATE NOCASE),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,split_removed_from_cents=NULL,split_removed_bills=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
+					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE ${named} AND archived = 0 ORDER BY (id = ?) DESC, id LIMIT 1),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,split_removed_from_cents=NULL,split_removed_bills=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
 				)
-				.bind(target, actor, id, JSON.stringify(ticked), id, token),
+				.bind(
+					...namedBinds,
+					existing?.id ?? null,
+					actor,
+					id,
+					JSON.stringify(ticked),
+					id,
+					token,
+				),
 			db
 				.prepare(
 					`UPDATE transactions SET note=json_extract(note.value,'$.note'),updated_by=?,updated_at=datetime('now') FROM json_each(?) AS note WHERE transactions.id=json_extract(note.value,'$.id') AND transactions.category_suggestion_id=? AND transactions.category_id IS NULL AND transactions.category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
@@ -448,17 +456,10 @@ export async function createFromSuggestion(
 			if (problem) return { ok: false, reason: "invalid", error: problem };
 		}
 		if (!existing) {
-			const currentCount = await db
-				.prepare("SELECT COUNT(*) n FROM categories WHERE archived=0")
-				.first<{ n: number }>();
-			if ((currentCount?.n ?? 0) >= MAX_ACTIVE)
+			const all = await categoryNames(db);
+			if (all.filter((c) => !c.archived).length >= MAX_ACTIVE)
 				return { ok: false, reason: "invalid", error: fullMessage("add") };
-			if (
-				await db
-					.prepare("SELECT 1 FROM categories WHERE name=? COLLATE NOCASE")
-					.bind(name)
-					.first()
-			)
+			if (all.some((c) => sameName(c.name, name)))
 				return { ok: false, reason: "invalid", error: "That name is taken." };
 		}
 		return {
@@ -477,16 +478,17 @@ export async function createFromSuggestion(
 	// a row, or the create did, or neither did and the ticks joined the active category with that name (decision 101).
 	const restored = (results[1]?.meta.changes ?? 0) > 0;
 	const joined = !restored && (results[2]?.meta.changes ?? 0) === 0;
-	// A joined category is named as the family stored it, whatever capitals the suggestion has. It is read after
-	// the write, so the name is the one the family has once the write has run.
-	const stored = joined
-		? await db
-				.prepare(
-					"SELECT name FROM categories WHERE name = ? COLLATE NOCASE AND archived = 0",
-				)
-				.bind(target)
-				.first<{ name: string }>()
-		: null;
+	// A joined or restored category is named as the family stored it, whatever capitals the suggestion has. It is read
+	// after the write, so the name is the one the family has once the write has run.
+	const stored =
+		joined || restored
+			? await db
+					.prepare(
+						`SELECT name FROM categories WHERE ${named} AND archived = 0 ORDER BY (id = ?) DESC, id LIMIT 1`,
+					)
+					.bind(...namedBinds, existing?.id ?? null)
+					.first<{ name: string }>()
+			: null;
 	return {
 		ok: true,
 		name: stored?.name ?? target,
