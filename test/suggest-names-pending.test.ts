@@ -746,4 +746,84 @@ describe("suggestTransactionNotes", () => {
 			tried: 1,
 		});
 	});
+
+	// A person may name the charge or its merchant while the call is out, so the note is checked against the names
+	// as they are once the call returns, not as the pass read them before it (#412).
+	it.each([
+		[
+			"the charge's own name",
+			"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+		],
+		[
+			"the merchant's name",
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('Note Shop', 'Dog bed') ON CONFLICT(raw_name) DO UPDATE SET display_name = 'Dog bed'",
+		],
+	])(
+		"checks a note against %s set during its call, so a note that now restates it is not saved",
+		async (_label, rename) => {
+			await addNoteCandidates(1);
+			const ai = fakeAi(() => ({ response: "Dog bed" }));
+			ai.run.mockImplementationOnce(async () => {
+				await db.prepare(rename).run();
+				return { response: "Dog bed" };
+			});
+			expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+				asked: 1,
+				suggested: 0,
+			});
+			expect(await noteOf("NOTE SHOP 1")).toEqual({
+				note: null,
+				note_guessed: 0,
+				tried: 1,
+			});
+		},
+	);
+
+	it("keeps a note checked against a name set during its call when the note says more than that name", async () => {
+		await addNoteCandidates(1);
+		const ai = fakeAi(() => ({ response: "Vet visit" }));
+		ai.run.mockImplementationOnce(async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET own_name = 'Dog bed' WHERE raw_name = 'NOTE SHOP 1'",
+				)
+				.run();
+			return { response: "Vet visit" };
+		});
+		expect(await suggestTransactionNotes({ DB: db, AI: ai })).toEqual({
+			asked: 1,
+			suggested: 1,
+		});
+		expect(await noteOf("NOTE SHOP 1")).toEqual({
+			note: "Vet visit",
+			note_guessed: 1,
+			tried: 1,
+		});
+	});
+
+	it("saves 100 notes in a small fixed statement count, reading each batch's names once before its save", async () => {
+		await addNoteCandidates(nameCallLimit);
+		let statements = 0;
+		const counted = new Proxy(db, {
+			get(target, property) {
+				const value = Reflect.get(target, property);
+				if (property === "prepare")
+					return (sql: string) => {
+						statements += 1;
+						return target.prepare(sql);
+					};
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const ai = fakeAi(() => ({ response: "Bought a gift" }));
+		expect(
+			await suggestTransactionNotes({
+				DB: counted as D1Database,
+				AI: ai,
+			}),
+		).toEqual({ asked: nameCallLimit, suggested: nameCallLimit });
+		// The switch read and the candidate query, then for every five calls a switch read, the batch's names read
+		// and its save: 2 + 20 × 3 = 62.
+		expect(statements).toBeLessThanOrEqual(62);
+	});
 });
