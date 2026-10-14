@@ -31,6 +31,17 @@ export const savedStillHoldArgs = (savedIds: string, categoryId: number) => [
 	savedIds,
 	categoryId,
 ];
+/**
+ * No saved charge's key carries a display name other than the one the question offered (#353). A key with no name
+ * passes, since tidyName names it, as organizeGroups does; only compared, never written. Its binds, in order, are
+ * `savedStillNamedArgs`.
+ */
+export const SAVED_STILL_NAMED_SQL = `NOT EXISTS (SELECT 1 FROM transactions s2 JOIN merchants m ON m.raw_name = ${merchantKeySql("s2")} WHERE s2.id IN (SELECT value FROM json_each(?)) AND m.display_name IS NOT NULL AND m.display_name != ?)`;
+/** The binds for SAVED_STILL_NAMED_SQL's `?`s: the saved list, then the name the question offered. */
+export const savedStillNamedArgs = (savedIds: string, merchant: string) => [
+	savedIds,
+	merchant,
+];
 
 export type OrganizeGroup = {
 	name: string;
@@ -248,13 +259,15 @@ export async function groupHasRule(
  * row that Save filed (`savedIds`, a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or
  * recategorized row makes the Yes stale (no rule, no charge changed, no toast). A pending charge that sync merges into
  * its posted row (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit
- * panel's tick can still make the rule. Returns the keys whose rule was written, so a caller can tell whether there is
- * a rule to name.
+ * panel's tick can still make the rule. `merchant` is the store's name the question offered: a key whose display name is
+ * another name makes the Yes stale too, so the toast can't name a store the rule doesn't cover. The name is only compared,
+ * never written. Returns the keys whose rule was written, so a caller can tell whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
 	categoryId: number,
 	savedIds: string,
+	merchant: string,
 	actor: string,
 ): Promise<string[]> {
 	const savedRows = `transactions s WHERE s.id IN (SELECT value FROM json_each(?)) AND s.category_id = ? AND s.category_source = 'user'`;
@@ -263,7 +276,7 @@ export async function setOrganizeRule(
 	const rule = db
 		.prepare(
 			`INSERT INTO merchants (raw_name, default_category_id)
-			SELECT DISTINCT ${merchantKeySql("s")}, ? FROM ${savedRows} AND ${SAVED_STILL_HOLD_SQL}
+			SELECT DISTINCT ${merchantKeySql("s")}, ? FROM ${savedRows} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}
 			ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id
 			RETURNING raw_name`,
 		)
@@ -272,10 +285,11 @@ export async function setOrganizeRule(
 			savedIds,
 			categoryId,
 			...savedStillHoldArgs(savedIds, categoryId),
+			...savedStillNamedArgs(savedIds, merchant),
 		);
 	const apply = db
 		.prepare(
-			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL}`,
+			`${applyMerchantRuleSql(`IN (SELECT ${merchantKeySql("s")} FROM ${savedRows})`)} AND ${SAVED_STILL_HOLD_SQL} AND ${SAVED_STILL_NAMED_SQL}`,
 		)
 		.bind(
 			categoryId,
@@ -283,6 +297,7 @@ export async function setOrganizeRule(
 			savedIds,
 			categoryId,
 			...savedStillHoldArgs(savedIds, categoryId),
+			...savedStillNamedArgs(savedIds, merchant),
 		);
 	// Only the rule's statement returns rows: the keys it wrote.
 	const [written] = await db.batch([rule, apply]);

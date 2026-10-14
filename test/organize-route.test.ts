@@ -2,6 +2,8 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { organizeGroups } from "../src/transactions/organize";
+import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
 const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
@@ -288,6 +290,90 @@ describe("POST /transactions/organize", () => {
 			announce: `Target is always ${await categoryName(2)} now.`,
 		});
 		expect(html).not.toContain("rule-offer-title");
+	});
+
+	it("a Yes makes no rule once a key of the group is renamed to another store, and says nothing (htmx, #353)", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW TWO', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'RAW TWO')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const save = await post(
+			{ category: "2", name: "Target", group: "Target" },
+			undefined,
+			true,
+		);
+		await env.DB.prepare(
+			"UPDATE merchants SET display_name = 'Walmart' WHERE raw_name = 'RAW TWO'",
+		).run();
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["RAW ONE", "RAW TWO"]),
+				merchant: "Target",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(await ruleOf("RAW ONE")).toBeNull();
+		expect(await ruleOf("RAW TWO")).toBeNull();
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(html).not.toContain("is always");
+		expect(html).not.toContain("rule-offer-title");
+		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
+	});
+
+	it("a Yes makes the rule on a key with no name that tidies to the store's name, beside a named key (htmx, #353)", async () => {
+		// No merchants row for TARGET 5678, so it is named by tidyName, as the group is (organizeGroups).
+		expect(tidyName("TARGET 5678")).toBe("Target");
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT OR REPLACE INTO merchants (raw_name, display_name) VALUES ('RAW ONE', 'Target')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 50000, 'RAW ONE')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, 40000, 'TARGET 5678')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const save = await post(
+			{ category: "2", name: "", group: "Target" },
+			undefined,
+			true,
+		);
+		const { res } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["RAW ONE", "TARGET 5678"]),
+				merchant: "Target",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(await ruleOf("RAW ONE")).toBe(2);
+		expect(await ruleOf("TARGET 5678")).toBe(2);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: {
+				message: `Target is always ${await categoryName(2)} now.`,
+				type: "success",
+			},
+			announce: `Target is always ${await categoryName(2)} now.`,
+		});
 	});
 
 	it("Not now makes no rule and moves to the next store, keeping the skips", async () => {
@@ -784,6 +870,118 @@ describe("POST /transactions/organize", () => {
 		expect(res.headers.get("HX-Replace-Url")).toBe("/transactions/organize");
 		expect(html).toMatch(/<h2[^>]*tabindex="-1"[^>]*autofocus/);
 		expect(html).not.toContain("rule-offer-title");
+	});
+
+	/** Files every other store's charges that need a category, so Local Bakery is the last store Organize shows. */
+	async function leaveOnlyLocalBakery() {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 3, category_source = 'user' WHERE category_id IS NULL AND COALESCE(NULLIF(merchant_name, ''), raw_name) != 'SQ *LOCAL BAKERY 4432'",
+		).run();
+		const { html } = await get();
+		expect(html).toMatch(/1 of 1 · \d+ left, all months/);
+		expect(html).toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
+	}
+
+	it("Not now on the last store focuses the sentence that says every transaction has a category, and announces it (htmx)", async () => {
+		await leaveOnlyLocalBakery();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const { res, html } = await post(
+			{
+				answer: "no",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			announce: "Every transaction has a category.",
+		});
+		expect(html).toMatch(
+			/<p(?=[^>]*tabindex="-1")(?=[^>]*autofocus)[^>]*>Every transaction has a category\.<\/p>/,
+		);
+		expect(html).not.toContain("rule-offer-title");
+	});
+
+	it("Yes on the last store writes the rule, announces the toast then the sentence, and focuses the sentence (htmx)", async () => {
+		await leaveOnlyLocalBakery();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			undefined,
+			true,
+		);
+		const { res, html } = await post(
+			{
+				answer: "yes",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			"/transactions/organize/rule",
+			true,
+		);
+		const message = `Local Bakery is always ${await categoryName(2)} now.`;
+		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: { message, type: "success" },
+			announce: `${message} Every transaction has a category.`,
+		});
+		expect(html).toMatch(
+			/<p(?=[^>]*tabindex="-1")(?=[^>]*autofocus)[^>]*>Every transaction has a category\.<\/p>/,
+		);
+	});
+
+	it("Not now on the last store after skips focuses 'You skipped the rest.' and announces it (htmx)", async () => {
+		const others = (await organizeGroups(env.DB))
+			.map((group) => group.name)
+			.filter((name) => name !== "Local Bakery");
+		expect(others.length).toBeGreaterThan(0);
+		const skips = new URLSearchParams(
+			others.map((name): [string, string] => ["skip", name]),
+		).toString();
+		const save = await post(
+			{ category: "2", name: "", group: "Local Bakery" },
+			`/transactions/organize?${skips}`,
+			true,
+		);
+		const { res, html } = await post(
+			{
+				answer: "no",
+				merchant_keys: JSON.stringify(["SQ *LOCAL BAKERY 4432"]),
+				merchant: "Local Bakery",
+				category: "2",
+				saved: savedIdsIn(save.html),
+			},
+			`/transactions/organize/rule?${skips}`,
+			true,
+		);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			announce: "You skipped the rest.",
+		});
+		expect(html).toMatch(
+			/<p(?=[^>]*tabindex="-1")(?=[^>]*autofocus)[^>]*>You skipped the rest\.<\/p>/,
+		);
+		expect(html).not.toContain("rule-offer-title");
+	});
+
+	it("a plain GET of an empty Organize keeps its sentence unfocused", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id IS NULL",
+		).run();
+		const { html } = await get();
+		const sentence =
+			html.match(/<p[^>]*>Every transaction has a category\.<\/p>/)?.[0] ?? "";
+		expect(sentence).toMatch(/^<p/);
+		expect(sentence).not.toContain("tabindex");
+		expect(sentence).not.toContain("autofocus");
 	});
 
 	it("shows a fresh form for the next merchant when the submitted one is already done", async () => {

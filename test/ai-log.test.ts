@@ -1176,6 +1176,7 @@ describe("what the Jev run and the names write", () => {
 			counted,
 			categoryId,
 			JSON.stringify(savedIds),
+			"Rule shop",
 			"test",
 		);
 		expect(ruled).toHaveLength(600);

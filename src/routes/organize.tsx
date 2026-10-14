@@ -37,6 +37,12 @@ type Values = {
 	nameError?: string;
 };
 
+/** An answer's reply (#353): the toast and the announcement, sent as one HX-Trigger header. */
+type Trigger = {
+	toast?: { message: string; type: "success" };
+	announce?: string;
+};
+
 export const organize = new Hono<App>();
 
 async function renderOrganize(
@@ -46,6 +52,11 @@ async function renderOrganize(
 	focus = false,
 	/** After a save, the question about the rule in place of the store (#353). */
 	rule?: GroupRuleOfferValue,
+	/**
+	 * A rule answer's reply (#353). When it is given, the one HX-Trigger header is set here, and the empty state's sentence
+	 * joins the announcement when the list ends on it. Without it, the caller's own header stands.
+	 */
+	trigger?: Trigger,
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
@@ -64,6 +75,10 @@ async function renderOrganize(
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
+	const doneSentence =
+		allGroups.length > 0
+			? "You skipped the rest."
+			: "Every transaction has a category.";
 	const query = new URLSearchParams();
 	for (const name of skipped) query.append("skip", name);
 	const action = `/transactions/organize${query.size ? `?${query}` : ""}`;
@@ -76,6 +91,21 @@ async function renderOrganize(
 	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
 	// question's own address also carries its category and saved ids, which an answer must not repeat.
 	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
+	if (trigger) {
+		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
+		const ends = focus && !rule && !group;
+		const announce = [trigger.announce, ends && doneSentence]
+			.filter(Boolean)
+			.join(" ");
+		if (trigger.toast || announce)
+			c.header(
+				"HX-Trigger",
+				JSON.stringify({
+					toast: trigger.toast,
+					announce: announce || undefined,
+				}),
+			);
+	}
 
 	return c.html(
 		<Layout
@@ -179,16 +209,16 @@ async function renderOrganize(
 							</div>
 						</form>
 					</>
-				) : allGroups.length > 0 ? (
-					<EmptyState
-						kind="done"
-						sentence="You skipped the rest."
-						action={{ href: "/transactions/organize", label: "Start over" }}
-					/>
 				) : (
 					<EmptyState
 						kind="done"
-						sentence="Every transaction has a category."
+						sentence={doneSentence}
+						focus={focus}
+						action={
+							allGroups.length > 0
+								? { href: "/transactions/organize", label: "Start over" }
+								: undefined
+						}
 					/>
 				)}
 			</div>
@@ -395,28 +425,26 @@ organize.post("/transactions/organize/rule", async (c) => {
 		form.get("answer") === "yes" && category && savedIds.length > 0
 			? category
 			: null;
+	const merchant = form.get("merchant")?.toString().trim() ?? "";
 	const written = ruled
 		? await setOrganizeRule(
 				c.env.DB,
 				ruled.id,
 				JSON.stringify(savedIds),
+				merchant,
 				actor(c),
 			)
 		: [];
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
+	const trigger: Trigger = {};
 	if (ruled && written.length > 0) {
-		const message = `${form.get("merchant")?.toString().trim() || written[0]} is always ${ruled.name} now.`;
-		c.header(
-			"HX-Trigger",
-			JSON.stringify({
-				toast: { message, type: "success" },
-				announce: message,
-			}),
-		);
+		const message = `${merchant || written[0]} is always ${ruled.name} now.`;
+		trigger.toast = { message, type: "success" };
+		trigger.announce = message;
 	}
 	// The Save before it pushed the question's address, so the answer replaces it with the skips-only address, giving
 	// one history entry, not two.
 	c.header("HX-Replace-Url", next);
-	return renderOrganize(c, undefined, 200, true);
+	return renderOrganize(c, undefined, 200, true, undefined, trigger);
 });
