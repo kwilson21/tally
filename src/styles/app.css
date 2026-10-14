@@ -749,32 +749,14 @@ html:not(.js) [data-money-js] {
  * Proposals only (P125): the replays of a family's first week, none of it in the app yet. Each replay loops, and
  * its base state is the end state, so reduced motion rests there (the reduce rule below stops every loop), and a
  * still capture, which starts each loop mid-hold, shows it too. Each keyframe starts from the before-state at 0%
- * and holds the end state to 100%, where the loop starts again from the before-state. A (6 s): the three bank
- * lines are struck in turn, 200 ms apart, and Tally's rows fade in under them. B (5 s): the pencilled amount inks
+ * and holds the end state to 100%, where the loop starts again from the before-state. A (8 s): Home's headline and
+ * status swap in turn (the status at 15% and 45%, the headline at 45%, each over 150 ms), and each of Tally's
+ * lines 1 to 4 turns found 200 ms after the one before it: its promise fades out, and its label, fact and the
+ * bank's line (struck through) with Tally's name fade in. Lines 2 to 4 have keyframes of their own, which their step classes name, so each turns found at its own point. B (5 s): the pencilled amount inks
  * in over 150 ms, its dashed rule turns solid, and the two bars fill. C (6 s): the fifth stroke draws across the
  * four in 200 ms, and all five turn from pencil to ink in 150 ms. D (6 s): the new answer's line fades in and rises
  * 4 px in 200 ms, the double rule draws from the left, and the amount fades in.
  */
-@keyframes replay-first-strike {
-	0%,
-	9.99% {
-		transform: scaleX(0);
-	}
-	13.33%,
-	100% {
-		transform: scaleX(1);
-	}
-}
-@keyframes replay-first-rows {
-	0%,
-	19.99% {
-		opacity: 0;
-	}
-	23.33%,
-	100% {
-		opacity: 1;
-	}
-}
 @keyframes replay-first-ink-text {
 	0%,
 	19.99% {
@@ -867,26 +849,6 @@ html:not(.js) [data-money-js] {
 		opacity: 1;
 	}
 }
-.proposal-first-strike {
-	--loop: calc(var(--duration-rising) * 30);
-	animation: replay-first-strike var(--loop) linear infinite;
-	animation-delay: calc(var(--loop) * -0.5);
-}
-.proposal-first-strike-later {
-	--loop: calc(var(--duration-rising) * 30);
-	animation: replay-first-strike var(--loop) linear infinite;
-	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising));
-}
-.proposal-first-strike-last {
-	--loop: calc(var(--duration-rising) * 30);
-	animation: replay-first-strike var(--loop) linear infinite;
-	animation-delay: calc(var(--loop) * -0.5 + var(--duration-rising) * 2);
-}
-.proposal-first-rows {
-	--loop: calc(var(--duration-rising) * 30);
-	animation: replay-first-rows var(--loop) linear infinite;
-	animation-delay: calc(var(--loop) * -0.5);
-}
 .proposal-first-ink-text {
 	--loop: calc(var(--duration-rising) * 25);
 	animation: replay-first-ink-text var(--loop) linear infinite;
@@ -937,11 +899,355 @@ html:not(.js) [data-money-js] {
 	animation: replay-first-amount var(--loop) linear infinite;
 	animation-delay: calc(var(--loop) * -0.5);
 }
+@keyframes replay-first-promise-line2 {
+	0%,
+	47.5% {
+		opacity: 1;
+	}
+	49.375%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-label-line2 {
+	0%,
+	47.5% {
+		opacity: 0;
+	}
+	49.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-fact-line2 {
+	0%,
+	49.375% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	51.875%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-strike-line2 {
+	0%,
+	51.875% {
+		transform: scaleX(0);
+	}
+	54.375%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-name-line2 {
+	0%,
+	51.875% {
+		opacity: 0;
+	}
+	54.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-promise-line3 {
+	0%,
+	20% {
+		opacity: 1;
+	}
+	21.875%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-label-line3 {
+	0%,
+	20% {
+		opacity: 0;
+	}
+	21.875%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-fact-line3 {
+	0%,
+	21.875% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	24.375%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-strike-line3 {
+	0%,
+	24.375% {
+		transform: scaleX(0);
+	}
+	26.875%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-name-line3 {
+	0%,
+	24.375% {
+		opacity: 0;
+	}
+	26.875%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-promise-line4 {
+	0%,
+	22.5% {
+		opacity: 1;
+	}
+	24.375%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-label-line4 {
+	0%,
+	22.5% {
+		opacity: 0;
+	}
+	24.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-fact-line4 {
+	0%,
+	24.375% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	26.875%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-strike-line4 {
+	0%,
+	26.875% {
+		transform: scaleX(0);
+	}
+	29.375%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-name-line4 {
+	0%,
+	26.875% {
+		opacity: 0;
+	}
+	29.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-status-first {
+	0%,
+	15% {
+		opacity: 1;
+	}
+	16.875%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-status-middle {
+	0%,
+	15% {
+		opacity: 0;
+	}
+	16.875%,
+	45% {
+		opacity: 1;
+	}
+	46.875%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-status-last {
+	0%,
+	45% {
+		opacity: 0;
+	}
+	46.875%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-promise {
+	0%,
+	17.5% {
+		opacity: 1;
+	}
+	19.375%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-label {
+	0%,
+	17.5% {
+		opacity: 0;
+	}
+	19.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-fact {
+	0%,
+	19.375% {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	21.875%,
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes replay-first-strike {
+	0%,
+	21.875% {
+		transform: scaleX(0);
+	}
+	24.375%,
+	100% {
+		transform: scaleX(1);
+	}
+}
+@keyframes replay-first-name {
+	0%,
+	21.875% {
+		opacity: 0;
+	}
+	24.375%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes replay-first-title-first {
+	0%,
+	45% {
+		opacity: 1;
+	}
+	46.875%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes replay-first-title-last {
+	0%,
+	45% {
+		opacity: 0;
+	}
+	46.875%,
+	100% {
+		opacity: 1;
+	}
+}
+.proposal-first-status-first {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: replay-first-status-first var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-status-middle {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: replay-first-status-middle var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-status-last {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: replay-first-status-last var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-promise {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: var(--kf-promise, replay-first-promise) var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-label {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: var(--kf-label, replay-first-label) var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-fact {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: var(--kf-fact, replay-first-fact) var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-strike {
+	--loop: calc(var(--duration-rising) * 40);
+	transform-origin: left;
+	animation: var(--kf-strike, replay-first-strike) var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-name {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: var(--kf-name, replay-first-name) var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-title-first {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: replay-first-title-first var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+.proposal-first-title-last {
+	--loop: calc(var(--duration-rising) * 40);
+	animation: replay-first-title-last var(--loop) linear infinite;
+	animation-delay: calc(var(--loop) * -0.5);
+}
+/* A line's step: the keyframes its own animations read, so each line turns found at its own point in the 8 s loop
+ * (line 1 at 17.5%, line 3 at 20%, line 4 at 22.5%, line 2 at 47.5%). Every line's loop starts at 0% together, so no
+ * line resets in the middle of the replay. */
+.proposal-first-later {
+	--kf-promise: replay-first-promise-line3;
+	--kf-label: replay-first-label-line3;
+	--kf-fact: replay-first-fact-line3;
+	--kf-strike: replay-first-strike-line3;
+	--kf-name: replay-first-name-line3;
+}
+.proposal-first-last {
+	--kf-promise: replay-first-promise-line4;
+	--kf-label: replay-first-label-line4;
+	--kf-fact: replay-first-fact-line4;
+	--kf-strike: replay-first-strike-line4;
+	--kf-name: replay-first-name-line4;
+}
+.proposal-first-second-round {
+	--kf-promise: replay-first-promise-line2;
+	--kf-label: replay-first-label-line2;
+	--kf-fact: replay-first-fact-line2;
+	--kf-strike: replay-first-strike-line2;
+	--kf-name: replay-first-name-line2;
+}
+
 @media (prefers-reduced-motion: reduce) {
+	.proposal-first-status-first,
+	.proposal-first-status-middle,
+	.proposal-first-status-last,
+	.proposal-first-title-first,
+	.proposal-first-title-last,
+	.proposal-first-promise,
+	.proposal-first-label,
+	.proposal-first-fact,
 	.proposal-first-strike,
-	.proposal-first-strike-later,
-	.proposal-first-strike-last,
-	.proposal-first-rows,
+	.proposal-first-name,
 	.proposal-first-ink-text,
 	.proposal-first-pencil-off,
 	.proposal-first-ink-on,

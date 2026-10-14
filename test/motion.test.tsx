@@ -601,7 +601,8 @@ describe("the proposals page's drawings", () => {
 		);
 		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), P118 and
 		// P119's saved-row replays (the tick, the let-go press and the toast), and P125's replays of a family's
-		// first week (the strikes, the rows, the pencil and ink, the strokes, the ledger line and the rule).
+		// first week (the headline and status lines, the promises and found lines, the strikes, the pencil and ink, the strokes,
+		// the ledger line and the rule), plus the three step classes that set when a line starts (no animation).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
@@ -609,16 +610,25 @@ describe("the proposals page's drawings", () => {
 				"proposal-first-amount",
 				"proposal-first-bar",
 				"proposal-first-cross",
+				"proposal-first-fact",
 				"proposal-first-ink-on",
 				"proposal-first-ink-text",
+				"proposal-first-label",
+				"proposal-first-last",
+				"proposal-first-later",
 				"proposal-first-line",
+				"proposal-first-name",
 				"proposal-first-pencil-off",
-				"proposal-first-rows",
+				"proposal-first-promise",
 				"proposal-first-rule",
+				"proposal-first-second-round",
+				"proposal-first-status-first",
+				"proposal-first-status-last",
+				"proposal-first-status-middle",
 				"proposal-first-strike",
-				"proposal-first-strike-last",
-				"proposal-first-strike-later",
 				"proposal-first-stroke",
+				"proposal-first-title-first",
+				"proposal-first-title-last",
 				"proposal-loop",
 				"proposal-morph",
 				"proposal-saved-chevron",

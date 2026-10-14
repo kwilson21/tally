@@ -1,7 +1,7 @@
 // P125 (#95): a new family's first week, four ways, drawn for the owner's pick (proposal only: nothing in the
 // app changes). Every picture is the family's app, with no demo banner, on one sample household: Chase linked
 // Tue Oct 13 at 7 p.m., today Wed Oct 14, Eastern time. Where the app's own components draw the same at a
-// phone's size they are used as they are (Band, TransactionRow, ProgressRow, CategoryIcon, FoldedRow,
+// phone's size they are used as they are (Band, ProgressRow, CategoryIcon, FoldedRow,
 // SheetFooter, MoneyInput, Button, Icon, WhyLink). The pencil states (a dashed amount, a dashed rule, a
 // muted row) and the notebook's strokes drawn one at a time are prototypes in tokens, and each says in words
 // what it is for a screen reader. The replays are proposals-only keyframes in app.css ("Proposals only (P125)").
@@ -17,7 +17,6 @@ import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
 import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
-import { TransactionRow } from "../views/transaction-row";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Sheet } from "./proposal-parts";
 import { EATING_OUT, TITLE, tx } from "./proposals-phase5-transactions";
@@ -176,11 +175,54 @@ const BLUE_BOTTLE = {
 	displayName: "Blue Bottle Coffee",
 };
 
-/** The evening's three bank lines, each with Tally's row under the bank's own text. */
-const BANK_LINES = [
-	{ bank: "ACME CORP PAYROLL PPD ID 4432", row: ACME },
-	{ bank: "ONLINE TRANSFER TO SAV ...5678", row: SAVINGS },
-	{ bank: "SQ *BLUE BOTTLE COF 0217", row: BLUE_BOTTLE },
+/** Tally's part: six lines, each a promise until Tally has found it. A found line has its fact and the bank's own line that proves it (or a muted sub). */
+type PartLine = {
+	promise: string;
+	found?: {
+		label: string;
+		fact: string;
+		/** The bank's own line, struck through, and the name Tally gives it. */
+		proof?: { bank: string; name: string };
+		/** A muted second line for a find with no bank line to prove it. */
+		sub?: string;
+	};
+};
+
+const TALLY_LINES: PartLine[] = [
+	{
+		promise: "Find your paycheck",
+		found: {
+			label: "Found your paycheck",
+			fact: "$2,450 every other Friday, from Acme Corp",
+			proof: { bank: ACME.rawName, name: ACME.displayName },
+		},
+	},
+	{
+		promise: "Spot your bills",
+		found: {
+			label: "Spotted your bills",
+			fact: "8 that come back every month, about $2,062",
+			sub: "Harbor Property, Geico, Spectrum and 5 more",
+		},
+	},
+	{
+		promise: "Leave out your transfers",
+		found: {
+			label: "Left out your transfers",
+			fact: "6 moves between your own accounts, so they don't count as spending",
+			proof: { bank: SAVINGS.rawName, name: SAVINGS.displayName },
+		},
+	},
+	{
+		promise: "Name your stores",
+		found: {
+			label: "Named your stores",
+			fact: "38 stores, from your bank's text",
+			proof: { bank: BLUE_BOTTLE.rawName, name: BLUE_BOTTLE.displayName },
+		},
+	},
+	{ promise: "Sort your spending" },
+	{ promise: "Write your first budget" },
 ];
 
 const FAMILY_BAND = (
@@ -203,64 +245,158 @@ function blank(words: string) {
 	);
 }
 
-/** A bank's line with a pencil strike drawn across it, and Tally's row under it. The replay names the classes that draw the strike and fade the row in. */
-function BankLine({
-	bank,
-	row,
-	strike = "",
-	rows = "",
-}: {
-	bank: string;
-	row: ReturnType<typeof tx>;
-	strike?: string;
-	rows?: string;
-}) {
+/** The promise: its label in muted words, and a dashed blank for what isn't found yet. `cls` adds the replay's classes. */
+function PromiseRow({ label, cls = "" }: { label: string; cls?: string }) {
 	return (
-		<div>
-			<p class="text-sm text-muted">
-				<span class="sr-only">The bank sent </span>
-				<span class="relative inline-block">
-					{bank}
-					<span
-						aria-hidden="true"
-						class={`absolute inset-x-0 top-1/2 h-px origin-left bg-muted ${strike}`}
-					/>
-				</span>
-			</p>
-			<ul class={`mt-1 border-y border-rule ${rows}`}>
-				<TransactionRow row={row} />
-			</ul>
+		<div class={`flex min-h-11 items-center justify-between gap-3 py-1 ${cls}`}>
+			<span class="text-lg text-muted">{label}</span>
+			<span class="inline-block h-px w-24 border-b-2 border-dashed border-muted">
+				<span class="sr-only">Not done yet</span>
+			</span>
 		</div>
 	);
 }
 
-/** One line of the entry: its name, what Tally wrote, and a muted second line. A dashed blank stands for what isn't written yet. */
-function EntryLine({
-	label,
-	value,
-	sub,
-	blankValue = false,
-	ruled = false,
+/** What Tally found: its label in ink, the fact, and the bank's own line struck through, with Tally's name beside it (or a muted sub). `cls` names the replay's classes for each part. */
+function FoundLines({
+	found,
+	cls = {},
 }: {
-	label: string;
-	value?: Child;
-	sub?: Child;
-	blankValue?: boolean;
-	ruled?: boolean;
+	found: NonNullable<PartLine["found"]>;
+	cls?: { label?: string; fact?: string; strike?: string; name?: string };
 }) {
 	return (
-		<li class={`py-3 ${ruled ? "border-t border-ink" : ""}`}>
-			<div class="flex items-baseline justify-between gap-3">
-				<span class="text-lg">{label}</span>
-				{blankValue && (
-					<span class="inline-block h-px w-24 border-b-2 border-dashed border-muted">
-						<span class="sr-only">Not filled in yet</span>
+		<>
+			<p class={`text-lg font-medium ${cls.label ?? ""}`}>{found.label}</p>
+			<p class={`mt-1 text-base ${cls.fact ?? ""}`}>{found.fact}</p>
+			{found.proof ? (
+				<p class={`mt-1 flex min-w-0 text-sm ${cls.fact ?? ""}`}>
+					<span class="sr-only">Your bank wrote </span>
+					<span class="relative min-w-0 truncate text-muted">
+						{found.proof.bank}
+						<span
+							aria-hidden="true"
+							class={`absolute inset-x-0 top-1/2 h-px origin-left bg-muted ${cls.strike ?? ""}`}
+						/>
 					</span>
-				)}
+					<span class="sr-only">; Tally reads it as </span>
+					<span class={`ml-1 shrink-0 text-ink ${cls.name ?? ""}`}>
+						{found.proof.name}
+					</span>
+					<span class="sr-only">.</span>
+				</p>
+			) : (
+				<p class={`mt-1 text-sm text-muted ${cls.name ?? ""}`}>{found.sub}</p>
+			)}
+		</>
+	);
+}
+
+/** The replay's step class for each line that turns found: it names the keyframes that line reads, so line 3 turns 200 ms after line 1 and line 4 400 ms after (app.css, "Proposals only (P125)"), and line 2 turns at 47.5%. The replay draws lines 1 to 4 only. */
+const REPLAY_STEP = [
+	"",
+	"proposal-first-second-round",
+	"proposal-first-later",
+	"proposal-first-last",
+];
+
+/** One line of Tally's part: a promise, or once found, its fact and proof. `replay` draws both states in one cell, with the classes that animate them. */
+function PartRow({
+	line,
+	found,
+	sub,
+	ruled,
+	replay,
+}: {
+	line: PartLine;
+	found: boolean;
+	/** A muted second line under a promise. */
+	sub?: string;
+	/** The last line sits under an ink rule. */
+	ruled: boolean;
+	replay?: { step: string };
+}) {
+	const rule = ruled ? "border-t border-ink" : "";
+	if (!found || !line.found) {
+		return (
+			<li class={`${sub ? "pb-2" : ""} ${rule}`}>
+				<PromiseRow label={line.promise} />
+				{sub && <p class="mt-1 text-sm text-muted">{sub}</p>}
+			</li>
+		);
+	}
+	if (!replay) {
+		return (
+			<li class={`py-3 ${rule}`}>
+				<FoundLines found={line.found} />
+			</li>
+		);
+	}
+	return (
+		<li class={`py-3 ${rule} ${replay.step}`}>
+			<div class="grid">
+				<PromiseRow
+					label={line.promise}
+					cls="col-start-1 row-start-1 self-start proposal-first-promise opacity-0"
+				/>
+				<div class="col-start-1 row-start-1">
+					<FoundLines
+						found={line.found}
+						cls={{
+							label: "proposal-first-label",
+							fact: "proposal-first-fact",
+							strike: "proposal-first-strike",
+							name: "proposal-first-name",
+						}}
+					/>
+				</div>
 			</div>
-			{value && <p class="text-base">{value}</p>}
-			{sub && <p class="text-sm text-muted">{sub}</p>}
 		</li>
+	);
+}
+
+/** Tally's part: its lines in order, from line `from` up to line `to` (all six by default). `found` names the lines Tally has found and `subs` gives promises their muted line. */
+function TallysPart({
+	found = [],
+	subs = {},
+	from = 0,
+	to = TALLY_LINES.length,
+	replay = false,
+}: {
+	found?: number[];
+	subs?: Record<number, string>;
+	from?: number;
+	to?: number;
+	replay?: boolean;
+}) {
+	return (
+		<ul class="divide-y divide-rule border-y border-rule">
+			{TALLY_LINES.slice(from, to).map((line, j) => {
+				const i = from + j;
+				return (
+					<PartRow
+						line={line}
+						found={found.includes(i)}
+						sub={subs[i]}
+						ruled={i === TALLY_LINES.length - 1}
+						replay={replay ? { step: REPLAY_STEP[i] ?? "" } : undefined}
+					/>
+				);
+			})}
+		</ul>
+	);
+}
+
+/** Your part: the one thing the family does, on a line under an ink rule. The picture says what sits at its right and under it. */
+function YourPart({ right, children }: { right: Child; children?: Child }) {
+	return (
+		<div class="mt-4 border-t border-ink pt-3">
+			<div class="flex items-baseline justify-between gap-3">
+				<p class="text-lg font-medium">Your part</p>
+				{right}
+			</div>
+			{children}
+		</div>
 	);
 }
 
@@ -469,95 +605,98 @@ function PencilTop({
 const aBefore = (
 	<>
 		<div class="flex items-center justify-between gap-4">
-			<h1 class="font-serif text-5xl font-semibold tracking-tight">
+			<h1 class="font-serif text-4xl font-semibold tracking-tight">
 				Let Tally read first.
 			</h1>
-			<div class="shrink-0 [&>svg]:size-24">
+			<div class="shrink-0 [&>svg]:size-20">
 				<LedgerIllustration />
 			</div>
 		</div>
-		<p class="mt-4 text-lg">
-			Link your bank and Tally reads your last 90 days: what you're paid, what
-			comes back every month and where the rest goes. Then it writes you a first
-			budget. You won't type a number.
+		<p class="mt-4 text-base">
+			Link your bank and Tally does the dull part: it reads your last 90 days,
+			tidies them up and writes you a first budget. You won't type a number.
 		</p>
-		<div class="mt-5">
-			<Button type="button" class="w-full">
-				Link a bank
-			</Button>
+		<h2 class="mt-4 text-sm font-medium text-muted">Tally's part</h2>
+		<div class="mt-2">
+			<TallysPart />
 		</div>
-		<p class="mt-2 text-sm text-muted">
-			Tally can only read your bank. It can't move money.
-		</p>
-		<h2 class="mt-6 text-sm font-medium text-muted">What Tally fills in</h2>
-		<ul class="mt-2 divide-y divide-rule border-y border-rule">
-			{["Paid", "Comes back every month", "Left out", "Where it goes"].map(
-				(label) => (
-					<li class="flex min-h-11 items-center justify-between gap-3 py-2">
-						<span class="text-lg">{label}</span>
-						<span class="inline-block h-px w-24 border-b-2 border-dashed border-muted">
-							<span class="sr-only">Not filled in yet</span>
-						</span>
-					</li>
-				),
-			)}
-			<li class="flex min-h-11 items-center justify-between gap-3 border-t border-ink py-2">
-				<span class="text-lg">A first budget</span>
-				<span class="inline-block h-px w-24 border-b-2 border-dashed border-muted">
-					<span class="sr-only">Not filled in yet</span>
-				</span>
-			</li>
-		</ul>
+		<YourPart right={<p class="text-muted">Link a bank</p>}>
+			<div class="mt-3">
+				<Button type="button" class="w-full">
+					Link a bank
+				</Button>
+			</div>
+			<p class="mt-2 text-sm text-muted">
+				Tally can only read your bank. It can't move money.
+			</p>
+		</YourPart>
 	</>
 );
 
+/** The before-bank Home, dimmed behind the sheet that Link a bank opens on Home: a placeholder for Plaid's own screens. */
+const aPlaid = (
+	<Sheet behind={aBefore} top="top-64">
+		<h2 class="font-serif text-2xl font-semibold text-muted">
+			Plaid's own screens
+		</h2>
+		<p class="text-muted">
+			Pick your bank and sign in with Plaid. Tally never sees your bank
+			password.
+		</p>
+		<div class="h-40 rounded-control border-2 border-dashed border-muted" />
+	</Sheet>
+);
+
+/** A minute later: the first month is in, and Home has filled in lines 1 to 4 of Tally's part, with line 2 still waiting. */
+const aMinute = (
+	<>
+		<h1 class="font-serif text-4xl font-semibold tracking-tight">
+			Reading Chase
+		</h1>
+		<p class="mt-3 font-serif text-lg italic">
+			142 transactions in so far, from Sep 14 to Oct 13.
+		</p>
+		<p class="mt-1 text-muted">You can close Tally. It keeps reading.</p>
+		<h2 class="mt-4 text-sm font-medium text-muted">Tally's part</h2>
+		<div class="mt-2">
+			<TallysPart
+				found={[0, 2, 3]}
+				to={4}
+				subs={{ 1: "Once all 90 days are in" }}
+			/>
+		</div>
+	</>
+);
+
+/** That evening: Tally's part, with lines 1 to 4 found. Lines 5 and 6 and Your part come in the scrolled picture below. */
 const aEvening = (
 	<>
 		<h1 class="font-serif text-4xl font-semibold tracking-tight">
 			Your last 90 days
 		</h1>
 		<p class="mt-3 font-serif text-lg italic">
-			Tally sorts the rest tonight. Your first budget will be ready by about 6
-			a.m.
+			All 412 are in, from Jul 16 to Oct 13. Tally sorts the rest tonight, and
+			your first budget will be ready by about 6 a.m.
 		</p>
 		<p class="mt-1 text-muted">Nothing for you to do until then.</p>
-		<h2 class="mt-6 font-serif text-2xl font-semibold">Three of your lines</h2>
-		<div class="mt-3 flex flex-col gap-4">
-			{BANK_LINES.map(({ bank, row }) => (
-				<BankLine bank={bank} row={row} />
-			))}
+		<h2 class="mt-4 text-sm font-medium text-muted">Tally's part</h2>
+		<div class="mt-2">
+			<TallysPart found={[0, 1, 2, 3]} to={4} />
 		</div>
 	</>
 );
 
-const aEntry = (
+/** That evening, further down: the last two lines, and Your part. */
+const aEveningRest = (
 	<>
-		<h2 class="font-serif text-2xl font-semibold">Tally's entry</h2>
-		<ul class="mt-2 divide-y divide-rule border-y border-rule">
-			<EntryLine
-				label="Paid"
-				value="$2,450 every other Friday, from Acme Corp"
-				sub="7 paychecks since Jul 17"
-			/>
-			<EntryLine
-				label="Comes back every month"
-				value="8 charges, about $2,062"
-				sub="Harbor Property, Geico, Spectrum and 5 more"
-			/>
-			<EntryLine label="Left out" value="6 moves between your own accounts" />
-			<EntryLine label="Named" value="31 stores, from your bank's text" />
-			<EntryLine
-				label="Where it goes"
-				blankValue
-				sub="50 of 412 sorted. The rest tonight."
-			/>
-			<EntryLine
-				label="A first budget"
-				blankValue
-				sub="Ready by about 6 a.m."
-				ruled
-			/>
-		</ul>
+		<TallysPart
+			from={4}
+			subs={{
+				4: "50 of 412 sorted so far. The rest tonight.",
+				5: "Ready by about 6 a.m.",
+			}}
+		/>
+		<YourPart right={<p class="text-ink">Linked Chase</p>} />
 	</>
 );
 
@@ -676,26 +815,34 @@ const aHome = (
 
 const aHomeRest = <BudgetRows rows={BUDGETS.slice(4)} />;
 
-/** The three strikes, in turn: each starts 200 ms after the one above it (app.css, "Proposals only (P125)"). */
-const STRIKES = [
-	"proposal-first-strike",
-	"proposal-first-strike-later",
-	"proposal-first-strike-last",
-];
-
-/** Option A's replay: the three bank lines are struck in turn, and Tally's rows fade in under them. */
+/** Option A's replay, 8 s: the headline and the status swap in turn, and lines 1 to 4 turn found as the bank's lines arrive (app.css, "Proposals only (P125)"). Its end state is the evening's words, so reduced motion rests there. */
 const aReplay = (
 	<>
-		<h2 class="font-serif text-2xl font-semibold">Three of your lines</h2>
-		<div class="mt-3 flex flex-col gap-4">
-			{BANK_LINES.map(({ bank, row }, i) => (
-				<BankLine
-					bank={bank}
-					row={row}
-					strike={STRIKES[i]}
-					rows="proposal-first-rows"
-				/>
-			))}
+		<h1 class="font-serif text-4xl font-semibold tracking-tight">
+			<span class="grid">
+				<span class="col-start-1 row-start-1 opacity-0 proposal-first-title-first">
+					Reading Chase
+				</span>
+				<span class="col-start-1 row-start-1 proposal-first-title-last">
+					Your last 90 days
+				</span>
+			</span>
+		</h1>
+		<div class="mt-3 grid font-serif text-lg italic">
+			<span class="col-start-1 row-start-1 opacity-0 proposal-first-status-first">
+				Reading Chase. The first month usually takes under a minute.
+			</span>
+			<span class="col-start-1 row-start-1 opacity-0 proposal-first-status-middle">
+				142 transactions in so far, from Sep 14 to Oct 13.
+			</span>
+			<span class="col-start-1 row-start-1 proposal-first-status-last">
+				All 412 are in, from Jul 16 to Oct 13. Tally sorts the rest tonight, and
+				your first budget will be ready by about 6 a.m.
+			</span>
+		</div>
+		<h2 class="mt-4 text-sm font-medium text-muted">Tally's part</h2>
+		<div class="mt-2">
+			<TallysPart found={[0, 1, 2, 3]} to={4} replay />
 		</div>
 	</>
 );
@@ -1175,29 +1322,47 @@ export function PolishRoundDProposals() {
 				<Choice
 					name="Option A · The Opening Entry"
 					width="w-full"
-					note="Tally reads your last 90 days first and writes the first page of your books, ending in a budget you keep with one tap."
-					cost="a first-budget rule (a spec line), a Home that is the entry until a budget exists, and checking for the import's end (htmx polling, a new pattern here)."
-					why="a family sees its own numbers the first evening, and the first budget comes from their own months, not from a guess."
+					note="Tally's part against yours: Tally finds your paycheck, bills and transfers, names your stores and writes a first budget, and you link a bank. Home fills itself in while Tally reads."
+					cost="a first-budget rule (a spec line), a Home that is the entry until a budget exists, Plaid Link opened on Home (the approved plaid-link.js, loaded there while no bank is linked), and Home checking every 5 seconds while Tally reads (htmx polling, a new pattern here). The status line is the only thing read aloud: once when the first month is in and once when all 90 days are."
+					why="a family sees what Tally does for them on their own money as it arrives, and the only thing they did was link a bank."
 					recommended
 				>
-					<Shot caption="Before a bank: Home, with no figure yet">
+					<Shot caption="Before a bank: Tally's part, and yours">
 						<Phone label="Option A, before a bank" demo={false} tab="home">
 							{aBefore}
 						</Phone>
 					</Shot>
-					<Shot caption="That evening: three of the bank's lines, struck, with Tally's row under each">
+					<Shot caption="Link a bank opens Plaid right on Home">
+						<Phone
+							label="Option A, Plaid opened on Home, over the dimmed Home"
+							demo={false}
+							tab="home"
+						>
+							{aPlaid}
+						</Phone>
+					</Shot>
+					<Shot caption="A minute later: the first month is in, and Home fills itself in">
+						<Phone
+							label="Option A, a minute later, with the first month in"
+							demo={false}
+							tab="home"
+						>
+							{aMinute}
+						</Phone>
+					</Shot>
+					<Shot caption="That evening: Tally's part, done">
 						<Phone label="Option A, that evening" demo={false} tab="home">
 							{aEvening}
 						</Phone>
 					</Shot>
-					<Shot caption="That evening, further down: Tally's entry, line by line">
+					<Shot caption="That evening, scrolled: the rest, and your part">
 						<Phone
-							label="Option A, that evening, the entry"
+							label="Option A, that evening, scrolled: the rest, and your part"
 							demo={false}
 							scrolled
 							tab="home"
 						>
-							{aEntry}
+							{aEveningRest}
 						</Phone>
 					</Shot>
 					<Shot caption="Next morning: Home's top, with the figure still to come">
@@ -1240,11 +1405,10 @@ export function PolishRoundDProposals() {
 							{aHomeRest}
 						</Phone>
 					</Shot>
-					<Shot caption="Replay, every 6 seconds: each bank line is struck through in turn, then Tally's row shows under it">
+					<Shot caption="Replay, a few minutes shortened to 8 seconds: Home fills itself in as the bank's lines arrive">
 						<Phone
-							label="Option A, replay: the bank lines struck through"
+							label="Option A, replay: Home fills itself in as the lines arrive"
 							demo={false}
-							scrolled
 							tab="home"
 						>
 							{aReplay}
