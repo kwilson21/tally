@@ -429,7 +429,7 @@ function RulesPage() {
 						</span>
 						<a
 							href="/settings"
-							class="shrink-0 py-2 text-sm text-muted underline"
+							class="flex min-h-11 shrink-0 items-center text-sm text-muted underline"
 						>
 							Remove
 						</a>
@@ -661,7 +661,7 @@ function P134() {
 							<HouseholdPage />
 						</Phone>
 					</Shot>
-					<Shot caption="Tally's rules at 390">
+					<Shot caption="Tally's rules at 390 (a prototype: Remove is the muted link this option asks for)">
 						<Phone label="Option A, rules" tab="more" masthead={PILL}>
 							<RulesPage />
 						</Phone>

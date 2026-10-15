@@ -4299,6 +4299,8 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(remove, "Remove as a link").not.toBeNull();
 		expect(remove?.[1]).toContain("text-muted");
 		expect(remove?.[1]).not.toContain("text-accent");
+		// The Remove link is a touch target, so it is at least 44px tall (CLAUDE.md, 44px touch targets).
+		expect(remove?.[1]).toContain("min-h-11");
 		expect(rules).toContain("Never suggest: none yet");
 		expect(rules.match(/City Gym/g)?.length).toBe(1);
 	});
