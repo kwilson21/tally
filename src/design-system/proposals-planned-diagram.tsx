@@ -47,7 +47,7 @@ function WideFrame({
 				role="img"
 				aria-label={`${name}, on desktop`}
 				aria-describedby={`${id}-sum`}
-				class="h-[240px] w-[824px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class="relative h-[240px] w-[824px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<span id={`${id}-sum`} hidden>
 					{sum}
@@ -83,7 +83,7 @@ function PhonePicture({
 				role="img"
 				aria-label={`${name}, on a phone`}
 				aria-describedby={`${id}-sum`}
-				class="h-[846px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class="relative h-[846px] w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<span id={`${id}-sum`} hidden>
 					{sum}
