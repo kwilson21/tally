@@ -315,3 +315,161 @@ describe("Savings goal: its close returns focus to the Savings row on Home", () 
 		for (const row of rows) expect(row).toContain("autofocus");
 	});
 });
+
+/** A valid plan form, as the Plan an expense sheet sends it: its own fields, in the given month. */
+function planFields(name: string, month: string) {
+	return new URLSearchParams({ name, amount: "180", month });
+}
+
+describe("Plans: a plan's sheet closes to what opened it, with focus back there", () => {
+	const thisMonth = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+
+	/** A plan set aside this month, as Bills lists it under Planned. */
+	async function planId() {
+		const row = await env.DB.prepare(
+			"INSERT INTO planned_expenses(name,amount_cents,month,created_by) VALUES('Car registration',18000,?,'demo') RETURNING id",
+		)
+			.bind(thisMonth)
+			.first<{ id: number }>();
+		return row?.id ?? 0;
+	}
+
+	it("closes a new plan's sheet, from its backdrop and from Cancel, to Plan an expense on Bills", async () => {
+		const html = await get("/plans/new");
+		expect(backdropHref(html)).toBe("/bills?focus=plan-expense");
+		expect(html.split('href="/bills?focus=plan-expense"').length - 1).toBe(2);
+	});
+
+	it("puts focus on Plan an expense when Bills is drawn with that focus, and not otherwise", async () => {
+		expect(
+			tagWithId(await get("/bills?focus=plan-expense"), "plan-expense"),
+		).toContain("autofocus");
+		expect(tagWithId(await get("/bills"), "plan-expense")).not.toContain(
+			"autofocus",
+		);
+	});
+
+	it("closes a planned row's sheet to that row on Bills, with focus on the row when Bills is drawn with that focus", async () => {
+		const id = await planId();
+		const sheet = await get(`/plans/${id}/edit`);
+		expect(backdropHref(sheet)).toBe(`/bills?focus=plan-${id}`);
+		expect(sheet.split(`href="/bills?focus=plan-${id}"`).length - 1).toBe(2);
+		expect(
+			tagWithId(await get(`/bills?focus=plan-${id}`), `plan-${id}`),
+		).toContain("autofocus");
+		expect(tagWithId(await get("/bills"), `plan-${id}`)).not.toContain(
+			"autofocus",
+		);
+	});
+
+	it("closes an edit sheet opened from the plan's page to that page, with focus on Edit planned expense", async () => {
+		const id = await planId();
+		const sheet = await get(`/plans/${id}/edit?opener=plan`);
+		expect(backdropHref(sheet)).toBe(`/plans/${id}?focus=edit-plan`);
+		expect(sheet.split(`href="/plans/${id}?focus=edit-plan"`).length - 1).toBe(
+			2,
+		);
+		const page = await get(`/plans/${id}`);
+		expect(tagWithId(page, "edit-plan")).toContain(
+			`href="/plans/${id}/edit?opener=plan"`,
+		);
+		expect(tagWithId(page, "edit-plan")).toContain(
+			`hx-get="/plans/${id}/edit?opener=plan"`,
+		);
+		expect(
+			tagWithId(await get(`/plans/${id}?focus=edit-plan`), "edit-plan"),
+		).toContain("autofocus");
+		expect(tagWithId(page, "edit-plan")).not.toContain("autofocus");
+	});
+
+	it("carries the opener through the delete question, so its Cancel and backdrop still go back to the plan's page", async () => {
+		const id = await planId();
+		const sheet = await get(`/plans/${id}/edit?opener=plan`);
+		expect(sheet).toContain(`href="/plans/${id}/delete?opener=plan"`);
+		const question = await get(`/plans/${id}/delete?opener=plan`);
+		expect(backdropHref(question)).toBe(`/plans/${id}?focus=edit-plan`);
+		expect(question).toContain(`href="/plans/${id}/edit?opener=plan"`);
+	});
+
+	it("keeps the plan's own close when its sheet is drawn again with a field's error", async () => {
+		const id = await planId();
+		const fields = planFields("", thisMonth);
+		fields.set("opener", "plan");
+		const html = await post(`/plans/${id}`, fields);
+		expect(html).toContain("Say what it");
+		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
+	});
+
+	it("keeps Bills' close when a new plan is drawn again with a field's error", async () => {
+		const html = await post("/plans", planFields("", thisMonth));
+		expect(html).toContain("Say what it");
+		expect(backdropHref(html)).toBe("/bills?focus=plan-expense");
+	});
+
+	it("keeps the plan's own close when its Unlink redraws the sheet", async () => {
+		const id = await planId();
+		const html = await post(
+			`/plans/${id}/unlink`,
+			new URLSearchParams({ opener: "plan" }),
+		);
+		expect(html).toContain('id="plan-sheet-title"');
+		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
+	});
+
+	it("keeps the plan's own page under its sheet when an invalid save redraws it from that page", async () => {
+		const id = await planId();
+		const fields = planFields("", thisMonth);
+		fields.set("opener", "plan");
+		const html = await post(`/plans/${id}`, fields);
+		expect(html).toContain('id="plan-sheet-title"');
+		expect(html).toContain("Say what it");
+		expect(backdropHref(html)).toBe(`/plans/${id}?focus=edit-plan`);
+		expect(html).toMatch(
+			/<h1 class="font-serif text-5xl[^"]*">Car registration<\/h1>/,
+		);
+		expect(tagWithId(html, "edit-plan")).not.toBe("");
+		expect(tagWithId(html, "edit-plan")).not.toContain("autofocus");
+		expect(html).not.toContain('id="plan-expense"');
+		expect(html).not.toContain('id="add-bill"');
+	});
+
+	it("draws the plan's own page under its edit sheet when a no-JavaScript edit from that page is loaded", async () => {
+		const id = await planId();
+		const html = await get(`/plans/${id}/edit?opener=plan`);
+		expect(html).toContain('id="edit-plan"');
+		expect(html).not.toContain('id="plan-expense"');
+	});
+
+	it("keeps Bills as the answer for a plan's invalid save and its sheet's Unlink when the sheet isn't opened from the plan's page", async () => {
+		const id = await planId();
+		const invalid = await post(`/plans/${id}`, planFields("", thisMonth));
+		expect(invalid).toContain('id="plan-expense"');
+		expect(backdropHref(invalid)).toBe(`/bills?focus=plan-${id}`);
+		const unlink = await post(`/plans/${id}/unlink`, new URLSearchParams());
+		expect(unlink).toContain('id="plan-expense"');
+	});
+
+	it("saving an edit from the plan's page with htmx answers with that page, focus on Edit planned expense, and its address", async () => {
+		const id = await planId();
+		const fields = planFields("Car registration", thisMonth);
+		fields.set("opener", "plan");
+		const res = await postResponse(`/plans/${id}`, fields);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Push-Url")).toBe(`/plans/${id}`);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			'"announce":"Saved Car registration."',
+		);
+		const html = await res.text();
+		expect(tagWithId(html, "edit-plan")).toContain("autofocus");
+		expect(html).not.toContain('role="dialog"');
+	});
+
+	it("saving an edit from the plan's page without JavaScript redirects to that page, with focus on Edit planned expense", async () => {
+		const id = await planId();
+		const fields = planFields("Car registration", thisMonth);
+		fields.set("opener", "plan");
+		const res = await postResponse(`/plans/${id}`, fields, false);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe(`/plans/${id}?focus=edit-plan`);
+	});
+});

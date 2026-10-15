@@ -37,23 +37,59 @@ export const paysBillSql = (alias: string) =>
 	`EXISTS (SELECT 1 FROM bill_payments linked_bill WHERE linked_bill.status = 'linked' AND linked_bill.transaction_id IN (${alias}.id, ${alias}.parent_id))`;
 
 /**
- * True when a transaction isn't left out of the budget (spec §6.1 rule 4, §8.5): it is not excluded, or
- * it pays a bill. A payment linked to a bill counts in Spent whatever its exclusion, so the bill counts
- * once; its exclusion is never written over by the link, so it is as it was when the link goes. A split
- * part counts on its own link or its parent's (the parent itself never counts once split, so a bank
- * transaction is counted by its parts once). Alias `t`. `paysBill` is the SQL that says the row pays a bill: a merge
- * passes the link it is about to give the row, and the default is the row's own link.
+ * True when a planned expense's linked payment is the transaction `alias` names, or, for a split part, its parent
+ * (decision 82): the plan twin of paysBillSql. A plan's payment keeps its own category and counts on its own date;
+ * the link only keeps an excluded payment in the budget, once, as a bill's link does.
  */
-export const includedSql = (alias: string, paysBill = paysBillSql(alias)) =>
-	`(${alias}.excluded = 0 OR ${paysBill})`;
+export const paysPlanSql = (alias: string) =>
+	`EXISTS (SELECT 1 FROM planned_expenses linked_plan WHERE linked_plan.transaction_id IN (${alias}.id, ${alias}.parent_id))`;
 
 /**
- * includedSql in TypeScript, for a row as a save leaves it: not excluded, or paying a bill. `excluded` is the exclusion
- * once saved (excludedAfterSave in src/transactions/edit.ts), so a lifted Plaid exclusion counts. Keep it in step with
- * includedSql. The save feeds jevAsksAbout's `included` from it; the edit panel draws as if included (name-choices.tsx).
+ * The payment group of the transaction `alias` names: the transaction, its split parent and its own parts (decision 82).
+ * Two parts of one split are separate money, so a bill and a plan may each take a different part, as two bills may.
  */
-export function isIncluded(excluded: boolean, paysBill: boolean): boolean {
-	return !excluded || paysBill;
+const paymentGroupSql = (alias: string) =>
+	`SELECT g.id FROM transactions g WHERE g.id IN (${alias}.id, ${alias}.parent_id) OR g.parent_id = ${alias}.id`;
+
+/** True when a bill's payment is in the payment group of `alias` (paymentGroupSql). */
+export const paysBillGroupSql = (alias: string) =>
+	`EXISTS (SELECT 1 FROM bill_payments group_bill WHERE group_bill.status = 'linked' AND group_bill.transaction_id IN (${paymentGroupSql(alias)}))`;
+
+/**
+ * True when a planned expense's payment is in the payment group of `alias` (paymentGroupSql). `exceptPlan`, an SQL
+ * expression for a plan id, leaves that plan's own link out, so an edit of a paid plan can ask whether its payment still fits.
+ */
+export const paysPlanGroupSql = (alias: string, exceptPlan?: string) =>
+	`EXISTS (SELECT 1 FROM planned_expenses group_plan WHERE group_plan.transaction_id IN (${paymentGroupSql(alias)})${exceptPlan ? ` AND group_plan.id <> ${exceptPlan}` : ""})`;
+
+/** True when the transaction `alias` names pays a bill or a planned expense (paysBillSql, paysPlanSql). */
+export const paysBillOrPlanSql = (alias: string) =>
+	`(${paysBillSql(alias)} OR ${paysPlanSql(alias)})`;
+
+/**
+ * True when a transaction isn't left out of the budget (spec §6.1 rule 4, §8.5): it is not excluded, or
+ * it pays a bill or a planned expense. A payment linked to a bill counts in Spent whatever its exclusion, so the bill counts
+ * once; its exclusion is never written over by the link, so it is as it was when the link goes. A split
+ * part counts on its own link or its parent's (the parent itself never counts once split, so a bank
+ * transaction is counted by its parts once). Alias `t`. `paysBill` is the SQL that says the row pays a bill or a
+ * planned expense: a merge passes the link it is about to give the row, and the default is the row's own links.
+ */
+export const includedSql = (
+	alias: string,
+	paysBill = paysBillOrPlanSql(alias),
+) => `(${alias}.excluded = 0 OR ${paysBill})`;
+
+/**
+ * includedSql in TypeScript, for a row as a save leaves it: not excluded, or paying a bill or a planned expense.
+ * `excluded` is the exclusion once saved (excludedAfterSave in src/transactions/edit.ts), so a lifted Plaid exclusion
+ * counts. Keep it in step with includedSql. The save feeds jevAsksAbout's `included` from it; the edit panel draws as if
+ * included (name-choices.tsx).
+ */
+export function isIncluded(
+	excluded: boolean,
+	paysBillOrPlan: boolean,
+): boolean {
+	return !excluded || paysBillOrPlan;
 }
 
 /**
@@ -63,7 +99,10 @@ export function isIncluded(excluded: boolean, paysBill: boolean): boolean {
  * src/db/transactions.ts); keep it in step with them, and with jevAsksAbout. Qualify every column: INCLUDED_ROW
  * is unqualified, so it is ambiguous inside an UPDATE ... FROM transactions AS p. `paysBill` is as includedSql's.
  */
-export const jevAsksAboutSql = (alias: string, paysBill = paysBillSql(alias)) =>
+export const jevAsksAboutSql = (
+	alias: string,
+	paysBill = paysBillOrPlanSql(alias),
+) =>
 	`(${includedSql(alias, paysBill)} AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0
 		AND NOT (${alias}.amount_cents < 0 AND COALESCE(${alias}.credit_reviewed, 0) = 1
 			AND EXISTS (SELECT 1 FROM transactions jrp WHERE jrp.id = ${alias}.refund_of_id AND jrp.excluded = 0)))`;
@@ -74,11 +113,11 @@ export const markedTransferSql = (alias: string) =>
 
 export const INCLUDED = includedSql("t");
 
-/** True when the row pays a bill (see `paysBillSql`), for an UPDATE or subquery on `transactions` itself. */
-export const PAYS_A_BILL = paysBillSql("transactions");
+/** True when the row pays a bill or a planned expense, for an UPDATE or subquery on `transactions` itself. */
+export const PAYS_A_BILL_OR_PLAN = paysBillOrPlanSql("transactions");
 
 /** `INCLUDED` for an UPDATE or subquery on `transactions` itself. */
-export const INCLUDED_ROW = `(excluded = 0 OR ${PAYS_A_BILL})`;
+export const INCLUDED_ROW = `(excluded = 0 OR ${PAYS_A_BILL_OR_PLAN})`;
 
 /**
  * What counts as spending, once the joins are added (spec §6): not excluded (or paying a bill), not a

@@ -303,7 +303,7 @@ describe("GET /design-system in the demo", () => {
 			ThingsToTry(),
 			HowLink({ section: "budget" }),
 			SystemDiagram(),
-			BudgetDiagram(BUDGET_EXAMPLE),
+			BudgetDiagram({ ...BUDGET_EXAMPLE, id: "budget-diagram-plain" }),
 			BillsDiagram({
 				amount: "$142.00",
 				due: "Sep 21",
@@ -582,6 +582,18 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("says a payment linked to a bill or a planned expense counts whatever its exclusion, in TransactionsButton's edges (#202)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transactions-button"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain(
+			"a payment linked to a bill or a planned expense counts whatever its exclusion.",
+		);
+		expect(section).not.toContain(
+			"a payment linked to a bill counts whatever its exclusion.",
+		);
+	});
+
 	it.each(["not-budgeted-row", "transactions-button"])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
@@ -649,6 +661,13 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*The Costco membership bill for 2026 is no longer paid\./,
 		);
+	});
+
+	it("shows a payment linked to a planned expense in TransactionRow as DESIGN.md's example, 'Auto · paid Car registration'", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("Auto · paid Car registration");
 	});
 
 	it("says which refund and bill a TransactionRow caption keeps, in its sentence and DESIGN.md (#382)", async () => {
