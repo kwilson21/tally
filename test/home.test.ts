@@ -680,17 +680,25 @@ describe("GET / with the demo seed", () => {
 	);
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
+		// The 20th: Groceries has spent $234 of $700 and Eating Out is $86 over, the one category over (#322).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-20T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-20");
 		const { html } = await home();
-		expect(html).toMatch(/\$395\s+of\s+\$700/);
-		expect(html).toMatch(/\$286\s+of\s+\$250/);
-		// Eating Out is $36 over; its words say by how much (decision 46).
+		expect(html).toMatch(/\$234\s+of\s+\$700/);
+		expect(html).toMatch(/\$336\s+of\s+\$250/);
+		// Eating Out is $86 over; its words say by how much (decision 46).
 		expect(
 			html.match(/ over<span class="sr-only"> budget<\/span>/g)?.length,
 		).toBe(1);
-		expect(html).toContain("$36 over");
+		expect(html).toContain("$86 over");
 	});
 
 	it("counts the seeded split's children, not its parent, in Home and Budget data", async () => {
+		// The 20th, after the Costco split's day (the 18th), so the parent is in the list and its two parts count (#322).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-20T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-20");
 		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
 		const parent = await env.DB.prepare(
 			"SELECT amount_cents FROM transactions WHERE raw_name = 'COSTCO WHSE #0431' AND is_split = 1",
@@ -710,22 +718,24 @@ describe("GET / with the demo seed", () => {
 			expect.objectContaining({ amountCents: parent?.amount_cents }),
 		);
 		const html = (await home()).html;
-		expect(html).toMatch(/\$395\s+of\s+\$700/);
-		expect(html).toMatch(/\$286\s+of\s+\$250/);
+		expect(html).toMatch(/\$234\s+of\s+\$700/);
+		expect(html).toMatch(/\$336\s+of\s+\$250/);
 	});
 
 	it("says needs a category once: the Band carries the amount, and there's no Uncategorized row (decision 50)", async () => {
 		const { html } = await home();
+		// Ten rows, $104.54 of them: the two the bills matched are out (#322).
 		expect(html).toMatch(
-			/10<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$211 of this month&#39;s spending/,
+			/10<span class="sr-only"> transactions<\/span> need a category[\s\S]*?\$105 of this month&#39;s spending/,
 		);
 		expect(html).not.toContain("Uncategorized");
 	});
 
 	it("shows the picked negative amount and sentence, and keeps the label at exactly zero", async () => {
+		// The 23rd: Safe to spend is low enough that a Groceries budget can be cut by it and stay $0 or more (#322).
 		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-10T12:00:00-04:00"));
-		await resetDemo(env.DB, "2026-10-10");
+		vi.setSystemTime(new Date("2026-10-23T12:00:00-04:00"));
+		await resetDemo(env.DB, "2026-10-23");
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		const month = today.slice(0, 7);
 		const data = await loadMonth(env.DB, month);

@@ -59,12 +59,11 @@ describe("Trends with the demo seed", () => {
 		expect(months.some((m) => m.part !== undefined)).toBe(false);
 	});
 
-	// Past months' spending is dated like this month's (clamped to today's day-of-month), so the
-	// same-days comparison is fair on any day: a difference in the household's favour, under $400. Daycare's
-	// Fridays fall on other days each month, so on a few days an extra Friday this month leaves only a few
-	// dollars between the two months.
+	// Past months' spending follows the same pace as this month's (#322), so the same-days comparison is fair on any day:
+	// a difference in the household's favour, under $400. Daycare's Fridays fall on other days each month, so on a few
+	// days an extra Friday this month leaves only a few dollars between the two months.
 	it.each(DATES)(
-		"says this month is less than by this time last month, by under $400, on %s",
+		"says this month is less than by this time last month, by under four hundred dollars, on %s",
 		async (today) => {
 			const page = await demoPage(today);
 			const gap = page.sentence.match(/^\$([\d,]+) less than by this time in /);
@@ -74,8 +73,9 @@ describe("Trends with the demo seed", () => {
 			// Rent adds $100 in the household's favour: last month's $700 was paid by this time and this month's $600 has been.
 			// Its $500 was paid late, this month, so it isn't in last month's days (the seed dates it this month's 1st).
 			expect(dollars).toBeLessThan(400);
-			// Out of about $1,700 for last month's days.
-			expect(page.sameDaysCents.last).toBeGreaterThan(150000);
+			// Last month's same days: $1,202 for its first two days, the least to compare with (the spending is paced, #322),
+			// and $3,359 for the whole month.
+			expect(page.sameDaysCents.last).toBeGreaterThan(100000);
 		},
 	);
 
