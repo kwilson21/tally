@@ -2527,6 +2527,36 @@ export async function pendingForJev(
 	);
 }
 
+/**
+ * How many imported transactions still wait for Jev's category or income answer (the first week's question gate,
+ * spec §8.8, decision 114): the rows pendingForJev would ask about for these switches, minus any Jev failed on
+ * (`jev_failed_at`, which counts as sorted) and any answered below the threshold (its confidence is stored, so it isn't
+ * NULL). Details-only work never counts. With categories off, category work is ignored, and a purchase waits for nothing;
+ * income work still counts while income is on. With no active category, a purchase waits for its transfer answer while
+ * categories are on, as pendingForJev asks it. It shares NEEDS_JEV_CLASSIFICATION and CATEGORY_ONLY with pendingForJev.
+ */
+export async function countWaitingForJev(
+	db: D1Database,
+	{ categories, income }: { categories: boolean; income: boolean },
+): Promise<number> {
+	if (!categories && !income) return 0;
+	const categoryWork = `(t.category_confidence IS NULL AND (EXISTS (SELECT 1 FROM categories WHERE archived = 0)
+		OR (NOT ${CATEGORY_ONLY} AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))`;
+	const incomeWork = `(NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)`;
+	const asked = [categories ? categoryWork : null, income ? incomeWork : null]
+		.filter((part) => part !== null)
+		.join(" OR ");
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS waiting FROM transactions t
+			${COUNTED_JOINS}
+			WHERE t.plaid_transaction_id IS NOT NULL AND t.jev_failed_at IS NULL
+				AND NOT ${FOLLOWS_PURCHASE} AND ${NEEDS_JEV_CLASSIFICATION} AND (${asked})`,
+		)
+		.first<{ waiting: number }>();
+	return row?.waiting ?? 0;
+}
+
 /** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
 export async function merchantCategoryHistoryForJev(
 	db: D1Database,
