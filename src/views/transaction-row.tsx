@@ -31,7 +31,7 @@ export function rowCaption(row: ListRow): Caption {
 	const unlinked = row.refundUnlinkedPurchaseDate
 		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
 		: null;
-	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
+	// A payment linked to a bill or a planned expense counts, so it isn't called excluded (spec §8.5); it reads as what it is.
 	if (row.excluded && !row.paysBill && !row.paysPlan)
 		return { kind: "excluded", caption: "Excluded", tag: false };
 	if (maybeIncomeVisible(row))

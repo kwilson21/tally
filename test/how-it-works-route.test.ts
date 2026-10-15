@@ -738,6 +738,37 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 	});
 });
 
+describe("a payment for a planned expense counts while excluded, as a bill's does (#202)", () => {
+	const sectionOf = (html: string, id: string) =>
+		decodeHtml(
+			html.match(
+				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
+			)?.[0] ?? "",
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
+	it("says in Transactions that a counted transaction is not excluded unless it pays a bill or a planned expense", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "transactions");
+			expect(text).toContain(
+				"A counted transaction is in the month, not excluded (unless it pays a bill or a planned expense), and not a split parent (its parts count instead) or a credit held for review (below).",
+			);
+			expect(text).not.toContain("unless it pays a bill)");
+		}
+	});
+
+	it("says in Excluding that a payment linked to a bill or a planned expense always counts", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "exclusions");
+			expect(text).toContain(
+				"An excluded transaction doesn't count toward spending, uncategorized, or safe to spend, unless it pays a bill or a planned expense: a payment linked to either always counts.",
+			);
+			expect(text).not.toContain("a payment linked to a bill always counts");
+		}
+	});
+});
+
 describe("new category suggestions in the Categories section (spec §7, #51)", () => {
 	const sectionOf = (html: string) =>
 		(
