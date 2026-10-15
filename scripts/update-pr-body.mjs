@@ -13,10 +13,16 @@ const headers = {
 };
 const raw = `https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots/${DIR}`;
 // Written by scripts/changed-shots.mjs.
-const { changes, unavailable } = JSON.parse(
+const { changes, unavailable, files } = JSON.parse(
 	await readFile("screenshots/changes.json", "utf8"),
 );
-const section = screenshotSection({ sha: SHA, raw, changes, unavailable });
+const section = screenshotSection({
+	sha: SHA,
+	raw,
+	changes,
+	unavailable,
+	files,
+});
 
 const current = await fetch(url, { headers });
 if (!current.ok) throw new Error(`GET PR failed: ${current.status}`);
