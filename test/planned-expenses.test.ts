@@ -737,6 +737,37 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(row?.transaction_id).toBeNull();
 	});
 
+	it("a link sent after the plan is paid says why on its paid page, with and without JavaScript, and links nothing", async () => {
+		const paidBy = await payment(9724, 18000);
+		const id = await plan("Car registration", 18000, MONTH, paidBy);
+		await payment(9725, 18000);
+		// 9724 is the plan's own payment, a resubmitted form: it pays the plan, so the plan's sentence must come before the payment's.
+		for (const transaction of [paidBy, 9725]) {
+			for (const htmx of [true, false]) {
+				const refused = await post(
+					`/plans/${id}/link`,
+					{ transaction_id: String(transaction) },
+					htmx,
+				);
+				expect(refused.status).toBe(200);
+				expect(refused.headers.get("Location")).toBeNull();
+				const html = await refused.text();
+				expect(html).toContain("Paid by");
+				expect(html).toMatch(
+					/role="alert"[^>]*>Car registration is already paid\./,
+				);
+				expect(html).not.toContain("be linked. It may already pay");
+				expect(html).not.toContain("already pays a planned expense");
+			}
+		}
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBe(paidBy);
+	});
+
 	it("without JavaScript, a link that is made redirects back to the plan's page and writes the link", async () => {
 		const id = await plan("Car registration", 18000, MONTH);
 		await payment(9723, 18000);

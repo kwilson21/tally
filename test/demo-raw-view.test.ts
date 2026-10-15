@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { listTransactions, PAGE_SIZE } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -70,29 +70,29 @@ async function addPlaidMarked() {
 	]);
 }
 
+// Pinned to the 20th of October (#322): the demo's Costco split (the 18th) and its Friday charges depend on the day, and
+// the bank's list has the 34 transactions Tally's list has. Every test here sees the same demo.
 beforeEach(async () => {
-	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	vi.useFakeTimers({ toFake: ["Date"] });
+	vi.setSystemTime(new Date("2026-10-20T15:00:00Z"));
+	await resetDemo(env.DB, "2026-10-20");
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("the list, straight from the bank (?raw=1, in the demo)", () => {
-	it("counts the split purchase parent once: 42 transactions in the bank's list, with October's two Daycare Fridays and Rent's two", async () => {
-		// Pinned, since the demo's Friday charges depend on the day of the month.
-		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-11T15:00:00Z"));
-		try {
-			await resetDemo(env.DB, "2026-10-11");
-			const { html: raw } = await demo("/transactions?raw=1");
-			expect(countOf(raw)).toMatch(
-				/^Showing 1–25 of 42 transactions in [A-Z][a-z]+, as the bank sends them$/,
-			);
-			const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
-			const { html: normal } = await demo(`/transactions?month=${month}`);
-			// Tally's own list shows the split's two parts in place of its parent (one more), and counts the late Rent part, dated
-			// this October 1st, in September, its bill's month (one less): the bank's list is by date, so it has the late part here.
-			expect(countOf(normal)).toMatch(/^Showing 1–25 of 42 transactions in /);
-		} finally {
-			vi.useRealTimers();
-		}
+	it("counts the split purchase parent once: 34 transactions in the bank's list, with October's three Daycare Fridays and Rent's two", async () => {
+		const { html: raw } = await demo("/transactions?raw=1");
+		expect(countOf(raw)).toMatch(
+			/^Showing 1–25 of 34 transactions in [A-Z][a-z]+, as the bank sends them$/,
+		);
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		const { html: normal } = await demo(`/transactions?month=${month}`);
+		// Tally's own list shows the split's two parts in place of its parent (one more), and counts the late Rent part, dated
+		// this October 1st, in September, its bill's month (one less): the bank's list is by date, so it has the late part here.
+		expect(countOf(normal)).toMatch(/^Showing 1–25 of 34 transactions in /);
 	});
 
 	it("shows a split purchase once as the bank sent it and counts it once", async () => {
