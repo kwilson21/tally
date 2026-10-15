@@ -524,7 +524,7 @@ describe("GET /design-system/proposals", () => {
 			(d) => d.title === "P135 · Category suggestions",
 		);
 		expect(suggestions?.issue).toBe(607);
-		expect(suggestions?.outcome).toContain("Create Pet Care or No;");
+		expect(suggestions?.outcome).toContain("Create Pet Care or Not now;");
 		expect(suggestions?.outcome).toContain("(decision 120).");
 	});
 
@@ -4449,8 +4449,21 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		]);
 		expect(rules).not.toContain("Costco");
 		expect(rules).not.toContain("Shell");
-		const remove = rules.match(/<a [^>]*class="([^"]*)"[^>]*>Remove<\/a>/);
+		const remove = rules.match(
+			/<a [^>]*class="([^"]*)"[^>]*>Remove<span class="sr-only"> [^<]+<\/span><\/a>/,
+		);
 		expect(remove, "Remove as a link").not.toBeNull();
+		// Each Remove's accessible name carries its merchant, as the app's own Remove does (spec §7, decision 120).
+		const removeNames = [
+			...rules.matchAll(
+				/<a [^>]*>Remove<span class="sr-only"> ([^<]+)<\/span><\/a>/g,
+			),
+		].map((m) => m[1]);
+		expect(removeNames).toEqual([
+			"City Gym",
+			"Procreate Dreams",
+			"YouTube Premium",
+		]);
 		expect(remove?.[1]).toContain("text-muted");
 		expect(remove?.[1]).not.toContain("text-accent");
 		// The Remove link is a touch target, so it is at least 44px tall (CLAUDE.md, 44px touch targets).
@@ -4462,7 +4475,8 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 		);
 		expect(rules).not.toContain("none yet");
-		expect(rules.match(/City Gym/g)?.length).toBe(1);
+		// The rule's name and category sit on one line, once; the Remove's sr-only name is checked above.
+		expect(rules.match(/City Gym · Always Household/g)?.length).toBe(1);
 	});
 
 	it("draws B's top with the in-page links under the title, in the brief's order, and B's AI picture with five switches and no Save button", async () => {
@@ -4553,10 +4567,11 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			expect(pic).toContain("A new category: Pet Care");
 			expect(pic).toContain("Create Pet Care");
 			expect(pic).toContain(esc("Tally's guess"));
-			// The card's answers are Create and No, with decision 89's Why? after No (decision 120).
-			expect(pic).toContain(">No</button>");
-			expect(pic).not.toContain("Not now");
-			expect(pic.indexOf(">No</button>")).toBeLessThan(
+			// The card's answers are Create and Not now, the word the owner picked, with decision 89's Why? after
+			// Not now (decision 120). The design track's "No" is an open question for the owner, not drawn here.
+			expect(pic).toContain(">Not now</button>");
+			expect(pic).not.toContain(">No</button>");
+			expect(pic.indexOf(">Not now</button>")).toBeLessThan(
 				pic.indexOf('aria-label="Why? suggested categories"'),
 			);
 			expect(pic).toContain('aria-label="Why? suggested categories"');

@@ -502,7 +502,7 @@ function RulesPage() {
 							href="/settings"
 							class="flex min-h-11 shrink-0 items-center text-sm text-muted underline"
 						>
-							Remove
+							Remove<span class="sr-only"> {rule.name}</span>
 						</a>
 					</li>
 				))}
@@ -545,7 +545,7 @@ function TidyTop() {
 
 /**
  * P135 A's one card: the same words and rows wherever Tally asks a person about Pet Care, with decision 89's Why? after
- * No. `skip` adds the Suggestions page's Skip link under it, as the route draws it; the Settings card has none.
+ * Not now (the owner's picked word). `skip` adds the Suggestions page's Skip link under it, as the route draws it; the Settings card has none.
  */
 function OneCard({ skip = false }: { skip?: boolean }) {
 	return (
@@ -576,7 +576,7 @@ function OneCard({ skip = false }: { skip?: boolean }) {
 				<div class="flex flex-wrap items-center gap-3">
 					<Button type="button">Create Pet Care</Button>
 					<Button kind="text" type="button">
-						No
+						Not now
 					</Button>
 					<WhyLink section="categorization" topic="suggested categories" />
 				</div>
@@ -859,7 +859,7 @@ function P135() {
 					name="Option A · One card, one set of words, everywhere"
 					picked
 					width="w-full"
-					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and No, with Why? after No. Skip is a link under the card on the Suggestions page only. Organize shows the same card above its chips, with its two answers."
+					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and Not now, with Why? after Not now. Skip is a link under the card on the Suggestions page only. Organize shows the same card above its chips, with its two answers."
 					cost="SuggestionReview and the Settings card become one view; Organize reads the waiting suggestions."
 					why="a person learns the card once, and Organize stops asking about a merchant Tally already has an answer for."
 				>

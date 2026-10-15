@@ -499,7 +499,7 @@ export const DECIDED: readonly {
 	{
 		title: "P135 · Category suggestions",
 		outcome:
-			"Option A: one suggestion card with one set of words wherever Tally asks it: Tally's guess, “A new category: Pet Care”, its transactions as ruled rows with one checkbox each, and Create Pet Care or No; in Organize, when the merchant is in a waiting suggestion, the card sits above the chips (decision 120).",
+			"Option A: one suggestion card with one set of words wherever Tally asks it: Tally's guess, “A new category: Pet Care”, its transactions as ruled rows with one checkbox each, and Create Pet Care or Not now; in Organize, when the merchant is in a waiting suggestion, the card sits above the chips (decision 120).",
 		issue: 607,
 	},
 ];
