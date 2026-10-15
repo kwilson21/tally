@@ -394,9 +394,8 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P126 and P129 are open: the owner has not picked from them yet, so they carry no Picked pill.
-			const expected =
-				n < 34 || n === 126 || n === 129 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P126 is open: the owner has not picked from it yet, so it carries no Picked pill. P129 is the owner's pick (decision 117).
+			const expected = n < 34 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -430,7 +429,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(80);
+		expect(DECIDED.length).toBe(81);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -473,7 +472,20 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
-		// P125 is the last entry: after P124 (issue 501), so the list stays in proposal order.
+		// P125 sits after P124 (issue 501) and before P129, so the list stays in proposal order.
+		expect(DECIDED.at(-2)).toBe(entry);
+	});
+
+	it("lists P129 as decided with issue 80, decision 117 and option A, last in the list", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P129 ·"));
+		expect(entry?.title).toBe("P129 · The money input, state by state");
+		expect(entry?.issue).toBe(80);
+		expect(entry?.outcome).toContain(
+			"Option A: a muted 0.00 when empty, a check on the chip that matches the box, the steps off while the text can't be read, and five keyboard and screen-reader fixes;",
+		);
+		expect(entry?.outcome).toContain(
+			"the centred layout stays (decision 117).",
+		);
 		expect(DECIDED.at(-1)).toBe(entry);
 	});
 
@@ -1526,11 +1538,8 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		);
 		expect(top).toBeGreaterThan(-1);
 		expect(start).toBeGreaterThan(top);
-		// Only P129's section (the money input, drawn first, decision-pending for #80) sits between the page's title and this one.
-		const first = html.indexOf('<section aria-labelledby="p129-title"');
-		expect(first).toBeGreaterThan(top);
-		expect(html.slice(top, first)).not.toContain("<section");
-		expect(first).toBeLessThan(start);
+		// Nothing else is drawn between the page's title and this section.
+		expect(html.slice(top, start)).not.toContain("<section");
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="polish4-title"'),
 		);
@@ -3038,10 +3047,10 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 // P129 (#80): the money input, state by state, drawn for the owner's pick. Proposal only: nothing in src/views changes.
 describe("GET /design-system/proposals, P129 (the money input, state by state, #80)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
-	// P129's section: from its heading to P126's (Home's budget list behind each sheet holds a section of its own).
+	// P129's section: from its heading to the first-week pick's (Home's budget list behind each sheet holds a section of its own).
 	const section = (html: string) => {
 		const start = html.indexOf('<section aria-labelledby="p129-title"');
-		const end = html.indexOf('<section aria-labelledby="p126-title"');
+		const end = html.indexOf('<section aria-labelledby="polish5-title"');
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
 		return html.slice(start, end);
@@ -3067,15 +3076,18 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		expect(to, STATES[i]).toBeGreaterThan(from);
 		return chunk.slice(from, to);
 	};
-	const PICTURE_LABEL = /aria-label="([^"]*), on a phone"/g;
-	// The labelled pictures in a chunk, by label, in drawing order.
+	// Every picture's label and kind, in drawing order. A phone and a desktop picture can share a label, so the kind is part of the key.
+	const PICTURE_LABEL = /aria-label="([^"]*), on (a phone|desktop)"/g;
+	// The phone pictures in a chunk, by label, in drawing order.
 	const labels = (chunk: string) =>
-		[...chunk.matchAll(PICTURE_LABEL)].map((m) => m[1]);
-	// One picture's markup: from its label to the next picture's label, or to the chunk's end.
-	const picture = (chunk: string, label: string) => {
+		[...chunk.matchAll(PICTURE_LABEL)]
+			.filter((m) => m[2] === "a phone")
+			.map((m) => m[1]);
+	// One picture's markup, by label and kind: from its label to the next picture of either kind, or to the chunk's end.
+	const picture = (chunk: string, label: string, kind = "a phone") => {
 		const found = [...chunk.matchAll(PICTURE_LABEL)];
-		const at = found.findIndex((m) => m[1] === label);
-		expect(at, label).toBeGreaterThan(-1);
+		const at = found.findIndex((m) => m[1] === label && m[2] === kind);
+		expect(at, `${label}, on ${kind}`).toBeGreaterThan(-1);
 		return chunk.slice(found[at]?.index ?? 0, found[at + 1]?.index);
 	};
 	// The buttons with a data-nudge attribute (− and + and the cent arrows), each with whether the disabled
@@ -3105,25 +3117,32 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 	const errorClass = (markup: string) =>
 		markup.match(/<p [^>]*class="([^"]*)"[^>]*>Enter a dollar amount/)?.[1] ??
 		"";
+	// The class tokens of a chip's check: the span that holds the check icon, so its slot's classes show whether it's laid out and when it shows.
+	const checkTokens = (chip: string) =>
+		(chip.match(/<span class="([^"]*)"><svg/)?.[1] ?? "").split(" ");
 	const CHECK = "M20 6 9 17l-5-5";
 
-	it("opens the page with its own section, before P126, titled and dated as the brief asks", async () => {
+	it("sits after P126 and before the first-week pick, titled and dated as the brief asks", async () => {
 		const html = await drawn();
-		const top = html.indexOf(">Proposals</h1>");
+		const p126 = html.indexOf(
+			'<section aria-labelledby="p126-title" class="mt-10">',
+		);
 		const start = html.indexOf(
-			'<section aria-labelledby="p129-title" class="mt-10">',
+			'<section aria-labelledby="p129-title" class="mt-12">',
 		);
-		expect(start).toBeGreaterThan(top);
-		expect(html.slice(top, start)).not.toContain("<section");
+		expect(p126).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(p126);
 		expect(start).toBeLessThan(
-			html.indexOf('<section aria-labelledby="p126-title" class="mt-10">'),
+			html.indexOf('<section aria-labelledby="polish5-title"'),
 		);
 		expect(html).toContain(
-			'<h2 id="p129-title" class="font-serif text-3xl font-semibold">Open: the money input, state by state</h2>',
+			'<h2 id="p129-title" class="font-serif text-3xl font-semibold">Picked: the money input</h2>',
 		);
 		expect(html).toContain(
-			"Drawn Oct 15 for #80: today’s money input beside two ways to put back what it lost from the original, in each of its five states.",
+			"Drawn Oct 15. The owner&#39;s pick, marked Picked, is decision 117: A, today&#39;s money input with what it lost put back.",
 		);
+		expect(html).not.toContain("Open: the money input, state by state");
+		expect(html).not.toContain("Drawn Oct 15 for #80");
 		expect(html).toContain(
 			'<section id="p129-money" aria-labelledby="p129-money-title"',
 		);
@@ -3132,16 +3151,19 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		);
 	});
 
-	it("names the three drawings in order: A recommended, and A and B each with a trade-off and a reason", async () => {
+	it("names the three drawings in order: A recommended and picked, and A and B each with a trade-off and a reason", async () => {
 		const chunk = section(await drawn());
 		expect(optionPicks(chunk)).toEqual([
 			{ name: "Reference · Today on main", picked: false },
-			{ name: "Option A · Today’s, with what it lost put back", picked: false },
+			{ name: "Option A · Today’s, with what it lost put back", picked: true },
 			{ name: "Option B · One left edge", picked: false },
 		]);
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
 		const a = optionOf(chunk, "Option A · Today’s, with what it lost put back");
 		expect(a).toContain(">Recommended<");
+		expect(a).toContain(">Picked<");
+		// The one Picked pill is A's: it is the only one in the section.
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
 		expect(a).toContain(
 			"Trade-off: money.js changes only (decision 39); no new token or script.",
 		);
@@ -3154,7 +3176,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		expect(b).toContain(
 			"Why: one left edge for the whole sheet, and nothing moves under a finger.",
 		);
-		expect(chunk).not.toContain(">Picked<");
+		expect(b).not.toContain(">Picked<");
 	});
 
 	it("draws five states, one row each, with Today, A and B side by side in every row", async () => {
@@ -3167,6 +3189,97 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 			]);
 		});
 		expect(labels(chunk)).toHaveLength(15);
+		expect(chunk).not.toContain(", on a phone, on a phone");
+		// At 1280, the cents and the equal-to-last-month rows each add Today and A as desktop pictures; the other rows have none.
+		const desk = [...chunk.matchAll(/aria-label="([^"]*), on desktop"/g)].map(
+			(m) => m[1],
+		);
+		expect(desk).toEqual([
+			"Today on main, with cents",
+			"Option A, with cents",
+			"Today on main, equal to last month",
+			"Option A, equal to last month",
+		]);
+		for (const i of [0, 3, 4]) {
+			expect(row(chunk, i), STATES[i]).not.toContain(", on desktop");
+		}
+	});
+
+	it("draws every phone picture on the 390 by 844 phone, with its sheet 24px down and reaching the foot", async () => {
+		const chunk = section(await drawn());
+		const frames = [
+			...chunk.matchAll(
+				/<div role="img" aria-label="[^"]*, on a phone" class="([^"]*)"/g,
+			),
+		].map((m) => m[1] ?? "");
+		expect(frames).toHaveLength(15);
+		for (const frame of frames) {
+			expect(frame).toContain("h-[846px] w-[392px]");
+			expect(frame).not.toContain("h-[790px]");
+		}
+		// Each sheet's wrapper is 724px tall (844 less the 120px above it), and its panel starts 24px below that: top-6.
+		const wrappers = [...chunk.matchAll(/class="relative -mx-5 ([^"]*)"/g)].map(
+			(m) => m[1],
+		);
+		expect(wrappers).toHaveLength(15);
+		for (const wrapper of wrappers) expect(wrapper).toContain("h-[724px]");
+		const panels = [
+			...chunk.matchAll(/class="([^"]*rounded-t-sheet[^"]*)"/g),
+		].map((m) => m[1] ?? "");
+		expect(panels).toHaveLength(15);
+		for (const panel of panels) {
+			expect(panel).toContain("bottom-0 top-6 ");
+			expect(panel).not.toContain("top-24");
+		}
+	});
+
+	it("draws Today and Option A at 1280 as a panel on Home's budget list, with the same bodies as the phone sheets", async () => {
+		const chunk = section(await drawn());
+		const cents = picture(
+			row(chunk, 1),
+			"Today on main, with cents",
+			"desktop",
+		);
+		const centsA = picture(row(chunk, 1), "Option A, with cents", "desktop");
+		const last = picture(
+			row(chunk, 2),
+			"Today on main, equal to last month",
+			"desktop",
+		);
+		const lastA = picture(
+			row(chunk, 2),
+			"Option A, equal to last month",
+			"desktop",
+		);
+		for (const desk of [cents, centsA, last, lastA]) {
+			// The panel is BottomSheet's right-hand one (its lg: classes), and the page behind it is dimmed.
+			expect(desk).toContain("w-[28rem]");
+			expect(desk).toContain("rounded-l-sheet");
+			expect(desk).toContain("bg-ink/30");
+			expect(desk).toContain("h-[560px] w-[722px]");
+			expect(desk).toContain("inert");
+			expect(desk).toContain('data-screen="picture"');
+		}
+		// Today's desktop pictures are the real money input; A's hold the check and the Round to chip where they belong.
+		expect(cents).toContain("data-money");
+		expect(last).toContain("data-money");
+		expect(chipOf(last, "Last month:")).toContain("aria-pressed:opacity-50");
+		expect(chipOf(last, "Last month:")).toContain('aria-pressed="true"');
+		expect(centsA).toContain("Round to $613");
+		expect(checkTokens(chipOf(lastA, "Last month:"))).toContain(
+			"group-aria-pressed:visible",
+		);
+		expect(chipOf(lastA, "Last month:")).toContain('aria-pressed="true"');
+		// Each desktop picture has its own ids, so none repeats on the page.
+		const html = await drawn();
+		for (const id of [
+			"p129-today-cents-desk",
+			"p129-a-cents-desk",
+			"p129-today-last-desk",
+			"p129-a-last-desk",
+		]) {
+			expect(html.split(`id="${id}"`).length - 1, id).toBe(1);
+		}
 	});
 
 	it("draws Today's pictures as the real money input, with its chips, Round to and error as they are", async () => {
@@ -3218,11 +3331,30 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		const lastMonth = chipOf(a, "Last month:");
 		expect(lastMonth).toContain('aria-pressed="true"');
 		expect(lastMonth).toContain("aria-pressed:text-ink");
-		expect(lastMonth).toContain("group-aria-pressed:inline-flex");
 		expect(lastMonth).toContain(CHECK);
 		expect(lastMonth).not.toContain("aria-pressed:opacity-50");
+		// The check is laid out and hidden until the chip is pressed: its slot is kept, so the chip never changes width.
+		expect(checkTokens(lastMonth)).toEqual(
+			expect.arrayContaining([
+				"inline-flex",
+				"invisible",
+				"group-aria-pressed:visible",
+			]),
+		);
+		expect(checkTokens(lastMonth)).not.toContain("hidden");
 		// The chip that doesn't match is not pressed.
 		expect(chipOf(a, "3-month average:")).toContain('aria-pressed="false"');
+	});
+
+	it("option A: both chips hold their check's slot, so a chip keeps its width when it's pressed", async () => {
+		const chunk = section(await drawn());
+		const withCents = picture(row(chunk, 1), "Option A, with cents");
+		for (const words of ["Last month:", "3-month average:"]) {
+			const tokens = checkTokens(chipOf(withCents, words));
+			expect(tokens, words).toContain("invisible");
+			expect(tokens, words).toContain("group-aria-pressed:visible");
+			expect(tokens, words).not.toContain("hidden");
+		}
 	});
 
 	it("option A: with unreadable text, all four step buttons are off", async () => {
@@ -3266,12 +3398,13 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		// B keeps A's other changes: the placeholder, the check and the four steps off.
 		expect(b).toContain('placeholder="0.00"');
 		expect(nudges(error).every((s) => s.disabled)).toBe(true);
-		expect(
-			chipOf(
-				picture(row(chunk, 2), "Option B, equal to last month"),
-				"Last month:",
-			),
-		).toContain("group-aria-pressed:inline-flex");
+		const bLast = chipOf(
+			picture(row(chunk, 2), "Option B, equal to last month"),
+			"Last month:",
+		);
+		expect(checkTokens(bLast)).toContain("group-aria-pressed:visible");
+		expect(checkTokens(bLast)).toContain("invisible");
+		expect(checkTokens(bLast)).not.toContain("hidden");
 	});
 
 	it("says what the spec already fixes, and lists the keyboard and screen-reader fixes either option brings", async () => {

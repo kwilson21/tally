@@ -1,7 +1,9 @@
-// P129 (#80): the money input, state by state, drawn for the owner's pick (decision 47). Each picture is
-// Home's budget sheet over Home on a phone, for Groceries in October: the catalog's sample. Today's is the
-// real BudgetSheet and MoneyInput. A and B are proposal-only copies of their markup with the change each
-// option makes, since nothing in src/views changes for a drawing. Nothing here is built until the owner picks.
+// P129 (#80): the money input, state by state. The owner picked A (decision 117): today's money input with what
+// it lost put back. Each picture is Home's budget sheet over Home, for Groceries in October: the catalog's sample.
+// On a phone it is a sheet to the foot of the screen; at 1280 it is BottomSheet's right-hand panel, for the two
+// states that have cents or match a chip. Today's is the real BudgetSheet and MoneyInput. A and B are proposal-only
+// copies of their markup with the change each option makes, since nothing in src/views changes for a drawing.
+// These drawings stay here as the build reference until #80 ships.
 
 import type { Child } from "hono/jsx";
 import { parseBudgetAmount } from "../budgets/amount";
@@ -14,8 +16,8 @@ import { moneyChip } from "../views/money-input";
 import { TransactionsButton } from "../views/transactions-button";
 import { Fixed, Sheet } from "./proposal-parts";
 import { budgetBehind } from "./proposals-phase5-home";
-import { Choice, Choices, Shot } from "./proposals-polish-4";
-import { PhoneFrame, Specimen, State } from "./specimen";
+import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
+import { Specimen, State } from "./specimen";
 
 // Groceries in October, as the catalog's budget sheet draws it (catalog.tsx's groceriesSheet).
 const GROCERIES = {
@@ -176,12 +178,13 @@ function ProposedMoney({
 				}
 			>
 				{!left && roundTo}
+				{/* A chip's check keeps its slot, hidden until the chip is pressed, so a chip never changes width. */}
 				<button
 					type="button"
 					aria-pressed={String(cents === LAST_MONTH_CENTS)}
 					class={pressedChip}
 				>
-					<span class="hidden group-aria-pressed:inline-flex">
+					<span class="inline-flex invisible group-aria-pressed:visible">
 						<Icon name="check" class="size-4" />
 					</span>
 					Last month: {formatCents(LAST_MONTH_CENTS)}
@@ -191,7 +194,7 @@ function ProposedMoney({
 					aria-pressed={String(cents === AVERAGE_CENTS)}
 					class={pressedChip}
 				>
-					<span class="hidden group-aria-pressed:inline-flex">
+					<span class="inline-flex invisible group-aria-pressed:visible">
 						<Icon name="check" class="size-4" />
 					</span>
 					3-month average: {formatCents(AVERAGE_CENTS)}
@@ -202,8 +205,8 @@ function ProposedMoney({
 	);
 }
 
-/** Today's budget sheet: the real BudgetSheet, over Home's budget list. */
-function TodaySheet({
+/** Today's budget sheet body: the real BudgetSheet, in the phone's sheet or the 1280 panel alike. */
+function TodayBody({
 	id,
 	value,
 	error,
@@ -213,26 +216,24 @@ function TodaySheet({
 	error?: string;
 }) {
 	return (
-		<Sheet behind={budgetBehind} top="top-24">
-			<BudgetSheet
-				id={id}
-				category={GROCERIES}
-				value={value}
-				error={error}
-				spentCents={SPENT_CENTS}
-				lastMonthCents={LAST_MONTH_CENTS}
-				averageCents={AVERAGE_CENTS}
-				transactionCount={TRANSACTIONS}
-				month={MONTH}
-				closeHref="/"
-				closeAttrs={{}}
-			/>
-		</Sheet>
+		<BudgetSheet
+			id={id}
+			category={GROCERIES}
+			value={value}
+			error={error}
+			spentCents={SPENT_CENTS}
+			lastMonthCents={LAST_MONTH_CENTS}
+			averageCents={AVERAGE_CENTS}
+			transactionCount={TRANSACTIONS}
+			month={MONTH}
+			closeHref="/"
+			closeAttrs={{}}
+		/>
 	);
 }
 
-/** A's and B's budget sheet: BudgetSheet's own markup, around the proposed money input. */
-function ProposedSheet({
+/** A's and B's budget sheet body: BudgetSheet's own markup, around the proposed money input. */
+function ProposedBody({
 	id,
 	value,
 	error,
@@ -244,7 +245,7 @@ function ProposedSheet({
 	left: boolean;
 }) {
 	return (
-		<Sheet behind={budgetBehind} top="top-24">
+		<>
 			<div class="flex items-center gap-3">
 				<CategoryIcon icon={GROCERIES.icon} color={GROCERIES.color} />
 				<h2 class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight">
@@ -266,40 +267,71 @@ function ProposedSheet({
 					</Button>
 				</div>
 			</div>
+		</>
+	);
+}
+
+/** A phone's sheet over Home's budget list: its top 24px below the wordmark, and its foot at the screen's foot. */
+function PhoneSheet({ children }: { children?: Child }) {
+	return (
+		<Sheet behind={budgetBehind} top="top-6" height="h-[724px]">
+			{children}
 		</Sheet>
 	);
 }
 
-/** One picture: a phone's screen, labelled with its option and state. */
-function Picture({ label, children }: { label: string; children?: Child }) {
+/**
+ * A picture at 1280: BottomSheet's right-hand panel over Home's budget list, dimmed where the panel isn't. The
+ * real panel is fixed to the viewport, so it is drawn in place, as Sheet draws the phone's. The column behind
+ * is centred as DesktopFrame centres it.
+ */
+function Desk({ label, children }: { label: string; children?: Child }) {
 	return (
-		<PhoneFrame label={`${label}, on a phone`}>
-			<div data-screen="picture">{children}</div>
-		</PhoneFrame>
+		<div class="overflow-x-auto">
+			<div
+				role="img"
+				aria-label={`${label}, on desktop`}
+				class="relative h-[560px] w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+			>
+				<div inert>
+					<div data-screen="picture">
+						<div class="mx-auto max-w-xl px-8 pt-8">{budgetBehind}</div>
+						<div class="absolute inset-0 bg-ink/30" />
+						<div class="absolute inset-y-0 right-0 w-[28rem] overflow-y-auto rounded-l-sheet bg-paper p-5">
+							{children}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
 	);
 }
 
-// The five states, in the order the owner sees them. `id` makes each picture's ids its own.
+// The five states, in the order the owner sees them. `id` makes each picture's ids its own; `desk` adds the two
+// states' 1280 pictures, the ones with cents and the one that matches a chip.
 const refusal = parseBudgetAmount("six hundred");
 const STATES = [
-	{ id: "empty", label: "Empty", tag: "empty", value: "" },
+	{ id: "empty", label: "Empty", tag: "empty", value: "", desk: false },
 	{
 		id: "cents",
 		label: "With cents: Round to $613 appears",
 		tag: "with cents",
 		value: "612.45",
+		desk: true,
 	},
 	{
 		id: "last",
 		label: "Equal to last month: Round to $572 appears too",
 		tag: "equal to last month",
 		value: "571.80",
+		desk: true,
 	},
 	{
 		id: "zero",
 		label: "At $0: the minus buttons are off",
 		tag: "at $0",
 		value: "0.00",
+		desk: false,
 	},
 	{
 		id: "error",
@@ -307,6 +339,7 @@ const STATES = [
 		tag: "error",
 		value: "six hundred",
 		error: refusal.ok ? undefined : refusal.error,
+		desk: false,
 	},
 ];
 
@@ -321,90 +354,111 @@ const FIXED_LIST = [
 
 export function MoneyInputProposal() {
 	return (
-		<section aria-labelledby="p129-title" class="mt-10">
-			<h2 id="p129-title" class="font-serif text-3xl font-semibold">
-				Open: the money input, state by state
-			</h2>
-			<p class="mt-2 max-w-prose text-muted">
-				Drawn Oct 15 for #80: today’s money input beside two ways to put back
-				what it lost from the original, in each of its five states.
-			</p>
-			<Specimen
-				id="p129-money"
-				title="P129 · The money input, state by state"
-				tier="visual"
-				sentence="Today's money input beside two ways to put back what it lost from the original, in each of its five states. Each picture is Home's budget sheet for Groceries in October, on a phone."
-			>
-				<Fixed>
-					the round ±$1 buttons either side of the box (decision 46), its 12px
-					control corners (decision 85, Q61 A) and the 3-month average chip
-					(decision 85, Q62 B).
-				</Fixed>
-				<Choices>
-					<Choice
-						name="Reference · Today on main"
-						note="The money input as it is on main: the round ±$1 buttons, a box with ▲▼ cent arrows, and the chips under it. Not an option."
-					/>
-					<Choice
-						name="Option A · Today’s, with what it lost put back"
-						note="The same box, buttons and chips. The empty box shows a muted 0.00, a chip that matches the box gets a check instead of fading, and the buttons that can’t work with unreadable text turn off."
-						cost="money.js changes only (decision 39); no new token or script."
-						why="it keeps the owner’s own hero layout, centred, and fixes the losses: the placeholder, a faded chip that reads at about 2.3:1, and buttons that do nothing."
-					/>
-					<Choice
-						name="Option B · One left edge"
-						note="Everything in A, and the chips and error line up at the left with the label, with Round to last, so the other chips stay put as cents come and go."
-						cost="same as A."
-						why="one left edge for the whole sheet, and nothing moves under a finger."
-						recommended={false}
-					/>
-				</Choices>
-				{STATES.map((s) => (
-					<State label={s.label}>
-						<div class="flex flex-wrap gap-6">
-							<Shot caption="Today on main">
-								<Picture label={`Today on main, ${s.tag}`}>
-									<TodaySheet
+		<Specimen
+			id="p129-money"
+			title="P129 · The money input, state by state"
+			tier="visual"
+			sentence="Today's money input beside two ways to put back what it lost from the original, in each of its five states. Each picture is Home's budget sheet for Groceries in October, on a phone; the states with cents and the one that matches a chip also show it at 1280, as the right-hand panel."
+		>
+			<Fixed>
+				the round ±$1 buttons either side of the box (decision 46), its 12px
+				control corners (decision 85, Q61 A) and the 3-month average chip
+				(decision 85, Q62 B).
+			</Fixed>
+			<Choices>
+				<Choice
+					name="Reference · Today on main"
+					note="The money input as it is on main: the round ±$1 buttons, a box with ▲▼ cent arrows, and the chips under it. Not an option."
+				/>
+				<Choice
+					name="Option A · Today’s, with what it lost put back"
+					note="The same box, buttons and chips. The empty box shows a muted 0.00, a chip that matches the box gets a check instead of fading, and the buttons that can’t work with unreadable text turn off."
+					cost="money.js changes only (decision 39); no new token or script."
+					why="it keeps the owner’s own hero layout, centred, and fixes the losses: the placeholder, a faded chip that reads at about 2.3:1, and buttons that do nothing."
+					picked
+				/>
+				<Choice
+					name="Option B · One left edge"
+					note="Everything in A, and the chips and error line up at the left with the label, with Round to last, so the other chips stay put as cents come and go."
+					cost="same as A."
+					why="one left edge for the whole sheet, and nothing moves under a finger."
+					recommended={false}
+				/>
+			</Choices>
+			{STATES.map((s) => (
+				<State label={s.label}>
+					<div class="flex flex-wrap gap-6">
+						<Shot caption="Today on main">
+							<Phone label={`Today on main, ${s.tag}`}>
+								<PhoneSheet>
+									<TodayBody
 										id={`p129-today-${s.id}`}
 										value={s.value}
 										error={s.error}
 									/>
-								</Picture>
-							</Shot>
-							<Shot caption="Option A">
-								<Picture label={`Option A, ${s.tag}`}>
-									<ProposedSheet
+								</PhoneSheet>
+							</Phone>
+						</Shot>
+						<Shot caption="Option A">
+							<Phone label={`Option A, ${s.tag}`}>
+								<PhoneSheet>
+									<ProposedBody
 										id={`p129-a-${s.id}`}
 										value={s.value}
 										error={s.error}
 										left={false}
 									/>
-								</Picture>
-							</Shot>
-							<Shot caption="Option B">
-								<Picture label={`Option B, ${s.tag}`}>
-									<ProposedSheet
+								</PhoneSheet>
+							</Phone>
+						</Shot>
+						<Shot caption="Option B">
+							<Phone label={`Option B, ${s.tag}`}>
+								<PhoneSheet>
+									<ProposedBody
 										id={`p129-b-${s.id}`}
 										value={s.value}
 										error={s.error}
 										left
 									/>
-								</Picture>
-							</Shot>
-						</div>
-					</State>
-				))}
-				<div class="max-w-prose">
-					<p class="text-sm font-medium text-muted">
-						Fixed with either option (keyboard and screen-reader paths)
-					</p>
-					<ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
-						{FIXED_LIST.map((item) => (
-							<li>{item}</li>
-						))}
-					</ul>
-				</div>
-			</Specimen>
-		</section>
+								</PhoneSheet>
+							</Phone>
+						</Shot>
+						{s.desk && (
+							<>
+								<Shot caption="At 1280: Today on main">
+									<Desk label={`Today on main, ${s.tag}`}>
+										<TodayBody
+											id={`p129-today-${s.id}-desk`}
+											value={s.value}
+											error={s.error}
+										/>
+									</Desk>
+								</Shot>
+								<Shot caption="At 1280: Option A">
+									<Desk label={`Option A, ${s.tag}`}>
+										<ProposedBody
+											id={`p129-a-${s.id}-desk`}
+											value={s.value}
+											error={s.error}
+											left={false}
+										/>
+									</Desk>
+								</Shot>
+							</>
+						)}
+					</div>
+				</State>
+			))}
+			<div class="max-w-prose">
+				<p class="text-sm font-medium text-muted">
+					Fixed with either option (keyboard and screen-reader paths)
+				</p>
+				<ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
+					{FIXED_LIST.map((item) => (
+						<li>{item}</li>
+					))}
+				</ul>
+			</div>
+		</Specimen>
 	);
 }

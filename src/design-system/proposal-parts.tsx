@@ -163,15 +163,18 @@ export function Title({ children }: { children?: Child }) {
 export function Sheet({
 	behind,
 	top = "top-64",
+	height = "h-[686px]",
 	children,
 }: {
 	behind?: Child;
 	/** Where the sheet's top edge sits, as a Tailwind class, for a sheet with more to hold. */
 	top?: string;
+	/** How tall the drawing is, as a Tailwind class: 686px by default, 724px on a phone's full 844px screen. */
+	height?: string;
 	children?: Child;
 }) {
 	return (
-		<div class="relative -mx-5 h-[686px] overflow-hidden">
+		<div class={`relative -mx-5 ${height} overflow-hidden`}>
 			<div class="px-5">{behind}</div>
 			<div class="absolute inset-0 bg-ink/30" />
 			<div
