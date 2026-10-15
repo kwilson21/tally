@@ -53,6 +53,14 @@ describe("HomeTop", () => {
 		expect(html).toContain('<span class="whitespace-nowrap">−$9,999</span>');
 	});
 
+	// Issue #500 (P127 A, decision 116): below 390px the notebook drawing is left out, so the amount has the whole row.
+	it("leaves the notebook drawing out below 390px so the amount has the whole row (#500, P127 A)", async () => {
+		const html = await top();
+		expect(html).toMatch(
+			/<div class="[^"]*\bhidden\b[^"]*\bmin-\[390px\]:block\b[^"]*"><svg/,
+		);
+	});
+
 	it("keeps the label and Why? link when safe to spend is negative", async () => {
 		const html = await top({ safeToSpendCents: -12000 });
 		expect(html).toContain("Safe to spend");

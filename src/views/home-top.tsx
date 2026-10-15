@@ -65,7 +65,7 @@ export function HomeTop({
 					<p
 						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 					>
-						{/* One unbreakable run, so a minus sign never sets alone above its number (#500). */}
+						{/* One unbreakable run, so a minus sign never sits alone above its number (#500). The class is on this span, not the <p>, so the "as of" pill stays free to wrap onto its own line. */}
 						<span class="whitespace-nowrap">{amount}</span>
 						{currentMonth && bankDate && (
 							<span class="ml-3 inline-flex min-h-8 items-center rounded-full border border-dashed border-muted px-3 align-middle font-sans text-sm font-normal text-muted">
@@ -74,7 +74,10 @@ export function HomeTop({
 						)}
 					</p>
 				</div>
-				<LedgerIllustration />
+				{/* Below 390px the notebook is left out so the amount has the whole row (#500, P127 A, decision 116). */}
+				<div class="hidden shrink-0 min-[390px]:block">
+					<LedgerIllustration />
+				</div>
 			</div>
 			<p class="mt-3 font-serif text-lg italic">
 				{over
