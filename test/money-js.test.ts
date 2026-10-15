@@ -351,56 +351,95 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			[
 				"612.45",
 				"",
+				"",
 				{
 					offer: "61300",
 					label: "Round to $613",
 					pressed: false,
 					hidden: false,
+					used: "",
 				},
 			],
 			[
 				"613.00",
+				"61300",
+				"",
+				{
+					offer: "61300",
+					label: "Round to $613",
+					pressed: false,
+					hidden: true,
+					used: "",
+				},
+			],
+			[
+				"613.00",
+				"61300",
 				"61300",
 				{
 					offer: "61300",
 					label: "Round to $613",
 					pressed: true,
 					hidden: false,
+					used: "61300",
+				},
+			],
+			[
+				"612.99",
+				"61300",
+				"61300",
+				{
+					offer: "61300",
+					label: "Round to $613",
+					pressed: false,
+					hidden: false,
+					used: "",
 				},
 			],
 			[
 				"600.00",
 				"61300",
+				"",
 				{
 					offer: "61300",
 					label: "Round to $613",
 					pressed: false,
 					hidden: true,
+					used: "",
 				},
 			],
 			[
 				"613.01",
 				"61300",
+				"",
 				{
 					offer: "61400",
 					label: "Round to $614",
 					pressed: false,
 					hidden: false,
+					used: "",
 				},
 			],
-			["613.00", "", { offer: "", label: "", pressed: false, hidden: true }],
+			[
+				"613.00",
+				"",
+				"",
+				{ offer: "", label: "", pressed: false, hidden: true, used: "" },
+			],
 			[
 				"six",
 				"61300",
+				"",
 				{
 					offer: "61300",
 					label: "Round to $613",
 					pressed: false,
 					hidden: true,
+					used: "",
 				},
 			],
-		])("%j with offer %j", (text, offer, expected) => {
-			expect(roundState(text, offer)).toMatchObject(expected);
+		])("%j with offer %j, used %j", (text, offer, used, expected) => {
+			expect(roundState(text, offer, used)).toMatchObject(expected);
 		});
 
 		it("stays ticked after use, and offers again once the amount has cents", () => {
@@ -417,6 +456,44 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			expect(input.value).toBe("612.99");
 			expect(round.attrs["aria-pressed"]).toBe("false");
 			expect(label.textContent).toBe("Round to $613");
+		});
+
+		it("is not ticked for a whole amount typed to the offer, since nobody rounded", () => {
+			browserStubs();
+			const { root, input, round } = widget("612.45");
+			update(root);
+			input.value = "613.00";
+			update(root);
+			expect(round.attrs["aria-pressed"]).toBe("false");
+			expect(round.hidden).toBe(true);
+		});
+
+		it("unticks when ↓ or ▲ moves the amount, and is not re-earned by reaching the offer again", () => {
+			browserStubs();
+			const { root, input, round, down, up } = widget("612.45");
+			update(root);
+			press(root, round);
+			expect(round.attrs["aria-pressed"]).toBe("true");
+			press(root, down);
+			expect(input.value).toBe("612.99");
+			expect(round.attrs["aria-pressed"]).toBe("false");
+			press(root, up);
+			expect(input.value).toBe("613.00");
+			expect(round.attrs["aria-pressed"]).toBe("false");
+		});
+
+		it("unticks when the amount is typed over, and is not re-earned by typing the offer again", () => {
+			browserStubs();
+			const { root, input, round } = widget("612.45");
+			update(root);
+			press(root, round);
+			expect(round.attrs["aria-pressed"]).toBe("true");
+			input.value = "614.00";
+			update(root);
+			expect(round.attrs["aria-pressed"]).toBe("false");
+			input.value = "613.00";
+			update(root);
+			expect(round.attrs["aria-pressed"]).toBe("false");
 		});
 	});
 

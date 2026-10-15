@@ -67,20 +67,21 @@ export function refusesInsert(text, start, end, typed) {
 }
 
 /**
- * Round to's state for the field's text and the offer it last made ("" for none): the offer to keep, its
- * words, whether it's ticked (the box is at the offer, after use) and whether it's hidden.
+ * Round to's state for the field's text, the offer it last made ("" for none) and the offer the person
+ * last used ("" for none): the offer to keep, its words, the used offer to keep, whether it's ticked (the
+ * box is still at the used offer) and whether it's hidden. Moving the amount off the used offer clears it,
+ * so reaching the same amount again doesn't tick Round to.
  */
-export function roundState(text, offer) {
+export function roundState(text, offer, used) {
 	const up = roundedUp(text);
-	const cents = fieldCents(text);
-	const ticked =
-		up === null && cents !== null && offer !== "" && cents === Number(offer);
 	const kept = up === null ? offer : String(fieldCents(up));
+	const usedKept = fieldCents(text) === Number(used) ? used : "";
 	return {
 		offer: kept,
 		label: kept === "" ? "" : `Round to ${dollars(Number(kept), true)}`,
-		pressed: ticked,
-		hidden: up === null && !ticked,
+		used: usedKept,
+		pressed: usedKept !== "",
+		hidden: up === null && usedKept === "",
 	};
 }
 
@@ -105,8 +106,13 @@ export function update(root) {
 	}
 	const round = root.querySelector("[data-roundup]");
 	if (round) {
-		const state = roundState(input.value, round.dataset.roundup ?? "");
+		const state = roundState(
+			input.value,
+			round.dataset.roundup ?? "",
+			round.dataset.rounded ?? "",
+		);
 		round.dataset.roundup = state.offer;
+		round.dataset.rounded = state.used;
 		if (state.label)
 			round.querySelector("[data-roundup-label]").textContent = state.label;
 		round.hidden = state.hidden;
@@ -152,7 +158,10 @@ export function press(root, button) {
 		set(root, showCents(Number(button.dataset.set)));
 	} else {
 		const up = roundedUp(root.querySelector("[data-money-input]").value);
-		if (up !== null) set(root, up);
+		if (up !== null) {
+			button.dataset.rounded = String(fieldCents(up));
+			set(root, up);
+		}
 	}
 	if (hadFocus && button.dataset.nudge && button.disabled) {
 		root
