@@ -10,6 +10,13 @@ import { HowLink } from "./how-link";
 import { LedgerIllustration } from "./illustration";
 import { WhyLink } from "./why-link";
 
+/** Safe to spend as Home shows it: whole dollars, a minus sign in front when it's negative. Start here uses it too. */
+export function safeToSpendText(safeToSpendCents: number): string {
+	return safeToSpendCents < 0
+		? `−${formatCents(-safeToSpendCents, { wholeDollars: -safeToSpendCents >= 100 })}`
+		: formatCents(safeToSpendCents, { wholeDollars: true });
+}
+
 type Props = {
 	/** "September" */
 	month: string;
@@ -46,9 +53,7 @@ export function HomeTop({
 	hasBudgets = true,
 }: Props) {
 	const negative = safeToSpendCents < 0;
-	const amount = negative
-		? `−${formatCents(-safeToSpendCents, { wholeDollars: -safeToSpendCents >= 100 })}`
-		: formatCents(safeToSpendCents, { wholeDollars: true });
+	const amount = safeToSpendText(safeToSpendCents);
 	const over = hasBudgets && negative;
 	return (
 		<>
