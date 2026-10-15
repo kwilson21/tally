@@ -1324,12 +1324,13 @@ describe("splits unlink their refunds", () => {
 			["part_amount", "10"],
 			["back", "/transactions"],
 		]);
-		// Splitting the purchase leaves the split refund Not linked: its own row and each part are unlinked.
+		// Splitting the purchase, with the split refund answered Not linked: its own row and each part are unlinked.
 		const { res, trigger } = await post(`/transactions/${PURCHASE}/split`, [
 			["part_category", String(KIDS)],
 			["part_category", String(GAS)],
 			["part_amount", "30"],
 			["part_amount", "20"],
+			[`refund_${REFUND}`, "none"],
 			["back", "/transactions"],
 		]);
 		expect(res.status).toBe(200);

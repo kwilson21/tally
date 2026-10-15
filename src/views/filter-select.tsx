@@ -8,6 +8,8 @@ type Props = {
 	options: { value: string | number; label: string }[];
 	/** The chosen option's value; null when none is, so the first option shows. */
 	selected: string | number | null;
+	/** The form the select belongs to, by its id, when that is not the form it sits in (Select mode's filters, #383). */
+	form?: string;
 };
 
 /**
@@ -16,7 +18,14 @@ type Props = {
  * showing in the pill. max-w-full lets a long option shorten inside its pill rather than push the page
  * sideways.
  */
-export function FilterSelect({ id, name, label, options, selected }: Props) {
+export function FilterSelect({
+	id,
+	name,
+	label,
+	options,
+	selected,
+	form,
+}: Props) {
 	return (
 		<>
 			<label for={id} class="sr-only">
@@ -25,6 +34,7 @@ export function FilterSelect({ id, name, label, options, selected }: Props) {
 			<select
 				id={id}
 				name={name}
+				form={form}
 				class="min-h-11 max-w-full rounded-full border border-rule bg-paper px-4 text-base text-ink"
 			>
 				{options.map((o) => (

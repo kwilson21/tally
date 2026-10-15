@@ -20,6 +20,7 @@ import {
 	bankDatedCount,
 	excludedBreakdown,
 	monthCounts,
+	startHereRows,
 } from "../db/transactions";
 import { loadTrends } from "../db/trends";
 import { FORECAST_START_DAY } from "../home-forecast";
@@ -44,6 +45,7 @@ import {
 	TransactionsDiagram,
 } from "../views/how-diagrams";
 import { Layout } from "../views/layout";
+import { StartHere } from "../views/start-here";
 import { SystemDiagram } from "../views/system-diagram";
 import { loadBillRows } from "./bills";
 
@@ -226,6 +228,13 @@ howItWorks.get("/how-it-works", async (c) => {
 			(!demo || bill.name === "Water"),
 	);
 	const billExamples = billStatusExamples(billData.rows, today);
+	// Start here's bank lines (spec §8.8) exist only in the demo. Its lines come from the seed's month, so its
+	// "See every line" link names that month when it isn't today's (the list's count is the heading's N).
+	const startRows = demo ? await startHereRows(c.env.DB, month) : null;
+	const startRawHref =
+		startRows && startRows.month !== month
+			? `/transactions?raw=1&month=${startRows.month}`
+			: "/transactions?raw=1";
 
 	return c.html(
 		<Layout
@@ -238,6 +247,15 @@ howItWorks.get("/how-it-works", async (c) => {
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					How Tally works
 				</h1>
+				{startRows && (
+					<StartHere
+						storyMonthName={monthName(startRows.month)}
+						monthName={monthLabel}
+						rawHref={startRawHref}
+						lines={startRows}
+						safeToSpendCents={summary.safeToSpendCents}
+					/>
+				)}
 				<p class="mt-4 text-lg">
 					Tally is a small family budgeting app. One server builds every page
 					and a database keeps the numbers.{" "}
@@ -246,29 +264,6 @@ howItWorks.get("/how-it-works", async (c) => {
 						: "AI helps with categories and store names, and a person can always change them."}{" "}
 					Code does all the math.
 				</p>
-				{demo && (
-					<p class="mt-2 text-muted">
-						This demo has no bank connection. It runs on a made-up household,
-						the Riveras, and resets every night.
-					</p>
-				)}
-
-				{demo && (
-					<Section id="architecture" title="How it's built">
-						<div class="mt-4">
-							<SystemDiagram />
-						</div>
-						<dl class="mt-6 divide-y divide-rule border-y border-rule">
-							{PARTS.map(([part, job]) => (
-								<div class="grid gap-1 py-3 sm:grid-cols-[14rem_1fr] sm:gap-4">
-									<dt class="font-semibold">{part}</dt>
-									<dd class="text-muted">{job}</dd>
-								</div>
-							))}
-						</dl>
-					</Section>
-				)}
-
 				<Section id="budget" title="Budget and safe to spend">
 					<p class="mt-2">
 						Home shows how much of this month's budget is left, for each
@@ -772,6 +767,22 @@ howItWorks.get("/how-it-works", async (c) => {
 						<p class="mt-3">There are no accounts to add up yet.</p>
 					)}
 				</Section>
+
+				{demo && (
+					<Section id="architecture" title="How it's built">
+						<div class="mt-4">
+							<SystemDiagram />
+						</div>
+						<dl class="mt-6 divide-y divide-rule border-y border-rule">
+							{PARTS.map(([part, job]) => (
+								<div class="grid gap-1 py-3 sm:grid-cols-[14rem_1fr] sm:gap-4">
+									<dt class="font-semibold">{part}</dt>
+									<dd class="text-muted">{job}</dd>
+								</div>
+							))}
+						</dl>
+					</Section>
+				)}
 
 				<div class="mt-10">
 					<TallyMark class="size-9" />
