@@ -109,16 +109,58 @@ export function withScreenshots(body, section) {
 }
 
 /**
- * The screenshots CI took that differ from the base branch's, or that the base doesn't have.
- * Identical images (byte for byte, same browser and seed) are left out.
- * @param {{ file: string, after: Uint8Array, before: Uint8Array | null }[]} shots
- * @returns {{ file: string, hasBefore: boolean }[]}
+ * Groups screenshots by page and size, each group's files in part order. A file that parseShot
+ * can't read is a group of its own, taken whole. The map's keys are in the order they first appear.
+ * @param {{ file: string, png: Uint8Array }[]} shots
+ * @returns {Map<string, { file: string, png: Uint8Array, part: number }[]>}
  */
-export function changedShots(shots) {
+function groupShots(shots) {
+	const groups = new Map();
+	for (const { file, png } of shots) {
+		const shot = parseShot(file);
+		const key = shot ? `${shot.page} ${shot.viewport}` : file;
+		if (!groups.has(key)) groups.set(key, []);
+		groups.get(key).push({ file, png, part: shot?.part ?? 0 });
+	}
+	for (const parts of groups.values()) parts.sort((a, b) => a.part - b.part);
+	return groups;
+}
+
+/**
+ * The screenshots that differ from the base branch's, as rows for the before-and-after table.
+ * A page with no files on the `before` side is one row with `before: []`, however many slices it
+ * has. Otherwise, when both sides have the same files (a whole page on both, or the same slices),
+ * each part whose bytes differ is its own row. Any other pairing (whole on one side and in slices
+ * on the other, or a different number of slices) is one row with every file of both sides, counted
+ * as changed without comparing bytes: the parts wouldn't line up, and no slice is dropped. Pages
+ * only `before` has are left out. Rows come in the order their pages first appear in `after`.
+ * @param {{ after: { file: string, png: Uint8Array }[], before: { file: string, png: Uint8Array }[] }} shots
+ * @returns {{ before: string[], after: string[] }[]}
+ */
+export function changedShots({ after, before }) {
 	const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
-	return shots
-		.filter(({ after, before }) => before === null || !same(after, before))
-		.map(({ file, before }) => ({ file, hasBefore: before !== null }));
+	const beforeGroups = groupShots(before);
+	const rows = [];
+	for (const [key, parts] of groupShots(after)) {
+		const afterFiles = parts.map((part) => part.file);
+		const old = beforeGroups.get(key);
+		if (!old) {
+			rows.push({ before: [], after: afterFiles });
+			continue;
+		}
+		const beforeFiles = old.map((part) => part.file);
+		const sameFiles =
+			beforeFiles.length === afterFiles.length &&
+			beforeFiles.every((file, i) => file === afterFiles[i]);
+		if (!sameFiles) {
+			rows.push({ before: beforeFiles, after: afterFiles });
+			continue;
+		}
+		for (const [i, part] of parts.entries())
+			if (!same(part.png, old[i].png))
+				rows.push({ before: [old[i].file], after: [part.file] });
+	}
+	return rows;
 }
 
 /**
@@ -143,11 +185,11 @@ export function comparisonProblem(after, before) {
 }
 
 /**
- * The PR description's screenshot section: before and after for every changed image, then every
+ * The PR description's screenshot section: before and after for every changed row, then every
  * page at both sizes. `raw` is the URL of this run's folder; "before" images sit in `before/`.
  * `unavailable` is why there's no comparison this time (see comparisonProblem). `files` is every
  * screenshot in this run, so a page taken in slices shows every slice (#580).
- * @param {{ sha: string, raw: string, changes: { file: string, hasBefore: boolean }[], unavailable?: string | null, files?: string[] }} options
+ * @param {{ sha: string, raw: string, changes: { before: string[], after: string[] }[], unavailable?: string | null, files?: string[] }} options
  * @returns {string}
  */
 export function screenshotSection({
@@ -160,15 +202,37 @@ export function screenshotSection({
 	const [desktop, phone] = VIEWPORTS;
 	const img = (path, alt, width) =>
 		`<img src="${raw}/${path}" width="${width}" alt="${alt}">`;
-	const label = (file) => {
+	// A page and its size, such as `/settings` (phone). The part number follows only when asked for.
+	const label = (file, withPart = false) => {
 		const shot = parseShot(file);
 		const page = PAGES.find((p) => p.name === shot?.page);
 		if (!shot || !page) return file;
-		const part = shot.part === null ? "" : `, part ${shot.part}`;
+		const part = withPart && shot.part !== null ? `, part ${shot.part}` : "";
 		return `\`${page.path}\` (${shot.viewport}${part})`;
 	};
 	const width = (file) =>
 		parseShot(file)?.viewport === phone.name ? 180 : 480;
+	const beforeCell = (files) =>
+		files.length === 0
+			? "New page"
+			: files
+					.map((file) => img(`before/${file}`, `${file}, before`, width(file)))
+					.join("<br>");
+	const afterCell = (files) =>
+		files.map((file) => img(file, `${file}, after`, width(file))).join("<br>");
+	const count = (n) => (n === 1 ? "whole" : `in ${n} parts`);
+	// One row of the before-and-after table. A page whose two sides are one same-named file is a
+	// single part (or a whole page), labelled with its part number. A page taken another way on
+	// `main` is labelled with what changed, and a new page with neither.
+	const changedRow = ({ before, after }) => {
+		const onePart =
+			before.length === 1 && after.length === 1 && before[0] === after[0];
+		const note =
+			before.length > 0 && !onePart
+				? `<br>Taken differently: ${count(before.length)} on \`main\`, ${count(after.length)} in this PR.`
+				: "";
+		return `| ${label(after[0], onePart)}${note} | ${beforeCell(before)} | ${afterCell(after)} |`;
+	};
 	// The files of one page at one size, in order: its slices, or its one whole-page file.
 	const shotsOf = (page, viewport) => {
 		const found = files
@@ -202,10 +266,7 @@ export function screenshotSection({
 			: [
 					"| Page | Before (`main`) | After (this PR) |",
 					"|---|---|---|",
-					...changes.map(
-						({ file, hasBefore }) =>
-							`| ${label(file)} | ${hasBefore ? img(`before/${file}`, `${file}, before`, width(file)) : "New page"} | ${img(file, `${file}, after`, width(file))} |`,
-					),
+					...changes.map(changedRow),
 				];
 
 	return [

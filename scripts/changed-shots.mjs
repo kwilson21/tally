@@ -1,5 +1,5 @@
 // Compares this PR's screenshots (screenshots/) with the base branch's (screenshots-before/).
-// Writes screenshots/changes.json and copies each changed image's "before" into screenshots/before/.
+// Writes screenshots/changes.json and copies each "before" image a changed row shows into screenshots/before/.
 import {
 	copyFile,
 	mkdir,
@@ -24,27 +24,33 @@ if (!after)
 	);
 const unavailable = comparisonProblem(after, await runOf(BEFORE));
 
-const files = (await readdir(AFTER)).filter((f) => f.endsWith(".png"));
+const listed = async (dir) =>
+	(await readdir(dir).catch(() => [])).filter((f) => f.endsWith(".png"));
+const readShots = (dir, names) =>
+	Promise.all(
+		names.map(async (file) => ({
+			file,
+			png: await readFile(`${dir}/${file}`),
+		})),
+	);
+
+const files = await listed(AFTER);
 const changes = unavailable
 	? []
-	: changedShots(
-			await Promise.all(
-				files.map(async (file) => ({
-					file,
-					after: await readFile(`${AFTER}/${file}`),
-					before: await read(`${BEFORE}/${file}`),
-				})),
-			),
-		);
+	: changedShots({
+			after: await readShots(AFTER, files),
+			before: await readShots(BEFORE, await listed(BEFORE)),
+		});
 
 await mkdir(`${AFTER}/before`, { recursive: true });
-for (const { file, hasBefore } of changes)
-	if (hasBefore) await copyFile(`${BEFORE}/${file}`, `${AFTER}/before/${file}`);
+for (const { before } of changes)
+	for (const file of before)
+		await copyFile(`${BEFORE}/${file}`, `${AFTER}/before/${file}`);
 await writeFile(
 	`${AFTER}/changes.json`,
 	JSON.stringify({ changes, unavailable, files }),
 );
 console.log(
 	unavailable ??
-		`${changes.length} of ${files.length} screenshots differ from the base.`,
+		`${changes.length} changed rows (pages, or slices of a page) among ${files.length} screenshots.`,
 );

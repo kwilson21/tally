@@ -9,11 +9,11 @@ export const SLICE_HEIGHT = 16000;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Runs `capture`, and if it fails, waits a moment and tries again. When every try fails, the page
- * is taken by `fallback` instead, so it is kept rather than dropped. Each failed try is logged
- * with the page's label and its attempt number.
+ * Runs `capture`, and if it fails, waits a moment and tries again. Each failed try is logged with
+ * the label and its attempt number. When every try fails, `fallback` takes the shot instead, so it
+ * is kept rather than dropped; without a `fallback`, the last error is thrown.
  * @template T
- * @param {{ label: string, capture: () => Promise<T>, fallback: () => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
+ * @param {{ label: string, capture: () => Promise<T>, fallback?: () => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
  * @returns {Promise<T>}
  */
 export async function captureWithRetries({
@@ -24,18 +24,76 @@ export async function captureWithRetries({
 	wait = pause,
 	log = console.warn,
 }) {
+	let last;
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
 			return await capture();
 		} catch (error) {
+			last = error;
 			log(
 				`${label}: attempt ${attempt} of ${attempts} failed (${error.message}).`,
 			);
 			if (attempt < attempts) await wait(attempt * 1000);
 		}
 	}
+	if (!fallback) throw last;
 	log(`${label}: every full-page try failed, so it is taken in slices.`);
 	return fallback();
+}
+
+/**
+ * Takes each slice of a page, in band order, one after another. A slice that fails is retried the
+ * same way a whole page is (see captureWithRetries), so one bad slice doesn't cost the page.
+ * @template T
+ * @param {{ label: string, bands: { y: number, height: number }[], capture: (band: { y: number, height: number }) => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
+ * @returns {Promise<T[]>}
+ */
+export async function captureSlices({
+	label,
+	bands,
+	capture,
+	attempts,
+	wait,
+	log,
+}) {
+	const shots = [];
+	for (const [i, band] of bands.entries())
+		shots.push(
+			await captureWithRetries({
+				label: `${label}, slice ${i + 1} of ${bands.length}`,
+				capture: () => capture(band),
+				attempts,
+				wait,
+				log,
+			}),
+		);
+	return shots;
+}
+
+/**
+ * Makes `shoot()` for one page: it takes the page whole, retrying, and once every whole-page try
+ * has failed it takes the page in slices and keeps taking it that way, so the stability retakes
+ * don't retry a page that can only be sliced.
+ * @template T
+ * @param {{ label: string, whole: () => Promise<T>, slices: () => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
+ * @returns {() => Promise<T>}
+ */
+export function pageShooter({ label, whole, slices, attempts, wait, log }) {
+	let sliced = false;
+	return () => {
+		if (sliced) return slices();
+		return captureWithRetries({
+			label,
+			capture: whole,
+			fallback: async () => {
+				sliced = true;
+				return slices();
+			},
+			attempts,
+			wait,
+			log,
+		});
+	};
 }
 
 /**

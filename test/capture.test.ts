@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { captureWithRetries, sliceBands } from "../scripts/capture.mjs";
+import {
+	captureSlices,
+	captureWithRetries,
+	pageShooter,
+	sliceBands,
+} from "../scripts/capture.mjs";
 
 // Retries never wait for real: each test passes a no-op wait and collects the log lines.
 function harness() {
@@ -70,6 +75,120 @@ describe("captureWithRetries", () => {
 		expect(run.waits).toEqual([1000, 2000]);
 		expect(run.logs.at(-1)).toContain("/design-system/proposals (desktop)");
 		expect(run.logs.at(-1)).toContain("in slices");
+	});
+
+	it("rethrows the last error when every try fails and there is no fallback, and never says it is taken in slices", async () => {
+		const run = harness();
+		let calls = 0;
+		await expect(
+			captureWithRetries({
+				label: "/design-system/proposals (desktop)",
+				capture: async () => {
+					calls += 1;
+					throw FAILURE;
+				},
+				...run.options,
+			}),
+		).rejects.toBe(FAILURE);
+		expect(calls).toBe(3);
+		expect(run.waits).toEqual([1000, 2000]);
+		expect(run.logs.some((line) => line.includes("in slices"))).toBe(false);
+	});
+});
+
+describe("captureSlices", () => {
+	const bands = [
+		{ y: 0, height: 16000 },
+		{ y: 16000, height: 16000 },
+		{ y: 32000, height: 4000 },
+	];
+
+	it("retries a slice that fails once, returns the slices in band order, and logs the slice and attempt", async () => {
+		const run = harness();
+		const taken: number[] = [];
+		let failed = false;
+		const shots = await captureSlices({
+			label: "/design-system/proposals (phone)",
+			bands,
+			capture: async (band) => {
+				taken.push(band.y);
+				if (band.y === 16000 && !failed) {
+					failed = true;
+					throw FAILURE;
+				}
+				return `slice at ${band.y}`;
+			},
+			...run.options,
+		});
+		expect(shots).toEqual(["slice at 0", "slice at 16000", "slice at 32000"]);
+		expect(taken).toHaveLength(4);
+		expect(run.waits).toEqual([1000]);
+		expect(run.logs).toHaveLength(1);
+		expect(run.logs[0]).toContain("slice 2 of 3");
+		expect(run.logs[0]).toContain("attempt 1 of 3");
+		expect(run.logs.some((line) => line.includes("in slices"))).toBe(false);
+	});
+
+	it("rejects with the error once a slice keeps failing, and captures no slice after it", async () => {
+		const run = harness();
+		const taken: number[] = [];
+		await expect(
+			captureSlices({
+				label: "/design-system/proposals (phone)",
+				bands,
+				capture: async (band) => {
+					taken.push(band.y);
+					if (band.y === 16000) throw FAILURE;
+					return `slice at ${band.y}`;
+				},
+				...run.options,
+			}),
+		).rejects.toBe(FAILURE);
+		expect(taken).toEqual([0, 16000, 16000, 16000]);
+		expect(run.waits).toEqual([1000, 2000]);
+	});
+});
+
+describe("pageShooter", () => {
+	it("takes a page whole until its whole-page tries have all failed, then goes straight to its slices", async () => {
+		const run = harness();
+		let wholeCalls = 0;
+		let sliceCalls = 0;
+		const shoot = pageShooter({
+			label: "/design-system/proposals (phone)",
+			whole: async () => {
+				wholeCalls += 1;
+				throw FAILURE;
+			},
+			slices: async () => {
+				sliceCalls += 1;
+				return ["a", "b"];
+			},
+			...run.options,
+		});
+		expect(await shoot()).toEqual(["a", "b"]);
+		expect(wholeCalls).toBe(3);
+		const logsAfterFirst = run.logs.length;
+		expect(await shoot()).toEqual(["a", "b"]);
+		expect(wholeCalls).toBe(3);
+		expect(run.logs).toHaveLength(logsAfterFirst);
+		expect(sliceCalls).toBe(2);
+	});
+
+	it("never slices a page whose whole-page capture works", async () => {
+		const run = harness();
+		let sliceCalls = 0;
+		const shoot = pageShooter({
+			label: "/settings (desktop)",
+			whole: async () => ["whole"],
+			slices: async () => {
+				sliceCalls += 1;
+				return ["a", "b"];
+			},
+			...run.options,
+		});
+		expect(await shoot()).toEqual(["whole"]);
+		expect(sliceCalls).toBe(0);
 	});
 });
 
