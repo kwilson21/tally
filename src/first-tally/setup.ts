@@ -5,6 +5,8 @@ import { dayLabel } from "../dates";
 import {
 	type FirstTally,
 	isSetUp,
+	markStroke,
+	questionsAnswered,
 	readFirstTally,
 	STROKES,
 } from "../db/first-tally";
@@ -13,9 +15,10 @@ import { type GateBank, questionsOpen, readGateInputs } from "./gate";
 
 /**
  * before: no connected bank yet (Link a bank). reading: a bank is linked and the questions are shut (the import is
- * being read). ready: the questions are open (the gate, §8.8).
+ * being read). ready: the questions are open (the gate, §8.8). answered: the three questions are done, so only the
+ * night's count is left (it stays answered while a newly linked bank is read).
  */
-export type SetupPhase = "before" | "reading" | "ready";
+export type SetupPhase = "before" | "reading" | "ready" | "answered";
 
 export type SetupView = {
 	phase: SetupPhase;
@@ -88,7 +91,8 @@ export function setupSteps(
 	fitsOneNight: boolean,
 ): StepLine[] {
 	// The line the family acts on now says "Next": Link your bank before a bank, then the first stroke not yet drawn once
-	// the questions are open. While the import is read there is nothing to act on.
+	// the questions are open. While the import is read, or once the three questions are answered, there is nothing to act
+	// on, so no line says Next.
 	const next =
 		phase === "before"
 			? 0
@@ -140,17 +144,21 @@ export function setupView({
 }): SetupView | null {
 	if (isSetUp(record)) return null;
 	const bankName = banks[0]?.name ?? null;
+	// Answered is checked before the gate, so a bank linked after the answers (which shuts the gate again) doesn't send
+	// the family back to "reading" for questions they have already answered.
 	const phase: SetupPhase =
 		banks.length === 0
 			? "before"
-			: questionsOpen({
-						today,
-						strokeOneDay: record?.strokes.bank ?? null,
-						banks,
-						waiting,
-					})
-				? "ready"
-				: "reading";
+			: questionsAnswered(record)
+				? "answered"
+				: questionsOpen({
+							today,
+							strokeOneDay: record?.strokes.bank ?? null,
+							banks,
+							waiting,
+						})
+					? "ready"
+					: "reading";
 	const fitsOneNight = waiting <= cap;
 	return {
 		phase,
@@ -168,9 +176,16 @@ export async function readSetup(
 	db: D1Database,
 	{ today, cap }: { today: string; cap: number },
 ): Promise<SetupView | null> {
-	const record = await readFirstTally(db);
+	let record = await readFirstTally(db);
 	if (isSetUp(record)) return null;
 	const { banks, waiting } = await readGateInputs(db);
+	// A connected bank with no stroke one (linked before the first week shipped, in a household with no budgets, so
+	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. markStroke keeps a stroke
+	// already drawn, so this is idempotent.
+	if (banks.length > 0 && record?.strokes.bank === undefined) {
+		await markStroke(db, "bank", today);
+		record = await readFirstTally(db);
+	}
 	const total =
 		(
 			await db

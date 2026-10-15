@@ -509,6 +509,25 @@ function Brand() {
 						)}
 					/>
 				</State>
+				<State label="Four drawn, the questions answered: the count line is later, and no line says Next">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
 				<State label="All five drawn, each with its day">
 					<TallySteps
 						steps={setupSteps(
@@ -568,6 +587,16 @@ function Brand() {
 						})}
 					/>
 				</State>
+				<State label="Reading, with a bank that stopped updating: its line under the status">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+						})}
+						bankLine={["Chase stopped updating Oct 9"]}
+					/>
+				</State>
 				<State label="Questions ready: the three things to check">
 					<HomeSetup
 						view={firstWeek(BANK_SYNCED, "ready", {
@@ -576,6 +605,23 @@ function Brand() {
 							total: 362,
 							sorted: 362,
 						})}
+					/>
+				</State>
+				<State label="Questions answered: the ruled total, and no Band">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{ bankName: "Chase", drawn: 4, total: 362, sorted: 362 },
+						)}
 					/>
 				</State>
 			</Specimen>

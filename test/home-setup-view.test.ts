@@ -12,11 +12,14 @@ const base: SetupView = {
 	sorted: 0,
 	total: 0,
 };
-const top = async (view: Partial<SetupView>, linkBank?: string) =>
-	String(await HomeSetup({ view: { ...base, ...view }, linkBank })).replaceAll(
-		"&#39;",
-		"'",
-	);
+const top = async (
+	view: Partial<SetupView>,
+	linkBank?: string,
+	bankLine?: string[],
+) =>
+	String(
+		await HomeSetup({ view: { ...base, ...view }, linkBank, bankLine }),
+	).replaceAll("&#39;", "'");
 
 describe("HomeSetup", () => {
 	it("before a bank: the headline, the one button and its line", async () => {
@@ -84,6 +87,32 @@ describe("HomeSetup", () => {
 			"Your pay, your bills and your budgets. About three minutes.",
 		);
 		expect(html).not.toContain("Link a bank");
+	});
+
+	it("answered: the ruled total under the status, with no Band and no question page", async () => {
+		const html = await top({
+			phase: "answered",
+			drawn: 4,
+			bankName: "Chase",
+			total: 362,
+			sorted: 362,
+		});
+		expect(html).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(html).not.toContain("Three things to check");
+		expect(html).not.toContain('href="/first-page"');
+		expect(html).not.toContain("Nothing for you to do");
+	});
+
+	it("shows a bank that stopped updating under the status, as Home's top does", async () => {
+		const html = await top(
+			{ phase: "reading", drawn: 1, bankName: "Chase", total: 40 },
+			undefined,
+			["Chase stopped updating Oct 9"],
+		);
+		expect(html).toContain("Chase stopped updating Oct 9");
+		expect(html).toContain('href="/accounts"');
 	});
 
 	it("reading: the notebook sits at the right under a heading only screen readers hear (the picked drawing has no visible title)", async () => {

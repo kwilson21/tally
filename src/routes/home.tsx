@@ -295,7 +295,11 @@ async function renderHome(
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
 						{setup ? (
-							<HomeSetup view={setup} linkBank={linkBank} />
+							<HomeSetup
+								view={setup}
+								linkBank={linkBank}
+								bankLine={bankNotice?.words}
+							/>
 						) : current ? (
 							<HomeTop
 								month={monthName(month)}

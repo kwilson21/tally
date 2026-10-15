@@ -4,14 +4,18 @@
 import type { Child } from "hono/jsx";
 import type { SetupView } from "../first-tally/setup";
 import { Band } from "./band";
+import { BankBehind } from "./bank-line";
 import { Notebook } from "./notebook";
 import { TallySteps } from "./tally-steps";
 
 const WORDS = ["None", "One", "Two", "Three", "Four", "Five"];
 const count = (n: number) => n.toLocaleString("en-US");
 
-/** The status sentence (serif italic) for the reading and ready states. */
+/** The status sentence (serif italic) for the reading, ready and answered states. */
 function statusOf(view: SetupView): string {
+	if (view.phase === "answered") {
+		return "Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
+	}
 	if (view.phase === "ready") {
 		return `Tally sorted ${count(view.total)} overnight. Three things to check, and Safe to spend is written in at the end.`;
 	}
@@ -24,14 +28,17 @@ function statusOf(view: SetupView): string {
 
 /**
  * The setup top. `linkBank` is Home's Link a bank (before a bank, and only when Plaid is on): the one button, with its
- * error region. The status takes focus after Plaid redraws Home (`data-link-bank-focus`, plaid-link.js).
+ * error region. `bankLine` is a connected bank that stopped syncing (src/stale-bank.ts), said as Home's top says it. The
+ * status takes focus after Plaid redraws Home (`data-link-bank-focus`, plaid-link.js).
  */
 export function HomeSetup({
 	view,
 	linkBank,
+	bankLine,
 }: {
 	view: SetupView;
 	linkBank?: Child;
+	bankLine?: string[];
 }) {
 	const { phase } = view;
 	const before = phase === "before";
@@ -68,6 +75,7 @@ export function HomeSetup({
 					)}
 				</>
 			)}
+			{bankLine && <BankBehind words={bankLine} />}
 			<TallySteps steps={view.steps} />
 			{phase === "before" && linkBank && (
 				<div class="mt-6">

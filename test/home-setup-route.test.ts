@@ -107,6 +107,51 @@ describe("Home during setup", () => {
 		expect(html).not.toContain("Link a bank");
 	});
 
+	it("four strokes drawn: the ruled total, and no three things to check", async () => {
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
+		const html = await page(family);
+		expect(html).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(html).not.toContain("Three things to check");
+		expect(html).not.toContain('href="/first-page"');
+	});
+
+	it("a connected bank with no stroke one gets it today, and Home reads the import", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		const html = await page(family);
+		expect(html).toContain("Your first week");
+		expect(html).toContain("Nothing for you to do until then.");
+		const stored = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(
+			todayIn(DEFAULT_TIME_ZONE),
+		);
+	});
+
+	it("a bank that stopped updating during setup shows its line under the status", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_synced_at = datetime('now', '-10 days')",
+		).run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const html = await page(family);
+		expect(html).toContain("Your first week");
+		expect(html).toContain("stopped updating");
+	});
+
 	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and Home offers Link a bank again", async () => {
 		const bank = await env.DB.prepare(
 			"SELECT MIN(id) AS id FROM plaid_items",

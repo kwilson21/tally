@@ -167,6 +167,42 @@ describe("setupView: which setup state Home shows", () => {
 		]);
 	});
 
+	it("is answered once pay, bills and budgets are drawn: the count line waits for the night, and no line says Next", () => {
+		const record: FirstTally = {
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		};
+		const answered = view({ record, banks: [BANK], waiting: 0, total: 362 });
+		expect(answered?.phase).toBe("answered");
+		expect(answered?.drawn).toBe(4);
+		expect(answered?.steps[4]).toEqual({
+			name: "Tomorrow · Tally keeps count on its own",
+			done: false,
+			note: "Later",
+		});
+		expect(answered?.steps.some((s) => s.note === "Next")).toBe(false);
+	});
+
+	it("stays answered while a newly linked bank is read, since the three answers are kept", () => {
+		const record: FirstTally = {
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		};
+		expect(
+			view({ record, banks: [{ ...BANK, historyCompleteAt: null }] })?.phase,
+		).toBe("answered");
+	});
+
 	it("names the done lines by their day, and an undated stroke has no day", () => {
 		const record: FirstTally = {
 			strokes: { bank: "2026-10-13", pay: "2026-10-13", bills: null },
@@ -199,6 +235,18 @@ describe("readSetup", () => {
 			.bind(JSON.stringify(ALL_DRAWN))
 			.run();
 		expect(await readSetup(env.DB, { today: TODAY, cap: 500 })).toBeNull();
+	});
+
+	it("draws stroke one today for a connected bank that has none (linked before the first week shipped)", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		const setup = await readSetup(env.DB, { today: TODAY, cap: 500 });
+		// Stroke one is drawn today, so the questions open tomorrow at the earliest: the setup is reading, not set up.
+		expect(setup?.phase).toBe("reading");
+		expect(setup?.steps[0]?.done).toBe(true);
+		const stored = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(TODAY);
 	});
 
 	it("reads before-bank setup for a household with no record and no connected bank", async () => {

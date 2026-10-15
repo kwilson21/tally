@@ -58,6 +58,13 @@ export function isSetUp(record: FirstTally | null): boolean {
 	return STROKES.every((stroke) => record?.strokes[stroke] !== undefined);
 }
 
+/** True once the three questions are answered (pay, bills and budgets drawn): only the night's count stroke is left. */
+export function questionsAnswered(record: FirstTally | null): boolean {
+	return (["pay", "bills", "budgets"] as const).every(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	);
+}
+
 // Each setter is one upsert, so the json_* change is applied to what is stored when the write happens. Two writes that
 // overlap then keep each other's fields, where a read-then-write of the whole record would lose one of them.
 
