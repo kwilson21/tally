@@ -139,6 +139,24 @@ export function MotionSpec({ children }: { children?: Child }) {
 }
 
 /**
+ * A sheet drawn on the catalog page (#610). A sheet is fixed to the viewport, so the frame must contain it: `contain-paint`
+ * makes the frame the containing block for the sheet and its backdrop, and clips them to its box. A fixed child adds
+ * nothing to its parent's height, so the frame has a height that holds the tallest state (the paid plan's sheet is 574 px
+ * at 320 wide). `inert`, as the other drawings are, so nothing in it can take focus or be pressed.
+ */
+export function SheetFrame({ children }: { children?: Child }) {
+	return (
+		<div
+			inert
+			data-sheet-frame=""
+			class="h-[40rem] max-w-xl overflow-hidden contain-paint rounded-t-sheet border border-rule bg-paper"
+		>
+			{children}
+		</div>
+	);
+}
+
+/**
  * A phone's first screen: 390 wide inside its 1px border and 788 tall, which is 844 minus the 56px
  * tab bar. What's below its edge is what a person scrolls to see. On a narrower screen it scrolls
  * sideways in its column rather than shrinking, so the text wraps exactly as on a real phone.
