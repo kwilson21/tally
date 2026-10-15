@@ -39,13 +39,17 @@ export async function sortAfterSync(
 	}
 }
 
-/** Syncs one bank, then sorts what it brought in. The sort adds nothing to what the sync reports or throws. */
+/**
+ * Syncs one bank, then sorts what it brought in. The sort adds nothing to what the sync reports or throws. `historyComplete`
+ * is the webhook's historical_update_complete (#581), passed to the sync.
+ */
 export async function syncItemAndSort(
 	env: Parameters<typeof syncItem>[0] & SortEnv,
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
+	{ historyComplete = false }: { historyComplete?: boolean } = {},
 ): Promise<SyncResult> {
-	const synced = await syncItem(env, itemRowId, fetchImpl);
+	const synced = await syncItem(env, itemRowId, fetchImpl, { historyComplete });
 	if (!("skipped" in synced)) await sortAfterSync(env, synced, fetchImpl);
 	return synced;
 }
