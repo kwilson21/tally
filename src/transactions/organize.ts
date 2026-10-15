@@ -327,6 +327,14 @@ export async function setOrganizeRule(
 	);
 }
 
+/**
+ * A store's name as organizeGroups shows it: the store's display name, else its merchant key tidied. Both the question
+ * and the store's charges are matched on it, so it is named one way only.
+ */
+function storeNameOf(shownName: string | null, merchantKey: string): string {
+	return shownName || tidyName(merchantKey);
+}
+
 /** Organize's question for a saved group, as `organizeOffer` rebuilds it; the view draws it (#353). */
 export type GroupOffer = {
 	savedIds: number[];
@@ -366,10 +374,9 @@ export async function organizeOffer(
 		)
 		.bind(savedJson, ...savedStillHoldArgs(savedJson, categoryId))
 		.all<{ merchantKey: string; shownName: string | null }>();
-	// Named as organizeGroups names a group: the store's display name, else its tidied key.
 	const names = [
 		...new Set(
-			results.map((row) => row.shownName || tidyName(row.merchantKey)),
+			results.map((row) => storeNameOf(row.shownName, row.merchantKey)),
 		),
 	];
 	const merchant = names[0];
@@ -382,4 +389,62 @@ export async function organizeOffer(
 		categoryId,
 		category: category.name,
 	};
+}
+
+/**
+ * The merchant row number that names a store on Organize's question address (#532): the `merchants` rowid, as Skip names
+ * a merchant row, of the key of the first of the charges Save filed. Save writes every filed charge's key row before it
+ * files the charge, so the row exists.
+ */
+export async function storeRowOf(
+	db: D1Database,
+	savedIds: number[],
+): Promise<number | null> {
+	const row = await db
+		.prepare(
+			`SELECT m.rowid AS id FROM transactions t JOIN merchants m ON m.raw_name = ${KEY} WHERE t.id IN (SELECT value FROM json_each(?)) ORDER BY t.id LIMIT 1`,
+		)
+		.bind(JSON.stringify(savedIds))
+		.first<{ id: number }>();
+	return row?.id ?? null;
+}
+
+/**
+ * The charges of a store that Organize's question asks about (#532): every charge in `categoryId` as a person's choice
+ * whose merchant key shares the store's name, the name its merchant row gives (its display name, else its key tidied, as
+ * organizeGroups names a group). A store with many keys is one name, so the question's address needs only one row
+ * number. The names are compared here, since tidyName has no SQL form: one scan of the category's distinct merchant
+ * keys, then the charges of the keys that match, in id order. Nothing when the row is gone.
+ */
+export async function storeChargeIds(
+	db: D1Database,
+	storeRow: number,
+	categoryId: number,
+): Promise<number[]> {
+	const seed = await db
+		.prepare(
+			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE rowid = ?",
+		)
+		.bind(storeRow)
+		.first<{ key: string; displayName: string | null }>();
+	if (!seed) return [];
+	const name = storeNameOf(seed.displayName, seed.key);
+	const { results: keyRows } = await db
+		.prepare(
+			`SELECT DISTINCT ${KEY} AS merchantKey, ${merchantColumnSql("t", "display_name")} AS shownName
+			FROM transactions t WHERE t.category_id = ? AND t.category_source = 'user'`,
+		)
+		.bind(categoryId)
+		.all<{ merchantKey: string; shownName: string | null }>();
+	const merchantKeys = keyRows
+		.filter((row) => storeNameOf(row.shownName, row.merchantKey) === name)
+		.map((row) => row.merchantKey);
+	if (merchantKeys.length === 0) return [];
+	const { results } = await db
+		.prepare(
+			`SELECT t.id AS id FROM transactions t WHERE ${KEY} IN (SELECT value FROM json_each(?)) AND t.category_id = ? AND t.category_source = 'user' ORDER BY t.id`,
+		)
+		.bind(JSON.stringify(merchantKeys), categoryId)
+		.all<{ id: number }>();
+	return results.map((row) => row.id);
 }

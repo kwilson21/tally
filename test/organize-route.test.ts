@@ -26,6 +26,12 @@ const ruleOf = async (key: string) =>
 /** The ids of the charges a save filed, as the question's hidden `saved` field carries them back (JSON). */
 const savedIdsIn = (html: string) =>
 	html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]";
+/** The same ids, in order: a rebuilt question lists them in id order, a save in the order it filed them. */
+const sortedIds = (html: string) =>
+	(JSON.parse(savedIdsIn(html)) as number[]).sort((a, b) => a - b);
+/** The address's merchant row number, as Save names the store (#532). */
+const storeOf = (location: string) =>
+	new URL(BASE + location).searchParams.get("store") ?? "";
 
 async function get(path = "/transactions/organize") {
 	const res = await exports.default.fetch(BASE + path);
@@ -581,8 +587,9 @@ describe("POST /transactions/organize", () => {
 		);
 		const ids = JSON.parse(savedIdsIn(save.html)) as number[];
 		expect(ids.length).toBeGreaterThan(0);
-		expect(save.res.headers.get("HX-Push-Url")).toBe(
-			`/transactions/organize?skip=Other+store&category=2&saved=${ids.join(".")}`,
+		// The address names the store by one merchant row and the category, never the saved ids (#532).
+		expect(save.res.headers.get("HX-Push-Url")).toMatch(
+			/^\/transactions\/organize\?skip=Other\+store&category=2&store=\d+$/,
 		);
 		const reload = await get(save.res.headers.get("HX-Push-Url") ?? "");
 		expect(reload.res.status).toBe(200);
@@ -590,7 +597,7 @@ describe("POST /transactions/organize", () => {
 		expect(reload.html).toContain(
 			`Always use ${await categoryName(2)} for Local Bakery?`,
 		);
-		expect(JSON.parse(savedIdsIn(reload.html))).toEqual(ids);
+		expect(sortedIds(reload.html)).toEqual([...ids].sort((a, b) => a - b));
 	});
 
 	it("the question's Yes sets the rule for 150 merchant keys in one request", async () => {
@@ -1165,8 +1172,8 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		const url = new URL(BASE + location);
 		expect(url.pathname).toBe("/transactions/organize");
 		expect(url.searchParams.get("category")).toBe("2");
-		const filed = (url.searchParams.get("saved") ?? "").split(".").map(Number);
-		expect(filed.length).toBeGreaterThan(0);
+		expect(url.searchParams.has("saved")).toBe(false);
+		expect(storeOf(location)).toMatch(/^\d+$/);
 
 		const first = await get(location);
 		expect(first.res.status).toBe(200);
@@ -1176,7 +1183,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		expect(first.html).toContain(
 			`Always use ${await categoryName(2)} for Local Bakery?`,
 		);
-		expect(JSON.parse(savedIdsIn(first.html))).toEqual(filed);
+		expect(sortedIds(first.html).length).toBeGreaterThan(0);
 
 		const reload = await get(location);
 		expect(reload.html).toContain(
@@ -1256,27 +1263,39 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		expect(back.html).not.toMatch(/<h2[^>]*>Local Bakery<\/h2>/);
 	});
 
-	it("an address whose charges no longer hold the category shows no question, and never an error", async () => {
+	it("an address whose store or category holds no question shows no question, and never an error", async () => {
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
-		const saved =
-			new URL(BASE + (save.res.headers.get("Location") ?? "")).searchParams.get(
-				"saved",
-			) ?? "";
+		const store = storeOf(save.res.headers.get("Location") ?? "");
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('OTHER RAW', 'Other store')",
+			),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source) VALUES (1, ?, 500, 'OTHER RAW', 3, 'user')",
+			).bind(todayIn(DEFAULT_TIME_ZONE)),
+		]);
+		const otherStore = await env.DB.prepare(
+			"SELECT rowid AS id FROM merchants WHERE raw_name = 'OTHER RAW'",
+		).first<{ id: number }>();
 		const crafted: Record<string, string> = {
-			"another category": `/transactions/organize?category=3&saved=${saved}`,
-			"a charge that does not exist": `/transactions/organize?category=2&saved=${saved}.999999`,
-			junk: "/transactions/organize?category=x&saved=abc",
-			"a missing category": `/transactions/organize?category=999&saved=${saved}`,
-			"no charges": "/transactions/organize?category=2&saved=",
+			"another category": `/transactions/organize?category=3&store=${store}`,
+			"a store that does not exist":
+				"/transactions/organize?category=2&store=999999",
+			"a store with no charges in this category": `/transactions/organize?category=2&store=${otherStore?.id}`,
+			junk: "/transactions/organize?category=x&store=abc",
+			"a missing category": `/transactions/organize?category=999&store=${store}`,
+			"no store": "/transactions/organize?category=2",
+			"an address from before #532, with saved ids":
+				"/transactions/organize?category=2&saved=1.2",
 		};
 		for (const [name, path] of Object.entries(crafted)) {
 			const { res, html } = await get(path);
 			expect(res.status, name).toBe(200);
 			expect(html, name).not.toContain("rule-offer-title");
 		}
-		// The same address with its own charges asks, so the checks above fail for the reason they name.
+		// The same store and category asks, so the checks above fail for the reason they name.
 		const { html } = await get(
-			`/transactions/organize?category=2&saved=${saved}`,
+			`/transactions/organize?category=2&store=${store}`,
 		);
 		expect(html).toContain("rule-offer-title");
 	});
@@ -1292,7 +1311,7 @@ describe("Organize's question with JavaScript off (#353)", () => {
 		expect(html).not.toContain("rule-offer-title");
 	});
 
-	it("ids from two differently named stores show no question, though both hold the category", async () => {
+	it("a store's address asks about that store alone, though another store holds the category", async () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name) VALUES ('STORE TWO RAW', 'Store two')",
 		).run();
@@ -1303,17 +1322,90 @@ describe("Organize's question with JavaScript off (#353)", () => {
 			.first<{ id: number }>();
 		expect(other?.id).toBeDefined();
 		const save = await post({ category: "2", name: "", group: "Local Bakery" });
-		const saved =
-			new URL(BASE + (save.res.headers.get("Location") ?? "")).searchParams.get(
-				"saved",
-			) ?? "";
-		const alone = await get(`/transactions/organize?category=2&saved=${saved}`);
-		expect(alone.html).toContain("rule-offer-title");
-		const both = await get(
-			`/transactions/organize?category=2&saved=${saved}.${other?.id}`,
+		const store = storeOf(save.res.headers.get("Location") ?? "");
+		const storeTwo = await env.DB.prepare(
+			"SELECT rowid AS id FROM merchants WHERE raw_name = 'STORE TWO RAW'",
+		).first<{ id: number }>();
+		const bakery = await get(
+			`/transactions/organize?category=2&store=${store}`,
 		);
-		expect(both.res.status).toBe(200);
-		expect(both.html).not.toContain("rule-offer-title");
+		expect(bakery.html).toContain("rule-offer-title");
+		expect(sortedIds(bakery.html)).not.toContain(other?.id);
+		const two = await get(
+			`/transactions/organize?category=2&store=${storeTwo?.id}`,
+		);
+		expect(two.html).toContain(
+			`Always use ${await categoryName(2)} for Store two?`,
+		);
+		expect(sortedIds(two.html)).toEqual([other?.id]);
+	});
+});
+
+describe("Organize's question address stays bounded (#532)", () => {
+	/** One store of 2,000 charges, each under its own bank text, so it is 2,000 merchant keys that tidy to one name. */
+	const bigStore = () =>
+		env.DB.prepare(
+			"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO transactions (account_id, date, amount_cents, raw_name) SELECT 1, ?, 1000, 'STORE*' || printf('%04d', i) FROM n",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE))
+			.run();
+
+	it("an htmx Save of 2,000 charges pushes an address under 200 characters with no bank text, and a reload asks the same question", async () => {
+		await bigStore();
+		const save = await post(
+			{ category: "2", name: "", group: "Store" },
+			"/transactions/organize",
+			true,
+		);
+		const pushed = save.res.headers.get("HX-Push-Url") ?? "";
+		expect(pushed.length).toBeLessThan(200);
+		expect(pushed).not.toContain("STORE*");
+		const filed = JSON.parse(savedIdsIn(save.html)) as number[];
+		expect(filed).toHaveLength(2000);
+
+		const reload = await get(pushed);
+		expect(reload.res.status).toBe(200);
+		expect(reload.html).toContain("rule-offer-title");
+		expect(reload.html).toContain(
+			`Always use ${await categoryName(2)} for Store?`,
+		);
+		expect(sortedIds(reload.html)).toEqual([...filed].sort((a, b) => a - b));
+	});
+
+	it("a no-JavaScript Save of 2,000 charges redirects to an address under 200 characters with no bank text", async () => {
+		await bigStore();
+		const save = await post({ category: "2", name: "", group: "Store" });
+		const location = save.res.headers.get("Location") ?? "";
+		expect(save.res.status).toBe(303);
+		expect(location.length).toBeLessThan(200);
+		expect(location).not.toContain("STORE*");
+		const { html } = await get(location);
+		expect(html).toContain("rule-offer-title");
+		expect(sortedIds(html)).toHaveLength(2000);
+	});
+
+	it("a question whose store has no charges in the category shows the ordinary page", async () => {
+		await bigStore();
+		const save = await post({ category: "2", name: "", group: "Store" });
+		const location = save.res.headers.get("Location") ?? "";
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id = 2 AND raw_name LIKE 'STORE*%'",
+		).run();
+		const { res, html } = await get(location);
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("rule-offer-title");
+	});
+
+	it("a reload asks about the store's charges still in the category, once some have moved", async () => {
+		await bigStore();
+		const save = await post({ category: "2", name: "", group: "Store" });
+		const location = save.res.headers.get("Location") ?? "";
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1 WHERE category_id = 2 AND raw_name = 'STORE*0001'",
+		).run();
+		const { html } = await get(location);
+		expect(html).toContain("rule-offer-title");
+		expect(sortedIds(html)).toHaveLength(1999);
 	});
 });
 

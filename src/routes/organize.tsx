@@ -6,11 +6,14 @@ import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
+	type GroupOffer,
 	groupHasRule,
 	organizeGroups,
 	organizeOffer,
 	saveOrganizeGroup,
 	setOrganizeRule,
+	storeChargeIds,
+	storeRowOf,
 } from "../transactions/organize";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
@@ -91,7 +94,7 @@ async function renderOrganize(
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
 	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
-	// question's own address also carries its category and saved ids, which an answer must not repeat.
+	// question's own address also carries its category and store, which an answer must not repeat.
 	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
 	if (trigger) {
 		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
@@ -231,38 +234,52 @@ async function renderOrganize(
 }
 
 /**
- * The address of Organize's question for a saved group (#353): the skips the page carries, then the category and the
- * saved charges' ids joined by dots. The question has an address of its own, so a reload asks it again.
+ * The address of Organize's question for a store (#353, #532): the skips the page carries, then the category and the
+ * store's merchant row number. The question has an address of its own, so a reload asks it again, and the address is the
+ * same length however many charges the store has.
  */
 function questionAddress(
 	skips: string[],
 	categoryId: number,
-	savedIds: number[],
+	storeRow: number,
 ): string {
 	const params = new URLSearchParams([
 		...skips.map((name): [string, string] => ["skip", name]),
 		["category", String(categoryId)],
-		["saved", savedIds.join(".")],
+		["store", String(storeRow)],
 	]);
 	return `/transactions/organize?${params}`;
 }
 
 /**
+ * The question an address asks (#532): rebuilt from the store's charges now in its category, through organizeOffer's
+ * rules. An address without a valid store and category, or a question its charges no longer hold, asks nothing.
+ */
+async function questionAt(
+	db: D1Database,
+	params: URLSearchParams,
+): Promise<GroupOffer | null> {
+	const categoryId = Number(params.get("category"));
+	const storeRow = Number(params.get("store"));
+	if (
+		!Number.isSafeInteger(categoryId) ||
+		categoryId <= 0 ||
+		!Number.isSafeInteger(storeRow) ||
+		storeRow <= 0
+	)
+		return null;
+	const savedIds = await storeChargeIds(db, storeRow, categoryId);
+	return savedIds.length > 0 ? organizeOffer(db, savedIds, categoryId) : null;
+}
+
+/**
  * Organize's page. A Save that asks the question lands on the question's own address both ways (#353): by a 303
  * redirect with JavaScript off, and by the reply's HX-Push-Url with it. Anything else in those parameters, or a
- * question the charges no longer hold, shows the ordinary page.
+ * question the charges no longer hold, shows the ordinary page. An address from before #532, which carried the saved
+ * ids, shows the ordinary page too.
  */
 organize.get("/transactions/organize", async (c) => {
-	const params = new URL(c.req.url).searchParams;
-	const categoryId = Number(params.get("category"));
-	const savedIds = (params.get("saved") ?? "")
-		.split(".")
-		.map(Number)
-		.filter((id) => Number.isSafeInteger(id) && id > 0);
-	const offer =
-		Number.isSafeInteger(categoryId) && categoryId > 0 && savedIds.length > 0
-			? await organizeOffer(c.env.DB, savedIds, categoryId)
-			: null;
+	const offer = await questionAt(c.env.DB, new URL(c.req.url).searchParams);
 	return offer
 		? renderOrganize(c, undefined, 200, true, offer)
 		: renderOrganize(c);
@@ -359,18 +376,22 @@ organize.post("/transactions/organize", async (c) => {
 	const asks =
 		!(await groupHasRule(c.env.DB, currentGroup.merchantKeys, chosen.id)) &&
 		!(await jevSaysMixedAmong(c.env.DB, filed));
-	const rule: GroupRuleOfferValue | undefined = asks
-		? {
-				savedIds: filed,
-				merchant: name || currentGroup.name,
-				categoryId: chosen.id,
-				category: chosen.name,
-			}
-		: undefined;
+	// The question's address names its store by a merchant row number (#532), never by the saved ids.
+	const store = asks ? await storeRowOf(c.env.DB, filed) : null;
+	const rule: GroupRuleOfferValue | undefined =
+		store === null
+			? undefined
+			: {
+					savedIds: filed,
+					merchant: name || currentGroup.name,
+					categoryId: chosen.id,
+					category: chosen.name,
+				};
 	// The question has an address of its own (#353), so a reload asks it again.
-	const asked = rule
-		? questionAddress(url.searchParams.getAll("skip"), chosen.id, filed)
-		: null;
+	const asked =
+		store === null
+			? null
+			: questionAddress(url.searchParams.getAll("skip"), chosen.id, store);
 	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
 		"HX-Trigger",
@@ -404,7 +425,7 @@ function postedItems<T>(
 organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
 	const url = new URL(c.req.url);
-	// The skips only: an answer to the question must not carry its category or saved ids back into the question.
+	// The skips only: an answer to the question must not carry its category or store back into the question.
 	const skips = new URLSearchParams(
 		url.searchParams.getAll("skip").map((name) => ["skip", name]),
 	);
