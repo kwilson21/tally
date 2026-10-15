@@ -44,10 +44,11 @@ const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "displ
 /**
  * The one rule that listing, linking and Undo all check (decision 82): money out, not split or income, in the plan's
  * month or the next, and paying neither a bill nor another plan. `alias` is the payment's table alias, `month` an SQL
- * expression for the plan's `YYYY-MM`.
+ * expression for the plan's `YYYY-MM`. `exceptPlan` (an SQL expression for a plan id) is paysPlanGroupSql's: that plan's
+ * own link doesn't count, so an edit of a paid plan can keep its payment.
  */
-const canPayPlanSql = (alias: string, month: string) =>
-	`(${alias}.amount_cents > 0 AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0 AND substr(${alias}.date, 1, 7) IN (${month}, substr(date(${month} || '-01', '+1 month'), 1, 7)) AND NOT ${paysBillGroupSql(alias)} AND NOT ${paysPlanGroupSql(alias)})`;
+const canPayPlanSql = (alias: string, month: string, exceptPlan?: string) =>
+	`(${alias}.amount_cents > 0 AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0 AND substr(${alias}.date, 1, 7) IN (${month}, substr(date(${month} || '-01', '+1 month'), 1, 7)) AND NOT ${paysBillGroupSql(alias)} AND NOT ${paysPlanGroupSql(alias, exceptPlan)})`;
 
 /**
  * A payer's name as bills show it (bills.tsx): its own name or its merchant's, else the bank's text tidied. The bank's
@@ -224,18 +225,39 @@ export async function insertPlan(
 	return result.meta.last_row_id ?? null;
 }
 
+/**
+ * Saves a plan's name, amount and month, and keeps its payment only while canPayPlanSql accepts it for the new month, so
+ * a month the payment no longer fits unlinks it (`unlinked`). One batch, so the read of the payment and the write land
+ * together; both answers are false when the plan doesn't exist.
+ */
 export async function updatePlan(
 	db: D1Database,
 	planId: number,
 	fields: PlanFields,
-): Promise<boolean> {
-	const result = await db
-		.prepare(
-			"UPDATE planned_expenses SET name = ?, amount_cents = ?, month = ? WHERE id = ?",
-		)
-		.bind(fields.name, fields.amountCents, fields.month, planId)
-		.run();
-	return result.meta.changes === 1;
+): Promise<{ saved: boolean; unlinked: boolean }> {
+	const [current, written] = await db.batch<{
+		before?: number | null;
+		after?: number | null;
+	}>([
+		db
+			.prepare(
+				"SELECT transaction_id AS before FROM planned_expenses WHERE id = ?1",
+			)
+			.bind(planId),
+		db
+			.prepare(
+				`UPDATE planned_expenses SET name = ?1, amount_cents = ?2, month = ?3,
+					transaction_id = CASE WHEN EXISTS (SELECT 1 FROM transactions t WHERE t.id = planned_expenses.transaction_id AND ${canPayPlanSql("t", "?3", "planned_expenses.id")}) THEN transaction_id END
+				 WHERE id = ?4 RETURNING transaction_id AS after`,
+			)
+			.bind(fields.name, fields.amountCents, fields.month, planId),
+	]);
+	const before = current?.results[0]?.before ?? null;
+	const after = written?.results[0]?.after ?? null;
+	return {
+		saved: written?.meta.changes === 1,
+		unlinked: before !== null && after === null,
+	};
 }
 
 /**

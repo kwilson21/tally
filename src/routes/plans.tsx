@@ -454,8 +454,8 @@ plans.post("/plans/:id", async (c) => {
 	);
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { plan, values, errors, opener }, today);
-	await updatePlan(c.env.DB, id, fields);
-	const message = `Saved ${fields.name}.`;
+	const { unlinked } = await updatePlan(c.env.DB, id, fields);
+	const message = `Saved ${fields.name}.${unlinked ? " Its payment is no longer linked." : ""}`;
 	if (opener) {
 		if (!c.req.header("HX-Request"))
 			return c.redirect(`/plans/${id}?focus=edit-plan`, 303);

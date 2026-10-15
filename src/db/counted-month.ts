@@ -55,9 +55,12 @@ const paymentGroupSql = (alias: string) =>
 export const paysBillGroupSql = (alias: string) =>
 	`EXISTS (SELECT 1 FROM bill_payments group_bill WHERE group_bill.status = 'linked' AND group_bill.transaction_id IN (${paymentGroupSql(alias)}))`;
 
-/** True when a planned expense's payment is in the payment group of `alias` (paymentGroupSql). */
-export const paysPlanGroupSql = (alias: string) =>
-	`EXISTS (SELECT 1 FROM planned_expenses group_plan WHERE group_plan.transaction_id IN (${paymentGroupSql(alias)}))`;
+/**
+ * True when a planned expense's payment is in the payment group of `alias` (paymentGroupSql). `exceptPlan`, an SQL
+ * expression for a plan id, leaves that plan's own link out, so an edit of a paid plan can ask whether its payment still fits.
+ */
+export const paysPlanGroupSql = (alias: string, exceptPlan?: string) =>
+	`EXISTS (SELECT 1 FROM planned_expenses group_plan WHERE group_plan.transaction_id IN (${paymentGroupSql(alias)})${exceptPlan ? ` AND group_plan.id <> ${exceptPlan}` : ""})`;
 
 /** True when the transaction `alias` names pays a bill or a planned expense (paysBillSql, paysPlanSql). */
 export const paysBillOrPlanSql = (alias: string) =>

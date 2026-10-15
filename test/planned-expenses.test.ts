@@ -55,12 +55,17 @@ beforeEach(async () => {
 	await env.DB.prepare("DELETE FROM planned_expenses").run();
 });
 
-/** A bank payment (money out) in the current month, with a fixed id, plus the plan that may pay it. */
-async function payment(id: number, amountCents: number, excluded = 0) {
+/** A bank payment (money out) in the current month, or in `month`, with a fixed id, plus the plan that may pay it. */
+async function payment(
+	id: number,
+	amountCents: number,
+	excluded = 0,
+	month = MONTH,
+) {
 	await env.DB.prepare(
 		"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,excluded) SELECT ?,id,?,?,'DMV FIXTURE',? FROM accounts WHERE type!='cash' LIMIT 1",
 	)
-		.bind(id, dateIn(MONTH), amountCents, excluded)
+		.bind(id, dateIn(month), amountCents, excluded)
 		.run();
 	return id;
 }
@@ -946,6 +951,102 @@ describe("Bills' Planned group, Band and sheet", () => {
 			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
 		},
 	);
+});
+
+describe("editing a paid plan's month keeps its payment only while the payment can still pay that month (#202)", () => {
+	const words = "Saved Car registration. Its payment is no longer linked.";
+	const edit = (
+		id: number,
+		month: string,
+		{ name = "Car registration", amount = "180", opener = false } = {},
+	) =>
+		post(`/plans/${id}`, {
+			name,
+			amount,
+			month,
+			...(opener ? { opener: "plan" } : {}),
+		});
+	const trigger = async (res: Response) =>
+		JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+			announce: string;
+		};
+	const linkOf = async (id: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+			)
+				.bind(id)
+				.first<{ t: number | null }>()
+		)?.t ?? null;
+
+	it("a name-only or amount-only edit of a paid plan keeps its payment and says nothing about the link", async () => {
+		const tx = await payment(9960, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const renamed = await edit(id, MONTH, { name: "Car registration" });
+		expect((await trigger(renamed)).toast.message).toBe(
+			"Saved Car registration.",
+		);
+		expect(await linkOf(id)).toBe(tx);
+		const repriced = await edit(id, MONTH, { amount: "200" });
+		expect((await trigger(repriced)).toast.message).toBe(
+			"Saved Car registration.",
+		);
+		expect(await linkOf(id)).toBe(tx);
+	});
+
+	it("moving a paid plan to a month its payment still falls in keeps the payment", async () => {
+		const next = monthsBefore(MONTH, -1);
+		const tx = await payment(9961, 18000, 0, next);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const moved = await edit(id, next);
+		expect((await trigger(moved)).toast.message).toBe(
+			"Saved Car registration.",
+		);
+		expect(await linkOf(id)).toBe(tx);
+	});
+
+	it("moving a paid plan past its payment's month unlinks the payment and says so, on Bills and on the plan's page", async () => {
+		const far = monthsBefore(MONTH, -11);
+		const onBills = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9962, 18000),
+		);
+		const onPage = await plan(
+			"Car registration",
+			18000,
+			MONTH,
+			await payment(9963, 18000),
+		);
+		const fromBills = await trigger(await edit(onBills, far));
+		expect(fromBills.toast.message).toBe(words);
+		expect(fromBills.announce).toBe(words);
+		const fromPage = await trigger(await edit(onPage, far, { opener: true }));
+		expect(fromPage.toast.message).toBe(words);
+		expect(fromPage.announce).toBe(words);
+		expect(await linkOf(onBills)).toBeNull();
+		expect(await linkOf(onPage)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, far)).toBe(36000);
+	});
+
+	it("moving a paid plan to the next month unlinks a payment from this month, which that month's window no longer takes", async () => {
+		const next = monthsBefore(MONTH, -1);
+		const tx = await payment(9964, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const moved = await edit(id, next);
+		expect((await trigger(moved)).toast.message).toBe(words);
+		expect(await linkOf(id)).toBeNull();
+	});
+
+	it("an edit of an unpaid plan's month never says its link is gone", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		const moved = await edit(id, monthsBefore(MONTH, -1));
+		expect((await trigger(moved)).toast.message).toBe(
+			"Saved Car registration.",
+		);
+	});
 });
 
 describe("a plan pays a part of a split payment, as a bill does", () => {
