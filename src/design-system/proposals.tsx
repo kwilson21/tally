@@ -5,6 +5,7 @@
 
 import { AiProposals } from "./proposals-ai";
 import { AutofillProposals } from "./proposals-autofill";
+import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
@@ -508,7 +509,18 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="p127-title" class="mt-10">
+			<section aria-labelledby="p136-title" class="mt-10">
+				<h2 id="p136-title" class="font-serif text-3xl font-semibold">
+					Open: what Bills' totals count
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15 for the owner's pick on #602: what the Upcoming and Paid
+					this month totals count, and whether each heading says so.
+				</p>
+				<BillsTotalsProposal />
+			</section>
+
+			<section aria-labelledby="p127-title" class="mt-12">
 				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
 					Open: Safe to spend on a small phone
 				</h2>

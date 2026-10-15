@@ -378,7 +378,8 @@ describe("GET /design-system/proposals", () => {
 				id === "p119-saved" ||
 				id === "p125-first-week" ||
 				id === "p128-keys" ||
-				id === "p129-money";
+				id === "p129-money" ||
+				id === "p136-bills-totals";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -394,9 +395,13 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P126 is open, and P127's pick is decision 116 in #566, not on main yet, so neither carries a Picked pill. P128 is the owner's pick (decision 118), P129 (decision 117).
+			// P126 and P136 are open, and P127's pick is decision 116 in #566, not on main yet, so none carries a Picked pill. P128 is the owner's pick (decision 118), P129 (decision 117).
 			const expected =
-				n < 34 || n === 126 || n === 127 ? 0 : twoPicks.includes(id) ? 2 : 1;
+				n < 34 || n === 126 || n === 127 || n === 136
+					? 0
+					: twoPicks.includes(id)
+						? 2
+						: 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -1551,9 +1556,10 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		);
 		expect(top).toBeGreaterThan(-1);
 		expect(start).toBeGreaterThan(top);
-		// P127 is drawn first: only its own section, and the specimen inside it, come before this one.
+		// P136 and P127 are drawn first: only their sections, and the specimens inside them, come before this one.
 		const before = html.slice(top, start);
-		expect(before.match(/<section /g)?.length).toBe(2);
+		expect(before.match(/<section /g)?.length).toBe(4);
+		expect(before).toContain('<section aria-labelledby="p136-title"');
 		expect(before).toContain('<section aria-labelledby="p127-title"');
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="polish4-title"'),
@@ -3086,15 +3092,14 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 	// The one frame height: the tallest picture's content, Option C's, measured in Chrome at 1280, 390 and 320 px.
 	const FRAME_HEIGHT = 478;
 
-	it("opens the page with its section first, titled and dated as the brief asks", async () => {
+	it("sits second among the Open sections, after P136 and before P126, titled and dated as the brief asks", async () => {
 		const html = await drawn();
-		const top = html.indexOf(">Proposals</h1>");
 		const start = html.indexOf(
-			'<section aria-labelledby="p127-title" class="mt-10">',
+			'<section aria-labelledby="p127-title" class="mt-12">',
 		);
-		expect(top).toBeGreaterThan(-1);
-		expect(start).toBeGreaterThan(top);
-		expect(html.slice(top, start)).not.toContain("<section");
+		expect(start).toBeGreaterThan(
+			html.indexOf('<section aria-labelledby="p136-title" class="mt-10">'),
+		);
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="p126-title"'),
 		);
@@ -3305,6 +3310,164 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			expect(caption).toMatch(/: (Fits|Spills \d+ px)$/);
 		// Each caption sits under its picture: the frame and its wrapper close, then the caption opens.
 		expect(chunk.match(/<\/div><\/div><figcaption/g)?.length).toBe(24);
+	});
+});
+
+// P136 (#602, the owner's pick to draw): what Bills' Upcoming and Paid this month totals count. Proposal only: nothing in the app changes.
+describe("GET /design-system/proposals, P136 (what Bills' section totals count, #602)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const count = (text: string, part: string) => text.split(part).length - 1;
+	// Each option's chunk, from its heading to the next (the first chunk is the note above the first option).
+	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+	// Each status group under a picture: a div with the class mt-4, up to the end of its list.
+	const groupsOf = (chunk: string) =>
+		chunk
+			.split('<div class="mt-4">')
+			.slice(1)
+			.map((group) => group.slice(0, group.indexOf("</ul>") + "</ul>".length));
+	const NAMES = [
+		"Reference · Today on main",
+		"Option A · Each heading says what it counts",
+		"Option B · Paid counts its rows",
+	];
+	const UPCOMING_LINE = "Includes Daycare&#39;s Fridays on Oct 23 and 30";
+	const PAID_LINE = "Includes Daycare&#39;s Fridays on Oct 2 and 9";
+
+	it("sits first among the Open sections, before P127, titled and dated as the brief asks", async () => {
+		const html = await drawn();
+		const top = html.indexOf(">Proposals</h1>");
+		const start = html.indexOf(
+			'<section aria-labelledby="p136-title" class="mt-10">',
+		);
+		expect(top).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(top);
+		expect(html.slice(top, start)).not.toContain("<section");
+		expect(start).toBeLessThan(
+			html.indexOf('<section aria-labelledby="p127-title" class="mt-12">'),
+		);
+		expect(html).toContain(
+			'<h2 id="p136-title" class="font-serif text-3xl font-semibold">Open: what Bills&#39; totals count</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 15 for the owner&#39;s pick on #602: what the Upcoming and Paid this month totals count, and whether each heading says so.",
+		);
+	});
+
+	it("draws P136 as one specimen, titled and sentenced over 390 and 1280 px", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		expect(chunk).toContain('<section id="p136-bills-totals"');
+		expect(chunk).toContain("P136 · What Bills&#39; section totals count");
+		expect(chunk).toContain(
+			"Bills&#39; Upcoming and Paid this month totals, today and in options A and B, at 390 and 1280 px.",
+		);
+	});
+
+	it("draws today on main and options A and B, each at 390 px and at 1280 px", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const list = options(chunk);
+		expect(list.length).toBe(3);
+		NAMES.forEach((name, i) => expect(list[i]).toContain(name));
+		NAMES.forEach((name, i) => {
+			const labels = [
+				...(list[i] ?? "").matchAll(/role="img" aria-label="([^"]*)"/g),
+			].map((m) => m[1]);
+			expect(labels).toEqual([
+				`${name} at 390 px, on a phone`,
+				`${name} at 1280 px, on desktop`,
+			]);
+		});
+	});
+
+	it("draws Bills from its Due heading to Paid this month with the demo's rows, and lists only Daycare's next Friday", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		for (const option of options(chunk)) {
+			// Daycare's Oct 16 Friday is the row; its Oct 23 and 30 Fridays, and its paid Oct 2 and 9, are not rows.
+			expect(count(option, ">Daycare</span>")).toBe(2);
+			expect(count(option, "Due Oct 16 · every Friday")).toBe(2);
+			expect(count(option, "Due Oct 18")).toBe(2);
+			expect(count(option, "$68.33")).toBe(2);
+			expect(count(option, "Due Jul 14, 2027")).toBe(2);
+			expect(count(option, "Paid today")).toBe(4);
+			expect(count(option, "$305.00")).toBe(2);
+		}
+	});
+
+	it("keeps Upcoming's $480.00 this month with its line in A and B, and draws today's reference with no line", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [today, a, b] = options(chunk);
+		expect(count(today, "$480.00 this month")).toBe(2);
+		expect(count(today, UPCOMING_LINE)).toBe(0);
+		for (const option of [a, b]) {
+			expect(count(option, "$480.00 this month")).toBe(2);
+			expect(count(option, UPCOMING_LINE)).toBe(2);
+		}
+	});
+
+	it("reads Paid this month as $16.98 today and in B, and as $496.98 with its line in A, in both pictures", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [today, a, b] = options(chunk);
+		for (const option of [today, b]) {
+			expect(count(option, "$16.98")).toBe(2);
+			expect(count(option, "$496.98")).toBe(0);
+			expect(count(option, PAID_LINE)).toBe(0);
+		}
+		expect(count(a, "$496.98")).toBe(2);
+		expect(count(a, "$16.98")).toBe(0);
+		expect(count(a, PAID_LINE)).toBe(2);
+	});
+
+	it("sets each line under its heading: A's Upcoming and Paid lines come before their rows", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [, a] = options(chunk);
+		for (const [heading, line] of [
+			["Upcoming</h2>", UPCOMING_LINE],
+			["Paid this month</h2>", PAID_LINE],
+		] as const) {
+			const groups = groupsOf(a ?? "").filter((g) => g.includes(heading));
+			expect(groups.length).toBe(2);
+			for (const group of groups)
+				expect(group.indexOf(heading)).toBeLessThan(group.indexOf(line));
+		}
+	});
+
+	it("draws B's Paid this month with its rows and no line, and keeps Upcoming's line", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [, , b] = options(chunk);
+		const paid = groupsOf(b ?? "").filter((g) =>
+			g.includes("Paid this month</h2>"),
+		);
+		expect(paid.length).toBe(2);
+		for (const group of paid) {
+			expect(group).toContain("$16.98");
+			expect(group).not.toContain("Includes");
+		}
+		const upcoming = groupsOf(b ?? "").filter((g) =>
+			g.includes("Upcoming</h2>"),
+		);
+		expect(upcoming.length).toBe(2);
+		for (const group of upcoming) expect(group).toContain(UPCOMING_LINE);
+	});
+
+	it("weighs A and B in words: A is recommended, each option gives its trade-off and why", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [today, a, b] = options(chunk);
+		expect(count(today ?? "", "Recommended")).toBe(0);
+		expect(count(a ?? "", "Recommended")).toBe(1);
+		expect(count(b ?? "", "Recommended")).toBe(0);
+		expect(a).toContain(
+			"Trade-off: Paid&#39;s total adds the month&#39;s paid occurrences;",
+		);
+		expect(a).toContain(
+			"Why: “Paid this month” means what the family paid, and the two headings count the same way.",
+		);
+		expect(b).toContain("Trade-off: the line under Upcoming only.");
+		expect(b).toContain(
+			"Why: a heading&#39;s total matches what&#39;s under it wherever it can.",
+		);
+	});
+
+	it("adds no client JavaScript: the specimen has no script", async () => {
+		expect(block(await drawn(), "p136-bills-totals")).not.toContain("<script");
 	});
 });
 
