@@ -1,0 +1,153 @@
+// Home's setup during a new family's first week (P125 E, spec §8.8, decision 114): which state Home shows, its five
+// lines, and the counts its sentences use. `setupView` is pure over what it's given, so the rules are tested without a
+// database; `readSetup` reads the household. The caller shows it in the family app only: the demo never shows setup.
+import { dayLabel } from "../dates";
+import {
+	type FirstTally,
+	isSetUp,
+	readFirstTally,
+	STROKES,
+} from "../db/first-tally";
+import type { StepLine } from "../views/tally-steps";
+import { type GateBank, questionsOpen, readGateInputs } from "./gate";
+
+/**
+ * before: no connected bank yet (Link a bank). reading: a bank is linked and the questions are shut (the import is
+ * being read). ready: the questions are open (the gate, §8.8).
+ */
+export type SetupPhase = "before" | "reading" | "ready";
+
+export type SetupView = {
+	phase: SetupPhase;
+	/** Strokes drawn so far, 0 to 5. */
+	drawn: number;
+	/** The five lines, in order (TallySteps). */
+	steps: StepLine[];
+	/** The first connected bank's name, or null before a bank is linked. */
+	bankName: string | null;
+	/** Reading: what Jev still owes the import fits one night's allowance (§8.6), so the questions come by the morning. */
+	fitsOneNight: boolean;
+	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
+	sorted: number;
+	total: number;
+};
+
+/** The five lines' names (spec §8.8). */
+const NAMES = [
+	"Link your bank",
+	"Your pay",
+	"Your bills",
+	"Your budgets",
+	"Tomorrow · Tally keeps count on its own",
+];
+
+/** The note of a line whose stroke isn't drawn, by phase. "Next" marks the line the family can act on now. */
+const WHEN: Record<SetupPhase, readonly string[]> = {
+	before: [
+		"Next",
+		"One question",
+		"One question",
+		"One tap, or one at a time",
+		"Later",
+	],
+	reading: [
+		"",
+		"Tomorrow morning",
+		"Tomorrow morning",
+		"Tomorrow morning",
+		"Later",
+	],
+	ready: ["", "Next", "One question", "One tap, or one at a time", "Later"],
+};
+
+/** Strokes drawn so far: a stroke with a key in the record is drawn, whether or not it has a day. */
+export function strokesDrawn(record: FirstTally | null): number {
+	return STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
+		.length;
+}
+
+export function setupSteps(
+	record: FirstTally | null,
+	phase: SetupPhase,
+	bankName: string | null,
+	today: string,
+): StepLine[] {
+	return STROKES.map((stroke, i) => {
+		const drawn = record?.strokes[stroke] !== undefined;
+		const day = record?.strokes[stroke] ?? null;
+		let note = WHEN[phase][i] ?? "";
+		if (drawn) {
+			note =
+				i === 0
+					? `${bankName ?? "Your bank"}, linked`
+					: day
+						? dayLabel(day, today)
+						: "";
+		}
+		return { name: NAMES[i] ?? "", done: drawn, note };
+	});
+}
+
+/**
+ * The setup Home shows, from the record, the connected banks and what Jev still owes; null once the first week is set
+ * up. `cap` is the day's Jev allowance, `total` how many transactions the banks sent.
+ */
+export function setupView({
+	record,
+	banks,
+	waiting,
+	total,
+	cap,
+	today,
+}: {
+	record: FirstTally | null;
+	banks: GateBank[];
+	/** Imported transactions still waiting for Jev's category or income answer (countWaitingForJev). */
+	waiting: number;
+	total: number;
+	/** The household's daily Jev allowance (categorize-pending's jevCallLimit). */
+	cap: number;
+	today: string;
+}): SetupView | null {
+	if (isSetUp(record)) return null;
+	const bankName = banks[0]?.name ?? null;
+	const phase: SetupPhase =
+		banks.length === 0
+			? "before"
+			: questionsOpen({
+						today,
+						strokeOneDay: record?.strokes.bank ?? null,
+						banks,
+						waiting,
+					})
+				? "ready"
+				: "reading";
+	return {
+		phase,
+		drawn: strokesDrawn(record),
+		steps: setupSteps(record, phase, bankName, today),
+		bankName,
+		fitsOneNight: waiting <= cap,
+		sorted: Math.max(0, total - waiting),
+		total,
+	};
+}
+
+/** The setup for this household, read from the database, or null once the first week is set up. */
+export async function readSetup(
+	db: D1Database,
+	{ today, cap }: { today: string; cap: number },
+): Promise<SetupView | null> {
+	const record = await readFirstTally(db);
+	if (isSetUp(record)) return null;
+	const { banks, waiting } = await readGateInputs(db);
+	const total =
+		(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS total FROM transactions WHERE plaid_transaction_id IS NOT NULL",
+				)
+				.first<{ total: number }>()
+		)?.total ?? 0;
+	return setupView({ record, banks, waiting, total, cap, today });
+}

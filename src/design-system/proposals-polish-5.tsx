@@ -15,8 +15,10 @@ import { FoldedRow } from "../views/folded-row";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { Notebook as SharedNotebook } from "../views/notebook";
 import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
+import { type StepLine, stepsOf, TallySteps } from "../views/tally-steps";
 import { WhyLink } from "../views/why-link";
 import { Fixed, Sheet } from "./proposal-parts";
 import { EATING_OUT, TITLE, tx } from "./proposals-phase5-transactions";
@@ -463,20 +465,10 @@ function Tick() {
 }
 
 /**
- * The notebook of LedgerIllustration, with its tally strokes drawn one at a time: `strokes` of the five,
- * in pencil (muted) until `ink`. `replay` draws the fifth across the four and turns all five to ink, with
- * proposal-only classes in app.css. The strokes are the illustration's own, in the same places: they copy the
- * five `<line>`s at src/views/illustration.tsx lines 18 to 22. LedgerIllustration takes no props, so if that
- * drawing changes, these lines change with it by hand.
+ * The notebook of the app (src/views/notebook.tsx), with the pencil states the proposals draw: `replay` draws the
+ * fifth stroke across the four and inks all five, `drawLast` draws the last stroke in pencil and inks it late in the loop
+ * (both with proposal-only classes in app.css), and otherwise its strokes are in pencil until `ink`.
  */
-const STROKE_LINES = [
-	[46, 38, 46, 60],
-	[53, 38, 53, 60],
-	[60, 38, 60, 60],
-	[67, 38, 67, 60],
-	[41, 56, 72, 42],
-];
-
 function Notebook({
 	strokes,
 	ink = false,
@@ -486,11 +478,8 @@ function Notebook({
 }: {
 	strokes: number;
 	ink?: boolean;
-	/** C's replay: all five strokes ink in from pencil, and the fifth draws across the four. */
 	replay?: boolean;
-	/** E's replay: the last stroke is drawn in pencil and inks late in the loop; the strokes before it are already ink. */
 	drawLast?: boolean;
-	/** The notebook's box: size-32 by default, size-12 beside a question, size-20 at the top of E's replay. */
 	size?: string;
 }) {
 	const lineClass = (i: number) => {
@@ -505,106 +494,12 @@ function Notebook({
 		return ink ? "stroke-ink" : "stroke-muted";
 	};
 	return (
-		<svg
-			class={`${size} shrink-0`}
-			viewBox="0 0 120 120"
-			fill="none"
-			stroke-width="1.75"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<g class="stroke-ink" transform="rotate(-6 56 58)">
-				<rect x="26" y="16" width="58" height="80" rx="4" />
-				{[26, 36, 46, 56, 66, 76, 86].map((y) => (
-					<circle cx="26" cy={y} r="3.5" />
-				))}
-				{STROKE_LINES.slice(0, replay ? 5 : strokes).map(
-					([x1, y1, x2, y2], i) => (
-						<line x1={x1} y1={y1} x2={x2} y2={y2} class={lineClass(i)} />
-					),
-				)}
-			</g>
-			{/* The pencil the illustration draws beside the notebook, as LedgerIllustration does. */}
-			<g class="stroke-accent fill-paper">
-				<path d="M96 26 L106 30 L88 96 L78 92 Z" />
-				<path d="M78 92 L88 96 L80 106 Z" />
-				<line x1="94" y1="33" x2="104" y2="37" />
-				<line x1="104" y1="16" x2="110" y2="8" />
-				<line x1="96" y1="12" x2="98" y2="4" />
-			</g>
-		</svg>
-	);
-}
-
-/** One stroke's line in TallySteps: its name, its note at the right, and whether the stroke is done. */
-type StepLine = { name: string; done: boolean; note: string };
-
-/** The five lines in order: `notes` gives each its note, and the first `done` of them are done. */
-function stepsOf(
-	names: readonly string[],
-	notes: readonly string[],
-	done: number,
-): StepLine[] {
-	return names.map((name, i) => ({
-		name,
-		done: i < done,
-		note: notes[i] ?? "",
-	}));
-}
-
-/**
- * The five strokes as a list, under the notebook (P125 C and E): each line's glyph is its stroke, a short
- * vertical line for the first four and a diagonal slash for the fifth, in ink when done and dashed muted when
- * not. A done line says so in words too (sr-only "done"); the note at the right says what was done.
- */
-function TallySteps({ steps }: { steps: StepLine[] }) {
-	const done = steps.filter((s) => s.done).length;
-	return (
-		<div class="mt-4">
-			<p class="text-sm text-muted">Your first tally · {done} of 5</p>
-			<ul class="mt-2 border-t border-rule">
-				{steps.map((s, i) => (
-					<li class="flex min-h-11 items-center gap-3 border-b border-rule">
-						<svg
-							class="h-6 w-3 shrink-0"
-							viewBox="0 0 12 24"
-							fill="none"
-							stroke-width="2"
-							stroke-linecap="round"
-							aria-hidden="true"
-						>
-							{i < 4 ? (
-								<line
-									x1="6"
-									y1="2"
-									x2="6"
-									y2="22"
-									class={s.done ? "stroke-ink" : "stroke-muted"}
-									stroke-dasharray={s.done ? undefined : "3 3"}
-								/>
-							) : (
-								<line
-									x1="1"
-									y1="22"
-									x2="11"
-									y2="2"
-									class={s.done ? "stroke-ink" : "stroke-muted"}
-									stroke-dasharray={s.done ? undefined : "3 3"}
-								/>
-							)}
-						</svg>
-						<span
-							class={`min-w-0 flex-1 py-2 text-base ${s.done ? "text-ink" : "text-muted"}`}
-						>
-							{s.name}
-							{s.done && <span class="sr-only">, done</span>}
-						</span>
-						<span class="shrink-0 text-sm text-muted">{s.note}</span>
-					</li>
-				))}
-			</ul>
-		</div>
+		<SharedNotebook
+			strokes={replay ? 5 : strokes}
+			ink={ink}
+			size={size}
+			lineClass={lineClass}
+		/>
 	);
 }
 

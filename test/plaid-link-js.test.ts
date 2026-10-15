@@ -5,6 +5,7 @@ const genericFailure = "Couldn't link the bank. Try again.";
 
 function harness({
 	linkBank = true,
+	dataset,
 	tokenResponse = {
 		ok: true,
 		json: async () => ({ link_token: "link-secret" }),
@@ -17,6 +18,7 @@ function harness({
 	},
 }: {
 	linkBank?: boolean;
+	dataset?: Record<string, string>;
 	tokenResponse?: {
 		ok: boolean;
 		json?: () => Promise<{ link_token: string }>;
@@ -39,6 +41,7 @@ function harness({
 	type RequestListener = (event: { detail?: { ctx?: unknown } }) => void;
 	const listeners = new Map<string, Set<RequestListener>>();
 	const button = {
+		dataset,
 		disabled: false,
 		focus: vi.fn(),
 		setAttribute: vi.fn(),
@@ -439,6 +442,25 @@ describe("plaid-link.js", () => {
 		expect(event.type).toBe("announce");
 		expect(event.detail).toEqual({ value: "Linked First Bank." });
 		expect(h.button.focus).toHaveBeenCalledOnce();
+	});
+
+	it("refreshes the page its button names (Home's /, not Accounts' list) after a link", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				const ctx = { response: { status: 204 }, text: "" };
+				h.button.dispatchRequest("htmx:after:request", ctx);
+				h.button.dispatchRequest("htmx:finally:request", ctx);
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
+		});
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+		expect(h.fetch).toHaveBeenCalledWith("/");
+		expect(h.fetch).not.toHaveBeenCalledWith("/accounts");
+		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
 	});
 
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {

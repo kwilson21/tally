@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { householdToday } from "../dates";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
+import { takeBackBankStrokes } from "../db/first-tally";
 import { netWorthView } from "../net-worth";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { sortAfterSync } from "../plaid/sort-after-sync";
@@ -13,20 +14,11 @@ import { Button } from "../views/button";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
+import { LinkBank, plaidScripts } from "../views/link-bank";
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env };
 export const accounts = new Hono<App>();
-
-/** Link a bank and its alert region. Both live inside #accounts-summary, so a refresh redraws them in place. */
-const LinkBank = ({ class: layout }: { class?: string }) => (
-	<>
-		<Button type="button" class={layout} busyLabel="Linking…" data-link-bank>
-			Link a bank
-		</Button>
-		<div data-link-bank-error class="mt-3" />
-	</>
-);
 
 const SyncNow = () => (
 	<form
@@ -109,14 +101,6 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 
 // More → Accounts (spec §8): net worth, each linked bank, then the Plaid Link action when configured.
 // Before any bank is linked there's nothing to add up, so no $0: the add empty state instead (decision 55).
-/** Plaid Link's scripts, on every page that can show Link a bank (the disconnect page swaps Accounts in). */
-const plaidScripts = (on: boolean) => ({
-	scripts: on
-		? ["https://cdn.plaid.com/link/v2/stable/link-initialize.js"]
-		: [],
-	modules: on ? ["/js/plaid-link.js"] : [],
-});
-
 /** The whole Accounts page; `alert` is a failed no-JavaScript Sync now. */
 function accountsPage(c: Context<App>, alert?: string) {
 	const plaidEnabled = enabled(c.env);
@@ -356,6 +340,8 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 				).bind(item.id, item.id),
 			]
 		: [];
+	// Before setup is done, the last connected bank going takes strokes one to four back (spec §8.8), in this batch.
+	statements.push(takeBackBankStrokes(c.env.DB, item.id));
 	statements.push(
 		c.env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now'), access_token_encrypted = X'', sync_locked_until = NULL, sync_lock_id = NULL WHERE id = ? AND disconnected_at IS NULL",

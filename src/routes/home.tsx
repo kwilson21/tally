@@ -3,6 +3,7 @@ import type { Child } from "hono/jsx";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
+import { jevCallLimit } from "../categorize-pending";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
@@ -23,6 +24,7 @@ import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, loadMonth } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
+import { readSetup } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
@@ -32,9 +34,11 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
+import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
+import { LinkBank, plaidScripts } from "../views/link-bank";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
@@ -42,6 +46,7 @@ import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { loadBillRows } from "./bills";
+import { enabled } from "./plaid";
 
 type App = { Bindings: Env };
 export const home = new Hono<App>();
@@ -257,6 +262,16 @@ async function renderHome(
 			.reduce((sum, t) => sum + t.amountCents, 0);
 	const transactionCount = (id: number) =>
 		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
+	// The first week's setup (P125 E, spec §8.8): the family app only, on the current month, until all five strokes are
+	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
+	const setup =
+		current && !demo
+			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env) })
+			: null;
+	const linkBank =
+		setup?.phase === "before" && enabled(c.env) ? (
+			<LinkBank class="w-full" refresh="/" target="#page" />
+		) : undefined;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
@@ -265,6 +280,7 @@ async function renderHome(
 	return c.html(
 		<Layout
 			active="home"
+			{...plaidScripts(linkBank !== undefined)}
 			demo={demo}
 			currentPath={c.req.path + new URL(c.req.url).search}
 		>
@@ -272,7 +288,9 @@ async function renderHome(
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
-						{current ? (
+						{setup ? (
+							<HomeSetup view={setup} linkBank={linkBank} />
+						) : current ? (
 							<HomeTop
 								month={monthName(month)}
 								monthHeading={

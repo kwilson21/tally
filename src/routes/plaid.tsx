@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { actor } from "../actor";
+import { householdToday } from "../dates";
+import { isSetUp, readFirstTally, strokeStatement } from "../db/first-tally";
 import {
 	createLinkToken,
 	exchangePublicToken,
@@ -185,16 +187,20 @@ plaid.post("/plaid/exchange", async (c) => {
 		} catch (error) {
 			logPlaidRequestId(error);
 		}
+		// Linking draws stroke one on the household's day, in the same batch as the bank (spec §8.8). The setup
+		// announcement is said only while the first week is still to do.
+		const settingUp = !isSetUp(await readFirstTally(c.env.DB));
 		try {
 			const encrypted = await encryptToken(
 				exchanged.access_token,
 				c.env.TOKEN_ENCRYPTION_KEY as string,
 			);
-			await c.env.DB.prepare(
-				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
-			)
-				.bind(encrypted, institution, actor(c), exchanged.item_id)
-				.run();
+			await c.env.DB.batch([
+				c.env.DB.prepare(
+					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
+				).bind(encrypted, institution, actor(c), exchanged.item_id),
+				strokeStatement(c.env.DB, "bank", await householdToday(c.env.DB)),
+			]);
 		} catch (error) {
 			try {
 				await removeItem(c.env, exchanged.access_token);
@@ -204,7 +210,9 @@ plaid.post("/plaid/exchange", async (c) => {
 			throw error;
 		}
 
-		const message = `Linked ${institution}.`;
+		const message = settingUp
+			? `${institution} is linked. Tally's reading your last 90 days.`
+			: `Linked ${institution}.`;
 		c.header(
 			"HX-Trigger",
 			JSON.stringify({

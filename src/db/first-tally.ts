@@ -61,19 +61,54 @@ export function isSetUp(record: FirstTally | null): boolean {
 // Each setter is one upsert, so the json_* change is applied to what is stored when the write happens. Two writes that
 // overlap then keep each other's fields, where a read-then-write of the whole record would lose one of them.
 
-/** Draws a stroke on a household day (or with no day). json_insert never overwrites, so a stroke already drawn keeps its first day. */
+/**
+ * The statement that draws a stroke on a household day (or with no day), for a batch with other writes (one transaction).
+ * json_insert never overwrites, so a stroke already drawn keeps its first day.
+ */
+export function strokeStatement(
+	db: D1Database,
+	stroke: Stroke,
+	day: string | null,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3))
+			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+		)
+		.bind(KEY, stroke, day);
+}
+
+/** Draws a stroke on a household day (or with no day). */
 export async function markStroke(
 	db: D1Database,
 	stroke: Stroke,
 	day: string | null,
 ): Promise<void> {
-	await db
+	await strokeStatement(db, stroke, day).run();
+}
+
+/** The four strokes a disconnected bank takes back before setup is done: all but the night's count. */
+const BANK_STROKES = STROKES.slice(0, 4);
+
+/**
+ * The statement that takes strokes one to four back when the last connected bank goes before setup is done (spec §8.8,
+ * #578). `disconnectingId` is the bank being disconnected, which doesn't count as connected for this check, so the
+ * statement is right whether it runs before or after that disconnect in the same batch. The budget answers stay (§5).
+ */
+export function takeBackBankStrokes(
+	db: D1Database,
+	disconnectingId: number,
+): D1PreparedStatement {
+	const notSetUp = STROKES.map(
+		(stroke) => `json_type(value, '$.strokes.${stroke}') IS NOT NULL`,
+	).join(" AND ");
+	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3))
-			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")})
+			WHERE key = ?1 AND NOT (${notSetUp})
+				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
 		)
-		.bind(KEY, stroke, day)
-		.run();
+		.bind(KEY, disconnectingId);
 }
 
 /** Keeps the budgets step's answer for a category. The newest answer for a category replaces the one before it. */

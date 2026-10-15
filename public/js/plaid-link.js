@@ -186,6 +186,9 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	let linking = false;
 	const linkClick = async (button) => {
 		if (linking) return;
+		// What a success redraws: Accounts' list by default; Home sets its own page (LinkBank's data attributes).
+		const refreshUrl = button.dataset?.linkBankRefresh || "/accounts";
+		const target = button.dataset?.linkBankTarget || "#accounts-summary";
 		const busy = (value) => {
 			linking = value;
 			const live = document.querySelector("[data-link-bank]");
@@ -260,15 +263,14 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						busy(true);
 						let refreshed = false;
 						try {
-							const refreshResponse = await fetch("/accounts");
+							const refreshResponse = await fetch(refreshUrl);
 							if (refreshResponse.ok) {
 								const parsed = new DOMParser().parseFromString(
 									await refreshResponse.text(),
 									"text/html",
 								);
-								const newSummary = parsed.querySelector("#accounts-summary");
-								const currentSummary =
-									document.querySelector("#accounts-summary");
+								const newSummary = parsed.querySelector(target);
+								const currentSummary = document.querySelector(target);
 								if (newSummary && currentSummary) {
 									currentSummary.replaceWith(newSummary);
 									htmx.process(newSummary);
@@ -293,8 +295,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							);
 							return;
 						}
-						// The refresh drew a new button; focus that one, not the one clicked.
-						document.querySelector("[data-link-bank]")?.focus();
+						// The refresh drew a new button, or on Home the status line; focus that, not the one clicked.
+						(
+							document.querySelector("[data-link-bank]") ??
+							document.querySelector("[data-link-bank-focus]")
+						)?.focus();
 					} catch {
 						showFailure();
 					} finally {
