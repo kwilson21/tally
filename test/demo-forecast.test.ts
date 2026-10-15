@@ -56,25 +56,29 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 		["2027-04", "April 2027, a 30-day month with five Fridays"],
 		["2027-02", "February 2027, a 28-day month"],
 		["2028-02", "February 2028, a 29-day leap month"],
-	])("on %s (%s), from the 7th to the last day", async (month) => {
-		const last = daysInMonth(month);
-		const failures: string[] = [];
-		for (const day of [7, 15, 20, last]) {
-			const today = `${month}-${String(day).padStart(2, "0")}`;
-			const html = await homeOn(today);
-			const forecast = forecastOf(html);
-			const overage = -(await categoryOn(month, "Eating Out")).leftCents;
-			// Whole dollars, as the forecast is shown: an "over" may not exceed Eating Out's overage rounded up.
-			const agrees =
-				forecast.direction === "under" ||
-				(overage > 0 && forecast.cents <= Math.ceil(overage / 100) * 100);
-			if (!agrees)
-				failures.push(
-					`${today}: forecast ${forecast.direction} $${forecast.cents / 100}, Eating Out over $${Math.max(0, overage) / 100}`,
-				);
-		}
-		expect(failures).toEqual([]);
-	});
+	])(
+		"on %s (%s), from the 7th to the last day",
+		async (month) => {
+			const last = daysInMonth(month);
+			const failures: string[] = [];
+			for (let day = 7; day <= last; day++) {
+				const today = `${month}-${String(day).padStart(2, "0")}`;
+				const html = await homeOn(today);
+				const forecast = forecastOf(html);
+				const overage = -(await categoryOn(month, "Eating Out")).leftCents;
+				// Whole dollars, as the forecast is shown: an "over" may not exceed Eating Out's overage rounded up.
+				const agrees =
+					forecast.direction === "under" ||
+					(overage > 0 && forecast.cents <= Math.ceil(overage / 100) * 100);
+				if (!agrees)
+					failures.push(
+						`${today}: forecast ${forecast.direction} $${forecast.cents / 100}, Eating Out over $${Math.max(0, overage) / 100}`,
+					);
+			}
+			expect(failures).toEqual([]);
+		},
+		60_000,
+	);
 
 	it("tells the story's dates: Eating Out over from the 13th, Gas near its limit from the 20th", async () => {
 		const month = "2026-10";

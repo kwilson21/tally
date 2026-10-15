@@ -147,23 +147,30 @@ describe("buildSeed", () => {
 		},
 	);
 
-	it("keeps earlier months' Groceries, Gas and Eating Out totals as the history says, whatever the day", () => {
+	it("keeps earlier months' category totals as the history says, whatever the day", () => {
 		for (const today of ["2026-10-01", "2026-10-15", "2026-10-31"]) {
 			const seed = buildSeed(today);
+			// A linked refund counts in its purchase's month, as Trends counts it (spec §6).
+			const countedDate = (t: (typeof seed.transactions)[number]) =>
+				seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
 			const totals = (categoryId: number) =>
 				[5, 4, 3, 2, 1].map((monthsAgo) =>
 					seed.transactions
 						.filter(
 							(t) =>
-								t.date.startsWith(monthOffset(today, monthsAgo)) &&
+								countedDate(t).startsWith(monthOffset(today, monthsAgo)) &&
 								t.categoryId === categoryId,
 						)
 						.reduce((sum, t) => sum + t.amountCents, 0),
 				);
-			// The history table in src/demo/seed.ts, oldest month first.
+			// The history table in src/demo/seed.ts, oldest month first, plus what else those months hold: Kids' last
+			// month has P19's Target purchase ($84.99) less its refund ($24.99), and Household's last two months have
+			// the repeat services ($61.48, YouTube, Procreate and the gym), with Apple's $2.99 in the last.
 			expect(totals(1), today).toEqual([64000, 65500, 61000, 69000, 67200]);
 			expect(totals(3), today).toEqual([17000, 18200, 16500, 19000, 17600]);
 			expect(totals(2), today).toEqual([17000, 19500, 21500, 24000, 26200]);
+			expect(totals(4), today).toEqual([24000, 31000, 20500, 28000, 32000]);
+			expect(totals(5), today).toEqual([12000, 21000, 14000, 15648, 24447]);
 		}
 	});
 
