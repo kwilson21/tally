@@ -920,7 +920,9 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 
 	it("shows Safe to spend exactly as Home does for the same day, under a decorative double rule", async () => {
 		const home = (await get("/")).html;
-		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		const amount = home.match(
+			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
+		)?.[1];
 		expect(amount).toBeTruthy();
 		const { html } = await get("/how-it-works");
 		expect(startHere(html)).toContain(`tabular-nums">${amount}</p>`);
@@ -978,7 +980,9 @@ describe("Start here's month and count (#502)", () => {
 	it("on November 1 names October for the bank lines and November for Safe to spend, which equals Home's", async () => {
 		await toNovemberFirst();
 		const home = (await get("/")).html;
-		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		const amount = home.match(
+			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
+		)?.[1];
 		expect(amount).toBeTruthy();
 		const section = await startHereHtml();
 		expect(section).toContain(
