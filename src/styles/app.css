@@ -1434,7 +1434,8 @@ html:not(.js) [data-money-js] {
  * so a fast load doesn't blink them. Reduced motion drops them at once. The bar with the disclosure open is
  * taller, so the list keeps its last rows clear of it.
  */
-.selection-list.htmx-request a[hx-get] {
+.selection-list.htmx-request a[hx-get],
+.selection-list.htmx-request button[hx-get] {
 	pointer-events: none;
 	opacity: 0.4;
 	transition: opacity var(--duration-pause) step-end;
@@ -1446,6 +1447,7 @@ html:not(.js) [data-money-js] {
 }
 @media (prefers-reduced-motion: reduce) {
 	.selection-list.htmx-request a[hx-get],
+	.selection-list.htmx-request button[hx-get],
 	.selection-list.htmx-request #set-category-selection,
 	.selection-list.htmx-request #exclude-selection {
 		transition: none;
