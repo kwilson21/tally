@@ -4,6 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AuditRoundTwoProposals } from "./proposals-audit-2";
 import { AutofillProposals } from "./proposals-autofill";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
@@ -500,6 +501,8 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<AuditRoundTwoProposals />
 
 			<section aria-labelledby="p127-title" class="mt-10">
 				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
