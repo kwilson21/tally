@@ -233,23 +233,32 @@ const homeTop = (
 );
 
 /**
- * Option C's sheet over Home on desktop: the BottomSheet's side panel over a dimmed page. Its Cancel link sits in
- * a footer under the ledger, as BottomSheet's footer draws it, so the sheet can be shut without the backdrop.
+ * Option C's sheet over Home, drawn both ways from one inside: the BottomSheet's side panel on desktop and its bottom
+ * sheet on a phone, each over a dimmed page. The title and the ledger sit in the body, and Cancel in a footer under
+ * them, as BottomSheet's footer draws it, so the sheet can be shut without the backdrop.
  */
-const sheetOverHome = (
-	<>
-		<div class="absolute inset-0 bg-ink/30" />
-		<div class="absolute inset-y-0 right-0 flex w-[28rem] flex-col rounded-l-sheet bg-paper">
-			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
-				<p class="font-serif text-2xl font-semibold">Keyboard shortcuts</p>
-				<Ledger />
+function KeysSheet({ phone = false }: { phone?: boolean }) {
+	// 754px is the BottomSheet's max height on an 844px screen: 100svh less the 90px toast room (at least 5.625rem).
+	const panel = phone
+		? "absolute inset-x-0 bottom-0 flex max-h-[754px] flex-col rounded-t-sheet bg-paper"
+		: "absolute inset-y-0 right-0 flex w-[28rem] flex-col rounded-l-sheet bg-paper";
+	return (
+		<>
+			<div class="absolute inset-0 bg-ink/30" />
+			<div class={panel}>
+				<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+					<p class="font-serif text-2xl font-semibold tracking-tight">
+						Keyboard shortcuts
+					</p>
+					<Ledger />
+				</div>
+				<div class="shrink-0 border-t border-rule px-5 pt-3 pb-5">
+					<SheetCancel href="#p128-keys" />
+				</div>
 			</div>
-			<div class="shrink-0 border-t border-rule px-5 pt-3 pb-5">
-				<SheetCancel href="#p128-keys" />
-			</div>
-		</div>
-	</>
-);
+		</>
+	);
+}
 
 /**
  * More at a phone's size below lg, drawn as the live More draws it (P122 A, #559 and #563): its title, its
@@ -370,10 +379,20 @@ export function KeyboardListProposal() {
 							label="C, the sheet over Home"
 							group
 							tall={900}
-							overlay={sheetOverHome}
+							overlay={<KeysSheet />}
 						>
 							{homeTop}
 						</Desk>
+					</Shot>
+					<Shot caption="Over Home on a phone: the sheet">
+						<Phone
+							label="C, the sheet open"
+							tab="home"
+							masthead={<FeedbackButton />}
+							overlay={<KeysSheet phone />}
+						>
+							{homeTop}
+						</Phone>
 					</Shot>
 					<Shot caption="Without the script: the foot, closed">
 						<Desk label="C, the fallback foot" group>

@@ -3439,19 +3439,20 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		).toEqual(["All options, More with Keyboard shortcuts open, on a phone"]);
 	});
 
-	it("draws each option's pictures: A three (closed, open, More), B three, C three", async () => {
+	it("draws each option's pictures: A three (closed, open, More), B three, C four", async () => {
 		const chunk = section(await drawn());
 		const a = option(chunk, "A · A sidebar");
 		const b = option(chunk, "B · At the foot");
 		const c = option(chunk, "C · A sheet");
 		expect(a.match(PICTURE)?.length).toBe(3);
 		expect(b.match(PICTURE)?.length).toBe(3);
-		expect(c.match(PICTURE)?.length).toBe(3);
+		expect(c.match(PICTURE)?.length).toBe(4);
 		// Home's pictures draw no How this works link: the foot pictures carry it, Home's status does not.
 		for (const label of [
 			"A, the sidebar closed, on desktop",
 			"A, the sidebar open, on desktop",
 			"C, the sheet over Home, on desktop",
+			"C, the sheet open, on a phone",
 		]) {
 			expect(pictureOf(chunk, label), label).not.toContain(
 				'aria-label="How this works: the budget"',
@@ -3471,6 +3472,9 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		expect(b).toContain('role="img" aria-label="B, More, on a phone"');
 		expect(c).toContain(
 			'role="img" aria-label="C, the sheet over Home, on desktop"',
+		);
+		expect(c).toContain(
+			'role="img" aria-label="C, the sheet open, on a phone"',
 		);
 		expect(c).toContain(
 			'role="img" aria-label="C, the fallback foot, on desktop"',
@@ -3603,6 +3607,58 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			/<a href="#p128-keys" class="[^"]*\bw-full\b[^"]*">Cancel<\/a>/,
 		);
 		expect(sheet).not.toContain(">Close</button>");
+		// The title is the ledger sheet's (DESIGN.md: font-serif, 2xl, semibold, tight tracking).
+		expect(sheet).toContain(
+			'<p class="font-serif text-2xl font-semibold tracking-tight">Keyboard shortcuts</p>',
+		);
+	});
+
+	it("draws C's sheet at phone width as the BottomSheet draws it: a rounded sheet rising over the tab bar, with Home behind it", async () => {
+		const chunk = section(await drawn());
+		expect(option(chunk, "C · A sheet")).toContain(
+			"Over Home on a phone: the sheet",
+		);
+		const sheet = pictureOf(chunk, "C, the sheet open, on a phone");
+		// The panel: the phone sheet's rounded top corners, 754px at most (the BottomSheet's max height on an 844px
+		// screen), and no rule on its edge. It has no side corner, since it is drawn from the screen's foot.
+		const panel = sheet.match(
+			/<div class="([^"]*\binset-x-0 bottom-0\b[^"]*)"/,
+		);
+		expect(panel, "panel").not.toBeNull();
+		expect(panel?.[1] ?? "").toMatch(/\brounded-t-sheet\b/);
+		expect(panel?.[1] ?? "").toMatch(/\bmax-h-\[754px\]/);
+		expect(panel?.[1] ?? "").not.toMatch(/\brounded-l-sheet\b/);
+		expect(panel?.[1] ?? "").not.toMatch(/\bborder-[tl]\b/);
+		// The sheet covers the tab bar: the tab bar comes first, then the dimmed backdrop, then the panel over both.
+		const nav = sheet.indexOf("<nav");
+		expect(nav).toBeGreaterThan(-1);
+		expect(sheet.indexOf("bg-ink/30")).toBeGreaterThan(nav);
+		expect(sheet.indexOf(panel?.[0] ?? "")).toBeGreaterThan(nav);
+		// The body keeps BottomSheet's p-5, and the footer sits under the ledger on a rule.
+		const body = sheet.match(/<div class="([^"]*\boverflow-y-auto\b[^"]*)"/);
+		expect(body?.[1] ?? "").toMatch(/\bp-5\b/);
+		const ledgerEnd = sheet.indexOf(
+			"Keys don&#39;t work while you&#39;re typing in a field.",
+		);
+		expect(ledgerEnd).toBeGreaterThan(-1);
+		const footer = sheet.indexOf("border-t border-rule", ledgerEnd);
+		expect(footer).toBeGreaterThan(ledgerEnd);
+		// Cancel stays in view under the ledger, and there is no Close button.
+		expect(sheet.slice(footer)).toMatch(
+			/<a href="#p128-keys" class="[^"]*\bw-full\b[^"]*">Cancel<\/a>/,
+		);
+		expect(sheet).not.toContain(">Close</button>");
+		// The title is the ledger sheet's, as on the desktop.
+		expect(sheet).toContain(
+			'<p class="font-serif text-2xl font-semibold tracking-tight">Keyboard shortcuts</p>',
+		);
+		// Home is behind it: its title, its amount and the Feedback pill in the top line, and no How this works link.
+		expect(sheet).toContain(">October</h1>");
+		expect(sheet).toContain("$1,240");
+		const feedback = sheet.indexOf('href="/feedback"');
+		expect(feedback).toBeGreaterThan(-1);
+		expect(feedback).toBeLessThan(sheet.indexOf("<h1"));
+		expect(sheet).not.toContain("How this works");
 	});
 
 	it("gives each option its note, with where its list sits below lg, and no line about phones showing nothing", async () => {
