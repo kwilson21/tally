@@ -103,6 +103,10 @@ describe("the first visit, no bank linked", () => {
 		expect(html).toMatch(
 			/<a[^>]*href="\/transactions\/cash\/new\?back=[^"]+"[^>]*id="add-cash"/,
 		);
+		// The first visit keeps How this works too, at the foot of the page under a short rule (decision 111).
+		expect(html).toMatch(
+			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#transactions"[^>]*>How this works<\/a><\/div><\/div>/,
+		);
 	});
 
 	it("is the same for a bank that was disconnected", async () => {
@@ -151,11 +155,13 @@ describe("the first visit, a bank linked and nothing arrived yet", () => {
 		expect(html).toContain(MAGNIFIER);
 		expect(html).not.toContain(ADD_SIGN);
 		expect(html).not.toContain(NO_BANK);
-		// The only way to Accounts is the sidebar and tabs, not a button in the empty list.
-		const results = html.slice(html.indexOf('aria-label="Results"'));
-		expect(results.slice(0, results.indexOf('<div id="sheet">'))).not.toContain(
-			"<a",
+		// The only way to Accounts is the sidebar and tabs, not a button in the empty list. The page's foot
+		// (How this works, under its rule) comes after the list, so the list ends where the rule starts.
+		const list = html.slice(
+			html.indexOf('aria-label="Results"'),
+			html.indexOf('w-12 border-t border-muted"'),
 		);
+		expect(list).not.toContain("<a");
 		waiting(html);
 	});
 
