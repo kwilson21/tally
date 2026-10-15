@@ -434,7 +434,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(81);
+		expect(DECIDED.length).toBe(82);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -477,7 +477,16 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
-		// P125 sits after P124 (issue 501) and before P129, so the list stays in proposal order.
+		// P125 sits after P124 (issue 501) and before P128, so the list stays in proposal order.
+		expect(DECIDED.at(-3)).toBe(entry);
+	});
+
+	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P128 ·"));
+		expect(entry?.title).toBe("P128 · The keyboard shortcuts list");
+		expect(entry?.issue).toBe(72);
+		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
+		expect(entry?.outcome).toContain("(decision 118).");
 		expect(DECIDED.at(-2)).toBe(entry);
 	});
 
@@ -3055,7 +3064,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 	const section = (html: string) => {
 		const start = html.indexOf('<section id="p128-keys"');
 		expect(start).toBeGreaterThan(-1);
-		const end = html.indexOf('<section aria-labelledby="p126-title"', start);
+		const end = html.indexOf('<section aria-labelledby="p129-title"', start);
 		expect(end).toBeGreaterThan(start);
 		return html.slice(start, end);
 	};
@@ -3089,21 +3098,22 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		);
 	const isOpen = (attrs: string) => /\sopen\b/.test(attrs);
 
-	it("is the first proposal on the page, above P126", async () => {
+	it("sits after P126 and before P129, as the picked proposal with its heading and line", async () => {
 		const html = await drawn();
-		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
-			(m) => m[1],
-		);
-		expect(ids[0]).toBe("p128-keys");
+		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
+		const p128 = html.indexOf('<section id="p128-keys"');
+		const p129 = html.indexOf('<section aria-labelledby="p129-title"');
+		expect(p126).toBeGreaterThan(-1);
+		expect(p126).toBeLessThan(p128);
+		expect(p128).toBeLessThan(p129);
 		expect(html).toContain(
-			'<h2 id="p128-title" class="font-serif text-3xl font-semibold">Open: the keyboard shortcuts list</h2>',
+			'<h2 id="p128-title" class="font-serif text-3xl font-semibold">Picked: the keyboard shortcuts list</h2>',
 		);
 		expect(html).toContain(
-			"Drawn Oct 15 for the owner&#39;s sign-off on #72 and #516: what <code>?</code> opens, and where the list lives without the script.",
+			"Drawn Oct 15. The owner&#39;s pick, marked Picked, is decision 118: C, a sheet that ? opens, with the extra keys and mono key chips.",
 		);
-		expect(html.indexOf('<section aria-labelledby="p128-title"')).toBeLessThan(
-			html.indexOf('<section aria-labelledby="p126-title"'),
-		);
+		expect(html).not.toContain("Open: the keyboard shortcuts list");
+		expect(html).not.toContain("Drawn Oct 15 for the owner&#39;s sign-off");
 	});
 
 	it("draws the Fixed box with decision 109's words, the keys and their rules", async () => {
@@ -3122,7 +3132,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		);
 	});
 
-	it("draws three options, A recommended, each with a note, a trade-off and a why, and no pick", async () => {
+	it("draws three options, C recommended and picked, A and B with neither, each with a note, a trade-off and a why", async () => {
 		const chunk = section(await drawn());
 		const names = [...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
 			(m) => (m[1] ?? "").split("<")[0],
@@ -3133,10 +3143,18 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			"C · A sheet, with the details as its fallback",
 		]);
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
-		expect(option(chunk, "A · A sidebar line that opens in place")).toContain(
-			">Recommended<",
-		);
-		expect(chunk.match(/>Picked</g)).toBeNull();
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
+		const c = option(chunk, "C · A sheet");
+		expect(c).toContain(">Recommended<");
+		expect(c).toContain(">Picked<");
+		for (const name of [
+			"A · A sidebar line that opens in place",
+			"B · At the foot of the page",
+		]) {
+			const opt = option(chunk, name);
+			expect(opt, name).not.toContain(">Recommended<");
+			expect(opt, name).not.toContain(">Picked<");
+		}
 		expect(chunk.match(/Trade-off: /g)?.length).toBe(3);
 		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(3);
 	});
@@ -3156,7 +3174,7 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		// Scrolled: it starts at the contents list, so no title sits above it.
 		const shared = chunk.slice(at, first);
 		expect(shared).not.toContain("<h1");
-		expect(shared.match(/to confirm/g)?.length).toBe(3);
+		expect(shared).not.toContain("to confirm");
 		expect(shared).toContain(
 			"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
 		);
@@ -3236,11 +3254,12 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		}
 	});
 
-	it("draws the same ledger of keys in each open list, with its words and to-confirm tags on Enter, the arrows and u", async () => {
+	it("draws the same ledger of keys in each open list, with its words, and no to-confirm tags or needs-your-yes line", async () => {
 		const chunk = section(await drawn());
 		for (const name of ["A · A sidebar", "B · At the foot", "C · A sheet"]) {
 			const opt = option(chunk, name);
-			expect(opt.match(/to confirm/g)?.length, name).toBe(3);
+			expect(opt, name).not.toContain("to confirm");
+			expect(opt, name).not.toContain("needs your yes");
 			expect(rowOf(opt, "Search transactions")).toContain(">/</kbd>");
 			expect(rowOf(opt, "Show these keys")).toContain(">?</kbd>");
 			expect(rowOf(opt, "Next row / previous row")).toContain(">j</kbd>");
@@ -3249,15 +3268,6 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			expect(rowOf(opt, "Undo it, while its toast shows")).toContain(
 				">u</kbd>",
 			);
-			expect(rowOf(opt, "Open the row")).toContain("to confirm");
-			expect(rowOf(opt, "Previous month / next month")).toContain("to confirm");
-			expect(rowOf(opt, "Undo it, while its toast shows")).toContain(
-				"to confirm",
-			);
-			expect(rowOf(opt, "Search transactions")).not.toContain("to confirm");
-			expect(rowOf(opt, "Show these keys")).not.toContain("to confirm");
-			expect(rowOf(opt, "Next row / previous row")).not.toContain("to confirm");
-			expect(opt).toContain("New (#516): needs your yes.");
 			expect(opt).toContain(
 				"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
 			);

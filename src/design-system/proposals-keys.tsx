@@ -40,14 +40,10 @@ type Row = {
 	/** How several keys join: "/" for "j / k", "or" for "e or Enter". */
 	joined?: "/" | "or";
 	words: string;
-	/** Beyond decision 109's sentence, so it waits for the owner's yes (#72's list, or #516's u). */
-	confirm?: boolean;
-	/** One more muted line under the words. */
-	note?: string;
 };
 
-// The ledger: the same in every option. Enter and the arrows are in #72's own list, and u is #516's
-// key; the rest is decision 109's sentence.
+// The ledger: the same in every option. Decision 118 adds Enter, the arrows and u to decision 109's
+// sentence (#72's list, and #516's u); the rest is decision 109's sentence.
 const LEDGER: { heading: string; rows: Row[] }[] = [
 	{
 		heading: "Anywhere",
@@ -60,35 +56,16 @@ const LEDGER: { heading: string; rows: Row[] }[] = [
 		heading: "In a list",
 		rows: [
 			{ keys: ["j", "k"], joined: "/", words: "Next row / previous row" },
-			{
-				keys: ["e", "Enter"],
-				joined: "or",
-				words: "Open the row",
-				confirm: true,
-			},
+			{ keys: ["e", "Enter"], joined: "or", words: "Open the row" },
 		],
 	},
 	{
 		heading: "On Home",
-		rows: [
-			{
-				keys: ["←", "→"],
-				joined: "/",
-				words: "Previous month / next month",
-				confirm: true,
-			},
-		],
+		rows: [{ keys: ["←", "→"], joined: "/", words: "Previous month / next month" }],
 	},
 	{
 		heading: "After a change",
-		rows: [
-			{
-				keys: ["u"],
-				words: "Undo it, while its toast shows",
-				confirm: true,
-				note: "New (#516): needs your yes.",
-			},
-		],
+		rows: [{ keys: ["u"], words: "Undo it, while its toast shows" }],
 	},
 ];
 
@@ -121,14 +98,6 @@ function Ledger() {
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
 								<RowKeys row={row} />
 								<span class="text-sm">{row.words}</span>
-								{row.confirm && (
-									<span class="rounded-full border border-rule px-2.5 text-sm text-muted">
-										to confirm
-									</span>
-								)}
-								{row.note && (
-									<span class="w-full text-sm text-muted">{row.note}</span>
-								)}
 							</li>
 						))}
 					</ul>
@@ -338,7 +307,7 @@ export function KeyboardListProposal() {
 				<Choice
 					name="A · A sidebar line that opens in place"
 					width="w-full"
-					recommended
+					recommended={false}
 					note="On desktop, the sidebar's second group gains a third line, Keyboard shortcuts, with a keyboard icon. Opening it drops the ledger down inside the sidebar; ? opens it and moves focus to its summary. Below lg the sidebar is hidden, so ? opens More's Keyboard shortcuts row instead (from another page, it goes to More with the row open)."
 					cost="a sidebar line and a details; keyboard.js only opens it; a keyboard icon, and Tally has none yet, so a new icon is needed."
 					why="the list sits with the sidebar's other links and never moves the page under a person's hands."
@@ -389,7 +358,7 @@ export function KeyboardListProposal() {
 				<Choice
 					name="C · A sheet, with the details as its fallback"
 					width="w-full"
-					recommended={false}
+					picked
 					note="? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the same list is B's details under How this works at the foot of each desktop page that has it, and More's Keyboard shortcuts row below lg."
 					cost="a ?keys param the server draws the sheet from over the page it was opened from, so Cancel, Escape and the backdrop close it as every sheet closes; keyboard.js opens it and sheet.js already makes it modal; without the script, the foot's details and More's row; a monospaced font token for the key chips; and a decision entry (decision 118), since decision 109's list was a disclosure only."
 					why="it's the sheet people already know from Add a bill, so the keys open what the app does everywhere else."
