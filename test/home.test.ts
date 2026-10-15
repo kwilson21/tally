@@ -225,7 +225,9 @@ describe("GET / with the demo seed", () => {
 			vi.setSystemTime(new Date("2026-10-01T00:01:00-04:00"));
 			const finished = await homeAt("2026-09");
 			const amount = (html: string) =>
-				html.match(/<p class="[^"]*text-6xl[^"]*">([^<]+)<\/p>/)?.[1];
+				html.match(
+					/<p class="[^"]*text-6xl[^"]*">(?:<span class="whitespace-nowrap">)?([^<]+)<\/(?:span|p)>/,
+				)?.[1];
 			expect(whileCurrent.html).toContain("Safe to spend");
 			expect(finished.html).toContain("September ended");
 			expect(amount(finished.html)).toBe(amount(whileCurrent.html));
@@ -501,7 +503,9 @@ describe("GET / with the demo seed", () => {
 	it("leads with a positive safe to spend, and no over-budget explanation", async () => {
 		const { html } = await home();
 		expect(html).toContain("Safe to spend");
-		expect(html).toMatch(/Safe to spend[\s\S]*?<\/p><p[^>]*>\$[\d,]+/);
+		expect(html).toMatch(
+			/Safe to spend[\s\S]*?<\/p><p[^>]*><span class="whitespace-nowrap">\$[\d,]+/,
+		);
 		expect(html).toContain('href="/how-it-works#budget"');
 		expect(html).toContain('aria-label="Why? safe to spend"');
 		expect(html).not.toContain(
@@ -524,7 +528,7 @@ describe("GET / with the demo seed", () => {
 		await resetDemo(env.DB, "2026-10-10");
 		const dollars = (html: string) => {
 			const match = html.match(
-				/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
+				/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([−-]?)\$([\d,]+)/,
 			);
 			return (
 				Number(match?.[2]?.replaceAll(",", "") ?? Number.NaN) *
@@ -763,7 +767,7 @@ describe("GET / with the demo seed", () => {
 			.run();
 		const zero = (await home()).html;
 		expect(zero).toContain("Safe to spend");
-		expect(zero).toContain(">$0</p>");
+		expect(zero).toContain('<span class="whitespace-nowrap">$0</span>');
 	});
 
 	it("shows older uncategorized transactions in the Band chip", async () => {

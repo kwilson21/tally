@@ -10,6 +10,7 @@ import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
+import { KeyboardListProposal } from "./proposals-keys";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { MoneyInputProposal } from "./proposals-money";
 import { Phase4Proposals } from "./proposals-phase4";
@@ -29,7 +30,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 117), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 118), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -478,6 +479,12 @@ export const DECIDED: readonly {
 		issue: 95,
 	},
 	{
+		title: "P128 · The keyboard shortcuts list",
+		outcome:
+			"Option C: ? opens the list as a sheet, with a disclosure at each desktop page's foot and a More row below 1024px; keys /, ?, j, k, e or Enter, ← →, and u; key chips in a mono face (decision 118).",
+		issue: 72,
+	},
+	{
 		title: "P129 · The money input, state by state",
 		outcome:
 			"Option A: a muted 0.00 when empty, a check on the chip that matches the box, the steps off while the text can't be read, and five keyboard and screen-reader fixes; the centred layout stays (decision 117).",
@@ -533,6 +540,17 @@ export function Proposals() {
 					Budget diagram without its boxes shrinking.
 				</p>
 				<PlannedDiagramProposal />
+			</section>
+
+			<section aria-labelledby="p128-title" class="mt-12">
+				<h2 id="p128-title" class="font-serif text-3xl font-semibold">
+					Picked: the keyboard shortcuts list
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's pick, marked Picked, is decision 118: C, a
+					sheet that ? opens, with the extra keys and mono key chips.
+				</p>
+				<KeyboardListProposal />
 			</section>
 
 			<section aria-labelledby="p129-title" class="mt-12">

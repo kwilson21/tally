@@ -95,7 +95,7 @@ export function DesktopFrame({
 			<div
 				role="img"
 				aria-label={label}
-				class="h-[560px] w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class="relative h-[560px] w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<div inert class="mx-auto max-w-xl px-8 pt-8">
 					{children}

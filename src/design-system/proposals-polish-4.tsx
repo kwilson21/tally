@@ -249,6 +249,12 @@ type DeskProps = {
 	label: string;
 	/** Adds the second sidebar group: How Tally works and Feedback. */
 	group?: boolean;
+	/** One more line at the end of that group (P128 A's Keyboard shortcuts). */
+	extra?: Child;
+	/** A taller window, for a picture with more to draw than 560px holds (900px, or 1200px for a full sidebar). */
+	tall?: 900 | 1200;
+	/** Drawn over the window, as a sheet is drawn over the page behind it. */
+	overlay?: Child;
 	/** The pill at the window's corner, where it sits on desktop today. */
 	floating?: boolean;
 	/** The sidebar item in accent: Home unless a picture is of another place. */
@@ -260,6 +266,9 @@ type DeskProps = {
 export function Desk({
 	label,
 	group = false,
+	extra,
+	tall,
+	overlay,
 	floating = false,
 	current = "home",
 	children,
@@ -269,7 +278,7 @@ export function Desk({
 			<div
 				role="img"
 				aria-label={`${label}, on desktop`}
-				class="relative h-[560px] w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class={`relative ${tall === 1200 ? "h-[1200px]" : tall === 900 ? "h-[900px]" : "h-[560px]"} w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
 			>
 				<div inert>
 					<div data-screen="picture">
@@ -312,6 +321,7 @@ export function Desk({
 													Feedback
 												</a>
 											</li>
+											{extra}
 										</ul>
 									)}
 								</nav>
@@ -319,6 +329,7 @@ export function Desk({
 							<main class="min-w-0 flex-1">{children}</main>
 						</div>
 						{floating && <div class="absolute bottom-6 right-6">{pill}</div>}
+						{overlay}
 					</div>
 				</div>
 			</div>
@@ -612,7 +623,7 @@ const ACCOUNTS: Place = {
 	desc: "Balances, net worth and your banks",
 };
 
-const PLACES: Place[] = [
+export const PLACES: Place[] = [
 	ACCOUNTS,
 	{
 		name: "Settings",
@@ -630,7 +641,7 @@ const PLACES: Place[] = [
 ];
 
 /** One place on the contents page: its icon, name, leader and folio, with what it holds under them. */
-function Entry({ place }: { place: Place }) {
+export function Entry({ place }: { place: Place }) {
 	return (
 		<a
 			href="#p122-more"
