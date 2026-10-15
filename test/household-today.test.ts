@@ -375,6 +375,11 @@ describe("a time zone other than Eastern", () => {
 	});
 
 	it("Transactions and How Tally works open on Pacific's month", async () => {
+		// Start here's sentence names the seed's month, and the nightly reset dates the seed by Eastern's day
+		// (src/index.tsx). Seeding on Pacific's day keeps both months on the page the same one; the reset puts the
+		// time zone back to Eastern, so it is set again.
+		await resetDemo(env.DB, todayIn(LOS_ANGELES));
+		await setZone(LOS_ANGELES);
 		const transactions = await get("/transactions");
 		expect(transactions.html).toContain("October");
 		const how = await get("/how-it-works");

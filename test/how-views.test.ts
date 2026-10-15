@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { StartHereLines } from "../src/db/transactions";
 import { START_HERE } from "../src/design-system/mock";
 import { HowLink } from "../src/views/how-link";
 import { DemoBanner } from "../src/views/layout";
 import { StartHere } from "../src/views/start-here";
 import { SystemDiagram } from "../src/views/system-diagram";
 import { ThingsToTry } from "../src/views/things-to-try";
+import { TransactionRow } from "../src/views/transaction-row";
 import { WhyLink } from "../src/views/why-link";
 
 const decode = (html: string) =>
@@ -12,6 +14,25 @@ const decode = (html: string) =>
 		.replaceAll("&#39;", "'")
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&");
+
+describe("TransactionRow's bank text (Start here, #502)", () => {
+	const bakery = START_HERE.lines.bakery;
+
+	it("with bankText off, a row that needs a category says only Needs category, since its struck bank text sits above", async () => {
+		const html = await TransactionRow({
+			row: bakery,
+			bankText: false,
+		}).toString();
+		expect(html).toContain("Needs category");
+		expect(html).not.toContain("SQ *LOCAL BAKERY 4432");
+	});
+
+	it("by default it still says the bank text after Needs category", async () => {
+		const html = await TransactionRow({ row: bakery }).toString();
+		expect(html).toContain("Needs category");
+		expect(html).toContain("SQ *LOCAL BAKERY 4432");
+	});
+});
 
 describe("ThingsToTry", () => {
 	it("is the three things to do under a heading, each linking to where it's done (spec §9)", async () => {
@@ -70,12 +91,58 @@ describe("DemoBanner", () => {
 });
 
 describe("StartHere", () => {
-	const view = async () =>
+	const view = async (lines: StartHereLines = START_HERE.lines) =>
 		StartHere({
+			storyMonthName: "October",
 			monthName: "October",
-			rows: START_HERE.rows,
+			rawHref: "/transactions?raw=1",
+			lines,
 			safeToSpendCents: START_HERE.safeToSpendCents,
 		}).toString();
+
+	it("names the story's month in the made-up family sentence and today's month in Safe to spend", async () => {
+		const html = decode(
+			await StartHere({
+				storyMonthName: "October",
+				monthName: "November",
+				rawHref: "/transactions?raw=1&month=2026-10",
+				lines: START_HERE.lines,
+				safeToSpendCents: START_HERE.safeToSpendCents,
+			}).toString(),
+		);
+		expect(html).toContain(
+			"what their bank sent this October, and what Tally wrote down.",
+		);
+		expect(html).toContain("What's left of November's budget");
+		expect(html).toContain('href="/transactions?raw=1&month=2026-10"');
+	});
+
+	it("heads its lines with the list's own count, 'Three lines of N so far', above the lines", async () => {
+		const html = await view();
+		expect(html).toContain(
+			'<h3 class="mt-6 font-medium text-muted">Three lines of 42 so far</h3>',
+		);
+		expect(html).toContain('<div class="mt-3 flex flex-col gap-4">');
+	});
+
+	it("leaves out the heading when a line is missing, and the sentence on what would count without a transfer", async () => {
+		const noTransfer = await view({ ...START_HERE.lines, transfer: null });
+		expect(noTransfer).not.toContain("Three lines of");
+		expect(noTransfer).not.toContain("Without Tally, the paycheck");
+		expect(noTransfer).toContain("ACME CORP PAYROLL");
+		expect(noTransfer).not.toContain("ONLINE TRANSFER TO SAV");
+		const noBakery = await view({ ...START_HERE.lines, bakery: null });
+		expect(noBakery).not.toContain("Three lines of");
+		expect(noBakery).toContain("Without Tally, the paycheck");
+	});
+
+	it("shows Tally's row for transaction 110 as Needs category alone under its struck bank text", async () => {
+		const html = await view();
+		expect(html.split("SQ *LOCAL BAKERY 4432")).toHaveLength(2);
+		expect(html).toMatch(
+			/<s class="decoration-muted">SQ \*LOCAL BAKERY 4432<\/s>[\s\S]*?Needs category<\/span>/,
+		);
+	});
 
 	it("is the demo's first section, labelled by its h2, with the made-up family sentence in this month's name", async () => {
 		const html = await view();

@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { accounts } from "../src/routes/accounts";
@@ -854,10 +855,10 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 		expect(family).not.toContain("#start-here");
 	});
 
-	it("opens How Tally works with Start here, then the feature sections in their order, and How it's built last, in the demo", async () => {
+	it("opens How Tally works with Start here under its title, then the intro, then the feature sections in their order, and How it's built last, in the demo", async () => {
 		const { html } = await get("/how-it-works");
+		const at = (needle: string) => html.indexOf(needle);
 		const ids = [
-			"start-here",
 			"budget",
 			"transactions",
 			"exclusions",
@@ -869,19 +870,28 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 			"net-worth",
 			"architecture",
 		];
-		const positions = ids.map((id) => html.indexOf(`id="${id}"`));
+		const positions = ids.map((id) => at(`id="${id}"`));
 		expect(positions.every((position) => position > -1)).toBe(true);
 		expect(positions).toEqual([...positions].sort((a, b) => a - b));
-		expect(html.indexOf("<h1")).toBeLessThan(positions[0] ?? -1);
+		expect(at("<h1")).toBeLessThan(at('id="start-here"'));
+		expect(at('id="start-here"')).toBeLessThan(
+			at("Tally is a small family budgeting app"),
+		);
+		expect(at("Tally is a small family budgeting app")).toBeLessThan(
+			positions[0] ?? -1,
+		);
+		expect(html).not.toContain("It runs on a made-up household");
 	});
 
-	it("leaves Start here and How it's built out of the family app's How Tally works, which opens with the features", async () => {
+	it("leaves Start here and How it's built out of the family app's How Tally works, whose intro sits right under the title", async () => {
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
 		expect(html).not.toContain('id="start-here"');
 		expect(html).not.toContain('id="architecture"');
-		expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('id="budget"'));
+		expect(html).toMatch(
+			/<\/h1>\s*<p class="mt-4 text-lg">\s*Tally is a small family budgeting app/,
+		);
 	});
 
 	it("says what the made-up family's bank sent this month, in the demo's current month", async () => {
@@ -933,5 +943,102 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 			["/transactions/110?uncategorized=1", "Set a rule for a merchant"],
 			["/transactions/110?uncategorized=1", "Rename a merchant"],
 		]);
+	});
+});
+
+describe("Start here's month and count (#502)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** The raw list's result count text, as a visitor reads it. */
+	const resultCount = (html: string) =>
+		decodeHtml(html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1] ?? "");
+	const startHere = (html: string) =>
+		decodeHtml(
+			html.match(/<section[^>]*id="start-here"[\s\S]*?<\/section>/)?.[0] ?? "",
+		);
+	/** The seed's month: the month of transaction 110, which Start here's lines are from. */
+	const storyMonth = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT substr(date, 1, 7) AS month FROM transactions WHERE id = 110",
+			).first<{ month: string }>()
+		)?.month;
+	/** Resets the demo on October 31 (its seed is October's), then moves the clock to November 1. */
+	const toNovemberFirst = async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-31T16:00:00Z"));
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		vi.setSystemTime(new Date("2026-11-01T16:00:00Z"));
+	};
+	const startHereHtml = async () =>
+		startHere((await get("/how-it-works")).html);
+
+	it("on November 1 names October for the bank lines and November for Safe to spend, which equals Home's", async () => {
+		await toNovemberFirst();
+		const home = (await get("/")).html;
+		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		expect(amount).toBeTruthy();
+		const section = await startHereHtml();
+		expect(section).toContain(
+			"Here's what their bank sent this October, and what Tally wrote down.",
+		);
+		expect(section.match(/<s class="decoration-muted">/g)).toHaveLength(3);
+		expect(section).toContain("Three lines of ");
+		expect(section).toContain("What's left of November's budget");
+		expect(section).toContain(`tabular-nums">${amount}</p>`);
+		expect(section).toContain("/transactions?raw=1&month=2026-10");
+	});
+
+	it("says 'Three lines of N so far', with N the raw list's own count, and drops that heading and the Without Tally sentence once the month has no transfer", async () => {
+		const month = await storyMonth();
+		const listed = await get("/transactions?raw=1");
+		const n = Number(
+			resultCount(listed.html).match(/(\d+) transactions?\b/)?.[1],
+		);
+		expect(n).toBeGreaterThan(0);
+		const section = await startHereHtml();
+		expect(section).toContain(`Three lines of ${n} so far`);
+		expect(section).toContain("Without Tally, the paycheck and the transfer");
+
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_transfer = 0 WHERE flag_transfer = 1 AND substr(date, 1, 7) = ?",
+		)
+			.bind(month)
+			.run();
+		const after = await startHereHtml();
+		expect(after).not.toContain("Three lines of");
+		expect(after).not.toContain("Without Tally, the paycheck");
+	});
+
+	it("keeps transaction 110 in Start here after a visitor splits it: struck text, Split transaction, and no link", async () => {
+		const split = await saveSplit(
+			env.DB,
+			110,
+			[
+				{ categoryId: 1, amountCents: 700 },
+				{ categoryId: 4, amountCents: 500 },
+			],
+			"person@example.com",
+		);
+		expect(split.saved).toBe(true);
+		const section = await startHereHtml();
+		expect(section).toMatch(
+			/<s class="decoration-muted">SQ \*LOCAL BAKERY 4432<\/s>[\s\S]*?data-transaction="110"/,
+		);
+		const start = section.indexOf('data-transaction="110"');
+		const row = section.slice(start, section.indexOf("</li>", start));
+		expect(row).toContain("Split transaction");
+		expect(row).not.toContain("<a ");
+	});
+
+	it("writes 'SQ *LOCAL BAKERY 4432' once in Start here, struck, with Needs category under it", async () => {
+		const section = await startHereHtml();
+		expect(section.split("SQ *LOCAL BAKERY 4432")).toHaveLength(2);
+		const start = section.indexOf("SQ *LOCAL BAKERY 4432");
+		expect(section.slice(start, section.indexOf("</li>", start))).toContain(
+			"Needs category",
+		);
 	});
 });

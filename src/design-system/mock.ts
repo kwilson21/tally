@@ -2,7 +2,7 @@
 // against the component's props, so a changed component fails `npm run typecheck` here first.
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { daysBefore } from "../dates";
-import type { ListRow } from "../db/transactions";
+import type { ListRow, StartHereLines } from "../db/transactions";
 import type { ExcludedBreakdown } from "../how-it-works/examples";
 import { type NetWorthPoint, netWorthView } from "../net-worth";
 import { type BankSync, flaggedBanks, homeBankNotice } from "../stale-bank";
@@ -172,42 +172,43 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 	},
 ];
 
-/** P30 A's suggested-category card, using the same transaction shape as the app. */
 /** Start here's three bank lines, as the list draws them (spec §8.8): the paycheck, the transfer and transaction 110. */
-const START_HERE_ROWS: ListRow[] = [
-	{
-		...row,
-		id: 901,
-		date: "2026-10-01",
-		amountCents: -245000,
-		rawName: "ACME CORP PAYROLL",
-		displayName: "Paycheck, Acme Corp",
-		income: true,
-	},
-	{
-		...row,
-		id: 902,
-		date: "2026-10-02",
-		amountCents: 50000,
-		rawName: "ONLINE TRANSFER TO SAV ...5678",
-		displayName: "Transfer to Savings",
-		excluded: true,
-	},
-	{
-		...row,
-		id: 110,
-		date: "2026-10-03",
-		amountCents: 1200,
-		rawName: "SQ *LOCAL BAKERY 4432",
-		displayName: "Local Bakery",
-	},
-];
-
 export const START_HERE = {
 	safeToSpendCents: 124000,
-	rows: START_HERE_ROWS,
+	lines: {
+		month: "2026-10",
+		paycheck: {
+			...row,
+			id: 901,
+			date: "2026-10-01",
+			amountCents: -245000,
+			rawName: "ACME CORP PAYROLL",
+			displayName: "Paycheck, Acme Corp",
+			income: true,
+		},
+		transfer: {
+			...row,
+			id: 902,
+			date: "2026-10-02",
+			amountCents: 50000,
+			rawName: "ONLINE TRANSFER TO SAV ...5678",
+			displayName: "Transfer to Savings",
+			excluded: true,
+		},
+		bakery: {
+			...row,
+			id: 110,
+			date: "2026-10-03",
+			amountCents: 1200,
+			rawName: "SQ *LOCAL BAKERY 4432",
+			displayName: "Local Bakery",
+		},
+		/** The drawing's count of the month's bank lines, as the list shows it. */
+		lineCount: 42,
+	} satisfies StartHereLines,
 };
 
+/** P30 A's suggested-category card, using the same transaction shape as the app. */
 export const CATEGORY_SUGGESTION = {
 	id: 30,
 	name: "Pet Care",

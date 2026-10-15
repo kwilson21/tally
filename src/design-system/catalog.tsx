@@ -4657,11 +4657,13 @@ function Demo() {
 				title="StartHere"
 				tier="visual"
 				components={["StartHere"]}
-				sentence="How Tally works' first section in the demo (P124 A): the made-up family's sentence, three of this month's bank lines struck through with Tally's row under each, the sentence on what would count without Tally, Safe to spend under a double rule, and the three things to try."
+				sentence="How Tally works' first section in the demo (P124 A), directly under its title: the made-up family's sentence, “Three lines of N so far”, three bank lines struck through with Tally's row under each, the sentence on what would count without Tally, Safe to spend under a double rule, and the three things to try."
 			>
 				<StartHere
+					storyMonthName="October"
 					monthName="October"
-					rows={START_HERE.rows}
+					rawHref="/transactions?raw=1"
+					lines={START_HERE.lines}
 					safeToSpendCents={START_HERE.safeToSpendCents}
 				/>
 			</Specimen>
