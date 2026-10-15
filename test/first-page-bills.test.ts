@@ -58,12 +58,11 @@ describe("splitKeepable", () => {
 	});
 
 	it("leaves out a charge whose name comes out empty, since a bill with no name can't be kept", () => {
+		// Alone, so the collision rule can't be what leaves it out: an empty name, and one of only spaces.
 		const nameless = found({ rawName: "XX", displayName: "" });
 		const blank = found({ rawName: "YY", displayName: "   " });
-		expect(splitKeepable([nameless, blank], []).waiting).toEqual([
-			nameless,
-			blank,
-		]);
+		expect(splitKeepable([nameless], []).waiting).toEqual([nameless]);
+		expect(splitKeepable([blank], []).waiting).toEqual([blank]);
 	});
 
 	it("leaves out a charge whose name is already an active bill's, ignoring case and spaces", () => {
