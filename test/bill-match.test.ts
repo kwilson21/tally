@@ -6,6 +6,33 @@ import {
 	pickBillPayment,
 } from "../src/bills/match";
 
+/**
+ * env.DB for one matcher run. `change` runs once the run has read its candidates and before it writes its links (the
+ * statement that inserts them from json_each), so a test can change a payment between the two.
+ */
+function changedBeforeWrite(change: () => Promise<unknown>): D1Database {
+	return new Proxy(env.DB, {
+		get(target, property) {
+			if (property === "prepare")
+				return (sql: string) => {
+					if (!sql.includes("INSERT OR IGNORE INTO bill_payments"))
+						return target.prepare(sql);
+					const write = target.prepare(sql);
+					return {
+						bind: (...values: unknown[]) => ({
+							run: async () => {
+								await change();
+								return write.bind(...values).run();
+							},
+						}),
+					};
+				};
+			const value = Reflect.get(target, property, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}
+
 describe("bill payment matching", () => {
 	it("enforces date and amount windows, then breaks ties by date, amount, and id", () => {
 		const candidates = [
@@ -375,6 +402,40 @@ describe("bill payment matching", () => {
 			"SELECT period,transaction_id FROM bill_payments WHERE bill_id=1 AND status='linked'",
 		).all();
 		expect(links.results).toEqual([]);
+	});
+
+	// Decision 82: a payment a plan pays is never a bill's too, and a part's plan counts for its whole purchase. The run reads
+	// its candidates, then writes its links, so a split and a plan on a part can land between the two: that payment is
+	// skipped, and the run's other payments still link.
+	it("skips a payment whose part a plan takes after the read, and links the run's other payments", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM planned_expenses"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare(
+				"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name) VALUES(40,1,'2026-06-10',10000,'LANDLORD'),(41,1,'2026-07-10',10000,'LANDLORD')",
+			),
+		]);
+		const splitAndPlanPart = () =>
+			env.DB.batch([
+				env.DB.prepare(
+					"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id,is_split) VALUES(401,1,'2026-06-10',6000,'LANDLORD',40,0),(402,1,'2026-06-10',4000,'LANDLORD',40,0)",
+				),
+				env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=40"),
+				env.DB.prepare(
+					"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Gift',6000,'2026-06',401,'demo')",
+				),
+			]);
+		expect(
+			await matchBillPayments(
+				changedBeforeWrite(splitAndPlanPart),
+				"2026-07-12",
+			),
+		).toBe(1);
+		const links = await env.DB.prepare(
+			"SELECT period,transaction_id FROM bill_payments WHERE status='linked' ORDER BY period",
+		).all();
+		expect(links.results).toEqual([{ period: "2026-07", transaction_id: 41 }]);
 	});
 
 	// Spec §6.1 rule 4 (decision 67): a payment Plaid or Jev excluded still pays a bill. Once linked it counts
