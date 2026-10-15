@@ -14,6 +14,8 @@ type Props = {
 	describedBy?: string;
 	/** A class the input carries beside sr-only, for a hook a form's CSS reads (name-choices.tsx). */
 	inputClass?: string;
+	/** The form the input belongs to, by its id, when that is not the form it sits in (Select mode's filters, #383). */
+	form?: string;
 	icon?: Child;
 	children?: Child;
 	"hx-get"?: string;

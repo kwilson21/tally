@@ -79,14 +79,22 @@ async function post(path: string, fields: [string, string][]) {
 	return { res, html: readable(await res.text()) };
 }
 
-const parts = (...refunds: [string, string][]): [string, string][] => [
+/** The sheet's fields for the Kids and Household parts with the given amounts, and any refund answers. */
+const sized = (
+	kids: string,
+	household: string,
+	...refunds: [string, string][]
+): [string, string][] => [
 	["part_category", String(KIDS)],
 	["part_category", String(HOUSEHOLD)],
-	["part_amount", "60.00"],
-	["part_amount", "40.00"],
+	["part_amount", kids],
+	["part_amount", household],
 	["back", "/transactions"],
 	...refunds,
 ];
+
+const parts = (...refunds: [string, string][]): [string, string][] =>
+	sized("60.00", "40.00", ...refunds);
 
 describe("the split sheet asks which part a linked refund goes with", () => {
 	it("shows a chooser under the parts for each linked refund, with nothing chosen", async () => {
@@ -342,36 +350,195 @@ describe("a credit that no longer follows its purchase is not asked about", () =
 	});
 });
 
-describe("a split refund is not asked about", () => {
+describe("a split refund is asked about like any linked refund, and its parts are not", () => {
 	const SPLIT_PURCHASE = 9301;
 	const SPLIT_REFUND = 9302;
+	const REFUND_KIDS = 9303;
+	const REFUND_HOUSEHOLD = 9304;
+	/** Another purchase, which a part of the split refund can be linked to instead (a person's own link). */
+	const OTHER_SHOP = 9305;
+
+	/** Inserts OTHER_SHOP, and links the given parts of the split refund to it, so they no longer follow it. */
+	const linkElsewhere = (...partIds: number[]) =>
+		db.batch([
+			db.prepare(`INSERT INTO transactions
+				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
+				(${OTHER_SHOP}, 3, '2026-09-01', 10000, 'OTHER SHOP', ${GROCERIES}, 'user', 0, NULL)`),
+			...partIds.map((partId) =>
+				db
+					.prepare(
+						`UPDATE transactions SET refund_of_id = ${OTHER_SHOP} WHERE id = ?`,
+					)
+					.bind(partId),
+			),
+		]);
 
 	beforeEach(async () => {
-		// A $100.00 purchase, refunded by a split refund ($100.00) whose two parts both point at the purchase.
+		// A $100.00 purchase, refunded by a split refund ($50.00, Sep 7) whose $30.00 and $20.00 parts all point at the purchase.
 		await db.batch([
 			db.prepare(`INSERT INTO transactions
 				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id) VALUES
 				(${SPLIT_PURCHASE}, 3, '2026-09-01', 10000, 'SPLIT SHOP', ${GROCERIES}, 'user', 0, NULL)`),
 			db.prepare(`INSERT INTO transactions
 				(id, account_id, date, amount_cents, raw_name, category_id, category_source, is_split, parent_id, refund_of_id, credit_reviewed, credit_reviewed_by) VALUES
-				(${SPLIT_REFUND}, 3, '2026-09-07', -10000, 'SPLIT SHOP', ${GROCERIES}, 'user', 1, NULL, ${SPLIT_PURCHASE}, 1, 'user'),
-				(9303, 3, '2026-09-07', -6000, 'SPLIT SHOP', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user'),
-				(9304, 3, '2026-09-07', -4000, 'SPLIT SHOP', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user')`),
+				(${SPLIT_REFUND}, 3, '2026-09-07', -5000, 'SPLIT SHOP', ${GROCERIES}, 'user', 1, NULL, ${SPLIT_PURCHASE}, 1, 'user'),
+				(${REFUND_KIDS}, 3, '2026-09-07', -3000, 'SPLIT SHOP', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user'),
+				(${REFUND_HOUSEHOLD}, 3, '2026-09-07', -2000, 'SPLIT SHOP', ${GROCERIES}, 'user', 0, ${SPLIT_REFUND}, ${SPLIT_PURCHASE}, 1, 'user')`),
 		]);
 	});
 
-	it("offers no chooser line for the split refund or its parts, and unlinks them all on save", async () => {
+	it("shows one chooser line for the split refund, named by its own date, and none for its parts", async () => {
 		const res = await exports.default.fetch(
 			`${BASE}/transactions/${SPLIT_PURCHASE}/split?back=%2Ftransactions`,
 		);
-		expect(readable(await res.text())).not.toContain("goes with");
-		const { res: saved } = await post(
+		const html = readable(await res.text());
+		expect(html.match(/goes with/g)).toHaveLength(1);
+		expect(html).toContain("The refund on Sep 7 goes with");
+		expect(html).toMatch(
+			new RegExp(`name="refund_${SPLIT_REFUND}"[^>]*value="0"`),
+		);
+		expect(html).toMatch(
+			new RegExp(`name="refund_${SPLIT_REFUND}"[^>]*value="none"`),
+		);
+		expect(html).not.toContain(`name="refund_${REFUND_KIDS}"`);
+		expect(html).not.toContain(`name="refund_${REFUND_HOUSEHOLD}"`);
+	});
+
+	it("refuses a save with the split refund unanswered, in words, and saves nothing", async () => {
+		const { res, html } = await post(
 			`/transactions/${SPLIT_PURCHASE}/split`,
 			parts(),
 		);
-		expect(saved.status).toBe(200);
+		expect(res.status).toBe(422);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain(
+			"Pick which part the refund on Sep 7 goes with, or Not linked.",
+		);
+		expect(await linkOf(SPLIT_REFUND)).toBe(SPLIT_PURCHASE);
+		expect(await linkOf(REFUND_KIDS)).toBe(SPLIT_PURCHASE);
+	});
+
+	it("refuses a part too small for the split refund chosen for it, and saves nothing", async () => {
+		const { res, html } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			parts([`refund_${SPLIT_REFUND}`, "1"]),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"The refund is $50.00, and Household is only $40.00.",
+		);
+		expect(await linkOf(SPLIT_REFUND)).toBe(SPLIT_PURCHASE);
+	});
+
+	it("moves the split refund to the part chosen for it, with its parts, and says so in the toast", async () => {
+		const { res } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			parts([`refund_${SPLIT_REFUND}`, "0"]),
+		);
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+		};
+		expect(trigger.toast.message).toContain(
+			"The refund on Sep 7 now counts with Kids.",
+		);
+		const kids = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? AND category_id = ?",
+			)
+			.bind(SPLIT_PURCHASE, KIDS)
+			.first<{ id: number }>();
+		expect(await linkOf(SPLIT_REFUND)).toBe(kids?.id);
+		expect(await linkOf(REFUND_KIDS)).toBe(kids?.id);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(kids?.id);
+	});
+
+	it("names a split refund answered Not linked once, and unlinks its parts with it", async () => {
+		const { res } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			parts([`refund_${SPLIT_REFUND}`, "none"]),
+		);
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+		};
+		expect(trigger.toast.message).toContain(
+			"The refund on Sep 7 is no longer linked.",
+		);
+		expect(trigger.toast.message.match(/no longer linked/g)).toHaveLength(1);
 		expect(await linkOf(SPLIT_REFUND)).toBeNull();
-		expect(await linkOf(9303)).toBeNull();
-		expect(await linkOf(9304)).toBeNull();
+		expect(await linkOf(REFUND_KIDS)).toBeNull();
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBeNull();
+	});
+
+	it("leaves a part linked elsewhere out of the fit, and moves the split refund with the rest", async () => {
+		await linkElsewhere(REFUND_KIDS);
+		const { res } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			sized("80.00", "20.00", [`refund_${SPLIT_REFUND}`, "1"]),
+		);
+		expect(res.status).toBe(200);
+		const household = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? AND category_id = ?",
+			)
+			.bind(SPLIT_PURCHASE, HOUSEHOLD)
+			.first<{ id: number }>();
+		expect(await linkOf(SPLIT_REFUND)).toBe(household?.id);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(household?.id);
+		expect(await linkOf(REFUND_KIDS)).toBe(OTHER_SHOP);
+	});
+
+	it("names the moving sum when that is too big for its part, and saves nothing", async () => {
+		await linkElsewhere(REFUND_KIDS);
+		const { res, html } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			sized("85.00", "15.00", [`refund_${SPLIT_REFUND}`, "1"]),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain(
+			"The refund is $20.00, and Household is only $15.00.",
+		);
+		expect(await linkOf(SPLIT_REFUND)).toBe(SPLIT_PURCHASE);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(SPLIT_PURCHASE);
+	});
+
+	it("needs the whole split refund when every part still follows it", async () => {
+		const { res, html } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			sized("80.00", "20.00", [`refund_${SPLIT_REFUND}`, "1"]),
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			"The refund is $50.00, and Household is only $20.00.",
+		);
+		expect(await linkOf(SPLIT_REFUND)).toBe(SPLIT_PURCHASE);
+		expect(await linkOf(REFUND_KIDS)).toBe(SPLIT_PURCHASE);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(SPLIT_PURCHASE);
+	});
+
+	it("gives no line to a split refund with no part still following it, and unlinks it with a toast", async () => {
+		await linkElsewhere(REFUND_KIDS, REFUND_HOUSEHOLD);
+		const page = await exports.default.fetch(
+			`${BASE}/transactions/${SPLIT_PURCHASE}/split?back=%2Ftransactions`,
+		);
+		const html = readable(await page.text());
+		expect(html).not.toContain("goes with");
+		expect(html).not.toContain(`name="refund_${SPLIT_REFUND}"`);
+		const { res } = await post(
+			`/transactions/${SPLIT_PURCHASE}/split`,
+			parts(),
+		);
+		expect(res.status).toBe(200);
+		const trigger = JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+		};
+		expect(
+			trigger.toast.message.match(/The refund on Sep 7 is no longer linked\./g),
+		).toHaveLength(1);
+		expect(await linkOf(SPLIT_REFUND)).toBeNull();
+		expect(await linkOf(REFUND_KIDS)).toBe(OTHER_SHOP);
+		expect(await linkOf(REFUND_HOUSEHOLD)).toBe(OTHER_SHOP);
 	});
 });

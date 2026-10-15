@@ -32,7 +32,7 @@ export function refundedByOthersSql(purchase: string, refund: string) {
  * still follow its link (the others were linked elsewhere by a person and stay there); any other
  * refund moves whole.
  */
-function movingSql(refund: string) {
+export function movingSql(refund: string) {
 	return `CASE WHEN (SELECT me.is_split FROM transactions me WHERE me.id = ${refund}) = 1
 		THEN (SELECT COALESCE(SUM(ABS(part.amount_cents)), 0) FROM transactions part
 			WHERE part.parent_id = ${refund}
