@@ -1,4 +1,4 @@
-// P125 (#95): a new family's first week, five ways, drawn for the owner's pick (proposal only: nothing in the
+// P125 (#95): a new family's first week, five ways, picked as E in decision 114 (proposal only: nothing in the
 // app changes). Every picture is the family's app, with no demo banner, on one sample household: Chase linked
 // Tue Oct 13 at 7 p.m., today Wed Oct 14, Eastern time. Where the app's own components draw the same at a
 // phone's size they are used as they are (Band, ProgressRow, CategoryIcon, FoldedRow,
@@ -1814,7 +1814,7 @@ const eReplay = (
 // ---------------------------------------------------------------------------------------------
 // The page: five options, each with its pictures and one replay.
 
-/** P125 on the proposals page: the five ways a new family's first week can go, drawn for the owner's pick. */
+/** P125 on the proposals page: the five ways a new family's first week can go, picked as E in decision 114. */
 export function PolishRoundDProposals() {
 	return (
 		<Specimen

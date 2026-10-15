@@ -23,9 +23,19 @@ const stripComments = (text: string) =>
 		.replace(/(^|[\s{])\/\*[\s\S]*?\*\/\}?/gm, "$1")
 		.replace(/(^|\s)\/\/.*$/gm, "$1");
 
+/**
+ * Prose that reads like a class, removed before words are read: "rounded up to the next $10" (decision 114's
+ * words; also "rounded each up to"). A class list never says "up to", so a real class="rounded" is still read.
+ * Trade-offs: new prose that uses "rounded" another way (say "rounded to the nearest dollar") fails loudly and
+ * needs this widened, which is the safe direction; a class attribute that literally reads "rounded up to …"
+ * would be skipped, and no real class does.
+ */
+const stripProse = (text: string) =>
+	text.replace(/\brounded(\s+each)?\s+up\s+to\b/g, " ");
+
 /** Each class-like word in the source, as written: "has-[:checked]:bg-band". */
 const words = (text: string) =>
-	stripComments(text)
+	stripProse(stripComments(text))
 		.split(/[\s"'`{}()<>,;]+/)
 		.filter(Boolean);
 
@@ -59,11 +69,6 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
-	// The word "rounded" in three lines of visible prose ("rounded up to the next $10", the brief's words), not a
-	// class: no class in proposals-polish-5.tsx is a bare "rounded".
-	"../src/design-system/proposals-polish-5.tsx": ["rounded"],
-	// The word "rounded" in P125's DECIDED outcome ("rounded up to the next $10", decision 114's words), not a class.
-	"../src/design-system/proposals.tsx": ["rounded"],
 	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
 	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
 	"../src/design-system/proposals-polish.tsx": [
@@ -701,6 +706,48 @@ describe("design tokens (DESIGN.md)", () => {
 		).toEqual([]);
 		expect(problems(file, '<div class="rounded-lg">')).toHaveLength(1);
 		expect(problems(file, '<div class="sm:rounded-lg">')).toHaveLength(1);
+	});
+
+	it("reads 'rounded up to the next $10' as prose, but a bare rounded class still fails in every file", () => {
+		for (const file of [
+			"../src/design-system/proposals.tsx",
+			"../src/design-system/proposals-polish-5.tsx",
+		]) {
+			expect(problems(file, '<div class="rounded">')).toHaveLength(1);
+			expect(problems(file, '<div class="hover:rounded">')).toHaveLength(1);
+			expect(
+				problems(file, '<p class="rounded">rounded up to the next $10</p>'),
+			).toHaveLength(1);
+			// The prose itself: JSX text, a line-wrapped sentence, "rounded each up to", and a JS string.
+			expect(
+				problems(
+					file,
+					'<p class="mt-2">September, rounded up to the next $10.</p>',
+				),
+			).toEqual([]);
+			expect(
+				problems(
+					file,
+					"What each category spent, rounded\n\t\t\tup to the next $10.",
+				),
+			).toEqual([]);
+			expect(
+				problems(file, "Tally\n\t\t\trounded each up to the next $10."),
+			).toEqual([]);
+			expect(
+				problems(
+					file,
+					'outcome: "each suggested as the mean of the full months Tally has, rounded up to the next $10; the demo keeps P124 A",',
+				),
+			).toEqual([]);
+		}
+		expect(
+			problems("x.tsx", 'primary: "min-h-11 rounded bg-ink"'),
+		).toHaveLength(1);
+		expect(EXCEPTIONS["../src/design-system/proposals.tsx"]).toBeUndefined();
+		expect(
+			EXCEPTIONS["../src/design-system/proposals-polish-5.tsx"],
+		).toBeUndefined();
 	});
 
 	it("doesn't read a /* inside a string as the start of a comment", () => {
