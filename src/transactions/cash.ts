@@ -108,6 +108,8 @@ export async function saveCash(
 	merchant: string;
 	amountCents: number;
 	categoryId: number;
+	/** False when the entry key was already stored, so this call stored nothing (a repost). */
+	inserted: boolean;
 }> {
 	const results = await db.batch([
 		db.prepare(
@@ -143,12 +145,11 @@ export async function saveCash(
 		: null;
 	// With no entry key nothing guards the insert, so it always lands. D1 returns the batch's results in
 	// statement order, so results[1] is the transaction's own insert and its last_row_id is the new row.
-	return (
-		stored ?? {
-			id: Number(results[1]?.meta.last_row_id),
-			merchant: value.merchant,
-			amountCents: value.amountCents,
-			categoryId: value.categoryId,
-		}
-	);
+	const row = stored ?? {
+		id: Number(results[1]?.meta.last_row_id),
+		merchant: value.merchant,
+		amountCents: value.amountCents,
+		categoryId: value.categoryId,
+	};
+	return { ...row, inserted: (results[1]?.meta.changes ?? 0) > 0 };
 }

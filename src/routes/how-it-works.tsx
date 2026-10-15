@@ -230,6 +230,7 @@ howItWorks.get("/how-it-works", async (c) => {
 	return c.html(
 		<Layout
 			title="How Tally works · Tally"
+			active="how"
 			demo={demo}
 			currentPath={c.req.path + new URL(c.req.url).search}
 		>

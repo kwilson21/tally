@@ -73,20 +73,23 @@ export function Layout({
 						<div class="mb-8">
 							<Wordmark />
 						</div>
-						<Sidebar active={active} />
+						<Sidebar active={active} currentPath={currentPath} />
 					</aside>
 					<main
 						id="main"
 						class="min-w-0 flex-1 pb-[var(--focus-scroll-room)] pt-6 lg:pb-24 lg:pt-8"
 					>
-						<div class="mb-2 lg:hidden">
+						<div
+							id="top-line"
+							class="mb-2 flex items-center justify-between gap-3 lg:hidden"
+						>
 							<Wordmark />
+							{!currentPath.startsWith("/feedback") && <FeedbackButton />}
 						</div>
 						{children}
 					</main>
 				</div>
 				<BottomTabs active={active} />
-				{!currentPath.startsWith("/feedback") && <FeedbackButton />}
 				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. Toasts sit in the frame, never over the page (decision 101): on a phone 12 px above the tab bar and its safe area, at the top edge while a sheet is open, and 12 px above the Select bar's real height in Select mode; on desktop 24 px from the bottom, beside the sidebar and no wider than it. */}
 				<div
 					id="toasts"

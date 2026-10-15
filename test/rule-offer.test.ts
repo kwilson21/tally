@@ -213,6 +213,11 @@ describe("merchant category rule offer", () => {
 			index: 3,
 			mark: "excluded = 1, excluded_source = 'plaid', flag_transfer = 0",
 		},
+		{
+			source: "Plaid category, excluded again by the person",
+			index: 3,
+			mark: "plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'user', flag_transfer = 0",
+		},
 	])(
 		"a pick on a transfer still left out of the budget doesn't count ($source)",
 		async ({ index, mark }) => {
@@ -228,6 +233,27 @@ describe("merchant category rule offer", () => {
 			expect(save.html).not.toContain(QUESTION);
 		},
 	);
+
+	it("a Plaid transfer included and then excluded again by the person doesn't count toward the picks", async () => {
+		await setCategory([ids[0]], groceries, "user");
+		// Plaid excluded it as a transfer. The person includes it with a pick, then excludes it again.
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'plaid', flag_transfer = 0 WHERE id = ?",
+		)
+			.bind(ids[1])
+			.run();
+		await post(`/transactions/${ids[1]}`, edit(groceries));
+		await post(`/transactions/${ids[1]}`, {
+			...edit(groceries),
+			excluded: "1",
+		});
+		// Only ids[0] counts so far. Were the excluded transfer counted, this save would be the third pick and be asked.
+		const second = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(second.html).not.toContain(QUESTION);
+		// ids[0] and ids[2] are two counted picks, so ids[3] is the third and is asked.
+		const third = await post(`/transactions/${ids[3]}`, edit(groceries));
+		expect(third.html).toContain(QUESTION);
+	});
 
 	it("does not offer for a merchant that already has a rule, even on a third save", async () => {
 		await setCategory(ids.slice(0, 3), groceries, "user");
@@ -1218,5 +1244,85 @@ describe("the rule offer after the store's own name is picked (decision 101)", (
 		});
 		expect(third.html).toContain(QUESTION);
 		expect(third.html).not.toContain("Pet Supplies Co");
+	});
+});
+
+describe("rule offer edge cases (#372)", () => {
+	it("asks when a Jev-marked transfer is included without changing its category, and that makes it the third pick", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_transfer = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		// The person keeps Groceries and only unticks Excluded: the row now counts, so it is the third pick asked about.
+		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(included.html).toContain(QUESTION);
+		expect(included.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
+	it("including a Plaid transfer category again, with Groceries kept, asks when it becomes the third pick", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		// Plaid's transfer category, excluded again by the person: it doesn't count while excluded.
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_category = 'TRANSFER_OUT', excluded = 1, excluded_source = 'user', flag_transfer = 0 WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(included.html).toContain(QUESTION);
+		expect(included.html).toContain(
+			"You&#39;ve picked Groceries for rule-offer-store 3 times.",
+		);
+	});
+
+	it("re-including an ordinary pick the person excluded adds no pick, so it asks nothing", async () => {
+		await setCategory(ids.slice(0, 3), groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		// An excluded ordinary pick still counts, so including it again changes nothing the count sees.
+		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(included.html).not.toContain(QUESTION);
+	});
+
+	it("a reposted cash form with the same entry key asks nothing new", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		const cash = {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant,
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+			entry_key: "123e4567-e89b-42d3-a456-426614174002",
+		};
+		const first = await post("/transactions/cash", cash);
+		expect(first.html).toContain(QUESTION);
+		// The same form again (a lost reply) stores nothing new, so it doesn't ask again.
+		const repost = await post("/transactions/cash", cash);
+		expect(repost.html).not.toContain(QUESTION);
+	});
+
+	it("a stale sheet whose rule was removed elsewhere still asks, and its save doesn't recreate the rule", async () => {
+		await setCategory([ids[0], ids[1]], groceries, "user");
+		// The sheet was opened with Groceries as the store's rule; another tab removed it, so the store has none now.
+		const stale = await post(`/transactions/${ids[2]}`, {
+			...edit(groceries),
+			always: "1",
+			always_was: "1",
+			rule_category_was: String(groceries),
+		});
+		expect(stale.html).toContain(QUESTION);
+		const rule = await env.DB.prepare(
+			"SELECT default_category_id FROM merchants WHERE raw_name = ?",
+		)
+			.bind(merchant)
+			.first<{ default_category_id: number | null }>();
+		expect(rule?.default_category_id ?? null).toBeNull();
 	});
 });
