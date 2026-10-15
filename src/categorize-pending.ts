@@ -113,7 +113,8 @@ export async function categorizePending(
 	// marked as asked by the category confidence the answer carries (decision 27). With no active category,
 	// the run still goes on while any of the three switches is on, because pendingForJev picks only what
 	// those switches can answer: a credit's income answer (income on) or an outgoing purchase's transfer
-	// answer (categories on) marks it asked instead.
+	// answer (categories on) marks it asked instead. A credit whose category Jev already answered is still asked for its
+	// income while income is on, and its income confidence marks that answer (decision 79).
 	const names = categories.map((c) => c.name);
 	let people = start.details
 		? await env.DB.prepare(

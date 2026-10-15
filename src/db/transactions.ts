@@ -2522,8 +2522,8 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * unreviewed negative credits, even when a category was selected already. A user-reviewed
  * uncategorized credit is eligible for category help only, so it's left out when the household's
  * categories switch is off (spec §8.6): that answer would go unused. An excluded payment that pays a
- * bill counts, so it is asked about too, and likewise for its category only. A stored confidence means Jev
- * already looked and wasn't sure (decision 27).
+ * bill counts, so it is asked about too, and likewise for its category only. A stored category confidence means Jev
+ * already looked at the category and wasn't sure (decision 27); it doesn't stop the income question.
  *
  * `categoryAsked` is false when no category is active. Then a category question isn't asked, so its category
  * confidence is never stored. A credit is asked for its income answer while the income switch is on, and not a credit a person reviewed for its
@@ -2532,7 +2532,8 @@ const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AN
  * asked: a low one is stored as its `transfer_confidence`, and a confident one sets the flag and excludes it, so it
  * leaves the queue. A purchase a person put back into the budget (`excluded_source = 'user'`) is not asked. Credits
  * come first, so newest purchases can't crowd out older credits. Once a category is active, a row is pending again for
- * its category question.
+ * its category question. A credit answered while Spot paychecks was off is asked again for its income once the switch
+ * is on (decision 79), since its category confidence doesn't stop that question.
  *
  * With `ids`, only those rows are considered: the ones a sync just brought in, or the one a person
  * just added a note to. They go in as one JSON array read by `json_each`, since D1 allows 100 bound
@@ -2579,7 +2580,10 @@ export async function pendingForJev(
 			LEFT JOIN household_people hp ON hp.id = t.for_person_id
 			${COUNTED_JOINS}
 			WHERE NOT ${FOLLOWS_PURCHASE} AND (
-				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ((? = 1 AND t.amount_cents < 0 AND t.income_confidence IS NULL) OR (? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))))
+				(? = 1 AND ${NEEDS_JEV_CLASSIFICATION} AND (
+					(t.category_confidence IS NULL AND (? = 1 OR (NOT ${CATEGORY_ONLY} AND ? = 1 AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))
+					OR (? = 1 AND NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)
+				))
 				OR (? = 1 AND ${INCLUDED} AND t.flag_income = 0 AND t.details_asked = 0 AND (${EMPTY_NOTE} OR t.kind IS NULL OR t.for_person_id IS NULL))
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
@@ -2593,8 +2597,8 @@ export async function pendingForJev(
 		.bind(
 			categories || income ? 1 : 0,
 			categoryAsked ? 1 : 0,
-			income ? 1 : 0,
 			categories ? 1 : 0,
+			income ? 1 : 0,
 			details ? 1 : 0,
 			categories || details ? 1 : 0,
 			...(ids ? [JSON.stringify(ids)] : []),
@@ -2630,6 +2634,39 @@ export async function pendingForJev(
 			detailsAsked: transaction.detailsAsked === 1,
 		}),
 	);
+}
+
+/**
+ * How many imported transactions still wait for Jev's category or income answer (the first week's question gate,
+ * spec §8.8, decision 114): the rows pendingForJev would ask about for these switches, minus any Jev failed on
+ * (`jev_failed_at`, which counts as sorted) and any answered below the threshold (its confidence is stored, so it isn't
+ * NULL). Details-only work never counts. With categories off, category work is ignored, and a purchase waits for nothing;
+ * income work still counts while income is on. With no active category, a purchase waits for its transfer answer while
+ * categories are on, as pendingForJev asks it. It shares NEEDS_JEV_CLASSIFICATION and CATEGORY_ONLY with pendingForJev.
+ * The category guard (`category_confidence IS NULL`) applies to category work only, as it does in pendingForJev: a credit
+ * whose category Jev answered with income off still waits for its income answer once income is on (decision 79).
+ */
+export async function countWaitingForJev(
+	db: D1Database,
+	{ categories, income }: { categories: boolean; income: boolean },
+): Promise<number> {
+	if (!categories && !income) return 0;
+	const categoryWork = `(t.category_confidence IS NULL AND (EXISTS (SELECT 1 FROM categories WHERE archived = 0)
+		OR (NOT ${CATEGORY_ONLY} AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))`;
+	const incomeWork = `(NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)`;
+	const asked = [categories ? categoryWork : null, income ? incomeWork : null]
+		.filter((part) => part !== null)
+		.join(" OR ");
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS waiting FROM transactions t
+			${COUNTED_JOINS}
+			WHERE t.plaid_transaction_id IS NOT NULL AND t.jev_failed_at IS NULL
+				AND NOT ${FOLLOWS_PURCHASE} AND ${NEEDS_JEV_CLASSIFICATION}
+				AND (${asked})`,
+		)
+		.first<{ waiting: number }>();
+	return row?.waiting ?? 0;
 }
 
 /** The recent categories chosen by a person or merchant rule, fetched once for a Jev page. */
@@ -2897,7 +2934,10 @@ async function saveJevAnswer(
 
 /**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
- * uncategorized with no source, so a person's choice made in the meantime always wins.
+ * uncategorized with no source, so a person's choice made in the meantime always wins. A credit whose stored category
+ * confidence is set, since Jev answered its category unsure with income off, is still written for its income answer
+ * while income is on (decision 79). Such a credit has only its income fields written; its stored category answer
+ * (category, suggestion, mixed reading, transfer answer and exclusion) is kept as it was.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
  * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
  * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
@@ -2966,22 +3006,26 @@ export async function saveJevResult(
 	const update = db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
-				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
-			category_confidence = ?,
+				-- A credit asked only for its income (its category confidence is set, decision 79) keeps its stored category answer.
+				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_id END,
+				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_source END,
+			category_confidence = COALESCE(category_confidence, ?),
 			income_confidence = CASE WHEN ${plaidSetIncomeSql("transactions")} OR income_source IN ('user', 'jev') OR credit_reviewed_by = 'user' THEN NULL WHEN ? = 1 AND amount_cents <= 0 AND ? < ? THEN ? ELSE NULL END,
-			transfer_confidence = CASE WHEN excluded_source = 'user' THEN transfer_confidence WHEN ? = 1 AND ? < ? THEN ? ELSE NULL END,
+			transfer_confidence = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN transfer_confidence WHEN ? = 1 AND ? < ? THEN ? ELSE NULL END,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
-			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ? AND (? IS NULL OR ? <= ?)) OR ? = 1) THEN 1 ELSE credit_reviewed END,
-				jev_category_id = ?, jev_none_fit = ?, jev_mixed = ?, jev_also_category_id = ?,
-				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((category_confidence IS NULL AND ? = 1 AND ? >= ? AND (? IS NULL OR ? <= ?)) OR ? = 1) THEN 1 ELSE credit_reviewed END,
+				jev_category_id = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_category_id END,
+				jev_none_fit = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_none_fit END,
+				jev_mixed = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_mixed END,
+				jev_also_category_id = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_also_category_id END,
+				flag_transfer = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
-				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
-				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				excluded = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN excluded ELSE MAX(excluded, ?) END,
+				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
-			WHERE id = ? AND category_confidence IS NULL
+			WHERE id = ? AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0
 				AND COALESCE(income_source, '') != 'user' AND COALESCE(credit_reviewed_by, '') != 'user'
 				AND (
@@ -3024,6 +3068,7 @@ export async function saveJevResult(
 			excludes,
 			excludes,
 			id,
+			incomeOn ? 1 : 0,
 			stillOn,
 		);
 	return saveJevAnswer(db, update, id, options.log);

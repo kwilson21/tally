@@ -83,7 +83,7 @@ import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
-import { HowLink } from "../views/how-link";
+import { HowFoot } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
@@ -408,7 +408,6 @@ export async function page(
 						month={today.slice(0, 7)}
 					/>
 				)}
-				<HowLink section="bills" />
 				{earlierPlans[0] && (
 					<PlanBand
 						planId={earlierPlans[0].id}
@@ -492,6 +491,7 @@ export async function page(
 						</ul>
 					</details>
 				)}
+				<HowFoot section="bills" />
 			</div>
 			<div id="sheet">
 				{sheet?.plan ??
@@ -910,12 +910,12 @@ bills.get("/bills/find", async (c) => {
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Possible bills
 				</h1>
-				<HowLink section="bills" />
 				<p class="mt-2 text-muted">
 					About the same amount, about a month apart. Nothing becomes a bill
 					until you add it.
 				</p>
 				{billFindingList(suggestions, focusRawName)}
+				<HowFoot section="bills" />
 			</div>
 		</Layout>,
 	);

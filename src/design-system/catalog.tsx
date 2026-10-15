@@ -63,7 +63,7 @@ import {
 	ExclusionsDiagram,
 	TransactionsDiagram,
 } from "../views/how-diagrams";
-import { HowLink } from "../views/how-link";
+import { HowFoot } from "../views/how-link";
 import { ICON_NAMES, Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { DemoBanner } from "../views/layout";
@@ -958,12 +958,13 @@ function describeHome({
 		...(bankDate ? [`as of ${bankDate}`] : []),
 		...(bankLine ? [...bankLine, "Fix"] : []),
 		...(forecast ? ["Forecast"] : dailyAmount ? [dailyAmount] : []),
-		"How this works",
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
+	// The Budget list and the foot's How this works come together, as HomeSketch draws them.
 	if (rows)
 		parts.push(
 			`Budget: ${HOME_ROWS.map((r) => `${r.name} ${whole(r.spentCents)} of ${whole(r.budgetCents)}`).join(", ")}`,
+			"How this works",
 		);
 	return parts.join(". ").replaceAll("..", ".");
 }
@@ -999,6 +1000,7 @@ function HomeSketch({
 					<ProgressRow {...row} />
 				))}
 			</ul>
+			<HowFoot section="budget" />
 		</>
 	);
 }
@@ -1107,7 +1109,7 @@ function HomeTopGroup() {
 				title="HomeTop"
 				tier="visual"
 				components={["HomeTop", "HomeForecast"]}
-				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7, How this works and the Band. Before then, the picked daily-amount line remains. Things to try has left Home for Start here (How Tally works, demo only). On desktop the top and the list share one width."
+				sentence="What's safe to spend is the one thing on Home, so it's on a phone's first screen (decision 46, P1): the month as a small heading, Safe to spend with Why?, the status sentence, a bank alert when needed, the forecast from day 7 and the Band. How this works sits at Home's foot, under a short rule (decision 111). Before day 7, the picked daily-amount line remains. Things to try has left Home for Start here (How Tally works, demo only). On desktop the top and the list share one width."
 			>
 				<State label="A phone's first screen (390×844, less the tab bar): the number is near the top">
 					<PhoneFrame
@@ -1147,7 +1149,7 @@ function HomeTopGroup() {
 				</State>
 				<State label="No budget yet: Safe to spend stays in ink, the status says No budgets set yet., and there is no forecast">
 					<Picture
-						label={`Home's top before any budget is set, with no forecast: ${HOME_TOP.month}. Safe to spend −$45. No budgets set yet. How this works. ${HOME_TOP.band.text}, ${HOME_TOP.band.detail}.`}
+						label={`Home's top before any budget is set, with no forecast: ${HOME_TOP.month}. Safe to spend −$45. No budgets set yet. ${HOME_TOP.band.text}, ${HOME_TOP.band.detail}.`}
 					>
 						<HomeTop
 							{...HOME_TOP}
@@ -4957,10 +4959,10 @@ function Demo() {
 				id="how-link"
 				title="HowLink"
 				tier="visual"
-				components={["HowLink"]}
-				sentence="A small “How this works” link under a screen's title, or under its status sentence on Home and Bills, to its section of How Tally works in both environments."
+				components={["HowLink", "HowFoot"]}
+				sentence="A small “How this works” link at the foot of each page, under a short rule, to its section of How Tally works in both environments. Why? links stay where they are."
 			>
-				<HowLink section="budget" />
+				<HowFoot section="budget" />
 			</Specimen>
 			<Specimen
 				id="why-link"
