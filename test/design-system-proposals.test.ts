@@ -1995,6 +1995,8 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 	const ROOM_PX: Record<number, number> = { 320: 64, 360: 16, 390: 8 };
 	// Option A's drawing shows from this frame width up (the measured fit, as home-top.tsx's cost note says).
 	const N = 375;
+	// The one frame height: the tallest picture's content (Option C's), measured in Chrome at 1280 px.
+	const FRAME_HEIGHT = 498;
 
 	it("opens the page with its section first, titled and dated as the brief asks", async () => {
 		const html = await drawn();
@@ -2053,12 +2055,15 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			expect(frame[1]).toContain(`w-[${width}px]`);
 			expect(frame[1]).toContain("@container");
 		});
-		// Every frame shares one height, and it is no longer the 420 px the first draft used.
+		// Every frame shares one height: the tallest picture's content, measured in Chrome. Not the 420 px of
+		// the first draft, nor the 442 px before the demo banner and How this works.
 		const heights = new Set(
 			frames.map((frame) => frame[1]?.match(/h-\[\d+px\]/)?.[0]),
 		);
 		expect(heights.size).toBe(1);
 		expect(heights.has("h-[420px]")).toBe(false);
+		expect(heights.has("h-[442px]")).toBe(false);
+		expect(heights.has(`h-[${FRAME_HEIGHT}px]`)).toBe(true);
 	});
 
 	it("gives each width room for its widest spill, and each row's two frames fit the card", async () => {
@@ -2113,6 +2118,35 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const chunk = block(await drawn(), "p127-safe-small");
 		expect(chunk.match(/aria-label="Months"/g)?.length).toBe(24);
 		expect(chunk.match(/>October<\/h1>/g)?.length).toBe(24);
+	});
+
+	it("draws the demo banner above the masthead in every picture, as the demo Home does", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		const banner = "Demo data. Nothing here is real.";
+		expect(chunk.match(/Demo data\. Nothing here is real\./g)?.length).toBe(24);
+		for (const picture of pictures(chunk)) {
+			const at = picture.indexOf(banner);
+			expect(at).toBeGreaterThan(-1);
+			expect(at).toBeLessThan(picture.indexOf('aria-label="Tally home"'));
+		}
+	});
+
+	it("draws How this works after the status sentence in every picture, as the demo Home does", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		const link = 'aria-label="How this works: the budget"';
+		expect(
+			chunk.match(/aria-label="How this works: the budget"/g)?.length,
+		).toBe(24);
+		for (const picture of pictures(chunk)) {
+			// The label names the amount; the slice runs on into the next picture, so read only this label.
+			const label = picture.slice(0, picture.indexOf('"'));
+			const status = label.includes("with −$9,999")
+				? "Over budget this month."
+				: "Eating Out is $36 over.";
+			const at = picture.indexOf(status);
+			expect(at).toBeGreaterThan(-1);
+			expect(picture.indexOf(link)).toBeGreaterThan(at);
+		}
 	});
 
 	it("draws option B's drawing at 72 px (size-18) with a 16 px gap on phones", async () => {
