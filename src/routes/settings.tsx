@@ -93,6 +93,15 @@ const ruleFocus = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
+	/**
+	 * The row a Settings save just changed: its chevron gives way to the pencil tick for the toast's stay (P119 A,
+	 * #71). Only a save's own row is marked: a category's rename or add, the time zone, a person's rename or add. Nothing
+	 * else is (archive, restore, move, remove, suggestions, the AI switches, a 422).
+	 */
+	saved?:
+		| { kind: "category"; id: number }
+		| { kind: "zone" }
+		| { kind: "person"; id: number };
 	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a bank sign-in email control. */
 	focus?:
 		| number
@@ -365,6 +374,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							values={view.values}
 							errors={view.errors}
 							budgetsOob={view.budgetsOob}
+							saved={
+								view.saved?.kind === "category" && view.saved.id === category.id
+									? "toast"
+									: undefined
+							}
 						/>
 					))}
 					{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
@@ -482,6 +496,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 						zone={timeZone}
 						error={view.zoneError}
 						focus={view.focus === "zone"}
+						saved={view.saved?.kind === "zone" ? "toast" : undefined}
 					/>
 					<BankSignInEmails
 						on={bankEmailsOn}
@@ -502,6 +517,11 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 					focus={
 						view.peopleFocus ||
 						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
+					}
+					saved={
+						view.saved?.kind === "person"
+							? { id: view.saved.id, mark: "toast" }
+							: undefined
 					}
 				/>
 			</section>
@@ -946,10 +966,14 @@ settings.post("/settings/people", async (c) => {
 			status: 422,
 		});
 	if (action === "add") {
+		let added: number;
 		try {
-			await c.env.DB.prepare("INSERT INTO household_people (name) VALUES (?)")
+			const result = await c.env.DB.prepare(
+				"INSERT INTO household_people (name) VALUES (?)",
+			)
 				.bind(name)
 				.run();
+			added = result.meta.last_row_id;
 		} catch (error) {
 			if (nameTaken(error))
 				return renderSettings(c, {
@@ -964,6 +988,7 @@ settings.post("/settings/people", async (c) => {
 			hash: "household",
 			peopleAddOpen: true,
 			peopleFocus: true,
+			saved: { kind: "person", id: added },
 		});
 	}
 	if (action === "rename" && Number.isInteger(id) && id > 1) {
@@ -989,6 +1014,7 @@ settings.post("/settings/people", async (c) => {
 			hash: "household",
 			peopleOpen: id,
 			peopleFocus: true,
+			saved: { kind: "person", id },
 		});
 	}
 	return c.text("Choose add, rename or remove.", 400);
@@ -1016,6 +1042,7 @@ settings.post("/settings/time-zone", async (c) => {
 			today,
 			timeZone: parsed.zone,
 			budgetsOob: true,
+			saved: { kind: "zone" },
 		},
 	);
 });
@@ -1038,7 +1065,7 @@ settings.post("/settings/categories", async (c) => {
 		c,
 		`Added ${parsed.value.name}`,
 		`Added ${parsed.value.name}. Set its budget on Home.`,
-		{ focus: id },
+		{ focus: id, saved: { kind: "category", id } },
 	);
 });
 
@@ -1055,8 +1082,10 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 			return retry(c, category.id, form, { name: "That name is taken." });
 		throw error;
 	}
+	// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark nothing.
 	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
 		focus: category.id,
+		saved: { kind: "category", id: category.id },
 	});
 });
 

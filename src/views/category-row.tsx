@@ -4,6 +4,7 @@ import type { CategoryErrors } from "../settings/category-form";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
 import { Icon } from "./icons";
+import { type SavedMark, SavedSlot, savedRowClass } from "./saved-tick";
 import { TextInput } from "./text-input";
 
 /** "$600" or "$612.50": a budget as the list shows it. */
@@ -87,6 +88,7 @@ export function CategoryRow({
 	values,
 	errors,
 	budgetsOob,
+	saved,
 }: {
 	category: SettingsCategory;
 	first: boolean;
@@ -99,6 +101,8 @@ export function CategoryRow({
 	errors?: CategoryErrors;
 	/** The household moved into another month, so the amount and budget line go out of band. */
 	budgetsOob?: boolean;
+	/** The row whose save just answered: its chevron gives way to the pencil tick (P119 A, #71). */
+	saved?: SavedMark;
 }) {
 	const url = `/settings/categories/${c.id}`;
 	const formId = `cat-${c.id}-form`;
@@ -106,7 +110,11 @@ export function CategoryRow({
 	// band by their ids, so an edit someone has open, its draft and its focus are left alone.
 	const oob = budgetsOob ? "true" : undefined;
 	return (
-		<details class="group border-b border-rule" data-row={c.id} open={open}>
+		<details
+			class={`group border-b border-rule${saved ? ` ${savedRowClass(saved)}` : ""}`}
+			data-row={c.id}
+			open={open}
+		>
 			<summary data-category={c.id} class={summaryClass} autofocus={focus}>
 				<CategoryIcon icon={c.icon} color={c.color} />
 				<span class="min-w-0 truncate text-lg font-medium">{c.name}</span>
@@ -124,7 +132,11 @@ export function CategoryRow({
 						</>
 					)}
 				</span>
-				{chevron}
+				{saved ? (
+					<SavedSlot class="shrink-0 text-muted">{chevron}</SavedSlot>
+				) : (
+					chevron
+				)}
 			</summary>
 			<div class="flex flex-col gap-4 pb-5 sm:pl-11">
 				<form
