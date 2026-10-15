@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { Wordmark } from "../views/brand";
+import { DemoBanner } from "../views/layout";
 
 export type Tier = "visual" | "interactive" | "flow";
 
@@ -164,11 +165,7 @@ export function PhoneFrame({
 				class={`${tall ? "h-[880px]" : "h-[790px]"} w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
 			>
 				<div inert>
-					{demo && (
-						<p class="bg-band py-2 text-center text-sm text-muted">
-							Demo data. Nothing here is real.
-						</p>
-					)}
+					{demo && <DemoBanner />}
 					<div class="px-5 pt-6">
 						<div class="mb-4">
 							<Wordmark />
