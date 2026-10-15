@@ -95,6 +95,13 @@ class FakeNode extends EventTarget {
 	querySelector(selector: string): FakeNode | null {
 		return this.querySelectorAll(selector)[0] ?? null;
 	}
+	/** The node itself, or its nearest ancestor that matches, as a browser's closest() does. */
+	closest(selector: string): FakeNode | null {
+		for (let node: FakeNode | null = this; node; node = node.parentElement) {
+			if (matchesSimple(node, selector)) return node;
+		}
+		return null;
+	}
 	/** As a browser does: a click on a link or button runs its handler, which a test counts. */
 	click() {
 		this.clicks += 1;
@@ -127,14 +134,18 @@ function radio(form: FakeNode | null, name: string, checked = false) {
 /**
  * A sheet as BottomSheet draws it: its backdrop link, then the section with a heading, a field and Save. The section
  * is labelled by its heading, as BottomSheet's labelledBy does. `autofocus` marks the field, as a form's first field does.
+ * `titleId` is the heading's id, so a drawing can have its own.
  */
-function drawSheet(sheetSlot: FakeNode, { autofocus = false } = {}) {
+function drawSheet(
+	sheetSlot: FakeNode,
+	{ autofocus = false, titleId = "sheet-title" } = {},
+) {
 	const backdrop = el("a", { href: "/transactions", "data-sheet-close": "" });
 	const section = el("section", {
 		"data-sheet": "",
-		"aria-labelledby": "sheet-title",
+		"aria-labelledby": titleId,
 	});
-	const title = el("h2", { id: "sheet-title", tabindex: "-1" });
+	const title = el("h2", { id: titleId, tabindex: "-1" });
 	const field = el("input", autofocus ? { autofocus: "" } : {});
 	const save = el("button");
 	section.append(title, field, save);
@@ -169,9 +180,12 @@ function drawRadioSheet(
 function drawPage({
 	sheet = true,
 	autofocus = false,
+	drawing = false,
 }: {
 	sheet?: boolean;
 	autofocus?: boolean;
+	/** A catalog drawing: a sheet inside an inert frame, ahead of #sheet, with a heading id of its own. */
+	drawing?: boolean;
 } = {}) {
 	const documentElement = el("html");
 	const body = el("body");
@@ -183,8 +197,9 @@ function drawPage({
 	const row = el("a", { href: "/transactions/1" });
 	list.append(row);
 	const sheetSlot = el("div", { id: "sheet" });
+	const drawingFrame = el("div", { inert: "" });
 	const main = el("main", { id: "main" });
-	main.append(header, list, sheetSlot);
+	main.append(header, list, ...(drawing ? [drawingFrame] : []), sheetSlot);
 	const frame = el("div");
 	frame.append(aside, main);
 	const tabs = el("nav");
@@ -196,6 +211,9 @@ function drawPage({
 	const announcer = el("div", { id: "announcer" });
 	body.append(skip, frame, tabs, feedback, toasts, announcer);
 	const drawn = sheet ? drawSheet(sheetSlot, { autofocus }) : null;
+	const drawingSheet = drawing
+		? drawSheet(drawingFrame, { titleId: "drawing-title" })
+		: null;
 	return {
 		documentElement,
 		body,
@@ -213,6 +231,7 @@ function drawPage({
 		undo,
 		announcer,
 		drawn,
+		drawingSheet,
 	};
 }
 
@@ -227,12 +246,15 @@ async function sheetPage(
 		sheet?: boolean;
 		/** The sheet's field is autofocus, as a form's first field can be. */
 		autofocus?: boolean;
+		/** A catalog drawing in an inert frame ahead of the page's sheet. */
+		drawing?: boolean;
 		beforeScript?: (doc: EventTarget) => void;
 	} = {},
 ) {
 	const parts = drawPage({
 		sheet: options.sheet,
 		autofocus: options.autofocus,
+		drawing: options.drawing,
 	});
 	const doc = Object.assign(new EventTarget(), {
 		body: parts.body,
@@ -645,5 +667,103 @@ describe("sheet.js: a radio group is one Tab stop", () => {
 		expect(
 			keydown(parts.document, "Tab", { shiftKey: true }).defaultPrevented,
 		).toBe(false);
+	});
+});
+
+describe("sheet.js: a sheet drawn inside an inert frame is not open", () => {
+	// A catalog drawing (SheetFrame) is a sheet inside an inert frame. It is a drawing, not the open sheet, so the
+	// script passes over it and never marks, focuses or closes it.
+	type Drawing = ReturnType<typeof drawSheet>;
+
+	it("with only the drawing on the page, marks nothing, gives it no aria-modal, and leaves focus on the row", async () => {
+		const parts = await sheetPage({ sheet: false, drawing: true });
+		const drawing = parts.drawingSheet as Drawing;
+		expect(parts.body.querySelectorAll("[data-sheet-inert]")).toEqual([]);
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
+		expect(parts.document.activeElement).toBe(parts.row);
+	});
+
+	it("leaves Escape and Tab alone when the drawing is the only sheet", async () => {
+		const parts = await sheetPage({ sheet: false, drawing: true });
+		const drawing = parts.drawingSheet as Drawing;
+		const escapeEvent = keydown(parts.document, "Escape");
+		expect(escapeEvent.defaultPrevented).toBe(false);
+		expect(drawing.backdrop.clicks).toBe(0);
+		const tabEvent = keydown(parts.document, "Tab");
+		expect(tabEvent.defaultPrevented).toBe(false);
+		expect(parts.document.activeElement).toBe(parts.row);
+	});
+
+	it("changes none of that when a swap or a settle runs", async () => {
+		const parts = await sheetPage({ sheet: false, drawing: true });
+		const drawing = parts.drawingSheet as Drawing;
+		swap(parts.document);
+		settle(parts.document);
+		expect(parts.body.querySelectorAll("[data-sheet-inert]")).toEqual([]);
+		expect(parts.list.hasAttribute("inert")).toBe(false);
+		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
+		expect(parts.document.activeElement).toBe(parts.row);
+		expect(keydown(parts.document, "Escape").defaultPrevented).toBe(false);
+		expect(drawing.backdrop.clicks).toBe(0);
+		expect(keydown(parts.document, "Tab").defaultPrevented).toBe(false);
+	});
+
+	it("with a real sheet open after the drawing, the real sheet is the modal, and the page around it is inert", async () => {
+		const parts = await sheetPage({ drawing: true });
+		const drawing = parts.drawingSheet as Drawing;
+		expect(parts.drawn?.section.getAttribute("aria-modal")).toBe("true");
+		expect(drawing.section.hasAttribute("aria-modal")).toBe(false);
+		for (const outside of [
+			parts.skip,
+			parts.aside,
+			parts.header,
+			parts.list,
+			parts.tabs,
+			parts.feedback,
+		]) {
+			expect(outside.hasAttribute("inert")).toBe(true);
+		}
+		// The drawing's frame was inert before the script ran, so sync leaves it as it is.
+		const frame = drawing.backdrop.parentElement as FakeNode;
+		expect(frame.hasAttribute("inert")).toBe(true);
+		expect(frame.hasAttribute("data-sheet-inert")).toBe(false);
+	});
+
+	it("moves focus to the real sheet's title on load, never to the drawing's", async () => {
+		const parts = await sheetPage({ drawing: true });
+		expect(parts.document.activeElement).toBe(parts.drawn?.title);
+	});
+
+	it("moves focus to the real sheet's [autofocus] field on load, never to the drawing's title", async () => {
+		const parts = await sheetPage({ drawing: true, autofocus: true });
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("Escape clicks the real sheet's backdrop, and not the drawing's", async () => {
+		const parts = await sheetPage({ drawing: true });
+		const drawing = parts.drawingSheet as Drawing;
+		const event = keydown(parts.document, "Escape");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.drawn?.backdrop.clicks).toBe(1);
+		expect(drawing.backdrop.clicks).toBe(0);
+	});
+
+	it("Tab from the real sheet's last control wraps to its first, and never goes to the drawing", async () => {
+		const parts = await sheetPage({ drawing: true });
+		parts.undo.hidden = true;
+		parts.drawn?.save.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
+	});
+
+	it("Tab from the body goes to the real sheet's first control, never to the drawing's", async () => {
+		const parts = await sheetPage({ drawing: true });
+		parts.undo.hidden = true;
+		parts.body.focus();
+		const event = keydown(parts.document, "Tab");
+		expect(event.defaultPrevented).toBe(true);
+		expect(parts.document.activeElement).toBe(parts.drawn?.field);
 	});
 });

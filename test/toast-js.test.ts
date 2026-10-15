@@ -152,6 +152,7 @@ async function page({
 	resizeObserver = true,
 	billPage = false,
 	sheet = false,
+	inertSheet = false,
 }: {
 	listed?: boolean;
 	bar?: FakeNode;
@@ -162,13 +163,23 @@ async function page({
 	billPage?: boolean;
 	/** A sheet open over the page: its section, and the heading that section is labelled by (#87). */
 	sheet?: boolean;
+	/** The sheet is a catalog drawing, inside an inert frame, so it is not the open sheet. */
+	inertSheet?: boolean;
 } = {}) {
 	let toasts = new FakeNode("div");
 	const announcer = new FakeNode("div");
 	const resultCount = new FakeNode("p");
 	// Every Transactions state renders the page's title, listed or not.
 	const heading = new FakeNode("h1");
-	const sheetSection = sheet ? new FakeNode("section") : null;
+	const inertFrame = new FakeNode("div");
+	inertFrame.setAttribute("inert", "");
+	// closest("[inert]") finds the frame a drawing sits in, as a browser's closest() does.
+	const sheetSection = sheet
+		? Object.assign(new FakeNode("section"), {
+				closest: (selector: string) =>
+					inertSheet && selector === "[inert]" ? inertFrame : null,
+			})
+		: null;
 	const sheetTitle = sheet ? new FakeNode("h2") : null;
 	if (sheetSection && sheetTitle) {
 		sheetSection.setAttribute("data-sheet", "");
@@ -194,8 +205,8 @@ async function page({
 		body,
 		documentElement,
 		activeElement: body as unknown,
-		querySelector: (selector: string) =>
-			selector === "section[data-sheet]" ? sheetSection : null,
+		querySelectorAll: (selector: string) =>
+			selector === "section[data-sheet]" && sheetSection ? [sheetSection] : [],
 		getElementById: (id: string) =>
 			id === "toasts"
 				? toasts
@@ -985,6 +996,27 @@ describe("focus from an Undo toast while a sheet is open", () => {
 		expect(titleFocus).toHaveBeenCalledTimes(1);
 		expect(document.activeElement).toBe(title);
 		expect(headingFocus).not.toHaveBeenCalled();
+	});
+
+	// A catalog drawing is a sheet inside an inert frame, so it is not the open sheet: the Transactions heading takes focus.
+	it("passes over a sheet drawn inside an inert frame, so focus goes to the Transactions heading and not the drawing's title", async () => {
+		const { body, document, toasts, heading, sheetTitle } = await page({
+			sheet: true,
+			inertSheet: true,
+		});
+		const title = sheetTitle as FakeNode;
+		const headingFocus = vi.spyOn(heading, "focus");
+		const titleFocus = vi.spyOn(title, "focus");
+		undoToast(body);
+		expect(document.activeElement).toBe(
+			undoButton(toasts.children[0] as FakeNode),
+		);
+		vi.advanceTimersByTime(10000);
+		expect(toasts.children).toHaveLength(0);
+		expect(titleFocus).not.toHaveBeenCalled();
+		expect(title.hasAttribute("tabindex")).toBe(false);
+		expect(headingFocus).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(heading);
 	});
 });
 
