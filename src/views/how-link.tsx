@@ -20,3 +20,15 @@ export function HowLink({ section }: { section: keyof typeof NAMES }) {
 		</a>
 	);
 }
+
+/** A screen's How this works at the foot of its page, under a short rule, after the page's last content (P124 A, decision 111). */
+export function HowFoot({ section }: { section: keyof typeof NAMES }) {
+	return (
+		<div class="mt-8">
+			<div class="w-12 border-t border-muted" />
+			<div class="mt-2">
+				<HowLink section={section} />
+			</div>
+		</div>
+	);
+}
