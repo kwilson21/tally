@@ -10,6 +10,7 @@ import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
+import { MoneyInputProposal } from "./proposals-money";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -26,7 +27,7 @@ import { PolishRoundCProposals } from "./proposals-polish-4";
 import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 114), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 117), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -474,6 +475,12 @@ export const DECIDED: readonly {
 			"Option E: until setup is done, Home names the notebook's five strokes (link your bank, your pay, your bills, your budgets, and Tally's first night on its own) and the next morning asks three things one at a time from the family's own bank, each answer a ledger line and each step a stroke; budgets kept all in one tap or one at a time, each suggested as the mean of the full months Tally has, rounded up to the next $10; the demo keeps P124 A (decision 114).",
 		issue: 95,
 	},
+	{
+		title: "P129 · The money input, state by state",
+		outcome:
+			"Option A: a muted 0.00 when empty, a check on the chip that matches the box, the steps off while the text can't be read, and five keyboard and screen-reader fixes; the centred layout stays (decision 117).",
+		issue: 80,
+	},
 ];
 
 /** The proposals page body. */
@@ -502,6 +509,17 @@ export function Proposals() {
 					Budget diagram without its boxes shrinking.
 				</p>
 				<PlannedDiagramProposal />
+			</section>
+
+			<section aria-labelledby="p129-title" class="mt-12">
+				<h2 id="p129-title" class="font-serif text-3xl font-semibold">
+					Picked: the money input
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's pick, marked Picked, is decision 117: A,
+					today's money input with what it lost put back.
+				</p>
+				<MoneyInputProposal />
 			</section>
 
 			<section aria-labelledby="polish5-title" class="mt-12">
