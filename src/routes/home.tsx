@@ -40,7 +40,6 @@ import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
-import { ThingsToTry } from "../views/things-to-try";
 import { loadBillRows } from "./bills";
 
 type App = { Bindings: Env };
@@ -479,12 +478,6 @@ async function renderHome(
 									))}
 								</ul>
 							</section>
-						)}
-						{/* The demo's Things to try, below the list until onboarding (#95) replaces it (#92). */}
-						{current && demo && (
-							<div class="mt-8">
-								<ThingsToTry />
-							</div>
 						)}
 					</div>
 					<div id="sheet">
