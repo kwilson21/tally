@@ -102,6 +102,13 @@ import {
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
+import {
+	PlanBand,
+	PlannedHeading,
+	PlannedRow,
+	PlanPaymentPicker,
+	PlanSheet,
+} from "../views/planned-expense";
 import { ProgressRow } from "../views/progress-row";
 import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
 import { SavedTick } from "../views/saved-tick";
@@ -1060,7 +1067,7 @@ const TRANSACTIONS_BUTTON_SPEC: UseSpecText = {
 		"Touch: 44px tall. Keyboard: Tab reaches it, and Enter follows it. Screen reader: “12 transactions, link”; the chevron is hidden.",
 	motion: "None.",
 	edges:
-		"Zero or fewer: nothing renders. One counted transaction reads “1 transaction”. A very large count prints in full digits with no thousands separator, so 1234 reads “1234 transactions”. A list longer than 25 rows pages, and its first page reads “Showing 1–25 of N spending transactions”. Excluded transactions are left out of both the count and the list. A late bill payment shows in the month it counts in, not the month it was paid, and a payment linked to a bill counts whatever its exclusion.",
+		"Zero or fewer: nothing renders. One counted transaction reads “1 transaction”. A very large count prints in full digits with no thousands separator, so 1234 reads “1234 transactions”. A list longer than 25 rows pages, and its first page reads “Showing 1–25 of N spending transactions”. Excluded transactions are left out of both the count and the list. A late bill payment shows in the month it counts in, not the month it was paid, and a payment linked to a bill or a planned expense counts whatever its exclusion.",
 	words: "{n} transactions · 1 transaction.",
 };
 
@@ -2246,6 +2253,178 @@ function Rows() {
 				</State>
 			</Specimen>
 			<Specimen
+				id="planned-expense"
+				title="Planned expenses: the row, the Planned heading, the Band and the sheet"
+				tier="visual"
+				components={[
+					"PlannedRow",
+					"PlannedHeading",
+					"BillStatusHeading",
+					"PlanBand",
+					"PlanSheet",
+					"PlanPaymentPicker",
+				]}
+				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with a Move to Nov button (this month's short name) and a Drop button (decision 101)."
+			>
+				<State label="Planned, with this month's total">
+					<div class="max-w-xl">
+						<PlannedHeading totalCents={18000} />
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 1,
+									name: "Car registration",
+									amountCents: 18000,
+									month: "2026-10",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Set aside from a later month">
+					<div class="max-w-xl">
+						<PlannedHeading />
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 2,
+									name: "Holiday gifts",
+									amountCents: 40000,
+									month: "2026-12",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Paid this month, with a check in its heading">
+					<div class="max-w-xl">
+						<BillStatusHeading status="paid" totalCents={18000} />
+						<ul>
+							<PlannedRow
+								plan={{
+									id: 3,
+									name: "Car registration",
+									amountCents: 18000,
+									month: "2026-10",
+									paidDate: "2026-10-03",
+								}}
+								month="2026-10"
+								today="2026-10-04"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="The Band: one plan waiting, then two">
+					<div class="max-w-xl">
+						<PlanBand
+							planId={1}
+							name="Car registration"
+							moveLabel="Nov"
+							waiting={1}
+						/>
+						<PlanBand
+							planId={1}
+							name="Car registration"
+							moveLabel="Nov"
+							waiting={2}
+						/>
+					</div>
+				</State>
+				<State label="Plan an expense, with the Month select">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-11",
+							}}
+							months={[
+								{ value: "2026-10", label: "October 2026" },
+								{ value: "2026-11", label: "November 2026" },
+								{ value: "2026-12", label: "December 2026" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="A plan's sheet once it's paid, with Unlink">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							plan={{
+								id: 3,
+								name: "Car registration",
+								amountCents: 18000,
+								month: "2026-10",
+								paidDate: "2026-10-03",
+							}}
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-10",
+							}}
+							months={[{ value: "2026-10", label: "October 2026" }]}
+							paidBy={{ name: "DMV", date: "2026-10-03", amountCents: 18000 }}
+						/>
+					</div>
+				</State>
+				<State label="Delete asks first, with the amount">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<PlanSheet
+							plan={{
+								id: 1,
+								name: "Car registration",
+								amountCents: 18000,
+								month: "2026-10",
+							}}
+							values={{
+								name: "Car registration",
+								amount: "180.00",
+								month: "2026-10",
+							}}
+							months={[{ value: "2026-10", label: "October 2026" }]}
+							deleteConfirm
+						/>
+					</div>
+				</State>
+				<State label="A payment's picker on the plan's page">
+					<PlanPaymentPicker
+						planId={1}
+						name="Car registration"
+						amountCents={18000}
+						candidates={[
+							{
+								id: 11,
+								date: "2026-11-03",
+								dateLabel: "Nov 3",
+								amountCents: 18000,
+								displayName: "DMV",
+								excluded: false,
+							},
+							{
+								id: 12,
+								date: "2026-10-30",
+								dateLabel: "Oct 30",
+								amountCents: 21200,
+								displayName: "Costco",
+								excluded: false,
+							},
+						]}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
 				id="bill-finding"
 				title="Bill finding Band and review row"
 				tier="visual"
@@ -2477,7 +2656,7 @@ function Rows() {
 				title="TransactionRow"
 				tier="visual"
 				components={["TransactionRow"]}
-				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
+				sentence="One transaction as a single link to its edit panel: icon, name, category or status in words, signed amount. A payment linked to a bill says its category, then “paid [bill] bill”; a payment linked to a planned expense says “paid [plan name]” the same way; split payments keep “Split transaction” or “Split from …” before that bill name. A refund pair says “Refund for [date]” without repeating the bank text, and a refund that follows its purchase adds “paid [bill] bill” when it paid one. After a split the bank changed, the purchase shows “The bank changed this from $187.42, so its split was removed.”, followed by “The Costco membership bill for 2026 is no longer paid.” for one bill still unpaid or “2 bills are no longer paid.” for more (the occurrence reads “for September 2026”, “for Q3 2026” or “for Sep 14, 2026” by the bill’s schedule; a bill paid again drops out), after the category it went back to, or in Needs category with none, then “$X refunded” and “paid [bill] bill” where they apply, until a person decides; a refund the change unlinked says “The bank changed the Sep 10 purchase, so this refund is no longer linked” until a person links it again; on a split refund’s part it follows “Split from …”. An income row shows only “Income” there, even after a split the bank changed, as an excluded one shows only “Excluded”. A pending one adds “Pending” in muted words to the same caption line. A name Tally guessed has the sparkles icon before it and a dashed underline until a person chooses it. Here each row links to this section, so it ends in the chevron after the amount and takes the press tint as it opens; a pressed row is held still in its own state below. Needs category is said in words, never a pill."
 			>
 				<State label="Above the list, once only while a suggested name is shown">
 					<div class="max-w-xl">
@@ -4913,14 +5092,34 @@ function Diagrams() {
 				sentence="Drawn from the same numbers as each worked example. A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
 				<State label="BudgetDiagram">
-					<BudgetDiagram {...BUDGET_EXAMPLE} />
+					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
 				</State>
 				<State label="BudgetDiagram with a savings goal">
 					<BudgetDiagram
+						id="budget-diagram-savings"
 						totalBudgetCents={140000}
 						totalSpentCents={46000}
 						savingsGoalCents={50000}
 						safeToSpendCents={29800}
+					/>
+				</State>
+				<State label="BudgetDiagram with a planned expense">
+					<BudgetDiagram
+						id="budget-diagram-planned"
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						plannedCents={18000}
+						safeToSpendCents={61800}
+					/>
+				</State>
+				<State label="BudgetDiagram with a savings goal and a planned expense">
+					<BudgetDiagram
+						id="budget-diagram-savings-planned"
+						totalBudgetCents={140000}
+						totalSpentCents={46000}
+						savingsGoalCents={10000}
+						plannedCents={18000}
+						safeToSpendCents={51800}
 					/>
 				</State>
 				<State label="BillsDiagram">
