@@ -8,6 +8,7 @@ import { resetDemo } from "../src/demo/reset";
 import { DURATION_TOKENS } from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 import { BottomSheet } from "../src/views/bottom-sheet";
+import { SAVED_TOAST_MS } from "../src/views/saved-tick";
 import { Switch } from "../src/views/switch";
 
 // P74 A and P85 A (decisions 76, 79, 80): quiet motion in CSS only. Every duration is a token in
@@ -166,6 +167,17 @@ describe("the duration tokens", () => {
 	});
 });
 
+/**
+ * A saved row's tick and arrow keep their timing under reduced motion (P119 A): they appear and go on the toast's own
+ * stay, with no draw and no movement, so their reduce rule is a step-end hold, not none. Only these selectors may use it.
+ */
+const REDUCE_HOLDS = [
+	".row-saved .saved-tick",
+	".row-saved-undo .saved-tick",
+	".row-saved .saved-arrow",
+	".row-saved-undo .saved-arrow",
+];
+
 describe("reduced motion", () => {
 	it("shows every move's end state: each rule that starts an animation or a transition is stilled by a later reduce rule that sets it to none", () => {
 		// Equal specificity, so the later rule wins: a reduce override has to come after its move.
@@ -180,7 +192,9 @@ describe("reduced motion", () => {
 						j > i &&
 						inReduce(o) &&
 						selectorsOf(o).includes(selector) &&
-						o.decls.get(kind) === "none",
+						(o.decls.get(kind) === "none" ||
+							(REDUCE_HOLDS.includes(selector) &&
+								/\bstep-end\b/.test(o.decls.get(kind) ?? ""))),
 				);
 				if (!stilled) missing.push(`${selector} (${kind})`);
 			}
@@ -205,6 +219,10 @@ describe("reduced motion", () => {
 			".bar-fill",
 			".field-shake",
 			".button-spinner",
+			".row-saved .saved-tick",
+			".row-saved-undo .saved-tick",
+			".row-saved .saved-arrow",
+			".row-saved-undo .saved-arrow",
 		])
 			expect(moving, selector).toContain(selector);
 	});
@@ -291,6 +309,9 @@ describe("toasts", () => {
 	it("lives as long as toast.js keeps it: the animation is as long as the stay, 4 seconds", () => {
 		expect(DISPLAY_MS).toBe(4000);
 		expect(ms(token("toast"))).toBe(DISPLAY_MS);
+		// The Likely sheet's close keeps a saved row's tick only this long after its save (saved-tick.tsx).
+		expect(SAVED_TOAST_MS).toBe(DISPLAY_MS);
+		expect(SAVED_TOAST_MS).toBe(ms(token("toast")));
 	});
 
 	it("is styled by CSS alone, on what #toasts holds, and toast.js is not asked to change", () => {
@@ -993,5 +1014,127 @@ describe("the catalog and DESIGN.md", () => {
 		);
 		expect(design).toMatch(/- Motion:[^\n]*decision 76[^\n]*[Dd]ecision 80/);
 		expect(design).toMatch(/- Motion:[^\n]*toast[^\n]*DISPLAY_MS/);
+	});
+});
+
+// P119 A (decision 111, #71): the saved row's pencil tick. Its stay is the toast's own, by token; its draw is the
+// confirmation's 150 ms; its stops mirror the toast's, so the tick is gone before the toast is.
+describe("the saved row's tick", () => {
+	const stop = (name: string, percent: string) =>
+		keyframes(name).find((r) => selectorsOf(r).includes(percent));
+	const animationOf = (selector: string) => decl(selector, "animation") ?? "";
+
+	it("draws the tick in the confirmation's 150 ms, then holds it for the toast's own stay", () => {
+		expect(animationOf(".row-saved .saved-tick")).toContain(
+			"var(--duration-confirm)",
+		);
+		expect(animationOf(".row-saved .saved-tick")).toContain(
+			"var(--duration-toast)",
+		);
+		expect(animationOf(".row-saved-undo .saved-tick")).toContain(
+			"var(--duration-undo-toast)",
+		);
+	});
+
+	it("brings the arrow back as the tick goes, on the same stays", () => {
+		expect(animationOf(".row-saved .saved-arrow")).toContain(
+			"var(--duration-toast)",
+		);
+		expect(animationOf(".row-saved-undo .saved-arrow")).toContain(
+			"var(--duration-undo-toast)",
+		);
+	});
+
+	it("fades the tick out inside the toast's own fade-out stops, so it is gone before the toast is", () => {
+		expect(stop("saved-tick", "0%")?.decls.get("opacity")).toBe("1");
+		expect(stop("saved-tick", "92.5%")?.decls.get("opacity")).toBe("1");
+		expect(stop("saved-tick", "96.25%")?.decls.get("opacity")).toBe("0");
+		expect(stop("saved-tick-undo", "97%")?.decls.get("opacity")).toBe("1");
+		expect(stop("saved-tick-undo", "98.5%")?.decls.get("opacity")).toBe("0");
+		expect(stop("saved-arrow", "96.25%")?.decls.get("opacity")).toBe("0");
+		expect(stop("saved-arrow-undo", "98.5%")?.decls.get("opacity")).toBe("0");
+	});
+
+	it("moves nothing but the draw: the tick's stay keyframes are opacity alone, and the draw is clip-path", () => {
+		for (const name of [
+			"saved-tick",
+			"saved-tick-undo",
+			"saved-arrow",
+			"saved-arrow-undo",
+			"saved-arrow-still",
+			"saved-arrow-undo-still",
+		])
+			for (const r of keyframes(name))
+				expect([...r.decls.keys()], name).toEqual(["opacity"]);
+		expect(keyframes("saved-draw")[0]?.decls.get("clip-path")).toBe(
+			"inset(0 100% 0 0)",
+		);
+	});
+
+	it("keeps the tick and the arrow on their stays under reduced motion, as a step with no draw", () => {
+		for (const selector of [
+			".row-saved .saved-tick",
+			".row-saved-undo .saved-tick",
+		]) {
+			const reduce = rules.find(
+				(r) => inReduce(r) && selectorsOf(r).includes(selector),
+			);
+			expect(reduce?.decls.get("animation"), selector).toMatch(/step-end/);
+			expect(reduce?.decls.get("animation"), selector).not.toContain(
+				"saved-draw",
+			);
+		}
+	});
+
+	it("brings the arrow back under reduced motion as a step, on its own still keyframes, for the same stay as the tick", () => {
+		const reduceAnimation = (selector: string) =>
+			rules
+				.find((r) => inReduce(r) && selectorsOf(r).includes(selector))
+				?.decls.get("animation") ?? "";
+		expect(reduceAnimation(".row-saved .saved-arrow")).toContain(
+			"saved-arrow-still",
+		);
+		expect(reduceAnimation(".row-saved .saved-arrow")).toMatch(/\bstep-end\b/);
+		expect(reduceAnimation(".row-saved .saved-arrow")).toContain(
+			"var(--duration-toast)",
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toContain(
+			"saved-arrow-undo-still",
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toMatch(
+			/\bstep-end\b/,
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toContain(
+			"var(--duration-undo-toast)",
+		);
+	});
+
+	it("shows the arrow at the tick's own hide stop, so under reduced motion the slot is never empty", () => {
+		expect(stop("saved-arrow-still", "0%")?.decls.get("opacity")).toBe("0");
+		expect(stop("saved-arrow-still", "96.25%")?.decls.get("opacity")).toBe("1");
+		expect(stop("saved-arrow-undo-still", "0%")?.decls.get("opacity")).toBe(
+			"0",
+		);
+		expect(stop("saved-arrow-undo-still", "98.5%")?.decls.get("opacity")).toBe(
+			"1",
+		);
+		// The first stop the tick hides at is the first stop the arrow shows at, for both stays.
+		const firstAt = (name: string, opacity: string) =>
+			Math.min(
+				...keyframes(name)
+					.filter((r) => r.decls.get("opacity") === opacity)
+					.flatMap(selectorsOf)
+					.map((percent) => Number.parseFloat(percent)),
+			);
+		expect(firstAt("saved-tick", "0")).toBe(firstAt("saved-arrow-still", "1"));
+		expect(firstAt("saved-tick-undo", "0")).toBe(
+			firstAt("saved-arrow-undo-still", "1"),
+		);
+	});
+
+	it("draws nothing in the catalog's held picture, which shows the tick at its full draw with the arrow back under it", () => {
+		expect(animationOf(".row-saved-held .saved-tick")).toBe("none");
+		expect(animationOf(".row-saved-held .saved-arrow")).toBe("none");
+		expect(decl(".row-saved-held .saved-arrow", "opacity")).toBe("0");
 	});
 });

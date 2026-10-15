@@ -10,6 +10,7 @@ import {
 	maybeIncomeVisible,
 } from "./maybe-category";
 import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
+import { type SavedMark, savedRowClass } from "./saved-tick";
 
 type Caption = {
 	kind: "category" | "income" | "excluded" | "needs";
@@ -149,6 +150,7 @@ export function TransactionRow({
 	autofocus,
 	bare = false,
 	bankText = true,
+	saved,
 }: {
 	row: ListRow;
 	href?: string;
@@ -160,6 +162,8 @@ export function TransactionRow({
 	bare?: boolean;
 	/** Show the bank's text under a row that needs a category; off where the text is already struck above it (Start here). */
 	bankText?: boolean;
+	/** The row a save just changed: its arrow gives way to the pencil tick (P119 A, #71). Only with a link. */
+	saved?: SavedMark;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
 	// A bank change's sentence keeps its place on the row over a Maybe category; the edit panel still shows the suggestion.
@@ -200,13 +204,15 @@ export function TransactionRow({
 			(kind === "category" && caption === row.categoryName));
 	const pendingFirst = pending && !pendingLast;
 	const Row = href ? "a" : "div";
+	// Only a row with a link has an arrow for the tick to take (P119 A, #71).
+	const mark = href ? saved : undefined;
 	const content = (
 		<>
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
 				autofocus={autofocus}
-				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}`}
+				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
 				{...attrs}
 			>
 				<RowIcon row={row} kind={kind} />
@@ -288,7 +294,7 @@ export function TransactionRow({
 				<span class="shrink-0 text-lg">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
-				{href && <RowArrow />}
+				{href && <RowArrow saved={mark} />}
 			</Row>
 		</>
 	);
