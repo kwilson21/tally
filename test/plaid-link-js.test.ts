@@ -16,6 +16,11 @@ function harness({
 		text: async () =>
 			'<section id="accounts-summary" data-version="new"></section>',
 	},
+	homeRefreshResponse = {
+		ok: true,
+		text: async () =>
+			'<main id="page" data-version="new"><p id="setup-status" data-link-bank-focus></p></main>',
+	},
 }: {
 	linkBank?: boolean;
 	dataset?: Record<string, string>;
@@ -26,6 +31,10 @@ function harness({
 	};
 	ajax?: ReturnType<typeof vi.fn>;
 	refreshResponse?: {
+		ok: boolean;
+		text: () => Promise<string>;
+	};
+	homeRefreshResponse?: {
 		ok: boolean;
 		text: () => Promise<string>;
 	};
@@ -99,6 +108,16 @@ function harness({
 		replaceWith: vi.fn(),
 	};
 	const parsedSummaries: Array<{ version: string }> = [];
+	// Home's #page holds Link a bank, so the refresh that swaps it in also takes the button away.
+	let linkButtonGone = false;
+	const currentPage = {
+		version: "old",
+		replaceWith: vi.fn(() => {
+			linkButtonGone = true;
+		}),
+	};
+	const parsedPages: Array<{ version: string }> = [];
+	const status = { focus: vi.fn() };
 	const document = {
 		body: { dispatchEvent: vi.fn() },
 		addEventListener: (name: string, listener: never) => {
@@ -106,9 +125,13 @@ function harness({
 		},
 		querySelector: (selector: string) => {
 			if (selector === "[data-link-bank]")
-				return liveLinkButton ?? (linkBank ? button : undefined);
+				return linkButtonGone
+					? undefined
+					: (liveLinkButton ?? (linkBank ? button : undefined));
 			if (selector === "[data-link-bank-error]") return liveErrorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
+			if (selector === "#page") return currentPage;
+			if (selector === "[data-link-bank-focus]") return status;
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
 		},
@@ -120,9 +143,11 @@ function harness({
 			textContent: "",
 		}),
 	};
-	const fetch = vi.fn(async (url: string) =>
-		url === "/accounts" ? refreshResponse : tokenResponse,
-	);
+	const fetch = vi.fn(async (url: string) => {
+		if (url === "/accounts") return refreshResponse;
+		if (url === "/") return homeRefreshResponse;
+		return tokenResponse;
+	});
 	const create = vi.fn((options) => {
 		linkOptions = options;
 		return { open: vi.fn() };
@@ -146,13 +171,20 @@ function harness({
 					}
 				: undefined;
 			if (summary) parsedSummaries.push(summary);
+			const pageMatch = text.match(
+				/id=["']page["'][^>]*data-version=["']([^"']*)/,
+			);
+			const page = pageMatch?.[1] ? { version: pageMatch[1] } : undefined;
+			if (page) parsedPages.push(page);
 			return {
 				querySelector: (selector: string) =>
 					selector === "#accounts-summary"
 						? summary
-						: match
-							? { textContent: match[1] }
-							: undefined,
+						: selector === "#page"
+							? page
+							: match
+								? { textContent: match[1] }
+								: undefined,
 			};
 		}
 	}
@@ -191,6 +223,9 @@ function harness({
 		document,
 		currentSummary,
 		parsedSummaries,
+		currentPage,
+		parsedPages,
+		status,
 		process,
 		replaceRepairError(region: typeof repairError) {
 			liveRepairError = region;
@@ -444,7 +479,7 @@ describe("plaid-link.js", () => {
 		expect(h.button.focus).toHaveBeenCalledOnce();
 	});
 
-	it("refreshes the page its button names (Home's /, not Accounts' list) after a link", async () => {
+	it("on Home, refreshes the page its button names (/, not Accounts' list), then focuses the status line, not the gone button", async () => {
 		const ajax = vi.fn(async (method: string) => {
 			if (method === "POST") {
 				const ctx = { response: { status: 204 }, text: "" };
@@ -460,7 +495,13 @@ describe("plaid-link.js", () => {
 		await h.linkOptions?.onSuccess("public-secret");
 		expect(h.fetch).toHaveBeenCalledWith("/");
 		expect(h.fetch).not.toHaveBeenCalledWith("/accounts");
+		expect(h.parsedPages).toHaveLength(1);
+		expect(h.currentPage.replaceWith).toHaveBeenCalledWith(h.parsedPages[0]);
+		expect(h.process).toHaveBeenCalledWith(h.parsedPages[0]);
 		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+		expect(h.children).toHaveLength(0);
+		expect(h.status.focus).toHaveBeenCalledOnce();
+		expect(h.button.focus).not.toHaveBeenCalled();
 	});
 
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {
