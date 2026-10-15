@@ -27,8 +27,25 @@ function expectLabelled(html: string) {
 	// Scales to the screen, like the system diagram.
 	expect(svg).toContain("w-full");
 }
+/** The Budget boxes' picture (decision 115, extended by #600): one role="img" wrapper, labelled and described by sr-only text. */
+function expectLabelledPicture(html: string, id: string) {
+	const wrapper = html.match(/<div role="img"[^>]*>/)?.[0] ?? "";
+	expect(html.match(/role="img"/g)).toHaveLength(1);
+	expect(wrapper).toContain(`aria-labelledby="${id}-title"`);
+	expect(wrapper).toContain(`aria-describedby="${id}-desc"`);
+	expect(html).toContain(
+		`<span id="${id}-title" class="sr-only">How safe to spend is worked out</span>`,
+	);
+	expect(html).toMatch(
+		new RegExp(`<span id="${id}-desc" class="sr-only">[^<]+</span>`),
+	);
+}
 const desc = (html: string) =>
 	(html.match(/<desc[^>]*>([^<]+)</)?.[1] ?? "").replaceAll("&#39;", "'");
+const pictureDesc = (html: string) =>
+	(
+		html.match(/<span id="[^"]*-desc" class="sr-only">([^<]+)</)?.[1] ?? ""
+	).replaceAll("&#39;", "'");
 
 describe("BillsDiagram", () => {
 	const props = {
@@ -67,11 +84,11 @@ describe("BudgetDiagram", () => {
 
 	it("shows budget − spent = safe to spend, with the same amounts as the example", async () => {
 		const html = await render(BudgetDiagram(demo));
-		expectLabelled(html);
+		expectLabelledPicture(html, "budget-diagram");
 		expect(words(html)).toContain(
 			"Budget $1,650.00 − Spent $1,385.94 = Safe to spend $264.06",
 		);
-		expect(desc(html)).toBe(
+		expect(pictureDesc(html)).toBe(
 			"The $1,650.00 budget minus $1,385.94 spent leaves $264.06 safe to spend.",
 		);
 		expect(html).toContain("stroke-ok");
@@ -85,7 +102,7 @@ describe("BudgetDiagram", () => {
 		expect(words(html)).toContain(
 			"Budget $1,650.00 − Spent $1,385.94 − Bills due $142.00 = Safe to spend $122.06",
 		);
-		expect(desc(html)).toContain("minus $142.00 for bills due");
+		expect(pictureDesc(html)).toContain("minus $142.00 for bills due");
 	});
 
 	it("names the savings goal separately from bills due", async () => {
@@ -100,7 +117,7 @@ describe("BudgetDiagram", () => {
 		expect(words(html)).toContain(
 			"Budget $1,400.00 − Spent $460.00 − Bills due $142.00 − Savings goal $500.00 = Safe to spend $298.00",
 		);
-		expect(desc(html)).toBe(
+		expect(pictureDesc(html)).toBe(
 			"The $1,400.00 budget minus $460.00 spent minus $142.00 for bills due minus $500.00 for the savings goal leaves $298.00 safe to spend.",
 		);
 	});
@@ -120,19 +137,13 @@ describe("BudgetDiagram", () => {
 
 	it("takes an id, so two drawings on one page can each name their own title and description", async () => {
 		const html = await render(BudgetDiagram({ ...demo, id: "x" }));
-		expect(html).toContain('aria-labelledby="x-title x-desc"');
-		expect(html).toContain('<title id="x-title">');
-		expect(html).toContain('<desc id="x-desc">');
+		expectLabelledPicture(html, "x");
 		expect(html).not.toContain('id="budget-diagram-');
 	});
 
 	it("keeps the app's own title and description ids when no id is given", async () => {
 		const html = await render(BudgetDiagram(demo));
-		expect(html).toContain(
-			'aria-labelledby="budget-diagram-title budget-diagram-desc"',
-		);
-		expect(html).toContain('<title id="budget-diagram-title">');
-		expect(html).toContain('<desc id="budget-diagram-desc">');
+		expectLabelledPicture(html, "budget-diagram");
 	});
 });
 
