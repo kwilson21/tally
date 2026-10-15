@@ -399,13 +399,8 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P126 is open, and P127's pick is decision 116 in #566, not on main yet, so neither carries a Picked pill. P128 is the owner's pick (decision 118), P129 (decision 117), and P130 to P132 are the owner's picks (decision 121). P133 is open again, so it carries none.
-			const expected =
-				n < 34 || n === 126 || n === 127 || n === 133
-					? 0
-					: twoPicks.includes(id)
-						? 2
-						: 1;
+			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, and P130 to P132 decision 121. P133 is open again, so it carries none.
+			const expected = n < 34 || n === 133 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -442,7 +437,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(85);
+		expect(DECIDED.length).toBe(87);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -485,7 +480,32 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
-		// P125 sits after P124 (issue 501) and before P128, so the list stays in proposal order.
+		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
+		expect(DECIDED.at(-8)).toBe(entry);
+	});
+
+	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P126 ·"));
+		expect(entry?.title).toBe("P126 · The Budget diagram with Planned");
+		expect(entry?.issue).toBe(202);
+		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
+		expect(entry?.outcome).toContain("decisions 115 and 116");
+		expect(DECIDED.at(-7)).toBe(entry);
+	});
+
+	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P127 ·"));
+		expect(entry?.title).toBe("P127 · Safe to spend on a small phone");
+		expect(entry?.issue).toBe(500);
+		expect(entry?.outcome).toContain(
+			"Option A: no drawing below 390 px for amounts of 7 characters or fewer",
+		);
+		expect(entry?.outcome).toContain("640 px for 8 or more characters");
+		expect(entry?.outcome).toContain(
+			"640 px for 8 or more characters, and the minus stays on its number (decision 116).",
+		);
+		expect(entry?.outcome).not.toContain("so the minus");
+		expect(entry?.outcome).toContain("(decision 116).");
 		expect(DECIDED.at(-6)).toBe(entry);
 	});
 
@@ -1552,26 +1572,22 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		[...chunk.matchAll(/<svg\b[^>]*>/g)].map((m) => m[0]);
 	const count = (chunk: string, text: string) => chunk.split(text).length - 1;
 
-	it("opens the page with its own section, ahead of the polish pass's picks", async () => {
+	it("sits among the Picked sections, newest decision first: after P127 (decision 116) and before the polish pass's picks (decision 114)", async () => {
 		const html = await drawn();
-		const top = html.indexOf(">Proposals</h1>");
-		const start = html.indexOf(
-			'<section aria-labelledby="p126-title" class="mt-10">',
+		const start = html.indexOf('<section aria-labelledby="p126-title"');
+		expect(start).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(
+			html.indexOf('<section aria-labelledby="p127-title"'),
 		);
-		expect(top).toBeGreaterThan(-1);
-		expect(start).toBeGreaterThan(top);
-		// P127 is drawn first: only its own section, and the specimen inside it, come before this one.
-		const before = html.slice(top, start);
-		expect(before).toContain('<section aria-labelledby="audit2-title"');
-		expect(before).toContain('<section aria-labelledby="p127-title"');
 		expect(start).toBeLessThan(
-			html.indexOf('<section aria-labelledby="polish4-title"'),
+			html.indexOf('<section aria-labelledby="polish5-title"'),
 		);
 		expect(html).toContain(
-			'<h2 id="p126-title" class="font-serif text-3xl font-semibold">Open: the Budget diagram with Planned</h2>',
+			'<h2 id="p126-title" class="font-serif text-3xl font-semibold">Picked: the Budget diagram with Planned</h2>',
 		);
+		expect(html).not.toContain("Open: the Budget diagram with Planned");
 		expect(html).toContain(
-			"Drawn Oct 14 for the owner&#39;s pick on #202 (PR #545): Planned joins the Budget diagram without its boxes shrinking.",
+			"Drawn Oct 14 for #202. The owner&#39;s pick, marked Picked, is decision 115: A, the boxes at today&#39;s size and the row wrapping where it doesn&#39;t fit. Decision 116 extends the wrap to every width.",
 		);
 	});
 
@@ -1631,12 +1647,15 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 			expect(branch).toContain(`>${label}</text>`);
 	});
 
-	it("draws option A at today's box size, recommended, with the owner's pick in words noted and no Picked pill", async () => {
+	it("draws option A at today's box size, recommended and picked, with decision 116's wrap at every width in its note", async () => {
 		const chunk = section(await drawn());
 		const [, , a = ""] = options(chunk);
 		expect(a).toContain(">Recommended<");
 		expect(a).toContain(
-			"The owner&#39;s pick in words, Oct 14; this drawing is to confirm it.",
+			"Option A · Today&#39;s box size, wrapping after Bills due<span",
+		);
+		expect(a).toContain(
+			"Planned is a fifth box at today&#39;s size. Where the row doesn&#39;t fit, it wraps after Bills due, and decision 116 extends the wrap to the four-box diagram too, with or without Planned.",
 		);
 		expect(a).toContain(
 			"Trade-off: a two-part diagram: the boxes split into two groups that wrap, instead of one SVG that scales; no new token, no JavaScript.",
@@ -1645,7 +1664,8 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 			"Why: the labels stay the size they are today on every screen, and the sum still reads left to right.",
 		);
 		// Each line is its own SVG at natural size: 323 wide (Budget, Spent, Bills due), 230 wide (Planned and Safe to spend).
-		const tags = svgs(a);
+		// The Picked pill's check icon is an svg too, so the lines are the ones that overflow visibly.
+		const tags = svgs(a).filter((tag) => tag.includes('overflow="visible"'));
 		expect(tags.length).toBe(6);
 		for (const tag of tags) {
 			expect(tag).toContain('aria-hidden="true"');
@@ -1658,7 +1678,9 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		expect(count(a, 'width="93" height="60"')).toBe(16);
 		for (const size of ['font-size="13"', 'font-size="15"', 'font-size="18"'])
 			expect(a).toContain(size);
-		expect(chunk).not.toContain(">Picked<");
+		// The owner's pick carries the Picked pill, and it is the only one on the diagram.
+		expect(a).toContain(">Picked<");
+		expect(count(chunk, ">Picked<")).toBe(1);
 	});
 
 	it("labels option A's row of boxes as one picture, its title and description saying the sum", async () => {
@@ -3095,27 +3117,40 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 	// The one frame height: the tallest picture's content, Option C's, measured in Chrome at 1280, 390 and 320 px.
 	const FRAME_HEIGHT = 478;
 
-	it("opens the page with its section after the second design audit's, titled and dated as the brief asks", async () => {
+	it("sits among the Picked sections, after P129 (decision 117) and before P126 (decision 115), titled and dated as the brief asks", async () => {
 		const html = await drawn();
-		const top = html.indexOf(">Proposals</h1>");
-		const start = html.indexOf(
-			'<section aria-labelledby="p127-title" class="mt-10">',
-		);
-		expect(top).toBeGreaterThan(-1);
-		expect(start).toBeGreaterThan(top);
-		// The second design audit (P130 to P133) is drawn first, so it is the only section before this one.
-		expect(html.slice(top, start)).toContain(
-			'<section aria-labelledby="audit2-title"',
+		const start = html.indexOf('<section aria-labelledby="p127-title"');
+		expect(start).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(
+			html.indexOf('<section aria-labelledby="p129-title"'),
 		);
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="p126-title"'),
 		);
 		expect(html).toContain(
-			'<h2 id="p127-title" class="font-serif text-3xl font-semibold">Open: Safe to spend on a small phone</h2>',
+			'<h2 id="p127-title" class="font-serif text-3xl font-semibold">Picked: Safe to spend on a small phone</h2>',
 		);
+		expect(html).not.toContain("Open: Safe to spend on a small phone");
 		expect(html).toContain(
-			"Drawn Oct 14 for issue #500: what Home&#39;s Safe to spend row does when the amount needs the room.",
+			"Drawn Oct 14 for issue #500. The owner&#39;s pick, marked Picked, is decision 116: A, no drawing below 390 px for amounts of 7 characters or fewer, and below 640 px for 8 or more, built in #566.",
 		);
+	});
+
+	it("words and labels option A to decision 116 and what #566 built, and marks it Picked and Recommended", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		const [, a = ""] = options(chunk);
+		expect(a).toContain(
+			"Option A · No drawing below 390 px (640 px for 8 or more characters)",
+		);
+		expect(a).toContain(">Picked<");
+		expect(a).toContain(">Recommended<");
+		expect(chunk.split(">Picked<").length - 1).toBe(1);
+		expect(a).toContain(
+			"built in #566: home-top.tsx hides the drawing below 390 px for 7 characters or fewer and below 640 px for 8 or more",
+		);
+		expect(chunk).not.toContain("Pick one");
+		expect(chunk).not.toContain("Pick how");
+		expect(chunk).not.toContain("Open:");
 	});
 
 	it("draws P127 as one specimen with its title and its sentence over 320, 360 and 390 px", async () => {
@@ -3126,11 +3161,14 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		);
 	});
 
-	it("draws today on main and options A to C, each with six pictures: 320, 360, then 390 px, $9,999 then −$9,999", async () => {
+	it("draws the reference and options A to C, each with six pictures: 320, 360, then 390 px, $9,999 then −$9,999", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const list = options(chunk);
 		expect(list.length).toBe(4);
-		expect(list[0]).toContain("Reference · Today on main");
+		expect(list[0]).toContain("Reference · Before #566&#39;s drawing rule");
+		expect(list[0]).toContain(
+			'aria-label="Reference · Before #566&#39;s drawing rule, 320 px wide, with $9,999, on a phone"',
+		);
 		expect(list[1]).toContain(`Option A · No drawing below ${N} px`);
 		expect(list[2]).toContain("Option B · A smaller drawing on phones");
 		expect(list[3]).toContain("Option C · The drawing under the amount");
@@ -3283,19 +3321,21 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		}
 	});
 
-	it("draws the Fixed note as #566's minus fix, not yet on main, with #388's size rule and that the drawing is decoration", async () => {
+	it("draws the Fixed note with #566 as on main, its minus fix in every picture, #388's size rule and that the drawing is decoration", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		expect(chunk).not.toContain("Fixed already");
+		expect(chunk).not.toContain("not on main yet");
 		expect(chunk).toContain(
-			"In every picture: </span>#566&#39;s fix for #500 part 2 (not on main yet) keeps the minus with its number; #388&#39;s size rule steps a long amount down; the drawing is decoration and never carries meaning.",
+			"In every picture: </span>#566, now on main, keeps the minus with its number; #388&#39;s size rule steps a long amount down; the drawing is decoration and never carries meaning.",
 		);
 	});
 
-	it("draws the Reference note as main plus #566's fix, with the minus kept with its number", async () => {
+	it("draws the Reference note as main before #566's drawing rule, with the minus kept with its number", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		expect(chunk).toContain(
-			"What main draws now, plus #566&#39;s fix that keeps the minus with its number: the 112 px notebook sits beside the amount.",
+			"Before #566&#39;s drawing rule: the 112 px notebook sits beside the amount at every width, with the minus kept on its number.",
 		);
+		expect(chunk).not.toContain("What main draws now");
 	});
 
 	it("marks exactly one option Recommended, and all six of its pictures say Fits", async () => {
@@ -3360,14 +3400,16 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		);
 	const isOpen = (attrs: string) => /\sopen\b/.test(attrs);
 
-	it("sits after P126 and before P129, as the picked proposal with its heading and line", async () => {
+	it("sits before P129 and above P127 and P126 (decisions 118, 117, 116, 115), as the picked proposal with its heading and line", async () => {
 		const html = await drawn();
-		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		const p128 = html.indexOf('<section id="p128-keys"');
 		const p129 = html.indexOf('<section aria-labelledby="p129-title"');
-		expect(p126).toBeGreaterThan(-1);
-		expect(p126).toBeLessThan(p128);
+		const p127 = html.indexOf('<section aria-labelledby="p127-title"');
+		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
+		expect(p128).toBeGreaterThan(-1);
 		expect(p128).toBeLessThan(p129);
+		expect(p129).toBeLessThan(p127);
+		expect(p127).toBeLessThan(p126);
 		expect(html).toContain(
 			'<h2 id="p128-title" class="font-serif text-3xl font-semibold">Picked: the keyboard shortcuts list</h2>',
 		);
@@ -3726,10 +3768,10 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 // P129 (#80): the money input, state by state, drawn for the owner's pick. Proposal only: nothing in src/views changes.
 describe("GET /design-system/proposals, P129 (the money input, state by state, #80)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
-	// P129's section: from its heading to the first-week pick's (Home's budget list behind each sheet holds a section of its own).
+	// P129's section: from its heading to P127's (Home's budget list behind each sheet holds a section of its own).
 	const section = (html: string) => {
 		const start = html.indexOf('<section aria-labelledby="p129-title"');
-		const end = html.indexOf('<section aria-labelledby="polish5-title"');
+		const end = html.indexOf('<section aria-labelledby="p127-title"');
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
 		return html.slice(start, end);
@@ -3801,18 +3843,15 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		(chip.match(/<span class="([^"]*)"><svg/)?.[1] ?? "").split(" ");
 	const CHECK = "M20 6 9 17l-5-5";
 
-	it("sits after P126 and before the first-week pick, titled and dated as the brief asks", async () => {
+	it("sits after P128 and before P127 (decision 116), titled and dated as the brief asks", async () => {
 		const html = await drawn();
-		const p126 = html.indexOf(
-			'<section aria-labelledby="p126-title" class="mt-10">',
-		);
 		const start = html.indexOf(
 			'<section aria-labelledby="p129-title" class="mt-12">',
 		);
-		expect(p126).toBeGreaterThan(-1);
-		expect(start).toBeGreaterThan(p126);
+		expect(start).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(html.indexOf('<section id="p128-keys"'));
 		expect(start).toBeLessThan(
-			html.indexOf('<section aria-labelledby="polish5-title"'),
+			html.indexOf('<section aria-labelledby="p127-title"'),
 		);
 		expect(html).toContain(
 			'<h2 id="p129-title" class="font-serif text-3xl font-semibold">Picked: the money input</h2>',
@@ -4197,7 +4236,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			'<section aria-labelledby="audit2-picks-title" class="mt-12">',
 		);
 		expect(picked).toBeGreaterThan(
-			html.indexOf('<section aria-labelledby="p126-title"'),
+			html.indexOf('<section aria-labelledby="audit2-title"'),
 		);
 		expect(picked).toBeLessThan(
 			html.indexOf('<section aria-labelledby="p128-title"'),

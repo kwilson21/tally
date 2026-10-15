@@ -2358,7 +2358,7 @@ function Rows() {
 								month: "2026-10",
 							}}
 							months={[{ value: "2026-10", label: "October 2026" }]}
-							paidBy={{ name: "DMV", date: "2026-10-03", amountCents: 18000 }}
+							paidBy={{ name: "DMV", date: "Oct 3", amountCents: 18000 }}
 						/>
 					</SheetFrame>
 				</State>
