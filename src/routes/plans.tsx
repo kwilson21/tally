@@ -346,6 +346,11 @@ plans.post("/plans/:id/link", async (c) => {
 			type: "success",
 		});
 	}
+	// A plan paid by the time its link is sent says so first, as a paid bill month does (decision 82, #623).
+	// It is read again here, so a link that lands after the route's first load gets the same sentence.
+	const now = await loadPlan(c.env.DB, id);
+	if (!now) return c.notFound();
+	if (now.transactionId) return planPage(c, id, `${now.name} is already paid.`);
 	// The refusal names what the payment already pays, in the bill side's words (decision 82).
 	const paid = Number.isInteger(transaction)
 		? await paysBillOrPlan(c.env.DB, transaction)
