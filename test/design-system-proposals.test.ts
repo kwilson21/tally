@@ -1573,7 +1573,7 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		);
 		expect(options(chunk).length).toBe(3);
 		expect(options(chunk)[0]).toContain(
-			"Reference · Today on main: four boxes",
+			"Reference · Main until #600: four boxes",
 		);
 		expect(options(chunk)[1]).toContain(
 			"Reference · PR #545 as built: five boxes in one row",
@@ -1583,16 +1583,16 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		);
 	});
 
-	it("draws today's four boxes with the real BudgetDiagram at 1280 and at 390, and no Planned box", async () => {
+	it("draws the four boxes as main drew them until #600, at 1280 and at 390, and no Planned box", async () => {
 		const html = await drawn();
 		const [today = ""] = options(section(html));
 		expect(today).toContain(
-			'aria-label="Reference · Today on main: four boxes, on desktop"',
+			'aria-label="Reference · Main until #600: four boxes, on desktop"',
 		);
 		expect(today).toContain(
-			'aria-label="Reference · Today on main: four boxes, on a phone"',
+			'aria-label="Reference · Main until #600: four boxes, on a phone"',
 		);
-		// The real component, drawn once per width: each drawing has its own title and description ids.
+		// Each drawing is drawn once per width, with its own title and description ids.
 		expect(count(today, '<title id="p126-today-1280-title">')).toBe(1);
 		expect(count(today, '<title id="p126-today-390-title">')).toBe(1);
 		expect(html).not.toContain('id="budget-diagram-title"');
@@ -1707,12 +1707,12 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 			"The $3,940.00 budget minus $2,535.00 spent minus $1,062.49 for bills due minus $270.00 for planned expenses minus $50.00 for the savings goal leaves $22.51 safe to spend.";
 		const pictures: [label: string, frame: string, sum: string][] = [
 			[
-				"Reference · Today on main: four boxes, on desktop",
+				"Reference · Main until #600: four boxes, on desktop",
 				"p126-today-1280-frame",
 				today,
 			],
 			[
-				"Reference · Today on main: four boxes, on a phone",
+				"Reference · Main until #600: four boxes, on a phone",
 				"p126-today-390-frame",
 				today,
 			],
