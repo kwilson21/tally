@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { TYPE_ROLES } from "../src/design-system/tokens";
 import { netWorthView } from "../src/net-worth";
 import { AccountsTop } from "../src/views/accounts-top";
-import { headlineAmountClass } from "../src/views/headline-amount";
+import {
+	headlineAmountClass,
+	homeDrawingClass,
+} from "../src/views/headline-amount";
 import { HomeTop } from "../src/views/home-top";
 import { MonthEnd } from "../src/views/month-end";
 import { TrendsTop } from "../src/views/trends";
@@ -42,6 +45,27 @@ describe("headlineAmountClass", () => {
 		expect(
 			TYPE_ROLES.find((r) => r.role === "Headline amount")?.classes,
 		).not.toContain(RULE);
+	});
+});
+
+// Issue #500 (P127 A, decision 116): Home's notebook drawing follows the amount's length. Up to 7
+// characters it shows from 390px; 8 or more it shows from 640px, because the widest 8-character
+// amount never fits beside the drawing with 8px to spare at any phone width up to 430px.
+describe("homeDrawingClass", () => {
+	it("shows the drawing from 390px for 7 characters or fewer", () => {
+		expect(homeDrawingClass("$283")).toBe("min-[390px]:block");
+		expect(homeDrawingClass("−$9,999")).toBe("min-[390px]:block");
+	});
+
+	it("waits for 640px from 8 characters, the length where the amount stops fitting beside it", () => {
+		expect(homeDrawingClass("−$19,999")).toBe("sm:block");
+		expect(homeDrawingClass("$199,999")).toBe("sm:block");
+	});
+
+	it("leaves the drawing out below 640px for 9 or more characters", () => {
+		expect(homeDrawingClass("−$999,999")).toBe("sm:block");
+		expect(homeDrawingClass("$1,000,000")).toBe("sm:block");
+		expect(homeDrawingClass("−$1,000,000")).toBe("sm:block");
 	});
 });
 

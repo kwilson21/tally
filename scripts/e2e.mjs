@@ -1480,7 +1480,8 @@ const shownDollars = (text) => {
 	return (match[1] ? -1 : 1) * Number(match[2].replaceAll(",", ""));
 };
 const shownAt = async () => shownDollars(await safeToSpend.textContent());
-// The notebook drawing is the row's last child: display none below 390px, block from 390px.
+// The notebook drawing is the row's last child. For amounts of up to seven characters it is display none below 390px and
+// block from 390px; longer amounts leave it out below 640px (decision 116).
 const drawingDisplay = () =>
 	safeToSpend.evaluate(
 		(el) => getComputedStyle(el.closest("div.flex").lastElementChild).display,
@@ -1550,6 +1551,44 @@ assert(
 );
 step(
 	"at 390px the notebook drawing is back, and a negative Safe to spend keeps its minus sign on the number's line",
+);
+// #500 (P127 A, decision 116): −$19,999 is eight characters, and no eight-character amount fits beside the drawing with
+// 8px to spare at any phone width up to 430px, so the drawing waits for 640px and the amount has the whole row. The
+// savings goal rises by the gap from −$9,999 to −$19,999, the same write the steps above use.
+const shownLow = await shownAt();
+writeLocalD1(
+	`INSERT OR REPLACE INTO savings_goal_amounts (effective_month, amount_cents) SELECT '${homeMonth}', COALESCE((SELECT amount_cents FROM savings_goal_amounts WHERE effective_month <= '${homeMonth}' ORDER BY effective_month DESC LIMIT 1), 0) + ${(shownLow + 19999) * 100}`,
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+const eightText = await safeToSpend.textContent();
+assert(
+	eightText.startsWith("−$19,999"),
+	`Safe to spend at 390px shows ${eightText}, not −$19,999`,
+);
+assert.equal(
+	await drawingDisplay(),
+	"none",
+	"the notebook drawing shows beside a −$19,999 Safe to spend at 390px",
+);
+const eightRow = await safeToSpend.evaluate((el) => {
+	const row = el.closest("div.flex");
+	return { scroll: row.scrollWidth, client: row.clientWidth };
+});
+assert(
+	eightRow.scroll <= eightRow.client,
+	`the Safe to spend row overflows at 390px: ${eightRow.scroll}px needed in ${eightRow.client}px`,
+);
+const eightPageWidth = await page.evaluate(
+	() => document.documentElement.scrollWidth,
+);
+assert(
+	eightPageWidth <= 390,
+	`−$19,999 scrolls sideways at 390px: ${eightPageWidth}px`,
+);
+step(
+	"at 390px a −$19,999 Safe to spend leaves the notebook drawing out, and nothing scrolls sideways",
 );
 // #534: Organize's Save is disabled while it posts (hx-disable), so a double click files the group once and the
 // question keeps its own address. Each Save is held for a moment, so the second click lands while the first is in flight.

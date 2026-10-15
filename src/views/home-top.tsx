@@ -5,7 +5,7 @@ import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
-import { headlineAmountClass } from "./headline-amount";
+import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
 import { HowLink } from "./how-link";
 import { LedgerIllustration } from "./illustration";
 import { WhyLink } from "./why-link";
@@ -74,8 +74,8 @@ export function HomeTop({
 						)}
 					</p>
 				</div>
-				{/* Below 390px the notebook is left out so the amount has the whole row (#500, P127 A, decision 116). */}
-				<div class="hidden shrink-0 min-[390px]:block">
+				{/* Below 390px, and wider for longer amounts, the notebook is left out so the row never spills (#500, P127 A, decision 116). */}
+				<div class={`hidden shrink-0 ${homeDrawingClass(amount)}`}>
 					<LedgerIllustration />
 				</div>
 			</div>

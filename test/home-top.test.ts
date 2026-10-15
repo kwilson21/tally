@@ -61,6 +61,15 @@ describe("HomeTop", () => {
 		);
 	});
 
+	// Issue #500 (P127 A, decision 116): an 8-character amount (−$19,999) would spill beside the drawing at 390px,
+	// so its wrapper waits for 640px instead.
+	it("leaves the notebook drawing out below 640px for an 8-character amount (#500, P127 A)", async () => {
+		const html = await top({ safeToSpendCents: -1999900 });
+		expect(html).toContain('<span class="whitespace-nowrap">−$19,999</span>');
+		expect(html).toMatch(/<div class="hidden shrink-0 sm:block"><svg/);
+		expect(html).not.toMatch(/min-\[390px\]:block/);
+	});
+
 	it("keeps the label and Why? link when safe to spend is negative", async () => {
 		const html = await top({ safeToSpendCents: -12000 });
 		expect(html).toContain("Safe to spend");
