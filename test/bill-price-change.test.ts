@@ -783,6 +783,23 @@ describe("bill matching and price changes", () => {
 				await unchanged();
 			});
 
+			it("changes nothing, and throws nothing, when a plan takes a part of the payment after the offer was read", async () => {
+				// The payment is split after the offer was read: its parts make up the charge, and a plan takes one part.
+				await env.DB.batch([
+					env.DB.prepare(
+						"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,parent_id,is_split) VALUES(301,1,?,6000,'NETFLIX.COM',1,0),(302,1,?,5500,'NETFLIX.COM',1,0)",
+					).bind(paidOn, paidOn),
+					env.DB.prepare("UPDATE transactions SET is_split=1 WHERE id=1"),
+					env.DB.prepare(
+						"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Gift',6000,?,301,'demo')",
+					).bind(period.slice(0, 7)),
+				]);
+				expect(await accepts()).toBe(false);
+				await unchanged();
+				expect(await rows("bill_payments")).toEqual([]);
+				expect(await rows("bill_amounts", "amount_cents=11500")).toEqual([]);
+			});
+
 			it("changes nothing when the bill's amount was edited, or the charge corrected", async () => {
 				await env.DB.prepare("UPDATE bills SET amount_cents=20000").run();
 				expect(await accepts()).toBe(false);
