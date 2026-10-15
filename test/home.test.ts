@@ -1030,4 +1030,20 @@ describe("How this works at the foot of Home", () => {
 		expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
 		expect(html.slice(foot, sheet)).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
 	});
+
+	it("comes at the foot of a finished month's Home too, after its Budget and Not budgeted lists", async () => {
+		const past = monthsBefore(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), 1);
+		const { html } = await homeAt(past);
+		// The root route falls back to the current month for a bad ?month=, so prove the finished month rendered first.
+		expect(html).toContain("Back to ");
+		expect(html).not.toContain("Safe to spend");
+		const foot = html.search(FOOT);
+		expect(foot).toBeGreaterThan(-1);
+		const sheet = html.indexOf('id="sheet"');
+		expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
+		expect(html.slice(foot, sheet)).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
+		expect(html.match(/aria-label="How this works: the budget"/g)).toHaveLength(
+			1,
+		);
+	});
 });

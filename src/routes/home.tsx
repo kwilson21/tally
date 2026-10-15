@@ -480,7 +480,7 @@ async function renderHome(
 								</ul>
 							</section>
 						)}
-						{current && <HowFoot section="budget" />}
+						<HowFoot section="budget" />
 					</div>
 					<div id="sheet">
 						{sheet?.(spent, data.savingsGoalCents, transactionCount)}
