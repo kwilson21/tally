@@ -13,6 +13,7 @@ import { homeForecastDays } from "../src/db/home-forecast";
 import { loadMonth } from "../src/db/month";
 import {
 	holdPlanDelete,
+	linkPlanPayment,
 	PLAN_UNDO_MS,
 	plansSetAsideCents,
 	restorePlanDelete,
@@ -912,20 +913,6 @@ describe("Bills' Planned group, Band and sheet", () => {
 					.bind(dateIn(LAST_MONTH), id)
 					.run(),
 		},
-		{
-			change: "was split",
-			paymentId: 9785,
-			apply: (id: number) =>
-				saveSplit(
-					env.DB,
-					id,
-					[
-						{ categoryId: 1, amountCents: 8000 },
-						{ categoryId: 1, amountCents: 10000 },
-					],
-					"demo",
-				),
-		},
 	])(
 		"an Undo whose plan's payment $change restores the plan unpaid and set aside again",
 		async ({ paymentId, apply }) => {
@@ -951,6 +938,35 @@ describe("Bills' Planned group, Band and sheet", () => {
 			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
 		},
 	);
+
+	it("an Undo after the plan's payment was split brings the plan back on the whole payment, as a split keeps it", async () => {
+		const tx = await payment(9785, 18000);
+		const id = await plan("Car registration", 18000, MONTH, tx);
+		const deleted = await post(`/plans/${id}/delete`, {});
+		const token = (
+			JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { undo: string };
+			}
+		).toast.undo;
+		await saveSplit(
+			env.DB,
+			tx,
+			[
+				{ categoryId: 1, amountCents: 8000 },
+				{ categoryId: 1, amountCents: 10000 },
+			],
+			"demo",
+		);
+		const restored = await post("/plans/undo-delete", { token });
+		const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+		expect(trigger.toast.message).toBe("Restored Car registration.");
+		expect(trigger.announce).toBe("Restored Car registration.");
+		const row = await env.DB.prepare(
+			"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
+		).first<{ t: number | null }>();
+		expect(row?.t).toBe(tx);
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+	});
 });
 
 describe("editing a paid plan's month keeps its payment only while the payment can still pay that month (#202)", () => {
@@ -1156,6 +1172,110 @@ describe("a plan pays a part of a split payment, as a bill does", () => {
 			.first<{ t: number | null }>();
 		expect(kept?.t).toBe(tx);
 		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+	});
+
+	describe("a plan paid by the whole of a payment that is later split stays on the whole payment (Codex 4279039340)", () => {
+		// A $300 payment the plan pays whole, then split into a $120 and a $180 part.
+		async function splitPaidPlan(paymentId: number) {
+			const tx = await payment(paymentId, 30000);
+			const planId = await plan("Car registration", 18000, MONTH, tx);
+			await saveSplit(
+				env.DB,
+				tx,
+				[
+					{ categoryId: 1, amountCents: 12000 },
+					{ categoryId: 1, amountCents: 18000 },
+				],
+				"demo",
+			);
+			return { tx, planId };
+		}
+		const editPlan = (
+			planId: number,
+			fields: { name?: string; amount?: string },
+		) =>
+			post(`/plans/${planId}`, {
+				name: "Car registration",
+				amount: "180",
+				month: MONTH,
+				...fields,
+			});
+		const planTrigger = async (res: Response) =>
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
+				toast: { message: string };
+				announce: string;
+			};
+		const linkOf = async (planId: number) =>
+			(
+				await env.DB.prepare(
+					"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+				)
+					.bind(planId)
+					.first<{ t: number | null }>()
+			)?.t ?? null;
+
+		it("a name-only edit of the plan keeps its link to the whole payment, and says nothing about the link", async () => {
+			const { tx, planId } = await splitPaidPlan(9840);
+			const renamed = await planTrigger(
+				await editPlan(planId, { name: "Car rego" }),
+			);
+			expect(renamed.toast.message).toBe("Saved Car rego.");
+			expect(renamed.announce).toBe("Saved Car rego.");
+			expect(await linkOf(planId)).toBe(tx);
+			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+		});
+
+		it("an amount-only edit of the plan keeps its link to the whole payment, and says nothing about the link", async () => {
+			const { tx, planId } = await splitPaidPlan(9841);
+			const repriced = await planTrigger(
+				await editPlan(planId, { amount: "200" }),
+			);
+			expect(repriced.toast.message).toBe("Saved Car registration.");
+			expect(repriced.announce).toBe("Saved Car registration.");
+			expect(await linkOf(planId)).toBe(tx);
+			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(0);
+		});
+
+		it("an Undo of the plan's delete brings it back on the whole payment, and the toast says only that it was restored", async () => {
+			const { tx, planId } = await splitPaidPlan(9842);
+			const deleted = await post(`/plans/${planId}/delete`, {});
+			const token = (
+				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+					toast: { undo: string };
+				}
+			).toast.undo;
+			const restored = await planTrigger(
+				await post("/plans/undo-delete", { token }),
+			);
+			expect(restored.toast.message).toBe("Restored Car registration.");
+			expect(restored.announce).toBe("Restored Car registration.");
+			const row = await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
+			).first<{ t: number | null }>();
+			expect(row?.t).toBe(tx);
+		});
+
+		it("a new link to the split purchase is still refused, so a plan unpaid now can't take it", async () => {
+			const tx = await payment(9843, 30000);
+			await saveSplit(
+				env.DB,
+				tx,
+				[
+					{ categoryId: 1, amountCents: 12000 },
+					{ categoryId: 1, amountCents: 18000 },
+				],
+				"demo",
+			);
+			const planId = await plan("Lawn service", 30000, MONTH);
+			const refused = await post(`/plans/${planId}/link`, {
+				transaction_id: String(tx),
+			});
+			expect(await refused.text()).toContain(
+				"It may already pay a bill or a planned expense.",
+			);
+			expect(await linkOf(planId)).toBeNull();
+			expect(await linkPlanPayment(env.DB, planId, tx)).toBe(false);
+		});
 	});
 });
 
@@ -1878,4 +1998,114 @@ describe("a save whose plan is deleted mid-save says it is gone, not saved (Code
 			expect(left?.n).toBe(0);
 		},
 	);
+});
+
+describe("a cash entry's date that takes its plan's payment out of the plan's month unlinks the plan (Codex 4279039333)", () => {
+	const CASH_NAME = "PLAN CASH FIXTURE";
+	const unlinkedWords = (name: string) =>
+		`Saved ${tidyName(name)}. Its payment is no longer linked.`;
+	const linkOf = async (planId: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+			)
+				.bind(planId)
+				.first<{ t: number | null }>()
+		)?.t ?? null;
+	const editCash = (id: number, date: string, amount: string) =>
+		post(`/transactions/${id}`, { date, amount, back: "/transactions" });
+	const trigger = async (res: Promise<Response>) =>
+		JSON.parse((await res).headers.get("HX-Trigger") ?? "{}") as {
+			toast: { message: string };
+			announce: string;
+		};
+	/** A cash entry in the cash account, as Add cash stores one, dated `date`. */
+	async function cashEntry(amountCents: number, date: string) {
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO accounts (name,type) VALUES ('Cash','cash') ON CONFLICT(type) WHERE type='cash' DO NOTHING",
+			),
+			env.DB.prepare(
+				`INSERT INTO transactions (account_id,date,amount_cents,raw_name,category_id,category_source,flag_income,updated_by)
+				SELECT id,?,?,?,1,'user',0,'demo' FROM accounts WHERE type='cash'`,
+			).bind(date, amountCents, CASH_NAME),
+		]);
+		const row = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name = ? ORDER BY id DESC LIMIT 1",
+		)
+			.bind(CASH_NAME)
+			.first<{ id: number }>();
+		return row?.id ?? 0;
+	}
+	const splitInTwo = (id: number) =>
+		saveSplit(
+			env.DB,
+			id,
+			[
+				{ categoryId: 1, amountCents: 12000 },
+				{ categoryId: 1, amountCents: 18000 },
+			],
+			"demo",
+		);
+
+	it("moving a cash entry's date to the month before its plan's unlinks the plan, and the save says so", async () => {
+		const id = await cashEntry(18000, dateIn(MONTH));
+		const planId = await plan("Car registration", 18000, MONTH, id);
+		const moved = await trigger(editCash(id, dateIn(LAST_MONTH), "180"));
+		expect(moved.toast.message).toBe(unlinkedWords(CASH_NAME));
+		expect(moved.announce).toBe(unlinkedWords(CASH_NAME));
+		expect(await linkOf(planId)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
+	});
+
+	it("moving a cash entry's date within the plan's month keeps the link, and the save says nothing about it", async () => {
+		const id = await cashEntry(18000, dateIn(MONTH));
+		const planId = await plan("Car registration", 18000, MONTH, id);
+		const moved = await trigger(editCash(id, `${MONTH}-02`, "180"));
+		expect(moved.toast.message).toBe(`Saved ${tidyName(CASH_NAME)}`);
+		expect(moved.announce).toBe(`Saved ${tidyName(CASH_NAME)}.`);
+		expect(await linkOf(planId)).toBe(id);
+	});
+
+	it("moving a split cash entry out of the plan's month unlinks the plan on its part, because the parts' dates follow", async () => {
+		const id = await cashEntry(30000, dateIn(MONTH));
+		await splitInTwo(id);
+		const part = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE parent_id = ? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(id)
+				.first<{ id: number }>()
+		)?.id as number;
+		const planId = await plan("Car registration", 18000, MONTH, part);
+		const moved = await trigger(editCash(id, dateIn(LAST_MONTH), "300"));
+		expect(moved.toast.message).toBe(unlinkedWords(CASH_NAME));
+		expect(moved.announce).toBe(unlinkedWords(CASH_NAME));
+		expect(await linkOf(planId)).toBeNull();
+	});
+
+	it("a plan linked to a cash entry before the entry was split keeps its link on a move within the month, and unlinks on a move out", async () => {
+		const id = await cashEntry(30000, dateIn(MONTH));
+		const planId = await plan("Car registration", 18000, MONTH, id);
+		await splitInTwo(id);
+		const within = await trigger(editCash(id, `${MONTH}-02`, "300"));
+		expect(within.toast.message).toBe(`Saved ${tidyName(CASH_NAME)}`);
+		expect(await linkOf(planId)).toBe(id);
+		const out = await trigger(editCash(id, dateIn(LAST_MONTH), "300"));
+		expect(out.toast.message).toBe(unlinkedWords(CASH_NAME));
+		expect(await linkOf(planId)).toBeNull();
+	});
+
+	it("a refused cash save, with an amount below its linked refunds, unlinks nothing", async () => {
+		const id = await cashEntry(18000, dateIn(MONTH));
+		const planId = await plan("Car registration", 18000, MONTH, id);
+		await env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,refund_of_id,flag_income) SELECT 9850,id,?,-5000,'REFUND FIXTURE',?,0 FROM accounts WHERE type!='cash' LIMIT 1",
+		)
+			.bind(dateIn(MONTH), id)
+			.run();
+		const refused = await editCash(id, dateIn(LAST_MONTH), "40");
+		expect(refused.status).toBe(422);
+		expect(await linkOf(planId)).toBe(id);
+	});
 });

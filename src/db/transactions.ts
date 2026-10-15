@@ -69,6 +69,7 @@ import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
+import { unlinkUnfitCashPlanPaymentsSql } from "./planned-expenses";
 import {
 	movingSql,
 	refundedByOthersSql,
@@ -1028,9 +1029,10 @@ export const APPLY_MERCHANT_RULE_SQL = applyMerchantRuleSql("= ?");
  * purchase has left for the whole split. A cash amount is refused when it breaks its parts (`amountCents`
  * is the parts' total) or its linked refunds (`refundCents` is their total, the smallest amount that would
  * fit). With a split correction (saveEdit's splitEdit), a refused correction is `split`, and nothing was saved.
+ * `planUnlinked` says a cash date moved its plan's payment out of the plan's month, so the plan is set aside again.
  */
 export type SaveEditResult =
-	| { saved: true }
+	| { saved: true; planUnlinked?: true }
 	| {
 			saved: false;
 			refundLeftCents: number;
@@ -1066,6 +1068,9 @@ export type SaveEditResult =
  * statements run before the edit's, and its new parts after them. The edit's statements carry the correction's
  * gate (correctCashSplit's), so a refused correction saves nothing of the edit either, and it is returned as
  * `split`. An error anywhere in the batch rolls both back.
+ *
+ * A cash entry's new date that takes its plan's payment out of the plan's month unlinks the plan in the same batch
+ * (`planUnlinked`); the unlink is gated like the rest, so a refused save unlinks nothing.
  */
 export async function saveEdit(
 	db: D1Database,
@@ -1596,6 +1601,9 @@ export async function saveEdit(
 				"UPDATE transactions SET date = ?, updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
 				[edit.cashDate, actor, id],
 			),
+			// A plan paid by this entry or a part of it keeps its link only while the new date still fits its month
+			// (decision 82). It runs after the dates are written; its gate is the edit's, so a refused save unlinks nothing.
+			gated(unlinkUnfitCashPlanPaymentsSql(), [id], " RETURNING id"),
 		);
 	}
 	// A For person removed after the panel's household list loaded fails the details write on its foreign
@@ -1679,6 +1687,9 @@ export async function saveEdit(
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
+	// The unlink's statement returns its row when it set a plan aside.
+	if (cashChangeIndex !== null && own[cashChangeIndex + 2]?.results.length)
+		return { saved: true, planUnlinked: true };
 	return { saved: true };
 }
 

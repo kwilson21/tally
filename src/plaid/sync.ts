@@ -7,7 +7,10 @@ import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
 } from "../db/plaid-transfers";
-import { unlinkUnfitPlanPaymentsSql } from "../db/planned-expenses";
+import {
+	SYNCED_PAYMENTS_SQL,
+	unlinkUnfitPlanPaymentsSql,
+} from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -920,11 +923,9 @@ export async function syncItem(
 			);
 			if (ids.length > 0) {
 				statements.push(
-					env.DB.prepare(unlinkUnfitPlanPaymentsSql(OWNS_LOCK)).bind(
-						JSON.stringify(ids),
-						itemRowId,
-						lockId,
-					),
+					env.DB.prepare(
+						unlinkUnfitPlanPaymentsSql(SYNCED_PAYMENTS_SQL, OWNS_LOCK),
+					).bind(JSON.stringify(ids), itemRowId, lockId),
 				);
 			}
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row

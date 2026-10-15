@@ -4097,14 +4097,22 @@ async function savePanel(
 		: guessAgain
 			? `Kept the details for ${name}. ${GUESSES_AGAIN}`
 			: `Kept the details for ${name}.`;
-	const saveWords = (keptDetails ? keptWords : saved) + exclusion;
-	const toastMessage = unnamed
+	// A cash date that moved its plan's payment out of the plan's month unlinked the plan (saveEdit), and the save says so.
+	const planWords = result.planUnlinked
+		? " Its payment is no longer linked."
+		: "";
+	const saveWords = (keptDetails ? keptWords : saved) + exclusion + planWords;
+	const toastWords = unnamed
 		? keptDetails
 			? "Kept details."
 			: "Saved."
 		: keptDetails
 			? `Kept details for ${name}`
 			: `Saved ${name}`;
+	// The toast's name has no full stop, so the plan's sentence follows one; an unnamed toast already ends in one.
+	const toastMessage = result.planUnlinked
+		? `${unnamed ? toastWords : `${toastWords}.`}${planWords}`
+		: toastWords;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
