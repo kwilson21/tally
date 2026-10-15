@@ -2,7 +2,8 @@
 // and exits non-zero if any page logs a console error (spec §11 finish line: no console errors).
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
-import { PAGES, VIEWPORTS } from "./pr-body.mjs";
+import { captureWithRetries, sliceBands } from "./capture.mjs";
+import { PAGES, shotNames, VIEWPORTS } from "./pr-body.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://127.0.0.1:8787";
 // OUT lets CI also screenshot the base branch into its own folder for before-and-after.
@@ -16,6 +17,43 @@ const browser = await chromium.launch({
 const errors = [];
 const today = () => new Date().toISOString().slice(0, 10);
 const started = today();
+let saved = 0;
+
+// A page too tall for one capture, taken as slices of at most SLICE_HEIGHT (#580). Each slice is a
+// clip of the full page, in page pixels, and the page is measured the way Playwright measures one.
+async function sliceShots(tab, where) {
+	const size = await tab.evaluate(() => {
+		const sides = [document.body, document.documentElement];
+		return {
+			width: Math.max(
+				...sides.flatMap((el) => [
+					el.scrollWidth,
+					el.offsetWidth,
+					el.clientWidth,
+				]),
+			),
+			height: Math.max(
+				...sides.flatMap((el) => [
+					el.scrollHeight,
+					el.offsetHeight,
+					el.clientHeight,
+				]),
+			),
+		};
+	});
+	const bands = sliceBands(size.height);
+	console.warn(`${where}: ${bands.length} slices, ${size.height}px tall.`);
+	const shots = [];
+	for (const band of bands)
+		shots.push(
+			await tab.screenshot({
+				fullPage: true,
+				animations: "disabled",
+				clip: { x: 0, y: band.y, width: size.width, height: band.height },
+			}),
+		);
+	return shots;
+}
 
 for (const viewport of VIEWPORTS) {
 	const context = await browser.newContext({
@@ -41,16 +79,30 @@ for (const viewport of VIEWPORTS) {
 			continue;
 		}
 		// Retake until two shots in a row match, so a page caught mid-render doesn't count as a
-		// change in the before-and-after comparison (#60).
+		// change in the before-and-after comparison (#60). A shot is a list of PNGs: the whole
+		// page, or its slices when Chromium won't capture it whole (#580).
 		const shoot = () =>
-			tab.screenshot({ fullPage: true, animations: "disabled" });
-		let shot = await shoot();
+			captureWithRetries({
+				label: where,
+				capture: async () => [
+					await tab.screenshot({ fullPage: true, animations: "disabled" }),
+				],
+				fallback: () => sliceShots(tab, where),
+			});
+		let shots = await shoot();
 		for (let tries = 0; tries < 5; tries++) {
 			const again = await shoot();
-			if (again.equals(shot)) break;
-			shot = again;
+			if (
+				again.length === shots.length &&
+				again.every((shot, i) => shot.equals(shots[i]))
+			)
+				break;
+			shots = again;
 		}
-		await writeFile(`${OUT}/${page.name}-${viewport.name}.png`, shot);
+		const names = shotNames(page.name, viewport.name, shots.length);
+		for (const [i, shot] of shots.entries())
+			await writeFile(`${OUT}/${names[i]}`, shot);
+		saved += shots.length;
 		await tab.close();
 	}
 	await context.close();
@@ -67,4 +119,4 @@ if (errors.length > 0) {
 	console.error(`Console errors:\n${errors.join("\n")}`);
 	process.exit(1);
 }
-console.log(`Saved ${PAGES.length * VIEWPORTS.length} screenshots to ${OUT}/`);
+console.log(`Saved ${saved} screenshots to ${OUT}/`);

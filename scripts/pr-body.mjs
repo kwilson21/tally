@@ -53,6 +53,42 @@ export const VIEWPORTS = [
 	{ name: "phone", width: 390, height: 844 },
 ];
 
+/**
+ * The file names of one page at one size: `page-viewport.png` when it was taken whole, or
+ * `page-viewport-01.png`, `-02`, ... when it was taken in slices (#580).
+ * @param {string} page
+ * @param {string} viewport
+ * @param {number} count
+ * @returns {string[]}
+ */
+export function shotNames(page, viewport, count) {
+	if (count === 1) return [`${page}-${viewport}.png`];
+	return Array.from(
+		{ length: count },
+		(_, i) => `${page}-${viewport}-${String(i + 1).padStart(2, "0")}.png`,
+	);
+}
+
+// A file from shotNames: the page, the viewport, and the slice number when there are several.
+const SHOT = new RegExp(
+	`^(.+)-(${VIEWPORTS.map((v) => v.name).join("|")})(?:-(\\d+))?\\.png$`,
+);
+
+/**
+ * What a screenshot file shows: null for a file that isn't one.
+ * @param {string} file
+ * @returns {{ page: string, viewport: string, part: number | null } | null}
+ */
+function parseShot(file) {
+	const match = SHOT.exec(file);
+	if (!match) return null;
+	return {
+		page: match[1],
+		viewport: match[2],
+		part: match[3] === undefined ? null : Number(match[3]),
+	};
+}
+
 const START = "<!-- screenshots:start -->";
 const END = "<!-- screenshots:end -->";
 
@@ -109,22 +145,55 @@ export function comparisonProblem(after, before) {
 /**
  * The PR description's screenshot section: before and after for every changed image, then every
  * page at both sizes. `raw` is the URL of this run's folder; "before" images sit in `before/`.
- * `unavailable` is why there's no comparison this time (see comparisonProblem).
- * @param {{ sha: string, raw: string, changes: { file: string, hasBefore: boolean }[], unavailable?: string | null }} options
+ * `unavailable` is why there's no comparison this time (see comparisonProblem). `files` is every
+ * screenshot in this run, so a page taken in slices shows every slice (#580).
+ * @param {{ sha: string, raw: string, changes: { file: string, hasBefore: boolean }[], unavailable?: string | null, files?: string[] }} options
  * @returns {string}
  */
-export function screenshotSection({ sha, raw, changes, unavailable = null }) {
+export function screenshotSection({
+	sha,
+	raw,
+	changes,
+	unavailable = null,
+	files = [],
+}) {
 	const [desktop, phone] = VIEWPORTS;
 	const img = (path, alt, width) =>
 		`<img src="${raw}/${path}" width="${width}" alt="${alt}">`;
 	const label = (file) => {
-		for (const page of PAGES)
-			for (const viewport of VIEWPORTS)
-				if (file === `${page.name}-${viewport.name}.png`)
-					return `\`${page.path}\` (${viewport.name})`;
-		return file;
+		const shot = parseShot(file);
+		const page = PAGES.find((p) => p.name === shot?.page);
+		if (!shot || !page) return file;
+		const part = shot.part === null ? "" : `, part ${shot.part}`;
+		return `\`${page.path}\` (${shot.viewport}${part})`;
 	};
-	const width = (file) => (file.endsWith(`-${phone.name}.png`) ? 180 : 480);
+	const width = (file) =>
+		parseShot(file)?.viewport === phone.name ? 180 : 480;
+	// The files of one page at one size, in order: its slices, or its one whole-page file.
+	const shotsOf = (page, viewport) => {
+		const found = files
+			.map((file) => ({ file, shot: parseShot(file) }))
+			.filter(
+				({ shot }) =>
+					shot?.page === page.name && shot.viewport === viewport.name,
+			)
+			.sort((a, b) => (a.shot.part ?? 0) - (b.shot.part ?? 0))
+			.map(({ file }) => file);
+		return found.length > 0 ? found : shotNames(page.name, viewport.name, 1);
+	};
+	// A page taken in slices stacks all of them in one cell.
+	const cell = (page, viewport) => {
+		const parts = shotsOf(page, viewport);
+		return parts
+			.map((file, i) =>
+				img(
+					file,
+					`${page.name}, ${viewport.name}${parts.length > 1 ? `, part ${i + 1}` : ""}`,
+					width(file),
+				),
+			)
+			.join("<br>");
+	};
 
 	const beforeAfter = unavailable
 		? [`No before-and-after this time: ${unavailable}`]
@@ -152,8 +221,7 @@ export function screenshotSection({ sha, raw, changes, unavailable = null }) {
 		"| Page | Desktop | Phone |",
 		"|---|---|---|",
 		...PAGES.map(
-			(p) =>
-				`| \`${p.path}\` | ${img(`${p.name}-${desktop.name}.png`, `${p.name}, ${desktop.name}`, 480)} | ${img(`${p.name}-${phone.name}.png`, `${p.name}, ${phone.name}`, 180)} |`,
+			(p) => `| \`${p.path}\` | ${cell(p, desktop)} | ${cell(p, phone)} |`,
 		),
 		END,
 	].join("\n");

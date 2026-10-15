@@ -128,6 +128,43 @@ describe("comparisonProblem", () => {
 	});
 });
 
+describe("screenshotSection for a page taken in slices (#580)", () => {
+	const base = { sha: "abc1234def", raw: "https://raw.example/pr-9/abc1234" };
+	// Written in order by scripts/screenshots.mjs; listed out of order to check the sort.
+	const files = [
+		"design-system-proposals-phone-02.png",
+		"design-system-proposals-phone-01.png",
+		"design-system-proposals-desktop-01.png",
+		"design-system-proposals-desktop-02.png",
+		"settings-phone.png",
+	];
+
+	it("stacks every part of the page in order, at the same width as a whole page", () => {
+		const section = screenshotSection({ ...base, changes: [], files });
+		const first = section.indexOf(
+			'<img src="https://raw.example/pr-9/abc1234/design-system-proposals-phone-01.png" width="180"',
+		);
+		const second = section.indexOf(
+			'<img src="https://raw.example/pr-9/abc1234/design-system-proposals-phone-02.png" width="180"',
+		);
+		expect(first).toBeGreaterThan(-1);
+		expect(second).toBeGreaterThan(first);
+		expect(section).not.toContain("design-system-proposals-phone.png");
+	});
+
+	it("labels a changed part with its number and keeps the phone width", () => {
+		const section = screenshotSection({
+			...base,
+			changes: [
+				{ file: "design-system-proposals-phone-02.png", hasBefore: true },
+			],
+		});
+		expect(section).toContain(
+			'| `/design-system/proposals` (phone, part 2) | <img src="https://raw.example/pr-9/abc1234/before/design-system-proposals-phone-02.png" width="180"',
+		);
+	});
+});
+
 describe("screenshotSection when there's nothing to compare", () => {
 	it("gives the reason, shows no before-and-after rows, and keeps the full table", () => {
 		const section = screenshotSection({
