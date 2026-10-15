@@ -20,11 +20,15 @@ type Props = {
 	inputAttributes?: Record<string, string>;
 };
 
-/** The typed text in cents, or null when it isn't a dollar amount. */
+/**
+ * The typed text in cents, or null when it isn't a dollar amount this box can read. A negative amount
+ * is null too, as money.js reads it (the budget route refuses it), so the steps and Round to agree.
+ */
 function centsOf(text: string): number | null {
 	if (text.trim() === "") return 0;
 	try {
-		return toCents(text);
+		const cents = toCents(text);
+		return cents < 0 ? null : cents;
 	} catch {
 		return null;
 	}

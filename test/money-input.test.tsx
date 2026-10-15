@@ -124,6 +124,19 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
 	});
 
+	it.each(["-5", "-0.05"])(
+		"turns all four steps off for %s, which money.js can't read either, and hides Round to",
+		(value) => {
+			const html = renderToString(
+				<MoneyInput id="amount" name="amount" label="Budget" value={value} />,
+			);
+			for (const nudge of ["100", "1", "-1", "-100"]) {
+				expect(stepTag(html, nudge)).toMatch(/\sdisabled[\s>=]/);
+			}
+			expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
+		},
+	);
+
 	it("keeps every step on for a readable amount", () => {
 		const html = renderToString(
 			<MoneyInput id="amount" name="amount" label="Budget" value="612.40" />,
