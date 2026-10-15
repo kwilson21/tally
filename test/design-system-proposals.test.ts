@@ -4163,6 +4163,23 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			if (i > 0) expect(index, words[i]).toBeGreaterThan(at[i - 1] ?? -1);
 		}
 	};
+	// A's contents rows, each section's name then its live count, as More lists them (P122 A).
+	const CONTENTS_ROWS = [
+		"Categories",
+		"7 categories · $3,940 a month",
+		"Tally's rules",
+		"3 merchants",
+		"Household",
+		"Eastern · sign-in emails on",
+		"People",
+		"Everyone",
+		"AI suggestions",
+		"All on · 23 sorted in October",
+		"Your data",
+		"Download",
+	];
+	// Pet Care's rows, newest first, as the demo's Settings card and Suggestions page list them.
+	const PET_ROWS_NEWEST_FIRST = ["Banfield Pet Hospital", "Petsmart", "Chewy"];
 
 	it("opens the page with its audit section first, ahead of P127, titled and dated as the brief asks", async () => {
 		const html = await drawn();
@@ -4250,20 +4267,21 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			"Option A, contents, on a phone",
 		);
 		expect(contents).toContain("5 suggestions to check");
-		inOrder(contents, [
-			"Categories",
-			"7 categories · $3,940 a month",
-			"Tally's rules",
-			"3 merchants",
-			"Household",
-			"Eastern · sign-in emails on",
-			"People",
-			"Everyone",
-			"AI suggestions",
-			"All on · 23 sorted in October",
-			"Your data",
-			"Download",
-		]);
+		inOrder(contents, CONTENTS_ROWS);
+	});
+
+	it("draws A's contents at 1280 in a 900px window, so all six rows and Your data's Download show", async () => {
+		const settings = block(await drawn(), "p134-settings");
+		const desktop = picture(
+			optionOf(
+				settings,
+				"Option A · A contents page, each section its own page",
+			),
+			"Option A, contents, on desktop",
+		);
+		// The contents list needs about 650px; a 560px window cut off Your data.
+		expect(desktop).toContain("h-[900px]");
+		inOrder(desktop, CONTENTS_ROWS);
 	});
 
 	it("draws A's Household with a switch just flipped and its toast, and no Save button; today's Household keeps Save", async () => {
@@ -4294,14 +4312,27 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			),
 			"Option A, rules, on a phone",
 		);
-		expect(rules).toContain("City Gym · Always Household · 2 transactions");
+		// The demo's three Always rules, A to Z, as the local demo's Settings lists them (seed.ts).
+		inOrder(rules, [
+			"City Gym · Always Household · 2 transactions",
+			"Procreate Dreams · Always Household · 2 transactions",
+			"YouTube Premium · Always Household · 2 transactions",
+		]);
+		expect(rules).not.toContain("Costco");
+		expect(rules).not.toContain("Shell");
 		const remove = rules.match(/<a [^>]*class="([^"]*)"[^>]*>Remove<\/a>/);
 		expect(remove, "Remove as a link").not.toBeNull();
 		expect(remove?.[1]).toContain("text-muted");
 		expect(remove?.[1]).not.toContain("text-accent");
 		// The Remove link is a touch target, so it is at least 44px tall (CLAUDE.md, 44px touch targets).
 		expect(remove?.[1]).toContain("min-h-11");
-		expect(rules).toContain("Never suggest: none yet");
+		// The empty "Never suggest" is one muted line: its name, then the app's own sentence.
+		expect(rules).toMatch(
+			new RegExp(
+				`<p class="[^"]*text-muted[^"]*">${esc("Never suggest: Tally hasn't been told No yet.")}</p>`,
+			),
+		);
+		expect(rules).not.toContain("none yet");
 		expect(rules.match(/City Gym/g)?.length).toBe(1);
 	});
 
@@ -4395,6 +4426,14 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			expect(pic).toContain(esc("Tally's guess"));
 			expect(pic).toContain("Not now");
 		}
+		// The guess line is muted: the sparkles icon and "Tally's guess" in a text-muted paragraph, on every card.
+		for (const pic of [settingsCard, page, organize, desk]) {
+			expect(pic).toMatch(
+				new RegExp(
+					`<p class="[^"]*text-muted[^"]*">(?:(?!</p>)[\\s\\S])*${esc("Tally's guess")}</p>`,
+				),
+			);
+		}
 		expect(organize).toContain("Create Pet Care");
 		expect(organize).toContain(esc("Tally's guess"));
 		expect(organize).toContain(
@@ -4407,6 +4446,32 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			expect(pic).not.toContain("Dismiss");
 			expect(pic).not.toContain("Suggested: ");
 		}
+	});
+
+	it("lists Pet Care's rows newest first in every card and on the Suggestions pages, as the demo does", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const reference = optionOf(suggestions, "Reference · Today on main");
+		const option = optionOf(
+			suggestions,
+			"Option A · One card, one set of words, everywhere",
+		);
+		inOrder(
+			picture(reference, "Reference, Settings card, on a phone"),
+			PET_ROWS_NEWEST_FIRST,
+		);
+		// The Suggestions page names its stores in a headline above the rows, so only the rows (after the hint) are ordered here.
+		const page = picture(reference, "Reference, Suggestions page, on a phone");
+		const rowsAt = page.indexOf(esc("Untick any that don't belong."));
+		expect(rowsAt).toBeGreaterThan(-1);
+		inOrder(page.slice(rowsAt), PET_ROWS_NEWEST_FIRST);
+		inOrder(
+			picture(option, "Option A, Settings card, on a phone"),
+			PET_ROWS_NEWEST_FIRST,
+		);
+		inOrder(
+			picture(option, "Option A, Suggestions page, on a phone"),
+			PET_ROWS_NEWEST_FIRST,
+		);
 	});
 
 	it("draws B's Settings top with only the Band for suggestions, and B's Organize with one link above the chips", async () => {

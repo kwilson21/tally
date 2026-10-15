@@ -123,11 +123,11 @@ const PLACES: Place[] = [
 	},
 ];
 
-/** Tally's rules as Settings lists them: each merchant with its rule and how many transactions it covers. */
+/** Tally's rules as Settings lists them, A to Z: the demo's three subscriptions, each with its two charges (seed.ts). */
 const RULES = [
 	{ name: "City Gym", line: "Always Household · 2 transactions" },
-	{ name: "Costco", line: "Always Groceries · 6 transactions" },
-	{ name: "Shell", line: "Always Gas · 4 transactions" },
+	{ name: "Procreate Dreams", line: "Always Household · 2 transactions" },
+	{ name: "YouTube Premium", line: "Always Household · 2 transactions" },
 ];
 
 /** Settings' own links under the title, in the order B's line gives them. */
@@ -140,16 +140,16 @@ const TIDY_LINKS = [
 	"Your data",
 ];
 
-/** Pet Care's three transactions (reset.ts): Chewy, Petsmart and Banfield Pet Hospital, in August. */
+/** Pet Care's three transactions (reset.ts) newest first, as the demo's Settings card lists them: Banfield, Petsmart and Chewy, in August. */
 const PET_ROWS = [
-	tx(7101, "2026-08-08", "CHEWY.COM", 6412, undefined, {
-		displayName: "Chewy",
+	tx(7103, "2026-08-21", "BANFIELD PET HOSPITAL", 18900, undefined, {
+		displayName: "Banfield Pet Hospital",
 	}),
 	tx(7102, "2026-08-14", "PETSMART 0412", 2399, undefined, {
 		displayName: "Petsmart",
 	}),
-	tx(7103, "2026-08-21", "BANFIELD PET HOSPITAL", 18900, undefined, {
-		displayName: "Banfield Pet Hospital",
+	tx(7101, "2026-08-08", "CHEWY.COM", 6412, undefined, {
+		displayName: "Chewy",
 	}),
 ];
 
@@ -171,12 +171,12 @@ const PET_ITEM: Extract<SuggestionItem, { kind: "new_category" }> = {
 	date: "2026-08-21",
 	rows: [
 		{
-			transactionId: 7101,
-			date: "2026-08-08",
-			amountCents: 6412,
-			merchantKey: "chewy",
-			merchant: "Chewy",
-			label: "Chewy",
+			transactionId: 7103,
+			date: "2026-08-21",
+			amountCents: 18900,
+			merchantKey: "banfield pet hospital",
+			merchant: "Banfield Pet Hospital",
+			label: "Banfield Pet Hospital",
 		},
 		{
 			transactionId: 7102,
@@ -187,12 +187,12 @@ const PET_ITEM: Extract<SuggestionItem, { kind: "new_category" }> = {
 			label: "Petsmart",
 		},
 		{
-			transactionId: 7103,
-			date: "2026-08-21",
-			amountCents: 18900,
-			merchantKey: "banfield pet hospital",
-			merchant: "Banfield Pet Hospital",
-			label: "Banfield Pet Hospital",
+			transactionId: 7101,
+			date: "2026-08-08",
+			amountCents: 6412,
+			merchantKey: "chewy",
+			merchant: "Chewy",
+			label: "Chewy",
 		},
 	],
 	stores: [
@@ -436,7 +436,9 @@ function RulesPage() {
 					</li>
 				))}
 			</ul>
-			<p class="mt-6 text-muted">Never suggest: none yet</p>
+			<p class="mt-6 text-muted">
+				Never suggest: Tally hasn't been told No yet.
+			</p>
 		</>
 	);
 }
@@ -474,7 +476,7 @@ function TidyTop() {
 function OneCard() {
 	return (
 		<div class={CARD}>
-			<p class="flex items-center gap-1.5 text-sm">
+			<p class="flex items-center gap-1.5 text-sm text-muted">
 				<Icon name="sparkles" class="size-4" />
 				Tally's guess
 			</p>
@@ -508,7 +510,7 @@ function OneCard() {
 function OrganizeCard() {
 	return (
 		<div class={CARD}>
-			<p class="flex items-center gap-1.5 text-sm">
+			<p class="flex items-center gap-1.5 text-sm text-muted">
 				<Icon name="sparkles" class="size-4" />
 				Tally's guess
 			</p>
@@ -643,7 +645,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="The contents page at 1280, with the sidebar">
-						<Desk label="Option A, contents" current="settings">
+						<Desk label="Option A, contents" current="settings" tall={900}>
 							<ContentsPage />
 						</Desk>
 					</Shot>
