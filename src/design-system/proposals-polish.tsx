@@ -332,21 +332,14 @@ const CASH_VALUES = {
 	note: "",
 };
 
-/**
- * B's drawing only: the money box and its cent arrows with the 8px corners they had, found inside
- * the money input by their token classes, so the other fields keep theirs. The pick is A.
- */
-const EIGHT_PX =
-	"[&_[data-money]_.rounded-control]:rounded-lg [&_[data-money]_.rounded-tr-control]:rounded-tr-lg [&_[data-money]_.rounded-br-control]:rounded-br-lg";
-
 /** The Add cash sheet as the route draws it, with its list behind. */
-function AddCash({ p, corners }: { p: string; corners?: string }) {
+function AddCash({ p }: { p: string }) {
 	return (
 		<PanelSheet behind={behind} tall>
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">
 				Add cash spending
 			</h2>
-			<div class={corners}>
+			<div>
 				<CashForm
 					today={TODAY}
 					values={CASH_VALUES}
@@ -648,7 +641,7 @@ export function PolishProposals() {
 				id="p115-money-corners"
 				title="P115 · The money box's corners"
 				tier="visual"
-				sentence="The money box is the one field with 8px corners; every other input has 12px. Pick whether it matches them. Each is the Add cash sheet on a phone, with the money box over Date and Where."
+				sentence="The owner picked the money box's 12px corner, like every input (decision 85). Here is the Add cash sheet on a phone, with the money box over Date and Where."
 			>
 				<Fixed>
 					DESIGN.md's Radii rule: rounded-control (12px) for inputs, buttons,
@@ -667,14 +660,6 @@ export function PolishProposals() {
 								"one corner size for every control, and nothing left off the tokens.",
 							tall: true,
 							screen: <AddCash p="p115-a-cash" />,
-						},
-						{
-							name: "Option B · Keep 8px",
-							note: "As it was: the box and its arrows keep the original app's 8px, a little squarer than the fields under it.",
-							tradeoff:
-								"the one field off the tokens, and an exception in the design-token test.",
-							tall: true,
-							screen: <AddCash p="p115-b-cash" corners={EIGHT_PX} />,
 						},
 					]}
 				/>

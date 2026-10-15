@@ -64,18 +64,12 @@ const TOKEN_RADII = new Set(["control", "sheet", "full", "none"]);
 
 /**
  * Off-token classes that are allowed, each with its reason. Toasts are the one shadow (DESIGN.md).
- * P115 B draws the 8px corners the owner turned down (decision 85), with three overrides on the money
- * box in its drawing; only those exact classes are allowed.
+ * Corners have no exceptions: the money box uses rounded-control (decision 85, Q61 A).
  */
 const EXCEPTIONS: Record<string, string[]> = {
 	"../public/js/toast.js": ["shadow-sm"],
 	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
 	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
-	"../src/design-system/proposals-polish.tsx": [
-		"[&_[data-money]_.rounded-control]:rounded-lg",
-		"[&_[data-money]_.rounded-tr-control]:rounded-tr-lg",
-		"[&_[data-money]_.rounded-br-control]:rounded-br-lg",
-	],
 };
 
 /**
@@ -696,16 +690,24 @@ describe("design tokens (DESIGN.md)", () => {
 	});
 
 	it("allows an exception only as the exact class it names, variant and all", () => {
+		const file = "../public/js/toast.js";
+		// The toast's shadow-sm is allowed; the same shadow with a variant, or in another file, is not.
+		expect(problems(file, '<div class="shadow-sm">')).toEqual([]);
+		expect(problems(file, '<div class="hover:shadow-sm">')).toHaveLength(1);
+		expect(
+			problems("../src/views/chip.tsx", '<div class="shadow-sm">'),
+		).toHaveLength(1);
+	});
+
+	it("draws the money box's corners in rounded-control with no 8px override anywhere (decision 85)", () => {
 		const file = "../src/design-system/proposals-polish.tsx";
-		// P115 B's override is allowed; the same corner anywhere else in the file is not.
+		expect(EXCEPTIONS[file]).toBeUndefined();
 		expect(
 			problems(
 				file,
 				'<div class="[&_[data-money]_.rounded-control]:rounded-lg">',
 			),
-		).toEqual([]);
-		expect(problems(file, '<div class="rounded-lg">')).toHaveLength(1);
-		expect(problems(file, '<div class="sm:rounded-lg">')).toHaveLength(1);
+		).toHaveLength(1);
 	});
 
 	it("reads 'rounded up to the next $10' as prose, but a bare rounded class still fails in every file", () => {
