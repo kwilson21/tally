@@ -620,7 +620,7 @@ const ACCOUNTS: Place = {
 	desc: "Balances, net worth and your banks",
 };
 
-const PLACES: Place[] = [
+export const PLACES: Place[] = [
 	ACCOUNTS,
 	{
 		name: "Settings",
@@ -638,7 +638,7 @@ const PLACES: Place[] = [
 ];
 
 /** One place on the contents page: its icon, name, leader and folio, with what it holds under them. */
-function Entry({ place }: { place: Place }) {
+export function Entry({ place }: { place: Place }) {
 	return (
 		<a
 			href="#p122-more"

@@ -402,7 +402,8 @@ describe("GET /design-system/proposals", () => {
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
 			// screen per step or per state (decision 47), P120 and P121 with two or three. P119's options are rows of
 			// stills, checked in its own test, so they count none here. Counted per option, so one option can't lose
-			// its picture while another gains one, and every picture in the proposal must sit inside an option.
+			// its picture while another gains one, and every picture in the proposal must sit inside an option
+			// (P128's one shared picture, before its options, is the exception and is counted below).
 			const drawn = section
 				.split("<h4 ")
 				.slice(1)
@@ -417,9 +418,11 @@ describe("GET /design-system/proposals", () => {
 							: count === 1,
 				),
 			]).toEqual([id, true]);
+			// P128's one open More is shared, so it sits before the first option and is counted in none of them.
+			const shared = id === "p128-keys" ? 1 : 0;
 			expect([id, section.match(PICTURE)?.length ?? 0]).toEqual([
 				id,
-				drawn.reduce((sum, count) => sum + count, 0),
+				drawn.reduce((sum, count) => sum + count, 0) + shared,
 			]);
 		}
 		// P119's options are rows of stills (checked in its own test), so they draw no picture above.
@@ -3060,6 +3063,18 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			chunk.indexOf("</li>", at),
 		);
 	};
+	// One picture, from its label to the end of its figure, so no other picture or caption comes in.
+	const pictureOf = (chunk: string, label: string) => {
+		const at = chunk.indexOf(`role="img" aria-label="${label}"`);
+		expect(at, label).toBeGreaterThan(-1);
+		return chunk.slice(at, chunk.indexOf("</figure>", at));
+	};
+	// Every disclosure that holds the keys: its opening tag (attributes only) and its summary.
+	const keyDisclosures = (chunk: string) =>
+		[...chunk.matchAll(/<details([^>]*)><summary[\s\S]*?<\/summary>/g)].filter(
+			(m) => m[0].includes("Keyboard shortcuts"),
+		);
+	const isOpen = (attrs: string) => /\sopen\b/.test(attrs);
 
 	it("is the first proposal on the page, above P126", async () => {
 		const html = await drawn();
@@ -3113,32 +3128,89 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(3);
 	});
 
-	it("draws each option's pictures: A three (closed, open, a phone), B three, C two", async () => {
+	it("draws the one open More, shared by every option, above the options, with the whole ledger", async () => {
+		const chunk = section(await drawn());
+		const lead = chunk.indexOf(
+			'<p class="max-w-prose text-sm">In every option, below lg (a phone, a narrow window or a tablet with a keyboard), More&#39;s contents end in a Keyboard shortcuts row: the same details, opening the same ledger.</p>',
+		);
+		const at = chunk.indexOf(
+			'role="img" aria-label="All options, More with Keyboard shortcuts open, on a phone"',
+		);
+		const first = chunk.indexOf("<h4 ");
+		expect(lead).toBeGreaterThan(chunk.indexOf("Already fixed by the spec"));
+		expect(at).toBeGreaterThan(lead);
+		expect(at).toBeLessThan(first);
+		// Scrolled: it starts at the contents list, so no title sits above it.
+		const shared = chunk.slice(at, first);
+		expect(shared).not.toContain("<h1");
+		expect(shared.match(/to confirm/g)?.length).toBe(3);
+		expect(shared).toContain(
+			"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
+		);
+		// Exactly one More picture in the section is open, and it is this one.
+		const more = [
+			...chunk.matchAll(/role="img" aria-label="([^"]*More[^"]*)"/g),
+		].map((m) => m[1] ?? "");
+		expect(
+			more.filter((label) =>
+				/<details class="group"[^>]*\sopen\b/.test(pictureOf(chunk, label)),
+			),
+		).toEqual(["All options, More with Keyboard shortcuts open, on a phone"]);
+	});
+
+	it("draws each option's pictures: A three (closed, open, More), B three, C three", async () => {
 		const chunk = section(await drawn());
 		const a = option(chunk, "A · A sidebar");
 		const b = option(chunk, "B · At the foot");
 		const c = option(chunk, "C · A sheet");
 		expect(a.match(PICTURE)?.length).toBe(3);
 		expect(b.match(PICTURE)?.length).toBe(3);
-		expect(c.match(PICTURE)?.length).toBe(2);
+		expect(c.match(PICTURE)?.length).toBe(3);
 		expect(a).toContain(
 			'role="img" aria-label="A, the sidebar closed, on desktop"',
 		);
 		expect(a).toContain(
 			'role="img" aria-label="A, the sidebar open, on desktop"',
 		);
-		expect(a).toContain('role="img" aria-label="A, Home, on a phone"');
+		expect(a).toContain('role="img" aria-label="A, More, on a phone"');
 		expect(b).toContain(
 			'role="img" aria-label="B, the foot closed, on desktop"',
 		);
 		expect(b).toContain('role="img" aria-label="B, the foot open, on desktop"');
-		expect(b).toContain('role="img" aria-label="B, Home, on a phone"');
+		expect(b).toContain('role="img" aria-label="B, More, on a phone"');
 		expect(c).toContain(
 			'role="img" aria-label="C, the sheet over Home, on desktop"',
 		);
 		expect(c).toContain(
 			'role="img" aria-label="C, the fallback foot, on desktop"',
 		);
+		expect(c).toContain('role="img" aria-label="C, More, on a phone"');
+		expect(chunk).not.toMatch(/, Home, on a phone/);
+	});
+
+	it("draws More below lg in each option: Accounts, Settings, How Tally works, then Keyboard shortcuts closed, with the Feedback pill in the top line", async () => {
+		const chunk = section(await drawn());
+		for (const name of ["A", "B", "C"]) {
+			const more = pictureOf(chunk, `${name}, More, on a phone`);
+			expect(more, name).toContain(">More</h1>");
+			const at = [
+				"Accounts",
+				"Settings",
+				"How Tally works",
+				"Keyboard shortcuts",
+			].map((words) => more.indexOf(words));
+			expect(
+				at.every((i) => i > -1),
+				name,
+			).toBe(true);
+			expect(at, name).toEqual([...at].sort((x, y) => x - y));
+			expect(more, name).toMatch(/<details class="group">/);
+			expect(more, name).not.toMatch(/<details class="group"[^>]*\sopen\b/);
+			expect(more, name).not.toContain("Show these keys");
+			expect(more.slice(0, more.indexOf("<h1")), name).toContain(
+				'href="/feedback"',
+			);
+		}
 	});
 
 	it("draws the same ledger of keys in each open list, with its words and to-confirm tags on Enter, the arrows and u", async () => {
@@ -3167,6 +3239,92 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 				"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
 			);
 		}
+	});
+
+	it("gives every Keyboard shortcuts disclosure a group, a chevron that turns when open, and the marker hidden", async () => {
+		const chunk = section(await drawn());
+		const found = keyDisclosures(chunk);
+		// Nine: A's sidebar (closed, open), B's foot (closed, open), C's fallback foot, three closed More rows and the shared open More.
+		const summaries = chunk.match(/<summary[\s\S]*?<\/summary>/g) ?? [];
+		expect(
+			summaries.filter((s) => s.includes("Keyboard shortcuts")).length,
+		).toBe(9);
+		expect(found.length).toBe(9);
+		for (const m of found) {
+			expect(m[1], m[0]).toContain('class="group"');
+			expect(m[0], m[0]).toContain("m9 18 6-6-6-6");
+			expect(m[0], m[0]).toContain("group-open:rotate-90");
+			expect(m[0], m[0]).toContain("list-none");
+			expect(m[0], m[0]).toContain("[&amp;::-webkit-details-marker]:hidden");
+		}
+		// Open: A's sidebar, B's foot and the shared More.
+		expect(found.filter((m) => isOpen(m[1] ?? "")).length).toBe(3);
+	});
+
+	it("draws the full sidebar in every desktop picture, with Keyboard shortcuts in the sidebar only in A's", async () => {
+		const chunk = section(await drawn());
+		const desktop = [
+			...chunk.matchAll(/role="img" aria-label="([^"]*, on desktop)"/g),
+		].map((m) => m[1] ?? "");
+		expect(desktop.length).toBe(6);
+		for (const label of desktop) {
+			const frame = pictureOf(chunk, label);
+			const aside = frame.slice(
+				frame.indexOf("<aside"),
+				frame.indexOf("</aside>"),
+			);
+			expect(aside, label).toContain("How Tally works");
+			expect(aside, label).toContain("Feedback");
+			expect(aside.includes("Keyboard shortcuts"), label).toBe(
+				label.startsWith("A, "),
+			);
+		}
+	});
+
+	it("draws B's foot and C's fallback foot with How this works as the short-ruled link", async () => {
+		const chunk = section(await drawn());
+		for (const label of [
+			"B, the foot closed, on desktop",
+			"B, the foot open, on desktop",
+			"C, the fallback foot, on desktop",
+		]) {
+			const frame = pictureOf(chunk, label);
+			expect(frame, label).toContain('aria-label="How this works: the budget"');
+			expect(frame, label).toContain("w-12 border-t border-muted");
+			expect(frame, label).not.toContain("underline underline-offset-4");
+			expect(frame.indexOf("How this works")).toBeLessThan(
+				frame.indexOf("Keyboard shortcuts"),
+			);
+		}
+	});
+
+	it("gives C's sheet a Close button in a footer under the ledger", async () => {
+		const chunk = section(await drawn());
+		const sheet = pictureOf(chunk, "C, the sheet over Home, on desktop");
+		const ledgerEnd = sheet.indexOf(
+			"Keys don&#39;t work while you&#39;re typing in a field.",
+		);
+		expect(ledgerEnd).toBeGreaterThan(-1);
+		const footer = sheet.indexOf("border-t border-rule", ledgerEnd);
+		expect(footer).toBeGreaterThan(ledgerEnd);
+		expect(sheet.slice(footer)).toMatch(
+			/<button type="button" class="[^"]*\bw-full\b[^"]*">Close<\/button>/,
+		);
+	});
+
+	it("gives each option its note, with where its list sits below lg, and no line about phones showing nothing", async () => {
+		const chunk = section(await drawn());
+		expect(chunk).not.toContain("Phones show nothing");
+		expect(chunk).not.toContain("Phones don&#39;t show it");
+		expect(option(chunk, "A · A sidebar")).toContain(
+			"On desktop, the sidebar&#39;s second group gains a third line, Keyboard shortcuts, with a keyboard icon. Opening it drops the ledger down inside the sidebar; ? opens it and moves focus to its summary. Below lg the sidebar is hidden, so ? opens More&#39;s Keyboard shortcuts row instead (from another page, it goes to More with the row open).",
+		);
+		expect(option(chunk, "B · At the foot")).toContain(
+			"On desktop, Keyboard shortcuts sits at the foot of every page, under How this works, and opens downward. ? opens it and scrolls it into view. Below lg the foot is hidden, so ? opens More&#39;s Keyboard shortcuts row instead (from another page, it goes to More with the row open).",
+		);
+		expect(option(chunk, "C · A sheet")).toContain(
+			"? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the page shows B&#39;s foot details on desktop and More&#39;s Keyboard shortcuts row below lg.",
+		);
 	});
 
 	it("adds no client JavaScript to the section", async () => {
