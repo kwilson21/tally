@@ -504,6 +504,47 @@ describe("plaid-link.js", () => {
 		expect(h.button.focus).not.toHaveBeenCalled();
 	});
 
+	it("on Home, a failed page refresh after linking says the page didn't refresh, not the list", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							announce:
+								"First Bank is linked. Tally's reading your last 90 days.",
+						}),
+					},
+				});
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
+			homeRefreshResponse: { ok: false, text: async () => "Refresh failed." },
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.children).toEqual([
+			expect.objectContaining({
+				role: "alert",
+				textContent:
+					"First Bank is linked. Tally's reading your last 90 days, but the page didn't refresh. Reload the page to see it.",
+			}),
+		]);
+		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
+			([event]) => event.type === "announce",
+		);
+		expect(announcements).toHaveLength(1);
+		expect(h.currentPage.replaceWith).not.toHaveBeenCalled();
+		expect(h.status.focus).not.toHaveBeenCalled();
+		expect(h.button.focus).not.toHaveBeenCalled();
+		expect(h.button.disabled).toBe(false);
+	});
+
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {
 		const h = harness();
 		delete (globalThis as { Plaid?: unknown }).Plaid;
@@ -635,6 +676,38 @@ describe("plaid-link.js", () => {
 		expect(h.button.disabled).toBe(false);
 		expect(h.button.focus).not.toHaveBeenCalled();
 		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+	});
+
+	it("on Accounts, a failed list refresh while the household is setting up still says the list", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							announce:
+								"First Bank is linked. Tally's reading your last 90 days.",
+						}),
+					},
+				});
+			}
+		});
+		const h = harness({
+			ajax,
+			refreshResponse: { ok: false, text: async () => "Refresh failed." },
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.children).toEqual([
+			expect.objectContaining({
+				role: "alert",
+				textContent:
+					"First Bank is linked. Tally's reading your last 90 days, but the list didn't refresh. Reload the page to see it.",
+			}),
+		]);
 	});
 
 	it("leaves the summary unchanged and reports a refresh network error", async () => {

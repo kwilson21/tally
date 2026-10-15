@@ -188,7 +188,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		if (linking) return;
 		// What a success redraws: Accounts' list by default; Home sets its own page (LinkBank's data attributes).
 		const refreshUrl = button.dataset?.linkBankRefresh || "/accounts";
-		const target = button.dataset?.linkBankTarget || "#accounts-summary";
+		const refreshTarget = button.dataset?.linkBankTarget || "#accounts-summary";
 		const busy = (value) => {
 			linking = value;
 			const live = document.querySelector("[data-link-bank]");
@@ -269,8 +269,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 									await refreshResponse.text(),
 									"text/html",
 								);
-								const newSummary = parsed.querySelector(target);
-								const currentSummary = document.querySelector(target);
+								const newSummary = parsed.querySelector(refreshTarget);
+								const currentSummary = document.querySelector(refreshTarget);
 								if (newSummary && currentSummary) {
 									currentSummary.replaceWith(newSummary);
 									htmx.process(newSummary);
@@ -290,8 +290,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						}
 						if (!refreshed) {
 							const bank = announcement?.replace(/[.!?]$/, "") || "Bank linked";
+							const stale =
+								refreshTarget === "#accounts-summary" ? "list" : "page";
 							showAlert(
-								`${bank}, but the list didn't refresh. Reload the page to see it.`,
+								`${bank}, but the ${stale} didn't refresh. Reload the page to see it.`,
 							);
 							return;
 						}
