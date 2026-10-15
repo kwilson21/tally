@@ -10,6 +10,7 @@ import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
+import { MoneyInputProposal } from "./proposals-money";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -492,6 +493,8 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<MoneyInputProposal />
 
 			<section aria-labelledby="p126-title" class="mt-10">
 				<h2 id="p126-title" class="font-serif text-3xl font-semibold">
