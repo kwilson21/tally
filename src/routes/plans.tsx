@@ -405,6 +405,9 @@ plans.post("/plans/:id/move", async (c) => {
 	);
 });
 
+/** The answer for a plan that is gone when a person acts on it (a delete, or a save that finds it deleted). */
+const PLAN_GONE = "That planned expense is already gone.";
+
 /** Deletes a plan, and offers Undo for ten seconds (decision 101), like a cash entry. */
 async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const id = Number(c.req.param("id"));
@@ -417,7 +420,7 @@ async function deletePlan(c: Context<App>, verb: "Deleted" | "Dropped") {
 	const response = atBills(await billsPage(c, undefined, today));
 	if (!token) {
 		return withToast(response, {
-			message: "That planned expense is already gone.",
+			message: PLAN_GONE,
 			type: "error",
 		});
 	}
@@ -454,7 +457,15 @@ plans.post("/plans/:id", async (c) => {
 	);
 	if (Object.keys(errors).length > 0)
 		return sheetPage(c, { plan, values, errors, opener }, today);
-	const { unlinked } = await updatePlan(c.env.DB, id, fields);
+	const { saved, unlinked } = await updatePlan(c.env.DB, id, fields);
+	// Deleted after this save read it: the answer is the gone one a delete gives, never "Saved" or the plan's address (#202).
+	if (!saved) {
+		if (!c.req.header("HX-Request")) return c.redirect("/bills", 303);
+		return withToast(atBills(await billsPage(c, undefined, today)), {
+			message: PLAN_GONE,
+			type: "error",
+		});
+	}
 	const message = `Saved ${fields.name}.${unlinked ? " Its payment is no longer linked." : ""}`;
 	if (opener) {
 		if (!c.req.header("HX-Request"))

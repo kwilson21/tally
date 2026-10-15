@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
@@ -1834,4 +1834,48 @@ describe("a plan's answer names its address: Bills, or the plan's own page after
 		});
 		expect(fromBills.headers.get("HX-Push-Url")).toBe("/bills");
 	});
+});
+
+describe("a save whose plan is deleted mid-save says it is gone, not saved (Codex 4278749957)", () => {
+	const gone = "That planned expense is already gone.";
+	const save = (id: number, opener: boolean) =>
+		post(`/plans/${id}`, {
+			name: "Car registration",
+			amount: "180",
+			month: MONTH,
+			...(opener ? { opener: "plan" } : {}),
+		});
+
+	it.each([
+		{ origin: "the plan's own page", opener: true },
+		{ origin: "Bills", opener: false },
+	])(
+		"a save from $origin that finds its plan gone answers with the gone toast, with no Saved and no plan address",
+		async ({ opener }) => {
+			const id = await plan("Car registration", 18000, MONTH);
+			// Another request deletes the plan after this save read it and before the save writes it.
+			const realBatch = env.DB.batch.bind(env.DB);
+			const spy = vi
+				.spyOn(env.DB, "batch")
+				.mockImplementationOnce(async (statements) => {
+					await env.DB.prepare("DELETE FROM planned_expenses WHERE id = ?")
+						.bind(id)
+						.run();
+					return realBatch(statements);
+				});
+			const answer = await save(id, opener).finally(() => spy.mockRestore());
+
+			expect(
+				JSON.parse(answer.headers.get("HX-Trigger") ?? "{}").toast,
+			).toEqual({ message: gone, type: "error" });
+			expect(answer.headers.get("HX-Trigger")).not.toContain("Saved");
+			expect(answer.headers.get("HX-Push-Url")).toBe("/bills");
+			const left = await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM planned_expenses WHERE id = ?",
+			)
+				.bind(id)
+				.first<{ n: number }>();
+			expect(left?.n).toBe(0);
+		},
+	);
 });
