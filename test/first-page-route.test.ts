@@ -6,6 +6,11 @@ import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import {
+	answerPay,
+	type PayMerchant,
+	payMerchants,
+} from "../src/first-tally/first-page";
 import { firstPage } from "../src/routes/first-page";
 
 // The question page at /first-page (P125 E, spec §8.8, decision 114): one question at a time, each answer written
@@ -18,8 +23,11 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 /** Stroke one was drawn two days ago, so the questions are open today (the household day after it, spec §8.8). */
 const STROKE_ONE = daysBefore(TODAY, 2);
 
-/** The app with the page mounted, as the family app serves it (`demo` decides the 404), with a verified identity. */
-function app(demo: boolean) {
+/**
+ * The app with the page mounted, as the family app serves it (`demo` decides the 404), with a verified identity.
+ * `DB` is the database the page reads and writes (the test's own unless a test wraps it).
+ */
+function app(demo: boolean, DB: D1Database = db) {
 	const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 	router.use("*", async (c, next) => {
 		c.set("actor", "person@example.com");
@@ -30,7 +38,7 @@ function app(demo: boolean) {
 		fetch(path: string, init?: RequestInit) {
 			return router.fetch(
 				new Request(BASE + path, init),
-				{ ...env, DEMO: demo ? "true" : "false" } as unknown as Env,
+				{ ...env, DB, DEMO: demo ? "true" : "false" } as unknown as Env,
 				{ waitUntil() {}, passThroughOnException() {}, props: {} },
 			);
 		},
@@ -322,16 +330,89 @@ describe("Yes and No writes", () => {
 				"SELECT updated_at FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all();
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "no",
-		});
+		const { res } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP PAYROLL", answer: "no" },
+			true,
+		);
+		expect(trigger(res).toast?.type).toBe("info");
 		const after = await db
 			.prepare(
 				"SELECT updated_at FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
 			)
 			.all();
 		expect(after.results).toEqual(before.results);
+		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.answer).toBe(
+			"yes",
+		);
+	});
+
+	it("a second answer from a stale read changes nothing and leaves the first's record and flags agreeing", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		expect(
+			await answerPay(db, merchant, "yes", "person@example.com"),
+		).toBeGreaterThan(0);
+		expect(await answerPay(db, merchant, "no", "person@example.com")).toBe(0);
+		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]).toEqual({
+			answer: "yes",
+			deposits: merchant.deposits,
+		});
+		const rows = await db
+			.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
+			)
+			.all<{ flag_income: number; income_source: string }>();
+		expect(
+			rows.results.every(
+				(row) => row.flag_income === 1 && row.income_source === "user",
+			),
+		).toBe(true);
+	});
+
+	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		let raced = false;
+		// The competing Yes lands just before this reply's own batch, so the reply's No changes no row.
+		const racing = new Proxy(db, {
+			get(target, prop) {
+				if (prop === "batch" && !raced) {
+					return async (statements: D1PreparedStatement[]) => {
+						raced = true;
+						await answerPay(target, merchant, "yes", "person@example.com");
+						return target.batch(statements);
+					};
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const res = await app(false, racing).fetch("/first-page/pay", {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				"HX-Request": "true",
+			},
+			body: new URLSearchParams({
+				merchant: "ACME CORP PAYROLL",
+				answer: "no",
+			}).toString(),
+		});
+		const html = await res.text();
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+		expect(trigger(res).announce).toBe("That one is already answered.");
+		expect(html).not.toContain("Saved");
+		expect(html).not.toContain("Is this your pay?");
+		expect(textOf(html)).toMatch(/Pay · /);
+		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.answer).toBe(
+			"yes",
+		);
 	});
 });
 
@@ -444,10 +525,54 @@ describe("the bank's head lines, before any answer", () => {
 			raw_name: "TRANSFER TO SAVINGS",
 			amount_cents: 20000,
 			flag_transfer: 1,
+			excluded: 1,
+			excluded_source: "plaid",
 		});
+		// A transfer put back in the budget is not left out: it counts as spending, so it isn't "left out".
+		await txn({
+			date: daysBefore(TODAY, 2),
+			raw_name: "TRANSFER BACK IN",
+			amount_cents: 3000,
+			flag_transfer: 1,
+			excluded: 0,
+			excluded_source: "user",
+		});
+		// A transfer that pays a bill counts once as the bill, so it isn't "left out" either.
+		await txn({
+			date: daysBefore(TODAY, 1),
+			raw_name: "TRANSFER TO PHONE",
+			amount_cents: 6000,
+			flag_transfer: 1,
+			excluded: 1,
+			excluded_source: "jev",
+		});
+		await insertBill(
+			db,
+			{
+				name: "Phone",
+				amountCents: 6000,
+				dueDay: 5,
+				frequency: "monthly",
+				anchorMonth: null,
+				categoryId: await categoryId(),
+				merchantRawName: "PHONE CO",
+			},
+			TODAY,
+		);
+		const phone = await db
+			.prepare(
+				"SELECT t.id AS txn, b.id AS bill FROM transactions t, bills b WHERE t.raw_name = 'TRANSFER TO PHONE' AND b.name = 'Phone'",
+			)
+			.first<{ txn: number; bill: number }>();
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'auto', 'linked')",
+			)
+			.bind(phone?.bill, TODAY.slice(0, 7), phone?.txn)
+			.run();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain(
-			`From Chase · 3 lines · ${shortDay(first, TODAY)} to ${shortDay(TODAY, TODAY)}`,
+			`From Chase · 5 lines · ${shortDay(first, TODAY)} to ${shortDay(TODAY, TODAY)}`,
 		);
 		expect(textOf(html)).toContain("Moves between your accounts · 1 left out");
 	});
@@ -547,7 +672,7 @@ describe("the answer's motion", () => {
 			/class="py-2 text-ink first-line-new">Pay · Acme Corp,/,
 		);
 		expect(html).not.toMatch(/first-line-new">Pay · Zed Co/);
-		// The ledger is in answer order: Zed was answered first, though its name sorts after Acme's.
+		// The ledger is in the order each merchant was first answered: Zed was answered first, though its name sorts after Acme's.
 		expect(html.indexOf("Pay · Zed Co")).toBeLessThan(
 			html.indexOf("Pay · Acme Corp"),
 		);
@@ -728,6 +853,42 @@ describe("the bills ledger line reads what the step recorded", () => {
 	});
 });
 
+describe("a Keep that fails part-way", () => {
+	it("still counts the bill it kept, and a retry counts the rest", async () => {
+		await charge("NETFLIX", 1549);
+		await charge("SPOTIFY", 1199);
+		// The first bill goes in; the second is refused by the database, so the Keep errors after one bill.
+		await db
+			.prepare(
+				"CREATE TRIGGER fail_keep BEFORE INSERT ON bills WHEN (SELECT COUNT(*) FROM bills) > 0 BEGIN SELECT RAISE(ABORT, 'forced'); END",
+			)
+			.run();
+		try {
+			const failed = await post("/first-page/bills", {});
+			expect(failed.res.status).toBe(500);
+		} finally {
+			await db.prepare("DROP TRIGGER IF EXISTS fail_keep").run();
+		}
+		const kept = await db
+			.prepare("SELECT amount_cents FROM bills")
+			.all<{ amount_cents: number }>();
+		expect(kept.results).toHaveLength(1);
+		expect((await readFirstTally(db))?.bills).toEqual({
+			kept: 1,
+			cents: kept.results[0]?.amount_cents,
+		});
+
+		const { res, html } = await post("/first-page/bills", {}, true);
+		expect(trigger(res).toast?.message).toBe("Kept 1 bill.");
+		expect((await readFirstTally(db))?.bills).toEqual({
+			kept: 2,
+			cents: 2748,
+		});
+		expect((await readFirstTally(db))?.strokes.bills).toBe(TODAY);
+		expect(textOf(html)).toContain("Bills · 2 kept, about $27 a month");
+	});
+});
+
 describe("the pay question's scope", () => {
 	it("asks a flagged income that a credit review reviewed, and Yes writes the person's choice", async () => {
 		await deposits("CREDIT PAY", 245000, 2, 14, {
@@ -745,6 +906,35 @@ describe("the pay question's scope", () => {
 		expect(rows.results.every((row) => row.income_source === "user")).toBe(
 			true,
 		);
+	});
+
+	it("doesn't ask an excluded deposit or a transfer in, and answering either changes no row", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2, 14, {
+			excluded: 1,
+			excluded_source: "jev",
+		});
+		await deposits("XFER FROM SAVINGS", 50000, 2, 14, { flag_transfer: 1 });
+		const { html } = await get("/first-page");
+		expect(html).not.toContain("Is this your pay?");
+		expect(textOf(html)).toContain(
+			"Tally didn't spot a paycheck. You can mark one from any transaction later.",
+		);
+		const rows = () =>
+			db
+				.prepare(
+					"SELECT id, flag_income, income_source, excluded, flag_transfer FROM transactions WHERE raw_name IN ('ACME CORP PAYROLL', 'XFER FROM SAVINGS') ORDER BY id",
+				)
+				.all();
+		const before = await rows();
+		await post("/first-page/pay", {
+			merchant: "ACME CORP PAYROLL",
+			answer: "yes",
+		});
+		await post("/first-page/pay", {
+			merchant: "XFER FROM SAVINGS",
+			answer: "no",
+		});
+		expect((await rows()).results).toEqual(before.results);
 	});
 
 	it("asks a flagged income the person reviewed as a credit, since only the answer settles it", async () => {

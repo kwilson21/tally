@@ -30,10 +30,10 @@ function notOpen(c: Context<App>) {
 }
 
 /**
- * What the answer changed between the page before it and the page after: the ledger line it wrote (its index; the ledger
- * is in answer order, the pay lines first and then the bills line), and the strokes it drew. The strokes are the next
- * indexes after the `drawn` already there (the bank's stroke is index 0, so the first drawn after it is index 1). One
- * answer can draw two, when the step after it has nothing to ask.
+ * What the answer changed between the page before it and the page after: the ledger line it wrote (its index; the
+ * ledger is in the order each merchant was first answered, the pay lines first and then the bills line), and the
+ * strokes it drew. The strokes are the next indexes after the `drawn` already there (the bank's stroke is index 0, so
+ * the first drawn after it is index 1). One answer can draw two, when the step after it has nothing to ask.
  */
 function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
 	const written = after.ledger.findIndex(
@@ -48,20 +48,32 @@ function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
 	};
 }
 
-/** The page after an answer: the swap, and the answer announced and toasted (both keys, spec CLAUDE.md). */
+/**
+ * The page after a reply: the swap, and the reply announced and toasted (both keys, spec CLAUDE.md). The toast is a
+ * success when an answer was written, and info when the reply changed nothing (`stale`).
+ */
 function answered(
 	c: Context<App>,
 	model: FirstPageModel,
 	message: string,
 	motion: Motion,
+	type: "success" | "info" = "success",
 ) {
 	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
 	return c.html(<FirstPageBody model={model} focus motion={motion} />, 200, {
 		"HX-Trigger": hxTrigger({
-			toast: { message, type: "success" },
+			toast: { message, type },
 			announce: message,
 		}),
 	});
+}
+
+/**
+ * The reply to an answer that changed nothing: its merchant has nothing left to ask, or a competing answer got there
+ * first. It writes nothing, so the page is the page as it is now with no motion, and the toast is info, not a success.
+ */
+function stale(c: Context<App>, model: FirstPageModel) {
+	return answered(c, model, "That one is already answered.", NO_MOTION, "info");
 }
 
 firstPage.get("/first-page", async (c) => {
@@ -93,11 +105,13 @@ firstPage.post("/first-page/pay", async (c) => {
 		return c.text("Choose yes or no.", 400);
 	const before = await settleAndLoad(c.env.DB, today);
 	const merchant = before.pay.find((m) => m.key === key);
-	if (!merchant) {
-		// Nothing left to ask about this merchant: the swap shows the page as it is, and changes nothing.
-		return answered(c, before, "That one is already answered.", NO_MOTION);
-	}
-	await answerPay(c.env.DB, merchant, answer, actor(c));
+	// Nothing left to ask about this merchant, or the answer changed no row (a competing one got there first): the
+	// page as it is now, and nothing written. The re-read is fresh, since `before` may be stale by now.
+	if (
+		!merchant ||
+		(await answerPay(c.env.DB, merchant, answer, actor(c))) === 0
+	)
+		return stale(c, await settleAndLoad(c.env.DB, today));
 	const after = await settleAndLoad(c.env.DB, today);
 	return answered(
 		c,
@@ -115,7 +129,7 @@ firstPage.post("/first-page/bills", async (c) => {
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
 	const before = await settleAndLoad(c.env.DB, today);
 	const bills = await keepBills(c.env.DB, today, before.keep);
-	const after = await settleAndLoad(c.env.DB, today, bills);
+	const after = await settleAndLoad(c.env.DB, today);
 	const message =
 		bills.kept === 0
 			? "Nothing to keep."

@@ -2,15 +2,15 @@
 // still to ask, and the ledger of what they answered. A reload asks only what is still open. The ledger reads what the
 // answers recorded in first_tally (each pay answer with the deposits it covered, and the bills step's kept count and
 // total), so a change made elsewhere, in the Transactions panel or on Bills, adds no line. The strokes never overwrite
-// a stroke's first day (markStroke, keepBillsStep).
+// a stroke's first day (markStroke).
 
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
-import { insertBill } from "../bills/write";
-import { markedTransferSql } from "../db/counted-month";
+import { insertBillStatements } from "../bills/write";
+import { includedSql, markedTransferSql } from "../db/counted-month";
 import {
 	type BillsKept,
-	keepBillsStep,
+	keptBillStatement,
 	markStroke,
 	type PayAnswer,
 	type PayRecord,
@@ -114,7 +114,7 @@ export async function answerPay(
 	return changed?.meta.changes ?? 0;
 }
 
-/** The connected banks' head lines: their names, how many bank lines, their first and last dates, and transfers left out. */
+/** The connected banks' head lines: their names, how many bank lines, their first and last dates, and transfers still left out of the budget. */
 export async function bankHead(db: D1Database): Promise<BankHead | null> {
 	const banks = await db
 		.prepare(
@@ -124,7 +124,7 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 	const lines = await db
 		.prepare(
 			`SELECT COUNT(*) AS lines, MIN(t.date) AS first, MAX(t.date) AS last,
-				COALESCE(SUM(CASE WHEN ${markedTransferSql("t")} THEN 1 ELSE 0 END), 0) AS leftOut
+				COALESCE(SUM(CASE WHEN ${markedTransferSql("t")} AND NOT ${includedSql("t")} THEN 1 ELSE 0 END), 0) AS leftOut
 			FROM transactions t JOIN accounts a ON a.id = t.account_id
 			JOIN plaid_items p ON p.id = a.plaid_item_id
 			WHERE p.disconnected_at IS NULL AND t.parent_id IS NULL`,
@@ -146,9 +146,9 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 }
 
 /**
- * The ledger lines of the pay answers (first_tally's `pay`), in answer order: "Pay · {Merchant}, …" for a Yes, from the
- * deposits that Yes covered, as recorded with the answer, so a deposit marked later in the Transactions panel adds
- * nothing. A No writes no line.
+ * The ledger lines of the pay answers (first_tally's `pay`), in the order each merchant was first answered (a merchant
+ * answered again keeps its place): "Pay · {Merchant}, …" for a Yes, from the deposits that Yes covered, as recorded
+ * with the answer, so a deposit marked later in the Transactions panel adds nothing. A No writes no line.
  */
 async function payLedger(
 	db: D1Database,
@@ -190,13 +190,12 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
 
 /**
  * Draws the strokes whose steps have nothing left to ask (an empty step counts as done, P125 E), then reads the page.
- * The pay stroke waits for the last pay answer; the bills stroke waits for pay, since the page asks pay first. `kept` is
- * what the Keep just before this read kept: the bills stroke's write records it (keepBillsStep).
+ * The pay stroke waits for the last pay answer; the bills stroke waits for pay, since the page asks pay first. What the
+ * bills step kept is recorded by keepBills, as each bill is kept, so this read adds no count.
  */
 export async function settleAndLoad(
 	db: D1Database,
 	today: string,
-	kept: BillsKept = { kept: 0, cents: 0 },
 ): Promise<FirstPageModel> {
 	const pay = await payMerchants(db);
 	if (pay.length === 0) await markStroke(db, "pay", today);
@@ -208,8 +207,7 @@ export async function settleAndLoad(
 				)
 			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
 	const done = pay.length === 0 && split.keep.length === 0;
-	if (done || kept.kept > 0)
-		await keepBillsStep(db, kept, done ? today : undefined);
+	if (done) await markStroke(db, "bills", today);
 	const record = await readFirstTally(db);
 	const payLines = await payLedger(db, record?.pay);
 	const billLine = billsLedger(record?.bills);
@@ -228,9 +226,13 @@ export async function settleAndLoad(
 }
 
 /**
- * Keeps the found charges, one tap (spec §8.8): each goes through insertBill, the Add bill write, which checks that no
- * active bill already has the name. Then the charges those bills already paid this period are linked (matchBillPayments,
- * as the Add bill route does), so that occurrence isn't due. Returns how many were added and their monthly total in cents.
+ * Keeps the found charges, one tap (spec §8.8). Each bill is the Add bill write (insertBillStatements, which checks that
+ * no active bill already has the name), with the record of what the step kept (keptBillStatement) between its bill
+ * and its amount row, in one batch: a bill and its count land together, so a Keep that fails part-way keeps the bills
+ * before it, counted, and a retry counts the rest. Then the charges those bills already paid this period are linked
+ * (matchBillPayments, as the Add bill route does), so that occurrence isn't due. It runs on every Keep, not only one
+ * that kept a bill: it fills only the occurrences not yet linked, so a retry after a failed link still links them
+ * (after-sync also runs it). Returns how many were added and their monthly total in cents.
  */
 export async function keepBills(
 	db: D1Database,
@@ -240,7 +242,7 @@ export async function keepBills(
 	let kept = 0;
 	let cents = 0;
 	for (const suggestion of keep) {
-		const added = await insertBill(
+		const [bill, amounts] = insertBillStatements(
 			db,
 			{
 				name: suggestion.displayName,
@@ -253,11 +255,16 @@ export async function keepBills(
 			},
 			today,
 		);
-		if (added) {
+		const [added] = await db.batch([
+			bill,
+			keptBillStatement(db, suggestion.amountCents),
+			amounts,
+		]);
+		if ((added?.meta.changes ?? 0) > 0) {
 			kept += 1;
 			cents += suggestion.amountCents;
 		}
 	}
-	if (kept > 0) await matchBillPayments(db, today);
+	await matchBillPayments(db, today);
 	return { kept, cents };
 }

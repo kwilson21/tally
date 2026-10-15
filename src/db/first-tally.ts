@@ -33,7 +33,7 @@ export type PayAnswer = "yes" | "no";
  */
 export type PayRecord = { answer: PayAnswer; deposits: PayDeposit[] };
 
-/** What the bills step kept: how many bills, and their monthly total in cents, summed over each Keep. */
+/** What the bills step kept: how many bills, and their monthly total in cents, added to as each bill is kept. */
 export type BillsKept = { kept: number; cents: number };
 
 export type FirstTally = {
@@ -48,7 +48,7 @@ export type FirstTally = {
 	night?: NightCounts;
 	/** The pay step's answers so far, by merchant key (the store's raw name); a merchant answered again keeps the newest. */
 	pay?: Record<string, PayRecord>;
-	/** What the bills step kept so far, absent until a Keep kept a bill. */
+	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
 	bills?: BillsKept;
 };
 
@@ -124,9 +124,11 @@ export async function keepNightCounts(
 }
 
 /**
- * The write of one pay answer, for a batch with the answer's own change (answerPay), so the two land together. The
- * merchant's key is bound as a value and merged with json_patch, not written into a JSON path, so a bank text with a
- * quote in it is safe; json_patch also creates `pay` on a record that has none yet.
+ * The record's write of one pay answer. It goes in the same batch, right after the answer's own UPDATE (answerPay), and
+ * lands only when that UPDATE changed rows (`WHERE changes() > 0`), so a stale answer that changes nothing leaves the
+ * record as the first answer set it, and the record and the flags always agree. The merchant's key is bound as a
+ * value and merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch
+ * also creates `pay` on a record that has none yet.
  */
 export function payAnswerStatement(
 	db: D1Database,
@@ -135,40 +137,27 @@ export function payAnswerStatement(
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json(?3)))))
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json(?3)))) WHERE changes() > 0
 			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json(?3))))`,
 		)
 		.bind(KEY, merchant, JSON.stringify(record));
 }
 
 /**
- * Records what the bills step kept, summed over each Keep, so a second Keep adds to the first. With `day`, the bills
- * stroke is drawn in the same write (its first day kept, as markStroke does). Without it, only the count and total change.
+ * The record's write of one kept bill, for keepBills' batch right after the bill's own INSERT: it adds one to the count
+ * and the bill's amount to the total, and lands only when that INSERT added the bill (`WHERE changes() > 0`), so a
+ * refused name adds nothing. Each kept bill lands with its bill, so a Keep that fails part-way still counts the bills
+ * it kept. The sum reads what is stored when the write happens, so two Keeps add up; a first bill on a record without
+ * `bills` starts from zero (json_extract is NULL there).
  */
-export async function keepBillsStep(
+export function keptBillStatement(
 	db: D1Database,
-	kept: BillsKept,
-	day?: string,
-): Promise<void> {
-	// The sum reads what is stored when the write happens, so two Keeps add up; a first Keep on a record without `bills`
-	// starts from zero (json_extract is NULL there).
-	const sum = `json_set(value, '$.bills', json_object('kept', COALESCE(json_extract(value, '$.bills.kept'), 0) + ?2, 'cents', COALESCE(json_extract(value, '$.bills.cents'), 0) + ?3))`;
-	const fresh = `json_set('${EMPTY_RECORD}', '$.bills', json_object('kept', ?2, 'cents', ?3))`;
-	if (day === undefined) {
-		await db
-			.prepare(
-				`INSERT INTO household_settings (key, value) VALUES (?1, ${fresh})
-				ON CONFLICT(key) DO UPDATE SET value = ${sum}`,
-			)
-			.bind(KEY, kept.kept, kept.cents)
-			.run();
-		return;
-	}
-	await db
+	cents: number,
+): D1PreparedStatement {
+	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_insert(${fresh}, '$.strokes.bills', ?4))
-			ON CONFLICT(key) DO UPDATE SET value = json_insert(${sum}, '$.strokes.bills', ?4)`,
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.bills', json_object('kept', 1, 'cents', ?2)) WHERE changes() > 0
+			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.bills', json_object('kept', COALESCE(json_extract(value, '$.bills.kept'), 0) + 1, 'cents', COALESCE(json_extract(value, '$.bills.cents'), 0) + ?2))`,
 		)
-		.bind(KEY, kept.kept, kept.cents, day)
-		.run();
+		.bind(KEY, cents);
 }

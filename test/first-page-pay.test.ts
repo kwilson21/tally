@@ -74,6 +74,46 @@ describe("cadenceOf", () => {
 	it("gives no cadence for a single deposit", () => {
 		expect(cadenceOf(["2026-10-09"])).toBeNull();
 	});
+
+	it("gives no cadence for daily deposits, which no named cadence fits", () => {
+		expect(
+			cadenceOf([
+				"2026-10-05",
+				"2026-10-06",
+				"2026-10-07",
+				"2026-10-08",
+				"2026-10-09",
+			]),
+		).toBeNull();
+	});
+
+	it("gives no cadence for deposits a few days apart", () => {
+		expect(
+			cadenceOf(["2026-10-01", "2026-10-04", "2026-10-08", "2026-10-11"]),
+		).toBeNull();
+	});
+
+	it("keeps the fortnightly cadence when a same-day bonus sits on one of its dates", () => {
+		expect(cadenceOf([...EVERY_OTHER_FRIDAY, "2026-08-14"])).toBe(
+			"every other Friday",
+		);
+	});
+
+	it("gives no cadence for two deposits on one date", () => {
+		expect(cadenceOf(["2026-10-09", "2026-10-09"])).toBeNull();
+	});
+
+	it("gives no cadence for a weekly series with one skipped week", () => {
+		expect(
+			cadenceOf([
+				"2026-10-02",
+				"2026-10-09",
+				"2026-10-16",
+				"2026-10-30",
+				"2026-11-06",
+			]),
+		).toBeNull();
+	});
 });
 
 describe("amountWords", () => {
@@ -121,6 +161,24 @@ describe("paySentence", () => {
 		).toBe(
 			"Your bank shows ACME CORP PAYROLL paying $2,300 to $2,600, 7 times since Jul 17.",
 		);
+	});
+
+	it("gives the count with no cadence word for daily payouts", () => {
+		expect(
+			paySentence({
+				bankText: "TIP PAYOUT",
+				deposits: deposits(
+					[
+						"2026-10-05",
+						"2026-10-06",
+						"2026-10-07",
+						"2026-10-08",
+						"2026-10-09",
+					],
+					4000,
+				),
+			}),
+		).toBe("Your bank shows TIP PAYOUT paying $40, 5 times since Oct 5.");
 	});
 
 	it("says once, with its date, for a single deposit", () => {

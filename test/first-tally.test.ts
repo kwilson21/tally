@@ -1,17 +1,19 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { BillSuggestion } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
 	isSetUp,
-	keepBillsStep,
 	keepBudgetAnswer,
 	keepNightCounts,
 	markStroke,
+	type PayRecord,
 	payAnswerStatement,
 	readFirstTally,
 	STROKES,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { keepBills } from "../src/first-tally/first-page";
 
 const db = env.DB;
 
@@ -19,6 +21,34 @@ const stored = async () =>
 	await db
 		.prepare("SELECT value FROM household_settings WHERE key = 'first_tally'")
 		.first<{ value: string }>();
+
+/**
+ * A pay answer's batch as answerPay writes it: the answer's own change, then the record behind it. The stand-in change
+ * is an UPDATE of the record's row, which changes one row whenever the record exists (each test writes one first).
+ */
+const payBatch = (merchant: string, record: PayRecord) =>
+	db.batch([
+		db.prepare(
+			"UPDATE household_settings SET value = value WHERE key = 'first_tally'",
+		),
+		payAnswerStatement(db, merchant, record),
+	]);
+
+/** A found charge as Possible bills lists it, with a category, for keepBills. */
+const found = (
+	rawName: string,
+	displayName: string,
+	amountCents: number,
+	categoryId: number,
+): BillSuggestion => ({
+	rawName,
+	bankText: rawName,
+	displayName,
+	amountCents,
+	dueDay: 5,
+	categoryId,
+	chargeCount: 2,
+});
 
 beforeEach(async () => {
 	await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
@@ -109,25 +139,18 @@ describe("first_tally record", () => {
 	});
 });
 
-describe("the pay answers and the bills step's record (P125 E)", () => {
+describe("the pay answers' record (P125 E)", () => {
 	it("keeps each merchant's answer by its key, a key with a quote in it included, and the newest answer for a merchant", async () => {
-		await db
-			.prepare(
-				`INSERT INTO household_settings (key, value) VALUES ('first_tally', '{"strokes":{"bank":"2026-10-10"}}')`,
-			)
-			.run();
-		await payAnswerStatement(db, 'ACME "CORP"', {
+		await markStroke(db, "bank", "2026-10-10");
+		await payBatch('ACME "CORP"', {
 			answer: "yes",
 			deposits: [{ date: "2026-10-01", cents: 245000 }],
-		}).run();
-		await payAnswerStatement(db, "SIDE GIG", {
-			answer: "no",
-			deposits: [],
-		}).run();
-		await payAnswerStatement(db, "SIDE GIG", {
+		});
+		await payBatch("SIDE GIG", { answer: "no", deposits: [] });
+		await payBatch("SIDE GIG", {
 			answer: "yes",
 			deposits: [{ date: "2026-10-01", cents: 245000 }],
-		}).run();
+		});
 		const record = await readFirstTally(db);
 		expect(record?.strokes).toEqual({ bank: "2026-10-10" });
 		expect(record?.pay).toEqual({
@@ -143,34 +166,53 @@ describe("the pay answers and the bills step's record (P125 E)", () => {
 	});
 
 	it("starts the pay answers on a record that has none yet", async () => {
-		await payAnswerStatement(db, "ACME CORP", {
-			answer: "no",
-			deposits: [],
-		}).run();
+		await markStroke(db, "bank", null);
+		await payBatch("ACME CORP", { answer: "no", deposits: [] });
 		expect((await readFirstTally(db))?.pay).toEqual({
 			"ACME CORP": { answer: "no", deposits: [] },
 		});
 	});
 
-	it("draws the bills stroke and records what the step kept in one write, adding each Keep to the count and the total", async () => {
-		await keepBillsStep(db, { kept: 2, cents: 3000 }, "2026-10-10");
-		await keepBillsStep(db, { kept: 1, cents: 1500 }, "2026-10-12");
-		const record = await readFirstTally(db);
-		expect(record?.strokes.bills).toBe("2026-10-10");
-		expect(record?.bills).toEqual({ kept: 3, cents: 4500 });
+	it("writes no record for an answer whose own change touched no row", async () => {
+		await markStroke(db, "bank", null);
+		await db.batch([
+			db.prepare("UPDATE transactions SET flag_income = flag_income WHERE 0"),
+			payAnswerStatement(db, "ACME CORP", {
+				answer: "yes",
+				deposits: [],
+			}),
+		]);
+		expect((await readFirstTally(db))?.pay).toBeUndefined();
+	});
+});
+
+describe("the bills step's record (P125 E)", () => {
+	it("adds each kept bill to the count and the total in the bill's own write, and a refused name adds nothing", async () => {
+		const categoryId = (
+			await db
+				.prepare(
+					"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+				)
+				.first<{ id: number }>()
+		)?.id as number;
+		const day = "2026-10-10";
+		await keepBills(db, day, [found("KEPT ONE", "Kept One", 1549, categoryId)]);
+		await keepBills(db, day, [found("KEPT TWO", "Kept Two", 1199, categoryId)]);
+		// The same name as an active bill, in other case and spacing: refused, so the record doesn't move.
+		await keepBills(db, day, [
+			found("KEPT ONE AGAIN", "kept one ", 1549, categoryId),
+		]);
+		expect((await readFirstTally(db))?.bills).toEqual({
+			kept: 2,
+			cents: 2748,
+		});
 	});
 
-	it("records a Keep without drawing the stroke when no day is given", async () => {
-		await keepBillsStep(db, { kept: 1, cents: 1000 });
-		const record = await readFirstTally(db);
-		expect(record?.strokes.bills).toBeUndefined();
-		expect(record?.bills).toEqual({ kept: 1, cents: 1000 });
-	});
-
-	it("draws an empty bills step with nothing kept", async () => {
-		await keepBillsStep(db, { kept: 0, cents: 0 }, "2026-10-10");
-		const record = await readFirstTally(db);
-		expect(record?.strokes.bills).toBe("2026-10-10");
-		expect(record?.bills).toEqual({ kept: 0, cents: 0 });
+	it("keeps no bills record for a step with nothing kept, and draws the bills stroke with its first day", async () => {
+		await keepBills(db, "2026-10-10", []);
+		expect((await readFirstTally(db))?.bills).toBeUndefined();
+		await markStroke(db, "bills", "2026-10-10");
+		await markStroke(db, "bills", "2026-10-12");
+		expect((await readFirstTally(db))?.strokes.bills).toBe("2026-10-10");
 	});
 });

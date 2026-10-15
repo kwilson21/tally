@@ -27,17 +27,19 @@ export const dollarsWords = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
 /**
- * How often the deposits came, from the typical gap between them: every week, or every weekday when all the deposits
- * share one weekday; every other week, or every other weekday when they share one (what a fortnightly paycheck does,
- * a holiday shift aside); twice a month, for gaps about two weeks apart that aren't all one fortnight's; or every month.
- * Null with fewer than two deposits, or with a gap none of these fits.
+ * How often the deposits came, from the gaps between their distinct days (two on one day count once): every week,
+ * or every weekday when all the deposits share one weekday, when every gap is 6 to 8 days; every other week, or every
+ * other weekday when they share one (what a fortnightly paycheck does, a holiday shift aside); twice a month, for gaps
+ * about two weeks apart that aren't all one fortnight's; or every month. Null with fewer than two distinct days, with
+ * any gap under 6 days (no named cadence has those), or with a gap none of these fits (a skipped week is none of them).
  */
 export function cadenceOf(dates: string[]): string | null {
-	if (dates.length < 2) return null;
-	const sorted = [...dates].sort();
+	const sorted = [...new Set(dates)].sort();
+	if (sorted.length < 2) return null;
 	const gaps = sorted
 		.slice(1)
 		.map((date, i) => epochDay(date) - epochDay(sorted[i] as string));
+	if (Math.min(...gaps) < 6) return null;
 	const median = [...gaps].sort((a, b) => a - b)[
 		Math.floor(gaps.length / 2)
 	] as number;
@@ -45,9 +47,9 @@ export function cadenceOf(dates: string[]): string | null {
 	const oneWeekday = sorted.every(
 		(date) => weekdayOf(date) === weekdayOf(latest),
 	);
+	const weekly = gaps.every((gap) => gap >= 6 && gap <= 8);
 	const fortnightly = gaps.every((gap) => gap >= 13 && gap <= 15);
-	if (median <= 9)
-		return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
+	if (weekly) return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
 	if (median >= 13 && median <= 15 && fortnightly)
 		return oneWeekday ? `every other ${weekdayOf(latest)}` : "every other week";
 	if (median >= 13 && median <= 17) return "twice a month";
