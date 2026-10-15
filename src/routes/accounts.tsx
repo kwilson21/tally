@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { householdToday } from "../dates";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
+import { hxTrigger } from "../htmx";
 import { netWorthView } from "../net-worth";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { sortAfterSync } from "../plaid/sort-after-sync";
@@ -182,7 +183,7 @@ accounts.post("/accounts/sync", async (c) => {
 		else
 			c.header(
 				"HX-Trigger",
-				JSON.stringify({
+				hxTrigger({
 					toast: { message: outcome.message, type: outcome.type },
 					announce: outcome.message,
 				}),
@@ -301,7 +302,7 @@ async function backToAccounts(c: Context<App>, message: string) {
 	if (!c.req.header("HX-Request")) return c.redirect("/accounts", 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", "/accounts");
 	return accountsPage(c);
