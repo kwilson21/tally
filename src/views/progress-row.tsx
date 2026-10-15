@@ -5,6 +5,7 @@ import { barGeometry } from "./bar";
 import { CategoryIcon } from "./category";
 import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 import { Icon, ROW_OPENS, RowArrow, RowArrowSpace } from "./icons";
+import { type SavedMark, savedRowClass } from "./saved-tick";
 
 type Props = {
 	name: string;
@@ -31,6 +32,10 @@ type Props = {
 	};
 	/** Its list has rows that open, so a row with no link keeps the arrow's empty space and the bars line up (P118 A). */
 	reserveArrow?: boolean;
+	/** The row a budget save just changed: its arrow gives way to the pencil tick (P119 A, #71). Only with a link. */
+	saved?: SavedMark;
+	/** Draw the bar still, not filling: a save's own reply, so only the toast and the tick move (P119 A, #71). */
+	barsStill?: boolean;
 };
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
@@ -41,12 +46,14 @@ function Wrap({
 	autofocus,
 	attrs,
 	adjusting,
+	saved,
 	children,
 }: {
 	href?: string;
 	autofocus?: boolean;
 	attrs?: Record<string, string>;
 	adjusting?: boolean;
+	saved?: SavedMark;
 	children?: Child;
 }) {
 	const box = `flex items-start py-3 text-ink no-underline ${adjusting ? "min-w-0 flex-1 gap-3" : "gap-4"}`;
@@ -54,7 +61,7 @@ function Wrap({
 		<a
 			href={href}
 			autofocus={autofocus}
-			class={`${box} ${ROW_OPENS}`}
+			class={`${box} ${ROW_OPENS}${saved ? ` ${savedRowClass(saved)}` : ""}`}
 			{...attrs}
 		>
 			{children}
@@ -116,8 +123,12 @@ export function ProgressRow({
 	autofocus,
 	nudge,
 	reserveArrow,
+	saved,
+	barsStill,
 }: Props) {
 	const over = spentCents > budgetCents;
+	// An Adjust tap has no arrow (its − and + take the room), so it marks nothing (P119 A).
+	const mark = href && !nudge ? saved : undefined;
 	const nearLimit =
 		!over &&
 		budgetCents > 0 &&
@@ -136,6 +147,7 @@ export function ProgressRow({
 				autofocus={autofocus}
 				attrs={attrs}
 				adjusting={nudge !== undefined}
+				saved={mark}
 			>
 				{nudge ? (
 					// On a phone in Adjust mode, − takes the icon's place, so the name and amount fit on one line.
@@ -182,7 +194,7 @@ export function ProgressRow({
 							height="100%"
 							rx="2"
 							// In Adjust mode each tap redraws the list; replaying every fill would make it jump.
-							class={`${nudge ? "" : "bar-fill "}${over ? "fill-over" : nearLimit ? "fill-near-limit" : "fill-ok"}`}
+							class={`${nudge || barsStill ? "" : "bar-fill "}${over ? "fill-over" : nearLimit ? "fill-near-limit" : "fill-ok"}`}
 						/>
 					</svg>
 					{over && (
@@ -194,7 +206,7 @@ export function ProgressRow({
 					{href && <span class="sr-only">, change the budget</span>}
 				</div>
 				{/* Hung in the margin, outside the text column. A row with no link keeps the same empty box in a list whose rows open, so the bars still end together. Adjust mode's − and + take its place. */}
-				{href && !nudge && <RowArrow class="self-start mt-1" />}
+				{href && !nudge && <RowArrow class="self-start mt-1" saved={mark} />}
 				{reserveArrow && !href && !nudge && (
 					<RowArrowSpace class="self-start mt-1" />
 				)}

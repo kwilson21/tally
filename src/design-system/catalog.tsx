@@ -72,7 +72,7 @@ import {
 	TransactionsDiagram,
 } from "../views/how-diagrams";
 import { HowFoot } from "../views/how-link";
-import { ICON_NAMES, Icon } from "../views/icons";
+import { ICON_NAMES, Icon, RowArrow } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
@@ -105,6 +105,7 @@ import { Notebook } from "../views/notebook";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
+import { SavedTick } from "../views/saved-tick";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -2473,6 +2474,18 @@ function Rows() {
 						))}
 					</ul>
 				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place, and the bar drawn still on a save's reply (P119 A)">
+					<ul class="max-w-xl">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow
+								{...s.props}
+								href="#progress-row"
+								saved="held"
+								barsStill
+							/>
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="not-budgeted-row"
@@ -2544,6 +2557,15 @@ function Rows() {
 				<State label="Pressed, held still: the press tint on a set goal as its sheet loads">
 					<ul class="max-w-xl divide-y divide-rule [&_.row-opens]:bg-press">
 						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
+					</ul>
+				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place once the goal is set (P119 A)">
+					<ul class="max-w-xl divide-y divide-rule">
+						<SavingsGoalRow
+							amountCents={50000}
+							href="#savings-goal-row"
+							saved="held"
+						/>
 					</ul>
 				</State>
 				<State label="Goal set">
@@ -2650,6 +2672,40 @@ function Rows() {
 							<TransactionRow row={s.row} href="#transaction-row" />
 						))}
 					</ul>
+				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place, as the toast stays (P119 A)">
+					<ul class="max-w-xl">
+						{TRANSACTION_ROWS.slice(0, 1).map((s) => (
+							<TransactionRow
+								row={s.row}
+								href="#transaction-row"
+								saved="held"
+							/>
+						))}
+					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="saved-tick"
+				title="SavedTick"
+				tier="visual"
+				components={["SavedTick"]}
+				sentence="After a save, the saved row's arrow gives way to a hand-drawn pencil tick for as long as the toast stays (P119 A, decision 111, #71). The tick is drawn in 150 ms, then the arrow comes back as the toast goes: 4 seconds, or 10 when the toast offers Undo. Only a save's own reply marks a row, and under reduced motion the tick appears and goes on the same stay without drawing. Here it is held still at its full draw, beside the arrow it takes the place of."
+			>
+				<State label="Held: the tick in the arrow's place">
+					<span class="row-saved-held inline-flex items-center px-3 text-muted">
+						<RowArrow saved="held" />
+					</span>
+				</State>
+				<State label="The arrow it replaces, as a row that opens ends in it">
+					<span class="inline-flex items-center px-3 text-muted">
+						<RowArrow />
+					</span>
+				</State>
+				<State label="The tick alone, at the arrow's size">
+					<span class="row-saved-held inline-flex items-center text-ink">
+						<SavedTick />
+					</span>
 				</State>
 			</Specimen>
 			<Specimen
@@ -4373,17 +4429,20 @@ function Controls() {
 				components={["HouseholdPeople"]}
 				sentence="Names a transaction can be for, shared by the household and never used as logins (P89 A, decision 81)."
 			>
-				<div inert class="max-w-3xl border-t border-rule">
-					<HouseholdPeople
-						people={[
-							{ id: 1, name: "Everyone" },
-							{ id: 2, name: "Kids" },
-							{ id: 3, name: "Morgan" },
-						]}
-						openId={2}
-						addOpen
-					/>
-				</div>
+				<State label="Saved, held still: Morgan's chevron gives way to the pencil tick, with Kids open (P119 A, #71)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<HouseholdPeople
+							people={[
+								{ id: 1, name: "Everyone" },
+								{ id: 2, name: "Kids" },
+								{ id: 3, name: "Morgan" },
+							]}
+							openId={2}
+							addOpen
+							saved={{ id: 3, mark: "held" }}
+						/>
+					</div>
+				</State>
 				<UseSpec spec={HOUSEHOLD_PEOPLE_SPEC} />
 			</Specimen>
 			<Specimen
@@ -4433,6 +4492,18 @@ function Controls() {
 						<TimeZoneRow
 							id="ds-zone-narrow"
 							zone="America/Puerto_Rico"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="Saved, held still: the pencil tick in the chevron's place, as the toast stays (P119 A, #71)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-saved"
+							zone="America/New_York"
+							saved="held"
 							action="#"
 							back="#"
 							backSwap="#"
@@ -5503,7 +5574,7 @@ function SettingsGroup() {
 				title="CategoryRow"
 				tier="visual"
 				components={["CategoryRow", "AddCategoryRow", "TextInput", "Button"]}
-				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list."
+				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list. A category its rename just saved holds the pencil tick in its chevron's place for the toast's stay (P119 A, #71)."
 			>
 				<State label="Closed: one with a budget, one with No budget">
 					<div inert class="max-w-3xl border-t border-rule">
@@ -5591,6 +5662,24 @@ function SettingsGroup() {
 				<State label="Add category open">
 					<div inert class="max-w-3xl border-t border-rule">
 						<AddCategoryRow open />
+					</div>
+				</State>
+				<State label="Saved, held still: the pencil tick in the chevron's place, as the toast stays (P119 A)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 51,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open={false}
+							focus={false}
+							saved="held"
+						/>
 					</div>
 				</State>
 			</Specimen>

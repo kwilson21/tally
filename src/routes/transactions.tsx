@@ -150,6 +150,7 @@ import {
 	type RuleOfferValue,
 	ruleOfferAnnouncement,
 } from "../views/rule-offer";
+import { listRowMark, SAVED_TOAST_MS } from "../views/saved-tick";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
@@ -218,6 +219,18 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/**
+	 * After a save (P119 A, #71): this row's arrow gives way to the pencil tick. Only a save's own reply passes it: the
+	 * edit panel's, the Likely sheet's close within its save's toast, or a cash entry's Undo restore. Never a Cancel,
+	 * Select mode or a bulk change.
+	 */
+	savedId?: number;
+	/**
+	 * How the saved row is marked: "toast" for the toast's four seconds (the default), "undo" for the ten a toast that
+	 * offers Undo stays (#70's saves, #510 and #511, pass it). An Undo restore is marked on the "toast" stay, since its
+	 * own toast is a plain four-second one.
+	 */
+	savedMark?: "toast" | "undo";
 	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
 	restoredId?: number;
 	/** "Only October" asked for focus on the result count, since its link goes (#211). */
@@ -304,6 +317,8 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		savedId,
+		savedMark,
 		restoredId,
 		countFocus = false,
 		status = 200,
@@ -985,6 +1000,7 @@ async function renderList(
 													autofocus={
 														row.id === focusId || row.id === restoredId
 													}
+													saved={listRowMark(row.id, savedId, savedMark)}
 													// Opening swaps in only the sheet, so the list keeps its place.
 													attrs={{
 														"hx-get": href,
@@ -1037,6 +1053,21 @@ transactions.get("/transactions", async (c) => {
 			})
 		: NO_SELECTION;
 	const filters = { ...asked, month };
+	// The row a Likely sheet's close names, while its toast can still be up (P119 A, #71). Both times are the server's
+	// Date.now(), so the window overstates the toast's real age by the round trip, and the tick can only end early,
+	// never late. Don't "fix" this with client time.
+	const savedAt = Number(params.get("saved-at"));
+	const saved = Number(params.get("saved"));
+	const age = Date.now() - savedAt;
+	const savedId =
+		c.req.header("HX-Request") === "true" &&
+		Number.isInteger(saved) &&
+		saved > 0 &&
+		Number.isInteger(savedAt) &&
+		age >= 0 &&
+		age < SAVED_TOAST_MS
+			? saved
+			: undefined;
 	let selectPushBase: string | undefined;
 	if (c.req.header("HX-Request") === "true") {
 		const named = monthParam(asked, before, month, thisMonth);
@@ -1052,6 +1083,8 @@ transactions.get("/transactions", async (c) => {
 			const address = new URL(c.req.url);
 			if (named !== address.searchParams.get("month")) {
 				address.searchParams.delete("focus");
+				address.searchParams.delete("saved");
+				address.searchParams.delete("saved-at");
 				if (named === null) address.searchParams.delete("month");
 				else address.searchParams.set("month", named);
 				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
@@ -1060,6 +1093,7 @@ transactions.get("/transactions", async (c) => {
 	}
 	return renderList(c, today, filters, {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		savedId,
 		countFocus: params.get("focus") === "count",
 		selecting,
 		focusSetCategory:
@@ -1673,6 +1707,19 @@ function listCloseAttrs(back: string, id: number): Record<string, string> {
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
 		"hx-push-url": back,
+	};
+}
+
+/** The Likely sheet's close keeps the saved row's element and names it, so its tick runs on to the toast's end. */
+function savedCloseAttrs(
+	back: string,
+	id: number,
+	savedAt: number,
+): Record<string, string> {
+	return {
+		...listCloseAttrs(back, id),
+		"hx-get": `${withFocus(back, id)}&saved=${id}&saved-at=${savedAt}`,
+		"hx-swap": "outerMorph",
 	};
 }
 
@@ -4090,9 +4137,11 @@ async function savePanel(
 	c.header("HX-Push-Url", back);
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
-	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
-	if (panel) return renderLikely(c, today, filters, panel);
-	return renderList(c, today, filters, { focusId: tx.id });
+	// The row this save saved is marked, and the question or sheet it draws keeps it marked behind (P119 A, #71).
+	if (ruleOffer)
+		return renderRuleOffer(c, today, back, ruleOffer, tx.id, tx.id);
+	if (panel) return renderLikely(c, today, filters, panel, tx.id, Date.now());
+	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
 /**
@@ -4245,8 +4294,11 @@ function renderLikely(
 		categoryName: string;
 		rows: LikelyRow[];
 	},
+	saved?: number,
+	savedAt?: number,
 ) {
 	return renderList(c, today, filters, {
+		savedId: saved,
 		sheet: () => (
 			<LikelySheet
 				savedId={panel.savedId}
@@ -4254,7 +4306,11 @@ function renderLikely(
 				savedCents={panel.savedCents}
 				back={panel.back}
 				closeHref={withFocus(panel.back, panel.savedId)}
-				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
+				closeAttrs={
+					savedAt === undefined
+						? listCloseAttrs(panel.back, panel.savedId)
+						: savedCloseAttrs(panel.back, panel.savedId, savedAt)
+				}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}
 				rows={panel.rows}
@@ -4271,7 +4327,8 @@ function renderLikely(
 
 /**
  * The rule offer after a save. `savedId` is the transaction that was saved, so closing the question puts focus on
- * its row (#87); a Select-mode save names no one row, so its close goes to the list.
+ * its row (#87); a Select-mode save names no one row, so its close goes to the list. `saved` is the row whose tick the
+ * reply draws (P119 A, #71): only the edit panel's htmx save passes it, never Cancel, Select or a cash save.
  */
 function renderRuleOffer(
 	c: Context<App>,
@@ -4279,8 +4336,10 @@ function renderRuleOffer(
 	back: string,
 	value: RuleOfferValue,
 	savedId?: number,
+	saved?: number,
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
+		savedId: saved,
 		sheet: () => (
 			<BottomSheet
 				labelledBy="rule-offer-title"
@@ -4421,8 +4480,9 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	if (wasFirstVisit && restoredNow) swapWholePage(c);
-	// The restored row takes focus when this list shows it; otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
+	// The restored row takes focus when this list shows it, and the saved tick (P119 A); otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
 	return renderList(c, today, filtersFrom(c, today, back), {
 		restoredId: restoredNow?.id,
+		savedId: restoredNow?.id,
 	});
 });
