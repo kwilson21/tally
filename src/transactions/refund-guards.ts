@@ -47,7 +47,11 @@ export function refundPurchaseLabel(
 	return `${shortDay(purchase.date, refundDate)} · ${formatCents(purchase.amountCents)} · ${purchase.categoryName ?? "No category"}`;
 }
 
-/** A refund linked to a split purchase, as the split sheet asks which part it goes with (decision 99). */
+/**
+ * A refund linked to a split purchase, as the split sheet asks which part it goes with (decision 99). Its amount is
+ * refund-shaped (negative): for a split refund, the cents of its parts that still follow its link, which is what a
+ * save moves (refundFitsSql), and for a plain refund its whole amount.
+ */
 export type SplitRefund = { id: number; date: string; amountCents: number };
 
 /**
