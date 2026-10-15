@@ -59,9 +59,9 @@ describe("Trends with the demo seed", () => {
 		expect(months.some((m) => m.part !== undefined)).toBe(false);
 	});
 
-	// Past months' spending follows the same pace as this month's (#322), so the same-days comparison is fair on any day:
-	// a difference in the household's favour, under $400. Daycare's Fridays fall on other days each month, so on a few
-	// days an extra Friday this month leaves only a few dollars between the two months.
+	// Past months' purchases are spread differently from this month's (#322), so the same-days comparison is checked here:
+	// a difference in the household's favour, under $400, on the dates below. Daycare's Fridays fall on other days each
+	// month, so on a few days an extra Friday this month leaves only a few dollars between the two months.
 	it.each(DATES)(
 		"says this month is less than by this time last month, by under four hundred dollars, on %s",
 		async (today) => {

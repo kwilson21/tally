@@ -299,8 +299,9 @@ export const SOCCER_DAY = 26;
 
 /**
  * Each category's three purchases in an earlier month: [day of the month (its last day at most), percent of the
- * month's total], in the order of its merchants above. They follow this month's own pace, so Trends' same-days
- * comparison stays fair on any day (spec §8.3). Kids' second is the soccer league.
+ * month's total], in the order of its merchants above. They are spread through the month differently from this month's,
+ * and test/trends-seed.test.ts checks that Trends' same-days comparison stays under $400 on its dates (spec §8.3).
+ * Kids' second is the soccer league.
  */
 const HISTORY_PARTS: Record<number, [number, number][]> = {
 	[GROCERIES]: [
