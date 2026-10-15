@@ -40,7 +40,33 @@ describe("HomeTop", () => {
 		expect(html).toMatch(
 			/<h1 class="font-serif text-2xl[^"]*">September<\/h1>/,
 		);
-		expect(html).toMatch(/class="font-serif text-6xl[^"]*">\$283</);
+		expect(html).toMatch(
+			/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">\$283<\/span>/,
+		);
+	});
+
+	// Issue #500: the minus sign and the number are one unbreakable run, so a phone never sets the
+	// minus alone on the line above the amount.
+	it("keeps a negative amount's minus sign and number in one unbreakable run", async () => {
+		const html = await top({ safeToSpendCents: -999900 });
+		expect(html).toContain('<span class="whitespace-nowrap">−$9,999</span>');
+	});
+
+	// Issue #500 (P127 A, decision 116): below 390px the notebook drawing is left out, so the amount has the whole row.
+	it("leaves the notebook drawing out below 390px so the amount has the whole row (#500, P127 A)", async () => {
+		const html = await top();
+		expect(html).toMatch(
+			/<div class="[^"]*\bhidden\b[^"]*\bmin-\[390px\]:block\b[^"]*"><svg/,
+		);
+	});
+
+	// Issue #500 (P127 A, decision 116): an 8-character amount (−$19,999) would spill beside the drawing at 390px,
+	// so its wrapper waits for 640px instead.
+	it("leaves the notebook drawing out below 640px for an 8-character amount (#500, P127 A)", async () => {
+		const html = await top({ safeToSpendCents: -1999900 });
+		expect(html).toContain('<span class="whitespace-nowrap">−$19,999</span>');
+		expect(html).toMatch(/<div class="hidden shrink-0 sm:block"><svg/);
+		expect(html).not.toMatch(/min-\[390px\]:block/);
 	});
 
 	it("keeps the label and Why? link when safe to spend is negative", async () => {

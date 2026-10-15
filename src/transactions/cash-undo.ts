@@ -1,3 +1,4 @@
+import { paysBillGroupSql, paysPlanGroupSql } from "../db/counted-month";
 import { refundFitsSql } from "../db/refunded";
 
 type Row = Record<string, unknown>;
@@ -6,6 +7,7 @@ type Snapshot = {
 	parts: Row[];
 	payments: (Row & { bill_name: string })[];
 	refunds: Row[];
+	plans: { id: number; transaction_id: number }[];
 };
 
 const jsonColumn = (column: string, alias = "") =>
@@ -36,13 +38,14 @@ export async function holdCashDelete(
 	const token = crypto.randomUUID();
 	const result = await db.batch([
 		db
-			.prepare(`INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows)
+			.prepare(`INSERT INTO cash_delete_holds (token,created_at,display_name,transaction_row,split_rows,payment_rows,refund_rows,plan_rows)
 				SELECT ?, ?, ?, ${jsonObject(transactionColumns)},
 				${arrayOf(`SELECT ${jsonObject(transactionColumns)} AS row FROM transactions WHERE parent_id=? ORDER BY id`)},
 				${arrayOf(`SELECT ${paymentJson} AS row FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY bp.id`)},
-				${arrayOf(`SELECT ${jsonObject(transactionColumns)} AS row FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY id`)}
+				${arrayOf(`SELECT ${jsonObject(transactionColumns)} AS row FROM transactions WHERE refund_of_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY id`)},
+				${arrayOf(`SELECT json_object('id', pe.id, 'transaction_id', pe.transaction_id) AS row FROM planned_expenses pe WHERE pe.transaction_id IN (SELECT id FROM transactions WHERE id=? OR parent_id=?) ORDER BY pe.id`)}
 				FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')`)
-			.bind(token, Date.now(), displayName, id, id, id, id, id, id),
+			.bind(token, Date.now(), displayName, id, id, id, id, id, id, id, id),
 		db
 			.prepare(
 				"DELETE FROM transactions WHERE id=? AND parent_id IS NULL AND account_id IN (SELECT id FROM accounts WHERE type='cash')",
@@ -78,6 +81,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 			split_rows: string;
 			payment_rows: string;
 			refund_rows: string;
+			plan_rows: string;
 		}>();
 	if (!hold) return null;
 	if (hold.restore_marker !== null)
@@ -89,6 +93,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 		parts: JSON.parse(hold.split_rows),
 		payments: JSON.parse(hold.payment_rows),
 		refunds: JSON.parse(hold.refund_rows),
+		plans: JSON.parse(hold.plan_rows),
 	};
 	const transaction = snapshot.transaction;
 	const columns = Object.keys(transaction);
@@ -245,6 +250,32 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					marker,
 				),
 		);
+		// A plan the entry or a part paid is paid again by the restored row, once its payment group pays no bill or other
+		// plan (paysBillGroupSql, paysPlanGroupSql). Its id is the plan's own, since the delete only unlinked it.
+		if (snapshot.plans.length > 0)
+			writes.push(
+				db
+					.prepare(
+						`WITH targets AS (
+							SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS old_id,
+								(SELECT MAX(id) FROM transactions) - (SELECT COUNT(*) FROM json_each(?)) + ROW_NUMBER() OVER (ORDER BY CAST(json_extract(value, '$.id') AS INTEGER)) AS new_id
+							FROM json_each(?)
+						)
+						UPDATE planned_expenses SET transaction_id = (SELECT new_id FROM targets WHERE old_id = json_extract(plans.value, '$.transaction_id'))
+						FROM json_each(?) AS plans
+						WHERE planned_expenses.id = json_extract(plans.value, '$.id') AND planned_expenses.transaction_id IS NULL
+						AND EXISTS (SELECT 1 FROM transactions nt WHERE nt.id = (SELECT new_id FROM targets WHERE old_id = json_extract(plans.value, '$.transaction_id'))
+							AND NOT ${paysBillGroupSql("nt")} AND NOT ${paysPlanGroupSql("nt")})
+						AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
+					)
+					.bind(
+						JSON.stringify(targets),
+						JSON.stringify(targets),
+						JSON.stringify(snapshot.plans),
+						token,
+						marker,
+					),
+			);
 		const results = await db.batch(writes);
 		if (results[0]?.meta.changes !== 1) return null;
 		const restoredLinks = new Set(

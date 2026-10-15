@@ -174,6 +174,30 @@ describe("Not this one can be undone for ten seconds (#340)", () => {
 		expect(await dismissedOn(9401)).toEqual([9401]);
 	});
 
+	it("says Couldn't undo, with no error, when a plan took the payment during the ten seconds", async () => {
+		const unlinked = await unlink();
+		// A plan links the payment after its Not this one: a dismissal doesn't block a plan (migration 0053).
+		await env.DB.prepare(
+			"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',1500,?,9401,'test')",
+		)
+			.bind(PERIOD)
+			.run();
+
+		const res = await undo(token(unlinked));
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({
+			message: "Couldn't undo. The payment stays unlinked.",
+			type: "error",
+			undoDone: token(unlinked),
+		});
+		expect(await linkedTo()).toBeNull();
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS transactionId FROM planned_expenses WHERE name='Car registration' AND created_by='test'",
+			).first<{ transactionId: number }>(),
+		).toEqual({ transactionId: 9401 });
+	});
+
 	it("can be used once, so a second tap links nothing more and claims no state", async () => {
 		const unlinked = await unlink();
 		await undo(token(unlinked));

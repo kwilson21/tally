@@ -3,6 +3,7 @@ import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
 	countedMonthSql,
+	paysPlanSql,
 } from "./counted-month";
 
 export type HomeForecastDay = {
@@ -20,11 +21,14 @@ export async function homeForecastDays(
 	today: string,
 ): Promise<HomeForecastDay[]> {
 	const nextMonth = `${monthsBefore(month, -1)}-01`;
+	// A payment that pays a planned expense has its own role: it is in spending so far, but not in the everyday pace
+	// projected forward, so the 'plan' role stays out of everydayCents (decision 82).
 	const { results } = await db
 		.prepare(
 			`WITH classified AS (
 				SELECT CAST(substr(t.date, 9, 2) AS INTEGER) AS day, t.amount_cents,
 					CASE WHEN bp.id IS NOT NULL THEN 'bill'
+						WHEN ${paysPlanSql("t")} THEN 'plan'
 						WHEN t.amount_cents < 0 THEN 'refund' ELSE 'spending' END AS role
 				FROM transactions t ${COUNTED_JOINS}
 				WHERE t.date >= ? AND t.date < ? AND t.date <= ?

@@ -587,4 +587,63 @@ describe("bill totals", () => {
 		expect(totals.stillToPayCents).toBe(60000);
 		expect(totals.groups.overdueCents).toBe(60000);
 	});
+
+	it("totals Paid this month at each shown paid row's amount, and leaves out a paid Friday no row shows", () => {
+		const friday = (dueDate: string, status: "paid" | "due" | "upcoming") => ({
+			billId: 24000,
+			dueDate,
+			status,
+			amountCents: 24000,
+			paidCents: status === "paid" ? 24000 : 0,
+		});
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(299), bill(1399), bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 299,
+					dueDate: "2026-10-15",
+					status: "paid",
+					amountCents: 299,
+					paidCents: 299,
+				},
+				{
+					billId: 1399,
+					dueDate: "2026-10-15",
+					status: "paid",
+					amountCents: 1399,
+					paidCents: 1399,
+				},
+				friday("2026-10-16", "due"),
+			],
+			thisMonthOccurrences: [
+				friday("2026-10-02", "paid"),
+				friday("2026-10-09", "paid"),
+				friday("2026-10-16", "due"),
+				friday("2026-10-23", "upcoming"),
+				friday("2026-10-30", "upcoming"),
+			],
+		});
+		expect(totals.groups.paidCents).toBe(1698);
+		expect(totals.groups.dueCents).toBe(24000);
+		expect(totals.groups.upcomingCents).toBe(48000);
+	});
+
+	it("totals a paid row at its full amount, even when its payments fell a little short of it", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-02",
+					status: "paid",
+					amountCents: 120000,
+					paidCents: 108000,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.groups.paidCents).toBe(120000);
+	});
 });

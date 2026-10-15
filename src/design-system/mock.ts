@@ -60,6 +60,22 @@ export const TRANSACTION_ROWS: { label: string; row: ListRow }[] = [
 			billName: "Rent",
 		},
 	},
+	{
+		label: "Payment linked to a planned expense",
+		row: {
+			...row,
+			id: 9,
+			displayName: "DMV",
+			rawName: "DMV REGISTRATION",
+			amountCents: 18000,
+			categoryId: 6,
+			categoryName: "Auto",
+			categoryIcon: "car",
+			categoryColor: "cat-slate",
+			paysPlan: true,
+			planName: "Car registration",
+		},
+	},
 	{ label: "Needs a category (unnamed merchant, raw text tidied)", row },
 	{
 		label: "Income",
@@ -431,6 +447,15 @@ export const BANK_LINES = {
 /** The money input in each state it can show. */
 export const MONEY_STATES = [
 	{
+		label: "Empty: a muted 0.00, and − and ▼ are off",
+		props: {
+			id: "ds-money-empty",
+			name: "ds-money-empty",
+			label: "Budget",
+			value: "",
+		},
+	},
+	{
 		label: "$0: the minus buttons are off",
 		props: {
 			id: "ds-money-zero",
@@ -451,7 +476,7 @@ export const MONEY_STATES = [
 		},
 	},
 	{
-		label: "Equal to last month: its chip is dimmed",
+		label: "Equal to last month: its chip is ticked",
 		props: {
 			id: "ds-money-last",
 			name: "ds-money-last",
@@ -462,7 +487,7 @@ export const MONEY_STATES = [
 		},
 	},
 	{
-		label: "With an error",
+		label: "With an error: all four steps are off",
 		props: {
 			id: "ds-money-error",
 			name: "ds-money-error",

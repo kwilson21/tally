@@ -205,7 +205,7 @@ function CloseUp({ p, look, label }: { p: string; look: Look; label: string }) {
 			<div
 				role="img"
 				aria-label={`${label}, close up`}
-				class="overflow-hidden rounded-control border border-ink bg-paper"
+				class="relative overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<div inert class={`${LOOKS[look]} [zoom:2]`}>
 					<div class="flex flex-col gap-2 p-1.5">

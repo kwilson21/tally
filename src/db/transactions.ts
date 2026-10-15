@@ -53,8 +53,10 @@ import {
 	isIncluded,
 	jevAsksAboutSql,
 	markedTransferSql,
-	PAYS_A_BILL,
+	PAYS_A_BILL_OR_PLAN,
+	paysBillOrPlanSql,
 	paysBillSql,
+	paysPlanSql,
 } from "./counted-month";
 import { maybeIncomeConfidenceSql, plaidSetIncomeSql } from "./income";
 import {
@@ -67,6 +69,7 @@ import { CLEAR_MERCHANT_RULE_SQL } from "./merchant-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 import { neverSuggestedSql } from "./never-suggest";
 import { ownNameSql } from "./own-name";
+import { unlinkUnfitCashPlanPaymentsSql } from "./planned-expenses";
 import {
 	movingSql,
 	refundedByOthersSql,
@@ -100,6 +103,9 @@ export type ListRow = {
 	paysBill?: boolean;
 	/** The linked bill whose payment this transaction is. */
 	billName?: string | null;
+	/** Linked to a planned expense: it counts whatever its exclusion, as a bill's payment does (decision 82), and `planName` says which. */
+	paysPlan?: boolean;
+	planName?: string | null;
 	income: boolean;
 	incomeConfidence?: number | null;
 	creditReviewed: boolean;
@@ -150,6 +156,8 @@ export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.categor
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;
+/** The name of the planned expense whose payment this transaction is, on its own link or its split parent's (`paysPlanSql`). */
+export const PLAN_NAME_COLUMN = `(SELECT pe.name FROM planned_expenses pe WHERE pe.transaction_id IN (t.id, t.parent_id) LIMIT 1) AS planName`;
 /** The bill a payment is linked to, for its "paid … bill" caption; needs `t`. */
 export const BILL_NAME_COLUMN = `(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=t.id AND bp.status='linked' LIMIT 1) AS billName`;
 /** The month a bill moved the row into, for its "Counts in …" caption, when it isn't the row's own month; needs COUNTED_JOINS. */
@@ -203,7 +211,7 @@ const SHOW_SQL: Record<Show, string | null> = {
 	spending: `(${COUNTED_SPENDING})`,
 	income: "t.flag_income = 1",
 	refunds: `(t.amount_cents < 0 AND t.flag_income = 0 AND COALESCE(p.flag_income, 0) = 0 AND t.is_split = 0
-		AND (${paysBillSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
+		AND (${paysBillOrPlanSql("t")} OR (t.excluded = 0 AND t.flag_transfer = 0 AND COALESCE(p.flag_transfer, 0) = 0)))`,
 	excluded: `(NOT ${INCLUDED} AND t.is_split = 0)`,
 };
 const RAW_SHOW_SQL: Record<Show, string | null> = {
@@ -379,7 +387,7 @@ export async function listTransactions(
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
-				t.excluded, ${paysBillSql("t")} AS paysBill,
+				t.excluded, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
 				${BILL_NAME_COLUMN},
 				(SELECT b.name FROM bill_payments bp JOIN bills b ON b.id=bp.bill_id WHERE bp.transaction_id=p.id AND bp.status='linked' LIMIT 1) AS parentBillName,
 				${PENDING_SQL} AS pending, t.flag_income AS income, t.credit_reviewed AS creditReviewed, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence,
@@ -396,6 +404,8 @@ export async function listTransactions(
 				ListRow,
 				| "excluded"
 				| "paysBill"
+				| "paysPlan"
+				| "planName"
 				| "income"
 				| "creditReviewed"
 				| "noteGuessed"
@@ -415,6 +425,8 @@ export async function listTransactions(
 					parentRawName: string | null;
 					excluded: number;
 					paysBill: number;
+					paysPlan: number;
+					planName: string | null;
 					income: number;
 					creditReviewed: number;
 					incomeConfidence: number | null;
@@ -467,6 +479,8 @@ export async function listTransactions(
 					: null,
 				excluded: r.excluded === 1,
 				paysBill: r.paysBill === 1,
+				paysPlan: r.paysPlan === 1,
+				planName: r.planName,
 				income: r.income === 1,
 				incomeConfidence: incomeOn ? r.incomeConfidence : null,
 				creditReviewed: r.creditReviewed === 1,
@@ -833,7 +847,7 @@ export async function getTransaction(
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
-				t.excluded, t.excluded_source AS excludedSource, ${paysBillSql("t")} AS paysBill,
+				t.excluded, t.excluded_source AS excludedSource, ${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${PLAN_NAME_COLUMN},
 				${BILL_NAME_COLUMN},
 				${PENDING_SQL} AS pending, t.flag_income AS income, ${maybeIncomeConfidenceSql("t")} AS incomeConfidence, t.category_source AS categorySource, t.category_confidence AS categoryConfidence,
 				t.credit_reviewed AS creditReviewed, (t.credit_reviewed_by = 'user') AS creditReviewedByUser, t.income_source AS incomeSource,
@@ -861,6 +875,8 @@ export async function getTransaction(
 				TransactionDetail,
 				| "excluded"
 				| "paysBill"
+				| "paysPlan"
+				| "planName"
 				| "income"
 				| "creditReviewed"
 				| "noteGuessed"
@@ -887,6 +903,8 @@ export async function getTransaction(
 					thisOwnName: string | null;
 					excluded: number;
 					paysBill: number;
+					paysPlan: number;
+					planName: string | null;
 					income: number;
 					creditReviewed: number;
 					creditReviewedByUser: number;
@@ -945,6 +963,8 @@ export async function getTransaction(
 		detailsVisible: detailsOn,
 		excluded: r.excluded === 1,
 		paysBill: r.paysBill === 1,
+		paysPlan: r.paysPlan === 1,
+		planName: r.planName,
 		income: r.income === 1,
 		incomeConfidence: incomeOn ? r.incomeConfidence : null,
 		creditReviewed: r.creditReviewed === 1,
@@ -1009,9 +1029,10 @@ export const APPLY_MERCHANT_RULE_SQL = applyMerchantRuleSql("= ?");
  * purchase has left for the whole split. A cash amount is refused when it breaks its parts (`amountCents`
  * is the parts' total) or its linked refunds (`refundCents` is their total, the smallest amount that would
  * fit). With a split correction (saveEdit's splitEdit), a refused correction is `split`, and nothing was saved.
+ * `planUnlinked` says a cash date moved its plan's payment out of the plan's month, so the plan is set aside again.
  */
 export type SaveEditResult =
-	| { saved: true }
+	| { saved: true; planUnlinked?: true }
 	| {
 			saved: false;
 			refundLeftCents: number;
@@ -1047,6 +1068,9 @@ export type SaveEditResult =
  * statements run before the edit's, and its new parts after them. The edit's statements carry the correction's
  * gate (correctCashSplit's), so a refused correction saves nothing of the edit either, and it is returned as
  * `split`. An error anywhere in the batch rolls both back.
+ *
+ * A cash entry's new date that takes its plan's payment out of the plan's month unlinks the plan in the same batch
+ * (`planUnlinked`); the unlink is gated like the rest, so a refused save unlinks nothing.
  */
 export async function saveEdit(
 	db: D1Database,
@@ -1057,7 +1081,7 @@ export async function saveEdit(
 ): Promise<SaveEditResult> {
 	const current = await db
 		.prepare(
-			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
+			`SELECT ${merchantKeySql("transactions")} AS merchantKey, raw_name AS rawName, amount_cents AS amountCents, category_id AS categoryId, category_source AS categorySource, flag_income AS income, income_source AS incomeSource, credit_reviewed AS creditReviewed, credit_reviewed_by AS creditReviewedBy, excluded, excluded_source AS excludedSource, ${paysBillSql("transactions")} AS paysBill, ${paysPlanSql("transactions")} AS paysPlan, (SELECT rp.excluded FROM transactions rp WHERE rp.id = transactions.refund_of_id) AS purchaseExcluded, refund_of_id AS refundOfId, is_split AS isSplit, note, note_guessed AS noteGuessed, kind, kind_guessed AS kindGuessed, for_person_id AS forPersonId, for_person_guessed AS forPersonGuessed FROM transactions WHERE id = ?`,
 		)
 		.bind(id)
 		.first<{
@@ -1073,6 +1097,7 @@ export async function saveEdit(
 			excluded: number;
 			excludedSource: string | null;
 			paysBill: number;
+			paysPlan: number;
 			/** The linked purchase's exclusion (1 or 0), or null when nothing is linked. */
 			purchaseExcluded: number | null;
 			refundOfId: number | null;
@@ -1414,7 +1439,7 @@ export async function saveEdit(
 	const askable = {
 		included: isIncluded(
 			excludedAfterSave(storedCredit, edit),
-			current.paysBill === 1,
+			current.paysBill === 1 || current.paysPlan === 1,
 		),
 		isSplit: current.isSplit === 1,
 		income:
@@ -1576,6 +1601,9 @@ export async function saveEdit(
 				"UPDATE transactions SET date = ?, updated_by = ?, updated_at = datetime('now') WHERE parent_id = ?",
 				[edit.cashDate, actor, id],
 			),
+			// A plan paid by this entry or a part of it keeps its link only while the new date still fits its month
+			// (decision 82). It runs after the dates are written; its gate is the edit's, so a refused save unlinks nothing.
+			gated(unlinkUnfitCashPlanPaymentsSql(), [id], " RETURNING id"),
 		);
 	}
 	// A For person removed after the panel's household list loaded fails the details write on its foreign
@@ -1659,6 +1687,9 @@ export async function saveEdit(
 			saved: false,
 			refundLeftCents: await refundLeftCents(db, purchase, id),
 		};
+	// The unlink's statement returns its row when it set a plan aside.
+	if (cashChangeIndex !== null && own[cashChangeIndex + 2]?.results.length)
+		return { saved: true, planUnlinked: true };
 	return { saved: true };
 }
 
@@ -1794,6 +1825,25 @@ async function partBills(
 	return results;
 }
 
+/** A planned expense on a part, with the part's amount and category: what a replacement can keep it by. */
+type PartPlan = { id: number; amountCents: number; categoryId: number | null };
+
+/** The planned expenses paid by a part of a split, read before a change deletes the parts (decision 82). */
+async function partPlans(
+	db: D1Database,
+	parentId: number,
+): Promise<PartPlan[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT pe.id AS id, part.amount_cents AS amountCents, part.category_id AS categoryId
+			FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
+			WHERE part.parent_id = ? ORDER BY part.id`,
+		)
+		.bind(parentId)
+		.all<PartPlan>();
+	return results;
+}
+
 /** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
 type PartPayment = UnpaidBill & {
 	billId: number;
@@ -1803,25 +1853,27 @@ type PartPayment = UnpaidBill & {
 };
 
 /**
- * Pairs each linked payment with the first unused new part of the same amount and category, oldest payment
- * first (decision 99). A payment with no such part is lost: its bill is unpaid, and it is named.
+ * Pairs each linked payment or planned expense with the first unused new part of the same amount and category, oldest
+ * first (decision 99). `used` holds the parts already taken, so a bill and a plan never share one. An item with no such
+ * part is lost: a bill's is unpaid and named, a plan's is set aside.
  */
-function keepPayments(payments: PartPayment[], parts: SplitPart[]) {
-	const used = new Set<number>();
-	const kept: { paymentId: number; index: number }[] = [];
-	const lost: PartPayment[] = [];
-	for (const payment of payments) {
+function keepParts<
+	T extends { amountCents: number; categoryId: number | null },
+>(items: T[], parts: SplitPart[], used: Set<number>) {
+	const kept: { item: T; index: number }[] = [];
+	const lost: T[] = [];
+	for (const item of items) {
 		const index = parts.findIndex(
 			(part, i) =>
 				!used.has(i) &&
-				part.amountCents === payment.amountCents &&
-				part.categoryId === payment.categoryId,
+				part.amountCents === item.amountCents &&
+				part.categoryId === item.categoryId,
 		);
 		if (index === -1) {
-			lost.push(payment);
+			lost.push(item);
 		} else {
 			used.add(index);
-			kept.push({ paymentId: payment.paymentId, index });
+			kept.push({ item, index });
 		}
 	}
 	return { kept, lost };
@@ -1865,8 +1917,9 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * not; refunds linked to replaced parts are unlinked in the same batch. A refund a bank change unlinked
  * keeps its unlink date on each new part, so the parts still say why (decision 99). The bill payments
  * of replaced parts are unlinked, with no dismissal left, so the matcher may link a bill again; the bills still
- * unpaid after the change are returned by name (decisions 99 and 105). A person's own Not this one is kept on the
- * purchase, and each new part starts with it.
+ * unpaid after the change are returned by name (decisions 99 and 105). A planned expense on a replaced part moves to a
+ * new part of its amount and category, as a bill's payment does, and is set aside otherwise (decision 99). A person's
+ * own Not this one is kept on the purchase, and each new part starts with it.
  *
  * `choices` says which part each linked refund goes with (decision 99): the part's index in `parts`, or null for
  * Not linked. Only an offered refund (offeredToSplit) can be chosen; the others are unlinked, and named. A refund left
@@ -1883,6 +1936,9 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * `unlinked` like any other. `moved` lists the chosen refunds that moved, by the date the save wrote them; `unlinked`
  * lists the refunds this save unlinked, by date, each refund once: a split refund's parts share its date, so it is
  * listed once however many of its rows were unlinked (its own row, a part, or both).
+ *
+ * A plan linked to a part after the read refuses the whole change: nothing is written, and `planLinked` says so, since
+ * the read never saw that plan and a write would unlink or move it unseen.
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1892,6 +1948,8 @@ export async function saveSplit(
 	choices: Record<number, number | null> = {},
 ): Promise<{
 	saved: boolean;
+	/** Set (true) only when a plan linked to a part after the read refused the change; absent otherwise. */
+	planLinked?: true;
 	unlinked: string[];
 	bills: UnpaidBill[];
 	moved: { date: string; part: number }[];
@@ -1904,11 +1962,16 @@ export async function saveSplit(
 	// Every child reads its parent inside the atomic batch, so date, exclusion and review edits
 	// made after the route validation are reflected in the children.
 	const total = parts.reduce((sum, part) => sum + part.amountCents, 0);
-	const unchanged =
-		"EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?)";
+	// Every plan on a part of this purchase, kept or lost, as the read sees it. A plan linked to a part after the read
+	// (a competing save did it) is on a part no write saw, so the change refuses (planLinked) rather than unlink or move it
+	// unseen: every write below carries this check, so none of them runs. The ids are whole numbers from the database,
+	// and the purchase id is a number too, so both are inlined.
+	const readPlans = await partPlans(db, parentId);
+	const plansLinkedElsewhere = `EXISTS (SELECT 1 FROM planned_expenses pe JOIN transactions part ON part.id = pe.transaction_id
+		WHERE part.parent_id = ${Number(parentId)} AND pe.id NOT IN (${readPlans.map((plan) => Number(plan.id)).join(", ")}))`;
+	const unchanged = `EXISTS (SELECT 1 FROM transactions WHERE id = ? AND amount_cents = ?) AND NOT ${plansLinkedElsewhere}`;
 	// The same check with numbered parameters, for the statements that keep a person's Not this one (decision 105).
-	const unchangedNumbered =
-		"EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)";
+	const unchangedNumbered = `EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2) AND NOT ${plansLinkedElsewhere}`;
 	const reviewColumns = ", income_source, credit_reviewed, credit_reviewed_by";
 	const reviewValues =
 		", (SELECT income_source FROM transactions WHERE id = ?), (SELECT credit_reviewed FROM transactions WHERE id = ?), (SELECT credit_reviewed_by FROM transactions WHERE id = ?)";
@@ -1936,7 +1999,11 @@ export async function saveSplit(
 		]),
 	);
 	const payments = await partBills(db, parentId);
-	const { kept, lost } = keepPayments(payments, parts);
+	// Bills are paired first. A plan on a part is paired the same way (decision 99): with a new part of its amount and
+	// category that no bill took. A plan with no such part is unlinked when its part goes (ON DELETE SET NULL), and set aside.
+	const used = new Set<number>();
+	const { kept, lost } = keepParts(payments, parts, used);
+	const { kept: keptPlans } = keepParts(readPlans, parts, used);
 	const inheritedRefundLink =
 		"CASE WHEN refund_of_id IS NOT NULL AND EXISTS (SELECT 1 FROM transactions rp WHERE rp.id = transactions.refund_of_id) THEN refund_of_id ELSE NULL END";
 	// A kept payment is parked on the purchase as dismissed, out of the way of the parts it leaves, and moved to its
@@ -1951,7 +2018,7 @@ export async function saveSplit(
 						)
 						.bind(
 							parentId,
-							JSON.stringify(kept.map((keep) => keep.paymentId)),
+							JSON.stringify(kept.map((keep) => keep.item.paymentId)),
 							parentId,
 							total,
 						),
@@ -1959,9 +2026,11 @@ export async function saveSplit(
 			: [];
 	// The purchase's own refund link is cleared only when the refund no longer fits (unlinkSplitOverRefundedSql), and the
 	// new parts keep it otherwise. RETURNING names it when it goes, alongside the refunds unlinked from the purchase and parts.
+	// A part that a kept plan still holds here has no refund link left: unlinkLinked, earlier in this batch, has cleared
+	// every refund link on the purchase's parts, so no refund counts it.
 	const unlinkRefund = db
 		.prepare(
-			`${unlinkSplitOverRefundedSql("?1")} AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?2)
+			`${unlinkSplitOverRefundedSql("?1")} AND ${unchangedNumbered}
 			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total);
@@ -1972,11 +2041,39 @@ export async function saveSplit(
 				`UPDATE bill_payments SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ? ORDER BY id LIMIT 1 OFFSET ?), status = 'linked'
 				WHERE id = ? AND transaction_id = ? AND status = 'dismissed' AND ${unchanged}`,
 			)
-			.bind(parentId, keep.index, keep.paymentId, parentId, parentId, total),
+			.bind(
+				parentId,
+				keep.index,
+				keep.item.paymentId,
+				parentId,
+				parentId,
+				total,
+			),
 	);
+	// Each kept plan moves to the new part it was paired with, as a kept payment does (decision 99). It moves only while it
+	// is still on a part of this purchase, so a plan unlinked after the read stays unlinked. The new parts hold no plan yet,
+	// so any match is an old part, and the new part is found by its place from the newest, since the old parts that held a
+	// plan still have lower ids.
+	const restorePlans = keptPlans.map((keep) =>
+		db
+			.prepare(
+				`UPDATE planned_expenses SET transaction_id = (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2)
+				WHERE id = ?3 AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ?1)
+				AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ?4) AND NOT ${plansLinkedElsewhere}`,
+			)
+			.bind(parentId, parts.length - 1 - keep.index, keep.item.id, total),
+	);
+	// The old parts that held a kept plan, which the first delete left for restorePlans: every part but the newest n, which
+	// are the new parts. Guarded like the others, so a change whose amount moved removes nothing.
+	const leftoverParts = db
+		.prepare(
+			`DELETE FROM transactions WHERE parent_id = ?1 AND id NOT IN (SELECT id FROM transactions WHERE parent_id = ?1 ORDER BY id DESC LIMIT ?3)
+			AND ${unchangedNumbered}`,
+		)
+		.bind(parentId, total, parts.length);
 	const markParent = db
 		.prepare(
-			"UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, jev_mixed=NULL, jev_also_category_id=NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ?",
+			`UPDATE transactions SET is_split = 1, category_suggestion_id=NULL, jev_none_fit=0, jev_mixed=NULL, jev_also_category_id=NULL, split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now') WHERE id = ? AND amount_cents = ? AND NOT ${plansLinkedElsewhere}`,
 		)
 		.bind(by, parentId, total);
 	const stillUnpaid = stillUnpaidStatement(db, lost);
@@ -2051,10 +2148,16 @@ export async function saveSplit(
 			.bind(parentId, total),
 		...park,
 		// The replaced parts go with their bill payments, which are unlinked with no dismissal left (decision 105).
-		// Kept ones moved above.
+		// Kept ones moved above. A part holding a plan this save keeps stays until its new part exists, so the plan moves
+		// straight across, and a plan someone unlinked meanwhile has nothing to move.
 		db
-			.prepare(`DELETE FROM transactions WHERE parent_id = ? AND ${unchanged}`)
-			.bind(parentId, parentId, total),
+			.prepare(`DELETE FROM transactions WHERE parent_id = ?1 AND id NOT IN (SELECT transaction_id FROM planned_expenses
+				WHERE id IN (SELECT value FROM json_each(?3)) AND transaction_id IS NOT NULL) AND ${unchangedNumbered}`)
+			.bind(
+				parentId,
+				total,
+				JSON.stringify(keptPlans.map((keep) => keep.item.id)),
+			),
 		// With the old parts gone and before the new ones take the parent's link: if the whole refund
 		// no longer fits its purchase, the link goes, and the new parts start unlinked.
 		unlinkRefund,
@@ -2064,7 +2167,7 @@ export async function saveSplit(
 			(account_id, date, amount_cents, raw_name, merchant_name, category_id, category_source, excluded, excluded_source${reviewColumns}, refund_of_id, refund_unlinked_purchase_date, parent_id, plaid_transaction_id, updated_by)
 			SELECT account_id, date, ?, raw_name, merchant_name, ?, 'user', excluded, excluded_source${reviewValues},
 				${inheritedRefundLink}, refund_unlinked_purchase_date, id, NULL, ?
-			FROM transactions WHERE id = ? AND amount_cents = ?`)
+			FROM transactions WHERE id = ? AND amount_cents = ? AND NOT ${plansLinkedElsewhere}`)
 				.bind(
 					part.amountCents,
 					part.categoryId,
@@ -2076,6 +2179,8 @@ export async function saveSplit(
 					total,
 				),
 		),
+		...restorePlans,
+		leftoverParts,
 		...restore,
 		...moveStatements.flatMap(({ statement, partsStatement }) =>
 			partsStatement ? [statement, partsStatement] : [statement],
@@ -2091,6 +2196,14 @@ export async function saveSplit(
 	const results = await db.batch(statements);
 	const saved =
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;
+	// A refused change wrote nothing, so a plan linked to a part after the read is still there to be found.
+	const planLinked =
+		!saved &&
+		(
+			await db
+				.prepare(`SELECT ${plansLinkedElsewhere} AS linked`)
+				.first<{ linked: number }>()
+		)?.linked === 1;
 	// The rows a statement returned with RETURNING: the refunds it changed, a refund's own row or one of its parts
 	// (parentId is the refund's id for a part). unlinkedDates counts each refund once.
 	const returnedRows = (statement: D1PreparedStatement) =>
@@ -2101,6 +2214,7 @@ export async function saveSplit(
 		}[];
 	return {
 		saved,
+		...(planLinked ? { planLinked: true as const } : {}),
 		unlinked: !saved
 			? []
 			: unlinkedDates([
@@ -2336,8 +2450,9 @@ async function prepareCashSplitCorrection(
 
 /**
  * Deletes a split and restores its parent atomically, unlinking refunds of its parts and unlinking the bill
- * payments of its parts with no dismissal left, so the matcher may link them to the purchase again (decisions
- * 99 and 105). A person's own Not this one on a part is kept on the purchase. Returns the refunds' dates and
+ * payments of its parts with no dismissal left, so the matcher may link them to the purchase again. The planned
+ * expenses its parts pay are set aside, as the bills are unlinked (decisions 99 and 105). A person's own Not this one
+ * on a part is kept on the purchase. Returns the refunds' dates and
  * the bills still unpaid after it, by name (decision 105). A split refund's parent is whole again and counts by
  * its own link, so that link is checked like a new one (src/db/refunded.ts) and dropped if the refund no longer
  * fits; its date is returned too. A split refund is returned once, however many of its rows were linked to the split.
@@ -2365,6 +2480,7 @@ export async function removeSplit(
 			.bind(parentId),
 		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105).
 		db.prepare(movePartDismissalsSql("?1", "?1", "1")).bind(parentId),
+		// The parts go with their bill payments; a plan on a part is set aside by ON DELETE SET NULL, as a bill's is unlinked.
 		db.prepare("DELETE FROM transactions WHERE parent_id = ?").bind(parentId),
 		db
 			.prepare(
@@ -2410,7 +2526,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 // something a person left out: Jev may suggest its category, and its flags are never written, since they
 // could only change what it is excluded as or take it out of Spent (income).
 const CATEGORY_ONLY = `(COALESCE(t.amount_cents < 0 AND t.credit_reviewed = 1 AND (t.income_source = 'user' OR t.credit_reviewed_by = 'user'), 0)
-	OR (t.excluded = 1 AND ${paysBillSql("t")}))`;
+	OR (t.excluded = 1 AND ${paysBillOrPlanSql("t")}))`;
 
 /**
  * Transactions to ask Jev about, newest first: uncategorized counted transactions and all
@@ -2865,7 +2981,7 @@ export async function saveJevResult(
 					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
-						OR (excluded = 1 AND ${PAYS_A_BILL}))
+						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
 			)
@@ -2969,20 +3085,24 @@ export async function saveJevResult(
 	return saveJevAnswer(db, update, id, options.log);
 }
 
-/** How many of these transactions pay a bill, on their own link or their split parent's (`paysBillSql`). */
-export async function payingBillsCount(
+/**
+ * How many of these transactions pay a bill or a planned expense, each row once, and how many pay each kind, on their
+ * own link or their split parent's (`paysBillSql`, `paysPlanSql`). The exclude toast's sentence reads it.
+ */
+export async function payingCounts(
 	db: D1Database,
 	ids: number[],
-): Promise<number> {
-	if (ids.length === 0) return 0;
+): Promise<{ paying: number; bills: number; plans: number }> {
+	if (ids.length === 0) return { paying: 0, bills: 0, plans: 0 };
 	// One bind for the whole list (D1 takes 100 binds at most), so Select all can count past 100 (#321).
 	const row = await db
 		.prepare(
-			`SELECT COUNT(*) AS n FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysBillSql("t")}`,
+			`SELECT COUNT(*) AS paying, COALESCE(SUM(${paysBillSql("t")}), 0) AS bills, COALESCE(SUM(${paysPlanSql("t")}), 0) AS plans
+			 FROM transactions t WHERE t.id IN (SELECT value FROM json_each(?)) AND ${paysBillOrPlanSql("t")}`,
 		)
 		.bind(JSON.stringify(ids))
-		.first<{ n: number }>();
-	return row?.n ?? 0;
+		.first<{ paying: number; bills: number; plans: number }>();
+	return row ?? { paying: 0, bills: 0, plans: 0 };
 }
 
 /**

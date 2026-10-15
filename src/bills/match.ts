@@ -1,5 +1,6 @@
 import { householdToday } from "../dates";
 import { amountRowsByBill } from "../db/bill-amounts";
+import { paysPlanSql } from "../db/counted-month";
 import { isMerchantTextSql, merchantTextArgs } from "../db/merchant-key";
 import { type AmountRow, amountForMonth } from "./amount";
 import {
@@ -45,7 +46,8 @@ async function candidatesBetween(
 			`SELECT t.id,t.date,t.amount_cents AS amountCents FROM transactions t
 				 WHERE ${isMerchantTextSql("t")} AND t.is_split=0 AND t.flag_income=0
 				 AND NOT (t.excluded=1 AND COALESCE(t.excluded_source,'')='user') AND t.date BETWEEN ? AND ?
-				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')`,
+				 AND NOT EXISTS (SELECT 1 FROM bill_payments claimed WHERE claimed.transaction_id=t.id AND claimed.status='linked')
+				 AND NOT ${paysPlanSql("t")}`,
 		)
 		.bind(...merchantTextArgs(bill), start, finish)
 		.all<MatchCandidate>();
@@ -318,7 +320,9 @@ export async function matchBillPayments(
 		.prepare(
 			// An occurrence with a payment already linked (a part payment, too) takes no more from the matcher. The unique
 			// index on one bill and period is gone (migration 0050), so this check is what keeps two runs from linking twice.
-			"INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM bill_payments l WHERE l.bill_id=json_extract(value,'$.billId') AND l.period=json_extract(value,'$.period') AND l.status='linked')",
+			// A payment a plan takes after the read above is skipped too, so the bill trigger (migration 0053) never aborts the run.
+			`INSERT OR IGNORE INTO bill_payments(bill_id,period,transaction_id,matched_by,status) SELECT json_extract(value,'$.billId'),json_extract(value,'$.period'),json_extract(value,'$.transactionId'),'auto','linked' FROM json_each(?) WHERE NOT EXISTS (SELECT 1 FROM bill_payments l WHERE l.bill_id=json_extract(value,'$.billId') AND l.period=json_extract(value,'$.period') AND l.status='linked')
+			 AND NOT EXISTS (SELECT 1 FROM transactions pt WHERE pt.id=json_extract(value,'$.transactionId') AND ${paysPlanSql("pt")})`,
 		)
 		.bind(
 			JSON.stringify(

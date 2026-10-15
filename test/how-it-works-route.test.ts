@@ -52,6 +52,18 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("are 25–35 days apart");
 	});
 
+	it("names planned expenses in the budget section: its list, the diagram's Planned box and the worked example", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		const budget =
+			html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(budget).toContain(
+			"A planned one-time expense is set aside for its whole month",
+		);
+		// The demo's two plans: Lawn service ($90, this month) and Car registration ($180, last month, unpaid).
+		expect(budget).toContain("minus $270.00 for planned expenses");
+		expect(budget).toContain("$270 is set aside for planned expenses");
+	});
+
 	it("gives a linked refund its exception in the spec's words, when its purchase is excluded", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain(
@@ -211,7 +223,7 @@ describe("GET /how-it-works in the demo", () => {
 		const safeCents = cents(match?.[1] ?? "$0") - cents(match?.[2] ?? "$0");
 		const homeHtml = (await get("/")).html;
 		const shown = homeHtml.match(
-			/class="font-serif text-6xl[^"]*">([−-]?)\$([\d,]+)/,
+			/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([−-]?)\$([\d,]+)/,
 		);
 		expect(shown).not.toBeNull();
 		// Home's headline is formatCents in whole dollars, so the example is rounded the same way.
@@ -238,7 +250,9 @@ describe("GET /how-it-works in the demo", () => {
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
 		const descOf = (id: string) =>
-			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
+			page.match(
+				new RegExp(`<(?:desc|span) id="${id}-desc"[^>]*>([^<]+)<`),
+			)?.[1] ?? "";
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
 		const [budgetsLeft, less] = example(
@@ -320,6 +334,7 @@ describe("the budget guide with no activity", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM budget_amounts"),
 			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+			env.DB.prepare("DELETE FROM planned_expenses"),
 		]);
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
@@ -427,6 +442,7 @@ describe("outside the demo", () => {
 		await env.DB.prepare("DELETE FROM budget_amounts").run();
 		await env.DB.prepare("DELETE FROM transactions").run();
 		await env.DB.prepare("UPDATE bills SET active = 0").run();
+		await env.DB.prepare("DELETE FROM planned_expenses").run();
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
@@ -723,6 +739,37 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 	});
 });
 
+describe("a payment for a planned expense counts while excluded, as a bill's does (#202)", () => {
+	const sectionOf = (html: string, id: string) =>
+		decodeHtml(
+			html.match(
+				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
+			)?.[0] ?? "",
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
+	it("says in Transactions that a counted transaction is not excluded unless it pays a bill or a planned expense", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "transactions");
+			expect(text).toContain(
+				"A counted transaction is in the month, not excluded (unless it pays a bill or a planned expense), and not a split parent (its parts count instead) or a credit held for review (below).",
+			);
+			expect(text).not.toContain("unless it pays a bill)");
+		}
+	});
+
+	it("says in Excluding that a payment linked to a bill or a planned expense always counts", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "exclusions");
+			expect(text).toContain(
+				"An excluded transaction doesn't count toward spending, uncategorized, or safe to spend, unless it pays a bill or a planned expense: a payment linked to either always counts.",
+			);
+			expect(text).not.toContain("a payment linked to a bill always counts");
+		}
+	});
+});
+
 describe("new category suggestions in the Categories section (spec §7, #51)", () => {
 	const sectionOf = (html: string) =>
 		(
@@ -920,7 +967,9 @@ describe("Start here, the demo banner and the page's order (spec §8.8, §9; P12
 
 	it("shows Safe to spend exactly as Home does for the same day, under a decorative double rule", async () => {
 		const home = (await get("/")).html;
-		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		const amount = home.match(
+			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
+		)?.[1];
 		expect(amount).toBeTruthy();
 		const { html } = await get("/how-it-works");
 		expect(startHere(html)).toContain(`tabular-nums">${amount}</p>`);
@@ -978,7 +1027,9 @@ describe("Start here's month and count (#502)", () => {
 	it("on November 1 names October for the bank lines and November for Safe to spend, which equals Home's", async () => {
 		await toNovemberFirst();
 		const home = (await get("/")).html;
-		const amount = home.match(/lg:text-7xl[^"]*">([^<]+)</)?.[1];
+		const amount = home.match(
+			/lg:text-7xl[^"]*">(?:<span[^>]*>)?([^<]+)</,
+		)?.[1];
 		expect(amount).toBeTruthy();
 		const section = await startHereHtml();
 		expect(section).toContain(
