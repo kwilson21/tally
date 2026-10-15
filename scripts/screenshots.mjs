@@ -19,10 +19,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 const started = today();
 let saved = 0;
 
-// A page too tall for one capture, taken as slices of at most SLICE_HEIGHT (#580). Each slice is a
-// clip of the full page, in page pixels, and the page is measured the way Playwright measures one.
-async function sliceShots(tab, where) {
-	const size = await tab.evaluate(() => {
+// The page's size in CSS pixels, measured the way Playwright measures a full-page capture.
+function pageSize(tab) {
+	return tab.evaluate(() => {
 		const sides = [document.body, document.documentElement];
 		return {
 			width: Math.max(
@@ -41,6 +40,12 @@ async function sliceShots(tab, where) {
 			),
 		};
 	});
+}
+
+// A page too tall for one capture, taken as slices of at most SLICE_HEIGHT (#580). Each slice is a
+// clip of the full page, in page pixels.
+async function sliceShots(tab, where) {
+	const size = await pageSize(tab);
 	const bands = sliceBands(size.height);
 	console.warn(`${where}: ${bands.length} slices, ${size.height}px tall.`);
 	return captureSlices({
@@ -83,6 +88,7 @@ for (const viewport of VIEWPORTS) {
 		// page, or its slices when Chromium won't capture it whole (#580).
 		const shoot = pageShooter({
 			label: where,
+			height: (await pageSize(tab)).height,
 			whole: async () => [
 				await tab.screenshot({ fullPage: true, animations: "disabled" }),
 			],

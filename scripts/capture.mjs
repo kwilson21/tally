@@ -71,15 +71,25 @@ export async function captureSlices({
 }
 
 /**
- * Makes `shoot()` for one page: it takes the page whole, retrying, and once every whole-page try
- * has failed it takes the page in slices and keeps taking it that way, so the stability retakes
- * don't retry a page that can only be sliced.
+ * Makes `shoot()` for one page. A page taller than one slice (`height`, in CSS pixels) is taken in
+ * slices from the start: Chromium's whole-page capture repeats the page's top past row 16384, and
+ * succeeds while doing it, so a whole try would keep a wrong image. Any other page is taken whole,
+ * retrying, and once every whole-page try has failed it is taken in slices. Either way, after the
+ * first slices the stability retakes don't retry a page that can only be sliced.
  * @template T
- * @param {{ label: string, whole: () => Promise<T>, slices: () => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
+ * @param {{ label: string, height?: number, whole: () => Promise<T>, slices: () => Promise<T>, attempts?: number, wait?: (ms: number) => Promise<void>, log?: (line: string) => void }} options
  * @returns {() => Promise<T>}
  */
-export function pageShooter({ label, whole, slices, attempts, wait, log }) {
-	let sliced = false;
+export function pageShooter({
+	label,
+	height,
+	whole,
+	slices,
+	attempts,
+	wait,
+	log,
+}) {
+	let sliced = height > SLICE_HEIGHT;
 	return () => {
 		if (sliced) return slices();
 		return captureWithRetries({

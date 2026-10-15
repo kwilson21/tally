@@ -3,6 +3,7 @@ import {
 	captureSlices,
 	captureWithRetries,
 	pageShooter,
+	SLICE_HEIGHT,
 	sliceBands,
 } from "../scripts/capture.mjs";
 
@@ -189,6 +190,68 @@ describe("pageShooter", () => {
 		});
 		expect(await shoot()).toEqual(["whole"]);
 		expect(sliceCalls).toBe(0);
+	});
+
+	it("never tries a page taller than one slice whole, since Chromium repeats its top in a whole capture that tall", async () => {
+		const run = harness();
+		let wholeCalls = 0;
+		let sliceCalls = 0;
+		const shoot = pageShooter({
+			label: "/design-system/proposals (desktop)",
+			height: 270694,
+			whole: async () => {
+				wholeCalls += 1;
+				return ["whole"];
+			},
+			slices: async () => {
+				sliceCalls += 1;
+				return ["a", "b"];
+			},
+			...run.options,
+		});
+		expect(await shoot()).toEqual(["a", "b"]);
+		expect(await shoot()).toEqual(["a", "b"]);
+		expect(wholeCalls).toBe(0);
+		expect(sliceCalls).toBe(2);
+		expect(run.logs).toHaveLength(0);
+	});
+
+	it("tries a page exactly one slice tall whole, and slices one pixel taller", async () => {
+		const run = harness();
+		let wholeCalls = 0;
+		let sliceCalls = 0;
+		const shootWhole = pageShooter({
+			label: "/settings (desktop)",
+			height: SLICE_HEIGHT,
+			whole: async () => {
+				wholeCalls += 1;
+				return ["whole"];
+			},
+			slices: async () => {
+				sliceCalls += 1;
+				return ["a", "b"];
+			},
+			...run.options,
+		});
+		expect(await shootWhole()).toEqual(["whole"]);
+		expect(wholeCalls).toBe(1);
+		expect(sliceCalls).toBe(0);
+		const shootSliced = pageShooter({
+			label: "/settings (desktop)",
+			height: SLICE_HEIGHT + 1,
+			whole: async () => {
+				wholeCalls += 1;
+				return ["whole"];
+			},
+			slices: async () => {
+				sliceCalls += 1;
+				return ["a", "b"];
+			},
+			...run.options,
+		});
+		expect(await shootSliced()).toEqual(["a", "b"]);
+		expect(wholeCalls).toBe(1);
+		expect(sliceCalls).toBe(1);
 	});
 });
 
