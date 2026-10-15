@@ -1,18 +1,30 @@
-// P136 (#602, the owner's pick to draw): what Bills' Upcoming and Paid this month totals count. Each picture is
-// the Bills page from its Due heading down to Paid this month, drawn with the real BillRow and BillStatusHeading
-// on the demo's Thursday, Oct 15. Today's totals are main's (#601): Paid counts its listed rows. Option A counts
-// every paid occurrence this month and says which ones aren't listed; option B keeps Paid to its rows and says
-// only what Upcoming adds. Proposal only: nothing in the app changes.
+// P136 (#602): what Bills' Upcoming and Paid this month totals count. The owner picked A (decision 122). Each picture is
+// the Bills page from its Due heading down to Paid this month, drawn with the real BillRow, BillStatusHeading and
+// PlannedRow on the demo's Thursday, Oct 15. Today's totals are main's (#601): Paid counts its listed rows. Option A
+// counts every paid occurrence this month and says which ones aren't listed; option B keeps Paid to its rows and says
+// only what Upcoming adds. These drawings stay as the build reference until #602 ships.
 
 import {
 	BillRow,
 	type BillRowData,
 	BillStatusHeading,
 } from "../views/bill-row";
+import {
+	PlannedHeading,
+	PlannedRow,
+	type PlannedRowData,
+} from "../views/planned-expense";
 import { Choice, Choices, Desk, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
 const TODAY = "2026-10-15";
+const MONTH = "2026-10";
+
+// The demo's categories, as src/demo/seed.ts CATEGORIES names them and src/demo/reset.ts demoBills files each bill:
+// Internet, Streaming and Water are Household (5), Daycare is Childcare (6), and Soccer league is Kids (4).
+const HOUSEHOLD = { icon: "household", color: "cat-brown" };
+const CHILDCARE = { icon: "kids", color: "cat-blue" };
+const KIDS = { icon: "kids", color: "cat-ochre" };
 
 // Daycare is a weekly bill on Fridays (dueDay 5, Friday). Bills lists each bill's next occurrence as its row, so
 // the Oct 16 Friday is the row; its Oct 23 and 30 Fridays are due later, and its Oct 2 and 9 Fridays are paid.
@@ -22,8 +34,7 @@ const INTERNET: BillRowData = {
 	amountCents: 6500,
 	status: "due",
 	dueDate: "2026-10-18",
-	icon: "utilities",
-	color: "cat-blue",
+	...HOUSEHOLD,
 };
 const DAYCARE: BillRowData = {
 	id: 2,
@@ -31,10 +42,9 @@ const DAYCARE: BillRowData = {
 	amountCents: 24000,
 	status: "due",
 	dueDate: "2026-10-16",
-	icon: "kids",
-	color: "cat-ochre",
 	frequency: "weekly",
 	dueDay: 5,
+	...CHILDCARE,
 };
 const SOCCER: BillRowData = {
 	id: 7,
@@ -42,8 +52,7 @@ const SOCCER: BillRowData = {
 	amountCents: 6833,
 	status: "upcoming",
 	dueDate: "2027-07-14",
-	icon: "kids",
-	color: "cat-plum",
+	...KIDS,
 };
 const STREAMING: BillRowData = {
 	id: 8,
@@ -52,8 +61,7 @@ const STREAMING: BillRowData = {
 	status: "paid",
 	dueDate: "2026-10-15",
 	paidDate: "2026-10-15",
-	icon: "subscriptions",
-	color: "cat-plum",
+	...HOUSEHOLD,
 };
 const WATER: BillRowData = {
 	id: 9,
@@ -62,9 +70,16 @@ const WATER: BillRowData = {
 	status: "paid",
 	dueDate: "2026-10-15",
 	paidDate: "2026-10-15",
-	icon: "utilities",
-	color: "cat-blue",
+	...HOUSEHOLD,
 };
+
+// The demo's plans in loadPlans' order (month, then id), as reset.ts sets them: Car registration for September,
+// Lawn service for October. Only Lawn service is this month's, so the Planned total is its $90.00.
+const PLANS: PlannedRowData[] = [
+	{ id: 2, name: "Car registration", amountCents: 18000, month: "2026-09" },
+	{ id: 1, name: "Lawn service", amountCents: 9000, month: "2026-10" },
+];
+const PLANNED_THIS_MONTH_CENTS = 9000;
 
 // The totals as the page adds them: Due is Internet and Daycare's Oct 16 Friday; Upcoming is Daycare's Oct 23 and 30
 // Fridays (Soccer league is next July, so it isn't this month); Paid this month is the two rows it lists.
@@ -121,6 +136,14 @@ function Groups({ paidCents, upcomingLine, paidLine }: Totals) {
 				line={upcomingLine}
 				bills={[SOCCER]}
 			/>
+			<div class="mt-4">
+				<PlannedHeading totalCents={PLANNED_THIS_MONTH_CENTS} />
+				<ul class="divide-y divide-rule">
+					{PLANS.map((plan) => (
+						<PlannedRow plan={plan} month={MONTH} today={TODAY} />
+					))}
+				</ul>
+			</div>
 			<Group
 				status="paid"
 				totalCents={paidCents}
@@ -131,17 +154,17 @@ function Groups({ paidCents, upcomingLine, paidLine }: Totals) {
 	);
 }
 
-/** One option at both sizes: the phone's screen at 390 px, then a desktop window at 1280 px. */
+/** One option at both sizes: the phone's screen at 390 px, then a desktop window at 1280 px, with Bills current. */
 function Pictures({ name, totals }: { name: string; totals: Totals }) {
 	return (
 		<>
 			<Shot caption="At 390 px">
-				<Phone label={`${name} at 390 px`} scrolled>
+				<Phone label={`${name} at 390 px`} scrolled tab="bills">
 					<Groups {...totals} />
 				</Phone>
 			</Shot>
 			<Shot caption="At 1280 px">
-				<Desk label={`${name} at 1280 px`} tall={900}>
+				<Desk label={`${name} at 1280 px`} tall={900} active="bills">
 					<Groups {...totals} />
 				</Desk>
 			</Shot>
@@ -189,6 +212,7 @@ export function BillsTotalsProposal() {
 					extra="The muted line names up to two bills, then “and 2 more”."
 					cost="Paid's total adds the month's paid occurrences; one muted line under a heading when its total includes unlisted ones; a decision entry that also fixes spec §8.4's sentence on what totals count."
 					why="“Paid this month” means what the family paid, and the two headings count the same way."
+					picked
 					width="w-[824px]"
 				>
 					<Pictures
