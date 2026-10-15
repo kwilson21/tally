@@ -141,7 +141,7 @@ function Pictures({ name, totals }: { name: string; totals: Totals }) {
 				</Phone>
 			</Shot>
 			<Shot caption="At 1280 px">
-				<Desk label={`${name} at 1280 px`}>
+				<Desk label={`${name} at 1280 px`} tall={900}>
 					<Groups {...totals} />
 				</Desk>
 			</Shot>
