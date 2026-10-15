@@ -4,7 +4,11 @@
 // every paid occurrence this month and says which ones aren't listed; option B keeps Paid to its rows and says
 // only what Upcoming adds. Proposal only: nothing in the app changes.
 
-import { type BillRowData, BillRow, BillStatusHeading } from "../views/bill-row";
+import {
+	BillRow,
+	type BillRowData,
+	BillStatusHeading,
+} from "../views/bill-row";
 import { Choice, Choices, Desk, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -110,11 +114,7 @@ function Group({
 function Groups({ paidCents, upcomingLine, paidLine }: Totals) {
 	return (
 		<>
-			<Group
-				status="due"
-				totalCents={DUE_CENTS}
-				bills={[INTERNET, DAYCARE]}
-			/>
+			<Group status="due" totalCents={DUE_CENTS} bills={[INTERNET, DAYCARE]} />
 			<Group
 				status="upcoming"
 				totalCents={UPCOMING_CENTS}
@@ -190,7 +190,10 @@ export function BillsTotalsProposal() {
 					why="“Paid this month” means what the family paid, and the two headings count the same way."
 					width="w-[824px]"
 				>
-					<Pictures name="Option A · Each heading says what it counts" totals={A_TOTALS} />
+					<Pictures
+						name="Option A · Each heading says what it counts"
+						totals={A_TOTALS}
+					/>
 				</Choice>
 				<Choice
 					name="Option B · Paid counts its rows"

@@ -3366,8 +3366,8 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		const chunk = block(await drawn(), "p136-bills-totals");
 		const list = options(chunk);
 		expect(list.length).toBe(3);
-		NAMES.forEach((name, i) => expect(list[i]).toContain(name));
-		NAMES.forEach((name, i) => {
+		for (const [i, name] of NAMES.entries()) {
+			expect(list[i]).toContain(name);
 			const labels = [
 				...(list[i] ?? "").matchAll(/role="img" aria-label="([^"]*)"/g),
 			].map((m) => m[1]);
@@ -3375,7 +3375,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 				`${name} at 390 px, on a phone`,
 				`${name} at 1280 px, on desktop`,
 			]);
-		});
+		}
 	});
 
 	it("draws Bills from its Due heading to Paid this month with the demo's rows, and lists only Daycare's next Friday", async () => {
@@ -3394,7 +3394,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("keeps Upcoming's $480.00 this month with its line in A and B, and draws today's reference with no line", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
-		const [today, a, b] = options(chunk);
+		const [today = "", a = "", b = ""] = options(chunk);
 		expect(count(today, "$480.00 this month")).toBe(2);
 		expect(count(today, UPCOMING_LINE)).toBe(0);
 		for (const option of [a, b]) {
@@ -3405,7 +3405,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("reads Paid this month as $16.98 today and in B, and as $496.98 with its line in A, in both pictures", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
-		const [today, a, b] = options(chunk);
+		const [today = "", a = "", b = ""] = options(chunk);
 		for (const option of [today, b]) {
 			expect(count(option, "$16.98")).toBe(2);
 			expect(count(option, "$496.98")).toBe(0);
@@ -3418,7 +3418,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("sets each line under its heading: A's Upcoming and Paid lines come before their rows", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
-		const [, a] = options(chunk);
+		const [, a = ""] = options(chunk);
 		for (const [heading, line] of [
 			["Upcoming</h2>", UPCOMING_LINE],
 			["Paid this month</h2>", PAID_LINE],
@@ -3432,7 +3432,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("draws B's Paid this month with its rows and no line, and keeps Upcoming's line", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
-		const [, , b] = options(chunk);
+		const [, , b = ""] = options(chunk);
 		const paid = groupsOf(b ?? "").filter((g) =>
 			g.includes("Paid this month</h2>"),
 		);
@@ -3450,7 +3450,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 
 	it("weighs A and B in words: A is recommended, each option gives its trade-off and why", async () => {
 		const chunk = block(await drawn(), "p136-bills-totals");
-		const [today, a, b] = options(chunk);
+		const [today = "", a = "", b = ""] = options(chunk);
 		expect(count(today ?? "", "Recommended")).toBe(0);
 		expect(count(a ?? "", "Recommended")).toBe(1);
 		expect(count(b ?? "", "Recommended")).toBe(0);
