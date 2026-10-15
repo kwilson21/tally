@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { markStroke } from "../src/db/first-tally";
-import { countWaitingForJev } from "../src/db/transactions";
+import {
+	countWaitingForJev,
+	pendingForJev,
+	saveJevResult,
+} from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { questionsOpen, readQuestionsGate } from "../src/first-tally/gate";
 
@@ -149,6 +153,31 @@ describe("countWaitingForJev", () => {
 			income_confidence: 0.4,
 		});
 		expect(await count(false, true)).toBe(0);
+	});
+
+	it("does not hold the gate for a credit whose category Jev answered with income off, since the queue never asks its income", async () => {
+		await saveAiSwitches(db, { categories: true, income: false });
+		await txn({ amount_cents: -5000 });
+		const row = await db
+			.prepare("SELECT id FROM transactions WHERE plaid_transaction_id = ?")
+			.bind(`gate-${n}`)
+			.first<{ id: number }>();
+		expect(row).not.toBeNull();
+		expect(
+			await saveJevResult(
+				db,
+				row?.id ?? 0,
+				{
+					categoryId: null,
+					suggestedCategoryId: null,
+					confidence: 0.4,
+					flags: { transfer: false, reimbursement: false, income: false },
+				},
+				{ switches: { income: false, categories: true } },
+			),
+		).toBe(true);
+		expect(await pendingForJev(db, 100)).toEqual([]);
+		expect(await count(true, true)).toBe(0);
 	});
 
 	it("treats a row Jev failed on as sorted, so it never holds the gate", async () => {

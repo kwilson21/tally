@@ -2533,15 +2533,17 @@ export async function pendingForJev(
  * (`jev_failed_at`, which counts as sorted) and any answered below the threshold (its confidence is stored, so it isn't
  * NULL). Details-only work never counts. With categories off, category work is ignored, and a purchase waits for nothing;
  * income work still counts while income is on. With no active category, a purchase waits for its transfer answer while
- * categories are on, as pendingForJev asks it. It shares NEEDS_JEV_CLASSIFICATION and CATEGORY_ONLY with pendingForJev.
+ * categories are on, as pendingForJev asks it. It shares NEEDS_JEV_CLASSIFICATION, CATEGORY_ONLY and the category guard
+ * (`category_confidence IS NULL`, which pendingForJev applies to every ask, income included) with pendingForJev, so a
+ * row whose category Jev already answered never waits for an income answer the queue won't ask for.
  */
 export async function countWaitingForJev(
 	db: D1Database,
 	{ categories, income }: { categories: boolean; income: boolean },
 ): Promise<number> {
 	if (!categories && !income) return 0;
-	const categoryWork = `(t.category_confidence IS NULL AND (EXISTS (SELECT 1 FROM categories WHERE archived = 0)
-		OR (NOT ${CATEGORY_ONLY} AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user')))`;
+	const categoryWork = `(EXISTS (SELECT 1 FROM categories WHERE archived = 0)
+		OR (NOT ${CATEGORY_ONLY} AND t.amount_cents > 0 AND t.transfer_confidence IS NULL AND COALESCE(t.excluded_source, '') != 'user'))`;
 	const incomeWork = `(NOT ${CATEGORY_ONLY} AND t.amount_cents < 0 AND t.income_confidence IS NULL)`;
 	const asked = [categories ? categoryWork : null, income ? incomeWork : null]
 		.filter((part) => part !== null)
@@ -2551,7 +2553,8 @@ export async function countWaitingForJev(
 			`SELECT COUNT(*) AS waiting FROM transactions t
 			${COUNTED_JOINS}
 			WHERE t.plaid_transaction_id IS NOT NULL AND t.jev_failed_at IS NULL
-				AND NOT ${FOLLOWS_PURCHASE} AND ${NEEDS_JEV_CLASSIFICATION} AND (${asked})`,
+				AND NOT ${FOLLOWS_PURCHASE} AND ${NEEDS_JEV_CLASSIFICATION}
+				AND t.category_confidence IS NULL AND (${asked})`,
 		)
 		.first<{ waiting: number }>();
 	return row?.waiting ?? 0;
