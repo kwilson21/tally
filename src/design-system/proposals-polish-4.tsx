@@ -249,19 +249,33 @@ type DeskProps = {
 	label: string;
 	/** Adds the second sidebar group: How Tally works and Feedback. */
 	group?: boolean;
+	/** One more line at the end of that group (P128 A's Keyboard shortcuts). */
+	extra?: Child;
+	/** A taller window, for a picture with more to draw than 560px holds (900px, or 1200px for a full sidebar). */
+	tall?: 900 | 1200;
+	/** Drawn over the window, as a sheet is drawn over the page behind it. */
+	overlay?: Child;
 	/** The pill at the window's corner, where it sits on desktop today. */
 	floating?: boolean;
 	children?: Child;
 };
 
 /** A desktop window's first screen, with the sidebar, drawn at 722 by 560 as DesktopFrame does. */
-function Desk({ label, group = false, floating = false, children }: DeskProps) {
+export function Desk({
+	label,
+	group = false,
+	extra,
+	tall,
+	overlay,
+	floating = false,
+	children,
+}: DeskProps) {
 	return (
 		<div class="overflow-x-auto">
 			<div
 				role="img"
 				aria-label={`${label}, on desktop`}
-				class="relative h-[560px] w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+				class={`relative ${tall === 1200 ? "h-[1200px]" : tall === 900 ? "h-[900px]" : "h-[560px]"} w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
 			>
 				<div inert>
 					<div data-screen="picture">
@@ -304,6 +318,7 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 													Feedback
 												</a>
 											</li>
+											{extra}
 										</ul>
 									)}
 								</nav>
@@ -311,6 +326,7 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 							<main class="min-w-0 flex-1">{children}</main>
 						</div>
 						{floating && <div class="absolute bottom-6 right-6">{pill}</div>}
+						{overlay}
 					</div>
 				</div>
 			</div>

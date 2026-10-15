@@ -9,6 +9,7 @@ import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
 import { FormsProposals } from "./proposals-forms";
+import { KeyboardListProposal } from "./proposals-keys";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
@@ -492,6 +493,17 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="p128-title" class="mt-10">
+				<h2 id="p128-title" class="font-serif text-3xl font-semibold">
+					Open: the keyboard shortcuts list
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15 for the owner's sign-off on #72 and #516: what{" "}
+					<code>?</code> opens, and where the list lives without the script.
+				</p>
+				<KeyboardListProposal />
+			</section>
 
 			<section aria-labelledby="p126-title" class="mt-10">
 				<h2 id="p126-title" class="font-serif text-3xl font-semibold">

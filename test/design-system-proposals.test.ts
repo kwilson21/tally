@@ -345,7 +345,7 @@ describe("GET /design-system/proposals", () => {
 		expect(html.slice(start)).toContain("and is $23,400 today.");
 	});
 
-	it("shows P23–P125 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
+	it("shows P23–P128 with one recommended option each (P91–P109 and P117 are picks drawn as decided), marks the owner's picks from P34 on, and lists every decided proposal", async () => {
 		const { res, html } = await get("/design-system/proposals");
 		expect(res.status).toBe(200);
 		expect(html).toContain("<title>Proposals · Design system · Tally</title>");
@@ -354,9 +354,10 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P125 is drawn, and each id is used once.
+		// Every proposal from P23 to P128 is drawn, and each id is used once. No proposal is numbered P127.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 125; n++) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 128; n++)
+			if (n !== 127) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -372,9 +373,12 @@ describe("GET /design-system/proposals", () => {
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
-			// P125 gives each of its five options a reason too (its E is the one recommended).
+			// P125 gives each of its five options a reason too (its E is the one recommended), and P128 each of its three.
 			const eachOption =
-				id === "p118-rows" || id === "p119-saved" || id === "p125-first-week";
+				id === "p118-rows" ||
+				id === "p119-saved" ||
+				id === "p125-first-week" ||
+				id === "p128-keys";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -390,8 +394,9 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P126 is open: the owner has not picked from it yet, so it carries no Picked pill.
-			const expected = n < 34 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P126 and P128 are open: the owner has not picked from them yet, so they carry no Picked pill.
+			const expected =
+				n < 34 || n === 126 || n === 128 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -1519,8 +1524,11 @@ describe("P126 · the Budget diagram with Planned (#202, decision 101)", () => {
 		);
 		expect(top).toBeGreaterThan(-1);
 		expect(start).toBeGreaterThan(top);
-		// Nothing else is drawn between the page's title and this section.
-		expect(html.slice(top, start)).not.toContain("<section");
+		// Only P128, the keyboard list, is drawn between the page's title and this section.
+		const p128 = html.indexOf('<section aria-labelledby="p128-title"');
+		expect(p128).toBeGreaterThan(top);
+		expect(html.slice(top, p128)).not.toContain("<section");
+		expect(p128).toBeLessThan(start);
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="polish4-title"'),
 		);
@@ -3022,5 +3030,166 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		const a = option(chunk, "Option A · The Opening Entry");
 		expect(a).not.toContain(">Recommended<");
 		expect(a).not.toContain(">Picked<");
+	});
+});
+
+// P128 (#72 and #516): where the keyboard shortcuts list lives, drawn for the owner's sign-off. Proposal only: nothing in the app changes.
+describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const section = (html: string) => {
+		const start = html.indexOf('<section id="p128-keys"');
+		expect(start).toBeGreaterThan(-1);
+		const end = html.indexOf('<section aria-labelledby="p126-title"', start);
+		expect(end).toBeGreaterThan(start);
+		return html.slice(start, end);
+	};
+	// One option: from its heading to the next option's heading (the last runs to the section's end).
+	const option = (chunk: string, name: string) => {
+		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return chunk.slice(at, next);
+	};
+	// The ledger row that holds some words: from the row's opening tag to its end.
+	const rowOf = (chunk: string, words: string) => {
+		const at = chunk.indexOf(words);
+		expect(at, words).toBeGreaterThan(-1);
+		return chunk.slice(
+			chunk.lastIndexOf("<li", at),
+			chunk.indexOf("</li>", at),
+		);
+	};
+
+	it("is the first proposal on the page, above P126", async () => {
+		const html = await drawn();
+		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
+			(m) => m[1],
+		);
+		expect(ids[0]).toBe("p128-keys");
+		expect(html).toContain(
+			'<h2 id="p128-title" class="font-serif text-3xl font-semibold">Open: the keyboard shortcuts list</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 15 for the owner&#39;s sign-off on #72 and #516: what <code>?</code> opens, and where the list lives without the script.",
+		);
+		expect(html.indexOf('<section aria-labelledby="p128-title"')).toBeLessThan(
+			html.indexOf('<section aria-labelledby="p126-title"'),
+		);
+	});
+
+	it("draws the Fixed box with decision 109's words, the keys and their rules", async () => {
+		const chunk = section(await drawn());
+		expect(chunk).toContain(
+			"Already fixed by the spec: </span>Decision 109 (keyboard.js).",
+		);
+		expect(chunk).toContain("focuses search");
+		expect(chunk).toContain("opens this list");
+		expect(chunk).toContain("move between a list&#39;s rows");
+		expect(chunk).toContain(
+			"no key acts while typing in a field, with Ctrl, Alt or Cmd held, or while a sheet is open (Escape belongs to the sheet)",
+		);
+		expect(chunk).toContain(
+			"the list is a &lt;details&gt; that reads without the script.",
+		);
+	});
+
+	it("draws three options, A recommended, each with a note, a trade-off and a why, and no pick", async () => {
+		const chunk = section(await drawn());
+		const names = [...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
+			(m) => (m[1] ?? "").split("<")[0],
+		);
+		expect(names).toEqual([
+			"A · A sidebar line that opens in place",
+			"B · At the foot of the page",
+			"C · A sheet, with the details as its fallback",
+		]);
+		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
+		expect(option(chunk, "A · A sidebar line that opens in place")).toContain(
+			">Recommended<",
+		);
+		expect(chunk.match(/>Picked</g)).toBeNull();
+		expect(chunk.match(/Trade-off: /g)?.length).toBe(3);
+		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(3);
+	});
+
+	it("draws each option's pictures: A three (closed, open, a phone), B three, C two", async () => {
+		const chunk = section(await drawn());
+		const a = option(chunk, "A · A sidebar");
+		const b = option(chunk, "B · At the foot");
+		const c = option(chunk, "C · A sheet");
+		expect(a.match(PICTURE)?.length).toBe(3);
+		expect(b.match(PICTURE)?.length).toBe(3);
+		expect(c.match(PICTURE)?.length).toBe(2);
+		expect(a).toContain(
+			'role="img" aria-label="A, the sidebar closed, on desktop"',
+		);
+		expect(a).toContain(
+			'role="img" aria-label="A, the sidebar open, on desktop"',
+		);
+		expect(a).toContain('role="img" aria-label="A, Home, on a phone"');
+		expect(b).toContain(
+			'role="img" aria-label="B, the foot closed, on desktop"',
+		);
+		expect(b).toContain('role="img" aria-label="B, the foot open, on desktop"');
+		expect(b).toContain('role="img" aria-label="B, Home, on a phone"');
+		expect(c).toContain(
+			'role="img" aria-label="C, the sheet over Home, on desktop"',
+		);
+		expect(c).toContain(
+			'role="img" aria-label="C, the fallback foot, on desktop"',
+		);
+	});
+
+	it("draws the same ledger of keys in each open list, with its words and to-confirm tags on Enter, the arrows and u", async () => {
+		const chunk = section(await drawn());
+		for (const name of ["A · A sidebar", "B · At the foot", "C · A sheet"]) {
+			const opt = option(chunk, name);
+			expect(opt.match(/to confirm/g)?.length, name).toBe(3);
+			expect(rowOf(opt, "Search transactions")).toContain(">/</kbd>");
+			expect(rowOf(opt, "Show these keys")).toContain(">?</kbd>");
+			expect(rowOf(opt, "Next row / previous row")).toContain(">j</kbd>");
+			expect(rowOf(opt, "Open the row")).toContain(">Enter</kbd>");
+			expect(rowOf(opt, "Previous month / next month")).toContain(">←</kbd>");
+			expect(rowOf(opt, "Undo it, while its toast shows")).toContain(
+				">u</kbd>",
+			);
+			expect(rowOf(opt, "Open the row")).toContain("to confirm");
+			expect(rowOf(opt, "Previous month / next month")).toContain("to confirm");
+			expect(rowOf(opt, "Undo it, while its toast shows")).toContain(
+				"to confirm",
+			);
+			expect(rowOf(opt, "Search transactions")).not.toContain("to confirm");
+			expect(rowOf(opt, "Show these keys")).not.toContain("to confirm");
+			expect(rowOf(opt, "Next row / previous row")).not.toContain("to confirm");
+			expect(opt).toContain("New (#516): needs your yes.");
+			expect(opt).toContain(
+				"Keys don&#39;t work while you&#39;re typing in a field. In a sheet, Escape closes it.",
+			);
+		}
+	});
+
+	it("adds no client JavaScript to the section", async () => {
+		const chunk = section(await drawn());
+		expect(chunk).not.toContain("<script");
+	});
+
+	it("gives every picture frame position, so an absolutely placed child can't escape its clip and widen the page at 390", async () => {
+		const html = await drawn();
+		// Opening tags, matched attribute by attribute, so a `>` inside a class can't cut a tag short.
+		const tags = [
+			...html.matchAll(
+				/<([a-z][a-z0-9]*)((?:\s+[a-zA-Z:_-]+(?:="[^"]*")?)*)\s*\/?>/g,
+			),
+		].filter((m) => /\srole="img"/.test(m[2] ?? ""));
+		const clipped = tags.filter((m) =>
+			/\sclass="[^"]*\boverflow-hidden\b/.test(m[2] ?? ""),
+		);
+		expect(clipped.length).toBeGreaterThan(0);
+		expect(
+			clipped
+				.filter((m) => !/\sclass="[^"]*\brelative\b/.test(m[2] ?? ""))
+				.map((m) => m[0]),
+		).toEqual([]);
 	});
 });
