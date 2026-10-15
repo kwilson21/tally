@@ -185,7 +185,8 @@ export function BillsTotalsProposal() {
 				</Choice>
 				<Choice
 					name="Option A · Each heading says what it counts"
-					note="Each heading says what its total counts. Paid this month adds every paid occurrence this month, so both headings count the same way. A muted line under a heading names the unlisted bills and dates, up to two bills and then “and 2 more”."
+					note="Both headings count every occurrence in the month, and say which ones aren't listed."
+					extra="The muted line names up to two bills, then “and 2 more”."
 					cost="Paid's total adds the month's paid occurrences; one muted line under a heading when its total includes unlisted ones; a decision entry that also fixes spec §8.4's sentence on what totals count."
 					why="“Paid this month” means what the family paid, and the two headings count the same way."
 					width="w-[824px]"
@@ -197,7 +198,7 @@ export function BillsTotalsProposal() {
 				</Choice>
 				<Choice
 					name="Option B · Paid counts its rows"
-					note="Paid this month is exactly its rows, with no line under it. Upcoming keeps its total and says what it counts, with A's muted line."
+					note="Paid is exactly its rows; Upcoming says what else it counts."
 					cost="the line under Upcoming only."
 					why="a heading's total matches what's under it wherever it can."
 					recommended={false}

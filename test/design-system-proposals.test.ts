@@ -3466,6 +3466,20 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		);
 	});
 
+	it("gives A and B the brief's notes word for word, and A's line rule under its note", async () => {
+		const chunk = block(await drawn(), "p136-bills-totals");
+		const [, a = "", b = ""] = options(chunk);
+		expect(a).toContain(
+			'<p class="text-sm">Both headings count every occurrence in the month, and say which ones aren&#39;t listed.</p>',
+		);
+		expect(a).toContain(
+			'<p class="text-sm">The muted line names up to two bills, then “and 2 more”.</p>',
+		);
+		expect(b).toContain(
+			'<p class="text-sm">Paid is exactly its rows; Upcoming says what else it counts.</p>',
+		);
+	});
+
 	it("adds no client JavaScript: the specimen has no script", async () => {
 		expect(block(await drawn(), "p136-bills-totals")).not.toContain("<script");
 	});
