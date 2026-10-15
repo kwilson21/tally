@@ -762,21 +762,130 @@ describe("demo", () => {
 	});
 });
 
-it("uses the Referer for the return page and omits the button on feedback", async () => {
+it("uses the Referer for the return page and leaves the top line's pill off feedback", async () => {
 	const response = await productionApp().fetch("/feedback", {
 		headers: { Referer: `${BASE}/transactions?uncategorized=1` },
 	});
 	const html = await response.text();
 	expect(html).toContain('name="from" value="/transactions"');
-	expect(html).not.toContain(
-		"fixed bottom-[calc(var(--feedback-bottom)+var(--safe-area-bottom))]",
-	);
+	// The top line keeps its wordmark on this page, and no pill beside it (P123 A).
+	const topLine = html.match(/<div id="top-line"[^>]*>[\s\S]*?<\/div>/)?.[0];
+	expect(topLine).toContain('aria-label="Tally home"');
+	expect(topLine).not.toContain('href="/feedback"');
 });
 
 it("renders a plain feedback link on app pages", async () => {
 	const html = await (await exports.default.fetch(`${BASE}/settings`)).text();
 	expect(html).toContain('href="/feedback"');
 	expect(html).not.toContain("/feedback?from=");
+});
+
+describe("the Feedback item on its own page", () => {
+	const SELF_HREF = "/feedback?return_to=%2Ftransactions%3Funcategorized%3D1";
+	const hiddenValue = (html: string, name: string) =>
+		html.match(
+			new RegExp(`<input type="hidden" name="${name}" value="([^"]*)"`),
+		)?.[1];
+
+	it("carries the page the form came from in the current item's own link", async () => {
+		const html = await (
+			await productionApp().fetch("/feedback", {
+				headers: { Referer: `${BASE}/transactions?uncategorized=1` },
+			})
+		).text();
+		expect(html).toContain(`<a href="${SELF_HREF}" aria-current="page"`);
+	});
+
+	it("keeps the original page when the item is clicked, whether the Referer is /feedback or its own link", async () => {
+		for (const referer of [`${BASE}/feedback`, `${BASE}${SELF_HREF}`]) {
+			const html = await (
+				await productionApp().fetch(SELF_HREF, {
+					headers: { Referer: referer },
+				})
+			).text();
+			expect(html).toContain('name="from" value="/transactions"');
+			expect(hiddenValue(html, "return_to")).toBe(
+				"/transactions?uncategorized=1",
+			);
+			expect(html).toContain(`<a href="${SELF_HREF}" aria-current="page"`);
+		}
+	});
+
+	it("sends from the sidebar's own link back to the page the person started from", async () => {
+		const first = await (
+			await productionApp().fetch("/feedback", {
+				headers: { Referer: `${BASE}/transactions?uncategorized=1` },
+			})
+		).text();
+		const href = first.match(
+			/<a href="(\/feedback[^"]*)" aria-current="page"/,
+		)?.[1];
+		expect(href).toBe(SELF_HREF);
+		const again = await (
+			await productionApp().fetch(SELF_HREF, {
+				headers: { Referer: `${BASE}/feedback` },
+			})
+		).text();
+		const response = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "The filter came back off",
+				from: hiddenValue(again, "from") ?? "",
+				return_to: hiddenValue(again, "return_to") ?? "",
+			}),
+		);
+		expect(response.status).toBe(303);
+		expect(response.headers.get("location")).toBe(
+			"/transactions?uncategorized=1&sent=feedback",
+		);
+		expect(await env.DB.prepare("SELECT page FROM feedback").first()).toEqual({
+			page: "/transactions",
+		});
+	});
+
+	it("keeps the page on the sidebar link when the form comes back with an error", async () => {
+		const response = await productionApp().fetch(
+			"/feedback",
+			postFields({
+				type: "Bug",
+				feeling: "Okay",
+				message: "",
+				from: "/settings?open=3",
+				return_to: "/settings?open=3",
+			}),
+		);
+		expect(response.status).toBe(422);
+		expect(await response.text()).toContain(
+			'<a href="/feedback?return_to=%2Fsettings%3Fopen%3D3" aria-current="page"',
+		);
+	});
+
+	it("never records /feedback as the page, even when the Referer is /feedback with no return page", async () => {
+		const html = await (
+			await productionApp().fetch("/feedback", {
+				headers: { Referer: `${BASE}/feedback` },
+			})
+		).text();
+		expect(html).toContain('name="from" value="/"');
+		expect(hiddenValue(html, "return_to")).toBe("/");
+	});
+
+	it("ignores a return_to in the link when the Referer is another page or there is none", async () => {
+		const fromOther = await (
+			await productionApp().fetch("/feedback?return_to=%2Fsettings", {
+				headers: { Referer: `${BASE}/transactions` },
+			})
+		).text();
+		expect(hiddenValue(fromOther, "from")).toBe("/transactions");
+		expect(hiddenValue(fromOther, "return_to")).toBe("/transactions");
+		const noReferer = await (
+			await productionApp().fetch("/feedback?return_to=%2Fsettings")
+		).text();
+		expect(hiddenValue(noReferer, "from")).toBe("/");
+		expect(hiddenValue(noReferer, "return_to")).toBe("/");
+	});
 });
 
 it("normalizes browser newlines before enforcing the message limit", async () => {

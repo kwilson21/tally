@@ -88,14 +88,10 @@
 		--toasts-height: 0px;
 		/* A phone sheet always leaves room at the top for the toasts on screen: at least a 12 px gap, a two-line toast (66 px) and 12 px. More when the toasts on screen are taller, such as an Undo toast and an error toast together. */
 		--toast-top-room: max(5.625rem, calc(var(--toasts-height) + 1.5rem));
-		--feedback-bottom: 6.5rem;
-		--feedback-height: 2.75rem;
 		--focus-scroll-gap: 0.5rem;
+		/* The phone's bottom room for focused content: the tab bar, the focus gap and the safe area. The Feedback pill sits in the top line and scrolls away (P123 A), so it doesn't count. */
 		--focus-scroll-room: calc(
-			max(
-				var(--tabs-height),
-				calc(var(--feedback-bottom) + var(--feedback-height))
-			) +
+			var(--tabs-height) +
 			var(--focus-scroll-gap) +
 			var(--safe-area-bottom)
 		);

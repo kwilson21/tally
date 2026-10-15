@@ -240,7 +240,7 @@ function Tabs({ current }: { current: "home" | "more" }) {
 }
 
 /** The feedback pill as the phone draws it: the real button, not fixed, placed over the screen. */
-const pill = <FeedbackButton fixed={false} />;
+const pill = <FeedbackButton />;
 
 /** The pill's place over a screen: fixed bottom-right above the tab bar, as it sits in the app. */
 const floatingPill = <div class="absolute bottom-[6.5rem] right-4">{pill}</div>;

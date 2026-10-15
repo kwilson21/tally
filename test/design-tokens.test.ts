@@ -303,7 +303,7 @@ function problems(file: string, text: string): string[] {
 }
 
 describe("design tokens (DESIGN.md)", () => {
-	it("keeps focused content clear of the phone tab bar and Feedback button", () => {
+	it("keeps focused content clear of the phone tab bar, the only fixed control at the foot (P123 A)", () => {
 		const scrollRules = cssRules(css).filter(
 			({ selector, body }) =>
 				selector === "html" && body.includes("scroll-padding-bottom"),
@@ -317,29 +317,17 @@ describe("design tokens (DESIGN.md)", () => {
 			/scroll-padding-bottom:\s*var\(--focus-scroll-room\)/,
 		);
 		expect(css).toMatch(
-			/--focus-scroll-room:\s*calc\(\s*max\(\s*var\(--tabs-height\),\s*calc\(var\(--feedback-bottom\)\s*\+\s*var\(--feedback-height\)\)\s*\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
+			/--focus-scroll-room:\s*calc\(\s*var\(--tabs-height\)\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\);/,
 		);
 		expect(css).toContain("--tabs-height: calc(3.5rem + 1px)");
-		expect(css).toContain("--feedback-bottom: 6.5rem");
-		expect(css).toContain("--feedback-height: 2.75rem");
+		// The pill's fixed offset and height went with it (P123 A): nothing reads them now.
+		expect(css).not.toContain("--feedback-bottom");
+		expect(css).not.toContain("--feedback-height");
 		expect(css).toContain("--focus-scroll-gap: 0.5rem");
-		const rem = (token: string) => {
-			const value = css.match(new RegExp(`${token}: ([0-9.]+)rem`))?.[1];
-			expect(value, `${token} is a rem token`).toBeDefined();
-			return Number(value);
-		};
-		const feedbackTopOffset =
-			rem("--feedback-bottom") + rem("--feedback-height");
-		const scrollPadding =
-			Math.max(3.5 + 1 / 16, feedbackTopOffset) + rem("--focus-scroll-gap");
-		expect(scrollPadding).toBeGreaterThanOrEqual(
-			feedbackTopOffset + rem("--focus-scroll-gap"),
-		);
 		const nav = SOURCES["../src/views/nav.tsx"];
 		const feedback = SOURCES["../src/views/feedback-button.tsx"];
 		expect(nav).toContain("var(--tabs-height)");
-		expect(feedback).toContain("var(--feedback-bottom)");
-		expect(feedback).toContain("var(--feedback-height)");
+		expect(feedback).not.toContain("var(--feedback-");
 	});
 
 	it("reads the views, routes and scripts", () => {

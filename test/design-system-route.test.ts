@@ -450,7 +450,8 @@ describe("GET /design-system in the demo", () => {
 		const groups = [
 			...section.matchAll(/<input[^>]*type="radio"[^>]*name="([^"]+)"/g),
 		].map((m) => m[1]);
-		expect(new Set(groups).size).toBe(13);
+		// The Exclude-ticked state adds two: its Name row and its Rename list (#428).
+		expect(new Set(groups).size).toBe(15);
 		const chosen = radios.filter(
 			(m) => /\schecked(\s|>|=)/.test(m[0]) && /name="ds-names-/.test(m[0]),
 		);
@@ -1018,18 +1019,21 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
-	it("renders one fixed Feedback button and makes the visual form inert", async () => {
+	it("renders one Feedback button, never fixed, and makes the visual form inert", async () => {
 		const { html } = await get("/design-system");
 		const button = html.slice(html.indexOf('id="feedback-button"'));
 		// The link sits inside the inert wrapper: no </div> between the wrapper and the link.
 		expect(button.slice(0, button.indexOf("<section"))).toMatch(
 			/<div inert[^>]*>(?:(?!<\/div>)[\s\S])*href="\/feedback"/,
 		);
-		expect(
-			html.match(
-				/fixed bottom-\[calc\(var\(--feedback-bottom\)\+var\(--safe-area-bottom\)\)\] right-\[calc\(1rem\+var\(--safe-area-right\)\)\]/g,
-			),
-		).toHaveLength(1);
+		// Every Feedback link is in the top line or the sidebar, and none is fixed (P123 A).
+		const feedbackLinks = [
+			...html.matchAll(/<a href="\/feedback" class="([^"]*)"/g),
+		];
+		expect(feedbackLinks.length).toBeGreaterThan(0);
+		for (const [, classes] of feedbackLinks) {
+			expect(classes).not.toMatch(/\bfixed\b/);
+		}
 		const formSpecimen = specimens(html).find((tag) =>
 			tag.includes('id="feedback-form"'),
 		);
