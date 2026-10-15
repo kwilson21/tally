@@ -11,6 +11,7 @@ import { Band } from "../views/band";
 import { barGeometry } from "../views/bar";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { FirstPage, type LedgerLine, SmallNotebook } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
@@ -1359,45 +1360,6 @@ const DLEDGER_LINES = [
 	"Moves between your accounts · 6 left out",
 	"Paychecks · $4,900 in September",
 ];
-
-/** A line of a question page's ledger: an answer (ink) or what the bank says (muted). */
-type LedgerLine = { text: string; ink?: boolean };
-
-/** A question page's top: "Your first page", the count at the right, and the ledger so far. */
-function FirstPage({
-	right,
-	lines,
-	children,
-}: {
-	right?: Child;
-	lines: LedgerLine[];
-	children?: Child;
-}) {
-	return (
-		<>
-			<div class="flex items-center justify-between gap-3">
-				<h1 class="text-lg font-semibold">Your first page</h1>
-				{right}
-			</div>
-			<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-				{lines.map((l) => (
-					<li class={`py-2 ${l.ink ? "text-ink" : "text-muted"}`}>{l.text}</li>
-				))}
-			</ul>
-			{children}
-		</>
-	);
-}
-
-/** The small notebook beside a question page's headline, with what it counts. */
-function SmallNotebook({ strokes, text }: { strokes: number; text: string }) {
-	return (
-		<div class="flex items-center gap-2">
-			<Notebook strokes={strokes} ink size="size-12" />
-			<p class="text-sm text-muted">{text}</p>
-		</div>
-	);
-}
 
 const D_LEDGER: LedgerLine[] = [
 	...DLEDGER_LINES.map((text) => ({ text })),

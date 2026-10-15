@@ -1,7 +1,8 @@
 // The question page at /first-page (P125 E, spec §8.8, decision 114): "Your first page", the notebook with its count,
 // the ledger of answers so far, and one question at a time. Each answer swaps the whole page (#first-page), so the
-// count, the ledger and the next question all come from the same reading.
-
+// count, the ledger and the next question all come from the same reading. The proposals page draws these same pieces
+// (FirstPage, SmallNotebook, LedgerLine), so the drawing and the app can't drift.
+import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { shortDay } from "../dates";
 import {
@@ -18,48 +19,76 @@ import { paySentence } from "../first-tally/pay";
 import { Button } from "./button";
 import { Notebook } from "./notebook";
 
-/** The heading and the notebook: its strokes drawn so far, and the count in words. */
-export function FirstPageHead({ drawn }: { drawn: number }) {
+/** One line of a ledger: an answer (ink) or what the bank says (muted). */
+export type LedgerLine = { text: string; ink?: boolean };
+
+/** The notebook beside a question page's headline, with what it counts in words beside it. */
+export function SmallNotebook({
+	strokes,
+	text,
+	size = "size-12",
+}: {
+	strokes: number;
+	text: string;
+	size?: string;
+}) {
 	return (
-		<div class="flex items-center justify-between gap-3">
-			<h1 class="text-lg font-semibold">Your first page</h1>
-			<div class="flex items-center gap-2">
-				<Notebook strokes={drawn} ink size="size-20" />
-				<p class="text-sm text-muted">{drawn} of 5</p>
-			</div>
+		<div class="flex items-center gap-2">
+			<Notebook strokes={strokes} ink size={size} />
+			<p class="text-sm text-muted">{text}</p>
 		</div>
 	);
 }
 
-/** Before any answer, the bank's head lines in muted words; after, the answers so far in ink, one per line. */
-export function Ledger({
+/**
+ * A question page's top (P125 E): "Your first page", the count at the right, and the ledger so far. The ledger is left
+ * out while it has no lines. `children` is the question.
+ */
+export function FirstPage({
+	right,
 	lines,
-	head,
+	children,
 }: {
-	lines: string[];
-	head: BankHead | null;
+	right?: Child;
+	lines: LedgerLine[];
+	children?: Child;
 }) {
-	if (lines.length > 0)
-		return (
-			<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-				{lines.map((line) => (
-					<li class="py-2 text-ink">{line}</li>
-				))}
-			</ul>
-		);
-	if (!head) return null;
-	const count = head.lines === 1 ? "1 line" : `${head.lines} lines`;
 	return (
-		<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-			<li class="py-2 text-muted">
-				From {head.banks} · {count} · {shortDay(head.first, head.last)} to{" "}
-				{shortDay(head.last, head.last)}
-			</li>
-			<li class="py-2 text-muted">
-				Moves between your accounts · {head.left} left out
-			</li>
-		</ul>
+		<>
+			<div class="flex items-center justify-between gap-3">
+				<h1 class="text-lg font-semibold">Your first page</h1>
+				{right}
+			</div>
+			{lines.length > 0 ? (
+				<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
+					{lines.map((line) => (
+						<li class={`py-2 ${line.ink ? "text-ink" : "text-muted"}`}>
+							{line.text}
+						</li>
+					))}
+				</ul>
+			) : null}
+			{children}
+		</>
 	);
+}
+
+/**
+ * The ledger's lines: the answers so far in ink; before any answer, the bank's head lines in muted words.
+ */
+export function ledgerLines(
+	answers: string[],
+	head: BankHead | null,
+): LedgerLine[] {
+	if (answers.length > 0) return answers.map((text) => ({ text, ink: true }));
+	if (!head) return [];
+	const count = head.lines === 1 ? "1 line" : `${head.lines} lines`;
+	return [
+		{
+			text: `From ${head.banks} · ${count} · ${shortDay(head.first, head.last)} to ${shortDay(head.last, head.last)}`,
+		},
+		{ text: `Moves between your accounts · ${head.left} left out` },
+	];
 }
 
 /** The pay question for one merchant: what the bank shows, "Is this your pay?", and Yes or No. */
@@ -241,26 +270,35 @@ export function FirstPageBody({
 	);
 	return (
 		<div id="first-page">
-			<FirstPageHead drawn={model.drawn} />
-			<Ledger lines={model.ledger} head={model.head} />
-			{model.pay.length > 0 && model.pay[0] ? (
-				<PayQuestion merchant={model.pay[0]} focus={focus} />
-			) : (
-				<>
-					{model.payAnswered ? null : <PayEmpty />}
-					{model.keep.length > 0 ? (
-						<BillsQuestion
-							keep={model.keep}
-							waiting={model.waiting}
-							focus={focus}
-						/>
-					) : billsAnswered ? (
-						<FirstPageDone waiting={model.waiting.length} focus={focus} />
-					) : (
-						<BillsEmpty waiting={model.waiting.length} focus={focus} />
-					)}
-				</>
-			)}
+			<FirstPage
+				right={
+					<SmallNotebook
+						strokes={model.drawn}
+						text={`${model.drawn} of 5`}
+						size="size-20"
+					/>
+				}
+				lines={ledgerLines(model.ledger, model.head)}
+			>
+				{model.pay.length > 0 && model.pay[0] ? (
+					<PayQuestion merchant={model.pay[0]} focus={focus} />
+				) : (
+					<>
+						{model.payAnswered ? null : <PayEmpty />}
+						{model.keep.length > 0 ? (
+							<BillsQuestion
+								keep={model.keep}
+								waiting={model.waiting}
+								focus={focus}
+							/>
+						) : billsAnswered ? (
+							<FirstPageDone waiting={model.waiting.length} focus={focus} />
+						) : (
+							<BillsEmpty waiting={model.waiting.length} focus={focus} />
+						)}
+					</>
+				)}
+			</FirstPage>
 		</div>
 	);
 }
