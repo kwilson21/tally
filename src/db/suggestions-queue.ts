@@ -139,6 +139,19 @@ export const incomeAskedSql = (alias: string, afterNo = false) =>
 		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${unsureSql(incomeGuessSql(alias))})`;
 
 /**
+ * The first page's pay question (P125 E, spec §8.8, #583): money in that Tally marked as income, Maybe income included,
+ * which a person hasn't decided yet (`income_source` isn't 'user'). It is not the review's question (incomeAskedSql),
+ * on purpose: it doesn't read `credit_reviewed`, which is about held credits and not "is this your pay?", so a credit the
+ * review treats as reviewed but Tally flagged as income is still asked; and it asks every income guess a person hasn't
+ * decided, even the ones the review wouldn't ask. Refunds, split parts, transfers and excluded rows are left out, as the
+ * review leaves them out. The page's query and its Yes and No write both use it, so they can't disagree.
+ */
+export const payAskedSql = (alias: string) =>
+	`(${alias}.amount_cents < 0 AND ${alias}.excluded = 0 AND ${alias}.parent_id IS NULL AND ${alias}.is_split = 0
+		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_transfer = 0 AND ${alias}.income_source IS NOT 'user'
+		AND (${alias}.flag_income = 1 OR ${unsureSql(maybeIncomeConfidenceSql(alias))}))`;
+
+/**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
  * Spec §8.6, "Jev's income answer is used".
  */

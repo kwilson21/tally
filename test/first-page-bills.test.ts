@@ -57,6 +57,15 @@ describe("splitKeepable", () => {
 		expect(split.waiting).toEqual([a, b]);
 	});
 
+	it("leaves out a charge whose name comes out empty, since a bill with no name can't be kept", () => {
+		const nameless = found({ rawName: "XX", displayName: "" });
+		const blank = found({ rawName: "YY", displayName: "   " });
+		expect(splitKeepable([nameless, blank], []).waiting).toEqual([
+			nameless,
+			blank,
+		]);
+	});
+
 	it("leaves out a charge whose name is already an active bill's, ignoring case and spaces", () => {
 		const netflix = found({ rawName: "NETFLIX", displayName: "Netflix" });
 		expect(splitKeepable([netflix], ["  NETFLIX "]).waiting).toEqual([netflix]);

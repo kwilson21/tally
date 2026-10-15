@@ -113,13 +113,13 @@ firstPage.post("/first-page/bills", async (c) => {
 	const today = await householdToday(c.env.DB);
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
 	const before = await settleAndLoad(c.env.DB, today);
-	const { kept } = await keepBills(c.env.DB, today, before.keep);
-	const after = await settleAndLoad(c.env.DB, today);
+	const bills = await keepBills(c.env.DB, today, before.keep);
+	const after = await settleAndLoad(c.env.DB, today, bills);
 	const message =
-		kept === 0
+		bills.kept === 0
 			? "Nothing to keep."
-			: kept === 1
+			: bills.kept === 1
 				? "Kept 1 bill."
-				: `Kept ${kept} bills.`;
+				: `Kept ${bills.kept} bills.`;
 	return answered(c, after, message, motionOf(before, after));
 });

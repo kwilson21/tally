@@ -6317,13 +6317,31 @@ function FirstWeekGroup() {
 				id="first-page"
 				title="FirstPage"
 				tier="visual"
-				components={["FirstPage", "SmallNotebook", "FirstPageBody"]}
+				components={[
+					"FirstPage",
+					"SmallNotebook",
+					"FirstPageBody",
+					"PayEmpty",
+					"FirstPageDone",
+				]}
 				sentence="The question page at /first-page: Your first page, the notebook with its count, the ledger of answers in ink (or the bank's head lines in muted words before any answer), and one question at a time. Only the family app has it; the demo has no bank to ask about."
 			>
 				<State label="Before any answer: the bank's head lines and the pay question">
 					<FirstPageBody
 						id="first-page-before"
 						model={page({})}
+						focus={false}
+					/>
+				</State>
+				<State label="Pay with nothing spotted: the step says so and counts as done, and the bills question follows">
+					<FirstPageBody
+						id="first-page-no-pay"
+						model={page({
+							drawn: 2,
+							pay: [],
+							keep: FIRST_WEEK_CHARGES,
+							waiting: [FIRST_WEEK_GYM],
+						})}
 						focus={false}
 					/>
 				</State>

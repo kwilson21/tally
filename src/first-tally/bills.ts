@@ -1,6 +1,6 @@
 // The bills step's words and its one-tap split (P125 E, spec §8.8, #579): the repeat charges Possible bills found, of
-// which a charge with no category, over $100,000, or whose name collides with another found charge or an active bill
-// waits in Possible bills instead of being kept in one tap.
+// which a charge with no category, over $100,000, whose name is empty, or whose name collides with another found charge
+// or an active bill waits in Possible bills instead of being kept in one tap.
 import type { BillSuggestion } from "../bills/find";
 import { BIG_BILL_CENTS, sameBillName } from "../bills/guards";
 import { formatCents } from "../money";
@@ -26,6 +26,7 @@ export function splitKeepable(
 			) ||
 			activeNames.some((name) => sameBillName(name, suggestion.displayName));
 		const leftOut =
+			suggestion.displayName.trim() === "" ||
 			suggestion.categoryId === null ||
 			suggestion.amountCents > BIG_BILL_CENTS ||
 			collides;

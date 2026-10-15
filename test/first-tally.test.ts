@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
 	isSetUp,
+	keepBillsStep,
 	keepBudgetAnswer,
 	keepNightCounts,
 	markStroke,
+	payAnswerStatement,
 	readFirstTally,
 	STROKES,
 } from "../src/db/first-tally";
@@ -104,5 +106,48 @@ describe("first_tally record", () => {
 		await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
 		expect(await readFirstTally(db)).toBeNull();
 		expect(await stored()).toBeNull();
+	});
+});
+
+describe("the pay answers and the bills step's record (P125 E)", () => {
+	it("keeps each merchant's answer by its key, a key with a quote in it included, and the newest answer for a merchant", async () => {
+		await db
+			.prepare(
+				`INSERT INTO household_settings (key, value) VALUES ('first_tally', '{"strokes":{"bank":"2026-10-10"}}')`,
+			)
+			.run();
+		await payAnswerStatement(db, 'ACME "CORP"', "yes").run();
+		await payAnswerStatement(db, "SIDE GIG", "no").run();
+		await payAnswerStatement(db, "SIDE GIG", "yes").run();
+		const record = await readFirstTally(db);
+		expect(record?.strokes).toEqual({ bank: "2026-10-10" });
+		expect(record?.pay).toEqual({ 'ACME "CORP"': "yes", "SIDE GIG": "yes" });
+	});
+
+	it("starts the pay answers on a record that has none yet", async () => {
+		await payAnswerStatement(db, "ACME CORP", "no").run();
+		expect((await readFirstTally(db))?.pay).toEqual({ "ACME CORP": "no" });
+	});
+
+	it("draws the bills stroke and records what the step kept in one write, adding each Keep to the count and the total", async () => {
+		await keepBillsStep(db, { kept: 2, cents: 3000 }, "2026-10-10");
+		await keepBillsStep(db, { kept: 1, cents: 1500 }, "2026-10-12");
+		const record = await readFirstTally(db);
+		expect(record?.strokes.bills).toBe("2026-10-10");
+		expect(record?.bills).toEqual({ kept: 3, cents: 4500 });
+	});
+
+	it("records a Keep without drawing the stroke when no day is given", async () => {
+		await keepBillsStep(db, { kept: 1, cents: 1000 });
+		const record = await readFirstTally(db);
+		expect(record?.strokes.bills).toBeUndefined();
+		expect(record?.bills).toEqual({ kept: 1, cents: 1000 });
+	});
+
+	it("draws an empty bills step with nothing kept", async () => {
+		await keepBillsStep(db, { kept: 0, cents: 0 }, "2026-10-10");
+		const record = await readFirstTally(db);
+		expect(record?.strokes.bills).toBe("2026-10-10");
+		expect(record?.bills).toEqual({ kept: 0, cents: 0 });
 	});
 });

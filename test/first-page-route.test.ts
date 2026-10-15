@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
+import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { saveSplit } from "../src/db/transactions";
@@ -662,5 +663,139 @@ describe("refunds and the Yes write", () => {
 		expect(rows.results.every((row) => row.income_confidence === null)).toBe(
 			true,
 		);
+	});
+});
+
+/** A bill added from the Bills page: the Add bill write, as the page's own Rent (no charge matches it). */
+const rentBill = async () =>
+	insertBill(
+		db,
+		{
+			name: "Rent",
+			amountCents: 100000,
+			dueDay: 1,
+			frequency: "monthly",
+			anchorMonth: null,
+			categoryId: await categoryId(),
+			merchantRawName: "RENT CO",
+		},
+		TODAY,
+	);
+
+describe("keeping bills links the charges they paid", () => {
+	it("links a charge already paid this period after Keep, so that occurrence isn't due", async () => {
+		await charge("NETFLIX", 1549);
+		await post("/first-page/bills", {});
+		const links = await db
+			.prepare(
+				"SELECT bp.period, t.date FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked' AND t.date = ?",
+			)
+			.bind(TODAY)
+			.all<{ period: string; date: string }>();
+		expect(links.results).toEqual([{ period: TODAY.slice(0, 7), date: TODAY }]);
+	});
+});
+
+describe("the bills ledger line reads what the step recorded", () => {
+	it("doesn't count a bill added on the Bills page the same day", async () => {
+		await charge("NETFLIX", 1500);
+		await post("/first-page/bills", {});
+		await rentBill();
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("Bills · 1 kept, about $15 a month");
+		expect(textOf(html)).not.toContain("Bills · 2 kept");
+	});
+
+	it("shows no kept line for an empty step, when a bill is added that day", async () => {
+		await charge("GYM", 4500, false);
+		await get("/first-page");
+		await rentBill();
+		const { html } = await get("/first-page");
+		expect(html).not.toMatch(/Bills · \d+ kept/);
+	});
+
+	it("adds a second Keep to the line, rather than replacing the first", async () => {
+		await charge("NETFLIX", 1500);
+		await post("/first-page/bills", {});
+		await charge("SPOTIFY", 1200);
+		await post("/first-page/bills", {});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("Bills · 2 kept, about $27 a month");
+	});
+});
+
+describe("the pay question's scope", () => {
+	it("asks a flagged income that a credit review reviewed, and Yes writes the person's choice", async () => {
+		await deposits("CREDIT PAY", 245000, 2, 14, {
+			credit_reviewed: 1,
+			income_source: "jev",
+		});
+		const { html } = await get("/first-page");
+		expect(html).toContain("CREDIT PAY");
+		await post("/first-page/pay", { merchant: "CREDIT PAY", answer: "yes" });
+		const rows = await db
+			.prepare(
+				"SELECT income_source FROM transactions WHERE raw_name = 'CREDIT PAY'",
+			)
+			.all<{ income_source: string }>();
+		expect(rows.results.every((row) => row.income_source === "user")).toBe(
+			true,
+		);
+	});
+
+	it("asks a flagged income the person reviewed as a credit, since only the answer settles it", async () => {
+		await deposits("REVIEWED PAY", 245000, 2, 14, {
+			credit_reviewed: 1,
+			credit_reviewed_by: "user",
+		});
+		const { html } = await get("/first-page");
+		expect(html).toContain("REVIEWED PAY");
+		expect(html.match(/Is this your pay\?/g)?.length).toBe(1);
+	});
+});
+
+describe("the pay ledger reads what the page recorded", () => {
+	it("doesn't add a pay line for an income review made in the Transactions panel", async () => {
+		await deposits("PANEL PAY", 245000, 2);
+		await db
+			.prepare(
+				"UPDATE transactions SET income_source = 'user' WHERE raw_name = 'PANEL PAY'",
+			)
+			.run();
+		const { html } = await get("/first-page");
+		expect(textOf(html)).not.toContain("Pay · ");
+		expect(textOf(html)).toContain("Tally didn't spot a paycheck.");
+	});
+
+	it("doesn't add a pay line for a split part", async () => {
+		await txn({
+			raw_name: "COSTCO",
+			date: TODAY,
+			amount_cents: 18742,
+			is_split: 1,
+		});
+		const parent = await db
+			.prepare("SELECT id FROM transactions WHERE raw_name = 'COSTCO'")
+			.first<{ id: number }>();
+		await txn({
+			raw_name: "COSTCO PART",
+			date: TODAY,
+			amount_cents: -6000,
+			parent_id: parent?.id,
+			flag_income: 1,
+			income_source: "user",
+		});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).not.toContain("Pay · ");
+	});
+
+	it("keeps the Not pay line for a No answer", async () => {
+		await deposits("TRANSFER IN", 50000, 2, 14, {
+			flag_income: 0,
+			income_confidence: 0.5,
+		});
+		await post("/first-page/pay", { merchant: "TRANSFER IN", answer: "no" });
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toMatch(/Not pay · /);
 	});
 });
