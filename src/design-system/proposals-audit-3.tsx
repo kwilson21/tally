@@ -661,7 +661,7 @@ function P134() {
 							<HouseholdPage />
 						</Phone>
 					</Shot>
-					<Shot caption="Tally's rules at 390 (a prototype: Remove is the muted link this option asks for)">
+					<Shot caption="Tally's rules at 390 (a prototype: Remove is a muted link, and each rule names its category once)">
 						<Phone label="Option A, rules" tab="more" masthead={PILL}>
 							<RulesPage />
 						</Phone>
