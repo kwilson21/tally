@@ -228,6 +228,65 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
+		const { html } = await get("/design-system");
+		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";
+		const voids = new Set([
+			"area",
+			"base",
+			"br",
+			"col",
+			"embed",
+			"hr",
+			"img",
+			"input",
+			"link",
+			"meta",
+			"source",
+			"track",
+			"wbr",
+		]);
+		// Each open element, and whether it is a sheet frame: a fixed sheet is contained by an ancestor frame.
+		const open: { frame: boolean }[] = [];
+		const markers: boolean[] = [];
+		// Each fixed piece pinned to the screen's bottom or whole edge, by its classes: a backdrop or a sheet, whatever its markers.
+		const fixedInFrame: boolean[] = [];
+		let frames = 0;
+		for (const token of main.matchAll(/<\/?([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+			const tag = token[1]?.toLowerCase() ?? "";
+			if (token[0].startsWith("</")) {
+				if (!voids.has(tag)) open.pop();
+				continue;
+			}
+			const frame = /\sdata-sheet-frame(?:="")?[\s>]/.test(token[0]);
+			if (frame) {
+				frames += 1;
+				expect(token[0]).toContain("contain-paint");
+			}
+			// A sheet's section (data-sheet) and its backdrop (data-sheet-close) are the fixed pieces.
+			if (/\sdata-sheet(?:-close)?(?:="")?[\s>]/.test(token[0])) {
+				markers.push(open.some((ancestor) => ancestor.frame));
+			}
+			const classes = (token[0].match(/\sclass="([^"]*)"/)?.[1] ?? "").split(
+				/\s+/,
+			);
+			if (
+				classes.includes("fixed") &&
+				(classes.includes("inset-0") || classes.includes("bottom-0"))
+			) {
+				fixedInFrame.push(open.some((ancestor) => ancestor.frame));
+			}
+			if (!voids.has(tag) && !/\/>$/.test(token[0])) {
+				open.push({ frame });
+			}
+		}
+		// The three planned-expense states: a sheet and a backdrop each, every one inside its frame. The class check
+		// comes first, so a backdrop or sheet drawn without its marker still fails here.
+		expect(fixedInFrame).toEqual([true, true, true, true, true, true]);
+		expect(frames).toBe(3);
+		expect(markers).toEqual([true, true, true, true, true, true]);
+	});
+
 	it("renders each component's own output, with the catalog's sample data", async () => {
 		const { html } = await get("/design-system");
 		const outputs = [

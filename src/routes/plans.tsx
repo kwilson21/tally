@@ -17,6 +17,7 @@ import {
 	unlinkPlanPayment,
 	updatePlan,
 } from "../db/planned-expenses";
+import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -43,20 +44,13 @@ function monthOptions(current: string, own?: string): PlanMonthOption[] {
 	}));
 }
 
-/**
- * Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). A header value must be
- * ASCII, so a non-ASCII character in a plan's name (a curly apostrophe) is written as \uXXXX, which the toast's JSON reads back.
- */
+/** Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). */
 function withToast(
 	response: Response,
 	toast: Record<string, unknown> & { message: string },
 	announce = toast.message,
 ) {
-	const json = JSON.stringify({ toast, announce }).replace(
-		/[\u007f-\uffff]/g,
-		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-	);
-	response.headers.set("HX-Trigger", json);
+	response.headers.set("HX-Trigger", hxTrigger({ toast, announce }));
 	return response;
 }
 
@@ -336,13 +330,14 @@ plans.post("/plans/:id/link", async (c) => {
 		Number.isInteger(transaction) &&
 		transaction > 0 &&
 		(await linkPlanPayment(c.env.DB, id, transaction));
-	if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
 	// Linking stays on the plan's page, which now shows it paid (decision 101), as the bill page's link does.
-	if (linked)
+	if (linked) {
+		if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
 		return withToast(await planPage(c, id), {
 			message: "Payment linked",
 			type: "success",
 		});
+	}
 	// The refusal names what the payment already pays, in the bill side's words (decision 82).
 	const paid = Number.isInteger(transaction)
 		? await paysBillOrPlan(c.env.DB, transaction)
