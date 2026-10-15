@@ -48,10 +48,13 @@ export function FirstPage({
 	right,
 	lines,
 	children,
+	fresh = false,
 }: {
 	right?: Child;
 	lines: LedgerLine[];
 	children?: Child;
+	/** A reply's page: its newest line (the last one) rises in. */
+	fresh?: boolean;
 }) {
 	return (
 		<>
@@ -61,8 +64,10 @@ export function FirstPage({
 			</div>
 			{lines.length > 0 ? (
 				<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-					{lines.map((line) => (
-						<li class={`py-2 ${line.ink ? "text-ink" : "text-muted"}`}>
+					{lines.map((line, i) => (
+						<li
+							class={`py-2 ${line.ink ? "text-ink" : "text-muted"}${fresh && i === lines.length - 1 ? " first-line-new" : ""}`}
+						>
 							{line.text}
 						</li>
 					))}
@@ -261,15 +266,18 @@ export function FirstPageDone({
 export function FirstPageBody({
 	model,
 	focus,
+	id = "first-page",
 }: {
 	model: FirstPageModel;
 	focus: boolean;
+	/** The root's id: the page's is `first-page`, which the swap targets; the catalog's states name their own. */
+	id?: string;
 }) {
 	const billsAnswered = model.ledger.some((line) =>
 		line.startsWith("Bills · "),
 	);
 	return (
-		<div id="first-page">
+		<div id={id}>
 			<FirstPage
 				right={
 					<SmallNotebook
@@ -279,6 +287,7 @@ export function FirstPageBody({
 					/>
 				}
 				lines={ledgerLines(model.ledger, model.head)}
+				fresh={focus}
 			>
 				{model.pay.length > 0 && model.pay[0] ? (
 					<PayQuestion merchant={model.pay[0]} focus={focus} />

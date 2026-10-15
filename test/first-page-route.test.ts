@@ -413,6 +413,9 @@ describe("announcements and focus", () => {
 		expect(html).toContain('id="first-page"');
 		expect(html).toContain('tabindex="-1"');
 		expect(html).toContain("autofocus");
+		expect(html).toContain("first-line-new");
+		const { html: page } = await get("/first-page");
+		expect(page).not.toContain("first-line-new");
 	});
 
 	it("announces a kept bills step with its count", async () => {
