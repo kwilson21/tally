@@ -644,10 +644,9 @@ describe("merchant category rule offer", () => {
 		expect(before?.default_category_id ?? null).toBeNull();
 		const yes = await post("/transactions/organize/rule", {
 			answer: "yes",
-			merchant_keys: JSON.stringify([merchant]),
-			merchant,
-			category: String(groceries),
-			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
+			store: organized.html.match(/name="store" value="([^"]*)"/)?.[1] ?? "",
+			category:
+				organized.html.match(/name="category" value="([^"]*)"/)?.[1] ?? "",
 		});
 		expect(yes.res.status).toBe(200);
 		const rule = await env.DB.prepare(
@@ -1087,10 +1086,9 @@ describe("Yes checks the trip the question was asked about (decision 113)", () =
 		await markMixed(ids[2] ?? 0);
 		await post("/transactions/organize/rule", {
 			answer: "yes",
-			merchant_keys: JSON.stringify([merchant]),
-			merchant,
-			category: String(groceries),
-			saved: organized.html.match(/name="saved" value="([^"]*)"/)?.[1] ?? "[]",
+			store: organized.html.match(/name="store" value="([^"]*)"/)?.[1] ?? "",
+			category:
+				organized.html.match(/name="category" value="([^"]*)"/)?.[1] ?? "",
 		});
 		expect((await ruleOfMerchant())?.default_category_id ?? null).toBeNull();
 	});

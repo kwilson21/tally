@@ -3403,7 +3403,7 @@ function Categorization() {
 						<GroupRuleOffer
 							id="group-rule-offer-sample-title"
 							value={{
-								savedIds: [1, 2],
+								store: 1,
 								merchant: "Costco",
 								categoryId: 1,
 								category: "Groceries",

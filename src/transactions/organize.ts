@@ -148,7 +148,8 @@ export async function organizeGroups(db: D1Database): Promise<OrganizeGroup[]> {
 /**
  * Files a merchant group's charges that need a category under `categoryId`, and names its merchants. It makes
  * no rule: Organize asks first, and only Yes on that question makes one (`setOrganizeRule`, decision 101).
- * Returns the ids of the charges it filed, which the question carries back so Yes can tell whether they still hold it.
+ * Returns the ids of the charges it filed. The question's address names their store by a merchant row (`storeRowOf`,
+ * #532), and nothing carries these ids back.
  */
 export async function saveOrganizeGroup(
 	db: D1Database,
@@ -257,17 +258,17 @@ export async function groupHasRule(
 }
 
 /**
- * Yes on Organize's question (#353, decision 101): makes `categoryId` the rule of each merchant key of the charges
- * Save filed, creating the `merchants` rows that don't exist yet, and applies it to the store's transactions a person
- * hasn't chosen, as setMerchantRule (#209's Yes) does, so later ones follow. Keys come from the saved rows, never from
- * the request, and a key gets the rule only where a saved row carries it as a person's choice. It acts only while every
- * row that Save filed (`savedIds`, a JSON array) still exists and holds `categoryId` as a person's choice: a deleted or
- * recategorized row makes the Yes stale (no rule, no charge changed, no toast). A pending charge that sync merges into
- * its posted row (src/plaid/pending-merge.ts deletes the pending row) makes it stale too, the safe outcome; the edit
- * panel's tick can still make the rule. `merchant` is the store's name the question offered: a key whose display name is
- * another name, or whose cleared name tidies to another, makes the Yes stale too, so the toast can't name a store the rule
- * doesn't cover. The name is only compared, never written. Returns the keys whose rule was written, so a caller can tell
- * whether there is a rule to name.
+ * Yes on Organize's question (#353, decision 101, #532): makes `categoryId` the rule of each merchant key of the store's
+ * charges in that category, creating the `merchants` rows that don't exist yet, and applies it to the store's transactions
+ * a person hasn't chosen, as setMerchantRule (#209's Yes) does, so later ones follow. `savedIds` (a JSON array) is those
+ * charges, rebuilt by storeOffer when Yes is answered and never read from the request. Keys come from those rows, and a
+ * key gets the rule only where a row carries it as a person's choice. The guard acts only while every row still exists
+ * and holds `categoryId` as a person's choice, so a change between that rebuild and this batch makes the Yes stale (no
+ * rule, no charge changed, no toast). A pending charge that sync merges into its posted row (src/plaid/pending-merge.ts
+ * deletes the pending row) makes it stale too, the safe outcome; the edit panel's tick can still make the rule.
+ * `merchant` is the store's name the question offered: a key whose display name is another name, or whose cleared name
+ * tidies to another, makes the Yes stale too, so the toast can't name a store the rule doesn't cover. The name is only
+ * compared, never written. Returns the keys whose rule was written, so a caller can tell whether there is a rule to name.
  */
 export async function setOrganizeRule(
 	db: D1Database,
@@ -335,26 +336,29 @@ function storeNameOf(shownName: string | null, merchantKey: string): string {
 	return shownName || tidyName(merchantKey);
 }
 
-/** Organize's question for a saved group, as `organizeOffer` rebuilds it; the view draws it (#353). */
+/** Organize's question for a store, as `storeOffer` rebuilds it; the view draws it (#353, #532). */
 export type GroupOffer = {
+	/** The store's charges in the category that the question is about: Yes makes the rule on their keys. */
 	savedIds: number[];
 	merchant: string;
 	categoryId: number;
 	category: string;
+	/** The store's merchant row number, which the question's address and form carry (#532). */
+	store: number;
 };
 
 /**
- * Rebuilds Organize's question from the charges a save filed, or returns nothing when they no longer hold the
- * category (#353). The question's address carries only the saved ids and the category, so every key and name here
- * comes from the database: a crafted address can show a question that is true of the data, or none. It returns
- * nothing unless those charges are one store's, so ids from two stores can't name one of them, and nothing once
- * every key already has the rule, so Back after Yes shows no question.
+ * Rebuilds Organize's question from the charges it is given, or returns nothing when they no longer hold the category
+ * (#353). storeOffer passes the store's charges in the category (#532). Every key and name here comes from the database,
+ * so a crafted request can show a question that is true of the data, or none. It returns nothing unless those charges
+ * are one store's, so ids from two stores can't name one of them, nothing while one of them looks mixed (decision 113),
+ * and nothing once every key already has the rule, so Back after Yes shows no question.
  */
 export async function organizeOffer(
 	db: D1Database,
 	savedIds: number[],
 	categoryId: number,
-): Promise<GroupOffer | null> {
+): Promise<Omit<GroupOffer, "store"> | null> {
 	const ids = [...new Set(savedIds)];
 	if (ids.length === 0) return null;
 	const category = await db
@@ -447,4 +451,27 @@ export async function storeChargeIds(
 		.bind(JSON.stringify(merchantKeys), categoryId)
 		.all<{ id: number }>();
 	return results.map((row) => row.id);
+}
+
+/**
+ * Organize's question for a store (#532): the store's charges in `categoryId` that a person chose there, asked through
+ * organizeOffer's rules. Save, a reload of the question's address and Yes all rebuild the question here, so they agree.
+ * Nothing unless both numbers are safe integers above 0, and nothing when the store has no charges in the category.
+ */
+export async function storeOffer(
+	db: D1Database,
+	storeRow: number,
+	categoryId: number,
+): Promise<GroupOffer | null> {
+	if (
+		!Number.isSafeInteger(storeRow) ||
+		storeRow <= 0 ||
+		!Number.isSafeInteger(categoryId) ||
+		categoryId <= 0
+	)
+		return null;
+	const ids = await storeChargeIds(db, storeRow, categoryId);
+	if (ids.length === 0) return null;
+	const offer = await organizeOffer(db, ids, categoryId);
+	return offer && { ...offer, store: storeRow };
 }
