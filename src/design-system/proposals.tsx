@@ -30,7 +30,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 118), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 120), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -490,6 +490,18 @@ export const DECIDED: readonly {
 			"Option A: a muted 0.00 when empty, a check on the chip that matches the box, the steps off while the text can't be read, and five keyboard and screen-reader fixes; the centred layout stays (decision 117).",
 		issue: 80,
 	},
+	{
+		title: "P134 · Settings",
+		outcome:
+			"Option A: Settings becomes a short contents page drawn like More (P122 A), with the suggestions Band above; each section opens its own page with Settings as the back link; switches save when flipped, each rule names its category once with Remove as a quiet link, an empty Never suggest is one muted line, and Household keeps who gets the bank sign-in emails (decision 120).",
+		issue: 606,
+	},
+	{
+		title: "P135 · Category suggestions",
+		outcome:
+			"Option A: one suggestion card with one set of words wherever Tally asks it: Tally's guess, “A new category: Pet Care”, its transactions as ruled rows with one checkbox each, and Create Pet Care or No; in Organize, when the merchant is in a waiting suggestion, the card sits above the chips (decision 120).",
+		issue: 607,
+	},
 ];
 
 /** The proposals page body. */
@@ -508,17 +520,6 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
-
-			<section aria-labelledby="audit3-title" class="mt-10">
-				<h2 id="audit3-title" class="font-serif text-3xl font-semibold">
-					Open: from the second design audit, Settings and suggestions
-				</h2>
-				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 15 for the owner's picks on #606 and #607, each beside
-					today's screen.
-				</p>
-				<AuditRoundThreeProposals />
-			</section>
 
 			<section aria-labelledby="p127-title" class="mt-10">
 				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
@@ -540,6 +541,18 @@ export function Proposals() {
 					Budget diagram without its boxes shrinking.
 				</p>
 				<PlannedDiagramProposal />
+			</section>
+
+			<section aria-labelledby="audit3-title" class="mt-12">
+				<h2 id="audit3-title" class="font-serif text-3xl font-semibold">
+					Picked: from the second design audit, Settings and suggestions
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's picks, marked Picked, are decision 120: A,
+					Settings as a contents page, and A, one card for a category
+					suggestion.
+				</p>
+				<AuditRoundThreeProposals />
 			</section>
 
 			<section aria-labelledby="p128-title" class="mt-12">

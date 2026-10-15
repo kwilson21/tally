@@ -12,6 +12,7 @@ import type { PendingSuggestion } from "../db/category-suggestions";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import { Band } from "../views/band";
+import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { CategoryRow } from "../views/category-row";
@@ -68,14 +69,35 @@ const CATEGORY_CHOICES = CATEGORIES.map((c, i) => ({
 	name: c.name,
 }));
 
-/** The five AI switches, in Settings' order, as the app words them (settings.tsx's AI_FEATURES). */
+/**
+ * The five AI switches, in Settings' order, with the label and hint the app gives each (a copy of settings.tsx's
+ * AI_FEATURES, which this file does not import). Every switch keeps its hint (decision 120).
+ */
 const AI_SWITCHES = [
-	"Suggest store names",
-	"Fill in details",
-	"Categories and exclusions",
-	"Income",
-	"Sort new transactions as they arrive",
+	{
+		label: "Suggest store names",
+		hint: "Turns bank text like SQ *BLUE BOTTLE COF into Blue Bottle Coffee. You pick the name.",
+	},
+	{
+		label: "Fill in details",
+		hint: "Adds a note, the kind of spending and who it was for.",
+	},
+	{
+		label: "Categories and exclusions",
+		hint: "Picks categories, and leaves out transfers and reimbursements.",
+	},
+	{ label: "Income", hint: "Spots paychecks and other money coming in." },
+	{
+		label: "Sort new transactions as they arrive",
+		hint: "Sorts them right after each sync, not only overnight.",
+	},
 ];
+
+/** The people the bank sign-in emails go to, as catalog.tsx's sample has them (the demo has no household members). */
+const RECIPIENTS = ["alex@example.com", "sam@example.com", "jo@example.com"];
+
+/** The round initials' backgrounds, by list position, as bank-sign-in-emails.tsx draws them (INITIAL_LOOKS). */
+const INITIAL_LOOKS = ["bg-accent", "bg-ok", "bg-muted"];
 
 /** Settings' sections as More lists them: each one's icon, what it holds and its live count (P122 A). */
 const PLACES: Place[] = [
@@ -244,6 +266,19 @@ function SettingsHead() {
 	);
 }
 
+/** The Suggestions page as src/routes/suggestions.tsx draws it: Settings' link, the count, then the card in a 3xl column. */
+function SuggestionsPage({ children }: { children?: Child }) {
+	return (
+		<div class="lg:max-w-3xl">
+			<a href="/settings" class="inline-flex min-h-11 items-center text-accent">
+				Settings
+			</a>
+			<p class="mt-2 text-muted">Suggestions · 1 of 5</p>
+			<div class="mt-6">{children}</div>
+		</div>
+	);
+}
+
 /** Categories as main draws them: each row a real CategoryRow, its ids numbered from `base` so no two pictures share one. */
 function CategoryRows({ base, count }: { base: number; count: number }) {
 	return (
@@ -302,26 +337,15 @@ function TimeRow() {
 	);
 }
 
-/** Household as main draws it: the time zone, the bank sign-in emails switch, and Save. */
-function HouseholdSection({ prefix, save }: { prefix: string; save: boolean }) {
+/** Household as main draws it: the time zone, then the app's own bank sign-in emails block, with its Save. */
+function HouseholdSection() {
 	return (
 		<>
 			<h2 class="font-serif text-3xl font-semibold">Household</h2>
 			<div class="mt-3 border-t border-rule">
 				<TimeRow />
-				<Switch
-					id={`${prefix}-emails`}
-					name="enabled"
-					label="Bank sign-in emails"
-					hint="Tells everyone in the household when a bank needs signing in again."
-					checked
-				/>
+				<BankSignInEmails on recipients={RECIPIENTS} open action="#" />
 			</div>
-			{save && (
-				<div class="mt-4">
-					<Button type="submit">Save</Button>
-				</div>
-			)}
 		</>
 	);
 }
@@ -342,12 +366,13 @@ function AiSection({ prefix, save }: { prefix: string; save: boolean }) {
 		<>
 			<h2 class="font-serif text-3xl font-semibold">AI suggestions</h2>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
-				{AI_SWITCHES.map((label, i) => (
+				{AI_SWITCHES.map(({ label, hint }, i) => (
 					<li>
 						<Switch
 							id={`${prefix}-${i}`}
 							name={`ai-${i}`}
 							label={label}
+							hint={hint}
 							checked
 						/>
 					</li>
@@ -376,6 +401,52 @@ function ContentsPage() {
 	);
 }
 
+/**
+ * A copy of BankSignInEmails without its Save, because A saves on flip: the sr-only line, the round initials, the
+ * open "Who gets them" list with each Remove, as bank-sign-in-emails.tsx draws them. Its Remove is a plain button
+ * (no form here), as OneCard's buttons are.
+ */
+function RecipientsCopy() {
+	return (
+		<>
+			<div class="flex items-center gap-2 pb-1">
+				<p class="sr-only">Goes to {RECIPIENTS.join(", ")}</p>
+				<ul aria-hidden="true" class="flex -space-x-2">
+					{RECIPIENTS.map((email, index) => (
+						<li
+							class={`flex size-8 items-center justify-center rounded-full border-2 border-paper text-sm font-semibold text-paper ${INITIAL_LOOKS[index % INITIAL_LOOKS.length]}`}
+						>
+							{email.charAt(0).toUpperCase()}
+						</li>
+					))}
+				</ul>
+			</div>
+			<details class="group pb-3" open>
+				<summary class="flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 text-accent [&::-webkit-details-marker]:hidden">
+					<span class="min-w-0 flex-1">Who gets them</span>
+					<Icon
+						name="chevron-right"
+						class="size-5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+					/>
+				</summary>
+				<p class="text-muted">
+					Everyone who has signed in to Tally in the last 90 days.
+				</p>
+				<ul class="divide-y divide-rule border-y border-rule">
+					{RECIPIENTS.map((email) => (
+						<li class="flex min-h-11 items-center gap-3">
+							<span class="min-w-0 flex-1 truncate">{email}</span>
+							<Button kind="text" type="button" class="shrink-0">
+								Remove<span class="sr-only"> {email}</span>
+							</Button>
+						</li>
+					))}
+				</ul>
+			</details>
+		</>
+	);
+}
+
 /** P134 A's Household page: the time zone and the sign-in emails switch, just flipped on, with no Save. */
 function HouseholdPage() {
 	return (
@@ -396,9 +467,9 @@ function HouseholdPage() {
 					id="p134-a-emails"
 					name="enabled"
 					label="Bank sign-in emails"
-					hint="Tells everyone in the household when a bank needs signing in again."
 					checked
 				/>
+				<RecipientsCopy />
 			</div>
 		</>
 	);
@@ -472,37 +543,55 @@ function TidyTop() {
 	);
 }
 
-/** P135 A's one card: the same words and rows wherever Tally asks a person about Pet Care. */
-function OneCard() {
+/**
+ * P135 A's one card: the same words and rows wherever Tally asks a person about Pet Care, with decision 89's Why? after
+ * No. `skip` adds the Suggestions page's Skip link under it, as the route draws it; the Settings card has none.
+ */
+function OneCard({ skip = false }: { skip?: boolean }) {
 	return (
-		<div class={CARD}>
-			<p class="flex items-center gap-1.5 text-sm text-muted">
-				<Icon name="sparkles" class="size-4" />
-				Tally's guess
-			</p>
-			<h3 class="font-serif text-xl font-semibold">A new category: Pet Care</h3>
-			<ul class="divide-y divide-rule border-y border-rule">
-				{PET_ROWS.map((row) => (
-					<li>
-						<label class="flex min-h-11 flex-wrap items-center gap-x-3 py-2">
-							<input type="checkbox" checked class="size-5 accent-ink" />
-							<span class="min-w-0 flex-1 wrap-anywhere">
-								{row.displayName}
-							</span>
-							<span class="tabular-nums">{exact(row.amountCents)}</span>
-							<span class="text-muted">{day(row.date)}</span>
-						</label>
-					</li>
-				))}
-			</ul>
-			<p class="text-sm text-muted">Untick any that don't belong.</p>
-			<div class="flex flex-wrap items-center gap-3">
-				<Button type="button">Create Pet Care</Button>
-				<Button kind="text" type="button">
-					Not now
-				</Button>
+		<>
+			<div class={CARD}>
+				<p class="flex items-center gap-1.5 text-sm text-muted">
+					<Icon name="sparkles" class="size-4" />
+					Tally's guess
+				</p>
+				<h3 class="font-serif text-xl font-semibold">
+					A new category: Pet Care
+				</h3>
+				<ul class="divide-y divide-rule border-y border-rule">
+					{PET_ROWS.map((row) => (
+						<li>
+							<label class="flex min-h-11 flex-wrap items-center gap-x-3 py-2">
+								<input type="checkbox" checked class="size-5 accent-ink" />
+								<span class="min-w-0 flex-1 wrap-anywhere">
+									{row.displayName}
+								</span>
+								<span class="tabular-nums">{exact(row.amountCents)}</span>
+								<span class="text-muted">{day(row.date)}</span>
+							</label>
+						</li>
+					))}
+				</ul>
+				<p class="text-sm text-muted">Untick any that don't belong.</p>
+				<div class="flex flex-wrap items-center gap-3">
+					<Button type="button">Create Pet Care</Button>
+					<Button kind="text" type="button">
+						No
+					</Button>
+					<WhyLink section="categorization" topic="suggested categories" />
+				</div>
 			</div>
-		</div>
+			{skip && (
+				<p class="text-center">
+					<a
+						href="/settings/suggestions"
+						class="inline-flex min-h-11 items-center text-accent"
+					>
+						Skip
+					</a>
+				</p>
+			)}
+		</>
 	);
 }
 
@@ -612,7 +701,7 @@ function P134() {
 							tab="more"
 							masthead={PILL}
 						>
-							<HouseholdSection prefix="p134-today" save />
+							<HouseholdSection />
 							<PeopleSection />
 						</Phone>
 					</Shot>
@@ -634,6 +723,7 @@ function P134() {
 				</Choice>
 				<Choice
 					name="Option A · A contents page, each section its own page"
+					picked
 					width="w-full"
 					note="Settings reads like More: what's there and how much, one tap from each. Settings becomes a contents list, and each section opens as its own page, with Settings as the back link. Switches save when flipped, and the 5-suggestions Band stays above the list."
 					cost="five small pages instead of one long one; the switches post on change with HTMX (no new script)."
@@ -743,16 +833,15 @@ function P135() {
 							tab="more"
 							masthead={PILL}
 						>
-							<h1 class="font-serif text-4xl font-semibold tracking-tight">
-								Suggestions
-							</h1>
-							<SuggestionCard
-								action="/settings/suggestions"
-								item={PET_ITEM}
-								today={TODAY}
-								skipHref="/settings/suggestions"
-								categories={CATEGORY_CHOICES}
-							/>
+							<SuggestionsPage>
+								<SuggestionCard
+									action="/settings/suggestions"
+									item={PET_ITEM}
+									today={TODAY}
+									skipHref="/settings/suggestions"
+									categories={CATEGORY_CHOICES}
+								/>
+							</SuggestionsPage>
 						</Phone>
 					</Shot>
 					<Shot caption="Organize, at 390: the existing categories only">
@@ -768,8 +857,9 @@ function P135() {
 				</Choice>
 				<Choice
 					name="Option A · One card, one set of words, everywhere"
+					picked
 					width="w-full"
-					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and Not now. Organize shows the same card above its chips, with its two answers."
+					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and No, with Why? after No. Skip is a link under the card on the Suggestions page only. Organize shows the same card above its chips, with its two answers."
 					cost="SuggestionReview and the Settings card become one view; Organize reads the waiting suggestions."
 					why="a person learns the card once, and Organize stops asking about a merchant Tally already has an answer for."
 				>
@@ -790,10 +880,9 @@ function P135() {
 							tab="more"
 							masthead={PILL}
 						>
-							<h1 class="font-serif text-4xl font-semibold tracking-tight">
-								Suggestions
-							</h1>
-							<OneCard />
+							<SuggestionsPage>
+								<OneCard skip />
+							</SuggestionsPage>
 						</Phone>
 					</Shot>
 					<Shot caption="Organize, at 390: the card above the chips">
@@ -809,10 +898,9 @@ function P135() {
 					</Shot>
 					<Shot caption="The Suggestions page, at 1280">
 						<Desk label="Option A, Suggestions page" current="settings">
-							<h1 class="font-serif text-4xl font-semibold tracking-tight">
-								Suggestions
-							</h1>
-							<OneCard />
+							<SuggestionsPage>
+								<OneCard skip />
+							</SuggestionsPage>
 						</Desk>
 					</Shot>
 				</Choice>
@@ -837,10 +925,9 @@ function P135() {
 							tab="more"
 							masthead={PILL}
 						>
-							<h1 class="font-serif text-4xl font-semibold tracking-tight">
-								Suggestions
-							</h1>
-							<OneCard />
+							<SuggestionsPage>
+								<OneCard skip />
+							</SuggestionsPage>
 						</Phone>
 					</Shot>
 					<Shot caption="Organize, at 390: a link above the chips">
@@ -860,7 +947,7 @@ function P135() {
 	);
 }
 
-/** The second design audit's two picks (#606 and #607), drawn before the rest of the open proposals. */
+/** The second design audit's two picks (#606 and #607), each drawn beside today's screen (decision 120). */
 export function AuditRoundThreeProposals() {
 	return (
 		<>
