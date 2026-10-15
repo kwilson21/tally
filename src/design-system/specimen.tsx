@@ -180,7 +180,7 @@ export function PhoneFrame({
 			<div
 				role="img"
 				aria-label={label}
-				class={`${tall ? "h-[880px]" : "h-[790px]"} w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
+				class={`relative ${tall ? "h-[880px]" : "h-[790px]"} w-[392px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper`}
 			>
 				<div inert>
 					{demo && <DemoBanner />}

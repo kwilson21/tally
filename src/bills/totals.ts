@@ -148,6 +148,11 @@ export function calculateBillTotals({
 		upcomingCents: 0,
 		paidCents: 0,
 	};
+	// Paid this month sums the rows Bills lists as paid, one per bill, each at its full amount: a paid row has nothing
+	// left to pay, so the heading shows what the row shows (issue #601). A paid Friday no row shows is left out.
+	for (const occurrence of displayedOccurrences)
+		if (occurrence.status === "paid" && activeIds.has(occurrence.billId))
+			groups.paidCents += occurrence.amountCents;
 	// Safe to spend and "to pay soon" set aside each due or overdue occurrence once (spec §6).
 	const soon = new Map<string, number>();
 	const soonBillIds = new Set<number>();
@@ -157,8 +162,8 @@ export function calculateBillTotals({
 		const groupKey =
 			`${occurrence.status === "paid" ? "paid" : occurrence.status}Cents` as keyof typeof groups;
 		if (
-			occurrence.status !== "upcoming" ||
-			occurrence.dueDate.startsWith(month)
+			occurrence.status !== "paid" &&
+			(occurrence.status !== "upcoming" || occurrence.dueDate.startsWith(month))
 		)
 			groups[groupKey] += left;
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
