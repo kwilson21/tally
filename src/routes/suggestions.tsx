@@ -24,6 +24,7 @@ import {
 	suggestionQueue,
 	transferAskedSql,
 } from "../db/suggestions-queue";
+import { hxTrigger } from "../htmx";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -258,7 +259,7 @@ async function renderScreen(
 	if (options.toast) {
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: {
 					message: options.toast.message,
 					type: options.toast.type,

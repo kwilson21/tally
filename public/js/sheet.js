@@ -3,6 +3,7 @@
 // inert, and a screen reader hears a modal dialog.
 // Without this script a sheet is the page region it has always been, closed by Cancel or the backdrop.
 // The sheet is found by its markers: data-sheet on its section, data-sheet-close on its backdrop link.
+// A marker inside an inert ancestor is a drawing (the catalog's), not an open sheet, so it is passed over.
 (() => {
 	const MARK = "data-sheet-inert";
 	// Toasts stay usable while a sheet is open (an Undo's button), and so does the announcer.
@@ -10,7 +11,11 @@
 	const TABBABLE =
 		"a[href], button, input, select, textarea, summary, [tabindex]";
 
-	const openSheet = () => document.querySelector("[data-sheet]");
+	const live = (selector) =>
+		[...document.querySelectorAll(selector)].find(
+			(node) => !node.closest("[inert]"),
+		);
+	const openSheet = () => live("[data-sheet]");
 
 	// Focus on nothing in the sheet (the body, or a row the sheet now covers) moves into it: to its [autofocus] field,
 	// or else to its title. Focus that is already in the sheet stays, and so does focus on an Undo toast, which toast.js
@@ -72,7 +77,7 @@
 	document.addEventListener("keydown", (event) => {
 		if (event.key !== "Escape" || event.isComposing || event.defaultPrevented)
 			return;
-		const close = document.querySelector("[data-sheet-close]");
+		const close = live("[data-sheet-close]");
 		if (!close) return;
 		event.preventDefault();
 		close.click();

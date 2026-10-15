@@ -62,6 +62,7 @@ import {
 } from "../db/merchant-key";
 import { ownNameSql } from "../db/own-name";
 import { loadPlans } from "../db/planned-expenses";
+import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
@@ -961,7 +962,7 @@ bills.post("/bills/find/:merchant/dismiss", async (c) => {
 		.run();
 	if (!result.meta.changes) return c.notFound();
 	const headers = {
-		"HX-Trigger": JSON.stringify({
+		"HX-Trigger": hxTrigger({
 			toast: { message: "Marked as not a bill", type: "success" },
 			announce: "Suggestion removed",
 		}),
@@ -1163,7 +1164,7 @@ async function save(c: Context<App>, id?: number) {
 			: await page(c, undefined, today);
 		res.headers.set(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success" },
 				announce: message,
 			}),
@@ -1181,7 +1182,7 @@ async function activeChanged(c: Context<App>, message: string) {
 	const res = await page(c);
 	res.headers.set(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: { message, type: "success" },
 			announce: message,
 		}),
@@ -1559,7 +1560,7 @@ async function billPage(
 		// The picker arrives whole, so a live line inside it isn't reliably spoken; the count goes to the announcer instead.
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({ announce: paymentCountSentence(candidates.length) }),
+			hxTrigger({ announce: paymentCountSentence(candidates.length) }),
 		);
 		return c.html(picker);
 	}
@@ -2011,7 +2012,7 @@ bills.post("/bills/:id/undo-unlink", async (c) => {
 		};
 	response.headers.set(
 		"HX-Trigger",
-		JSON.stringify({ toast, announce: toast.message }),
+		hxTrigger({ toast, announce: toast.message }),
 	);
 	return response;
 });
@@ -2035,7 +2036,7 @@ async function feedbackRedirect(
 		);
 		response.headers.set(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success", ...toast },
 				announce,
 			}),

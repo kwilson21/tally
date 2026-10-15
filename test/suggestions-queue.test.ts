@@ -383,6 +383,25 @@ describe("suggestionQueue", () => {
 		expect(income).toEqual([paying]);
 	});
 
+	it("asks about an excluded credit that pays a planned expense, as its row shows it as Maybe income", async () => {
+		const paying = await transaction({
+			amount: -250000,
+			raw: "PLAN PAYMENT CREDIT",
+			incomeConfidence: 0.5,
+			excluded: 1,
+		});
+		await db
+			.prepare(
+				"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',250000,'2026-10',?,'demo')",
+			)
+			.bind(paying)
+			.run();
+		const income = (await suggestionQueue(db, AI_SWITCHES_ALL_ON)).flatMap(
+			(item) => (item.kind === "income" ? [item.transactionId] : []),
+		);
+		expect(income).toEqual([paying]);
+	});
+
 	it("never asks a transfer about a payment linked to a bill, since leaving it out can't take it out of the budget", async () => {
 		const paying = await transaction({
 			amount: 20000,

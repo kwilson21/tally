@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { jevSaysMixedAmong } from "../db/mixed-trip";
+import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
@@ -101,7 +102,7 @@ async function renderOrganize(
 		if (trigger.toast || announce)
 			c.header(
 				"HX-Trigger",
-				JSON.stringify({
+				hxTrigger({
 					toast: trigger.toast,
 					announce: announce || undefined,
 				}),
@@ -291,7 +292,7 @@ organize.post("/transactions/organize", async (c) => {
 		const message = "That merchant already has a category.";
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 		return renderOrganize(c, undefined, 200, true);
 	};
@@ -373,7 +374,7 @@ organize.post("/transactions/organize", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	if (asked) c.header("HX-Push-Url", asked);
 	return renderOrganize(c, undefined, 200, true, rule);
