@@ -124,7 +124,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
 	});
 
-	it.each(["-5", "-0.05"])(
+	it.each(["-5", "-0.05", "-0"])(
 		"turns all four steps off for %s, which money.js can't read either, and hides Round to",
 		(value) => {
 			const html = renderToString(
