@@ -40,14 +40,18 @@ const unlinkedFirstPageIds = async () => {
 
 /**
  * The fields a browser without JavaScript submits from the selection form: each checked box and each hidden input the
- * form draws, the no-JavaScript block's included (without JavaScript its inputs are real). A native submit sends
- * exactly these, so a test reads them as the server will (#383).
+ * form draws, the no-JavaScript block's included (without JavaScript its inputs are real), and the filter fields that
+ * name the form with a form attribute (#383). A native submit sends exactly these, so a test reads them as the server will.
  */
 const submittedFields = (html: string) => {
 	const form =
 		html.match(/<form id="selection-form"[\s\S]*?<\/form>/)?.[0] ?? "";
 	const fields = new URLSearchParams();
-	for (const tag of form.match(/<input [^>]*>/g) ?? []) {
+	const inputs = [
+		...(form.match(/<input [^>]*>/g) ?? []),
+		...(html.match(/<input [^>]*form="selection-form"[^>]*>/g) ?? []),
+	];
+	for (const tag of inputs) {
 		const name = tag.match(/ name="([^"]*)"/)?.[1];
 		if (name === undefined) continue;
 		if (/type="checkbox"/.test(tag) && !/ checked/.test(tag)) continue;
@@ -55,6 +59,16 @@ const submittedFields = (html: string) => {
 			name,
 			tag.match(/ value="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
 		);
+	}
+	for (const select of html.match(
+		/<select [^>]*form="selection-form"[^>]*>[\s\S]*?<\/select>/g,
+	) ?? []) {
+		const name = select.match(/ name="([^"]*)"/)?.[1];
+		const chosen =
+			select.match(/<option value="([^"]*)"[^>]* selected/)?.[1] ??
+			select.match(/<option value="([^"]*)"/)?.[1] ??
+			"";
+		if (name !== undefined) fields.append(name, chosen);
 	}
 	return fields;
 };
@@ -913,6 +927,9 @@ describe("select several transactions", () => {
 		/** The no-JavaScript block inside the selection form: the list's own fields, drawn as they stand. */
 		const noscriptBlock = (html: string) =>
 			selectionForm(html).match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] ?? "";
+		/** The no-JavaScript block of a form's markup (the filter form's own, in these tests). */
+		const noscriptBlockOf = (markup: string) =>
+			markup.match(/<noscript>[\s\S]*?<\/noscript>/)?.[0] ?? "";
 
 		it("makes Older and Newer buttons that submit the selection form, each with its page as its own value", async () => {
 			const html = await listHtml("month=all&page=2&select=1");
@@ -941,14 +958,88 @@ describe("select several transactions", () => {
 			);
 		});
 
-		it("draws the list's select and filters in the selection form's no-JavaScript block, but not the page", async () => {
+		it("draws only the list's select in the selection form's no-JavaScript block, never a copy of a filter or the page", async () => {
 			const block = noscriptBlock(
 				await listHtml("month=all&q=coffee&page=2&select=1"),
 			);
 			expect(block).toContain('name="select" value="1"');
-			expect(block).toContain('name="q" value="coffee"');
-			expect(block).toContain('name="month" value="all"');
+			expect(block).not.toContain('name="q"');
+			expect(block).not.toContain('name="month"');
 			expect(block).not.toContain('name="page"');
+		});
+
+		it("makes the filter fields the selection form's own, by form attribute, only in Select mode", async () => {
+			const html = await listHtml("month=all&q=coffee&select=1");
+			for (const name of [
+				"q",
+				"month",
+				"category",
+				"account",
+				"show",
+				"uncategorized",
+			]) {
+				const tag =
+					html.match(
+						new RegExp(`<(?:input|select)[^>]* name="${name}"[^>]*>`),
+					)?.[0] ?? "";
+				expect(tag, name).toContain('form="selection-form"');
+			}
+			expect(await listHtml("month=all&q=coffee")).not.toContain(
+				'form="selection-form"',
+			);
+		});
+
+		it("makes Apply filters, drawn for a browser without JavaScript, a button that submits the selection form", async () => {
+			const html = await listHtml("month=all&select=1");
+			const filters =
+				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+			const apply =
+				filters.match(/<button [^>]*>Apply filters<\/button>/)?.[0] ?? "";
+			expect(noscriptBlockOf(filters)).toContain("Apply filters");
+			expect(apply).toContain('type="submit"');
+			expect(apply).toContain('form="selection-form"');
+			expect(apply).toContain('formaction="/transactions"');
+			expect(apply).toContain('formmethod="get"');
+		});
+
+		it("keeps the filter form's ticks out of its own no-JavaScript block, since the checked boxes are the selection form's", async () => {
+			const ids = (await firstPageIds()).slice(0, 2);
+			const html = await listHtml(`month=all&select=1&ids=${ids.join(",")}`);
+			const filters =
+				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+			expect(noscriptBlockOf(filters)).not.toContain('name="ids"');
+			expect(
+				submittedFields(html)
+					.getAll("ids")
+					.map(Number)
+					.sort((a, b) => a - b),
+			).toEqual([...ids].sort((a, b) => a - b));
+		});
+
+		it("draws a hidden submit button before Add cash, which submits the selection form, so Enter in the search box never opens the sheet", async () => {
+			const html = await listHtml("month=all&select=1");
+			const guard = html.match(/<button hidden=""[^>]*><\/button>/)?.[0] ?? "";
+			expect(guard).toContain('type="submit"');
+			expect(guard).toContain('form="selection-form"');
+			expect(guard).toContain('formaction="/transactions"');
+			expect(guard).toContain('formmethod="get"');
+			expect(html.indexOf(guard)).toBeGreaterThan(-1);
+			expect(html.indexOf(guard)).toBeLessThan(html.indexOf('id="add-cash"'));
+			expect(await listHtml("month=all")).not.toMatch(/<button hidden=""/);
+		});
+
+		it("gives the filter form's htmx request its own fields by selector and the ticks, and submits it on the selection form's submit", async () => {
+			const html = await listHtml("month=all&select=1");
+			const filters = html.match(/<form id="filters"[^>]*>/)?.[0] ?? "";
+			expect(filters).toContain("#filters input[name], #filters select[name]");
+			expect(filters).toContain("#selection-form input[name=ids]:checked");
+			expect(filters).toContain(
+				'hx-trigger="input delay:300ms, submit, submit from:#selection-form"',
+			);
+			const plain = await listHtml("month=all");
+			expect(plain.match(/<form id="filters"[^>]*>/)?.[0] ?? "").toContain(
+				'hx-trigger="input delay:300ms, submit"',
+			);
 		});
 
 		it("draws Add cash as a button that submits the selection form to the sheet, with no name of its own", async () => {
@@ -1565,13 +1656,6 @@ describe("select several transactions", () => {
 			),
 		];
 		const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b);
-		/** The ids in the no-JS hidden fields of the filter form. */
-		const noscriptIds = (html: string) =>
-			[
-				...(html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? [])
-					.join("")
-					.matchAll(/name="ids" value="(\d+)"/g),
-			].map((m) => Number(m[1]));
 
 		it("keeps page 1's ticks on page 2, and the bar counts them as not on this page", async () => {
 			const ids = await pageOneTicks();
@@ -1898,12 +1982,10 @@ describe("select several transactions", () => {
 					.map(Number)
 					.sort((a, b) => a - b),
 			).toEqual([...ids].sort((a, b) => a - b));
-			// Without JavaScript the filter form submits these; with it, htmx ignores a noscript block.
-			const noscript = (
-				html.match(/<noscript>[\s\S]*?<\/noscript>/g) ?? []
-			).join("");
-			for (const id of ids)
-				expect(noscript).toContain(`name="ids" value="${id}"`);
+			// The filter form's Apply submits the same checked boxes, since they are the selection form's own (#383).
+			const filters =
+				html.match(/<form id="filters"[\s\S]*?<\/form>/)?.[0] ?? "";
+			expect(filters).not.toContain('name="ids"');
 		});
 
 		it("takes no focus without the disclosure's marker, or while a tick is still off the page", async () => {
@@ -2071,7 +2153,6 @@ describe("select several transactions", () => {
 			expect(sorted(submittedFields(html).getAll("ids").map(Number))).toEqual(
 				sorted(real),
 			);
-			expect(sorted(noscriptIds(html))).toEqual(sorted(real));
 			expect(
 				sorted(
 					new URL(addCashSubmitAddress(html), "http://tally.test").searchParams

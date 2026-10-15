@@ -1543,7 +1543,92 @@ assert.ok(
 	`Add cash's sheet dropped the tick: ${plain.url()}`,
 );
 step("without JavaScript, Add cash's sheet keeps the tick");
+
+// Apply filters and Enter in the search box submit the selection form too (#383): a tick made on the page is kept, an
+// untick is kept, and the search typed into the box is applied. Enter filters rather than opening Add cash's sheet.
+await plain.goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "load",
+});
+await tickFirstRow("#selection-form");
+const appliedId = await plain
+	.locator("#selection-form input[name=ids]")
+	.nth(0)
+	.getAttribute("value");
+await plain.getByRole("button", { name: "Apply filters", exact: true }).click();
+await plain.waitForURL((url) =>
+	url.searchParams.getAll("ids").includes(appliedId),
+);
+assert.ok(
+	await plain.locator("#selection-form input[name=ids]").nth(0).isChecked(),
+	"Apply filters dropped a tick made on the page",
+);
+step("without JavaScript, Apply filters keeps a tick made on the page");
+
+await plain.goto(`${BASE}/transactions?month=all&select=1&ids=${appliedId}`, {
+	waitUntil: "load",
+});
+await tickFirstRow("#selection-form");
+await plain.getByRole("button", { name: "Apply filters", exact: true }).click();
+await plain.waitForURL(
+	(url) => !url.searchParams.getAll("ids").includes(appliedId),
+);
+assert.equal(
+	await plain.locator("#selection-form input[name=ids]").nth(0).isChecked(),
+	false,
+	"Apply filters brought back a tick that was unticked on the page",
+);
+step("without JavaScript, Apply filters keeps an untick made on the page");
+
+await plain.goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "load",
+});
+await plain.locator("#q").fill("zzz-no-match");
+await plain.getByRole("button", { name: "Apply filters", exact: true }).click();
+await plain.waitForURL((url) => url.searchParams.get("q") === "zzz-no-match");
+assert.ok(
+	await plain.getByText("No transactions match these filters.").isVisible(),
+	"Apply filters dropped the search typed into the box",
+);
+step("without JavaScript, Apply filters applies the search typed into the box");
+
+await plain.goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "load",
+});
+await plain.locator("#q").fill("zzz-no-match");
+await plain.locator("#q").press("Enter");
+await plain.waitForURL((url) => url.searchParams.get("q") === "zzz-no-match");
+assert.ok(
+	!plain.url().includes("/transactions/cash/new"),
+	`Enter in the search box opened Add cash: ${plain.url()}`,
+);
+step("without JavaScript, Enter in the search box filters and opens no sheet");
 await plainContext.close();
+
+// With JavaScript, Enter in the search box filters the list in Select mode too, and opens no sheet (#383).
+await goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "networkidle",
+});
+await page.locator("#q").fill("zzz-no-match");
+// A window value a full page load would clear: Enter must filter in place, not submit the form natively.
+await page.evaluate(() => {
+	window.enterFiltersInPlace = true;
+});
+await page.locator("#q").press("Enter");
+await page.waitForURL((url) => url.searchParams.get("q") === "zzz-no-match");
+await page.getByText("No transactions match these filters.").waitFor();
+assert.equal(
+	await page.evaluate(() => window.enterFiltersInPlace),
+	true,
+	"Enter in the search box reloaded the page instead of filtering in place",
+);
+assert.equal(
+	await page.locator('[role="dialog"]').count(),
+	0,
+	"Enter in the search box opened a sheet with JavaScript",
+);
+step(
+	"with JavaScript, Enter in the search box filters in Select mode and opens no sheet",
+);
 
 const restored = await fetch(`${BASE}/cdn-cgi/handler/scheduled`);
 assert.equal(restored.status, 200, "restoring the demo data failed");
