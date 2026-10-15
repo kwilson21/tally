@@ -1455,6 +1455,19 @@ await assertHeadlineFitsPhone(
 	"Net worth",
 );
 step("a seven-figure Net worth fits a 320px phone one size smaller");
+// #600: every Budget box keeps its size and wraps, so How Tally works never scrolls sideways at 320px or 390px.
+for (const width of [320, 390]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/how-it-works`, { waitUntil: "networkidle" });
+	const scrollWidth = await page.evaluate(
+		() => document.documentElement.scrollWidth,
+	);
+	assert(
+		scrollWidth <= width,
+		`How Tally works scrolls sideways at ${width}px: ${scrollWidth}px`,
+	);
+}
+step("How Tally works doesn't scroll sideways at 320px or 390px");
 // #534: Organize's Save is disabled while it posts (hx-disable), so a double click files the group once and the
 // question keeps its own address. Each Save is held for a moment, so the second click lands while the first is in flight.
 await page.setViewportSize({ width: 390, height: 844 });
