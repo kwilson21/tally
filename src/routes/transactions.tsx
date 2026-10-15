@@ -21,6 +21,8 @@ import {
 import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
 import {
+	type CashSplitEdit,
+	type CashSplitRefusal,
 	correctCashSplit,
 	type FirstVisit,
 	firstVisitState,
@@ -90,7 +92,6 @@ import {
 import { jevAsksAbout, oneOffGuessesAgain } from "../transactions/rename";
 import { resultCount } from "../transactions/result-count";
 import {
-	categoryRuleOffer,
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../transactions/rule-offer";
@@ -129,11 +130,13 @@ import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
+	LINKED_PURCHASE_CLASS,
 	NameChoices,
 	OWN_VALUE,
 	pickValue,
 	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
+	TALLY_CATEGORY_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import {
@@ -1612,6 +1615,190 @@ function listCloseAttrs(back: string, id: number): Record<string, string> {
 	};
 }
 
+/**
+ * The purchase a linked refund is linked to (`linked`), and the one its category is locked to (`locked`): the
+ * refund counts with that purchase once the panel is saved (followsPurchaseAfterSave), so its category is the
+ * purchase's and the panel's category choice is disabled.
+ */
+function linkedPurchases(
+	tx: TransactionDetail,
+	values: Pick<
+		Edit,
+		| "refundOfId"
+		| "income"
+		| "incomeWas"
+		| "creditReviewed"
+		| "creditReviewedWas"
+		| "creditReviewedProvided"
+	>,
+	refunds: RefundPurchase[],
+) {
+	const linked = refunds.find((p) => p.id === values.refundOfId && !p.excluded);
+	return {
+		linked,
+		locked: linked && followsPurchaseAfterSave(tx, values) ? linked : undefined,
+	};
+}
+
+/** The lock's sentence: where a linked refund counts, named by its purchase's category while that category exists. */
+function countsWithPurchase(
+	purchase: RefundPurchase,
+	categories: Category[],
+	date: string,
+) {
+	const category = categories.find((cat) => cat.id === purchase.categoryId);
+	const day = shortDay(purchase.date, date);
+	return category
+		? `Counts in ${category.name} with the ${day} purchase.`
+		: `Counts with the ${day} purchase.`;
+}
+
+/** The purchase the panel's "This refunds…" answer names: a field left out keeps the saved link, an empty one unlinks. */
+function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
+	const current = tx.refundOfId ?? null;
+	const posted = form.get("refund_of");
+	return posted === null ? current : posted === "" ? null : Number(posted);
+}
+
+/**
+ * The panel's category choice (spec §8). A linked refund that counts with its purchase is locked: the choice is
+ * disabled, drawn with the purchase's category and the "Counts in" line. The choice sits in its own wrapper, which
+ * the category lock route draws again when Count as income or Reviewed changes. A locked choice's last pick sits in
+ * hidden fields after the disabled fieldset, since a browser posts nothing from a disabled one. A trip that looks
+ * mixed (#233) draws its split line in the open choice, so the lock route's redraw brings it back when the lock lifts.
+ */
+function CategoryChoice({
+	tx,
+	categories,
+	values,
+	errors = {},
+	purchase,
+	back,
+}: {
+	tx: TransactionDetail;
+	categories: Category[];
+	values: Pick<Edit, "categoryId" | "newCategory" | "newCategoryName">;
+	errors?: EditErrors;
+	purchase?: RefundPurchase;
+	back: string;
+}) {
+	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
+	const mixed = mixedCategories(tx);
+	return (
+		<div id="edit-category">
+			<fieldset
+				class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+				disabled={purchase !== undefined}
+				aria-describedby={errors.category ? "category-error" : undefined}
+			>
+				<legend class="flex items-center gap-1 text-base text-ink">
+					Category
+					{tx.categorySource === "bill" && (
+						<>
+							<span aria-hidden="true">·</span>
+							<WhyLink section="categorization" topic="this category" />
+						</>
+					)}
+				</legend>
+				<div class="flex flex-wrap items-start gap-2">
+					{!purchase &&
+						tx.categorySource !== "jev" &&
+						tx.maybeCategoryName &&
+						!tx.maybeCategoryNew &&
+						tx.suggestedCategoryId !== null &&
+						tx.suggestedCategoryName &&
+						tx.categoryConfidence !== null &&
+						tx.categoryConfidence < JEV_THRESHOLD && (
+							<SuggestedCategoryChip
+								name={tx.suggestedCategoryName}
+								value={String(tx.suggestedCategoryId)}
+								sure={Math.round(tx.categoryConfidence * 100)}
+								transactionId={tx.id}
+							/>
+						)}
+					{categories.map((cat) => (
+						<Chip
+							type="radio"
+							name="category"
+							value={String(cat.id)}
+							checked={
+								purchase
+									? purchase.categoryId === cat.id
+									: values.categoryId === cat.id
+							}
+							inputClass={
+								cat.id === tx.categoryId ? TALLY_CATEGORY_CLASS : undefined
+							}
+							icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
+						>
+							{cat.name}
+						</Chip>
+					))}
+					<NewCategoryChip checked={!purchase && values.newCategory === true} />
+				</div>
+				{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
+				{!purchase && mixed && (
+					<MixedTripLine
+						first={mixed.first.name}
+						second={mixed.second.name}
+						href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+					/>
+				)}
+				{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
+				<NewCategoryName
+					id="new-category-name"
+					value={values.newCategoryName ?? ""}
+					hint="Added to your categories and used for this transaction."
+					error={errors.newCategory}
+				/>
+				{purchase && (
+					<p class="text-sm text-muted">
+						{countsWithPurchase(purchase, categories, tx.date)}
+					</p>
+				)}
+				{!purchase &&
+					tx.categorySource === "jev" &&
+					tx.categoryConfidence !== null && (
+						<p class="text-sm text-muted">
+							Picked by Tally · {Math.round(tx.categoryConfidence * 100)}% sure
+						</p>
+					)}
+				{!purchase &&
+					tx.categorySource !== "jev" &&
+					tx.maybeCategoryName &&
+					!tx.maybeCategoryNew &&
+					tx.suggestedCategoryName &&
+					tx.categoryConfidence !== null &&
+					tx.categoryConfidence < JEV_THRESHOLD && (
+						<p class="text-sm text-muted">
+							Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
+						</p>
+					)}
+				{errors.category && (
+					<p id="category-error" role="alert" class="text-sm text-over">
+						{errors.category}
+					</p>
+				)}
+			</fieldset>
+			{/* Only while locked: an open choice's radios post category themselves, and a copy would post it twice. */}
+			{purchase && (values.newCategory || values.categoryId !== null) && (
+				<input
+					type="hidden"
+					name="category"
+					value={values.newCategory ? "new" : String(values.categoryId)}
+				/>
+			)}
+			{purchase && values.newCategoryName && (
+				<input
+					type="hidden"
+					name="new_category_name"
+					value={values.newCategoryName}
+				/>
+			)}
+		</div>
+	);
+}
+
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
 function EditSheet({
 	tx,
@@ -1640,23 +1827,36 @@ function EditSheet({
 	// A refund that follows its purchase counts in that purchase's category, so its own can't be picked
 	// while it does. Whether it follows is the counting rule on what a save would hold, so the lock and the
 	// "Counts in" line say how the row really counts.
-	const linkedPurchase = refunds.find(
-		(p) => p.id === values.refundOfId && !p.excluded,
+	const { linked: linkedPurchase, locked: purchase } = linkedPurchases(
+		tx,
+		values,
+		refunds,
 	);
-	const purchase =
-		linkedPurchase && followsPurchaseAfterSave(tx, values)
-			? linkedPurchase
-			: undefined;
-	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
-	const mixed = mixedCategories(tx);
-	const purchaseCategory = categories.find(
-		(cat) => cat.id === purchase?.categoryId,
-	);
+	// Count as income and Reviewed lock a linked credit's category, so a change draws that choice again (/category/lock).
+	const lockRedraw = linkedPurchase
+		? {
+				"hx-post": `/transactions/${tx.id}/category/lock`,
+				"hx-trigger": "change",
+				"hx-target": "#edit-category",
+				"hx-select": "#edit-category > *",
+				"hx-swap": "innerHTML",
+				"hx-sync": "#edit-category:queue last",
+				"hx-include": "closest form",
+			}
+		: {};
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
+	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
+	// panel's hooks need even after a redraw that posted Exclude off or Income on.
 	const countsIfReviewed = (creditReviewed: boolean) =>
 		isIncluded(
-			excludedAfterSave(tx, { ...values, creditReviewed }),
+			excludedAfterSave(tx, {
+				...values,
+				excluded: true,
+				income: false,
+				refundOfId: tx.refundOfId ?? null,
+				creditReviewed,
+			}),
 			tx.paysBill === true,
 		);
 	return (
@@ -1901,33 +2101,30 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
-								// tick, keeps the category (rename.ts).
+								// The note is drawn as if every control the edit reads were off, and the hooks hide it while one of them blocks the
+								// guess (name-choices.tsx). So a purchase link counts as Not linked, and what stays out is only a split row, or a
+								// category someone else set. linkHolds is the drawn purchase that keeps the refund following it with Reviewed off,
+								// which Jev's review does; reviewLifts is whether ticking Reviewed lifts Plaid's exclusion, which Exclude's hook
+								// reads. The hooks fold on both.
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
-									values.newCategory !== true &&
-									values.alwaysForMerchant !== true &&
-									(values.categoryId === null ||
-										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: isIncluded(
-											excludedAfterSave(tx, values),
-											tx.paysBill === true,
-										),
+										included: true,
 										isSplit: tx.isSplit === true,
-										income: values.income,
-										followsPurchase: purchase !== undefined,
+										income: false,
+										followsPurchase: false,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// The review chip folds the note where the review decides whether the row counts: a Plaid
-								// exclusion it lifts, not on a bill payment and not once Exclude is off. A linked purchase is
-								// one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
-								reviewCounts:
-									linkedPurchase !== undefined ||
-									countsIfReviewed(true) !== countsIfReviewed(false),
+								linkHolds:
+									linkedPurchase !== undefined &&
+									followsPurchaseAfterSave(tx, {
+										...values,
+										income: false,
+										creditReviewed: false,
+									}),
+								reviewLifts: countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -2095,102 +2292,14 @@ function EditSheet({
 						</p>
 					</div>
 				)}
-				<fieldset
-					class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
-					disabled={purchase !== undefined}
-					aria-describedby={errors.category ? "category-error" : undefined}
-				>
-					<legend class="flex items-center gap-1 text-base text-ink">
-						Category
-						{tx.categorySource === "bill" && (
-							<>
-								<span aria-hidden="true">·</span>
-								<WhyLink section="categorization" topic="this category" />
-							</>
-						)}
-					</legend>
-					<div class="flex flex-wrap items-start gap-2">
-						{!purchase &&
-							tx.categorySource !== "jev" &&
-							tx.maybeCategoryName &&
-							!tx.maybeCategoryNew &&
-							tx.suggestedCategoryId !== null &&
-							tx.suggestedCategoryName &&
-							tx.categoryConfidence !== null &&
-							tx.categoryConfidence < JEV_THRESHOLD && (
-								<SuggestedCategoryChip
-									name={tx.suggestedCategoryName}
-									value={String(tx.suggestedCategoryId)}
-									sure={Math.round(tx.categoryConfidence * 100)}
-									transactionId={tx.id}
-								/>
-							)}
-						{categories.map((cat) => (
-							<Chip
-								type="radio"
-								name="category"
-								value={String(cat.id)}
-								checked={
-									purchase
-										? purchase.categoryId === cat.id
-										: values.categoryId === cat.id
-								}
-								icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
-							>
-								{cat.name}
-							</Chip>
-						))}
-						<NewCategoryChip
-							checked={!purchase && values.newCategory === true}
-						/>
-					</div>
-					{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
-					{!purchase && mixed && (
-						<MixedTripLine
-							first={mixed.first.name}
-							second={mixed.second.name}
-							href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
-						/>
-					)}
-					{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
-					<NewCategoryName
-						id="new-category-name"
-						value={values.newCategoryName ?? ""}
-						hint="Added to your categories and used for this transaction."
-						error={errors.newCategory}
-					/>
-					{purchase && (
-						<p class="text-sm text-muted">
-							{purchaseCategory
-								? `Counts in ${purchaseCategory.name} with the ${shortDay(purchase.date, tx.date)} purchase.`
-								: `Counts with the ${shortDay(purchase.date, tx.date)} purchase.`}
-						</p>
-					)}
-					{!purchase &&
-						tx.categorySource === "jev" &&
-						tx.categoryConfidence !== null && (
-							<p class="text-sm text-muted">
-								Picked by Tally · {Math.round(tx.categoryConfidence * 100)}%
-								sure
-							</p>
-						)}
-					{!purchase &&
-						tx.categorySource !== "jev" &&
-						tx.maybeCategoryName &&
-						!tx.maybeCategoryNew &&
-						tx.suggestedCategoryName &&
-						tx.categoryConfidence !== null &&
-						tx.categoryConfidence < JEV_THRESHOLD && (
-							<p class="text-sm text-muted">
-								Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
-							</p>
-						)}
-					{errors.category && (
-						<p id="category-error" role="alert" class="text-sm text-over">
-							{errors.category}
-						</p>
-					)}
-				</fieldset>
+				<CategoryChoice
+					tx={tx}
+					categories={categories}
+					values={values}
+					errors={errors}
+					purchase={purchase}
+					back={back}
+				/>
 				{/* An error keeps the section, even when no purchase is offered any more. */}
 				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
@@ -2226,6 +2335,7 @@ function EditSheet({
 										name="refund_of"
 										value={String(p.id)}
 										checked={values.refundOfId === p.id}
+										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
 									>
 										{refundPurchaseLabel(p, tx.date)}
 									</Chip>
@@ -2261,7 +2371,7 @@ function EditSheet({
 					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
 					<p class="text-base text-ink">Income</p>
-					<div class="flex flex-wrap gap-2">
+					<div class="flex flex-wrap gap-2" {...lockRedraw}>
 						<Chip
 							type="checkbox"
 							name="income"
@@ -2289,7 +2399,10 @@ function EditSheet({
 					)}
 				</div>
 				{tx.amountCents < 0 && (
-					<div class="flex flex-col gap-2 border-t border-rule pt-3">
+					<div
+						class="flex flex-col gap-2 border-t border-rule pt-3"
+						{...lockRedraw}
+					>
 						<input type="hidden" name="creditReviewedVisible" value="1" />
 						<input
 							type="hidden"
@@ -2558,11 +2671,11 @@ transactions.post("/transactions/cash", async (c) => {
 	// In Select mode the reply's address is the list's own, keeping a month that has turned over on screen (#321);
 	// otherwise it is the back as sent, as it always was.
 	const address = selecting ? listAddress(c, today, back) : back;
-	const offerRecord = await categoryRuleOffer(
-		c.env.DB,
-		saved.merchant,
-		saved.categoryId,
-	);
+	// A repost of an entry already saved stores nothing new, so it asks nothing: only a row this
+	// save stored can be the pick.
+	const offerRecord = saved.inserted
+		? await ruleOfferForTransaction(c.env.DB, saved.id, saved.categoryId)
+		: null;
 	const categoryName = categories.find(
 		(category) => category.id === saved.categoryId,
 	)?.name;
@@ -3193,46 +3306,52 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			),
 		});
 	if (correction) {
-		const result = await correctCashSplit(
-			c.env.DB,
-			tx.id,
-			{
-				totalCents: correction.totalCents,
-				amountWasCents: correction.amountWas,
-				parts: parsed.parts.map((part, i) => ({
-					id: values[i]?.partId ?? null,
-					categoryId: part.categoryId,
-					amountCents: part.amountCents,
-				})),
-			},
-			actor(c),
-		);
-		// The panel's other changes (its pending edit) are saved with the corrected parts, as its own save.
+		const split: CashSplitEdit = {
+			totalCents: correction.totalCents,
+			amountWasCents: correction.amountWas,
+			parts: parsed.parts.map((part, i) => ({
+				id: values[i]?.partId ?? null,
+				categoryId: part.categoryId,
+				amountCents: part.amountCents,
+			})),
+		};
+		// The sheet again at the posted parts, with why the correction was refused (nothing saved).
+		const refused = (refusal: CashSplitRefusal) => {
+			const error =
+				"refundPart" in refusal
+					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
+					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
+			return renderList(c, today, filtersFrom(c, today, back), {
+				status: 422,
+				sheet: (_categories, today) => (
+					<SplitSheet
+						tx={tx}
+						back={back}
+						categories={categories}
+						values={values}
+						error={error}
+						today={today}
+						refunds={refunds}
+						choices={choices}
+						still
+						correction={correction}
+					/>
+				),
+			});
+		};
+		// The panel's pending edit is checked first, and saved in the same batch as the parts (#365): an edit that
+		// fails its checks saves nothing, and a refused correction saves none of the edit either.
+		if (correction.pendingEdit)
+			return savePanel(
+				c,
+				tx,
+				pendingEditForm(correction.pendingEdit, correction.totalCents),
+				{ split, refused },
+			);
+		const result = await correctCashSplit(c.env.DB, tx.id, split, actor(c));
 		if (result.saved)
-			return correction.pendingEdit
-				? savePendingEdit(c, tx, correction.totalCents, correction.pendingEdit)
-				: splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
-		const error =
-			"refundPart" in result
-				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
-				: `Linked refunds add up to ${formatCents(result.refundTotalCents)}, so the amount can't be less than that.`;
-		return renderList(c, today, filtersFrom(c, today, back), {
-			status: 422,
-			sheet: (_categories, today) => (
-				<SplitSheet
-					tx={tx}
-					back={back}
-					categories={categories}
-					values={values}
-					error={error}
-					today={today}
-					refunds={refunds}
-					choices={choices}
-					still
-					correction={correction}
-				/>
-			),
-		});
+			return splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
+		return refused(result);
 	}
 	// The part each refund goes with, or null for Not linked (every answer was checked above).
 	const result = await saveSplit(
@@ -3366,6 +3485,51 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	return renderList(c, today, filtersFrom(c, today, back), { focusId: tx.id });
 });
 
+/**
+ * A linked credit's category choice, drawn again as its Count as income or Reviewed toggle changes (decision 99): the
+ * purchase's category while the credit counts with it, open otherwise. The reply is the choice alone, so the toggle
+ * keeps focus, and the lock is announced in words.
+ */
+transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
+	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
+	if (!tx) return c.notFound();
+	const form = await c.req.formData();
+	const back = safeBack(form.get("back")?.toString());
+	const { linked, locked } = linkedPurchases(
+		tx,
+		{ refundOfId: postedRefundOf(tx, form), ...postedCredit(form) },
+		await refundPurchases(c.env.DB, tx),
+	);
+	const { results: categories } = await c.env.DB.prepare(
+		"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+	).all<Category>();
+	if (linked)
+		c.header(
+			"HX-Trigger",
+			JSON.stringify({
+				announce: locked
+					? countsWithPurchase(locked, categories, tx.date)
+					: "Pick a category.",
+			}),
+		);
+	// A locked choice is disabled, so the browser posts none of its radios: it carries the last pick in hidden
+	// fields (CategoryChoice), and the row's own category is drawn only when nothing is posted.
+	const posted = form.get("category");
+	return c.html(
+		<CategoryChoice
+			tx={tx}
+			categories={categories}
+			values={{
+				categoryId: posted === null ? tx.categoryId : Number(posted) || null,
+				newCategory: posted === "new",
+				newCategoryName: form.get("new_category_name")?.toString() ?? "",
+			}}
+			purchase={locked}
+			back={back}
+		/>,
+	);
+});
+
 // Saving the edit panel. htmx gets the updated list back with a toast; plain browsers are redirected to it.
 transactions.post("/transactions/:id{[0-9]+}", async (c) => {
 	const tx = await getTransaction(c.env.DB, Number(c.req.param("id")));
@@ -3390,14 +3554,25 @@ function pendingEditOf(form: FormData): string {
 const GUESSES_AGAIN = "Tally guesses its category again.";
 
 /**
+ * A split's correction (Change the parts) that is saved in the same batch as the panel's save, and how to draw
+ * the split sheet when the correction is refused.
+ */
+type PanelCorrection = {
+	split: CashSplitEdit;
+	refused: (refusal: CashSplitRefusal) => Promise<Response>;
+};
+
+/**
  * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
  * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
  * the split sheet at that amount, holding the panel's other changes, which are saved with the corrected parts.
+ * With `correction`, the parts are corrected in the same batch (saveEdit), so the parts aren't checked here.
  */
 async function savePanel(
 	c: Context<App>,
 	tx: TransactionDetail,
 	form: FormData,
+	correction?: PanelCorrection,
 ) {
 	// The panel as it was posted, before anything below changes the form: a Change the parts sheet carries it.
 	const pendingEdit = pendingEditOf(form);
@@ -3429,9 +3604,7 @@ async function savePanel(
 		? parseCashDateAmount(cashValues.date, cashValues.amount, today)
 		: undefined;
 	const current = tx.refundOfId ?? null;
-	const posted = form.get("refund_of");
-	const refundOfId =
-		posted === null ? current : posted === "" ? null : Number(posted);
+	const refundOfId = postedRefundOf(tx, form);
 	const refundOk =
 		refundOfId === null || refunds.some((p) => p.id === refundOfId);
 	// A refund that follows its purchase counts in that purchase's category, so a posted category (and a
@@ -3606,7 +3779,9 @@ async function savePanel(
 			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 			...(cashParsed?.errors ?? {}),
 		});
-	if (cashParsed && tx.isSplit) {
+	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
+	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
+	if (cashParsed && tx.isSplit && !correction) {
 		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
 		// is checked first.
 		const linked = await c.env.DB.prepare(
@@ -3651,6 +3826,7 @@ async function savePanel(
 				: {}),
 		},
 		actor(c),
+		correction?.split,
 	).catch(async (error: unknown) => {
 		// A save that throws files nothing, so a category made for it goes too.
 		if (made) await unmakeCategory(c.env.DB, made.id);
@@ -3659,6 +3835,9 @@ async function savePanel(
 	if (!result.saved) {
 		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
 		if (made) await unmakeCategory(c.env.DB, made.id);
+		// Only a save with a correction is refused for its split; without one, the split is never in the batch.
+		if ("split" in result)
+			return correction ? correction.refused(result.split) : c.notFound();
 		if ("personMissing" in result)
 			// Removed since this page loaded the household: the panel shows the household as it is now.
 			return showErrors(
@@ -3703,10 +3882,18 @@ async function savePanel(
 			? tx.merchantName
 			: parsed.value.displayName) ??
 		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
+	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
+	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
+	const countedBefore = isIncluded(tx.excluded, tx.paysBill === true);
+	const countsNow = isIncluded(excludedNow, tx.paysBill === true);
+	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts while
+	// excluded, so putting it back adds no pick (COUNTED_PICKS_SQL).
+	const putBackInBudget = tx.markedTransfer && countsNow && !countedBefore;
+	// The question follows a new pick: a category picked, or a transfer put back in the budget. The post-save lookup
+	// drops it when the store already has that rule, including one this save made or kept (decision 101).
 	const ruleOfferRecord =
 		parsed.value.categoryId === null ||
-		parsed.value.categoryId === tx.categoryId ||
-		parsed.value.alwaysForMerchant
+		(parsed.value.categoryId === tx.categoryId && !putBackInBudget)
 			? null
 			: await ruleOfferForTransaction(c.env.DB, tx.id, parsed.value.categoryId);
 	const offerCategory = categories.find(
@@ -3736,8 +3923,6 @@ async function savePanel(
 		(parsed.value.kind !== undefined && parsed.value.kind !== tx.kind) ||
 		(parsed.value.forPersonId !== undefined &&
 			parsed.value.forPersonId !== tx.forPersonId);
-	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
-	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
 	// A one-off name also asks again when Tally picked the category, which saveEdit has cleared (decision 101),
 	// and only on a row Jev can be asked about as this save leaves it (rename.ts jevAsksAbout).
 	const guessAgain = oneOffGuessesAgain({
@@ -3804,8 +3989,6 @@ async function savePanel(
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
 	// A bill payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
-	const countedBefore = isIncluded(tx.excluded, tx.paysBill === true);
-	const countsNow = isIncluded(excludedNow, tx.paysBill === true);
 	const exclusion =
 		excludedNow && !tx.excluded
 			? tx.paysBill
@@ -3848,21 +4031,16 @@ async function savePanel(
 }
 
 /**
- * Change the parts has saved the entry's new total and its corrected parts: the panel's pending edit is
- * saved now too, as its own save would save it, with the amount the parts now add up to.
+ * The panel's pending edit (pendingEditOf's fields) as the form a save reads, with the amount the corrected parts
+ * add up to: Change the parts saves it with those parts, as its own save would (savePanel).
  */
-async function savePendingEdit(
-	c: Context<App>,
-	tx: TransactionDetail,
-	totalCents: number,
-	pendingEdit: string,
-) {
+function pendingEditForm(pendingEdit: string, totalCents: number): FormData {
 	const form = new FormData();
 	new URLSearchParams(pendingEdit).forEach((value, key) => {
 		form.append(key, value);
 	});
 	form.set("amount", centsToAmount(totalCents));
-	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
+	return form;
 }
 
 /** A live category a likely-transactions form names, or null. */
