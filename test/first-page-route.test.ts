@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
+import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { firstPage } from "../src/routes/first-page";
 
@@ -65,8 +66,10 @@ const trigger = (res: Response) =>
 		announce?: string;
 	};
 
+/** The page's words: a link's tags leave no space behind (so "Possible bills." reads whole), other tags a space. */
 const textOf = (html: string) =>
 	html
+		.replace(/<\/?a\b[^>]*>/g, "")
 		.replace(/<[^>]+>/g, " ")
 		.replaceAll("&#39;", "'")
 		.replaceAll("&quot;", '"')
@@ -523,5 +526,141 @@ describe("the answer's motion", () => {
 		const { html } = await get("/first-page");
 		expect(html).not.toContain("first-line-new");
 		expect(html).not.toContain("first-stroke-new");
+	});
+
+	it("rises the line the reply wrote, even when it sorts before a line already there", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp'), ('ZED CO', 'Zed Co')",
+			)
+			.run();
+		await deposits("ZED CO", 245000, 2);
+		await deposits("ACME CORP", 245000, 2);
+		await post("/first-page/pay", { merchant: "ZED CO", answer: "yes" }, true);
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP", answer: "yes" },
+			true,
+		);
+		expect(html).toMatch(
+			/class="py-2 text-ink first-line-new">Pay · Acme Corp,/,
+		);
+		expect(html).not.toMatch(/first-line-new">Pay · Zed Co/);
+	});
+});
+
+describe("the waiting line names Possible bills once", () => {
+	const count = (html: string) =>
+		(textOf(html).match(/Possible bills/g) ?? []).length;
+
+	it("in the bills question", async () => {
+		await charge("NETFLIX", 1549);
+		await charge("GYM", 4500, false);
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("Keep this one as a bill?");
+		expect(textOf(html)).toContain("1 more waits in Possible bills.");
+		expect(count(html)).toBe(1);
+	});
+
+	it("in the empty bills step", async () => {
+		await charge("GYM", 4500, false);
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("1 more waits in Possible bills.");
+		expect(count(html)).toBe(1);
+	});
+
+	it("in the done step, after a keep leaves one charge waiting", async () => {
+		await charge("NETFLIX", 1549);
+		await charge("GYM", 4500, false);
+		await post("/first-page/bills", {});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("Pay and bills are done.");
+		expect(textOf(html)).toContain("1 more waits in Possible bills.");
+		expect(count(html)).toBe(1);
+	});
+});
+
+describe("a split purchase in the bank's head lines", () => {
+	it("counts the split purchase once, as the bank's one line", async () => {
+		const first = daysBefore(TODAY, 9);
+		await txn({ date: first, raw_name: "COFFEE", amount_cents: 500 });
+		await txn({
+			date: daysBefore(TODAY, 3),
+			raw_name: "GROCER",
+			amount_cents: 4000,
+		});
+		await txn({ date: TODAY, raw_name: "COSTCO", amount_cents: 18742 });
+		const costco = await db
+			.prepare("SELECT id FROM transactions WHERE raw_name = 'COSTCO'")
+			.first<{ id: number }>();
+		const category = await categoryId();
+		const split = await saveSplit(
+			db,
+			costco?.id as number,
+			[
+				{ categoryId: category, amountCents: 6000 },
+				{ categoryId: category, amountCents: 6000 },
+				{ categoryId: category, amountCents: 6742 },
+			],
+			"person@example.com",
+		);
+		expect(split.saved).toBe(true);
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain(
+			`From Chase · 3 lines · ${shortDay(first, TODAY)} to ${shortDay(TODAY, TODAY)}`,
+		);
+	});
+});
+
+describe("refunds and the Yes write", () => {
+	it("does not ask a refund linked to a purchase, even with a Maybe guess on it", async () => {
+		await txn({
+			raw_name: "STORE",
+			date: daysBefore(TODAY, 3),
+			amount_cents: 2500,
+		});
+		const purchase = await db
+			.prepare("SELECT id FROM transactions WHERE raw_name = 'STORE'")
+			.first<{ id: number }>();
+		await txn({
+			raw_name: "STORE REFUND",
+			date: TODAY,
+			amount_cents: -2500,
+			refund_of_id: purchase?.id,
+			flag_income: 0,
+			income_confidence: 0.5,
+		});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain(
+			"Tally didn't spot a paycheck. You can mark one from any transaction later.",
+		);
+		expect(html).not.toContain("STORE REFUND");
+		await post("/first-page/pay", {
+			merchant: "STORE REFUND",
+			answer: "yes",
+		});
+		const row = await db
+			.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'STORE REFUND'",
+			)
+			.first<{ flag_income: number; income_source: string | null }>();
+		expect(row).toEqual({ flag_income: 0, income_source: null });
+	});
+
+	it("Yes clears the Maybe guess, as the review's Yes does", async () => {
+		await deposits("SIDE GIG", 4000, 2, 30, {
+			flag_income: 0,
+			income_confidence: 0.5,
+		});
+		await post("/first-page/pay", { merchant: "SIDE GIG", answer: "yes" });
+		const rows = await db
+			.prepare(
+				"SELECT income_confidence FROM transactions WHERE raw_name = 'SIDE GIG'",
+			)
+			.all<{ income_confidence: number | null }>();
+		expect(rows.results).toHaveLength(2);
+		expect(rows.results.every((row) => row.income_confidence === null)).toBe(
+			true,
+		);
 	});
 });

@@ -6353,7 +6353,7 @@ function FirstWeekGroup() {
 							waiting: [FIRST_WEEK_GYM],
 						})}
 						focus={false}
-						motion={{ line: true, strokes: [1] }}
+						motion={{ line: 0, strokes: [1] }}
 					/>
 				</State>
 				<State label="Nothing to keep in one tap: the step says so and names what waits">

@@ -6,7 +6,11 @@ import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { insertBill } from "../bills/write";
 import { markedTransferSql } from "../db/counted-month";
 import { markStroke, readFirstTally, STROKES } from "../db/first-tally";
-import { maybeIncomeConfidenceSql, personChoseIncomeSql } from "../db/income";
+import {
+	maybeIncomeConfidenceSql,
+	PERSON_INCOME_SET_SQL,
+	personChoseIncomeSql,
+} from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { unsureSql } from "../db/suggestions-queue";
 import { tidyName } from "../transactions/tidy-name";
@@ -48,12 +52,13 @@ export type FirstPageModel = {
 
 /**
  * The money in Tally marked as income that nobody has answered (a Maybe income included, #583): the rows the Yes and No
- * write, so an answered merchant has no rows left to ask about.
+ * write, so an answered merchant has no rows left to ask about. A split's parts and a refund are not pay questions
+ * (the guards incomeAskedSql applies to the review's income question).
  */
 const PAY_SQL = `SELECT ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date, -t.amount_cents AS cents
 	FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
-	WHERE t.amount_cents < 0 AND t.excluded = 0 AND t.is_split = 0 AND t.flag_transfer = 0
-	AND (t.flag_income = 1 OR ${unsureSql(maybeIncomeConfidenceSql("t"))})
+	WHERE t.amount_cents < 0 AND t.excluded = 0 AND t.is_split = 0 AND t.parent_id IS NULL AND t.refund_of_id IS NULL
+	AND t.flag_transfer = 0 AND (t.flag_income = 1 OR ${unsureSql(maybeIncomeConfidenceSql("t"))})
 	AND COALESCE(${personChoseIncomeSql("t")}, 0) = 0`;
 
 type PayRow = {
@@ -83,8 +88,8 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 
 /**
  * Yes and No on a merchant's money in: each row that the question covers is marked income or not, as the person's
- * choice (`income_source` = 'user', which wins over Plaid and Jev, spec §6). Returns the rows changed (0 when the
- * merchant has nothing left to ask, so a stale answer changes nothing).
+ * choice (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). Returns the rows changed
+ * (0 when the merchant has nothing left to ask, so a stale answer changes nothing).
  */
 export async function answerPay(
 	db: D1Database,
@@ -94,10 +99,9 @@ export async function answerPay(
 ): Promise<number> {
 	const result = await db
 		.prepare(
-			`UPDATE transactions SET flag_income = ?1, income_source = 'user',
-				updated_by = ?2, updated_at = datetime('now')
-			WHERE amount_cents < 0 AND excluded = 0 AND is_split = 0 AND flag_transfer = 0
-			AND ${merchantKeySql("transactions")} = ?3
+			`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
+			WHERE amount_cents < 0 AND excluded = 0 AND is_split = 0 AND parent_id IS NULL AND refund_of_id IS NULL
+			AND flag_transfer = 0 AND ${merchantKeySql("transactions")} = ?
 			AND (flag_income = 1 OR ${unsureSql(maybeIncomeConfidenceSql("transactions"))})
 			AND COALESCE(${personChoseIncomeSql("transactions")}, 0) = 0`,
 		)
@@ -119,7 +123,7 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 				COALESCE(SUM(CASE WHEN ${markedTransferSql("t")} THEN 1 ELSE 0 END), 0) AS leftOut
 			FROM transactions t JOIN accounts a ON a.id = t.account_id
 			JOIN plaid_items p ON p.id = a.plaid_item_id
-			WHERE p.disconnected_at IS NULL AND t.is_split = 0`,
+			WHERE p.disconnected_at IS NULL AND t.parent_id IS NULL`,
 		)
 		.first<{
 			lines: number;
@@ -137,7 +141,12 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 	};
 }
 
-/** The ledger lines of the pay answers: each money-in merchant the family marked, as a pay line (Yes) or Not pay (No). */
+/**
+ * The ledger lines of the pay answers: each money-in merchant the family marked, as a pay line (Yes) or Not pay (No).
+ * The ledger reads every money-in row the family decided (income_source 'user'), so a review in the Transactions panel
+ * shows here too; only the pay answers on this page are the question's own. (Whether it should narrow to those is the
+ * owner's call.)
+ */
 async function payLedger(db: D1Database): Promise<string[]> {
 	const { results } = await db
 		.prepare(

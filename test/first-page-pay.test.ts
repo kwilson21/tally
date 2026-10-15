@@ -37,6 +37,28 @@ describe("cadenceOf", () => {
 		expect(cadenceOf(EVERY_OTHER_FRIDAY)).toBe("every other Friday");
 	});
 
+	it("says every other week for a fortnightly paycheck whose weekday moved", () => {
+		// The Friday of Aug 14 came on the Thursday before it (a holiday shift): the gaps are 14, 13, 15, 14, 14, 14.
+		expect(
+			cadenceOf([
+				"2026-07-17",
+				"2026-07-31",
+				"2026-08-13",
+				"2026-08-28",
+				"2026-09-11",
+				"2026-09-25",
+				"2026-10-09",
+			]),
+		).toBe("every other week");
+	});
+
+	it("says every week for a weekly paycheck whose weekday moved", () => {
+		// Friday Oct 2, Thursday Oct 8 (a holiday shift), then Fridays: the gaps are 6, 8 and 7 days.
+		expect(
+			cadenceOf(["2026-10-02", "2026-10-08", "2026-10-16", "2026-10-23"]),
+		).toBe("every week");
+	});
+
 	it("names a deposit twice a month", () => {
 		expect(
 			cadenceOf(["2026-08-01", "2026-08-15", "2026-09-01", "2026-09-15"]),

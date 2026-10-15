@@ -8,7 +8,7 @@ import { shortDay } from "../dates";
 import {
 	billsMutedLine,
 	keepHeading,
-	waitingSentence,
+	waitingWords,
 } from "../first-tally/bills";
 import type {
 	BankHead,
@@ -23,11 +23,12 @@ import { Notebook } from "./notebook";
 export type LedgerLine = { text: string; ink?: boolean };
 
 /**
- * What a reply changed, for its one-shot motion: whether a ledger line was added (it rises in), and the notebook's
- * strokes it drew (their indexes in the five, which draw in pencil and then ink). A page that isn't a reply has none.
+ * What a reply changed, for its one-shot motion: the index of the ledger line it wrote (it rises in, null when it wrote
+ * none), and the notebook's strokes it drew (their indexes in the five, which draw in pencil and then ink). A page that
+ * isn't a reply has none.
  */
-export type Motion = { line: boolean; strokes: number[] };
-export const NO_MOTION: Motion = { line: false, strokes: [] };
+export type Motion = { line: number | null; strokes: number[] };
+export const NO_MOTION: Motion = { line: null, strokes: [] };
 
 /** The notebook beside a question page's headline, with what it counts in words beside it. */
 export function SmallNotebook({
@@ -65,13 +66,13 @@ export function FirstPage({
 	right,
 	lines,
 	children,
-	fresh = false,
+	fresh = null,
 }: {
 	right?: Child;
 	lines: LedgerLine[];
 	children?: Child;
-	/** A reply's page: its newest line (the last one) rises in. */
-	fresh?: boolean;
+	/** A reply's page: the index of the line it wrote, which rises in. */
+	fresh?: number | null;
 }) {
 	return (
 		<>
@@ -83,7 +84,7 @@ export function FirstPage({
 				<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
 					{lines.map((line, i) => (
 						<li
-							class={`py-2 ${line.ink ? "text-ink" : "text-muted"}${fresh && i === lines.length - 1 ? " first-line-new" : ""}`}
+							class={`py-2 ${line.ink ? "text-ink" : "text-muted"}${i === fresh ? " first-line-new" : ""}`}
 						>
 							{line.text}
 						</li>
@@ -92,6 +93,21 @@ export function FirstPage({
 			) : null}
 			{children}
 		</>
+	);
+}
+
+/** The line that names what waits in Possible bills: the count in words, and the link that ends the sentence. */
+function Waiting({ count }: { count: number }) {
+	const words = waitingWords(count);
+	if (!words) return null;
+	return (
+		<p class="mt-2 text-sm text-muted">
+			{words}{" "}
+			<a href="/bills/find" class="text-accent">
+				Possible bills
+			</a>
+			.
+		</p>
 	);
 }
 
@@ -179,7 +195,6 @@ export function BillsQuestion({
 	waiting: BillSuggestion[];
 	focus: boolean;
 }) {
-	const waits = waitingSentence(waiting.length);
 	return (
 		<section>
 			<p class="mt-6 text-base text-muted">
@@ -210,7 +225,7 @@ export function BillsQuestion({
 					Choose which
 				</Button>
 			</div>
-			{waits ? <p class="mt-2 text-sm text-muted">{waits}</p> : null}
+			<Waiting count={waiting.length} />
 		</section>
 	);
 }
@@ -223,7 +238,6 @@ export function BillsEmpty({
 	waiting: number;
 	focus: boolean;
 }) {
-	const waits = waitingSentence(waiting);
 	return (
 		<section>
 			<h2
@@ -234,14 +248,7 @@ export function BillsEmpty({
 				Your bills
 			</h2>
 			<p class="mt-2 text-base text-muted">Nothing here to keep in one tap.</p>
-			{waits ? (
-				<p class="mt-2 text-sm text-muted">
-					{waits}{" "}
-					<a href="/bills/find" class="text-accent">
-						Possible bills
-					</a>
-				</p>
-			) : null}
+			<Waiting count={waiting} />
 		</section>
 	);
 }
@@ -254,7 +261,6 @@ export function FirstPageDone({
 	waiting: number;
 	focus: boolean;
 }) {
-	const waits = waitingSentence(waiting);
 	return (
 		<section>
 			<h2
@@ -264,14 +270,7 @@ export function FirstPageDone({
 			>
 				Pay and bills are done.
 			</h2>
-			{waits ? (
-				<p class="mt-2 text-sm text-muted">
-					{waits}{" "}
-					<a href="/bills/find" class="text-accent">
-						Possible bills
-					</a>
-				</p>
-			) : null}
+			<Waiting count={waiting} />
 		</section>
 	);
 }

@@ -27,8 +27,9 @@ export const dollarsWords = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
 /**
- * How often the deposits came, from the typical gap between them: every week; every other week (every other weekday
- * when all the deposits share one weekday, which is what a fortnightly paycheck does); twice a month; or every month.
+ * How often the deposits came, from the typical gap between them: every week, or every weekday when all the deposits
+ * share one weekday; every other week, or every other weekday when they share one (what a fortnightly paycheck does,
+ * a holiday shift aside); twice a month, for gaps about two weeks apart that aren't all one fortnight's; or every month.
  * Null with fewer than two deposits, or with a gap none of these fits.
  */
 export function cadenceOf(dates: string[]): string | null {
@@ -44,9 +45,11 @@ export function cadenceOf(dates: string[]): string | null {
 	const oneWeekday = sorted.every(
 		(date) => weekdayOf(date) === weekdayOf(latest),
 	);
-	if (median <= 9) return `every ${weekdayOf(latest)}`;
-	if (median >= 13 && median <= 15 && oneWeekday)
-		return `every other ${weekdayOf(latest)}`;
+	const fortnightly = gaps.every((gap) => gap >= 13 && gap <= 15);
+	if (median <= 9)
+		return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
+	if (median >= 13 && median <= 15 && fortnightly)
+		return oneWeekday ? `every other ${weekdayOf(latest)}` : "every other week";
 	if (median >= 13 && median <= 17) return "twice a month";
 	if (median >= 25 && median <= 35) return "every month";
 	return null;

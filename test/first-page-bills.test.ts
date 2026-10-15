@@ -6,7 +6,7 @@ import {
 	billsMutedLine,
 	keepHeading,
 	splitKeepable,
-	waitingSentence,
+	waitingWords,
 } from "../src/first-tally/bills";
 
 // The bills step's words and its one-tap exclusions (P125 E, spec §8.8, #579): a found charge with no category, over
@@ -63,17 +63,17 @@ describe("splitKeepable", () => {
 	});
 });
 
-describe("waitingSentence", () => {
+describe("waitingWords", () => {
 	it("says nothing when none waits", () => {
-		expect(waitingSentence(0)).toBeNull();
+		expect(waitingWords(0)).toBeNull();
 	});
 
-	it("says one more waits in Possible bills", () => {
-		expect(waitingSentence(1)).toBe("1 more waits in Possible bills.");
+	it("says one more waits in, before the Possible bills link", () => {
+		expect(waitingWords(1)).toBe("1 more waits in");
 	});
 
-	it("says more wait in Possible bills", () => {
-		expect(waitingSentence(2)).toBe("2 more wait in Possible bills.");
+	it("says more wait in, before the Possible bills link", () => {
+		expect(waitingWords(2)).toBe("2 more wait in");
 	});
 });
 

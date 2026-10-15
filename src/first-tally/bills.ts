@@ -34,12 +34,13 @@ export function splitKeepable(
 	return { keep, waiting };
 }
 
-/** "1 more waits in Possible bills." or "2 more wait in Possible bills.", or null when none waits. */
-export function waitingSentence(count: number): string | null {
+/**
+ * The words before the link to Possible bills: "1 more waits in" or "2 more wait in" (the link ends the sentence), or
+ * null when none waits.
+ */
+export function waitingWords(count: number): string | null {
 	if (count === 0) return null;
-	return count === 1
-		? "1 more waits in Possible bills."
-		: `${count} more wait in Possible bills.`;
+	return count === 1 ? "1 more waits in" : `${count} more wait in`;
 }
 
 /** The question: "Keep these 8 as bills?", or "Keep this one as a bill?" for one. */

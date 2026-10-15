@@ -1,3 +1,5 @@
+import { NOTEBOOK_STROKES } from "./notebook";
+
 /** The notebook-and-pencil line drawing beside the headline: ink notebook with tally marks, terracotta pencil. */
 export function LedgerIllustration() {
 	return (
@@ -15,11 +17,9 @@ export function LedgerIllustration() {
 				{[26, 36, 46, 56, 66, 76, 86].map((y) => (
 					<circle cx="26" cy={y} r="3.5" />
 				))}
-				<line x1="46" y1="38" x2="46" y2="60" />
-				<line x1="53" y1="38" x2="53" y2="60" />
-				<line x1="60" y1="38" x2="60" y2="60" />
-				<line x1="67" y1="38" x2="67" y2="60" />
-				<line x1="41" y1="56" x2="72" y2="42" />
+				{NOTEBOOK_STROKES.map(([x1, y1, x2, y2]) => (
+					<line x1={x1} y1={y1} x2={x2} y2={y2} />
+				))}
 			</g>
 			{/* Filled with paper so the notebook behind the pencil is hidden, not seen through it. */}
 			<g class="stroke-accent fill-paper">

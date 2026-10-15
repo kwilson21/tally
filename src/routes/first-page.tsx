@@ -29,13 +29,17 @@ function notOpen(c: Context<App>) {
 }
 
 /**
- * What the answer changed between the page before it and the page after: a ledger line, and the strokes it drew. The
- * strokes are the next indexes after the `drawn` already there (the bank's stroke is index 0, so the first drawn after
- * it is index 1). One answer can draw two, when the step after it has nothing to ask.
+ * What the answer changed between the page before it and the page after: the ledger line it wrote (its index, since the
+ * ledger is in merchant order, not answer order), and the strokes it drew. The strokes are the next indexes after the
+ * `drawn` already there (the bank's stroke is index 0, so the first drawn after it is index 1). One answer can draw
+ * two, when the step after it has nothing to ask.
  */
 function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
+	const written = after.ledger.findIndex(
+		(line) => !before.ledger.includes(line),
+	);
 	return {
-		line: after.ledger.length > before.ledger.length,
+		line: written === -1 ? null : written,
 		strokes: Array.from(
 			{ length: after.drawn - before.drawn },
 			(_, i) => before.drawn + i,
