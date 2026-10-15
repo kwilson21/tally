@@ -14,7 +14,7 @@ import { CategoryIcon } from "../views/category";
 import { Icon } from "../views/icons";
 import { moneyChip } from "../views/money-input";
 import { TransactionsButton } from "../views/transactions-button";
-import { Fixed, Sheet } from "./proposal-parts";
+import { Fixed } from "./proposal-parts";
 import { budgetBehind } from "./proposals-phase5-home";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen, State } from "./specimen";
@@ -271,12 +271,26 @@ function ProposedBody({
 	);
 }
 
-/** A phone's sheet over Home's budget list: its top 24px below the wordmark, and its foot at the screen's foot. */
-function PhoneSheet({ children }: { children?: Child }) {
+/**
+ * A phone's picture: Home's budget list behind the sheet. The backdrop covers the whole phone, banner and
+ * wordmark included, as BottomSheet's fixed backdrop does; the sheet's top sits 24px below the wordmark row,
+ * and its foot is the screen's foot.
+ */
+function PhoneSheet({ label, children }: { label: string; children?: Child }) {
 	return (
-		<Sheet behind={budgetBehind} top="top-6" height="h-[724px]">
-			{children}
-		</Sheet>
+		<Phone
+			label={label}
+			overlay={
+				<>
+					<div class="absolute inset-0 bg-ink/30" />
+					<div class="absolute inset-x-0 bottom-0 top-36 flex flex-col gap-3 overflow-y-auto rounded-t-sheet bg-paper p-5">
+						{children}
+					</div>
+				</>
+			}
+		>
+			{budgetBehind}
+		</Phone>
 	);
 }
 
@@ -373,7 +387,7 @@ export function MoneyInputProposal() {
 				<Choice
 					name="Option A · Today’s, with what it lost put back"
 					note="The same box, buttons and chips. The empty box shows a muted 0.00, a chip that matches the box gets a check instead of fading, and the buttons that can’t work with unreadable text turn off."
-					cost="money.js changes only (decision 39); no new token or script."
+					cost="src/views/money-input.tsx (the placeholder and the chip’s check slot) and money.js (decision 39); no new token or script."
 					why="it keeps the owner’s own hero layout, centred, and fixes the losses: the placeholder, a faded chip that reads at about 2.3:1, and buttons that do nothing."
 					picked
 				/>
@@ -389,39 +403,33 @@ export function MoneyInputProposal() {
 				<State label={s.label}>
 					<div class="flex flex-wrap gap-6">
 						<Shot caption="Today on main">
-							<Phone label={`Today on main, ${s.tag}`}>
-								<PhoneSheet>
-									<TodayBody
-										id={`p129-today-${s.id}`}
-										value={s.value}
-										error={s.error}
-									/>
-								</PhoneSheet>
-							</Phone>
+							<PhoneSheet label={`Today on main, ${s.tag}`}>
+								<TodayBody
+									id={`p129-today-${s.id}`}
+									value={s.value}
+									error={s.error}
+								/>
+							</PhoneSheet>
 						</Shot>
 						<Shot caption="Option A">
-							<Phone label={`Option A, ${s.tag}`}>
-								<PhoneSheet>
-									<ProposedBody
-										id={`p129-a-${s.id}`}
-										value={s.value}
-										error={s.error}
-										left={false}
-									/>
-								</PhoneSheet>
-							</Phone>
+							<PhoneSheet label={`Option A, ${s.tag}`}>
+								<ProposedBody
+									id={`p129-a-${s.id}`}
+									value={s.value}
+									error={s.error}
+									left={false}
+								/>
+							</PhoneSheet>
 						</Shot>
 						<Shot caption="Option B">
-							<Phone label={`Option B, ${s.tag}`}>
-								<PhoneSheet>
-									<ProposedBody
-										id={`p129-b-${s.id}`}
-										value={s.value}
-										error={s.error}
-										left
-									/>
-								</PhoneSheet>
-							</Phone>
+							<PhoneSheet label={`Option B, ${s.tag}`}>
+								<ProposedBody
+									id={`p129-b-${s.id}`}
+									value={s.value}
+									error={s.error}
+									left
+								/>
+							</PhoneSheet>
 						</Shot>
 						{s.desk && (
 							<>

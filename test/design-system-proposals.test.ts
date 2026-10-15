@@ -3165,7 +3165,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		// The one Picked pill is A's: it is the only one in the section.
 		expect(chunk.match(/>Picked</g)?.length).toBe(1);
 		expect(a).toContain(
-			"Trade-off: money.js changes only (decision 39); no new token or script.",
+			"Trade-off: src/views/money-input.tsx (the placeholder and the chip’s check slot) and money.js (decision 39); no new token or script.",
 		);
 		expect(a).toContain(
 			"Why: it keeps the owner’s own hero layout, centred, and fixes the losses: the placeholder, a faded chip that reads at about 2.3:1, and buttons that do nothing.",
@@ -3205,31 +3205,40 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		}
 	});
 
-	it("draws every phone picture on the 390 by 844 phone, with its sheet 24px down and reaching the foot", async () => {
+	it("draws every phone picture on the 390 by 844 phone, with a backdrop over the whole phone, banner and wordmark included, and the sheet reaching the foot", async () => {
 		const chunk = section(await drawn());
-		const frames = [
-			...chunk.matchAll(
-				/<div role="img" aria-label="[^"]*, on a phone" class="([^"]*)"/g,
-			),
-		].map((m) => m[1] ?? "");
-		expect(frames).toHaveLength(15);
-		for (const frame of frames) {
-			expect(frame).toContain("h-[846px] w-[392px]");
-			expect(frame).not.toContain("h-[790px]");
-		}
-		// Each sheet's wrapper is 724px tall (844 less the 120px above it), and its panel starts 24px below that: top-6.
-		const wrappers = [...chunk.matchAll(/class="relative -mx-5 ([^"]*)"/g)].map(
-			(m) => m[1],
-		);
-		expect(wrappers).toHaveLength(15);
-		for (const wrapper of wrappers) expect(wrapper).toContain("h-[724px]");
-		const panels = [
-			...chunk.matchAll(/class="([^"]*rounded-t-sheet[^"]*)"/g),
-		].map((m) => m[1] ?? "");
-		expect(panels).toHaveLength(15);
-		for (const panel of panels) {
-			expect(panel).toContain("bottom-0 top-6 ");
-			expect(panel).not.toContain("top-24");
+		const phones = STATES.flatMap((_, i) => [
+			`Today on main, ${TAGS[i]}`,
+			`Option A, ${TAGS[i]}`,
+			`Option B, ${TAGS[i]}`,
+		]);
+		expect(phones).toHaveLength(15);
+		for (const label of phones) {
+			const phone = picture(chunk, label);
+			// The frame is the whole 390 by 844 phone, with its 1px border around it.
+			const frame = phone.match(/ class="([^"]*)"/)?.[1] ?? "";
+			expect(frame, label).toContain("h-[846px] w-[392px]");
+			// One backdrop, drawn after the banner and the wordmark, so it dims both.
+			expect(phone.split("absolute inset-0 bg-ink/30").length - 1, label).toBe(
+				1,
+			);
+			const banner = phone.indexOf("Demo data. Nothing here is real.");
+			const wordmark = phone.indexOf('aria-label="Tally home"');
+			expect(banner, label).toBeGreaterThan(-1);
+			expect(wordmark, label).toBeGreaterThan(-1);
+			expect(
+				phone.indexOf("absolute inset-0 bg-ink/30"),
+				label,
+			).toBeGreaterThan(Math.max(banner, wordmark));
+			// One sheet, pinned to the foot and starting 144px down: the wordmark row's 120px, then 24px.
+			const panels = [
+				...phone.matchAll(/class="([^"]*rounded-t-sheet[^"]*)"/g),
+			].map((m) => m[1] ?? "");
+			expect(panels, label).toHaveLength(1);
+			expect(panels[0], label).toContain("absolute inset-x-0 bottom-0 top-36 ");
+			// No wrapper that clips the backdrop to the lower part of the phone.
+			expect(phone, label).not.toContain("relative -mx-5");
+			expect(phone, label).not.toContain("h-[724px]");
 		}
 	});
 
