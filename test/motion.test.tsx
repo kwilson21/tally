@@ -8,6 +8,7 @@ import { resetDemo } from "../src/demo/reset";
 import { DURATION_TOKENS } from "../src/design-system/tokens";
 import css from "../src/styles/app.css?raw";
 import { BottomSheet } from "../src/views/bottom-sheet";
+import { SAVED_TOAST_MS } from "../src/views/saved-tick";
 import { Switch } from "../src/views/switch";
 
 // P74 A and P85 A (decisions 76, 79, 80): quiet motion in CSS only. Every duration is a token in
@@ -308,6 +309,9 @@ describe("toasts", () => {
 	it("lives as long as toast.js keeps it: the animation is as long as the stay, 4 seconds", () => {
 		expect(DISPLAY_MS).toBe(4000);
 		expect(ms(token("toast"))).toBe(DISPLAY_MS);
+		// The Likely sheet's close keeps a saved row's tick only this long after its save (saved-tick.tsx).
+		expect(SAVED_TOAST_MS).toBe(DISPLAY_MS);
+		expect(SAVED_TOAST_MS).toBe(ms(token("toast")));
 	});
 
 	it("is styled by CSS alone, on what #toasts holds, and toast.js is not asked to change", () => {

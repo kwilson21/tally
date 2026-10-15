@@ -10,6 +10,12 @@ export const TICK_PATH =
 	"M3.59 13.65L8.98 18.66L19.88 5.53L19.12 4.87L8.93 16.27L5.41 11.95Z";
 
 /**
+ * The plain toast's stay, in milliseconds: the same 4 s as app.css --duration-toast and toast.js DISPLAY_MS. The
+ * Likely sheet's close keeps a save's tick only this long after the save (transactions.tsx, P119 A, #71).
+ */
+export const SAVED_TOAST_MS = 4000;
+
+/**
  * How a save's own reply marks its row (P119 A): `toast` for the toast's four seconds, `undo` when its toast offers
  * Undo (ten seconds), and `held` for the catalog's still picture of a saved row at the tick's full draw.
  */

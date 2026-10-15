@@ -150,7 +150,7 @@ import {
 	type RuleOfferValue,
 	ruleOfferAnnouncement,
 } from "../views/rule-offer";
-import { listRowMark } from "../views/saved-tick";
+import { listRowMark, SAVED_TOAST_MS } from "../views/saved-tick";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
@@ -221,7 +221,8 @@ type ListOptions = {
 	focusId?: number;
 	/**
 	 * After a save (P119 A, #71): this row's arrow gives way to the pencil tick. Only a save's own reply passes it: the
-	 * edit panel's, or a cash entry's Undo restore. Never a Cancel, Select mode or a bulk change.
+	 * edit panel's, the Likely sheet's close within its save's toast, or a cash entry's Undo restore. Never a Cancel,
+	 * Select mode or a bulk change.
 	 */
 	savedId?: number;
 	/**
@@ -1052,6 +1053,21 @@ transactions.get("/transactions", async (c) => {
 			})
 		: NO_SELECTION;
 	const filters = { ...asked, month };
+	// The row a Likely sheet's close names, while its toast can still be up (P119 A, #71). Both times are the server's
+	// Date.now(), so the window overstates the toast's real age by the round trip, and the tick can only end early,
+	// never late. Don't "fix" this with client time.
+	const savedAt = Number(params.get("saved-at"));
+	const saved = Number(params.get("saved"));
+	const age = Date.now() - savedAt;
+	const savedId =
+		c.req.header("HX-Request") === "true" &&
+		Number.isInteger(saved) &&
+		saved > 0 &&
+		Number.isInteger(savedAt) &&
+		age >= 0 &&
+		age < SAVED_TOAST_MS
+			? saved
+			: undefined;
 	let selectPushBase: string | undefined;
 	if (c.req.header("HX-Request") === "true") {
 		const named = monthParam(asked, before, month, thisMonth);
@@ -1067,6 +1083,8 @@ transactions.get("/transactions", async (c) => {
 			const address = new URL(c.req.url);
 			if (named !== address.searchParams.get("month")) {
 				address.searchParams.delete("focus");
+				address.searchParams.delete("saved");
+				address.searchParams.delete("saved-at");
 				if (named === null) address.searchParams.delete("month");
 				else address.searchParams.set("month", named);
 				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
@@ -1075,6 +1093,7 @@ transactions.get("/transactions", async (c) => {
 	}
 	return renderList(c, today, filters, {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		savedId,
 		countFocus: params.get("focus") === "count",
 		selecting,
 		focusSetCategory:
@@ -1688,6 +1707,19 @@ function listCloseAttrs(back: string, id: number): Record<string, string> {
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
 		"hx-push-url": back,
+	};
+}
+
+/** The Likely sheet's close keeps the saved row's element and names it, so its tick runs on to the toast's end. */
+function savedCloseAttrs(
+	back: string,
+	id: number,
+	savedAt: number,
+): Record<string, string> {
+	return {
+		...listCloseAttrs(back, id),
+		"hx-get": `${withFocus(back, id)}&saved=${id}&saved-at=${savedAt}`,
+		"hx-swap": "outerMorph",
 	};
 }
 
@@ -4108,7 +4140,7 @@ async function savePanel(
 	// The row this save saved is marked, and the question or sheet it draws keeps it marked behind (P119 A, #71).
 	if (ruleOffer)
 		return renderRuleOffer(c, today, back, ruleOffer, tx.id, tx.id);
-	if (panel) return renderLikely(c, today, filters, panel, tx.id);
+	if (panel) return renderLikely(c, today, filters, panel, tx.id, Date.now());
 	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
@@ -4263,6 +4295,7 @@ function renderLikely(
 		rows: LikelyRow[];
 	},
 	saved?: number,
+	savedAt?: number,
 ) {
 	return renderList(c, today, filters, {
 		savedId: saved,
@@ -4273,7 +4306,11 @@ function renderLikely(
 				savedCents={panel.savedCents}
 				back={panel.back}
 				closeHref={withFocus(panel.back, panel.savedId)}
-				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
+				closeAttrs={
+					savedAt === undefined
+						? listCloseAttrs(panel.back, panel.savedId)
+						: savedCloseAttrs(panel.back, panel.savedId, savedAt)
+				}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}
 				rows={panel.rows}

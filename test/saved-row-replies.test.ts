@@ -260,6 +260,35 @@ describe("a save that opens the likely transactions marks its own row", () => {
 			/\brow-saved\b/,
 		);
 	});
+
+	/** The opening tags of the sheet's two closes: Not now, and the backdrop every close shares (data-sheet-close). */
+	const closes = (html: string) => [
+		html.match(/<a [^>]*>Not now<\/a>/)?.[0] ?? "",
+		html.match(/<a [^>]*data-sheet-close[^>]*>/)?.[0] ?? "",
+	];
+
+	it("carries the saved row while its toast is up, on both closes that are htmx swaps", async () => {
+		const saved = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			merchant_was: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			category: "new",
+			new_category_name: "Pet Care",
+		});
+		const [notNow, backdrop] = closes(saved.html);
+		expect(notNow).not.toBe("");
+		expect(backdrop).not.toBe("");
+		for (const tag of [notNow, backdrop]) {
+			expect(tag).toMatch(new RegExp(`hx-get="[^"]*focus=${bakery}[^"]*"`));
+			expect(tag).toMatch(new RegExp(`hx-get="[^"]*saved=${bakery}[^"]*"`));
+			expect(tag).toMatch(/hx-get="[^"]*saved-at=\d+[^"]*"/);
+			expect(tag).toContain('hx-swap="outerMorph"');
+			expect(tag).toContain('hx-push-url="/transactions"');
+			// A close without htmx is a full page load, which drops the toast anyway, so its href stays plain.
+			expect(tag).not.toMatch(/href="[^"]*saved=/);
+		}
+	});
 });
 
 /** The opening tag of the disclosure that holds `marker`, found by walking back from the marker to its own <details>. */
@@ -439,6 +468,43 @@ describe("a cash entry's Undo restore marks its row", () => {
 	});
 });
 
+describe("a Likely sheet's close keeps the saved row's tick for the rest of its toast", () => {
+	/** The list an htmx close asks for: the row named, and when it was saved (the server's clock, in milliseconds). */
+	const closeAt = (savedAt: string) =>
+		`/transactions?focus=${bakery}&saved=${bakery}&saved-at=${savedAt}`;
+
+	it("marks the saved row when the close is within the toast's stay", async () => {
+		const { html } = await get(closeAt(String(Date.now() - 1000)), true);
+		expect(marked(html)).toBe(1);
+		expect(linkTag(html, `/transactions/${bakery}[^"]*`)).toMatch(
+			/\brow-saved\b/,
+		);
+		expect(html).not.toContain("row-saved-undo");
+	});
+
+	it("marks nothing once the toast has gone", async () => {
+		const { html } = await get(closeAt(String(Date.now() - 5000)), true);
+		expect(marked(html)).toBe(0);
+	});
+
+	it("marks nothing unless htmx asks within the stay", async () => {
+		const fresh = String(Date.now() - 1000);
+		const cases: [string, boolean][] = [
+			// A close without htmx is a full page load; the save's toast is gone by then.
+			[closeAt(fresh), false],
+			[closeAt(String(Date.now() + 60000)), true],
+			[closeAt("abc"), true],
+			[`/transactions?focus=${bakery}&saved=${bakery}`, true],
+			[`/transactions?focus=${bakery}&saved=0&saved-at=${fresh}`, true],
+			[`/transactions?focus=${bakery}&saved=abc&saved-at=${fresh}`, true],
+		];
+		for (const [path, htmx] of cases) {
+			const { html } = await get(path, htmx);
+			expect(marked(html), path).toBe(0);
+		}
+	});
+});
+
 describe("nothing but a save's own reply marks a row", () => {
 	it("marks nothing when Cancel closes the budget sheet", async () => {
 		const { html } = await get("/?focus=1", true);
@@ -447,6 +513,11 @@ describe("nothing but a save's own reply marks a row", () => {
 
 	it("marks nothing when Cancel closes the savings goal sheet", async () => {
 		const { html } = await get("/?focus=savings-goal", true);
+		expect(marked(html)).toBe(0);
+	});
+
+	it("marks nothing when Cancel closes the edit panel", async () => {
+		const { html } = await get(`/transactions?focus=${bakery}`, true);
 		expect(marked(html)).toBe(0);
 	});
 
