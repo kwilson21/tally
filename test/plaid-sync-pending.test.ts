@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { summarizeMonth } from "../src/budget";
+import { paysBillSql, paysPlanSql } from "../src/db/counted-month";
 import { loadMonth } from "../src/db/month";
+import { plansSetAsideCents } from "../src/db/planned-expenses";
 import {
 	pendingForJev,
 	transactionsNeedingNoteGuess,
@@ -176,6 +178,7 @@ async function addBillLinkedTo(
 
 beforeEach(async () => {
 	await env.DB.batch([
+		env.DB.prepare("DELETE FROM planned_expenses"),
 		env.DB.prepare("DELETE FROM bill_payments"),
 		env.DB.prepare("DELETE FROM bills"),
 		env.DB.prepare("DELETE FROM transactions"),
@@ -1862,6 +1865,297 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		).toEqual([{ bill_id: 701, transaction_id: ids.posted }]);
 	});
 
+	/** A plan paid by the given payment, as a person links it (decision 82). */
+	async function planPaidBy(transactionId: number, name = "Car registration") {
+		const row = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES (?, 1234, '2026-09', ?, 'demo') RETURNING id",
+		)
+			.bind(name, transactionId)
+			.first<{ id: number }>();
+		return row?.id as number;
+	}
+
+	const planPayer = async (planId: number) =>
+		(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id = ?",
+			)
+				.bind(planId)
+				.first<{ t: number | null }>()
+		)?.t ?? null;
+
+	it("moves a planned expense's payment onto the posted row, as a bill's payment moves", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const plan = await planPaidBy(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBe(ids.posted);
+	});
+
+	it("leaves a planned expense's payment on the pending row when the posted one already pays a bill, so the plan is unpaid and the bill keeps its payment", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		await addBillLinkedTo(ids.posted);
+		const plan = await planPaidBy(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBeNull();
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE transaction_id = ? AND status = 'linked'",
+				ids.posted,
+			),
+		).toBe(1);
+	});
+
+	it("leaves a bill's payment on the pending row when the posted one already pays a planned expense, and the plan stays paid", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const plan = await planPaidBy(ids.posted);
+		await addBillLinkedTo(ids.pending);
+		await post(item);
+		expect(await planPayer(plan)).toBe(ids.posted);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 700",
+			),
+		).toBe(0);
+	});
+
+	it("keeps a planned expense's payment on a pending part on the posted part with the same amount and category", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await planPayer(plan)).toBe(own[0]);
+	});
+
+	it("does not keep a planned expense's payment on a posted part that already pays another plan, and unlinks it", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const other = await planPaidBy(own[0] ?? 0, "Gym");
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await planPayer(other)).toBe(own[0]);
+		expect(await planPayer(plan)).toBeNull();
+	});
+
+	it("moves only one of two planned expenses on pending parts that match the same posted part, and the other is set aside", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const own = await splitInto(ids.posted, 600, 634);
+		const pending = await splitInto(ids.pending, 600, 634);
+		// The second pending part matches the first's amount and category, so both could take the one posted part.
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = 600, category_id = 1 WHERE id = ?",
+		)
+			.bind(pending[1] ?? 0)
+			.run();
+		const first = await planPaidBy(pending[0] ?? 0, "Gym");
+		const second = await planPaidBy(pending[1] ?? 0, "Lawn service");
+
+		await post(item);
+
+		const payers = [await planPayer(first), await planPayer(second)];
+		expect(payers.filter((payer) => payer === own[0])).toHaveLength(1);
+		expect(payers).toContain(null);
+	});
+
+	/** A posted charge with no pending twin, stored by a sync, and a plan paid by it (Codex 4278749951). */
+	async function postedPlanPayment(item: number) {
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const payment = (await row("posted-1"))?.id as number;
+		return { payment, plan: await planPaidBy(payment) };
+	}
+
+	it("unlinks a plan whose payment the bank changes to a credit, and sets the plan aside again", async () => {
+		const item = await addItem();
+		const { plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [postedTx({ pending_transaction_id: null, amount: -12.34 })],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("unlinks a plan whose payment the bank moves out of its month and the next, and sets the plan aside again", async () => {
+		const item = await addItem();
+		const { plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("keeps a plan's payment when the bank changes its amount and it still fits the plan's month", async () => {
+		const item = await addItem();
+		const { payment, plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [postedTx({ pending_transaction_id: null, amount: 20 })],
+			}),
+		);
+		expect(await planPayer(plan)).toBe(payment);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(0);
+	});
+
+	it("unlinks a plan whose pending payment is posted outside its window, as the posted charge takes the row over", async () => {
+		const item = await addItem();
+		const plan = await planPaidBy(await syncPending(item));
+		await post(item, { date: "2026-11-03" });
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("unlinks a plan on one part of a split when the bank moves the purchase out of its window, since the parts move with it", async () => {
+		const item = await addItem();
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const [part] = await splitInto(
+			(await row("posted-1"))?.id as number,
+			600,
+			634,
+		);
+		const plan = await planPaidBy(part ?? 0);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("keeps a plan on a split purchase's whole payment while the bank's date still fits, and unlinks it once the date moves out", async () => {
+		const item = await addItem();
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const whole = (await row("posted-1"))?.id as number;
+		const plan = await planPaidBy(whole);
+		await splitInto(whole, 600, 634);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-09-30" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBe(whole);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	/** Transactions that a bill and a planned expense both pay: the never-both rule (spec section 5) the merge must keep. */
+	const bothPaying = async () =>
+		(
+			await env.DB.prepare(
+				`SELECT t.id FROM transactions t WHERE ${paysBillSql("t")} AND ${paysPlanSql("t")}`,
+			).all<{ id: number }>()
+		).results.map((found) => found.id);
+
+	const partsUnder = (parent: number) =>
+		count("SELECT COUNT(*) AS n FROM transactions WHERE parent_id = ?", parent);
+
+	it("sets a planned expense on a pending part aside when the posted row already pays a bill, so the part can't pay both (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await addBillLinkedTo(ids.posted);
+		await post(item);
+		// The parts hang under the posted row, which pays the bill, so the plan's part would share its payment: the plan is set aside.
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM bill_payments WHERE bill_id = 700 AND transaction_id = ? AND status = 'linked'",
+				ids.posted,
+			),
+		).toBe(1);
+		expect(await bothPaying()).toEqual([]);
+	});
+
+	it("sets a planned expense on a pending part aside when the posted row already pays another planned expense (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		const other = await planPaidBy(ids.posted, "Gym");
+		await post(item);
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await planPayer(other)).toBe(ids.posted);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+		expect(await bothPaying()).toEqual([]);
+	});
+
+	it("lets a planned expense on a pending part ride its part to an unoccupied posted row, as before (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		const plan = await planPaidBy(pending[0] ?? 0);
+		await post(item);
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await planPayer(plan)).toBe(pending[0]);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(0);
+	});
+
+	it("unlinks a bill on a pending part, with no dismissal, when the posted row already pays a planned expense (#202)", async () => {
+		const item = await addItem();
+		const ids = await bothStored(item);
+		const pending = await splitInto(ids.pending, 600, 634);
+		await addBillLinkedTo(pending[0] ?? 0);
+		const plan = await planPaidBy(ids.posted);
+		await post(item);
+		// The part moves under the posted row, which pays the plan, so the bill's payment goes: the matcher may link it again.
+		expect(await partsUnder(ids.posted)).toBe(2);
+		expect(await count("SELECT COUNT(*) AS n FROM bill_payments")).toBe(0);
+		expect(await planPayer(plan)).toBe(ids.posted);
+		expect(await bothPaying()).toEqual([]);
+	});
+
 	it("moves refund links both ways", async () => {
 		const item = await addItem();
 		const ids = await bothStored(item);
@@ -2571,6 +2865,35 @@ describe("when the posted transaction is already stored as the link arrives", ()
 				excluded_source: "plaid",
 				...keptAnswer,
 			});
+		});
+
+		it("clears the posted row's Jev answer when the pending row's planned expense moves onto it and counts it, so the night run asks again with the name (#202)", async () => {
+			const item = await addItem();
+			const loan = { personal_finance_category: { primary: "LOAN_PAYMENTS" } };
+			const ids = await bothStored(item, loan);
+			await env.DB.prepare(
+				"UPDATE transactions SET own_name = 'Dog bed' WHERE id = ?",
+			)
+				.bind(ids.pending)
+				.run();
+			// A plan keeps its payment's own category (decision 82), so the clear is what changes the posted row's guess.
+			const plan = await planPaidBy(ids.pending);
+			await jevAnswer(ids.posted);
+			await post(item, loan);
+			// Plaid excluded the posted payment, so the plan moving onto it is what counts it.
+			expect(await planPayer(plan)).toBe(ids.posted);
+			expect(await answer("posted-1")).toMatchObject({
+				own_name: "Dog bed",
+				excluded: 1,
+				excluded_source: "plaid",
+				category_id: null,
+				category_source: null,
+				category_confidence: null,
+				jev_category_id: null,
+			});
+			expect((await pendingForJev(env.DB, 10)).map((r) => r.id)).toContain(
+				ids.posted,
+			);
 		});
 	});
 

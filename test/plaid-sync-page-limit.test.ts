@@ -22,7 +22,8 @@ const KEY = btoa("01234567890123456789012345678901");
 const D1_BOUND_VALUES = 100;
 /**
  * The statements a page's batch holds beyond its rows: the lock renewal, the cursor, and the merchant names and
- * suggestions. Measured at 4 to 6 on this branch, so 10 leaves room without letting a new per-row statement through.
+ * suggestions, and the planned-expense check that unlinks a payment the bank changed. Measured at 5 to 7 on this branch, so
+ * 10 leaves room without letting a new per-row statement through.
  */
 const PAGE_STATEMENTS = 10;
 
@@ -277,9 +278,10 @@ describe("the statements of one 100-row page's batch, by shape (issue #418)", ()
 	const removedRows = () => Array.from({ length: ROWS }, (_, i) => `a${i}`);
 
 	// Measured on this branch with runAfterSync off, so the batch is the page's own: per row, 9 for an added row,
-	// 9 modified, 1 removed (a removed split costs the same as a removed row), 10 pending rekey, 42 pending merge (one
-	// more than before #233's Jev mixed-trip statement, pending-merge.ts), 9 split removal, 42 merge onto a split. A ceiling
-	// is its per-row cost times 100 plus PAGE_STATEMENTS.
+	// 9 modified, 1 removed (a removed split costs the same as a removed row), 10 pending rekey, 42 pending merge (#202's
+	// planned-expense statement and #233's Jev mixed-trip arm (#546) share one statement, the Jev answer statement, so the
+	// merged tree costs what each parent did), 9 split removal, 42 merge onto a split. A ceiling is its per-row cost times
+	// 100 plus PAGE_STATEMENTS.
 	it.each([
 		{
 			shape: "added",
