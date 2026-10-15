@@ -339,15 +339,13 @@ function AddCash({ p }: { p: string }) {
 			<h2 class="font-serif text-4xl font-semibold tracking-tight">
 				Add cash spending
 			</h2>
-			<div>
-				<CashForm
-					today={TODAY}
-					values={CASH_VALUES}
-					categories={THREE.map((c, i) => ({ id: i + 1, ...c }))}
-					action="#"
-					idPrefix={p}
-				/>
-			</div>
+			<CashForm
+				today={TODAY}
+				values={CASH_VALUES}
+				categories={THREE.map((c, i) => ({ id: i + 1, ...c }))}
+				action="#"
+				idPrefix={p}
+			/>
 		</PanelSheet>
 	);
 }
