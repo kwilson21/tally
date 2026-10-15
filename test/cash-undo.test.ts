@@ -700,6 +700,135 @@ describe("cash delete undo", () => {
 		).toEqual({ status: "linked" });
 	});
 
+	it("restores a plan the entry paid, so the plan is paid again by the restored entry", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account) throw new Error("cash account missing");
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
+		)
+			.bind(account.id)
+			.first<{ id: number }>();
+		const id = inserted?.id ?? 0;
+		const plan = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
+		)
+			.bind(id)
+			.first<{ id: number }>();
+		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+		if (!token) throw new Error("cash delete token missing");
+		// The delete sets the plan aside again, as a bank drop does, until the entry comes back.
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
+			)
+				.bind(plan?.id)
+				.first(),
+		).toEqual({ t: null });
+
+		const restored = await restoreCashDelete(env.DB, token);
+		if (!restored || restored.alreadyRestored)
+			throw new Error("cash restore failed");
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
+			)
+				.bind(plan?.id)
+				.first(),
+		).toEqual({ t: restored.id });
+	});
+
+	it("restores a plan paid by a part of the entry on the restored part, not the part with the old id", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account) throw new Error("cash account missing");
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,is_split,updated_by) VALUES (?, '2026-10-06', 3000, 'Split cash', 1, 'test') RETURNING id",
+		)
+			.bind(account.id)
+			.first<{ id: number }>();
+		const id = inserted?.id ?? 0;
+		await env.DB.batch([
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,category_id,updated_by) SELECT account_id,date,1000,'Split cash part',id,1,'test' FROM transactions WHERE id=?",
+			).bind(id),
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id,date,amount_cents,raw_name,parent_id,category_id,updated_by) SELECT account_id,date,2000,'Split cash part',id,1,'test' FROM transactions WHERE id=?",
+			).bind(id),
+		]);
+		const parts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id=? ORDER BY id",
+		)
+			.bind(id)
+			.all<{ id: number }>();
+		const secondPart = parts.results[1]?.id ?? 0;
+		const plan = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Lawn service', 2000, '2026-10', ?, 'demo') RETURNING id",
+		)
+			.bind(secondPart)
+			.first<{ id: number }>();
+		const token = await holdCashDelete(env.DB, id, "Split cash");
+		if (!token) throw new Error("cash delete token missing");
+		// The restored parts take new ids, and the plan must follow the second part to its new id.
+		const restored = await restoreCashDelete(env.DB, token);
+		if (!restored || restored.alreadyRestored)
+			throw new Error("cash restore failed");
+		const restoredParts = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE parent_id=? ORDER BY id",
+		)
+			.bind(restored.id)
+			.all<{ id: number }>();
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
+			)
+				.bind(plan?.id)
+				.first(),
+		).toEqual({ t: restoredParts.results[1]?.id });
+		expect(restoredParts.results[1]?.id).not.toBe(secondPart);
+	});
+
+	it("leaves a plan planned after the paid one was deleted unpaid, since a deleted plan's id is never handed out again (#202)", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account) throw new Error("cash account missing");
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
+		)
+			.bind(account.id)
+			.first<{ id: number }>();
+		const id = inserted?.id ?? 0;
+		const paid = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
+		)
+			.bind(id)
+			.first<{ id: number }>();
+		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+		if (!token) throw new Error("cash delete token missing");
+		// Within the entry's ten seconds the paid plan is deleted and another is planned: the new plan must not take its id.
+		await env.DB.prepare("DELETE FROM planned_expenses WHERE id=?")
+			.bind(paid?.id)
+			.run();
+		const later = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Lawn service', 2000, '2026-10', 'demo') RETURNING id",
+		).first<{ id: number }>();
+		expect(later?.id).not.toBe(paid?.id);
+
+		const restored = await restoreCashDelete(env.DB, token);
+		if (!restored || restored.alreadyRestored)
+			throw new Error("cash restore failed");
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
+			)
+				.bind(later?.id)
+				.first(),
+		).toEqual({ t: null });
+	});
+
 	it("rolls back restored rows when consuming the token fails", async () => {
 		const id = await cashEntry();
 		const token = await holdCashDelete(env.DB, id, "Market");

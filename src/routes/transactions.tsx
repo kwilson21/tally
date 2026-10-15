@@ -35,7 +35,7 @@ import {
 	needsCategoryCount,
 	offeredToSplit,
 	PAGE_SIZE,
-	payingBillsCount,
+	payingCounts,
 	type RefundPurchase,
 	refundPurchases,
 	removeSplit,
@@ -150,6 +150,7 @@ import {
 	type RuleOfferValue,
 	ruleOfferAnnouncement,
 } from "../views/rule-offer";
+import { listRowMark, SAVED_TOAST_MS } from "../views/saved-tick";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
@@ -190,6 +191,17 @@ import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
+/**
+ * The sentence after a saved exclusion, for the rows that still count because they pay a bill or a planned expense
+ * (`thing`). Empty when none of the selection pays one.
+ */
+function stillCountsSentence(selected: number, paying: number, thing: string) {
+	if (paying === 0) return "";
+	if (selected === 1) return ` It still counts while it pays a ${thing}.`;
+	if (paying === 1) return ` 1 still counts while it pays a ${thing}.`;
+	return ` ${paying} still count while they pay a ${thing}.`;
+}
+
 export const transactions = new Hono<App>();
 
 type Category = { id: number; name: string; icon: string; color: string };
@@ -218,6 +230,18 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/**
+	 * After a save (P119 A, #71): this row's arrow gives way to the pencil tick. Only a save's own reply passes it: the
+	 * edit panel's, the Likely sheet's close within its save's toast, or a cash entry's Undo restore. Never a Cancel,
+	 * Select mode or a bulk change.
+	 */
+	savedId?: number;
+	/**
+	 * How the saved row is marked: "toast" for the toast's four seconds (the default), "undo" for the ten a toast that
+	 * offers Undo stays (#70's saves, #510 and #511, pass it). An Undo restore is marked on the "toast" stay, since its
+	 * own toast is a plain four-second one.
+	 */
+	savedMark?: "toast" | "undo";
 	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
 	restoredId?: number;
 	/** "Only October" asked for focus on the result count, since its link goes (#211). */
@@ -304,6 +328,8 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		savedId,
+		savedMark,
 		restoredId,
 		countFocus = false,
 		status = 200,
@@ -985,6 +1011,7 @@ async function renderList(
 													autofocus={
 														row.id === focusId || row.id === restoredId
 													}
+													saved={listRowMark(row.id, savedId, savedMark)}
 													// Opening swaps in only the sheet, so the list keeps its place.
 													attrs={{
 														"hx-get": href,
@@ -1037,6 +1064,21 @@ transactions.get("/transactions", async (c) => {
 			})
 		: NO_SELECTION;
 	const filters = { ...asked, month };
+	// The row a Likely sheet's close names, while its toast can still be up (P119 A, #71). Both times are the server's
+	// Date.now(), so the window overstates the toast's real age by the round trip, and the tick can only end early,
+	// never late. Don't "fix" this with client time.
+	const savedAt = Number(params.get("saved-at"));
+	const saved = Number(params.get("saved"));
+	const age = Date.now() - savedAt;
+	const savedId =
+		c.req.header("HX-Request") === "true" &&
+		Number.isInteger(saved) &&
+		saved > 0 &&
+		Number.isInteger(savedAt) &&
+		age >= 0 &&
+		age < SAVED_TOAST_MS
+			? saved
+			: undefined;
 	let selectPushBase: string | undefined;
 	if (c.req.header("HX-Request") === "true") {
 		const named = monthParam(asked, before, month, thisMonth);
@@ -1052,6 +1094,8 @@ transactions.get("/transactions", async (c) => {
 			const address = new URL(c.req.url);
 			if (named !== address.searchParams.get("month")) {
 				address.searchParams.delete("focus");
+				address.searchParams.delete("saved");
+				address.searchParams.delete("saved-at");
 				if (named === null) address.searchParams.delete("month");
 				else address.searchParams.set("month", named);
 				c.header("HX-Push-Url", `${address.pathname}${address.search}`);
@@ -1060,6 +1104,7 @@ transactions.get("/transactions", async (c) => {
 	}
 	return renderList(c, today, filters, {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
+		savedId,
 		countFocus: params.get("focus") === "count",
 		selecting,
 		focusSetCategory:
@@ -1586,15 +1631,17 @@ transactions.post("/transactions/select/exclude", async (c) => {
 	}
 	// A payment linked to a bill counts whatever its exclusion (spec §8.5), so the message says so, as
 	// the edit panel's does.
-	const paying = await payingBillsCount(c.env.DB, excluded);
-	const stillCounts =
-		paying === 0
-			? ""
-			: excluded.length === 1
-				? " It still counts while it pays a bill."
-				: paying === 1
-					? " 1 still counts while it pays a bill."
-					: ` ${paying} still count while they pay a bill.`;
+	// Bills and planned expenses share one count and one sentence; the noun names the kinds that are there.
+	const { paying, bills, plans } = await payingCounts(c.env.DB, excluded);
+	const stillCounts = stillCountsSentence(
+		excluded.length,
+		paying,
+		bills && plans
+			? "bill or a planned expense"
+			: plans
+				? "planned expense"
+				: "bill",
+	);
 	return finishSelection(
 		c,
 		today,
@@ -1673,6 +1720,19 @@ function listCloseAttrs(back: string, id: number): Record<string, string> {
 		"hx-select": "#page",
 		"hx-swap": "outerHTML",
 		"hx-push-url": back,
+	};
+}
+
+/** The Likely sheet's close keeps the saved row's element and names it, so its tick runs on to the toast's end. */
+function savedCloseAttrs(
+	back: string,
+	id: number,
+	savedAt: number,
+): Record<string, string> {
+	return {
+		...listCloseAttrs(back, id),
+		"hx-get": `${withFocus(back, id)}&saved=${id}&saved-at=${savedAt}`,
+		"hx-swap": "outerMorph",
 	};
 }
 
@@ -1918,7 +1978,7 @@ function EditSheet({
 				refundOfId: tx.refundOfId ?? null,
 				creditReviewed,
 			}),
-			tx.paysBill === true,
+			tx.paysBill === true || tx.paysPlan === true,
 		);
 	return (
 		<BottomSheet
@@ -1972,7 +2032,7 @@ function EditSheet({
 					{unpaidBillsNote(tx.splitRemovedBills)}
 				</p>
 			)}
-			{tx.countsInMonth && (!tx.excluded || tx.paysBill) && (
+			{tx.countsInMonth && (!tx.excluded || tx.paysBill || tx.paysPlan) && (
 				<p class="text-muted">
 					Counts in{" "}
 					{new Intl.DateTimeFormat("en-US", {
@@ -1982,7 +2042,7 @@ function EditSheet({
 				</p>
 			)}
 			{/* The saved state, near the top, so an excluded transaction says so before any options. */}
-			{tx.excluded && !tx.paysBill && (
+			{tx.excluded && !tx.paysBill && !tx.paysPlan && (
 				<p class="flex items-center gap-2 text-muted">
 					<Icon name="transfer" class="size-5" />
 					Excluded from the budget
@@ -1991,6 +2051,11 @@ function EditSheet({
 			{/* A payment linked to a bill counts whatever its exclusion (spec §8.5), so the panel says so. */}
 			{tx.excluded && tx.paysBill && (
 				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
+			)}
+			{tx.excluded && !tx.paysBill && tx.paysPlan && (
+				<p class="text-muted">
+					It pays a planned expense, so it counts in the budget.
+				</p>
 			)}
 			{tx.parentId === null && !tx.isSplit && !tx.income && (
 				<Button
@@ -2172,8 +2237,8 @@ function EditSheet({
 										income: false,
 										followsPurchase: false,
 									}),
-								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
-								excludeCounts: tx.paysBill !== true,
+								// Exclude changes the answer only where the row isn't a bill or planned-expense payment, which counts either way.
+								excludeCounts: tx.paysBill !== true && tx.paysPlan !== true,
 								linkHolds:
 									linkedPurchase !== undefined &&
 									followsPurchaseAfterSave(tx, {
@@ -3453,7 +3518,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				back={back}
 				categories={categories}
 				values={values}
-				error="The bank just changed this amount. Check the parts and save again."
+				error={splitRefusedError(result.planLinked === true)}
 				today={today}
 				refunds={refunds}
 				choices={choices}
@@ -3462,6 +3527,15 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 		),
 	});
 });
+
+/**
+ * The words a refused split save says (saveSplit): a planned expense linked to a part after the sheet was read, or the
+ * bank's amount changed. Only the amount change says the bank's amount moved.
+ */
+export const splitRefusedError = (planLinked: boolean) =>
+	planLinked
+		? "A planned expense was just linked to one of these parts. Check the parts and save again."
+		: "The bank just changed this amount. Check the parts and save again.";
 
 /** What a split change unlinked: refunds by the date of their purchase, and bill payments by bill (decision 99). */
 type SplitChange = {
@@ -3949,8 +4023,10 @@ async function savePanel(
 		(turnsDownSuggestions ? tidyName(tx.rawName) : tx.storeName);
 	// Linking a refund includes it, whatever the Exclude chip held, and a review as non-income lifts Plaid's exclusion.
 	const excludedNow = excludedAfterSave(tx, { ...parsed.value, refundOfId });
-	const countedBefore = isIncluded(tx.excluded, tx.paysBill === true);
-	const countsNow = isIncluded(excludedNow, tx.paysBill === true);
+	// A bill or planned-expense payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
+	const paysBillOrPlan = tx.paysBill === true || tx.paysPlan === true;
+	const countedBefore = isIncluded(tx.excluded, paysBillOrPlan);
+	const countsNow = isIncluded(excludedNow, paysBillOrPlan);
 	// A transfer put back in the budget can be the third pick though its category stays. An ordinary row counts while
 	// excluded, so putting it back adds no pick (COUNTED_PICKS_SQL).
 	const putBackInBudget = tx.markedTransfer && countsNow && !countedBefore;
@@ -3998,7 +4074,7 @@ async function savePanel(
 		},
 		postedCategory: edit.categoryId,
 		row: {
-			included: isIncluded(excludedNow, tx.paysBill === true),
+			included: isIncluded(excludedNow, paysBillOrPlan),
 			isSplit: tx.isSplit === true,
 			income: parsed.value.income,
 			followsPurchase:
@@ -4053,12 +4129,13 @@ async function savePanel(
 			: category
 				? `Saved. ${name} is now ${category}.`
 				: `Saved ${name}.`;
-	// A bill payment counts whatever its exclusion (isIncluded), so lifting its exclusion doesn't make it count again.
 	const exclusion =
 		excludedNow && !tx.excluded
 			? tx.paysBill
 				? " It still counts while it pays a bill."
-				: " It's excluded from the budget."
+				: tx.paysPlan
+					? " It still counts while it pays a planned expense."
+					: " It's excluded from the budget."
 			: countsNow && !countedBefore
 				? " It counts in the budget again."
 				: "";
@@ -4067,14 +4144,22 @@ async function savePanel(
 		: guessAgain
 			? `Kept the details for ${name}. ${GUESSES_AGAIN}`
 			: `Kept the details for ${name}.`;
-	const saveWords = (keptDetails ? keptWords : saved) + exclusion;
-	const toastMessage = unnamed
+	// A cash date that moved its plan's payment out of the plan's month unlinked the plan (saveEdit), and the save says so.
+	const planWords = result.planUnlinked
+		? " Its payment is no longer linked."
+		: "";
+	const saveWords = (keptDetails ? keptWords : saved) + exclusion + planWords;
+	const toastWords = unnamed
 		? keptDetails
 			? "Kept details."
 			: "Saved."
 		: keptDetails
 			? `Kept details for ${name}`
 			: `Saved ${name}`;
+	// The toast's name has no full stop, so the plan's sentence follows one; an unnamed toast already ends in one.
+	const toastMessage = result.planUnlinked
+		? `${unnamed ? toastWords : `${toastWords}.`}${planWords}`
+		: toastWords;
 	c.header(
 		"HX-Trigger",
 		JSON.stringify({
@@ -4090,9 +4175,11 @@ async function savePanel(
 	c.header("HX-Push-Url", back);
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
-	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
-	if (panel) return renderLikely(c, today, filters, panel);
-	return renderList(c, today, filters, { focusId: tx.id });
+	// The row this save saved is marked, and the question or sheet it draws keeps it marked behind (P119 A, #71).
+	if (ruleOffer)
+		return renderRuleOffer(c, today, back, ruleOffer, tx.id, tx.id);
+	if (panel) return renderLikely(c, today, filters, panel, tx.id, Date.now());
+	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
 /**
@@ -4245,8 +4332,11 @@ function renderLikely(
 		categoryName: string;
 		rows: LikelyRow[];
 	},
+	saved?: number,
+	savedAt?: number,
 ) {
 	return renderList(c, today, filters, {
+		savedId: saved,
 		sheet: () => (
 			<LikelySheet
 				savedId={panel.savedId}
@@ -4254,7 +4344,11 @@ function renderLikely(
 				savedCents={panel.savedCents}
 				back={panel.back}
 				closeHref={withFocus(panel.back, panel.savedId)}
-				closeAttrs={listCloseAttrs(panel.back, panel.savedId)}
+				closeAttrs={
+					savedAt === undefined
+						? listCloseAttrs(panel.back, panel.savedId)
+						: savedCloseAttrs(panel.back, panel.savedId, savedAt)
+				}
 				categoryId={panel.categoryId}
 				categoryName={panel.categoryName}
 				rows={panel.rows}
@@ -4271,7 +4365,8 @@ function renderLikely(
 
 /**
  * The rule offer after a save. `savedId` is the transaction that was saved, so closing the question puts focus on
- * its row (#87); a Select-mode save names no one row, so its close goes to the list.
+ * its row (#87); a Select-mode save names no one row, so its close goes to the list. `saved` is the row whose tick the
+ * reply draws (P119 A, #71): only the edit panel's htmx save passes it, never Cancel, Select or a cash save.
  */
 function renderRuleOffer(
 	c: Context<App>,
@@ -4279,8 +4374,10 @@ function renderRuleOffer(
 	back: string,
 	value: RuleOfferValue,
 	savedId?: number,
+	saved?: number,
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
+		savedId: saved,
 		sheet: () => (
 			<BottomSheet
 				labelledBy="rule-offer-title"
@@ -4421,8 +4518,9 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	if (wasFirstVisit && restoredNow) swapWholePage(c);
-	// The restored row takes focus when this list shows it; otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
+	// The restored row takes focus when this list shows it, and the saved tick (P119 A); otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
 	return renderList(c, today, filtersFrom(c, today, back), {
 		restoredId: restoredNow?.id,
+		savedId: restoredNow?.id,
 	});
 });

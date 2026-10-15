@@ -7,7 +7,7 @@ import { nameKey, sameName } from "../settings/category-form";
 import { shownName } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 import { readAiSwitches } from "./ai-switches";
-import { COUNTED_JOINS, paysBillSql } from "./counted-month";
+import { COUNTED_JOINS, paysBillSql, paysPlanSql } from "./counted-month";
 import { merchantColumnSql, sameMerchantSql } from "./merchant-key";
 import { ownNameSql } from "./own-name";
 import {
@@ -18,6 +18,7 @@ import {
 	MAYBE_CATEGORY_JOINS,
 	NAME_SUGGESTION_COLUMNS,
 	NEEDS_CATEGORY,
+	PLAN_NAME_COLUMN,
 	REFUNDED_COLUMN,
 } from "./transactions";
 
@@ -43,6 +44,7 @@ type LikelyRecord = Omit<
 	| "maybeCategoryNew"
 	| "noteGuessed"
 	| "paysBill"
+	| "paysPlan"
 > & {
 	merchantName: string | null;
 	ownName: string | null;
@@ -57,18 +59,19 @@ type LikelyRecord = Omit<
 	maybeCategoryNew: number;
 	noteGuessed: number;
 	paysBill: number;
+	paysPlan: number;
 };
 
 // A name is worked out as the list works it (NAME_SUGGESTION_COLUMNS and shownName), and a row's note, Maybe chip,
-// refunds and caption as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN, BILL_NAME_COLUMN and
-// COUNTS_IN_MONTH_COLUMN, and the caption's refund and bank-change fields), so a row reads the same here.
+// refunds and caption as the list draws them (MAYBE_CATEGORY_COLUMNS, REFUNDED_COLUMN, BILL_NAME_COLUMN,
+// PLAN_NAME_COLUMN and COUNTS_IN_MONTH_COLUMN, and the caption's refund and bank-change fields), so a row reads the same here.
 const LIKELY_SELECT = `SELECT t.id AS id, t.date AS date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 	${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, t.note AS note, t.note_guessed AS noteGuessed,
 	t.excluded AS excluded, t.flag_income AS income, t.credit_reviewed AS creditReviewed,
 	t.category_id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon, c.color AS categoryColor,
 	${MAYBE_CATEGORY_COLUMNS}, ${REFUNDED_COLUMN},
 	rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate,
-	${paysBillSql("t")} AS paysBill, ${BILL_NAME_COLUMN}, ${COUNTS_IN_MONTH_COLUMN},
+	${paysBillSql("t")} AS paysBill, ${paysPlanSql("t")} AS paysPlan, ${BILL_NAME_COLUMN}, ${PLAN_NAME_COLUMN}, ${COUNTS_IN_MONTH_COLUMN},
 	t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 	t.pending AS pending, ${sameMerchantSql("t", "src")} AS sameMerchant
 	FROM transactions t ${COUNTED_JOINS}
@@ -201,6 +204,7 @@ export async function likelyTransactions(
 				creditReviewed: !!row.creditReviewed,
 				maybeCategoryNew: !!row.maybeCategoryNew,
 				paysBill: !!row.paysBill,
+				paysPlan: !!row.paysPlan,
 				pending: !!row.pending,
 				sameMerchant: !!row.sameMerchant,
 			};

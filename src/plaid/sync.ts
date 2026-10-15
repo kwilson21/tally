@@ -7,6 +7,10 @@ import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
 } from "../db/plaid-transfers";
+import {
+	SYNCED_PAYMENTS_SQL,
+	unlinkUnfitPlanPaymentsSql,
+} from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -910,6 +914,18 @@ export async function syncItem(
 						itemRowId,
 						lockId,
 					),
+				);
+			}
+			// A payment the bank changed that no longer fits its plan's month unlinks the plan, which is set aside again
+			// (decision 82). One statement for the page's charges, after their amounts and dates are written in this batch.
+			const ids = [...added, ...page.modified].map(
+				(transaction) => transaction.transaction_id,
+			);
+			if (ids.length > 0) {
+				statements.push(
+					env.DB.prepare(
+						unlinkUnfitPlanPaymentsSql(SYNCED_PAYMENTS_SQL, OWNS_LOCK),
+					).bind(JSON.stringify(ids), itemRowId, lockId),
 				);
 			}
 			// When Plaid first names a merchant (the key differs from the bank text), the merchant's settings row

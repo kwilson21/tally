@@ -128,7 +128,96 @@ function Figure({
 const down = (x: number, y1: number, y2: number) =>
 	`M${x} ${y1} V${y2} M${x - 6} ${y2 - 6} L${x} ${y2} L${x + 6} ${y2 - 6}`;
 
-/** Budget − Spent − bills due − savings goal = Safe to spend, as boxes. */
+/** The drawing's width for each row of boxes, by how many there are: three boxes use the default width (W). */
+const BOX_ROW_WIDTH: Partial<Record<number, number>> = {
+	4: 440,
+	5: 550,
+};
+
+/** A box at the four-box size (BOX_ROW_WIDTH's 440 holds four 93-wide boxes) and the slot an operator sits in. */
+const UNIT_BOX_W = 93;
+const UNIT_OP_W = 22;
+
+/**
+ * One box of the Budget row, with the operator that leads into it, drawn at its natural size and never scaled
+ * (decision 115): the labels keep their size, and the row wraps where it doesn't fit. The unit is aria-hidden, as the
+ * wrapper that holds the units is the one labelled picture.
+ */
+function BudgetUnit({
+	label,
+	cents,
+	operator,
+	safe,
+	over,
+}: {
+	label: string;
+	cents: number;
+	/** The operator before the box, or none for the first box. */
+	operator?: string;
+	/** Whether this is Safe to spend, drawn heavier, in green or red (`over`) with its words. */
+	safe: boolean;
+	over: boolean;
+}) {
+	const lead = operator === undefined ? 0 : UNIT_OP_W;
+	const width = lead + UNIT_BOX_W;
+	const cx = lead + UNIT_BOX_W / 2;
+	return (
+		<svg
+			aria-hidden="true"
+			class="shrink-0"
+			width={width}
+			height="68"
+			viewBox={`0 0 ${width} 68`}
+			fill="none"
+			stroke-width="1.75"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			overflow="visible"
+		>
+			{operator !== undefined && (
+				<text
+					x={UNIT_OP_W / 2}
+					y="40"
+					font-size="18"
+					text-anchor="middle"
+					class="fill-ink"
+				>
+					{operator}
+				</text>
+			)}
+			<rect
+				x={lead}
+				y="4"
+				width={UNIT_BOX_W}
+				height="60"
+				rx="8"
+				class={safe ? (over ? "stroke-over" : "stroke-ok") : "stroke-ink"}
+				stroke-width={safe ? "2.5" : undefined}
+			/>
+			<text
+				x={cx}
+				y="28"
+				font-size="13"
+				text-anchor="middle"
+				class={safe ? (over ? "fill-over" : "fill-ok") : "fill-muted"}
+			>
+				{label}
+			</text>
+			<text
+				x={cx}
+				y="50"
+				font-size="15"
+				font-weight="600"
+				text-anchor="middle"
+				class="fill-ink"
+			>
+				{formatCents(cents)}
+			</text>
+		</svg>
+	);
+}
+
+/** Budget − Spent − bills due − planned − savings goal = Safe to spend, as boxes. */
 export function BudgetDiagram(
 	s: Pick<
 		MonthSummary,
@@ -136,39 +225,78 @@ export function BudgetDiagram(
 		| "totalSpentCents"
 		| "safeToSpendCents"
 		| "savingsGoalCents"
-	> & { id?: string },
+	> & { plannedCents?: number; id?: string },
 ) {
+	const id = s.id ?? "budget-diagram";
 	const savingsGoalCents = s.savingsGoalCents ?? 0;
+	const plannedCents = s.plannedCents ?? 0;
+	// Bills due is what Safe to spend takes out beyond the budget, spending, savings goal and planned expenses.
 	const billsCents =
 		s.totalBudgetCents -
 		s.totalSpentCents -
 		s.safeToSpendCents -
-		savingsGoalCents;
+		savingsGoalCents -
+		plannedCents;
 	const over = s.safeToSpendCents < 0;
 	const boxes: [string, number][] = [
 		["Budget", s.totalBudgetCents],
 		["Spent", s.totalSpentCents],
 		...(billsCents > 0 ? [["Bills due", billsCents] as [string, number]] : []),
+		...(plannedCents > 0
+			? [["Planned", plannedCents] as [string, number]]
+			: []),
 		...(savingsGoalCents > 0
 			? [["Savings goal", savingsGoalCents] as [string, number]]
 			: []),
 		["Safe to spend", s.safeToSpendCents],
 	];
-	const width = boxes.length === 5 ? 550 : boxes.length === 4 ? 440 : W;
-	const gap = 22;
-	const boxW = (width - 2 - gap * (boxes.length - 1)) / boxes.length;
 	const money = (cents: number) => formatCents(cents);
 	const bills =
 		billsCents > 0 ? ` minus ${money(billsCents)} for bills due` : "";
+	const planned =
+		plannedCents > 0
+			? ` minus ${money(plannedCents)} for planned expenses`
+			: "";
 	const savings =
 		savingsGoalCents > 0
 			? ` minus ${money(savingsGoalCents)} for the savings goal`
 			: "";
+	const desc = `The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills}${planned}${savings} leaves ${money(s.safeToSpendCents)} safe to spend.`;
+	if (plannedCents > 0) {
+		// With a Planned box, every box keeps its size and the row wraps where it doesn't fit, after Bills due on a phone.
+		return (
+			<div
+				role="img"
+				aria-labelledby={`${id}-title`}
+				aria-describedby={`${id}-desc`}
+				class="flex flex-wrap gap-y-2"
+			>
+				<span id={`${id}-title`} class="sr-only">
+					How safe to spend is worked out
+				</span>
+				<span id={`${id}-desc`} class="sr-only">
+					{desc}
+				</span>
+				{boxes.map(([label, cents], i) => (
+					<BudgetUnit
+						label={label}
+						cents={cents}
+						operator={i === 0 ? undefined : i === boxes.length - 1 ? "=" : "−"}
+						safe={i === boxes.length - 1}
+						over={over}
+					/>
+				))}
+			</div>
+		);
+	}
+	const width = BOX_ROW_WIDTH[boxes.length] ?? W;
+	const gap = 22;
+	const boxW = (width - 2 - gap * (boxes.length - 1)) / boxes.length;
 	return (
 		<Figure
-			id={s.id ?? "budget-diagram"}
+			id={id}
 			title="How safe to spend is worked out"
-			desc={`The ${money(s.totalBudgetCents)} budget minus ${money(s.totalSpentCents)} spent${bills}${savings} leaves ${money(s.safeToSpendCents)} safe to spend.`}
+			desc={desc}
 			width={width}
 			height={68}
 		>

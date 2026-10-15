@@ -288,7 +288,7 @@ describe("GET /design-system in the demo", () => {
 			ThingsToTry(),
 			HowLink({ section: "budget" }),
 			SystemDiagram(),
-			BudgetDiagram(BUDGET_EXAMPLE),
+			BudgetDiagram({ ...BUDGET_EXAMPLE, id: "budget-diagram-plain" }),
 			BillsDiagram({
 				amount: "$142.00",
 				due: "Sep 21",
@@ -567,6 +567,18 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("says a payment linked to a bill or a planned expense counts whatever its exclusion, in TransactionsButton's edges (#202)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transactions-button"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain(
+			"a payment linked to a bill or a planned expense counts whatever its exclusion.",
+		);
+		expect(section).not.toContain(
+			"a payment linked to a bill counts whatever its exclusion.",
+		);
+	});
+
 	it.each(["not-budgeted-row", "transactions-button"])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
@@ -634,6 +646,13 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(
 			/\| TransactionRow \|[^\n]*The Costco membership bill for 2026 is no longer paid\./,
 		);
+	});
+
+	it("shows a payment linked to a planned expense in TransactionRow as DESIGN.md's example, 'Auto · paid Car registration'", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transaction-row"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("Auto · paid Car registration");
 	});
 
 	it("says which refund and bill a TransactionRow caption keeps, in its sentence and DESIGN.md (#382)", async () => {
@@ -731,15 +750,17 @@ describe("GET /design-system in the demo", () => {
 		expect(tag).toContain("hx-ignore");
 		const section =
 			html.split('id="time-zone-row"')[1]?.split("</section>")[0] ?? "";
-		// Four rows, each in an inert box so nothing in them can be tapped or can take focus.
-		expect(section.match(/<details/g)).toHaveLength(4);
-		expect(section.match(/<div inert/g)).toHaveLength(4);
+		// Five rows, each in an inert box so nothing in them can be tapped or can take focus.
+		expect(section.match(/<details/g)).toHaveLength(5);
+		expect(section.match(/<div inert/g)).toHaveLength(5);
 		// Closed, open (the chevron's turned state is the open attribute), and the error one open too.
 		expect(
 			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
 				/\sopen(\s|>|=)/.test(m[0]),
 			),
-		).toEqual([false, true, true, false]);
+		).toEqual([false, true, true, false, false]);
+		// The saved row held still: its tick in the chevron's place (P119 A, #71).
+		expect(section.match(/row-saved-held/g)).toHaveLength(1);
 		expect(section).toContain("Eastern");
 		expect(section).toContain("Puerto Rico");
 		expect(section).toMatch(
@@ -767,13 +788,16 @@ describe("GET /design-system in the demo", () => {
 		expect(tag).toContain("hx-ignore");
 		const section =
 			html.split('id="category-row"')[1]?.split("</section>")[0] ?? "";
-		// One inert box per state: two closed rows, then the first and last rows open, the name error, and Add category.
-		expect(section.match(/<div inert/g)).toHaveLength(5);
+		// One inert box per state: two closed rows, then the first and last rows open, the name error, Add category, and the saved row held still (P119 A).
+		expect(section.match(/<div inert/g)).toHaveLength(6);
 		expect(
 			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
 				/\sopen(\s|>|=)/.test(m[0]),
 			),
-		).toEqual([false, false, true, true, true, true]);
+		).toEqual([false, false, true, true, true, true, false]);
+		// The saved row held still: its tick in the chevron's place (P119 A, #71).
+		expect(section.match(/row-saved-held/g)).toHaveLength(1);
+		expect(section).toContain('class="saved-tick ');
 		// Closed: a budget, then No budget.
 		const closed = section.split('id="cat-21-form"')[0] ?? "";
 		expect(closed).toContain("$700");

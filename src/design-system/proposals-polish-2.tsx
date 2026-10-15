@@ -15,6 +15,7 @@ import { CategoryIcon } from "../views/category";
 import { Icon } from "../views/icons";
 import { BottomTabs, type NavKey } from "../views/nav";
 import { ProgressRow } from "../views/progress-row";
+import { TICK_PATH } from "../views/saved-tick";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { rowCaption, TransactionRow } from "../views/transaction-row";
 import { DesktopFrame, Fixed, PickedPill } from "./proposal-parts";
@@ -354,10 +355,6 @@ function Toast({
 		</p>
 	);
 }
-
-/** The pencil tick's outline: a filled mark, 2.5 px at the heel and 1 px at the tip, in a 24-unit box. */
-const TICK_PATH =
-	"M3.59 13.65L8.98 18.66L19.88 5.53L19.12 4.87L8.93 16.27L5.41 11.95Z";
 
 /**
  * The pencil tick (P119 A): a filled, tapered mark in ink, turned −8° in a 24px box. At 0 s only its

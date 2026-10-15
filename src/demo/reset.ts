@@ -23,7 +23,9 @@ const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 const TABLES_CHILD_FIRST = [
 	"ai_log",
 	"cash_delete_holds",
+	"planned_delete_holds",
 	"bill_payments",
+	"planned_expenses",
 	"never_suggest_rules",
 	"bill_amounts",
 	"documents",
@@ -239,6 +241,18 @@ export async function resetDemo(
 				)
 				.bind(period, seedMerchantKey(RENT_PAYEE), RENT_PAYEE, date, cents),
 		),
+		// Planned one-time expenses (#202): one set aside this month, and one from last month still unpaid, so Bills shows
+		// its Band ("Car registration wasn't paid") and Safe to spend sets both aside.
+		db
+			.prepare(
+				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Lawn service', 9000, ?, 'demo')",
+			)
+			.bind(today.slice(0, 7)),
+		db
+			.prepare(
+				"INSERT INTO planned_expenses (name, amount_cents, month, created_by) VALUES ('Car registration', 18000, ?, 'demo')",
+			)
+			.bind(monthOffset(today, 1)),
 	]);
 	if (options.categoryExample) {
 		const petMonthNumber = Number(today.slice(5, 7)) - 2;

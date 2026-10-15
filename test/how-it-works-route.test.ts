@@ -52,6 +52,18 @@ describe("GET /how-it-works in the demo", () => {
 		expect(html).not.toContain("are 25–35 days apart");
 	});
 
+	it("names planned expenses in the budget section: its list, the diagram's Planned box and the worked example", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		const budget =
+			html.match(/<section[^>]*id="budget"[\s\S]*?<\/section>/)?.[0] ?? "";
+		expect(budget).toContain(
+			"A planned one-time expense is set aside for its whole month",
+		);
+		// The demo's two plans: Lawn service ($90, this month) and Car registration ($180, last month, unpaid).
+		expect(budget).toContain("minus $270.00 for planned expenses");
+		expect(budget).toContain("$270 is set aside for planned expenses");
+	});
+
 	it("gives a linked refund its exception in the spec's words, when its purchase is excluded", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain(
@@ -238,7 +250,9 @@ describe("GET /how-it-works in the demo", () => {
 	it("draws each section's diagram from the same numbers as its worked example", async () => {
 		const page = decodeHtml((await get("/how-it-works")).html);
 		const descOf = (id: string) =>
-			page.match(new RegExp(`<desc id="${id}-desc">([^<]+)<`))?.[1] ?? "";
+			page.match(
+				new RegExp(`<(?:desc|span) id="${id}-desc"[^>]*>([^<]+)<`),
+			)?.[1] ?? "";
 		const example = (re: RegExp) => page.match(re)?.slice(1) ?? [];
 
 		const [budgetsLeft, less] = example(
@@ -320,6 +334,7 @@ describe("the budget guide with no activity", () => {
 			env.DB.prepare("DELETE FROM transactions"),
 			env.DB.prepare("DELETE FROM budget_amounts"),
 			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+			env.DB.prepare("DELETE FROM planned_expenses"),
 		]);
 		const html = decodeHtml(
 			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
@@ -427,6 +442,7 @@ describe("outside the demo", () => {
 		await env.DB.prepare("DELETE FROM budget_amounts").run();
 		await env.DB.prepare("DELETE FROM transactions").run();
 		await env.DB.prepare("UPDATE bills SET active = 0").run();
+		await env.DB.prepare("DELETE FROM planned_expenses").run();
 		const html = await (
 			await howItWorks.request("/how-it-works", {}, notDemo)
 		).text();
@@ -720,6 +736,37 @@ describe("the held-for-review rule (spec §6, decision 70)", () => {
 			);
 		}
 		expect(sectionOf(await family(), "transactions")).not.toMatch(/jev/i);
+	});
+});
+
+describe("a payment for a planned expense counts while excluded, as a bill's does (#202)", () => {
+	const sectionOf = (html: string, id: string) =>
+		decodeHtml(
+			html.match(
+				new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?</section>`),
+			)?.[0] ?? "",
+		).replace(/\s+/g, " ");
+	const family = async () =>
+		(await howItWorks.request("/how-it-works", {}, notDemo)).text();
+
+	it("says in Transactions that a counted transaction is not excluded unless it pays a bill or a planned expense", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "transactions");
+			expect(text).toContain(
+				"A counted transaction is in the month, not excluded (unless it pays a bill or a planned expense), and not a split parent (its parts count instead) or a credit held for review (below).",
+			);
+			expect(text).not.toContain("unless it pays a bill)");
+		}
+	});
+
+	it("says in Excluding that a payment linked to a bill or a planned expense always counts", async () => {
+		for (const html of [(await get("/how-it-works")).html, await family()]) {
+			const text = sectionOf(html, "exclusions");
+			expect(text).toContain(
+				"An excluded transaction doesn't count toward spending, uncategorized, or safe to spend, unless it pays a bill or a planned expense: a payment linked to either always counts.",
+			);
+			expect(text).not.toContain("a payment linked to a bill always counts");
+		}
 	});
 });
 

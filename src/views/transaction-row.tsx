@@ -10,6 +10,7 @@ import {
 	maybeIncomeVisible,
 } from "./maybe-category";
 import { BankMark, GuessMark, SUGGESTED_NAME_CLASS } from "./name-choices";
+import { type SavedMark, savedRowClass } from "./saved-tick";
 
 type Caption = {
 	kind: "category" | "income" | "excluded" | "needs";
@@ -24,12 +25,15 @@ export function rowCaption(row: ListRow): Caption {
 		: row.billName;
 	const paidBill =
 		row.paysBill && paidBillName ? `paid ${paidBillName} bill` : null;
+	// A payment for a planned expense says what it paid, by the plan's name (P101's row, owner's pick decision 101).
+	const paidPlan = row.paysPlan && row.planName ? `paid ${row.planName}` : null;
+	const paid = paidBill ?? paidPlan;
 	// A refund the bank's change unlinked says why, with the purchase's date, until a person links it again (decision 99).
 	const unlinked = row.refundUnlinkedPurchaseDate
 		? `The bank changed the ${shortDay(row.refundUnlinkedPurchaseDate, row.date)} purchase, so this refund is no longer linked`
 		: null;
-	// A payment linked to a bill counts, so it isn't called excluded (spec §8.5); it reads as what it is.
-	if (row.excluded && !row.paysBill)
+	// A payment linked to a bill or a planned expense counts, so it isn't called excluded (spec §8.5); it reads as what it is.
+	if (row.excluded && !row.paysBill && !row.paysPlan)
 		return { kind: "excluded", caption: "Excluded", tag: false };
 	if (maybeIncomeVisible(row))
 		return { kind: "needs", caption: "Maybe income", tag: false };
@@ -48,7 +52,7 @@ export function rowCaption(row: ListRow): Caption {
 				`Split from ${row.parentName ?? tidyFallback(row.rawName)}`,
 				unlinked,
 				refunded(row),
-				paidBill,
+				paid,
 			]
 				.filter(Boolean)
 				.join(" · "),
@@ -57,7 +61,7 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.isSplit)
 		return {
 			kind: "category",
-			caption: ["Split transaction", paidBill].filter(Boolean).join(" · "),
+			caption: ["Split transaction", paid].filter(Boolean).join(" · "),
 			tag: false,
 		};
 	// An income row says only Income, even when a bank change removed its split; its restored category and note stay in the edit panel.
@@ -70,7 +74,7 @@ export function rowCaption(row: ListRow): Caption {
 	) {
 		const note = `The bank changed this from ${formatCents(row.splitRemovedFromCents, { signed: true })}, so its split was removed.${unpaidBillsNote(row.splitRemovedBills)}`;
 		// The refunds and the bill follow the note, in the same order as a categorized row (#313, #382).
-		const facts = [note, refunded(row), paidBill];
+		const facts = [note, refunded(row), paid];
 		return row.categoryId === null
 			? {
 					kind: "needs",
@@ -93,11 +97,11 @@ export function rowCaption(row: ListRow): Caption {
 	if (row.categoryName)
 		return {
 			kind: "category",
-			caption: [row.categoryName, pair, paidBill].filter(Boolean).join(" · "),
+			caption: [row.categoryName, pair, paid].filter(Boolean).join(" · "),
 			tag: false,
 		};
-	// A refund and the bill it paid both say so ahead of the note, in the same order as a categorized row (#313).
-	const facts = [pair, paidBill].filter(Boolean).join(" · ") || null;
+	// A refund and the bill or plan it paid both say so ahead of the note, in the same order as a categorized row (#313).
+	const facts = [pair, paid].filter(Boolean).join(" · ") || null;
 	// A refund that follows its purchase takes its category, so the tag sits on the purchase's row.
 	if (row.followsPurchase) return { kind: "needs", caption: facts, tag: false };
 	return {
@@ -146,6 +150,7 @@ export function TransactionRow({
 	autofocus,
 	bare = false,
 	bankText = true,
+	saved,
 }: {
 	row: ListRow;
 	href?: string;
@@ -157,6 +162,8 @@ export function TransactionRow({
 	bare?: boolean;
 	/** Show the bank's text under a row that needs a category; off where the text is already struck above it (Start here). */
 	bankText?: boolean;
+	/** The row a save just changed: its arrow gives way to the pencil tick (P119 A, #71). Only with a link. */
+	saved?: SavedMark;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
 	// A bank change's sentence keeps its place on the row over a Maybe category; the edit panel still shows the suggestion.
@@ -197,13 +204,15 @@ export function TransactionRow({
 			(kind === "category" && caption === row.categoryName));
 	const pendingFirst = pending && !pendingLast;
 	const Row = href ? "a" : "div";
+	// Only a row with a link has an arrow for the tick to take (P119 A, #71).
+	const mark = href ? saved : undefined;
 	const content = (
 		<>
 			{/* Every row is the same height: two lines (name, then caption and tag), long text truncated. */}
 			<Row
 				href={href}
 				autofocus={autofocus}
-				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}`}
+				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
 				{...attrs}
 			>
 				<RowIcon row={row} kind={kind} />
@@ -285,7 +294,7 @@ export function TransactionRow({
 				<span class="shrink-0 text-lg">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
-				{href && <RowArrow />}
+				{href && <RowArrow saved={mark} />}
 			</Row>
 		</>
 	);

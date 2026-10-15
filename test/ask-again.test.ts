@@ -120,6 +120,15 @@ const linkToBill = async (transactionId: number) => {
 		.run();
 };
 
+/** A planned expense paid by the transaction: it counts whatever its exclusion, as a bill payment does (decision 82). */
+const linkToPlan = (transactionId: number) =>
+	db
+		.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 9000, '2026-09', ?, 'demo')",
+		)
+		.bind(transactionId)
+		.run();
+
 let bakery: number;
 beforeEach(async () => {
 	vi.restoreAllMocks();
@@ -1536,6 +1545,37 @@ describe("a one-off name re-guesses only where Jev can be asked (decision 101)",
 		expect(
 			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
 		).toBe("Saved Dog bed. Tally guesses its category again.");
+	});
+
+	it("re-guesses a planned-expense payment the person excluded, and says nothing of counting again (#202)", async () => {
+		const category = await firstCategory();
+		await linkToPlan(bakery);
+		await pickedByTally(category, ", excluded = 1, excluded_source = 'user'");
+		const jev = fakeJev(() => reply(0.2));
+		const { response } = await save(bakery, {
+			category: "",
+			name_pick: "own",
+			merchant: "Dog bed",
+			name_scope: "one",
+		});
+		await background();
+		expect(jev.bodies).toHaveLength(1);
+		expect(
+			JSON.parse(response.headers.get("HX-Trigger") ?? "{}").announce,
+		).toBe("Saved Dog bed. Tally guesses its category again.");
+	});
+
+	it("draws the note on an excluded planned-expense payment with no Exclude hook, since the payment counts either way (#202)", async () => {
+		await linkToPlan(bakery);
+		await pickedByTally(
+			await firstCategory(),
+			", excluded = 1, excluded_source = 'user'",
+		);
+		const note = (await panelHtml()).match(
+			/<span class="([^"]*)">Tally guesses its category again\.<\/span>/,
+		)?.[1];
+		expect(note).toBeDefined();
+		expect(note).not.toContain("input[name=excluded]");
 	});
 
 	it("re-guesses the category when the same save un-excludes the transaction", async () => {
