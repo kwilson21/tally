@@ -250,8 +250,8 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					marker,
 				),
 		);
-		// A plan the entry or a part paid is paid again by the restored row, once that row is free to pay a plan. Its id is
-		// the plan's own, since the delete only unlinked it. The row is checked as restorePlanDelete checks it.
+		// A plan the entry or a part paid is paid again by the restored row, once its payment group pays no bill or other
+		// plan (paysBillGroupSql, paysPlanGroupSql). Its id is the plan's own, since the delete only unlinked it.
 		if (snapshot.plans.length > 0)
 			writes.push(
 				db

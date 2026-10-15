@@ -879,6 +879,73 @@ describe("Bills' Planned group, Band and sheet", () => {
 		expect(trigger.toast.message).toBe(words);
 		expect(trigger.announce).toBe(words);
 	});
+
+	it.each([
+		{
+			change: "became a credit",
+			paymentId: 9782,
+			apply: (id: number) =>
+				env.DB.prepare(
+					"UPDATE transactions SET amount_cents = -18000 WHERE id = ?",
+				)
+					.bind(id)
+					.run(),
+		},
+		{
+			change: "was marked income",
+			paymentId: 9783,
+			apply: (id: number) =>
+				env.DB.prepare("UPDATE transactions SET flag_income = 1 WHERE id = ?")
+					.bind(id)
+					.run(),
+		},
+		{
+			change: "moved outside the plan's month and the next",
+			paymentId: 9784,
+			apply: (id: number) =>
+				env.DB.prepare("UPDATE transactions SET date = ? WHERE id = ?")
+					.bind(dateIn(LAST_MONTH), id)
+					.run(),
+		},
+		{
+			change: "was split",
+			paymentId: 9785,
+			apply: (id: number) =>
+				saveSplit(
+					env.DB,
+					id,
+					[
+						{ categoryId: 1, amountCents: 8000 },
+						{ categoryId: 1, amountCents: 10000 },
+					],
+					"demo",
+				),
+		},
+	])(
+		"an Undo whose plan's payment $change restores the plan unpaid and set aside again",
+		async ({ paymentId, apply }) => {
+			const tx = await payment(paymentId, 18000);
+			const id = await plan("Car registration", 18000, MONTH, tx);
+			const deleted = await post(`/plans/${id}/delete`, {});
+			const token = (
+				JSON.parse(deleted.headers.get("HX-Trigger") ?? "{}") as {
+					toast: { undo: string };
+				}
+			).toast.undo;
+			await apply(tx);
+			const restored = await post("/plans/undo-delete", { token });
+			const trigger = JSON.parse(restored.headers.get("HX-Trigger") ?? "{}");
+			const words =
+				"Restored Car registration. Its payment is no longer linked.";
+			expect(trigger.toast.message).toBe(words);
+			expect(trigger.announce).toBe(words);
+			const row = await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE name='Car registration'",
+			).first<{ t: number | null }>();
+			expect(row?.t).toBeNull();
+			expect(await plansSetAsideCents(env.DB, MONTH)).toBe(18000);
+		},
+	);
 });
 
 describe("a plan pays a part of a split payment, as a bill does", () => {

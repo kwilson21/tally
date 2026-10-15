@@ -5,7 +5,6 @@
  * Every write here is one statement or one batch, so the never-both triggers (migration 0053) are the only guard
  * a link needs beyond these checks, and the link reports which one fired.
  */
-import { monthsBefore } from "../dates";
 import { tidyName } from "../transactions/tidy-name";
 import { paysBillGroupSql, paysPlanGroupSql } from "./counted-month";
 import { merchantColumnSql } from "./merchant-key";
@@ -26,8 +25,8 @@ export type PlannedExpense = {
 };
 
 /**
- * A payment a plan could be paid by, as a bill's picker lists one (decision 82): money out in its month or the next,
- * not already paying a bill or a plan, a split part included (a split parent is not listed, since it is no longer one payment).
+ * A payment a plan could be paid by, as a bill's picker lists one (decision 82): each one canPayPlanSql accepts, a split
+ * part included (a split parent is not listed, since it is no longer one payment).
  */
 export type PlanPaymentCandidate = {
 	id: number;
@@ -41,6 +40,14 @@ export type PlanPaymentCandidate = {
 export const PLAN_UNDO_MS = 10_000;
 
 const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")})`;
+
+/**
+ * The one rule that listing, linking and Undo all check (decision 82): money out, not split or income, in the plan's
+ * month or the next, and paying neither a bill nor another plan. `alias` is the payment's table alias, `month` an SQL
+ * expression for the plan's `YYYY-MM`.
+ */
+const canPayPlanSql = (alias: string, month: string) =>
+	`(${alias}.amount_cents > 0 AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0 AND substr(${alias}.date, 1, 7) IN (${month}, substr(date(${month} || '-01', '+1 month'), 1, 7)) AND NOT ${paysBillGroupSql(alias)} AND NOT ${paysPlanGroupSql(alias)})`;
 
 /**
  * A payer's name as bills show it (bills.tsx): its own name or its merchant's, else the bank's text tidied. The bank's
@@ -112,13 +119,10 @@ export async function planPaymentCandidates(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, ${PAYER_NAME} AS name, t.raw_name AS rawName, t.excluded AS excluded
 			 FROM transactions t
-			 WHERE t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
-				AND substr(t.date, 1, 7) IN (?1, ?2)
-				AND NOT ${paysBillGroupSql("t")}
-				AND NOT ${paysPlanGroupSql("t")}
-			 ORDER BY ABS(t.amount_cents - ?3), t.date, t.id`,
+			 WHERE ${canPayPlanSql("t", "?1")}
+			 ORDER BY ABS(t.amount_cents - ?2), t.date, t.id`,
 		)
-		.bind(plan.month, monthsBefore(plan.month, -1), plan.amountCents)
+		.bind(plan.month, plan.amountCents)
 		.all<{
 			id: number;
 			date: string;
@@ -137,9 +141,8 @@ export async function planPaymentCandidates(
 }
 
 /**
- * Links a payment to a plan, only if it is still unpaid, is money out in the plan's month or the next, and pays neither
- * a bill nor another plan (the candidates' rule, planPaymentCandidates). Returns whether the link was made; the caller
- * says why when it wasn't.
+ * Links a payment to a plan, only if it is still unpaid and canPayPlanSql accepts it, the same rule the picker lists
+ * by (planPaymentCandidates). Returns whether the link was made; the caller says why when it wasn't.
  */
 export async function linkPlanPayment(
 	db: D1Database,
@@ -150,9 +153,7 @@ export async function linkPlanPayment(
 		.prepare(
 			`UPDATE planned_expenses SET transaction_id = ?1
 			 WHERE id = ?2 AND transaction_id IS NULL
-				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND t.amount_cents > 0 AND t.is_split = 0 AND t.flag_income = 0
-					AND substr(t.date, 1, 7) IN (planned_expenses.month, substr(date(planned_expenses.month || '-01', '+1 month'), 1, 7))
-					AND NOT ${paysBillGroupSql("t")} AND NOT ${paysPlanGroupSql("t")})`,
+				AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?1 AND ${canPayPlanSql("t", "planned_expenses.month")})`,
 		)
 		.bind(transactionId, planId)
 		.run();
@@ -266,9 +267,10 @@ export async function holdPlanDelete(
 
 /**
  * Writes a deleted plan back, once, within its ten seconds. Returns the restored plan's name, or null when the token
- * is unknown, already used or too old. The payment comes back only if it is still free to pay a plan; when a bill,
- * another plan or a deletion took it meanwhile, the plan comes back unpaid and set aside again, and `unlinked` says so
- * (true only when the deleted plan had a payment and lost it).
+ * is unknown, already used or too old. The payment comes back only while canPayPlanSql accepts it for the plan's month:
+ * if a bill, another plan or a deletion took it meanwhile, or it became a credit or income, was split or moved outside
+ * the plan's month and the next, the plan comes back unpaid and set aside again, and `unlinked` says so (true only when
+ * the deleted plan had a payment and lost it).
  */
 export async function restorePlanDelete(
 	db: D1Database,
@@ -287,9 +289,7 @@ export async function restorePlanDelete(
 			.prepare(
 				`INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by)
 				 SELECT h.name, h.amount_cents, h.month,
-					CASE WHEN h.transaction_id IS NOT NULL
-						AND EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = h.transaction_id
-							AND NOT ${paysBillGroupSql("pt")} AND NOT ${paysPlanGroupSql("pt")})
+					CASE WHEN EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = h.transaction_id AND ${canPayPlanSql("pt", "h.month")})
 					THEN h.transaction_id END,
 					h.created_by
 				 FROM planned_delete_holds h WHERE h.token = ?1 AND h.created_ms > ?2`,
