@@ -2972,7 +2972,8 @@ function postedSplitValues(
 /**
  * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
  * split refund is asked about as one refund, its parts are left out, and so is a credit that no longer counts (it is
- * unlinked, not asked about).
+ * unlinked, not asked about). A split refund's size is the cents of its parts that still follow its link (movingCents,
+ * what the save moves), so the sheet's room check and its words use those, and not the split refund's full amount.
  */
 async function splitRefundsOf(
 	db: D1Database,
@@ -2980,7 +2981,11 @@ async function splitRefundsOf(
 ): Promise<SplitRefund[]> {
 	return (await linkedRefunds(db, parentId, true))
 		.filter(offeredToSplit)
-		.map(({ id, date, amountCents }) => ({ id, date, amountCents }));
+		.map(({ id, date, movingCents }) => ({
+			id,
+			date,
+			amountCents: -movingCents,
+		}));
 }
 
 /**
