@@ -235,6 +235,7 @@ plans.get("/plans/:id/delete", async (c) => {
  * A plan's own page, where its payment is linked (P101). `focusEditPlan` and `focusLinkHeading` take focus when the page is
  * drawn: Edit planned expense after its sheet's save, the Link a payment heading after an Unlink that changed nothing (#87).
  * `sheet` is a plan's sheet drawn over the page (#87); the sheet takes focus, so neither of those focuses applies then.
+ * `error` is a refused link's words: the picker shows them while the plan is unpaid, and the paid page above its Unlink (#623).
  */
 async function planPage(
 	c: Context<App>,
@@ -271,24 +272,31 @@ async function planPage(
 						: `Set aside for ${monthName(plan.month)}`}
 				</p>
 				{plan.transactionId ? (
-					<form
-						method="post"
-						action={`/plans/${plan.id}/unlink`}
-						hx-post={`/plans/${plan.id}/unlink`}
-						hx-target="body"
-						hx-swap="outerHTML"
-						class="mt-6 flex items-center justify-between gap-3 border-t border-rule pt-4"
-					>
-						<input type="hidden" name="from" value="plan" />
-						<p>
-							Paid by {plan.paidName} ·{" "}
-							{shortDay(plan.paidDate ?? today, today)} ·{" "}
-							{formatCents(plan.paidAmountCents ?? 0)}
-						</p>
-						<Button kind="secondary" type="submit">
-							Unlink
-						</Button>
-					</form>
+					<>
+						{error && (
+							<p role="alert" class="mt-2 text-over">
+								{error}
+							</p>
+						)}
+						<form
+							method="post"
+							action={`/plans/${plan.id}/unlink`}
+							hx-post={`/plans/${plan.id}/unlink`}
+							hx-target="body"
+							hx-swap="outerHTML"
+							class="mt-6 flex items-center justify-between gap-3 border-t border-rule pt-4"
+						>
+							<input type="hidden" name="from" value="plan" />
+							<p>
+								Paid by {plan.paidName} ·{" "}
+								{shortDay(plan.paidDate ?? today, today)} ·{" "}
+								{formatCents(plan.paidAmountCents ?? 0)}
+							</p>
+							<Button kind="secondary" type="submit">
+								Unlink
+							</Button>
+						</form>
+					</>
 				) : (
 					<PlanPaymentPicker
 						planId={plan.id}
