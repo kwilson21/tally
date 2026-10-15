@@ -93,6 +93,8 @@ const ruleFocus = (
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
+	/** The category row a save just changed: its chevron gives way to the pencil tick (P119 A, #71). */
+	saved?: number;
 	/** Move focus here after a swap: a row's summary, the Archived summary, the Time zone row, or a bank sign-in email control. */
 	focus?:
 		| number
@@ -365,6 +367,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 							values={view.values}
 							errors={view.errors}
 							budgetsOob={view.budgetsOob}
+							saved={view.saved === category.id ? "toast" : undefined}
 						/>
 					))}
 					{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
@@ -1055,8 +1058,10 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 			return retry(c, category.id, form, { name: "That name is taken." });
 		throw error;
 	}
+	// A rename's own reply marks its row (P119 A, #71); Archive and Move, which take the row out of its place, don't.
 	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
 		focus: category.id,
+		saved: category.id,
 	});
 });
 

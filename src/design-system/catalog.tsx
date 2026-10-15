@@ -64,7 +64,7 @@ import {
 	TransactionsDiagram,
 } from "../views/how-diagrams";
 import { HowLink } from "../views/how-link";
-import { ICON_NAMES, Icon } from "../views/icons";
+import { ICON_NAMES, Icon, RowArrow } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
@@ -96,6 +96,7 @@ import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { PendingNote } from "../views/pending-note";
 import { ProgressRow } from "../views/progress-row";
 import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
+import { SavedTick } from "../views/saved-tick";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
@@ -2297,6 +2298,18 @@ function Rows() {
 						))}
 					</ul>
 				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place, and the bar drawn still on a save's reply (P119 A)">
+					<ul class="max-w-xl">
+						{PROGRESS_ROWS.slice(0, 1).map((s) => (
+							<ProgressRow
+								{...s.props}
+								href="#progress-row"
+								saved="held"
+								barsStill
+							/>
+						))}
+					</ul>
+				</State>
 			</Specimen>
 			<Specimen
 				id="not-budgeted-row"
@@ -2368,6 +2381,15 @@ function Rows() {
 				<State label="Pressed, held still: the press tint on a set goal as its sheet loads">
 					<ul class="max-w-xl divide-y divide-rule [&_.row-opens]:bg-press">
 						<SavingsGoalRow amountCents={50000} href="#savings-goal-row" />
+					</ul>
+				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place once the goal is set (P119 A)">
+					<ul class="max-w-xl divide-y divide-rule">
+						<SavingsGoalRow
+							amountCents={50000}
+							href="#savings-goal-row"
+							saved="held"
+						/>
 					</ul>
 				</State>
 				<State label="Goal set">
@@ -2474,6 +2496,40 @@ function Rows() {
 							<TransactionRow row={s.row} href="#transaction-row" />
 						))}
 					</ul>
+				</State>
+				<State label="Saved, held still: the pencil tick in the arrow's place, as the toast stays (P119 A)">
+					<ul class="max-w-xl">
+						{TRANSACTION_ROWS.slice(0, 1).map((s) => (
+							<TransactionRow
+								row={s.row}
+								href="#transaction-row"
+								saved="held"
+							/>
+						))}
+					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="saved-tick"
+				title="SavedTick"
+				tier="visual"
+				components={["SavedTick"]}
+				sentence="After a save, the saved row's arrow gives way to a hand-drawn pencil tick for as long as the toast stays (P119 A, decision 111, #71). The tick is drawn in 150 ms, then the arrow comes back as the toast goes: 4 seconds, or 10 when the toast offers Undo. Only a save's own reply marks a row, and under reduced motion the tick appears and goes on the same stay without drawing. Here it is held still at its full draw, beside the arrow it takes the place of."
+			>
+				<State label="Held: the tick in the arrow's place">
+					<span class="row-saved-held inline-flex items-center px-3 text-muted">
+						<RowArrow saved="held" />
+					</span>
+				</State>
+				<State label="The arrow it replaces, as a row that opens ends in it">
+					<span class="inline-flex items-center px-3 text-muted">
+						<RowArrow />
+					</span>
+				</State>
+				<State label="The tick alone, at the arrow's size">
+					<span class="row-saved-held inline-flex items-center text-ink">
+						<SavedTick />
+					</span>
 				</State>
 			</Specimen>
 			<Specimen

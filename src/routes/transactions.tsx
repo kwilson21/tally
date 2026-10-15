@@ -218,6 +218,11 @@ type ListOptions = {
 	sheet?: (categories: Category[], today: string) => unknown;
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
+	/**
+	 * After the edit panel's save (P119 A, #71): this row's arrow gives way to the pencil tick. Only that save's reply
+	 * passes it, never a Cancel, Select mode or a bulk change. Undo's restore (#70) will pass the same id, marked undo.
+	 */
+	savedId?: number;
 	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
 	restoredId?: number;
 	/** "Only October" asked for focus on the result count, since its link goes (#211). */
@@ -304,6 +309,7 @@ async function renderList(
 	{
 		sheet,
 		focusId,
+		savedId,
 		restoredId,
 		countFocus = false,
 		status = 200,
@@ -983,6 +989,7 @@ async function renderList(
 													autofocus={
 														row.id === focusId || row.id === restoredId
 													}
+													saved={row.id === savedId ? "toast" : undefined}
 													// Opening swaps in only the sheet, so the list keeps its place.
 													attrs={{
 														"hx-get": href,
@@ -4091,7 +4098,7 @@ async function savePanel(
 	// category made in this save has only this one.
 	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
 	if (panel) return renderLikely(c, today, filters, panel);
-	return renderList(c, today, filters, { focusId: tx.id });
+	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
 /**

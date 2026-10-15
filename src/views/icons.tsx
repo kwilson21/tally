@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { type SavedMark, SavedSlot } from "./saved-tick";
 
 // Paths from Lucide (https://lucide.dev), ISC License. Copied, not a dependency.
 const PATHS = {
@@ -300,8 +301,25 @@ export const ROW_ARROW_BOX = "size-5 shrink-0 -ml-3 -mr-2";
 /**
  * The arrow a row that opens ends in (P118 A): muted, hung into the right margin so its tip is the content's edge.
  * It is an Icon, so it is hidden from assistive technology; the row's own words say what it opens.
+ * A save's own reply (P119 A, #71) puts the pencil tick in this same box; the arrow comes back when the toast goes.
  */
-export function RowArrow({ class: extra }: { class?: string }) {
+export function RowArrow({
+	class: extra,
+	saved,
+}: {
+	class?: string;
+	saved?: SavedMark;
+}) {
+	if (saved) {
+		return (
+			<SavedSlot class={extra ? `${ROW_ARROW_BOX} ${extra}` : ROW_ARROW_BOX}>
+				<Icon
+					name="chevron-right"
+					class="size-5 text-muted group-hover/row:text-ink"
+				/>
+			</SavedSlot>
+		);
+	}
 	const base = `${ROW_ARROW_BOX} text-muted group-hover/row:text-ink`;
 	return (
 		<Icon name="chevron-right" class={extra ? `${base} ${extra}` : base} />
