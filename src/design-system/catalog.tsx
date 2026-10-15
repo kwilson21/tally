@@ -5101,12 +5101,12 @@ function Diagrams() {
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
 				]}
-				sentence="Drawn from the same numbers as each worked example. A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
+				sentence="Drawn from the same numbers as each worked example. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
-				<State label="BudgetDiagram">
+				<State label="BudgetDiagram, four boxes">
 					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
 				</State>
-				<State label="BudgetDiagram with a savings goal">
+				<State label="BudgetDiagram with a savings goal, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings"
 						totalBudgetCents={140000}
@@ -5115,7 +5115,7 @@ function Diagrams() {
 						safeToSpendCents={29800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a planned expense">
+				<State label="BudgetDiagram with a planned expense, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-planned"
 						totalBudgetCents={140000}
@@ -5124,7 +5124,7 @@ function Diagrams() {
 						safeToSpendCents={61800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a savings goal and a planned expense">
+				<State label="BudgetDiagram with a savings goal and a planned expense, six boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings-planned"
 						totalBudgetCents={140000}
