@@ -5,9 +5,12 @@ import { daysInMonth } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 
-// The demo's spending is paced through the month, so Home's forecast agrees with its sentence on every day from the
-// 7th (#322, decision 119): the forecast says "under", or "over" by no more than Eating Out's overage. The 5-Friday
-// months (October 2026, January 2027, April 2027) are the tightest, and February 2028 is the one leap February.
+// The demo's spending is paced through the month, so from the 7th Home's forecast agrees with its sentence (#322,
+// decision 119): the forecast says "under", or "over" by no more than Eating Out's overage. The forecast check runs to
+// the month's end and still holds there, because Home renders the forecast even when Safe to spend is negative. What
+// stops in the last week (about the 24th in October 2026) is the sentence: Home shows "Over budget this month…" in its
+// place (#631). The 5-Friday months (October 2026, January 2027, April 2027) are the tightest, and February 2028 is the
+// one leap February.
 
 /** Home's page for the demo reset to `today`, read at noon UTC on that day (the household's day in New York). */
 async function homeOn(today: string): Promise<string> {
@@ -105,6 +108,22 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 		);
 		expect(await homeOn("2026-10-20")).toContain(
 			"Eating Out is $86 over. Everything else is on track.",
+		);
+	});
+
+	// Pins today's last week: Safe to spend goes below $0 from about the 24th, as next month's bills enter the 7-day window.
+	// #631 takes this up and should change this test on purpose.
+	it("on Oct 31 2026, Safe to spend is below $0 (the last week, #631)", async () => {
+		const html = await homeOn("2026-10-31");
+		const match = html.match(
+			/Safe to spend[\s\S]*?<\/p><p[^>]*><span class="whitespace-nowrap">(−?)\$([\d,]+)/,
+		);
+		expect(match).not.toBeNull();
+		const dollars = Number((match?.[2] ?? "0").replaceAll(",", ""));
+		const cents = (match?.[1] === "−" ? -1 : 1) * dollars * 100;
+		expect(cents).toBeLessThan(0);
+		expect(html).toContain(
+			"Over budget this month. Spending more takes it further over.",
 		);
 	});
 });
