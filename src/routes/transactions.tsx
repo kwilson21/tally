@@ -945,6 +945,9 @@ async function renderList(
 								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
 						</div>
+						{/* After the bar in the page order, so Tab still goes pager, then Select all, then here. The form's
+						    bottom padding sits below it, so the fixed bar never covers it. */}
+						<HowFoot section="transactions" />
 					</form>
 				) : (
 					<section id="results" class="mt-2" aria-label="Results">
@@ -998,9 +1001,9 @@ async function renderList(
 							))
 						)}
 						{pageNav}
+						<HowFoot section="transactions" />
 					</section>
 				)}
-				<HowFoot section="transactions" />
 				<div id="sheet">{sheet?.(categories.results, today)}</div>
 			</div>
 		</Layout>,
