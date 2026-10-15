@@ -606,6 +606,16 @@ describe("GET /transactions: a search looks in every month (#211)", () => {
 		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
 	});
 
+	it("pushes an address without the saved row's focus or its save time", async () => {
+		// A Likely sheet's close after a save: the list it returns to names the saved row and when, and the address it
+		// pushes is the clean one, the same as the close's own back address.
+		const { res } = await get(
+			`/transactions?focus=1&saved=1&saved-at=${Date.now()}&month=${LAST}`,
+			fromPage("/transactions?q=trader&month=all"),
+		);
+		expect(res.headers.get("HX-Push-Url")).toBe("/transactions");
+	});
+
 	it("keeps All months for a category picked when no search was typed", async () => {
 		const { res, html } = await get(
 			"/transactions?month=all&category=1",

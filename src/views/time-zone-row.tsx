@@ -1,7 +1,8 @@
 import { OTHER_ZONES, US_ZONES, zoneLabel } from "../settings/time-zones";
 import { Button } from "./button";
+import { chevron } from "./category-row";
 import { FormField } from "./form-field";
-import { Icon } from "./icons";
+import { type SavedMark, SavedSlot, savedRowClass } from "./saved-tick";
 
 /** What the zone decides, and what it never touches (decision 67). */
 export const TIME_ZONE_HINT =
@@ -12,13 +13,14 @@ export const TIME_ZONE_HINT =
  * name at the right and a chevron, like a category row. Open, it holds a select, its hint, Save and
  * Cancel, in a form that posts without JavaScript and swaps only its own row (`#${id}-disclosure`)
  * with it, so an unsaved Bank sign-in emails switch or an open Household people edit stays. An error
- * opens it.
+ * opens it. A save's own reply marks the row (P119 A, #71): its chevron gives way to the pencil tick.
  */
 export function TimeZoneRow({
 	zone,
 	error,
 	open = false,
 	focus = false,
+	saved,
 	id = "time-zone",
 	action = "/settings/time-zone",
 	back = "/settings#household",
@@ -31,6 +33,8 @@ export function TimeZoneRow({
 	open?: boolean;
 	/** Move focus to the row after a swap: it replaced the Save that had it. */
 	focus?: boolean;
+	/** The row whose save just answered: its chevron gives way to the pencil tick (P119 A, #71). */
+	saved?: SavedMark;
 	/** The select's id, which its label, hint and error build on. */
 	id?: string;
 	action?: string;
@@ -46,7 +50,7 @@ export function TimeZoneRow({
 	return (
 		<details
 			id={`${id}-disclosure`}
-			class="group border-b border-rule"
+			class={`group border-b border-rule${saved ? ` ${savedRowClass(saved)}` : ""}`}
 			open={open || Boolean(error)}
 		>
 			<summary
@@ -55,9 +59,11 @@ export function TimeZoneRow({
 			>
 				<span class="min-w-0 truncate text-lg font-medium">Time zone</span>
 				<span class="ml-auto shrink-0">{zoneLabel(zone)}</span>
-				<span class="shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none">
-					<Icon name="chevron-right" class="size-5" />
-				</span>
+				{saved ? (
+					<SavedSlot class="shrink-0 text-muted">{chevron}</SavedSlot>
+				) : (
+					chevron
+				)}
 			</summary>
 			<form
 				method="post"

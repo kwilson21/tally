@@ -562,6 +562,120 @@ html:not(.js) [data-money-js] {
 }
 
 /*
+ * A save's own reply marks its row (P119 A, decision 111, #71). The server adds row-saved (row-saved-undo when the
+ * toast offers Undo); the row's arrow gives way to the pencil tick, drawn in the confirmation's 150 ms, and the
+ * tick holds for the toast's own stay, then the arrow comes back. Each stay is a token, and its stops are the
+ * toast's (the toast block above), so the tick is gone before the toast is: at 96.25% of 4 s, or 98.5% of the
+ * 10 s an Undo toast stays. Under reduced motion there is no draw and no movement: the tick appears and goes on
+ * the same stay, as a step, and the arrow comes back as a step at that same stop. The arrow has its own still
+ * keyframes (saved-arrow-still, saved-arrow-undo-still) for that: the moving ones would hold it back to the stay's
+ * end, leaving the slot empty. row-saved-held is the catalog's still picture: the tick drawn in the arrow's place, the
+ * arrow hidden under it.
+ */
+@keyframes saved-draw {
+	from {
+		clip-path: inset(0 100% 0 0);
+	}
+	to {
+		clip-path: inset(0 0 0 0);
+	}
+}
+@keyframes saved-tick {
+	0%,
+	92.5% {
+		opacity: 1;
+	}
+	96.25%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes saved-tick-undo {
+	0%,
+	97% {
+		opacity: 1;
+	}
+	98.5%,
+	100% {
+		opacity: 0;
+	}
+}
+@keyframes saved-arrow {
+	0%,
+	96.25% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes saved-arrow-undo {
+	0%,
+	98.5% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 1;
+	}
+}
+/* Reduced motion's arrow: opacity alone, a step that shows at the tick's own hide stop, so the slot is never empty. */
+@keyframes saved-arrow-still {
+	0% {
+		opacity: 0;
+	}
+	96.25%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes saved-arrow-undo-still {
+	0% {
+		opacity: 0;
+	}
+	98.5%,
+	100% {
+		opacity: 1;
+	}
+}
+.row-saved .saved-tick {
+	animation:
+		saved-draw var(--duration-confirm) ease-out both,
+		saved-tick var(--duration-toast) ease-out both;
+}
+.row-saved-undo .saved-tick {
+	animation:
+		saved-draw var(--duration-confirm) ease-out both,
+		saved-tick-undo var(--duration-undo-toast) ease-out both;
+}
+.row-saved .saved-arrow {
+	animation: saved-arrow var(--duration-toast) ease-out both;
+}
+.row-saved-undo .saved-arrow {
+	animation: saved-arrow-undo var(--duration-undo-toast) ease-out both;
+}
+.row-saved-held .saved-tick {
+	animation: none;
+}
+.row-saved-held .saved-arrow {
+	animation: none;
+	opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+	.row-saved .saved-tick {
+		animation: saved-tick var(--duration-toast) step-end both;
+	}
+	.row-saved-undo .saved-tick {
+		animation: saved-tick-undo var(--duration-undo-toast) step-end both;
+	}
+	.row-saved .saved-arrow {
+		animation: saved-arrow-still var(--duration-toast) step-end both;
+	}
+	.row-saved-undo .saved-arrow {
+		animation: saved-arrow-undo-still var(--duration-undo-toast) step-end both;
+	}
+}
+
+/*
  * The proposals page's drawings of motion (P74, P85). The moves that shipped are drawn with their
  * real classes above; a drawing can't be tapped or load a new page, so the loop replays them: a
  * stage is 30 times a move's length (4.5 s for 150 ms, 6 s for 200 ms): a rest on the start, the move
