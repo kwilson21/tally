@@ -21,6 +21,8 @@ import {
 import { mixedCategories } from "../db/mixed-trip";
 import { refundedByOthersSql } from "../db/refunded";
 import {
+	type CashSplitEdit,
+	type CashSplitRefusal,
 	correctCashSplit,
 	type FirstVisit,
 	firstVisitState,
@@ -128,11 +130,13 @@ import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
 import {
 	EDIT_FORM_GROUP,
+	LINKED_PURCHASE_CLASS,
 	NameChoices,
 	OWN_VALUE,
 	pickValue,
 	STORE_VALUE,
 	SUGGESTED_NAME_CLASS,
+	TALLY_CATEGORY_CLASS,
 } from "../views/name-choices";
 import { ABOVE_TABS } from "../views/nav";
 import {
@@ -1722,6 +1726,9 @@ function CategoryChoice({
 									? purchase.categoryId === cat.id
 									: values.categoryId === cat.id
 							}
+							inputClass={
+								cat.id === tx.categoryId ? TALLY_CATEGORY_CLASS : undefined
+							}
 							icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
 						>
 							{cat.name}
@@ -1838,10 +1845,18 @@ function EditSheet({
 			}
 		: {};
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
-	// Whether the row counts with the review ticked or unticked, as the save would leave it (excludedAfterSave).
+	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
+	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
+	// panel's hooks need even after a redraw that posted Exclude off or Income on.
 	const countsIfReviewed = (creditReviewed: boolean) =>
 		isIncluded(
-			excludedAfterSave(tx, { ...values, creditReviewed }),
+			excludedAfterSave(tx, {
+				...values,
+				excluded: true,
+				income: false,
+				refundOfId: tx.refundOfId ?? null,
+				creditReviewed,
+			}),
 			tx.paysBill === true,
 		);
 	return (
@@ -2086,33 +2101,30 @@ function EditSheet({
 								part: typeof tx.parentId === "number",
 								owned: tx.nameChoices.owned,
 								thisOwn: tx.nameChoices.thisOwn,
-								// The note shows only where a one-off name would make Jev guess again (rename.ts). It needs the
-								// category drawn as none or as saved: a save that posts another one, or ticks the merchant rule
-								// tick, keeps the category (rename.ts).
+								// The note is drawn as if every control the edit reads were off, and the hooks hide it while one of them blocks the
+								// guess (name-choices.tsx). So a purchase link counts as Not linked, and what stays out is only a split row, or a
+								// category someone else set. linkHolds is the drawn purchase that keeps the refund following it with Reviewed off,
+								// which Jev's review does; reviewLifts is whether ticking Reviewed lifts Plaid's exclusion, which Exclude's hook
+								// reads. The hooks fold on both.
 								tallyCategory:
 									tx.nameChoices.tallyCategory &&
-									values.newCategory !== true &&
-									values.alwaysForMerchant !== true &&
-									(values.categoryId === null ||
-										values.categoryId === tx.categoryId) &&
 									jevCategories &&
 									jevAsksAbout({
-										included: isIncluded(
-											excludedAfterSave(tx, values),
-											tx.paysBill === true,
-										),
+										included: true,
 										isSplit: tx.isSplit === true,
-										income: values.income,
-										followsPurchase: purchase !== undefined,
+										income: false,
+										followsPurchase: false,
 									}),
 								// Exclude changes the answer only where the row isn't a bill payment, which counts either way.
 								excludeCounts: tx.paysBill !== true,
-								// The review chip folds the note where the review decides whether the row counts: a Plaid
-								// exclusion it lifts, not on a bill payment and not once Exclude is off. A linked purchase is
-								// one the review decides too (followsPurchaseAfterSave), so it is drawn as well.
-								reviewCounts:
-									linkedPurchase !== undefined ||
-									countsIfReviewed(true) !== countsIfReviewed(false),
+								linkHolds:
+									linkedPurchase !== undefined &&
+									followsPurchaseAfterSave(tx, {
+										...values,
+										income: false,
+										creditReviewed: false,
+									}),
+								reviewLifts: countsIfReviewed(true) !== countsIfReviewed(false),
 								today,
 								scope: nameScope,
 							}}
@@ -2323,6 +2335,7 @@ function EditSheet({
 										name="refund_of"
 										value={String(p.id)}
 										checked={values.refundOfId === p.id}
+										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
 									>
 										{refundPurchaseLabel(p, tx.date)}
 									</Chip>
@@ -3293,46 +3306,52 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 			),
 		});
 	if (correction) {
-		const result = await correctCashSplit(
-			c.env.DB,
-			tx.id,
-			{
-				totalCents: correction.totalCents,
-				amountWasCents: correction.amountWas,
-				parts: parsed.parts.map((part, i) => ({
-					id: values[i]?.partId ?? null,
-					categoryId: part.categoryId,
-					amountCents: part.amountCents,
-				})),
-			},
-			actor(c),
-		);
-		// The panel's other changes (its pending edit) are saved with the corrected parts, as its own save.
+		const split: CashSplitEdit = {
+			totalCents: correction.totalCents,
+			amountWasCents: correction.amountWas,
+			parts: parsed.parts.map((part, i) => ({
+				id: values[i]?.partId ?? null,
+				categoryId: part.categoryId,
+				amountCents: part.amountCents,
+			})),
+		};
+		// The sheet again at the posted parts, with why the correction was refused (nothing saved).
+		const refused = (refusal: CashSplitRefusal) => {
+			const error =
+				"refundPart" in refusal
+					? `Linked refunds add up to ${formatCents(refusal.refundPart.refundCents)}, so part ${refusal.refundPart.part} can't be less than that.`
+					: `Linked refunds add up to ${formatCents(refusal.refundTotalCents)}, so the amount can't be less than that.`;
+			return renderList(c, today, filtersFrom(c, today, back), {
+				status: 422,
+				sheet: (_categories, today) => (
+					<SplitSheet
+						tx={tx}
+						back={back}
+						categories={categories}
+						values={values}
+						error={error}
+						today={today}
+						refunds={refunds}
+						choices={choices}
+						still
+						correction={correction}
+					/>
+				),
+			});
+		};
+		// The panel's pending edit is checked first, and saved in the same batch as the parts (#365): an edit that
+		// fails its checks saves nothing, and a refused correction saves none of the edit either.
+		if (correction.pendingEdit)
+			return savePanel(
+				c,
+				tx,
+				pendingEditForm(correction.pendingEdit, correction.totalCents),
+				{ split, refused },
+			);
+		const result = await correctCashSplit(c.env.DB, tx.id, split, actor(c));
 		if (result.saved)
-			return correction.pendingEdit
-				? savePendingEdit(c, tx, correction.totalCents, correction.pendingEdit)
-				: splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
-		const error =
-			"refundPart" in result
-				? `Linked refunds add up to ${formatCents(result.refundPart.refundCents)}, so part ${result.refundPart.part} can't be less than that.`
-				: `Linked refunds add up to ${formatCents(result.refundTotalCents)}, so the amount can't be less than that.`;
-		return renderList(c, today, filtersFrom(c, today, back), {
-			status: 422,
-			sheet: (_categories, today) => (
-				<SplitSheet
-					tx={tx}
-					back={back}
-					categories={categories}
-					values={values}
-					error={error}
-					today={today}
-					refunds={refunds}
-					choices={choices}
-					still
-					correction={correction}
-				/>
-			),
-		});
+			return splitSaved(c, tx, today, back, { unlinked: [], bills: [] });
+		return refused(result);
 	}
 	// The part each refund goes with, or null for Not linked (every answer was checked above).
 	const result = await saveSplit(
@@ -3535,14 +3554,25 @@ function pendingEditOf(form: FormData): string {
 const GUESSES_AGAIN = "Tally guesses its category again.";
 
 /**
+ * A split's correction (Change the parts) that is saved in the same batch as the panel's save, and how to draw
+ * the split sheet when the correction is refused.
+ */
+type PanelCorrection = {
+	split: CashSplitEdit;
+	refused: (refusal: CashSplitRefusal) => Promise<Response>;
+};
+
+/**
  * Saves the edit panel as `form` posted it, for `tx` (spec §8): the check, the save, the toast and the
  * list again. Change the parts (spec §8.4) is a save that the amount breaks the parts of: it answers with
  * the split sheet at that amount, holding the panel's other changes, which are saved with the corrected parts.
+ * With `correction`, the parts are corrected in the same batch (saveEdit), so the parts aren't checked here.
  */
 async function savePanel(
 	c: Context<App>,
 	tx: TransactionDetail,
 	form: FormData,
+	correction?: PanelCorrection,
 ) {
 	// The panel as it was posted, before anything below changes the form: a Change the parts sheet carries it.
 	const pendingEdit = pendingEditOf(form);
@@ -3749,7 +3779,9 @@ async function savePanel(
 			...(newCategoryError ? { newCategory: newCategoryError } : {}),
 			...(cashParsed?.errors ?? {}),
 		});
-	if (cashParsed && tx.isSplit) {
+	// With a correction, the linked refunds and the parts are checked against the amount in the same batch (saveEdit),
+	// and a refusal draws the split sheet with the posted parts, so they are not checked here.
+	if (cashParsed && tx.isSplit && !correction) {
 		// Refunds linked to the entry and to its parts together: moving the parts can't make them fit, so this
 		// is checked first.
 		const linked = await c.env.DB.prepare(
@@ -3794,6 +3826,7 @@ async function savePanel(
 				: {}),
 		},
 		actor(c),
+		correction?.split,
 	).catch(async (error: unknown) => {
 		// A save that throws files nothing, so a category made for it goes too.
 		if (made) await unmakeCategory(c.env.DB, made.id);
@@ -3802,6 +3835,9 @@ async function savePanel(
 	if (!result.saved) {
 		// Nothing was filed in a category made for this save, so it goes too: a retry must not find its name taken.
 		if (made) await unmakeCategory(c.env.DB, made.id);
+		// Only a save with a correction is refused for its split; without one, the split is never in the batch.
+		if ("split" in result)
+			return correction ? correction.refused(result.split) : c.notFound();
 		if ("personMissing" in result)
 			// Removed since this page loaded the household: the panel shows the household as it is now.
 			return showErrors(
@@ -3995,21 +4031,16 @@ async function savePanel(
 }
 
 /**
- * Change the parts has saved the entry's new total and its corrected parts: the panel's pending edit is
- * saved now too, as its own save would save it, with the amount the parts now add up to.
+ * The panel's pending edit (pendingEditOf's fields) as the form a save reads, with the amount the corrected parts
+ * add up to: Change the parts saves it with those parts, as its own save would (savePanel).
  */
-async function savePendingEdit(
-	c: Context<App>,
-	tx: TransactionDetail,
-	totalCents: number,
-	pendingEdit: string,
-) {
+function pendingEditForm(pendingEdit: string, totalCents: number): FormData {
 	const form = new FormData();
 	new URLSearchParams(pendingEdit).forEach((value, key) => {
 		form.append(key, value);
 	});
 	form.set("amount", centsToAmount(totalCents));
-	return savePanel(c, (await getTransaction(c.env.DB, tx.id)) ?? tx, form);
+	return form;
 }
 
 /** A live category a likely-transactions form names, or null. */
