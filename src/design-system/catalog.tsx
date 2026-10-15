@@ -66,6 +66,7 @@ import {
 import { HowFoot } from "../views/how-link";
 import { ICON_NAMES, Icon, RowArrow } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
+import { Key, KeysDetails, KeysSheetBody, Ledger } from "../views/keys";
 import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
@@ -188,6 +189,7 @@ const SECTIONS = [
 	["controls", "Controls"],
 	["ledger-form", "Ledger form"],
 	["feedback", "Feedback and sheets"],
+	["keys", "Keyboard shortcuts"],
 	["demo", "Guidance"],
 	["diagrams", "Diagrams"],
 ] as const;
@@ -5003,6 +5005,92 @@ function Feedback() {
 	);
 }
 
+/** The keys (#72, decisions 109 and 118): the chip, the ledger, the details in the foot and in More, and the sheet's body. */
+function Keys() {
+	return (
+		<Group id="keys" title="Keyboard shortcuts">
+			<Specimen
+				id="key-chip"
+				title="Key"
+				tier="visual"
+				components={["Key"]}
+				sentence="A key's name in a small box with a rule, in the monospaced key face (the --font-mono token, used only here)."
+			>
+				<p class="flex flex-wrap items-center gap-2 text-lg">
+					<Key>/</Key>
+					<Key>?</Key>
+					<Key>j</Key>
+					<Key>Enter</Key>
+					<Key>←</Key>
+					<Key>u</Key>
+				</p>
+			</Specimen>
+			<Specimen
+				id="ledger"
+				title="Ledger"
+				tier="visual"
+				components={["Ledger"]}
+				sentence="Every key, in four groups: Anywhere, In a list, On Home and After a change. The same list in the sheet, the foot's details and More's row."
+			>
+				<div class="max-w-md">
+					<Ledger />
+				</div>
+			</Specimen>
+			<Specimen
+				id="keys-details"
+				title="Keyboard shortcuts details"
+				tier="visual"
+				components={["KeysDetails", "HowFoot"]}
+				sentence="The foot's disclosure on desktop, under How this works: a chevron that turns when open, and the ledger inside. Without the script it is the whole list; below lg More's last row lists it instead."
+			>
+				<State label="Closed">
+					<div class="max-w-md">
+						<KeysDetails />
+					</div>
+				</State>
+				<State label="Open">
+					<div class="max-w-md">
+						<KeysDetails open />
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="keys-more"
+				title="Keyboard shortcuts row in More"
+				tier="visual"
+				components={["KeysDetails"]}
+				sentence="Below lg, More's contents end in this row: the keyboard icon first, the chevron at the far right, and the same ledger in place."
+			>
+				<State label="Closed">
+					<ul class="divide-y divide-rule border-y border-rule">
+						<li>
+							<KeysDetails row />
+						</li>
+					</ul>
+				</State>
+				<State label="Open">
+					<ul class="divide-y divide-rule border-y border-rule">
+						<li>
+							<KeysDetails open row />
+						</li>
+					</ul>
+				</State>
+			</Specimen>
+			<Specimen
+				id="keys-sheet"
+				title="Keyboard shortcuts sheet"
+				tier="visual"
+				components={["KeysSheet"]}
+				sentence="The sheet ? opens: its title and the ledger, in a BottomSheet over the page. Cancel, Escape and the backdrop close it back to the same page. The sheet's frame is the BottomSheet specimen above; this is its body."
+			>
+				<div class="max-w-md rounded-sheet border border-rule bg-paper p-5">
+					<KeysSheetBody />
+				</div>
+			</Specimen>
+		</Group>
+	);
+}
+
 function Demo() {
 	return (
 		<Group id="demo" title="Guidance">
@@ -6248,6 +6336,7 @@ export function Catalog() {
 			<Controls />
 			<LedgerForm />
 			<Feedback />
+			<Keys />
 			<Demo />
 			<Diagrams />
 		</>

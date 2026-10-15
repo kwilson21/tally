@@ -222,9 +222,19 @@ describe("HowLink", () => {
 // P124 A (decision 111): each page's link sits at its foot, under a short rule.
 describe("HowFoot", () => {
 	it("draws a short rule, then the same HowLink under it", async () => {
-		const foot = String(await HowFoot({ section: "bills" }));
+		const foot = String(await HowFoot({ section: "bills", keys: false }));
 		expect(foot).toBe(
 			`<div class="mt-8"><div class="w-12 border-t border-muted"></div><div class="mt-2">${String(await HowLink({ section: "bills" }))}</div></div>`,
+		);
+	});
+
+	it("puts the keys' details under the link on desktop only, and not in a sheet's foot (decision 118)", async () => {
+		const foot = String(await HowFoot({ section: "bills" }));
+		expect(foot).toContain(
+			'<div class="mt-2 hidden lg:block"><details class="group"><summary',
+		);
+		expect(foot.indexOf("How this works")).toBeLessThan(
+			foot.indexOf("Keyboard shortcuts"),
 		);
 	});
 });

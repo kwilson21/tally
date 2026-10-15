@@ -114,6 +114,7 @@ async function renderOrganize(
 			title="Organize · Tally"
 			active="transactions"
 			demo={c.env.DEMO === "true"}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<div id="organize-page" class="lg:max-w-3xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">

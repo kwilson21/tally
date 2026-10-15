@@ -22,7 +22,7 @@ designSystem.get("/design-system", (c) =>
 			title="Design system · Tally"
 			demo
 			scripts={["/js/ds.js"]}
-			currentPath={c.req.path}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<Catalog />
 		</Layout>,
@@ -34,7 +34,7 @@ designSystem.get("/design-system/bottom-sheet", (c) =>
 		<Layout
 			title="BottomSheet · Design system · Tally"
 			demo
-			currentPath={c.req.path}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<SheetSpecimen />
 		</Layout>,
@@ -46,7 +46,7 @@ designSystem.get("/design-system/ledger-sheet", (c) =>
 		<Layout
 			title="Ledger sheet · Design system · Tally"
 			demo
-			currentPath={c.req.path}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<LedgerSheetSpecimen />
 		</Layout>,
@@ -58,7 +58,7 @@ designSystem.get("/design-system/proposals", (c) =>
 		<Layout
 			title="Proposals · Design system · Tally"
 			demo
-			currentPath={c.req.path}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<Proposals />
 		</Layout>,

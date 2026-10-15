@@ -250,7 +250,7 @@ async function planPage(
 			title={`${plan.name} · Tally`}
 			active="bills"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path}
+			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<div class="max-w-2xl">
 				<a href="/bills" class="inline-flex min-h-11 items-center text-accent">

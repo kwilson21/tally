@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import type { Bank } from "../db/accounts";
 import { flaggedBanks } from "../stale-bank";
 import { TallyMark } from "./brand";
@@ -108,7 +109,14 @@ function FolioWords({ folio }: { folio: Folio }) {
  * The leader is hidden from screen readers, so each link's name reads in order: "Accounts, 3 accounts,
  * Balances, net worth and your banks".
  */
-export function ContentsList({ places }: { places: Place[] }) {
+export function ContentsList({
+	places,
+	children,
+}: {
+	places: Place[];
+	/** Rows after the places, such as the keys' row below lg (decision 118). */
+	children?: Child;
+}) {
 	return (
 		<ul class="mt-6 divide-y divide-rule border-y border-rule">
 			{places.map((place) => (
@@ -143,6 +151,7 @@ export function ContentsList({ places }: { places: Place[] }) {
 					</a>
 				</li>
 			))}
+			{children}
 		</ul>
 	);
 }

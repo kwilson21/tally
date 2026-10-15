@@ -265,6 +265,8 @@ type ListOptions = {
 	focusFirstTick?: boolean;
 	/** The Add cash sheet closed: focus Add cash, the button it was opened from (FOCUS_ADD_CASH). */
 	focusAddCash?: boolean;
+	/** `/` from another page: focus the search field (FOCUS_SEARCH, decision 118). */
+	focusSearch?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -343,6 +345,7 @@ async function renderList(
 		focusSetCategory = false,
 		focusFirstTick = false,
 		focusAddCash = false,
+		focusSearch = false,
 	}: ListOptions = {},
 ) {
 	const [
@@ -734,6 +737,9 @@ async function renderList(
 									value={filters.q}
 									placeholder="Search transactions"
 									autocomplete="off"
+									// / moves focus here (keyboard.js, decision 118); from another page it arrives with focus.
+									aria-keyshortcuts="/"
+									autofocus={focusSearch}
 									class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
 									{...a11y}
 								/>
@@ -1112,6 +1118,7 @@ transactions.get("/transactions", async (c) => {
 			selecting &&
 			(selectAll || params.get("focus") === FOCUS_SET_CATEGORY_BACK),
 		focusAddCash: params.get("focus") === FOCUS_ADD_CASH,
+		focusSearch: params.get("focus") === FOCUS_SEARCH,
 		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 		selection,
 		selectPushBase,
@@ -1701,6 +1708,9 @@ function showEditIncomeGuess(tx: TransactionDetail, posted: Edit) {
 
 /** The `focus` value the Add cash sheet's close asks for: the list puts focus on its Add cash button (#87). */
 const FOCUS_ADD_CASH = "add-cash";
+
+/** The `focus` value `/` asks for from another page: the list puts focus in its search field (decision 118). */
+const FOCUS_SEARCH = "search";
 
 /**
  * The list address with `focus` set, so the list it draws puts focus on that row or control. A sheet's close
@@ -2637,7 +2647,7 @@ function EditSheet({
 				</form>
 			)}
 			{/* Outside the forms, so following it never happens by accident mid-edit. */}
-			<HowFoot section="categorization" />
+			<HowFoot section="categorization" keys={false} />
 		</BottomSheet>
 	);
 }

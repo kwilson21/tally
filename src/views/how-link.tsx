@@ -1,3 +1,5 @@
+import { KeysDetails } from "./keys";
+
 const NAMES = {
 	budget: "the budget",
 	transactions: "transactions",
@@ -21,14 +23,31 @@ export function HowLink({ section }: { section: keyof typeof NAMES }) {
 	);
 }
 
-/** A screen's How this works at the foot of its page, under a short rule, after the page's last content (P124 A, decision 111). */
-export function HowFoot({ section }: { section: keyof typeof NAMES }) {
+/**
+ * A screen's How this works at the foot of its page, under a short rule, after the page's last content (P124 A, decision
+ * 111). Under it, on desktop, the keys' details (decision 118), unless `keys` is off: a sheet's foot has none. Below lg,
+ * More's last row lists the keys instead.
+ */
+export function HowFoot({
+	section,
+	keys = true,
+}: {
+	section: keyof typeof NAMES;
+	keys?: boolean;
+}) {
 	return (
-		<div class="mt-8">
-			<div class="w-12 border-t border-muted" />
-			<div class="mt-2">
-				<HowLink section={section} />
+		<>
+			<div class="mt-8">
+				<div class="w-12 border-t border-muted" />
+				<div class="mt-2">
+					<HowLink section={section} />
+				</div>
 			</div>
-		</div>
+			{keys && (
+				<div class="mt-2 hidden lg:block">
+					<KeysDetails />
+				</div>
+			)}
+		</>
 	);
 }

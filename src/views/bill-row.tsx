@@ -204,7 +204,11 @@ export function BillRow({
 	return (
 		<li>
 			{href ? (
-				<a href={href} class={`${look} text-ink no-underline ${ROW_OPENS}`}>
+				<a
+					href={href}
+					class={`${look} text-ink no-underline ${ROW_OPENS}`}
+					data-row=""
+				>
 					{content}
 					<RowArrow />
 				</a>

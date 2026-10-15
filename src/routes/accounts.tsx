@@ -228,10 +228,13 @@ function DisconnectPage({
 	item,
 	error,
 	deleteHistory = false,
+	address,
 }: {
 	item: DisconnectItem;
 	error?: string;
 	deleteHistory?: boolean;
+	/** The address the page was asked for, with its query, so the keys sheet can open over it. */
+	address?: string;
 }) {
 	const url = `/accounts/${item.id}/disconnect`;
 	return (
@@ -239,6 +242,7 @@ function DisconnectPage({
 			title={`Disconnect ${item.institution_name}? · Tally`}
 			active="accounts"
 			demo={false}
+			currentPath={address}
 			{...plaidScripts(true)}
 		>
 			<h1 class="font-serif text-4xl font-semibold tracking-tight">
@@ -294,7 +298,12 @@ accounts.get("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	if (c.env.DEMO === "true" || !enabled(c.env)) return c.notFound();
 	const item = await disconnectItem(c.env.DB, Number(c.req.param("itemId")));
 	if (!item || item.disconnected_at !== null) return c.notFound();
-	return c.html(<DisconnectPage item={item} />);
+	return c.html(
+		<DisconnectPage
+			item={item}
+			address={c.req.path + new URL(c.req.url).search}
+		/>,
+	);
 });
 
 /** Back to Accounts: htmx gets the page with a toast and an announcement; plain browsers are redirected. */

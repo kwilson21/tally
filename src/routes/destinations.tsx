@@ -3,6 +3,7 @@ import { householdToday } from "../dates";
 import { accountsByBank } from "../db/accounts";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
+import { KeysDetails } from "../views/keys";
 import { Layout } from "../views/layout";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 
@@ -59,7 +60,12 @@ destinations.get("/more", async (c) => {
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ContentsList
 				places={contentsPlaces({ demo, banks, today, toCheck: queue.length })}
-			/>
+			>
+				{/* Below lg the keys' row ends the list (decision 118); from lg the foot of a page has them. */}
+				<li class="lg:hidden">
+					<KeysDetails row />
+				</li>
+			</ContentsList>
 			<Colophon demo={demo} version={c.env.APP_VERSION} />
 		</Layout>,
 	);

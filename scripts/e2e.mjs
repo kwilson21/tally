@@ -415,6 +415,25 @@ await page.locator('[role="dialog"]').waitFor({ state: "detached" });
 assert.equal(await rows(), 8);
 step("excluding a transaction takes it out of the list, leaving 8");
 
+// The keys (#72): j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on that row.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.keyboard.press("j");
+const onRow = () =>
+	page.evaluate(
+		() => document.activeElement?.hasAttribute("data-row") ?? false,
+	);
+assert.equal(await onRow(), true, "j focuses a transaction row");
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(() =>
+	document.activeElement?.hasAttribute("data-row"),
+);
+step(
+	"j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on the row",
+);
+
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /8 transactions need a category/ })
