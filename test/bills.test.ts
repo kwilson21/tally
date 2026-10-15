@@ -118,11 +118,12 @@ describe("Bills", () => {
 			expect(html).toMatch(
 				/\$[\d,]+ a month in bills, \$[\d,]+ still to pay in [A-Z][a-z]+/,
 			);
+			// Paid this month takes the paid row's full amount, not the $12.34 a 98.8% payment leaves (issue #601).
 			for (const [status, total] of [
 				["Overdue", "$123.45"],
 				["Due in the next 7 days", "$234.56"],
 				["Upcoming", "$345.67 this month"],
-				["Paid this month", "$12.34"],
+				["Paid this month", "$1,012.34"],
 			] as const)
 				expect(groupUnder(html, status)).toContain(
 					`<span class="ml-auto shrink-0">${total}</span>`,
@@ -955,7 +956,9 @@ describe("Bills", () => {
 				await exports.default.fetch("http://tally.test/")
 			).text();
 			const headline =
-				html.match(/class="font-serif text-6xl[^"]*">([^<]*)</)?.[1] ?? "";
+				html.match(
+					/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
+				)?.[1] ?? "";
 			expect(headline).toMatch(/^\$\d/);
 			expect(html).toContain(
 				"Eating Out is $36 over. Everything else is on track.",
@@ -1652,7 +1655,7 @@ describe("Bills", () => {
 				.first("n");
 		const safeToSpend = async () =>
 			(await (await exports.default.fetch("http://tally.test/")).text()).match(
-				/class="font-serif text-6xl[^"]*">([^<]*)</,
+				/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
 			)?.[1];
 
 		beforeEach(async () => {
