@@ -1972,7 +1972,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 });
 
 // P127 (#500 part 1): Home's Safe to spend row on a small phone, drawn for the owner's pick. Each picture
-// is Home's top at 320 or 390 px, so the drawing and the amount are measured where they really lay out.
+// is Home's top at 320, 360 or 390 px, so the drawing and the amount are measured where they really lay out.
 describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (#500)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
 	// Each option's chunk, from its heading to the next (the first chunk is the note above the first option).
@@ -1985,7 +1985,16 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			(m) => m[1] ?? "",
 		);
 	const AMOUNTS = ["$9,999", "−$9,999"];
-	const WIDTHS = [320, 390];
+	const WIDTHS = [320, 360, 390];
+	// Tailwind's spacing step is 4 px: pr-16 is 64 px, pr-4 is 16 px, pr-2 is 8 px.
+	const ROOM: Record<number, string> = {
+		320: "pr-16",
+		360: "pr-4",
+		390: "pr-2",
+	};
+	const ROOM_PX: Record<number, number> = { 320: 64, 360: 16, 390: 8 };
+	// Option A's drawing shows from this frame width up (the measured fit, as home-top.tsx's cost note says).
+	const N = 375;
 
 	it("opens the page with its section first, titled and dated as the brief asks", async () => {
 		const html = await drawn();
@@ -2007,17 +2016,20 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		);
 	});
 
-	it("draws P127 as one specimen with its title", async () => {
+	it("draws P127 as one specimen with its title and its sentence over 320, 360 and 390 px", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		expect(chunk).toContain("P127 · Safe to spend on a small phone");
+		expect(chunk).toContain(
+			"Home&#39;s Safe to spend row at 320, 360 and 390 px, with $9,999 and −$9,999:",
+		);
 	});
 
-	it("draws today on main and options A to C, each with four pictures: 320 then 390 px, $9,999 then −$9,999", async () => {
+	it("draws today on main and options A to C, each with six pictures: 320, 360, then 390 px, $9,999 then −$9,999", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const list = options(chunk);
 		expect(list.length).toBe(4);
 		expect(list[0]).toContain("Reference · Today on main");
-		expect(list[1]).toContain("Option A · No drawing below 360 px");
+		expect(list[1]).toContain(`Option A · No drawing below ${N} px`);
 		expect(list[2]).toContain("Option B · A smaller drawing on phones");
 		expect(list[3]).toContain("Option C · The drawing under the amount");
 		const expected = WIDTHS.flatMap((w) =>
@@ -2032,34 +2044,47 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		}
 	});
 
-	it("lays each picture out in a frame as wide as its phone, 320 or 390 px, as a container", async () => {
+	it("lays each picture out in a frame as wide as its phone, 320, 360 or 390 px, as a container, all one height", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const frames = [...chunk.matchAll(/<div role="img"[^>]*class="([^"]*)"/g)];
-		expect(frames.length).toBe(16);
+		expect(frames.length).toBe(24);
 		frames.forEach((frame, i) => {
-			const width = WIDTHS[Math.floor(i / 2) % 2];
+			const width = WIDTHS[Math.floor(i / 2) % 3];
 			expect(frame[1]).toContain(`w-[${width}px]`);
 			expect(frame[1]).toContain("@container");
 		});
+		// Every frame shares one height, and it is no longer the 420 px the first draft used.
+		const heights = new Set(
+			frames.map((frame) => frame[1]?.match(/h-\[\d+px\]/)?.[0]),
+		);
+		expect(heights.size).toBe(1);
+		expect(heights.has("h-[420px]")).toBe(false);
 	});
 
-	it("gives the 320 px frames room for their widest spill (55 px) and the 390 px frames less, so both columns fit the card", async () => {
+	it("gives each width room for its widest spill, and each row's two frames fit the card", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const wrappers = [
 			...chunk.matchAll(/<div class="([^"]*)"><div role="img"/g),
 		];
-		expect(wrappers.length).toBe(16);
+		expect(wrappers.length).toBe(24);
 		wrappers.forEach(([, cls = ""], i) => {
-			const width = WIDTHS[Math.floor(i / 2) % 2];
-			expect(cls).toContain(width === 320 ? "pr-16" : "pr-8");
+			const width = WIDTHS[Math.floor(i / 2) % 3] ?? 0;
+			expect(cls).toContain(ROOM[width]);
 		});
+		// The grid lays out one width per row: two columns, not the three-row flow of the first draft.
+		expect(chunk.match(/grid w-max grid-cols-2 gap-x-4 gap-y-6/g)?.length).toBe(
+			4,
+		);
+		expect(chunk).not.toContain("grid-rows-2");
 		const cards = [
 			...chunk.matchAll(
 				/class="flex min-w-0 max-w-full flex-col gap-4 w-\[(\d+)px\]"/g,
 			),
 		];
 		expect(cards.length).toBe(4);
-		// Two columns: 320 px with 64 px of room, a 16 px gap, then 390 px with 32 px of room (822 px).
+		// The widest row is 390 px with 8 px of room, beside itself with a 16 px gap: 2 × 398 + 16 = 812 px.
+		const widest = Math.max(...WIDTHS.map((w) => w + (ROOM_PX[w] ?? 0)));
+		expect(2 * widest + 16).toBeLessThanOrEqual(824);
 		for (const [, width = "0"] of cards)
 			expect(Number(width)).toBeGreaterThanOrEqual(822);
 	});
@@ -2069,16 +2094,25 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const amounts = [
 			...chunk.matchAll(/<p class="[^"]*whitespace-nowrap[^"]*">([^<]*)<\/p>/g),
 		].map((m) => m[1]);
-		expect(amounts.length).toBe(16);
-		expect(amounts.filter((a) => a === "−$9,999").length).toBe(8);
-		expect(amounts.filter((a) => a === "$9,999").length).toBe(8);
+		expect(amounts.length).toBe(24);
+		expect(amounts.filter((a) => a === "−$9,999").length).toBe(12);
+		expect(amounts.filter((a) => a === "$9,999").length).toBe(12);
 	});
 
-	it("hides option A's drawing below 360 px and shows it from 360 px up, by the frame's own width", async () => {
+	it("hides option A's drawing below 375 px and shows it from 375 px up, by the frame's own width", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const [, a = ""] = options(chunk);
-		expect(a).toMatch(/class="[^"]*\bhidden\b[^"]*@min-\[360px\]:block/);
+		expect(a).toMatch(
+			new RegExp(`class="[^"]*\\bhidden\\b[^"]*@min-\\[${N}px\\]:block`),
+		);
+		expect(a).not.toContain("@min-[360px]");
 		expect(a).not.toMatch(/size-18/);
+	});
+
+	it("puts the real month navigation in every picture, inside its inert page, so its links take no focus", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		expect(chunk.match(/aria-label="Months"/g)?.length).toBe(24);
+		expect(chunk.match(/>October<\/h1>/g)?.length).toBe(24);
 	});
 
 	it("draws option B's drawing at 72 px (size-18) with a 16 px gap on phones", async () => {
@@ -2093,7 +2127,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const chunk = block(await drawn(), "p127-safe-small");
 		const [, , , c = ""] = options(chunk);
 		const pictureList = pictures(c);
-		expect(pictureList.length).toBe(4);
+		expect(pictureList.length).toBe(6);
 		for (const picture of pictureList) {
 			const amount = picture.search(/>−?\$9,999</);
 			const under = picture.indexOf('data-drawing="under"');
@@ -2102,31 +2136,39 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		}
 	});
 
-	it("draws the Fixed note with the minus fix, #388's size rule and that the drawing is decoration", async () => {
+	it("draws the Fixed note as #566's minus fix, not yet on main, with #388's size rule and that the drawing is decoration", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
+		expect(chunk).not.toContain("Fixed already");
 		expect(chunk).toContain(
-			"Fixed already: </span>the amount never wraps and its minus stays with it (#500 part 2); #388&#39;s size rule steps a long amount down; the drawing is decoration and never carries meaning.",
+			"In every picture: </span>#566&#39;s fix for #500 part 2 (not on main yet) keeps the minus with its number; #388&#39;s size rule steps a long amount down; the drawing is decoration and never carries meaning.",
 		);
 	});
 
-	it("marks exactly one option Recommended, and all four of its pictures say Fits", async () => {
+	it("draws the Reference note as main plus #566's fix, with the minus kept with its number", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		expect(chunk).toContain(
+			"What main draws now, plus #566&#39;s fix that keeps the minus with its number: the 112 px notebook sits beside the amount.",
+		);
+	});
+
+	it("marks exactly one option Recommended, and all six of its pictures say Fits", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const recommended = options(chunk).filter((o) =>
 			o.includes(">Recommended<"),
 		);
 		expect(recommended.length).toBe(1);
 		const own = captions(recommended[0] ?? "");
-		expect(own).toHaveLength(4);
+		expect(own).toHaveLength(6);
 		for (const caption of own) expect(caption.endsWith(": Fits")).toBe(true);
 	});
 
 	it("captions every picture under it with its measured fit: Fits, or Spills N px", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const all = captions(chunk);
-		expect(all.length).toBe(16);
+		expect(all.length).toBe(24);
 		for (const caption of all)
 			expect(caption).toMatch(/: (Fits|Spills \d+ px)$/);
 		// Each caption sits under its picture: the frame and its wrapper close, then the caption opens.
-		expect(chunk.match(/<\/div><\/div><figcaption/g)?.length).toBe(16);
+		expect(chunk.match(/<\/div><\/div><figcaption/g)?.length).toBe(24);
 	});
 });

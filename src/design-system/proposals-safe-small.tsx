@@ -1,15 +1,16 @@
 // P127 (#500 part 1): Home's Safe to spend row on a small phone, drawn for the owner's pick (decision 47).
-// Each picture is Home's top as the app draws it, in a frame 320 or 390 px wide, so its content lays out
+// Each picture is Home's top as the app draws it, in a frame 320, 360 or 390 px wide, so its content lays out
 // at that width. The frame is a container, so a width rule reads the frame, not the window. Whatever runs
 // past the frame's right edge shows past a terracotta guide line, in the room the wrapper leaves; the
-// caption is the fit measured in Chrome at those widths. Every picture keeps the minus with its number
-// (#500 part 2), so the amount never wraps.
+// caption is the fit measured in Chrome at those widths. The pictures include #566's fix for the minus
+// (#500 part 2, not on main yet), which keeps the minus with its number, so the amount never wraps.
 
 import { formatCents } from "../money";
 import { Wordmark } from "../views/brand";
 import { FeedbackButton } from "../views/feedback-button";
 import { headlineAmountClass } from "../views/headline-amount";
 import { LedgerIllustration } from "../views/illustration";
+import { MonthNavigation } from "../views/month-navigation";
 import { WhyLink } from "../views/why-link";
 import { Choice, Choices } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
@@ -21,40 +22,50 @@ const DEMO_STATUS = "Eating Out is $36 over. Everything else is on track.";
 const OVER_STATUS =
 	"Over budget this month. Spending more takes it further over.";
 
-type Width = 320 | 390;
+type Width = 320 | 360 | 390;
 /** Each width written out in full, so Tailwind keeps the class. */
 const FRAME_WIDTH: Record<Width, string> = {
 	320: "w-[320px]",
+	360: "w-[360px]",
 	390: "w-[390px]",
 };
 
-/** Where the drawing goes on a phone: beside the amount as today, left out below 360 px, 72 px beside it, or under the amount. */
+/** Where the drawing goes on a phone: beside the amount as today, left out below 375 px, 72 px beside it, or under the amount. */
 type Layout = "today" | "hide" | "small" | "under";
 
-/** The four pictures of an option, in order: 320 with $9,999, 320 with −$9,999, 390 with $9,999, 390 with −$9,999. */
+/** The six pictures of an option, in order: 320, 360, then 390 px, each with $9,999 above −$9,999 (width-major). */
 const SHOTS: [Width, boolean][] = [
 	[320, false],
 	[320, true],
+	[360, false],
+	[360, true],
 	[390, false],
 	[390, true],
 ];
 
 /**
- * The measured fit of each picture, in SHOTS' order: Chrome (Playwright) at 320 and 390 px, the content's
+ * The measured fit of each picture, in SHOTS' order: Chrome (Playwright) at 320, 360 and 390 px, the content's
  * right edge against the frame's right edge, rounded to whole px. "Fits" when nothing passes the edge.
  */
 const FITS: Record<Layout, string[]> = {
-	today: ["Spills 25 px", "Spills 55 px", "Fits", "Fits"],
-	hide: ["Fits", "Fits", "Fits", "Fits"],
-	small: ["Fits", "Spills 7 px", "Fits", "Fits"],
-	under: ["Fits", "Fits", "Fits", "Fits"],
+	today: [
+		"Spills 25 px",
+		"Spills 55 px",
+		"Fits",
+		"Spills 15 px",
+		"Fits",
+		"Fits",
+	],
+	hide: ["Fits", "Fits", "Fits", "Fits", "Fits", "Fits"],
+	small: ["Fits", "Spills 7 px", "Fits", "Fits", "Fits", "Fits"],
+	under: ["Fits", "Fits", "Fits", "Fits", "Fits", "Fits"],
 };
 
 /** The notebook drawing beside the amount, at a phone's width. Its size is set on the svg, so the app's lg: size can't win. */
 function Drawing({ layout }: { layout: Exclude<Layout, "under"> }) {
 	const look = {
 		today: "shrink-0 [&>svg]:size-28",
-		hide: "hidden @min-[360px]:block shrink-0 [&>svg]:size-28",
+		hide: "hidden @min-[375px]:block shrink-0 [&>svg]:size-28",
 		small: "shrink-0 [&>svg]:size-18",
 	}[layout];
 	return (
@@ -65,8 +76,9 @@ function Drawing({ layout }: { layout: Exclude<Layout, "under"> }) {
 }
 
 /**
- * Home's top as HomeTop draws it at a phone's width: the top line, the month, Safe to spend with its
- * Why? link, the amount with the minus kept with its number, and the status sentence.
+ * Home's top as HomeTop draws it at a phone's width. The pictures include #566's fix for the minus: the
+ * real month navigation, Safe to spend with its Why? link, the amount with the minus kept with its number,
+ * and the status sentence.
  */
 function HomeTop({
 	amount,
@@ -92,7 +104,11 @@ function HomeTop({
 	const status = negative ? OVER_STATUS : DEMO_STATUS;
 	return (
 		<>
-			<h1 class="font-serif text-2xl font-semibold tracking-tight">October</h1>
+			<MonthNavigation
+				month="2026-10"
+				firstMonth="2026-05"
+				currentMonth="2026-10"
+			/>
 			{layout === "under" ? (
 				<>
 					<div class="mt-2">
@@ -124,12 +140,19 @@ function HomeTop({
 	);
 }
 
+/** The room each width's wrapper leaves for its widest spill, written out in full so Tailwind keeps each class. */
+const ROOM: Record<Width, string> = {
+	320: "pr-16",
+	360: "pr-4",
+	390: "pr-2",
+};
+
 /**
  * One picture: a frame at a phone's width, with its content in an inert page and a terracotta guide
  * line at the frame's right edge. The frame's own overflow stays visible, so a spill shows past the
- * line; its wrapper leaves room for it and scrolls only past that. The 320 px frame's room is the
- * widest spill (55 px); the 390 px frame never spills, so it keeps less, and both columns fit the
- * 824 px card.
+ * line; its wrapper leaves room for it and scrolls only past that. The room is per width, in ROOM: 320 px
+ * keeps 64 px for its widest spill (55 px), 360 px keeps 16 px for its own (15 px), and 390 px never
+ * spills, so it keeps 8 px. The widest row is then 390 px, 2 × 398 + 16 = 812 px, inside the 824 px card.
  */
 function Screen({
 	name,
@@ -144,13 +167,11 @@ function Screen({
 }) {
 	const amount = negative ? NEGATIVE : POSITIVE;
 	return (
-		<div
-			class={`w-fit max-w-full overflow-x-auto ${width === 320 ? "pr-16" : "pr-8"}`}
-		>
+		<div class={`w-fit max-w-full overflow-x-auto ${ROOM[width]}`}>
 			<div
 				role="img"
 				aria-label={`${name}, ${width} px wide, with ${amount}, on a phone`}
-				class={`@container relative h-[420px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
+				class={`@container relative h-[442px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
 			>
 				<div inert class="px-5 pt-6">
 					<div class="mb-2 flex items-center justify-between gap-3">
@@ -168,11 +189,14 @@ function Screen({
 	);
 }
 
-/** The four pictures of one option, two columns: 320 px, then 390 px, each with $9,999 above −$9,999. */
+/**
+ * The six pictures of one option, two columns: each row is one width, 320, 360 then 390 px, with $9,999 on
+ * the left and −$9,999 on the right.
+ */
 function Pictures({ name, layout }: { name: string; layout: Layout }) {
 	return (
 		<div class="max-w-full overflow-x-auto">
-			<div class="grid w-max grid-flow-col grid-rows-2 gap-x-4 gap-y-6">
+			<div class="grid w-max grid-cols-2 gap-x-4 gap-y-6">
 				{SHOTS.map(([width, negative], i) => (
 					<figure class="flex w-fit flex-col gap-2">
 						<Screen
@@ -192,37 +216,37 @@ function Pictures({ name, layout }: { name: string; layout: Layout }) {
 	);
 }
 
-/** P127: four options for Home's Safe to spend row on a small phone, each drawn at 320 and 390 px. */
+/** P127: four options for Home's Safe to spend row on a small phone, each drawn at 320, 360 and 390 px. */
 export function SafeToSpendSmallProposal() {
 	return (
 		<Specimen
 			id="p127-safe-small"
 			title="P127 · Safe to spend on a small phone"
 			tier="visual"
-			sentence="Home's Safe to spend row at 320 and 390 px, with $9,999 and −$9,999: the notebook stays beside the amount, goes, shrinks, or moves under it. Each caption is the measured fit."
+			sentence="Home's Safe to spend row at 320, 360 and 390 px, with $9,999 and −$9,999: the notebook stays beside the amount, goes, shrinks, or moves under it. Each caption is the measured fit."
 		>
 			<p class="max-w-prose text-sm">
-				<span class="font-medium">Fixed already: </span>
-				the amount never wraps and its minus stays with it (#500 part 2); #388's
-				size rule steps a long amount down; the drawing is decoration and never
+				<span class="font-medium">In every picture: </span>#566's fix for #500
+				part 2 (not on main yet) keeps the minus with its number; #388's size
+				rule steps a long amount down; the drawing is decoration and never
 				carries meaning.
 			</p>
 			<Choices>
 				<Choice
 					name="Reference · Today on main"
-					note="What main draws now, with the minus kept with its number: the 112 px notebook sits beside the amount."
+					note="What main draws now, plus #566's fix that keeps the minus with its number: the 112 px notebook sits beside the amount."
 					width="w-[824px]"
 				>
 					<Pictures name="Reference · Today on main" layout="today" />
 				</Choice>
 				<Choice
-					name="Option A · No drawing below 360 px"
-					note="Under 360 px the notebook is left out, so the amount has the whole row; from 360 px up it stays beside the amount, as today."
-					cost="a wrapper div with a class around the drawing in home-top.tsx. Home is 8 px shorter at 320 px and the same at 390 px."
-					why="it fits all four pictures, and of those options it changes Home's height least."
+					name="Option A · No drawing below 375 px"
+					note="Under 375 px the notebook is left out, so the amount has the whole row; from 375 px up it stays beside the amount, as today."
+					cost="a wrapper div with hidden min-[375px]:block around the drawing in home-top.tsx. Home is 8 px shorter at 320 and 360 px and the same at 390 px."
+					why="it fits all six pictures, and of those options it changes Home's height least."
 					width="w-[824px]"
 				>
-					<Pictures name="Option A · No drawing below 360 px" layout="hide" />
+					<Pictures name="Option A · No drawing below 375 px" layout="hide" />
 				</Choice>
 				<Choice
 					name="Option B · A smaller drawing on phones"
@@ -238,7 +262,7 @@ export function SafeToSpendSmallProposal() {
 				<Choice
 					name="Option C · The drawing under the amount"
 					note="On phones the notebook moves under the amount, right-aligned beside the status sentence, so the amount has the full width; desktop keeps today's row."
-					cost="markup in home-top.tsx: the row splits in two on phones. Home is 48 px taller at 320 px and at 390 px."
+					cost="markup in home-top.tsx: the row splits in two on phones. Home is 48 px taller at 320, 360 and 390 px."
 					width="w-[824px]"
 				>
 					<Pictures
