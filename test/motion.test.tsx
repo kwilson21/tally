@@ -599,12 +599,43 @@ describe("the proposals page's drawings", () => {
 				.flatMap((s) => [...s.matchAll(/\.(proposal-[a-z0-9-]+)/g)])
 				.map((m) => m[1]),
 		);
-		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), and
-		// P118 and P119's saved-row replays (the tick, the let-go press and the toast).
+		// What's left is the loop that draws the unpicked B's morph and sliding pages (and C's cuts), P118 and
+		// P119's saved-row replays (the tick, the let-go press and the toast), and P125's replays of a family's
+		// first week (the headline and status lines, the promises and found lines, the strikes, the pencil and ink, the strokes,
+		// the ledger line and the rule, and E's answered question, its press, its Bills line, its drawn stroke and its counter),
+		// plus the three step classes that set when a line starts (no animation of their own).
 		expect([...classes].sort()).toEqual(
 			[
 				"proposal-200",
 				"proposal-cut",
+				"proposal-first-amount",
+				"proposal-first-answer",
+				"proposal-first-bar",
+				"proposal-first-bills",
+				"proposal-first-counter-after",
+				"proposal-first-counter-before",
+				"proposal-first-cross",
+				"proposal-first-draw",
+				"proposal-first-fact",
+				"proposal-first-ink-on",
+				"proposal-first-ink-text",
+				"proposal-first-label",
+				"proposal-first-last",
+				"proposal-first-later",
+				"proposal-first-line",
+				"proposal-first-name",
+				"proposal-first-pencil-off",
+				"proposal-first-press",
+				"proposal-first-promise",
+				"proposal-first-rule",
+				"proposal-first-second-round",
+				"proposal-first-status-first",
+				"proposal-first-status-last",
+				"proposal-first-status-middle",
+				"proposal-first-strike",
+				"proposal-first-stroke",
+				"proposal-first-title-first",
+				"proposal-first-title-last",
 				"proposal-loop",
 				"proposal-morph",
 				"proposal-saved-chevron",
@@ -754,6 +785,97 @@ describe("the proposals page's drawings", () => {
 		expect(stops("replay-press").get("30%")?.get("background-color")).toBe(
 			"transparent",
 		);
+	});
+
+	it("times Option E's replay in keyframe stops (1% is 60 ms of the six-second loop): the answer fades 18% to 20.5%, the Bills line writes in 20% to 23.33%, the third stroke draws 25% to 28.33% and inks 30% to 32.5%, and the counter turns to 3 of 5 over the same 30% to 32.5%", () => {
+		const stops = (name: string) =>
+			new Map(
+				keyframes(name).flatMap((r) =>
+					selectorsOf(r).map((s) => [s, r.decls] as const),
+				),
+			);
+		// The answer: full strength and ink until 18%, then 40% in muted words from 20.5% (150 ms).
+		expect([...stops("replay-first-answer").keys()]).toEqual([
+			"0%",
+			"18%",
+			"20.5%",
+			"100%",
+		]);
+		expect(stops("replay-first-answer").get("18%")?.get("opacity")).toBe("1");
+		expect(stops("replay-first-answer").get("20.5%")?.get("opacity")).toBe(
+			"0.4",
+		);
+		expect(stops("replay-first-answer").get("20.5%")?.get("color")).toBe(
+			"var(--color-muted)",
+		);
+		// The primary button: the press tint from 15% to 17.5% (150 ms), held, and released by 22.5%.
+		expect([...stops("replay-first-press").keys()]).toEqual([
+			"0%",
+			"15%",
+			"17.5%",
+			"20%",
+			"22.5%",
+			"100%",
+		]);
+		expect(
+			stops("replay-first-press").get("17.5%")?.get("background-color"),
+		).toBe("var(--color-press)");
+		expect(
+			stops("replay-first-press").get("22.5%")?.get("background-color"),
+		).toBe("var(--color-ink)");
+		// The Bills line: hidden to 20%, then fades in and rises 4 px by 23.33% (200 ms).
+		expect([...stops("replay-first-bills").keys()]).toEqual([
+			"0%",
+			"20%",
+			"23.33%",
+			"100%",
+		]);
+		expect(stops("replay-first-bills").get("20%")?.get("opacity")).toBe("0");
+		expect(stops("replay-first-bills").get("23.33%")?.get("opacity")).toBe("1");
+		// The third stroke: its dash is drawn in from nothing, 25% to 28.33% (200 ms), then it turns to ink, 30% to 32.5%.
+		expect([...stops("replay-first-draw").keys()]).toEqual([
+			"0%",
+			"25%",
+			"28.33%",
+			"100%",
+		]);
+		expect(
+			stops("replay-first-draw").get("25%")?.get("stroke-dashoffset"),
+		).toBe("23");
+		expect(
+			stops("replay-first-draw").get("28.33%")?.get("stroke-dashoffset"),
+		).toBe("0");
+		expect([...stops("replay-first-stroke-late").keys()]).toEqual([
+			"0%",
+			"30%",
+			"32.5%",
+			"100%",
+		]);
+		expect(stops("replay-first-stroke-late").get("30%")?.get("stroke")).toBe(
+			"var(--color-muted)",
+		);
+		expect(stops("replay-first-stroke-late").get("32.5%")?.get("stroke")).toBe(
+			"var(--color-ink)",
+		);
+		// The counter: 2 of 5 fades out over 30% to 32.5% while 3 of 5 fades in over the same stops.
+		expect([...stops("replay-first-counter-before").keys()]).toEqual([
+			"0%",
+			"30%",
+			"32.5%",
+			"100%",
+		]);
+		expect(
+			stops("replay-first-counter-before").get("32.5%")?.get("opacity"),
+		).toBe("0");
+		expect([...stops("replay-first-counter-after").keys()]).toEqual([
+			"0%",
+			"30%",
+			"32.5%",
+			"100%",
+		]);
+		expect(
+			stops("replay-first-counter-after").get("32.5%")?.get("opacity"),
+		).toBe("1");
 	});
 
 	it("keeps the switch moving too: it is drawn Off, and the loop slides the real knob and track from the On look", async () => {
