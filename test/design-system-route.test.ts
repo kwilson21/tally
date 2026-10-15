@@ -729,6 +729,25 @@ describe("GET /design-system in the demo", () => {
 		expect(section).toContain("Auto · paid Car registration");
 	});
 
+	it("shows a paid plan's sheet with the day the app shows, 'Oct 3', not the stored date (#627)", async () => {
+		const { html } = await get("/design-system");
+		// Up to the next specimen: the sheets inside it close with their own </section>.
+		const section =
+			html.split('id="planned-expense"')[1]?.split('id="bill-finding"')[0] ??
+			"";
+		// The paid sheet's drawing runs up to the next state, Delete asks first.
+		const start = section.search(
+			/A plan(&#39;|')s sheet once it(&#39;|')s paid, with Unlink/,
+		);
+		expect(start).toBeGreaterThan(-1);
+		const paid = section.slice(
+			start,
+			section.indexOf("Delete asks first", start),
+		);
+		expect(paid).toContain("DMV · Oct 3 · $180.00");
+		expect(paid).not.toContain("2026-10-03");
+	});
+
 	it("says which refund and bill a TransactionRow caption keeps, in its sentence and DESIGN.md (#382)", async () => {
 		const { html } = await get("/design-system");
 		const section =
