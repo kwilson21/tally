@@ -26,7 +26,7 @@ import { PolishRoundCProposals } from "./proposals-polish-4";
 import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 111), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 114), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -465,8 +465,14 @@ export const DECIDED: readonly {
 	{
 		title: "P124 · What a first visit shows and teaches",
 		outcome:
-			"Option A, for the demo only: the banner's “Start here” opens How Tally works' new first section, Tally's story in three struck-through bank lines with Tally's rows and the total under a double rule; Things to try leaves Home, each screen's How this works moves to its page's foot, and How it's built moves last (#502). The family's first week was sent back for a more creative design (#95) (decision 111).",
+			"Option A, for the demo only: the banner's “Start here” opens How Tally works' new first section, Tally's story in three struck-through bank lines with Tally's rows and the total under a double rule; Things to try leaves Home, each screen's How this works moves to its page's foot, and How it's built moves last (#502) (decision 111). The family's first week is P125 E (#95).",
 		issue: 501,
+	},
+	{
+		title: "P125 · A new family's first week",
+		outcome:
+			"Option E: until setup is done, Home names the notebook's five strokes (link your bank, your pay, your bills, your budgets, and Tally's first night on its own) and the next morning asks three things one at a time from the family's own bank, each answer a ledger line and each step a stroke; budgets kept all in one tap or one at a time, each suggested as the mean of the full months Tally has, rounded up to the next $10; the demo keeps P124 A (decision 114).",
+		issue: 95,
 	},
 ];
 
@@ -500,11 +506,11 @@ export function Proposals() {
 
 			<section aria-labelledby="polish5-title" class="mt-12">
 				<h2 id="polish5-title" class="font-serif text-3xl font-semibold">
-					Open: the polish track, a new family's first week
+					Picked: the polish track, a new family's first week
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 14 for the owner's pick: five ways a family's first week can
-					feel, from linking a bank to a Home that's just Home.
+					Drawn Oct 14. The owner's pick, marked Picked, is decision 114: E, the
+					notebook filled in one question at a time.
 				</p>
 				<PolishRoundDProposals />
 			</section>

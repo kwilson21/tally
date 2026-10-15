@@ -62,6 +62,8 @@ const EXCEPTIONS: Record<string, string[]> = {
 	// The word "rounded" in three lines of visible prose ("rounded up to the next $10", the brief's words), not a
 	// class: no class in proposals-polish-5.tsx is a bare "rounded".
 	"../src/design-system/proposals-polish-5.tsx": ["rounded"],
+	// The word "rounded" in P125's DECIDED outcome ("rounded up to the next $10", decision 114's words), not a class.
+	"../src/design-system/proposals.tsx": ["rounded"],
 	"../src/views/month-end.tsx": ["shadow-swipe-cue"],
 	"../src/design-system/tokens.ts": ["shadow-swipe-cue"],
 	"../src/design-system/proposals-polish.tsx": [

@@ -2113,6 +2113,7 @@ export function PolishRoundDProposals() {
 					note="C's notebook shows how far along you are, and D's plain questions fill it in: your pay, your bills, then your budgets, all from your own last 90 days."
 					cost="a kept record of the five strokes (one household setting), a question page, and a first-budget rule (a spec line); no polling, since the questions are ready the next morning."
 					why="every step says what it's for, every number comes from the family's own bank, and the longest part, the budgets, can be one tap."
+					picked
 				>
 					<Shot caption="Before a bank: five strokes and you're set up">
 						<Phone

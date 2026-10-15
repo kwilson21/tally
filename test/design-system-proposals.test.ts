@@ -372,7 +372,7 @@ describe("GET /design-system/proposals", () => {
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
-			// P125 gives each of its four options a reason too (its A is the one recommended).
+			// P125 gives each of its five options a reason too (its E is the one recommended).
 			const eachOption =
 				id === "p118-rows" || id === "p119-saved" || id === "p125-first-week";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
@@ -380,7 +380,7 @@ describe("GET /design-system/proposals", () => {
 				id,
 				eachOption ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
 			]);
-			// P34 on mark the owner's pick (decisions 72–86), and P118 to P124 mark the owner's picks (decision 111).
+			// P34 on mark the owner's pick (decisions 72–86), and P118 to P125 mark the owner's picks (decisions 111 and 114).
 			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			const twoPicks = [
@@ -390,9 +390,8 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P125 and P126 are open: the owner has not picked from them yet, so they carry no Picked pill.
-			const expected =
-				n < 34 || n === 125 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P126 is open: the owner has not picked from it yet, so it carries no Picked pill.
+			const expected = n < 34 || n === 126 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -424,7 +423,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(79);
+		expect(DECIDED.length).toBe(80);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -450,7 +449,25 @@ describe("GET /design-system/proposals", () => {
 		}
 		const firstVisit = DECIDED.find((d) => d.title.startsWith("P124 ·"));
 		expect(firstVisit?.outcome).toContain("for the demo only");
-		expect(firstVisit?.outcome).toContain("first week was sent back");
+		expect(firstVisit?.outcome).toContain(
+			"The family's first week is P125 E (#95)",
+		);
+	});
+
+	it("lists P125 as decided with issue 95, decision 114 and option E, and the demo keeping P124 A", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P125 ·"));
+		expect(entry?.title).toBe("P125 · A new family's first week");
+		expect(entry?.issue).toBe(95);
+		expect(entry?.outcome).toContain(
+			"Option E: until setup is done, Home names the notebook's five strokes",
+		);
+		expect(entry?.outcome).toContain(
+			"link your bank, your pay, your bills, your budgets, and Tally's first night on its own",
+		);
+		expect(entry?.outcome).toContain("rounded up to the next $10");
+		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
+		// P125 is the last entry: after P124 (issue 501), so the list stays in proposal order.
+		expect(DECIDED.at(-1)).toBe(entry);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -854,7 +871,7 @@ describe("GET /design-system/proposals", () => {
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
-	it("marks the owner's picks for P118 to P124 (decision 111): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
+	it("marks the owner's picks for P118 to P125 (decisions 111 and 114): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
 		const { html } = await get("/design-system/proposals");
 		const picks = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
@@ -880,7 +897,9 @@ describe("GET /design-system/proposals", () => {
 		expect(picks("p122-more")).toEqual(["Option A · Contents page"]);
 		expect(picks("p123-feedback")).toEqual(["Option A · In the top line"]);
 		expect(picks("p124-first-visit")).toEqual(["Option A · The first page"]);
-		expect(picks("p125-first-week")).toEqual([]);
+		expect(picks("p125-first-week")).toEqual([
+			"Option E · The notebook, one question at a time",
+		]);
 	});
 
 	describe("P118 and P119 · the polish track, picked (#497, #71, decision 111)", () => {
@@ -1123,9 +1142,9 @@ describe("GET /design-system/proposals", () => {
 		expect(html).toContain(
 			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what More shows, where Feedback lives, and what a first visit shows and teaches.",
 		);
-		// P124 A is the pick for the demo's first visit; the family's first week is still being redrawn.
+		// P124 A is the pick for the demo's first visit; the family's first week is P125 E (decision 114).
 		expect(html).toContain(
-			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is being redrawn.",
+			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is P125 E.",
 		);
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
@@ -1972,7 +1991,7 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 	});
 });
 
-// P125 (#95): a family's first week, four ways, drawn for the owner's pick. Proposal only: nothing in the app changes.
+// P125 (#95): a family's first week, five ways, drawn for the owner's pick and picked as E (decision 114). Proposal only: nothing in the app changes.
 describe("GET /design-system/proposals, polish round D (P125, a new family's first week)", () => {
 	// The P125 section, up to the next top-level section (its pictures can hold sections of their own).
 	const section = (html: string) => {
@@ -2015,10 +2034,10 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 			html.indexOf('<section aria-labelledby="polish4-title"'),
 		);
 		expect(html).toContain(
-			'<h2 id="polish5-title" class="font-serif text-3xl font-semibold">Open: the polish track, a new family&#39;s first week</h2>',
+			'<h2 id="polish5-title" class="font-serif text-3xl font-semibold">Picked: the polish track, a new family&#39;s first week</h2>',
 		);
 		expect(html).toContain(
-			"Drawn Oct 14 for the owner&#39;s pick: five ways a family&#39;s first week can feel, from linking a bank to a Home that&#39;s just Home.",
+			"Drawn Oct 14. The owner&#39;s pick, marked Picked, is decision 114: E, the notebook filled in one question at a time.",
 		);
 		expect(html).toContain('<section id="p125-first-week"');
 		expect(html).toContain(
@@ -2026,7 +2045,7 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		);
 	});
 
-	it("draws five options: E recommended and none picked, each with its cost and its reason, all in the family's app", async () => {
+	it("draws five options: E recommended and picked (decision 114), each with its cost and its reason, all in the family's app", async () => {
 		const { html } = await get("/design-system/proposals");
 		const chunk = section(html);
 		const names = [...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map(
@@ -2035,7 +2054,8 @@ describe("GET /design-system/proposals, polish round D (P125, a new family's fir
 		expect(names).toEqual(OPTIONS);
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
 		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Recommended<");
-		expect(chunk).not.toContain(">Picked<");
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
+		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Picked<");
 		expect(chunk.match(/Trade-off: /g)?.length).toBe(5);
 		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(5);
 		// The family's first week has no demo banner: none of these pictures draws one.
@@ -2992,14 +3012,15 @@ describe("GET /design-system/proposals, P125 round E (the stroke list, C and D f
 		);
 	});
 
-	it("gives the Recommended pill to option E alone, and takes it off option A", async () => {
+	it("gives the Recommended and Picked pills to option E alone, and takes both off option A", async () => {
 		const chunk = section(await drawn());
 		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
-		expect(
-			option(chunk, "Option E · The notebook, one question at a time"),
-		).toContain(">Recommended<");
-		expect(option(chunk, "Option A · The Opening Entry")).not.toContain(
-			">Recommended<",
-		);
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
+		const e = option(chunk, "Option E · The notebook, one question at a time");
+		expect(e).toContain(">Recommended<");
+		expect(e).toContain(">Picked<");
+		const a = option(chunk, "Option A · The Opening Entry");
+		expect(a).not.toContain(">Recommended<");
+		expect(a).not.toContain(">Picked<");
 	});
 });

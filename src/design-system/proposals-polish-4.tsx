@@ -1424,7 +1424,7 @@ export function PolishRoundCProposals() {
 				</Fixed>
 				<p class="mt-6">
 					P124 A is picked for the demo's first visit; the family's first week
-					is being redrawn.
+					is P125 E.
 				</p>
 				<Choices>
 					<Choice
