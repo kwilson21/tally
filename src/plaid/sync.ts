@@ -52,7 +52,15 @@ type SyncResponse = {
 	removed: { transaction_id: string }[];
 	next_cursor: string;
 	has_more: boolean;
+	/**
+	 * Plaid's own report of the Item's pulls: TRANSACTIONS_UPDATE_STATUS_UNKNOWN, NOT_READY, INITIAL_UPDATE_COMPLETE or
+	 * HISTORICAL_UPDATE_COMPLETE (Plaid's transactions API reference, /transactions/sync).
+	 */
+	transactions_update_status?: string | null;
 };
+
+/** Plaid's transactions_update_status once the Item's 90-day history is in (spec §5, #581). */
+const HISTORICAL_UPDATE_COMPLETE = "HISTORICAL_UPDATE_COMPLETE";
 
 type ItemRow = {
 	access_token_encrypted: ArrayBuffer;
@@ -460,7 +468,11 @@ export async function syncItem(
 	itemRowId: number,
 	fetchImpl?: typeof fetch,
 	// The daily catch-up and Sync now sync every bank, then run the after-sync step once for all of them.
-	{ runAfterSync = true }: { runAfterSync?: boolean } = {},
+	// `historyComplete`: the webhook said Plaid's 90-day history is in, so this sync ran after it (#581).
+	{
+		runAfterSync = true,
+		historyComplete = false,
+	}: { runAfterSync?: boolean; historyComplete?: boolean } = {},
 ): Promise<SyncResult> {
 	const lockId = crypto.randomUUID();
 	const lock = await env.DB.prepare(
@@ -537,6 +549,9 @@ export async function syncItem(
 		// pass wrote remain.
 		const openMerchantKeys = new Set<string>();
 		let holdAt: { cursor: string | null } | null = null;
+		// Plaid said the 90-day history is in: by the webhook, or by a page's transactions_update_status. Kept across a
+		// restart, since Plaid's report doesn't change with the pass (#581).
+		let historyReported = historyComplete;
 
 		for (;;) {
 			let page: SyncResponse;
@@ -579,6 +594,8 @@ export async function syncItem(
 				);
 			}
 
+			if (page.transactions_update_status === HISTORICAL_UPDATE_COMPLETE)
+				historyReported = true;
 			// Pending transactions are stored and counted like posted ones (decision 67).
 			const added = page.added;
 			if (
@@ -1078,9 +1095,14 @@ export async function syncItem(
 					),
 				);
 			}
+			// The last page's write also stamps the first sync that ran after Plaid said the history was in (#581): the same
+			// batch, so the stamp means the history's pages are in. COALESCE keeps the first stamp of all.
+			const lastPageStamp = historyReported
+				? ", last_synced_at = datetime('now'), history_complete_at = COALESCE(history_complete_at, datetime('now'))"
+				: ", last_synced_at = datetime('now')";
 			statements.push(
 				env.DB.prepare(
-					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : ", last_synced_at = datetime('now')"}
+					`UPDATE plaid_items SET sync_cursor = ?${page.has_more ? "" : lastPageStamp}
 					 WHERE id = ? AND sync_lock_id = ? AND disconnected_at IS NULL`,
 				).bind(
 					page.has_more && holdAt ? holdAt.cursor : page.next_cursor,
