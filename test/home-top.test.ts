@@ -29,11 +29,10 @@ describe("HomeTop", () => {
 		expect(html).toContain('href="/how-it-works#budget"');
 		expect(html).toContain('aria-label="Why? safe to spend"');
 		expect(at("$283")).toBeLessThan(at("Eating Out is $36 over"));
-		expect(at("Eating Out is $36 over")).toBeLessThan(at("How this works"));
 		expect(at("Eating Out is $36 over")).toBeLessThan(at("forecast"));
-		expect(at("How this works")).toBeLessThan(
-			at("12 transactions need a category"),
-		);
+		expect(at("forecast")).toBeLessThan(at("12 transactions need a category"));
+		// How this works is at the foot of Home, not in its top (P124 A, decision 111).
+		expect(html).not.toContain("How this works");
 	});
 
 	it("keeps the month a heading, but smaller than the number, so the number is the one thing", async () => {
@@ -103,6 +102,6 @@ describe("HomeTop", () => {
 	it("shows no Band when nothing needs a category", async () => {
 		const html = await top({ band: undefined });
 		expect(html).not.toContain("bg-band");
-		expect(html).toContain("How this works");
+		expect(html).not.toContain("How this works");
 	});
 });

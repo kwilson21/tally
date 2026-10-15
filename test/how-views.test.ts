@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StartHereLines } from "../src/db/transactions";
 import { START_HERE } from "../src/design-system/mock";
-import { HowLink } from "../src/views/how-link";
+import { HowFoot, HowLink } from "../src/views/how-link";
 import { DemoBanner } from "../src/views/layout";
 import { StartHere } from "../src/views/start-here";
 import { SystemDiagram } from "../src/views/system-diagram";
@@ -216,6 +216,16 @@ describe("HowLink", () => {
 		expect(html).toContain("min-h-11");
 		// Each link says where it goes, so several on one page stay distinct (WCAG 2.4.4).
 		expect(html).toContain('aria-label="How this works: the budget"');
+	});
+});
+
+// P124 A (decision 111): each page's link sits at its foot, under a short rule.
+describe("HowFoot", () => {
+	it("draws a short rule, then the same HowLink under it", async () => {
+		const foot = String(await HowFoot({ section: "bills" }));
+		expect(foot).toBe(
+			`<div class="mt-8"><div class="w-12 border-t border-muted"></div><div class="mt-2">${String(await HowLink({ section: "bills" }))}</div></div>`,
+		);
 	});
 });
 

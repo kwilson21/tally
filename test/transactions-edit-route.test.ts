@@ -1996,6 +1996,18 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		expect((sheet.match(/>How this works<\/a>/g) ?? []).length).toBe(1);
 		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
 	});
+
+	// P124 A (decision 111): the sheet's How this works sits at its foot, under a short rule, after Save.
+	it("puts How this works at the foot of the edit sheet, after Save", async () => {
+		const html = (await get(`/transactions/${bakery}`)).html;
+		const foot = html.search(
+			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#categorization" aria-label="How this works: categories" class="[^"]*">How this works<\/a><\/div><\/div>/,
+		);
+		expect(foot).toBeGreaterThan(html.indexOf('id="edit-save"'));
+		expect(html.slice(foot, html.indexOf("</section>", foot))).not.toMatch(
+			/<(form|button|input|ul|li|h[1-6]|p)\b/,
+		);
+	});
 });
 
 describe("a For person removed while the panel is saving", () => {

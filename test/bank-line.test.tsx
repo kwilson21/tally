@@ -70,8 +70,8 @@ describe("HomeTop with a bank behind", () => {
 		expect(html.match(/data-icon="bank"/g) ?? []).toHaveLength(1);
 		expect(html.match(/href="\/accounts"/g) ?? []).toHaveLength(1);
 		expect(html).toContain("<li>Capital One needs signing in</li>");
-		expect(at("forecast")).toBeLessThan(at("How this works"));
-		expect(at("How this works")).toBeLessThan(at("4 need a category"));
+		expect(at("forecast")).toBeLessThan(at("4 need a category"));
+		expect(html).not.toContain("How this works");
 	});
 
 	it("keeps Fix when there is no Band", () => {
