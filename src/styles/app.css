@@ -410,6 +410,43 @@ html:not(.js) [data-money-js] {
 }
 
 /*
+ * The first page's answer (P125 E, decision 114). The reply's own ledger line rises in (first-line-new): a fade and a 4 px
+ * rise over the rising token. The reply's own notebook stroke (first-stroke-new) is drawn in pencil over the rising token,
+ * then inked over the confirm token. Reduced motion shows the end state.
+ */
+@keyframes ledger-rise {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+@keyframes stroke-draw {
+	from {
+		stroke-dashoffset: 36;
+	}
+}
+@keyframes stroke-ink {
+	from {
+		stroke: var(--color-muted);
+	}
+}
+.first-line-new {
+	animation: ledger-rise var(--duration-rising) ease-out;
+}
+.first-stroke-new {
+	stroke-dasharray: 36;
+	animation:
+		stroke-draw var(--duration-rising) ease-out,
+		stroke-ink var(--duration-confirm) linear var(--duration-rising) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+	.first-line-new,
+	.first-stroke-new {
+		animation: none;
+	}
+}
+
+/*
  * Quiet confirmations (decision 76, P74 A; decision 80, P85 A). Four moves, each over in 150 to 200 ms,
  * each a class here because the CSP forbids style attributes, and each stilled by the reduced-motion
  * block below, which shows the end state with nothing moving. A rule names a duration token above,
@@ -417,22 +454,6 @@ html:not(.js) [data-money-js] {
  * once when the element arrives. A sheet plays only when it opens: BottomSheet leaves the classes off
  * (`still`) when a swap draws the open sheet again, so an error never looks like it closing and opening.
  */
-/* The first page's newest ledger line rises in (P125 E, decision 114): a fade and a 4 px rise over the rising token.
-   Only a reply's own line gets the class (first-line-new); under reduced motion the line simply shows. */
-@keyframes ledger-rise {
-	from {
-		opacity: 0;
-		transform: translateY(4px);
-	}
-}
-.first-line-new {
-	animation: ledger-rise var(--duration-rising) ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-	.first-line-new {
-		animation: none;
-	}
-}
 @keyframes fade-in {
 	from {
 		opacity: 0;

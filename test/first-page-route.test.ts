@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { firstPage } from "../src/routes/first-page";
@@ -423,5 +423,105 @@ describe("announcements and focus", () => {
 		await charge("SPOTIFY", 1199);
 		const { res } = await post("/first-page/bills", {}, true);
 		expect(trigger(res).announce).toBe("Kept 2 bills.");
+	});
+});
+
+describe("the bank's head lines, before any answer", () => {
+	it("says the bank, its lines and their dates, and the transfers left out", async () => {
+		const first = daysBefore(TODAY, 9);
+		await txn({ date: first, raw_name: "COFFEE", amount_cents: 500 });
+		await txn({
+			date: daysBefore(TODAY, 3),
+			raw_name: "GROCER",
+			amount_cents: 4000,
+		});
+		await txn({
+			date: TODAY,
+			raw_name: "TRANSFER TO SAVINGS",
+			amount_cents: 20000,
+			flag_transfer: 1,
+		});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain(
+			`From Chase · 3 lines · ${shortDay(first, TODAY)} to ${shortDay(TODAY, TODAY)}`,
+		);
+		expect(textOf(html)).toContain("Moves between your accounts · 1 left out");
+	});
+});
+
+describe("the answer's motion", () => {
+	it("marks the notebook's pay line for its one-shot draw when the reply draws the pay stroke", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		await charge("NETFLIX", 1549);
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
+			true,
+		);
+		// The pay stroke is the second of the five, and the bills step still has a charge to keep: only its line draws.
+		expect(html.match(/first-stroke-new/g)).toHaveLength(1);
+		expect(html).toMatch(
+			/<line x1="53" y1="38" x2="53" y2="60" class="stroke-ink first-stroke-new"/,
+		);
+	});
+
+	it("marks every line the reply drew, when an empty step after the answer is done too", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
+			true,
+		);
+		// Pay is the last merchant, and no bill charge is found: the pay and the bills strokes are drawn together.
+		expect(html.match(/first-stroke-new/g)).toHaveLength(2);
+		expect(html).toMatch(
+			/<line x1="53" y1="38" x2="53" y2="60" class="stroke-ink first-stroke-new"/,
+		);
+		expect(html).toMatch(
+			/<line x1="60" y1="38" x2="60" y2="60" class="stroke-ink first-stroke-new"/,
+		);
+	});
+
+	it("marks the bills stroke when the kept bills draw it", async () => {
+		await charge("NETFLIX", 1549);
+		await charge("SPOTIFY", 1199);
+		const { html } = await post("/first-page/bills", {}, true);
+		expect(html).toMatch(
+			/<line x1="60" y1="38" x2="60" y2="60" class="stroke-ink first-stroke-new"/,
+		);
+	});
+
+	it("marks no notebook line when the reply draws no stroke", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		await deposits("SIDE GIG", 4000, 2, 30, {
+			flag_income: 0,
+			income_confidence: 0.5,
+		});
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
+			true,
+		);
+		expect(html).toContain("first-line-new");
+		expect(html).not.toContain("first-stroke-new");
+	});
+
+	it("marks no line and no stroke for a stale answer, which writes nothing", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { res, html } = await post(
+			"/first-page/pay",
+			{ merchant: "GONE MERCHANT", answer: "yes" },
+			true,
+		);
+		expect(trigger(res).announce).toBe("That one is already answered.");
+		expect(html).not.toContain("first-line-new");
+		expect(html).not.toContain("first-stroke-new");
+	});
+
+	it("marks nothing on a plain page load", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { html } = await get("/first-page");
+		expect(html).not.toContain("first-line-new");
+		expect(html).not.toContain("first-stroke-new");
 	});
 });

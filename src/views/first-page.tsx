@@ -22,19 +22,36 @@ import { Notebook } from "./notebook";
 /** One line of a ledger: an answer (ink) or what the bank says (muted). */
 export type LedgerLine = { text: string; ink?: boolean };
 
+/**
+ * What a reply changed, for its one-shot motion: whether a ledger line was added (it rises in), and the notebook's
+ * strokes it drew (their indexes in the five, which draw in pencil and then ink). A page that isn't a reply has none.
+ */
+export type Motion = { line: boolean; strokes: number[] };
+export const NO_MOTION: Motion = { line: false, strokes: [] };
+
 /** The notebook beside a question page's headline, with what it counts in words beside it. */
 export function SmallNotebook({
 	strokes,
 	text,
 	size = "size-12",
+	justDrawn = [],
 }: {
 	strokes: number;
 	text: string;
 	size?: string;
+	/** The strokes this reply drew (their indexes), which draw in pencil and then ink; none on any other page. */
+	justDrawn?: number[];
 }) {
 	return (
 		<div class="flex items-center gap-2">
-			<Notebook strokes={strokes} ink size={size} />
+			<Notebook
+				strokes={strokes}
+				ink
+				size={size}
+				lineClass={(line) =>
+					`stroke-ink${justDrawn.includes(line) ? " first-stroke-new" : ""}`
+				}
+			/>
 			<p class="text-sm text-muted">{text}</p>
 		</div>
 	);
@@ -266,10 +283,13 @@ export function FirstPageDone({
 export function FirstPageBody({
 	model,
 	focus,
+	motion = NO_MOTION,
 	id = "first-page",
 }: {
 	model: FirstPageModel;
 	focus: boolean;
+	/** What the reply changed (NO_MOTION on a page load), so only the reply's own line and stroke animate. */
+	motion?: Motion;
 	/** The root's id: the page's is `first-page`, which the swap targets; the catalog's states name their own. */
 	id?: string;
 }) {
@@ -284,10 +304,11 @@ export function FirstPageBody({
 						strokes={model.drawn}
 						text={`${model.drawn} of 5`}
 						size="size-20"
+						justDrawn={motion.strokes}
 					/>
 				}
 				lines={ledgerLines(model.ledger, model.head)}
-				fresh={focus}
+				fresh={motion.line}
 			>
 				{model.pay.length > 0 && model.pay[0] ? (
 					<PayQuestion merchant={model.pay[0]} focus={focus} />

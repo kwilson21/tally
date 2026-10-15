@@ -6320,6 +6320,21 @@ function FirstWeekGroup() {
 						focus={false}
 					/>
 				</State>
+				<State label="An answer just landed: its ledger line rises in, and its notebook stroke draws in pencil, then inks">
+					<FirstPageBody
+						id="first-page-answered"
+						model={page({
+							drawn: 2,
+							ledger: [FIRST_WEEK_PAY_LINE],
+							payAnswered: true,
+							pay: [],
+							keep: FIRST_WEEK_CHARGES,
+							waiting: [FIRST_WEEK_GYM],
+						})}
+						focus={false}
+						motion={{ line: true, strokes: [1] }}
+					/>
+				</State>
 				<State label="Nothing to keep in one tap: the step says so and names what waits">
 					<FirstPageBody
 						id="first-page-empty"

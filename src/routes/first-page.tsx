@@ -5,11 +5,10 @@ import {
 	answerPay,
 	type FirstPageModel,
 	keepBills,
-	payMerchants,
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
-import { FirstPageBody } from "../views/first-page";
+import { FirstPageBody, type Motion, NO_MOTION } from "../views/first-page";
 import { Layout } from "../views/layout";
 
 // The question page (P125 E, spec §8.8, decision 114): the family app only, opened once the gate is open. Each answer
@@ -29,10 +28,30 @@ function notOpen(c: Context<App>) {
 	return c.redirect("/", 303);
 }
 
+/**
+ * What the answer changed between the page before it and the page after: a ledger line, and the strokes it drew. The
+ * strokes are the next indexes after the `drawn` already there (the bank's stroke is index 0, so the first drawn after
+ * it is index 1). One answer can draw two, when the step after it has nothing to ask.
+ */
+function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
+	return {
+		line: after.ledger.length > before.ledger.length,
+		strokes: Array.from(
+			{ length: after.drawn - before.drawn },
+			(_, i) => before.drawn + i,
+		),
+	};
+}
+
 /** The page after an answer: the swap, and the answer announced and toasted (both keys, spec CLAUDE.md). */
-function answered(c: Context<App>, model: FirstPageModel, message: string) {
+function answered(
+	c: Context<App>,
+	model: FirstPageModel,
+	message: string,
+	motion: Motion,
+) {
 	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
-	return c.html(<FirstPageBody model={model} focus />, 200, {
+	return c.html(<FirstPageBody model={model} focus motion={motion} />, 200, {
 		"HX-Trigger": JSON.stringify({
 			toast: { message, type: "success" },
 			announce: message,
@@ -67,20 +86,21 @@ firstPage.post("/first-page/pay", async (c) => {
 	const answer = String(form.answer ?? "");
 	if (answer !== "yes" && answer !== "no")
 		return c.text("Choose yes or no.", 400);
-	const merchant = (await payMerchants(c.env.DB)).find((m) => m.key === key);
+	const before = await settleAndLoad(c.env.DB, today);
+	const merchant = before.pay.find((m) => m.key === key);
 	if (!merchant) {
 		// Nothing left to ask about this merchant: the swap shows the page as it is, and changes nothing.
-		const model = await settleAndLoad(c.env.DB, today);
-		return answered(c, model, "That one is already answered.");
+		return answered(c, before, "That one is already answered.", NO_MOTION);
 	}
 	await answerPay(c.env.DB, key, answer, actor(c));
-	const model = await settleAndLoad(c.env.DB, today);
+	const after = await settleAndLoad(c.env.DB, today);
 	return answered(
 		c,
-		model,
+		after,
 		answer === "yes"
 			? `Saved: ${merchant.name} is your pay.`
 			: `Saved: ${merchant.name} isn't your pay.`,
+		motionOf(before, after),
 	);
 });
 
@@ -90,12 +110,12 @@ firstPage.post("/first-page/bills", async (c) => {
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
 	const before = await settleAndLoad(c.env.DB, today);
 	const { kept } = await keepBills(c.env.DB, today, before.keep);
-	const model = await settleAndLoad(c.env.DB, today);
+	const after = await settleAndLoad(c.env.DB, today);
 	const message =
 		kept === 0
 			? "Nothing to keep."
 			: kept === 1
 				? "Kept 1 bill."
 				: `Kept ${kept} bills.`;
-	return answered(c, model, message);
+	return answered(c, after, message, motionOf(before, after));
 });
