@@ -4,6 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AuditRoundThreeProposals } from "./proposals-audit-3";
 import { AutofillProposals } from "./proposals-autofill";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
@@ -500,6 +501,17 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="audit3-title" class="mt-10">
+				<h2 id="audit3-title" class="font-serif text-3xl font-semibold">
+					Open: from the second design audit, Settings and suggestions
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15 for the owner's picks on #606 and #607, each beside
+					today's screen.
+				</p>
+				<AuditRoundThreeProposals />
+			</section>
 
 			<section aria-labelledby="p127-title" class="mt-10">
 				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
