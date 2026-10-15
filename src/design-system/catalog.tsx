@@ -1055,7 +1055,7 @@ const TRANSACTIONS_BUTTON_SPEC: UseSpecText = {
 		"Touch: 44px tall. Keyboard: Tab reaches it, and Enter follows it. Screen reader: “12 transactions, link”; the chevron is hidden.",
 	motion: "None.",
 	edges:
-		"Zero or fewer: nothing renders. One counted transaction reads “1 transaction”. A very large count prints in full digits with no thousands separator, so 1234 reads “1234 transactions”. A list longer than 25 rows pages, and its first page reads “Showing 1–25 of N spending transactions”. Excluded transactions are left out of both the count and the list. A late bill payment shows in the month it counts in, not the month it was paid, and a payment linked to a bill counts whatever its exclusion.",
+		"Zero or fewer: nothing renders. One counted transaction reads “1 transaction”. A very large count prints in full digits with no thousands separator, so 1234 reads “1234 transactions”. A list longer than 25 rows pages, and its first page reads “Showing 1–25 of N spending transactions”. Excluded transactions are left out of both the count and the list. A late bill payment shows in the month it counts in, not the month it was paid, and a payment linked to a bill or a planned expense counts whatever its exclusion.",
 	words: "{n} transactions · 1 transaction.",
 };
 

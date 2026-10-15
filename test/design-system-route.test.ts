@@ -567,6 +567,18 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("says a payment linked to a bill or a planned expense counts whatever its exclusion, in TransactionsButton's edges (#202)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="transactions-button"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain(
+			"a payment linked to a bill or a planned expense counts whatever its exclusion.",
+		);
+		expect(section).not.toContain(
+			"a payment linked to a bill counts whatever its exclusion.",
+		);
+	});
+
 	it.each(["not-budgeted-row", "transactions-button"])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
