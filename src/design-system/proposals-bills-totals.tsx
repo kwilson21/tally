@@ -20,8 +20,8 @@ import { Specimen } from "./specimen";
 const TODAY = "2026-10-15";
 const MONTH = "2026-10";
 
-// The demo's categories, as src/demo/seed.ts CATEGORIES names them and src/demo/reset.ts demoBills files each bill:
-// Internet, Streaming and Water are Household (5), Daycare is Childcare (6), and Soccer league is Kids (4).
+// The demo's bills, as src/demo/reset.ts demoBills files them (each id and category id) and src/demo/seed.ts CATEGORIES
+// names them: Internet, Streaming and Water are Household, Daycare is Childcare, and Soccer league is Kids.
 const HOUSEHOLD = { icon: "household", color: "cat-brown" };
 const CHILDCARE = { icon: "kids", color: "cat-blue" };
 const KIDS = { icon: "kids", color: "cat-ochre" };
@@ -29,7 +29,7 @@ const KIDS = { icon: "kids", color: "cat-ochre" };
 // Daycare is a weekly bill on Fridays (dueDay 5, Friday). Bills lists each bill's next occurrence as its row, so
 // the Oct 16 Friday is the row; its Oct 23 and 30 Fridays are due later, and its Oct 2 and 9 Fridays are paid.
 const INTERNET: BillRowData = {
-	id: 4,
+	id: 5,
 	name: "Internet",
 	amountCents: 6500,
 	status: "due",
@@ -37,7 +37,7 @@ const INTERNET: BillRowData = {
 	...HOUSEHOLD,
 };
 const DAYCARE: BillRowData = {
-	id: 2,
+	id: 8,
 	name: "Daycare",
 	amountCents: 24000,
 	status: "due",
@@ -47,7 +47,7 @@ const DAYCARE: BillRowData = {
 	...CHILDCARE,
 };
 const SOCCER: BillRowData = {
-	id: 7,
+	id: 6,
 	name: "Soccer league",
 	amountCents: 6833,
 	status: "upcoming",
@@ -55,7 +55,7 @@ const SOCCER: BillRowData = {
 	...KIDS,
 };
 const STREAMING: BillRowData = {
-	id: 8,
+	id: 1,
 	name: "Streaming",
 	amountCents: 299,
 	status: "paid",
@@ -64,7 +64,7 @@ const STREAMING: BillRowData = {
 	...HOUSEHOLD,
 };
 const WATER: BillRowData = {
-	id: 9,
+	id: 2,
 	name: "Water",
 	amountCents: 1399,
 	status: "paid",
