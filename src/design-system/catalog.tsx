@@ -158,6 +158,7 @@ import {
 import {
 	MotionSpec,
 	PhoneFrame,
+	SheetFrame,
 	Specimen,
 	State,
 	TierPill,
@@ -2326,10 +2327,7 @@ function Rows() {
 					</div>
 				</State>
 				<State label="Plan an expense, with the Month select">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							values={{
 								name: "Car registration",
@@ -2342,13 +2340,10 @@ function Rows() {
 								{ value: "2026-12", label: "December 2026" },
 							]}
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="A plan's sheet once it's paid, with Unlink">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							plan={{
 								id: 3,
@@ -2365,13 +2360,10 @@ function Rows() {
 							months={[{ value: "2026-10", label: "October 2026" }]}
 							paidBy={{ name: "DMV", date: "2026-10-03", amountCents: 18000 }}
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="Delete asks first, with the amount">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							plan={{
 								id: 1,
@@ -2387,7 +2379,7 @@ function Rows() {
 							months={[{ value: "2026-10", label: "October 2026" }]}
 							deleteConfirm
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="A payment's picker on the plan's page">
 					<PlanPaymentPicker
@@ -5101,12 +5093,12 @@ function Diagrams() {
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
 				]}
-				sentence="Drawn from the same numbers as each worked example. A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
+				sentence="Drawn from the same numbers as each worked example. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
-				<State label="BudgetDiagram">
+				<State label="BudgetDiagram, four boxes">
 					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
 				</State>
-				<State label="BudgetDiagram with a savings goal">
+				<State label="BudgetDiagram with a savings goal, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings"
 						totalBudgetCents={140000}
@@ -5115,7 +5107,7 @@ function Diagrams() {
 						safeToSpendCents={29800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a planned expense">
+				<State label="BudgetDiagram with a planned expense, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-planned"
 						totalBudgetCents={140000}
@@ -5124,7 +5116,7 @@ function Diagrams() {
 						safeToSpendCents={61800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a savings goal and a planned expense">
+				<State label="BudgetDiagram with a savings goal and a planned expense, six boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings-planned"
 						totalBudgetCents={140000}

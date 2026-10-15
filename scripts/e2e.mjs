@@ -1455,6 +1455,61 @@ await assertHeadlineFitsPhone(
 	"Net worth",
 );
 step("a seven-figure Net worth fits a 320px phone one size smaller");
+// #600: every Budget box keeps its size and wraps, so How Tally works never scrolls sideways at 320px or 390px.
+for (const width of [320, 390]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/how-it-works`, { waitUntil: "networkidle" });
+	const scrollWidth = await page.evaluate(
+		() => document.documentElement.scrollWidth,
+	);
+	assert(
+		scrollWidth <= width,
+		`How Tally works scrolls sideways at ${width}px: ${scrollWidth}px`,
+	);
+}
+step("How Tally works doesn't scroll sideways at 320px or 390px");
+// #600: the Budget diagram's boxes are the direct svg children of its labelled row. At 390px the column is 350px, so three
+// boxes fill the first line and "= Safe to spend" wraps below Budget; at 1280px all of them share one line. Each width
+// loads the page again, so what is measured doesn't depend on the loop above.
+const budgetBoxes = page.locator(
+	'[role="img"][aria-labelledby="budget-diagram-title"] > svg',
+);
+const budgetBoxTops = () =>
+	budgetBoxes.evaluateAll((els) =>
+		els.map((el) => {
+			const r = el.getBoundingClientRect();
+			return { top: r.top, bottom: r.bottom };
+		}),
+	);
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/how-it-works`, { waitUntil: "networkidle" });
+const phoneBoxes = await budgetBoxTops();
+assert(
+	phoneBoxes.length >= 4,
+	`the Budget diagram has ${phoneBoxes.length} boxes at 390px, not 4 or more`,
+);
+assert(
+	(await budgetBoxes.last().textContent()).includes("Safe to spend"),
+	"the last Budget box at 390px is not = Safe to spend",
+);
+assert(
+	phoneBoxes.at(-1).top > phoneBoxes[0].bottom,
+	`= Safe to spend is on Budget's line at 390px (tops ${phoneBoxes.map((box) => box.top).join(", ")})`,
+);
+step("at 390px the Budget diagram puts = Safe to spend on a line below Budget");
+await page.setViewportSize({ width: 1280, height: 800 });
+await goto(`${BASE}/how-it-works`, { waitUntil: "networkidle" });
+const desktopBoxes = await budgetBoxTops();
+assert(
+	desktopBoxes.length >= 4,
+	`the Budget diagram has ${desktopBoxes.length} boxes at 1280px, not 4 or more`,
+);
+const desktopTops = desktopBoxes.map((box) => box.top);
+assert(
+	Math.max(...desktopTops) - Math.min(...desktopTops) <= 1,
+	`the Budget boxes are not on one line at 1280px (tops ${desktopTops.join(", ")})`,
+);
+step("at 1280px every Budget box sits on one line");
 // #500: on a 320px phone the notebook drawing is left out below 390px (decision 116), so a seven-character amount has the
 // whole row and nothing scrolls sideways. Safe to spend moves one for one with this month's Groceries budget and savings
 // goal, so each write moves it to the target shown; the demo reset below restores the data.
@@ -1616,6 +1671,50 @@ assert(
 await page.unroute(isOrganizeSave);
 step(
 	"a double click on Organize's Save files the group once, and the question keeps its address",
+);
+
+// #610: the catalog's sheet drawings sit inside an inert frame, so they are not open sheets. Nothing is marked inert,
+// Tab and Escape stay on the page, and the toasts keep their place above the tabs.
+await goto(`${BASE}/design-system`, { waitUntil: "networkidle" });
+assert.equal(
+	await page.evaluate(
+		() => document.querySelectorAll("[data-sheet-inert]").length,
+	),
+	0,
+	"the catalog's sheet drawings marked the page inert",
+);
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("Tab");
+const catalogFocus = await page.evaluate(() => {
+	const el = document.activeElement;
+	return {
+		onPage: !!el && el !== document.body && el !== document.documentElement,
+		inert: !!el?.closest("[inert]"),
+	};
+});
+assert(
+	catalogFocus.onPage && !catalogFocus.inert,
+	"Tab left focus on nothing, or on a drawing inside the inert frame",
+);
+await page.keyboard.press("Escape");
+await settle();
+assert.equal(
+	new URL(page.url()).pathname,
+	"/design-system",
+	"Escape followed a drawing's backdrop away from the catalog",
+);
+// A fixed region's computed top and bottom are its used pixels, so the place is read from where its box sits: above the
+// tabs, in the lower half of the phone, and not at the top edge where a sheet's toasts go.
+const toastPlace = await page.evaluate(() => ({
+	top: document.getElementById("toasts").getBoundingClientRect().top,
+	viewport: innerHeight,
+}));
+assert(
+	toastPlace.top > toastPlace.viewport / 2,
+	`the toasts moved to the top edge: ${JSON.stringify(toastPlace)}`,
+);
+step(
+	"the catalog's sheet drawings leave it usable: nothing inert, Tab and Escape stay on the page, toasts in their place",
 );
 
 // Without JavaScript Older, Newer and Add cash submit the selection form (#383), so a tick made on the page survives

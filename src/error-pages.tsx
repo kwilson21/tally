@@ -1,6 +1,7 @@
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
+import { hxTrigger } from "./htmx";
 import { ErrorPage } from "./views/error-page";
 import { Layout } from "./views/layout";
 
@@ -48,7 +49,7 @@ export const notFoundPage: NotFoundHandler<App> = (c) => {
 		c.header("HX-Reswap", "none");
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+			hxTrigger({ toast: { message, type: "error" }, announce: message }),
 		);
 		return c.body(null, 404);
 	}

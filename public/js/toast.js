@@ -91,7 +91,10 @@
 	// to the sheet's first stop). With no sheet, the Transactions heading takes it (every Transactions page has one,
 	// the first-visit page too), and a page without it, a bill's page, takes focus on its own page-title.
 	function focusHeading() {
-		const sheet = document.querySelector("section[data-sheet]");
+		// The open sheet is the first one with no inert ancestor: a drawing (the catalog's) sits inside one.
+		const sheet = [...document.querySelectorAll("section[data-sheet]")].find(
+			(node) => !node.closest("[inert]"),
+		);
 		const heading =
 			(sheet &&
 				document.getElementById(sheet.getAttribute("aria-labelledby"))) ??
