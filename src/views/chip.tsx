@@ -12,6 +12,8 @@ type Props = {
 	autofocus?: boolean;
 	/** The id of a hint that explains this choice (aria-describedby). */
 	describedBy?: string;
+	/** A class the input carries beside sr-only, for a hook a form's CSS reads (name-choices.tsx). */
+	inputClass?: string;
 	icon?: Child;
 	children?: Child;
 	"hx-get"?: string;
@@ -28,6 +30,7 @@ export function Chip({
 	checked,
 	dashed = false,
 	describedBy,
+	inputClass,
 	icon,
 	children,
 	...inputAttrs
@@ -42,7 +45,7 @@ export function Chip({
 				value={value}
 				checked={checked}
 				aria-describedby={describedBy}
-				class="sr-only"
+				class={inputClass ? `sr-only ${inputClass}` : "sr-only"}
 				{...inputAttrs}
 			/>
 			{/* A switched-on toggle also shows a check mark, so its state isn't color alone (DESIGN.md). */}
