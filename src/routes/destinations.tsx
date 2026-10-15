@@ -1,13 +1,15 @@
 import { Hono } from "hono";
+import { householdToday } from "../dates";
+import { accountsByBank } from "../db/accounts";
+import { suggestionQueue } from "../db/suggestions-queue";
+import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
 import { Layout } from "../views/layout";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 
 // Every nav destination resolves inside the shell. A feature's own route replaces its placeholder when it ships.
-export const destinations = new Hono<{ Bindings: Env }>();
-
-const MORE_ITEMS = SIDEBAR_ITEMS.filter((item) =>
-	["accounts", "settings"].includes(item.key),
-);
+export const destinations = new Hono<{
+	Bindings: Env & { APP_VERSION?: string };
+}>();
 
 // Documents is no menu item (decisions 66 and 82), but its address keeps answering inside the shell.
 const PLACEHOLDERS: { key?: NavKey; label: string; href: string }[] = [
@@ -39,31 +41,26 @@ for (const item of PLACEHOLDERS) {
 	);
 }
 
-destinations.get("/more", (c) => {
-	const items = [
-		...MORE_ITEMS,
-		{ label: "How Tally works", href: "/how-it-works" },
-	];
+// More is a contents page (P122 A, decision 111): each place with its icon, what it holds and a live count.
+destinations.get("/more", async (c) => {
+	const demo = c.env.DEMO === "true";
+	const [banks, queue, today] = await Promise.all([
+		accountsByBank(c.env.DB),
+		suggestionQueue(c.env.DB),
+		householdToday(c.env.DB),
+	]);
 	return c.html(
 		<Layout
 			title="More · Tally"
 			active="more"
-			demo={c.env.DEMO === "true"}
+			demo={demo}
 			currentPath={c.req.path + new URL(c.req.url).search}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
-			<ul class="mt-6 divide-y divide-rule border-y border-rule">
-				{items.map((item) => (
-					<li>
-						<a
-							href={item.href}
-							class="flex min-h-11 items-center py-3 text-lg text-ink no-underline"
-						>
-							{item.label}
-						</a>
-					</li>
-				))}
-			</ul>
+			<ContentsList
+				places={contentsPlaces({ demo, banks, today, toCheck: queue.length })}
+			/>
+			<Colophon demo={demo} version={c.env.APP_VERSION} />
 		</Layout>,
 	);
 });

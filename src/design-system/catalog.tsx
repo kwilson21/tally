@@ -2,6 +2,7 @@
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
 import { parseBudgetAmount } from "../budgets/amount";
+import type { Bank } from "../db/accounts";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
@@ -43,6 +44,7 @@ import { CategoryIcon } from "../views/category";
 import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
+import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
 import { DetailRow } from "../views/detail-row";
 import { DueRow } from "../views/due-row";
 import { EmptyState } from "../views/empty-state";
@@ -435,6 +437,65 @@ function Brand() {
 	);
 }
 
+/** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
+const MORE_TODAY = "2026-10-14";
+const moreAccount = (
+	id: number,
+	name: string,
+	mask: string,
+	type = "checking",
+	isLiability = false,
+): Bank["accounts"][number] => ({
+	id,
+	name,
+	mask,
+	type,
+	balanceCents: 100000,
+	isLiability,
+});
+const moreBank = (overrides: Partial<Bank>): Bank => ({
+	id: 1,
+	name: "First Harbor Bank",
+	needsAttention: false,
+	lastSyncedAt: "2026-10-13 09:00:00",
+	accounts: [
+		moreAccount(1, "Checking", "0412"),
+		moreAccount(2, "Savings", "7788", "savings"),
+	],
+	...overrides,
+});
+const MORE_BANKS: Bank[] = [
+	moreBank({}),
+	moreBank({
+		id: 2,
+		name: "Northline Card Services",
+		accounts: [moreAccount(3, "Credit card", "9012", "credit", true)],
+	}),
+];
+
+/** More as a phone draws it: its title, the contents list and the colophon, with the counts from contentsPlaces. */
+function MoreSketch({
+	demo,
+	banks,
+	toCheck,
+	version,
+}: {
+	demo: boolean;
+	banks: Bank[];
+	toCheck: number;
+	version?: string;
+}) {
+	return (
+		<>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
+			<ContentsList
+				places={contentsPlaces({ demo, banks, today: MORE_TODAY, toCheck })}
+			/>
+			<Colophon demo={demo} version={version} />
+		</>
+	);
+}
+
 function Shell() {
 	return (
 		<Group id="shell" title="Page shell">
@@ -473,6 +534,43 @@ function Shell() {
 					stays off. To see it, follow a link from this page to the bottom
 					sheet's page and back.
 				</MotionSpec>
+			</Specimen>
+			<Specimen
+				id="more-contents"
+				title="ContentsList and Colophon"
+				tier="visual"
+				components={["ContentsList", "Colophon"]}
+				sentence="More is a contents page (P122 A, decision 111): each place is one ruled row with the sidebar's icon, its name, a dotted leader and a live count when there is one, and a muted line saying what it holds. The colophon closes the page with the tally mark: the demo's line, or the deploy's version in the family app."
+			>
+				<State label="The rest, in the demo: 3 accounts, and 3 suggestions to check">
+					<PhoneFrame label="More on a phone in the demo: Accounts, 3 accounts; Settings, 3 to check; How Tally works, with the demo's colophon">
+						<MoreSketch demo banks={MORE_BANKS} toCheck={3} />
+					</PhoneFrame>
+				</State>
+				<State label="A bank needs signing in: Accounts says so, in brick">
+					<PhoneFrame
+						demo={false}
+						label="More on a phone in the family app, with a bank that needs signing in: Accounts, Needs attention; Settings, 3 to check"
+					>
+						<MoreSketch
+							demo={false}
+							banks={MORE_BANKS.map((bank) => ({
+								...bank,
+								needsAttention: bank.id === 2,
+							}))}
+							toCheck={3}
+							version="v2026.10.12 9e5e14d"
+						/>
+					</PhoneFrame>
+				</State>
+				<State label="Before any bank is linked: Accounts says None linked yet, and the colophon is left out with no version">
+					<PhoneFrame
+						demo={false}
+						label="More on a phone in the family app, before any bank is linked: Accounts, None linked yet; How Tally works, with your numbers"
+					>
+						<MoreSketch demo={false} banks={[]} toCheck={0} />
+					</PhoneFrame>
+				</State>
 			</Specimen>
 		</Group>
 	);
