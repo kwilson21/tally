@@ -61,7 +61,9 @@ const LEDGER: { heading: string; rows: Row[] }[] = [
 	},
 	{
 		heading: "On Home",
-		rows: [{ keys: ["←", "→"], joined: "/", words: "Previous month / next month" }],
+		rows: [
+			{ keys: ["←", "→"], joined: "/", words: "Previous month / next month" },
+		],
 	},
 	{
 		heading: "After a change",
