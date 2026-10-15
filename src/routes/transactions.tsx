@@ -162,6 +162,7 @@ import {
 	NotOnPage,
 	NotOnPageCount,
 	SELECTION_BAR_OOB,
+	SELECTION_FORM,
 	SelectAllOnPage,
 	SelectedCount,
 	SelectionActionBar,
@@ -169,8 +170,9 @@ import {
 	SelectionFields,
 	SelectionLimit,
 	selectAllOffer,
-	selectionQuery,
 	selectModeHref,
+	submitsSelection,
+	TICKS,
 	TICKS_INCLUDE,
 	TOO_MANY,
 } from "../views/selection-action-bar";
@@ -474,32 +476,54 @@ async function renderList(
 				...LIST_LOAD_PAUSE,
 			}
 		: {};
-	// Without JavaScript a page link's address carries the ticks, so the next page keeps them (#350). The
-	// htmx request doesn't use this address: it sends the ticks as they are when clicked, not as drawn.
-	const pageLinkHref = (n: number) =>
-		selecting ? `${pageHref(n)}${selectionQuery(current)}` : pageHref(n);
-	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
-	const pageLink = (n: number, rel: "prev" | "next", label: string) => (
-		<a
-			href={pageLinkHref(n)}
-			rel={rel}
-			class="inline-flex min-h-11 items-center px-2 -mx-2"
-			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
-			hx-get={
-				selecting ? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}` : pageHref(n)
+	// In Select mode the filter fields belong to the selection form (#383), so the filter form's request reads them by
+	// selector beside the ticks; its own FormData holds only the fields it still draws.
+	const filterForm = selecting ? SELECTION_FORM : undefined;
+	const filtersInclude = selecting
+		? {
+				"hx-include": `${FILTER_FIELDS}, ${TICKS}`,
+				...LIST_LOAD_PAUSE,
 			}
-			hx-sync="#filters:replace"
-			hx-target="#results"
-			hx-select="#results > *"
-			hx-select-oob={LIST_OOB}
-			hx-swap="innerHTML show:top"
+		: {};
+	// Page links swap only the list's contents and scroll back to its top; the live count says where you are.
+	// In select mode a page link is a button that submits the selection form, so without JavaScript it carries the
+	// ticks and the filter fields as they stand, not as drawn (#383). Its own value is the page.
+	const pageLink = (n: number, rel: "prev" | "next", label: string) => {
+		const swap = {
+			// In select mode the reply focuses the first tick. pageHref always has a query there (select=1), so the marker joins with &.
+			"hx-get": selecting
+				? `${pageHref(n)}&focus=${FOCUS_FIRST_TICK}`
+				: pageHref(n),
+			"hx-sync": "#filters:replace",
+			"hx-target": "#results",
+			"hx-select": "#results > *",
+			"hx-select-oob": LIST_OOB,
+			"hx-swap": "innerHTML show:top",
 			// In Select mode the reply's HX-Push-Url (the ticks, without the focus marker) replaces this.
-			hx-push-url={selecting ? pageHref(n) : "true"}
-			{...includeTicked}
-		>
-			{label}
-		</a>
-	);
+			"hx-push-url": selecting ? pageHref(n) : "true",
+			...includeTicked,
+		};
+		return selecting ? (
+			<button
+				{...submitsSelection("/transactions")}
+				name="page"
+				value={n}
+				class="inline-flex min-h-11 cursor-pointer items-center px-2 -mx-2 text-accent"
+				{...swap}
+			>
+				{label}
+			</button>
+		) : (
+			<a
+				href={pageHref(n)}
+				rel={rel}
+				class="inline-flex min-h-11 items-center px-2 -mx-2"
+				{...swap}
+			>
+				{label}
+			</a>
+		);
+	};
 	const pageNav = pages > 1 && (
 		<nav
 			aria-label="Pages"
@@ -556,11 +580,11 @@ async function renderList(
 		</>
 	));
 	const htmx = c.req.header("HX-Request") === "true";
-	// In Select mode the Add cash sheet's close link and Cancel keep the ticks (#350). The link carries them as
-	// drawn, for a browser without JavaScript; with it, the request sends them as they are when the link is tapped.
 	// In Select mode the sheet returns to the pinned back, so the month on screen survives the month turning over (#321).
+	// Add cash is a button that submits the selection form in Select mode (#383), so a browser without JavaScript sends
+	// the ticks as they stand; with it, the request sends them as they are when the button is tapped (TICKS_INCLUDE).
+	// The sheet's close link and Cancel keep the ticks as drawn (#350), since they can't change while the sheet is open.
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
-	const cashHref = selecting ? selectModeHref(cashPath, current) : cashPath;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
 	if (selecting && htmx && selectPushBase !== undefined)
@@ -626,12 +650,18 @@ async function renderList(
 				<p class="mt-2 text-sm text-muted">Tap rows to select them.</p>
 			)}
 			<div class="mt-3">
+				{/* Enter in a filter field submits the selection form (its filter fields are its own, #383), and the first
+				    submit button that form owns is its default button. This hidden one comes before Add cash, so Enter
+				    filters rather than opening the sheet. With JavaScript the submit is cancelled and htmx sends the
+				    filter request (the filter form's hx-trigger). It is hidden, so nothing shows in either case. */}
+				{selecting && <button hidden {...submitsSelection("/transactions")} />}
 				{/* Swapped out-of-band on filter and page changes, so its back URL keeps the current filters. */}
 				<Button
 					id="add-cash"
 					kind="secondary"
-					href={cashHref}
-					class="gap-2"
+					href={selecting ? undefined : cashPath}
+					{...(selecting ? submitsSelection("/transactions/cash/new") : {})}
+					class="gap-2 cursor-pointer"
 					autofocus={focusAddCash}
 					hx-get={cashGet}
 					// htmx sends the ticks as they are when tapped, and the URL it pushes carries them (#350).
@@ -655,7 +685,14 @@ async function renderList(
 					action="/transactions"
 					class="mt-4 flex flex-col gap-3 lg:max-w-3xl"
 					hx-get="/transactions"
-					hx-trigger="input delay:300ms, submit"
+					// In Select mode the filter fields belong to the selection form, so Enter in one submits that form through
+					// its hidden default button (before Add cash). The submit is caught here: htmx cancels it and sends this
+					// form's request instead.
+					hx-trigger={
+						selecting
+							? "input delay:300ms, submit, submit from:#selection-form"
+							: "input delay:300ms, submit"
+					}
 					// The newest request replaces any in flight, so results always match the controls.
 					hx-sync="replace"
 					hx-target="#results"
@@ -663,7 +700,7 @@ async function renderList(
 					hx-select-oob={`#needs-count:innerHTML, ${LIST_OOB}`}
 					hx-swap="innerHTML"
 					hx-push-url="true"
-					{...includeTicked}
+					{...filtersInclude}
 				>
 					{selecting && <input type="hidden" name="select" value="1" />}
 					{/* The demo's raw view stays on while filtering, with or without htmx. */}
@@ -678,6 +715,7 @@ async function renderList(
 									id="q"
 									name="q"
 									type="search"
+									form={filterForm}
 									value={filters.q}
 									placeholder="Search transactions"
 									autocomplete="off"
@@ -700,6 +738,7 @@ async function renderList(
 								{ value: "all", label: "All months" },
 							]}
 							selected={filters.month}
+							form={filterForm}
 						/>
 						<FilterSelect
 							id="category"
@@ -713,6 +752,7 @@ async function renderList(
 								})),
 							]}
 							selected={filters.category}
+							form={filterForm}
 						/>
 						<FilterSelect
 							id="account"
@@ -726,6 +766,7 @@ async function renderList(
 								})),
 							]}
 							selected={filters.account}
+							form={filterForm}
 						/>
 						<FilterSelect
 							id="show"
@@ -733,6 +774,7 @@ async function renderList(
 							label="Show"
 							options={SHOWS.map((s) => ({ value: s, label: SHOW_LABELS[s] }))}
 							selected={filters.show}
+							form={filterForm}
 						/>
 					</div>
 					<div class="flex flex-wrap gap-2">
@@ -741,6 +783,7 @@ async function renderList(
 							name="uncategorized"
 							value="1"
 							checked={filters.uncategorized}
+							form={filterForm}
 						>
 							{/* One span, so the chip's flex gap doesn't split the text around the count. */}
 							<span>
@@ -748,14 +791,16 @@ async function renderList(
 							</span>
 						</Chip>
 					</div>
-					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. The
-					    ticks ride along only in the noscript block, which a browser with JavaScript never reads: htmx
-					    sends the current ticks itself (TICKS_INCLUDE), so a stale render can't resend them (#350). */}
+					{/* With JavaScript, filters apply as you type or pick; without it, this button submits the form. In Select
+					    mode it submits the selection form, which owns the filter fields and the ticked boxes (#383), so
+					    the ticks as they stand go with it. */}
 					<noscript>
-						{selecting &&
-							ticks.map((id) => <input type="hidden" name="ids" value={id} />)}
-						{selecting && <SelectionFields selection={current} />}
-						<Button type="submit" class="self-start px-4">
+						<Button
+							class="self-start px-4"
+							{...(selecting
+								? submitsSelection("/transactions")
+								: { type: "submit" as const })}
+						>
 							Apply filters
 						</Button>
 					</noscript>
@@ -831,6 +876,12 @@ async function renderList(
 							name="back"
 							value={selectionBack}
 						/>
+						{/* Without JavaScript the page links, Add cash and Apply filters submit this form (#383), so it carries
+						    Select as a hidden field, and the filter fields and ticked boxes as they stand, which are its own.
+						    With JavaScript this block is raw text, so the count and the actions post what they always did. */}
+						<noscript>
+							<input type="hidden" name="select" value="1" />
+						</noscript>
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
 							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}
@@ -1028,6 +1079,13 @@ transactions.get("/transactions", async (c) => {
 		selectPushBase,
 	});
 });
+
+/**
+ * The filter fields in Select mode, which belong to the selection form (by form attribute, so Apply filters without
+ * JavaScript submits them with the ticks, #383). The filter form's own request reads them by selector, in document
+ * order, as its FormData read them before.
+ */
+const FILTER_FIELDS = "#filters input[name], #filters select[name]";
 
 /** What a list change refreshes outside the results, so nothing shows stale filters or ticks. */
 const LIST_OOB = [
@@ -2989,7 +3047,9 @@ function postedSplitValues(
 
 /**
  * The refunds a split sheet asks which part they go with (decision 99): the linked refunds offeredToSplit names. A
- * split refund and its parts are left out, and so is a credit that no longer counts (it is unlinked, not asked about).
+ * split refund is asked about as one refund, its parts are left out, and so is a credit that no longer counts (it is
+ * unlinked, not asked about). A split refund's size is the cents of its parts that still follow its link (movingCents,
+ * what the save moves), so the sheet's room check and its words use those, and not the split refund's full amount.
  */
 async function splitRefundsOf(
 	db: D1Database,
@@ -2997,7 +3057,11 @@ async function splitRefundsOf(
 ): Promise<SplitRefund[]> {
 	return (await linkedRefunds(db, parentId, true))
 		.filter(offeredToSplit)
-		.map(({ id, date, amountCents }) => ({ id, date, amountCents }));
+		.map(({ id, date, movingCents }) => ({
+			id,
+			date,
+			amountCents: -movingCents,
+		}));
 }
 
 /**
