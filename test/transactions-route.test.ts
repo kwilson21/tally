@@ -1039,3 +1039,37 @@ describe("GET /transactions: Account and Show", () => {
 		}
 	});
 });
+
+// P124 A (decision 111): How this works is at the foot of the list, under a short rule, after the results and the pager.
+describe("How this works at the foot of Transactions", () => {
+	const FOOT =
+		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#transactions" aria-label="How this works: transactions" class="[^"]*">How this works<\/a><\/div><\/div>/;
+
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	});
+
+	it.each([
+		["the list", "/transactions"],
+		["Select mode", "/transactions?select=1"],
+	])(
+		"is the last thing on the list page, after the rows and pager, in %s",
+		async (_, path) => {
+			const { html } = await get(path);
+			const foot = html.search(FOOT);
+			expect(foot).toBeGreaterThan(html.indexOf('aria-label="Results"'));
+			// Nothing opens after it before the sheet: the rows, the pager and the bar all come before it.
+			expect(html.slice(foot, html.indexOf('id="sheet"'))).not.toMatch(
+				/<(section|ul|li|h[1-6]|p|form)\b/,
+			);
+		},
+	);
+
+	// In Select mode it comes after the selection bar, inside the form's bottom padding, so the fixed bar never covers it.
+	it("sits after the selection bar, inside the Select form, so Tab order and the bar stay as they are", async () => {
+		const { html } = await get("/transactions?select=1");
+		const foot = html.search(FOOT);
+		expect(foot).toBeGreaterThan(html.indexOf('id="selection-bar"'));
+		expect(html.slice(foot, html.indexOf('id="sheet"'))).toContain("</form>");
+	});
+});
