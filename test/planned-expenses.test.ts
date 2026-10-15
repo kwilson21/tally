@@ -1567,6 +1567,66 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		);
 	});
 
+	it("an ordinary re-split carries a plan on the first part to the new part of its amount (#573)", async () => {
+		const tx = await payment(9830, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+
+		const result = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(true);
+		expect(result.planLinked).toBeUndefined();
+		const [newFirst] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newFirst);
+	});
+
+	it("refuses a re-split when a competing save moves a plan from one old part to another after the read, and changes nothing (#573)", async () => {
+		const tx = await payment(9832, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[second ?? 0, planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		// The plan stays on the part it is linked to now, never on the new 12000 part that A's pairing names.
+		expect(await paidBy(planId)).toBe(second);
+		expect(await partIds(tx)).toEqual(before);
+
+		// The retry reads the plan on its part, so the plan takes the new part that follows it.
+		const retry = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(retry.saved).toBe(true);
+		const [, newSecond] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newSecond);
+	});
+
+	it("refuses a re-split when a competing save moves one plan onto the part another plan left after the read (#573)", async () => {
+		const tx = await payment(9834, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		// transaction_id is unique, so the race must free the second part before the other plan takes it: the plan created
+		// first is the one the race visits first.
+		const onSecond = await plan("Car registration", 18000, MONTH, second ?? 0);
+		const onFirst = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = CASE id WHEN ?1 THEN ?2 ELSE NULL END WHERE id IN (?1, ?3)",
+			[onFirst, second ?? 0, onSecond],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(onFirst)).toBe(second);
+		expect(await paidBy(onSecond)).toBeNull();
+		expect(await partIds(tx)).toEqual(before);
+	});
+
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {
 		const tx = await payment(9808, 30000);
 		await splitInTwo(tx, 12000, 18000);
