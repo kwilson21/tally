@@ -1,10 +1,10 @@
 // P127 (#500 part 1): Home's Safe to spend row on a small phone, drawn for the owner's pick (decision 47).
 // Each picture is Home's top as the app draws it, in a frame 320, 360 or 390 px wide, so its content lays out
-// at that width. Each one draws the demo banner above the masthead and How this works after the status, as the
-// demo Home does. The frame is a container, so a width rule reads the frame, not the window. Whatever runs
-// past the frame's right edge shows past a terracotta guide line, in the room the wrapper leaves; the
-// caption is the fit measured in Chrome at those widths. Every frame is 498 px tall, the tallest picture's
-// content, so nothing spills onto its caption. The pictures include #566's fix for the minus
+// at that width. Each one draws the demo banner, with its Start here link, above the masthead and How this works
+// after the status, as the demo Home does. The frame is a container, so a width rule reads the frame, not the
+// window. Whatever runs past the frame's right edge shows past a terracotta guide line, in the room the wrapper
+// leaves; the caption is the fit measured in Chrome at those widths. Every frame is 522 px tall, the tallest
+// picture's content, so nothing spills onto its caption. The pictures include #566's fix for the minus
 // (#500 part 2, not on main yet), which keeps the minus with its number, so the amount never wraps.
 
 import { formatCents } from "../money";
@@ -13,6 +13,7 @@ import { FeedbackButton } from "../views/feedback-button";
 import { headlineAmountClass } from "../views/headline-amount";
 import { HowLink } from "../views/how-link";
 import { LedgerIllustration } from "../views/illustration";
+import { DemoBanner } from "../views/layout";
 import { MonthNavigation } from "../views/month-navigation";
 import { WhyLink } from "../views/why-link";
 import { Choice, Choices } from "./proposals-polish-4";
@@ -158,8 +159,9 @@ const ROOM: Record<Width, string> = {
  * Home does. The frame's own overflow stays visible, so a spill shows past the line; its wrapper leaves
  * room for it and scrolls only past that. The room is per width, in ROOM: 320 px keeps 64 px for its
  * widest spill (55 px), 360 px keeps 16 px for its own (15 px), and 390 px never spills, so it keeps 8 px.
- * The widest row is then 390 px, 2 × 398 + 16 = 812 px, inside the 824 px card. The frame is 498 px tall,
- * the tallest picture's content (Option C's, measured in Chrome at 1280 px), so no picture runs past its bottom.
+ * The widest row is then 390 px, 2 × 398 + 16 = 812 px, inside the 824 px card. The frame is 522 px tall,
+ * the tallest picture's content (Option C's, measured in Chrome at 1280, 390 and 320 px), so no picture runs past
+ * its bottom.
  */
 function Screen({
 	name,
@@ -178,12 +180,10 @@ function Screen({
 			<div
 				role="img"
 				aria-label={`${name}, ${width} px wide, with ${amount}, on a phone`}
-				class={`@container relative h-[498px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
+				class={`@container relative h-[522px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
 			>
 				<div inert>
-					<p class="bg-band py-2 text-center text-sm text-muted">
-						Demo data. Nothing here is real.
-					</p>
+					<DemoBanner />
 					<div class="px-5 pt-6">
 						<div class="mb-2 flex items-center justify-between gap-3">
 							<Wordmark />
