@@ -5383,7 +5383,7 @@ function SettingsGroup() {
 				title="CategoryRow"
 				tier="visual"
 				components={["CategoryRow", "AddCategoryRow", "TextInput", "Button"]}
-				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list."
+				sentence="Settings' category list: a closed row shows its icon, name and this month's budget, or No budget. Open, it shows its Name field, Save, Cancel and Archive, and the moves, with Move up off the first row and Move down off the last. A name left empty says so in words, and Add category opens at the end of the list. A category its rename just saved holds the pencil tick in its chevron's place for the toast's stay (P119 A, #71)."
 			>
 				<State label="Closed: one with a budget, one with No budget">
 					<div inert class="max-w-3xl border-t border-rule">
@@ -5471,6 +5471,24 @@ function SettingsGroup() {
 				<State label="Add category open">
 					<div inert class="max-w-3xl border-t border-rule">
 						<AddCategoryRow open />
+					</div>
+				</State>
+				<State label="Saved, held still: the pencil tick in the chevron's place, as the toast stays (P119 A)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<CategoryRow
+							category={{
+								id: 51,
+								name: "Groceries",
+								icon: "groceries",
+								color: "cat-blue",
+								budgetCents: 70000,
+							}}
+							first
+							last={false}
+							open={false}
+							focus={false}
+							saved="held"
+						/>
 					</div>
 				</State>
 			</Specimen>

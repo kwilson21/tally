@@ -15,7 +15,12 @@ async function get(path: string, htmx = false) {
 	return { res, html: await res.text() };
 }
 
-async function post(path: string, fields: Record<string, string>, htmx = true) {
+/** A form post; pairs repeat a field name (the Select-mode save sends one `ids` per row). */
+async function post(
+	path: string,
+	fields: Record<string, string> | [string, string][],
+	htmx = true,
+) {
 	const res = await exports.default.fetch(BASE + path, {
 		method: "POST",
 		redirect: "manual",
@@ -142,5 +147,38 @@ describe("nothing but a save's own reply marks a row", () => {
 	it("marks nothing when Cancel closes the savings goal sheet", async () => {
 		const { html } = await get("/?focus=savings-goal", true);
 		expect(marked(html)).toBe(0);
+	});
+
+	it("marks nothing when Select mode opens", async () => {
+		const { html } = await get("/transactions?select=1", true);
+		expect(marked(html)).toBe(0);
+		expect(html).not.toContain("saved-tick");
+	});
+
+	it("marks nothing when an edit panel save takes the row out of the list it returns to", async () => {
+		// Eating Out (2) is not in the Groceries (1) filter the back address names, so the row leaves the list.
+		const { html } = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions?month=all&category=1",
+			category: "2",
+		});
+		expect(linkTag(html, `/transactions/${bakery}[^"]*`)).toBe("");
+		expect(marked(html)).toBe(0);
+		expect(html).not.toContain("saved-tick");
+	});
+
+	it("marks nothing when a Select-mode category save sets its ticked row", async () => {
+		const { res, html } = await post("/transactions/select/category/save", [
+			["category", "2"],
+			["back", "/transactions?month=all"],
+			["ids", String(bakery)],
+		]);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Set 1 transaction to Eating Out.",
+		);
+		expect(marked(html)).toBe(0);
+		expect(html).not.toContain("saved-tick");
 	});
 });

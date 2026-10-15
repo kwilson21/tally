@@ -767,13 +767,16 @@ describe("GET /design-system in the demo", () => {
 		expect(tag).toContain("hx-ignore");
 		const section =
 			html.split('id="category-row"')[1]?.split("</section>")[0] ?? "";
-		// One inert box per state: two closed rows, then the first and last rows open, the name error, and Add category.
-		expect(section.match(/<div inert/g)).toHaveLength(5);
+		// One inert box per state: two closed rows, then the first and last rows open, the name error, Add category, and the saved row held still (P119 A).
+		expect(section.match(/<div inert/g)).toHaveLength(6);
 		expect(
 			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
 				/\sopen(\s|>|=)/.test(m[0]),
 			),
-		).toEqual([false, false, true, true, true, true]);
+		).toEqual([false, false, true, true, true, true, false]);
+		// The saved row held still: its tick in the chevron's place (P119 A, #71).
+		expect(section.match(/row-saved-held/g)).toHaveLength(1);
+		expect(section).toContain('class="saved-tick ');
 		// Closed: a budget, then No budget.
 		const closed = section.split('id="cat-21-form"')[0] ?? "";
 		expect(closed).toContain("$700");
