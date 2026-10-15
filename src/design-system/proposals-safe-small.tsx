@@ -1,12 +1,12 @@
-// P127 (#500 part 1): Home's Safe to spend row on a small phone, drawn for the owner's pick (decision 47).
-// Each picture is Home's top as the app draws it, in a frame 320, 360 or 390 px wide, so its content lays out
-// at that width. Each one draws the demo banner, with its Start here link, above the masthead, as the demo Home
-// does. How this works sits at Home's foot since #592, so the pictures leave it out. The frame is a container,
-// so a width rule reads the frame, not the window. Whatever runs past the frame's right edge shows past a
-// terracotta guide line, in the room the wrapper leaves; the caption is the fit measured in Chrome at those
-// widths. Every frame is 478 px tall, the tallest picture's content (Option C's), so nothing spills onto its
-// caption. The pictures include #566's fix for the minus (#500 part 2, not on main yet), which keeps the minus
-// with its number, so the amount never wraps.
+// P127 (#500): Home's Safe to spend row on a small phone. The owner picked option A (decision 116), built in
+// #566: the notebook drawing is left out below 390 px for amounts of 7 characters or fewer, and below 640 px for
+// 8 or more, and #566 also keeps the minus with its number. Each picture is Home's top as the app draws it, in a
+// frame 320, 360 or 390 px wide, so its content lays out at that width. Each one draws the demo banner, with its
+// Start here link, above the masthead, as the demo Home does. How this works sits at Home's foot since #592, so
+// the pictures leave it out. The frame is a container, so a width rule reads the frame, not the window. Whatever
+// runs past the frame's right edge shows past a terracotta guide line, in the room the wrapper leaves; the caption
+// is the fit measured in Chrome at those widths. Every frame is 478 px tall, the tallest picture's content
+// (Option C's), so nothing spills onto its caption.
 
 import { formatCents } from "../money";
 import { Wordmark } from "../views/brand";
@@ -236,27 +236,30 @@ export function SafeToSpendSmallProposal() {
 			sentence="Home's Safe to spend row at 320, 360 and 390 px, with $9,999 and −$9,999: the notebook stays beside the amount, goes, shrinks, or moves under it. Each caption is the measured fit."
 		>
 			<p class="max-w-prose text-sm">
-				<span class="font-medium">In every picture: </span>#566's fix for #500
-				part 2 (not on main yet) keeps the minus with its number; #388's size
-				rule steps a long amount down; the drawing is decoration and never
-				carries meaning.
+				<span class="font-medium">In every picture: </span>#566, now on main,
+				keeps the minus with its number; #388's size rule steps a long amount
+				down; the drawing is decoration and never carries meaning.
 			</p>
 			<Choices>
 				<Choice
-					name="Reference · Today on main"
-					note="What main draws now, plus #566's fix that keeps the minus with its number: the 112 px notebook sits beside the amount."
+					name="Reference · Before #566"
+					note="Before #566's drawing rule: the 112 px notebook sits beside the amount at every width, with the minus kept on its number."
 					width="w-[824px]"
 				>
-					<Pictures name="Reference · Today on main" layout="today" />
+					<Pictures name="Reference · Before #566" layout="today" />
 				</Choice>
 				<Choice
-					name="Option A · No drawing below 390 px"
-					note="Below 390 px the notebook is left out for amounts of 7 characters or fewer, like $9,999 and −$9,999, and below 640 px for 8 or more, like −$19,999 and $199,999, so the amount has the whole row. Elsewhere it stays beside the amount, as today. No picture's amount reaches 8 characters, so the pictures show only the 390 px edge."
-					cost="a wrapper div around the drawing in home-top.tsx, hidden below 390 px for 7 characters or fewer and below 640 px for 8 or more. Home is 8 px shorter at 320 and 360 px and the same at 390 px."
+					name="Option A · No drawing below 390 px (640 px for 8 or more characters)"
+					note="The drawing shows from 390 px for amounts of 7 characters or fewer, like $9,999 and −$9,999, and from 640 px for 8 or more, like −$19,999 and $199,999; below those widths it is left out, so the amount has the whole row. No picture's amount reaches 8 characters, so the pictures show only the 390 px edge."
+					cost="built in #566: home-top.tsx hides the drawing below 390 px for 7 characters or fewer and below 640 px for 8 or more, through homeDrawingClass. Against the reference, Home is 8 px shorter at 320 and 360 px and the same at 390 px."
 					why="it fits all six pictures, and of those options it changes Home's height least."
 					width="w-[824px]"
+					picked
 				>
-					<Pictures name="Option A · No drawing below 390 px" layout="hide" />
+					<Pictures
+						name="Option A · No drawing below 390 px (640 px for 8 or more characters)"
+						layout="hide"
+					/>
 				</Choice>
 				<Choice
 					name="Option B · A smaller drawing on phones"

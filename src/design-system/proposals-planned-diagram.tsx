@@ -1,14 +1,14 @@
-// P126 (#202, decision 101): where Planned joins the Budget diagram. The owner picked it in words on
-// Oct 14: the boxes keep the size main draws four and never scale down, and on a narrow screen the row
-// wraps after Bills due. These pictures are to confirm that before #545 builds it. Each picture is the
-// Budget section as How Tally works draws it, from the same numbers as its worked example. Today's
+// P126 (#202, decisions 101, 115 and 116): where Planned joins the Budget diagram. The owner picked option A
+// (decision 115): the boxes keep the size main draws four and never scale down, and where the row doesn't fit
+// it wraps after Bills due; decision 116 extends the wrap to every width, with or without Planned. Each picture
+// is the Budget section as How Tally works draws it, from the same numbers as its worked example. Today's
 // reference is the real BudgetDiagram; the other drawings are local copies that use main's box size
 // (93 by 60), gap (22) and type sizes, so they are true to the diagram rather than to a new one.
 
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { BudgetDiagram } from "../views/how-diagrams";
-import { Fixed } from "./proposal-parts";
+import { Fixed, PickedPill } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
 // The demo's October numbers (the delivery session's). Bills due is what the other four leave: $1,062.49.
@@ -129,19 +129,19 @@ function Column({ caption, children }: { caption: string; children?: Child }) {
 function Choice({
 	name,
 	note,
-	aside,
 	tradeoff,
 	why,
 	recommended = false,
+	picked = false,
 	children,
 }: {
 	name: string;
 	note: string;
-	/** A note on the option's status, under what it is. */
-	aside?: string;
 	tradeoff?: string;
 	why?: string;
 	recommended?: boolean;
+	/** The owner's pick (decision 115 for option A). */
+	picked?: boolean;
 	children?: Child;
 }) {
 	return (
@@ -154,9 +154,9 @@ function Choice({
 							Recommended
 						</span>
 					)}
+					{picked && <PickedPill />}
 				</h4>
 				<p class="text-sm">{note}</p>
-				{aside && <p class="text-sm text-muted">{aside}</p>}
 				{tradeoff && <p class="text-sm text-muted">Trade-off: {tradeoff}</p>}
 				{why && <p class="text-sm text-muted">Why: {why}</p>}
 			</div>
@@ -417,7 +417,7 @@ export function PlannedDiagramProposal() {
 			id="p126-planned-diagram"
 			title="P126 · The Budget diagram with Planned"
 			tier="visual"
-			sentence="Planned joins the Budget diagram as a fifth box. Pick how the row lays out at 1280 and at 390. Each picture is the Budget section of How Tally works, as the page draws it."
+			sentence="Planned joins the Budget diagram as a fifth box. Each picture is the Budget section of How Tally works, as the page draws it, at 1280 and at 390."
 		>
 			<Fixed>
 				the diagram is drawn by code from the same numbers as the section's
@@ -493,11 +493,11 @@ export function PlannedDiagramProposal() {
 			</Choice>
 			<Choice
 				name="Option A · Today's box size, wrapping after Bills due"
-				note="Planned is a fifth box at today's size; where the row doesn't fit, it wraps after Bills due."
-				aside="The owner's pick in words, Oct 14; this drawing is to confirm it."
+				note="Planned is a fifth box at today's size. Where the row doesn't fit, it wraps after Bills due, and decision 116 extends the wrap to the four-box diagram too, with or without Planned."
 				tradeoff="a two-part diagram: the boxes split into two groups that wrap, instead of one SVG that scales; no new token, no JavaScript."
 				why="the labels stay the size they are today on every screen, and the sum still reads left to right."
 				recommended
+				picked
 			>
 				<Column caption="At 1280: one row">
 					<WideFrame
