@@ -739,6 +739,50 @@ describe("cash delete undo", () => {
 		).toEqual({ t: restored.id });
 	});
 
+	it("leaves a plan unpaid when its month was edited out of the payment's reach during the Undo window (#577)", async () => {
+		const account = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
+		).first<{ id: number }>();
+		if (!account) throw new Error("cash account missing");
+		const inserted = await env.DB.prepare(
+			"INSERT INTO transactions (account_id,date,amount_cents,raw_name,updated_by) VALUES (?, '2026-10-06', 1500, 'Car registration cash', 'test') RETURNING id",
+		)
+			.bind(account.id)
+			.first<{ id: number }>();
+		const id = inserted?.id ?? 0;
+		const plan = await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 1500, '2026-10', ?, 'demo') RETURNING id",
+		)
+			.bind(id)
+			.first<{ id: number }>();
+		const token = await holdCashDelete(env.DB, id, "Car registration cash");
+		if (!token) throw new Error("cash delete token missing");
+		// August accepts only August and September payments, so the October entry no longer pays it. (September would
+		// still accept October, since a plan's payment may fall in its month or the next.)
+		await env.DB.prepare(
+			"UPDATE planned_expenses SET month='2026-08' WHERE id=?",
+		)
+			.bind(plan?.id)
+			.run();
+
+		const restored = await restoreCashDelete(env.DB, token);
+		if (!restored || restored.alreadyRestored)
+			throw new Error("cash restore failed");
+		expect(
+			await env.DB.prepare("SELECT id FROM transactions WHERE id=?")
+				.bind(restored.id)
+				.first(),
+		).toEqual({ id: restored.id });
+		expect(
+			await env.DB.prepare(
+				"SELECT transaction_id AS t FROM planned_expenses WHERE id=?",
+			)
+				.bind(plan?.id)
+				.first(),
+		).toEqual({ t: null });
+		expect(restored.lostLinks).toEqual(["Car registration"]);
+	});
+
 	it("restores a plan paid by a part of the entry on the restored part, not the part with the old id", async () => {
 		const account = await env.DB.prepare(
 			"SELECT id FROM accounts WHERE type='cash' LIMIT 1",
@@ -827,6 +871,8 @@ describe("cash delete undo", () => {
 				.bind(later?.id)
 				.first(),
 		).toEqual({ t: null });
+		// The deleted plan has no row to name, so the restore names no link it left off.
+		expect(restored).toMatchObject({ lostLinks: [] });
 	});
 
 	it("rolls back restored rows when consuming the token fails", async () => {

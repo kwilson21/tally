@@ -1673,6 +1673,50 @@ step(
 	"a double click on Organize's Save files the group once, and the question keeps its address",
 );
 
+// #610: the catalog's sheet drawings sit inside an inert frame, so they are not open sheets. Nothing is marked inert,
+// Tab and Escape stay on the page, and the toasts keep their place above the tabs.
+await goto(`${BASE}/design-system`, { waitUntil: "networkidle" });
+assert.equal(
+	await page.evaluate(
+		() => document.querySelectorAll("[data-sheet-inert]").length,
+	),
+	0,
+	"the catalog's sheet drawings marked the page inert",
+);
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("Tab");
+const catalogFocus = await page.evaluate(() => {
+	const el = document.activeElement;
+	return {
+		onPage: !!el && el !== document.body && el !== document.documentElement,
+		inert: !!el?.closest("[inert]"),
+	};
+});
+assert(
+	catalogFocus.onPage && !catalogFocus.inert,
+	"Tab left focus on nothing, or on a drawing inside the inert frame",
+);
+await page.keyboard.press("Escape");
+await settle();
+assert.equal(
+	new URL(page.url()).pathname,
+	"/design-system",
+	"Escape followed a drawing's backdrop away from the catalog",
+);
+// A fixed region's computed top and bottom are its used pixels, so the place is read from where its box sits: above the
+// tabs, in the lower half of the phone, and not at the top edge where a sheet's toasts go.
+const toastPlace = await page.evaluate(() => ({
+	top: document.getElementById("toasts").getBoundingClientRect().top,
+	viewport: innerHeight,
+}));
+assert(
+	toastPlace.top > toastPlace.viewport / 2,
+	`the toasts moved to the top edge: ${JSON.stringify(toastPlace)}`,
+);
+step(
+	"the catalog's sheet drawings leave it usable: nothing inert, Tab and Escape stay on the page, toasts in their place",
+);
+
 // Without JavaScript Older, Newer and Add cash submit the selection form (#383), so a tick made on the page survives
 // a page change, an untick does too, and Add cash's sheet gets the tick. This context has no JavaScript at all.
 const plainContext = await browser.newContext({

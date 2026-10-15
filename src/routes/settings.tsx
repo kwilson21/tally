@@ -34,6 +34,7 @@ import {
 } from "../db/reconnect";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
+import { hxTrigger } from "../htmx";
 import { reconnectRecipients } from "../reconnect/reminders";
 import {
 	type CategoryErrors,
@@ -567,7 +568,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 	if (!merchantKey) {
 		const message = "Choose a merchant to remove.";
 		if (c.req.header("HX-Request"))
-			c.header("HX-Trigger", JSON.stringify({ announce: message }));
+			c.header("HX-Trigger", hxTrigger({ announce: message }));
 		return renderSettings(c, {
 			rulesSearch: search,
 			merchantRuleError: message,
@@ -583,7 +584,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 		if (c.req.header("HX-Request"))
 			c.header(
 				"HX-Trigger",
-				JSON.stringify({ announce: "Merchant rules list updated." }),
+				hxTrigger({ announce: "Merchant rules list updated." }),
 			);
 		return renderSettings(c, view);
 	}
@@ -591,7 +592,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 	if (c.req.header("HX-Request")) {
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success" },
 				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
 			}),
@@ -624,7 +625,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 			return c.redirect(rulesAddress(search), 303);
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({ announce: "Tally's rules list updated." }),
+			hxTrigger({ announce: "Tally's rules list updated." }),
 		);
 		return renderSettings(c, {
 			rulesSearch: search,
@@ -635,7 +636,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 	if (c.req.header("HX-Request")) {
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success" },
 				announce: `${message} ${neverSuggestRuleLine(removed.rule)} is gone.`,
 			}),
@@ -739,7 +740,7 @@ function done(
 		return c.redirect(`/settings${view.hash ? `#${view.hash}` : ""}`, 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message: toast, type: "success" }, announce }),
+		hxTrigger({ toast: { message: toast, type: "success" }, announce }),
 	);
 	return renderSettings(c, view);
 }
@@ -907,7 +908,7 @@ function bankSignInEmailError(
 ) {
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "error" }, announce: message }),
+		hxTrigger({ toast: { message, type: "error" }, announce: message }),
 	);
 	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
 	return renderSettings(c, {
