@@ -478,6 +478,18 @@ export const DECIDED: readonly {
 		issue: 95,
 	},
 	{
+		title: "P126 · The Budget diagram with Planned",
+		outcome:
+			"Option A: the boxes keep today's size, and the row wraps after Bills due where it doesn't fit, with or without Planned (decisions 115 and 116).",
+		issue: 202,
+	},
+	{
+		title: "P127 · Safe to spend on a small phone",
+		outcome:
+			"Option A: no drawing below 390 px for amounts of 7 characters or fewer, and below 640 px for 8 or more characters, and the minus stays on its number (decision 116).",
+		issue: 500,
+	},
+	{
 		title: "P128 · The keyboard shortcuts list",
 		outcome:
 			"Option C: ? opens the list as a sheet, with a disclosure at each desktop page's foot and a More row below 1024px; keys /, ?, j, k, e or Enter, ← →, and u; key chips in a mono face (decision 118).",
@@ -508,28 +520,6 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<section aria-labelledby="p127-title" class="mt-10">
-				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
-					Open: Safe to spend on a small phone
-				</h2>
-				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 14 for issue #500: what Home's Safe to spend row does when
-					the amount needs the room.
-				</p>
-				<SafeToSpendSmallProposal />
-			</section>
-
-			<section aria-labelledby="p126-title" class="mt-10">
-				<h2 id="p126-title" class="font-serif text-3xl font-semibold">
-					Open: the Budget diagram with Planned
-				</h2>
-				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 14 for the owner's pick on #202 (PR #545): Planned joins the
-					Budget diagram without its boxes shrinking.
-				</p>
-				<PlannedDiagramProposal />
-			</section>
-
 			<section aria-labelledby="p128-title" class="mt-12">
 				<h2 id="p128-title" class="font-serif text-3xl font-semibold">
 					Picked: the keyboard shortcuts list
@@ -550,6 +540,30 @@ export function Proposals() {
 					today's money input with what it lost put back.
 				</p>
 				<MoneyInputProposal />
+			</section>
+
+			<section aria-labelledby="p127-title" class="mt-12">
+				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
+					Picked: Safe to spend on a small phone
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 14 for issue #500. The owner's pick, marked Picked, is
+					decision 116: A, no drawing below 390 px for amounts of 7 characters
+					or fewer, and below 640 px for 8 or more, built in #566.
+				</p>
+				<SafeToSpendSmallProposal />
+			</section>
+
+			<section aria-labelledby="p126-title" class="mt-12">
+				<h2 id="p126-title" class="font-serif text-3xl font-semibold">
+					Picked: the Budget diagram with Planned
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 14 for #202. The owner's pick, marked Picked, is decision
+					115: A, the boxes at today's size and the row wrapping where it
+					doesn't fit. Decision 116 extends the wrap to every width.
+				</p>
+				<PlannedDiagramProposal />
 			</section>
 
 			<section aria-labelledby="polish5-title" class="mt-12">
