@@ -140,6 +140,29 @@ describe("rowCaption", () => {
 			"Maybe income",
 		);
 	});
+	it.each([
+		["bill", { paysBill: true, billName: "Electric" }],
+		["planned expense", { paysPlan: true, planName: "Car registration" }],
+	])(
+		"shows an unsure income guess on an excluded credit that pays a %s as Maybe income, as the income queue asks it",
+		async (_, paid) => {
+			const row = {
+				...base,
+				amountCents: -2500,
+				excluded: true,
+				creditReviewed: false,
+				incomeConfidence: 0.5,
+				...paid,
+			};
+			expect(rowCaption(row)).toMatchObject({
+				kind: "needs",
+				caption: "Maybe income",
+			});
+			const html = await TransactionRow({ row }).toString();
+			expect(html).toContain("Maybe income");
+			expect(html).not.toContain("Review credit");
+		},
+	);
 	it("does not add Needs category beside Maybe income for a none-fit category", async () => {
 		const row = {
 			...base,
