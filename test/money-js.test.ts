@@ -5,6 +5,9 @@ import {
 	fieldCents,
 	nudge,
 	nudged,
+	onBeforeInput,
+	onInput,
+	onKeydown,
 	press,
 	refusesInsert,
 	roundedUp,
@@ -181,6 +184,11 @@ type Control = {
 	focus: () => void;
 	querySelector: (selector: string) => Control | null;
 	dispatchEvent: (event: Event) => boolean;
+	/** The field's own parts, set by the keyboard and typing tests: a plain control matches nothing. */
+	matches?: (selector: string) => boolean;
+	closest?: (selector: string) => unknown;
+	selectionStart?: number;
+	selectionEnd?: number;
 };
 
 const browser = {
@@ -438,6 +446,133 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			const { root, down } = widget("0.01");
 			press(root, down);
 			expect(browser.activeElement).toBeNull();
+		});
+	});
+
+	describe("the field's keys and typing: the document listeners, as events", () => {
+		/** An event sent to the field, which matches its selector and sits in its money box. */
+		function fieldEvent(
+			input: Control,
+			root: object,
+			init: Record<string, unknown>,
+		) {
+			input.matches = (selector) => selector === "[data-money-input]";
+			input.closest = (selector) => (selector === "[data-money]" ? root : null);
+			return { target: input, preventDefault: vi.fn(), ...init };
+		}
+
+		it("↑ and ↓ move the amount by a cent, and Shift by a dollar, and say it", () => {
+			browserStubs();
+			const { root, input } = widget("5.00");
+			const up = fieldEvent(input, root, { key: "ArrowUp" });
+			onKeydown(up);
+			expect(input.value).toBe("5.01");
+			expect(up.preventDefault).toHaveBeenCalledOnce();
+			expect(browser.region.textContent).toBe("$5.01");
+
+			const shiftUp = fieldEvent(input, root, {
+				key: "ArrowUp",
+				shiftKey: true,
+			});
+			onKeydown(shiftUp);
+			expect(input.value).toBe("6.01");
+			expect(browser.region.textContent).toBe("$6.01");
+
+			const shiftDown = fieldEvent(input, root, {
+				key: "ArrowDown",
+				shiftKey: true,
+			});
+			onKeydown(shiftDown);
+			expect(input.value).toBe("5.01");
+			expect(browser.region.textContent).toBe("$5.01");
+		});
+
+		it("keeps the text at $0 when ↓ is pressed, and says nothing", () => {
+			browserStubs();
+			const { root, input } = widget("0.00");
+			const down = fieldEvent(input, root, { key: "ArrowDown" });
+			onKeydown(down);
+			expect(input.value).toBe("0.00");
+			expect(browser.region.textContent).toBe("");
+		});
+
+		it("leaves Alt, Ctrl and Cmd arrows to the browser, and other keys alone", () => {
+			browserStubs();
+			const { root, input } = widget("5.00");
+			for (const init of [
+				{ key: "ArrowUp", altKey: true },
+				{ key: "ArrowUp", ctrlKey: true },
+				{ key: "ArrowDown", metaKey: true },
+				{ key: "ArrowLeft" },
+			]) {
+				const event = fieldEvent(input, root, init);
+				onKeydown(event);
+				expect(event.preventDefault).not.toHaveBeenCalled();
+			}
+			expect(input.value).toBe("5.00");
+		});
+
+		it("ignores ↑ pressed anywhere but the field", () => {
+			browserStubs();
+			const { input } = widget("5.00");
+			const elsewhere = {
+				key: "ArrowUp",
+				target: control(),
+				preventDefault: vi.fn(),
+			};
+			onKeydown(elsewhere);
+			expect(elsewhere.preventDefault).not.toHaveBeenCalled();
+			expect(input.value).toBe("5.00");
+		});
+
+		it("refuses a typed third decimal: the box and the caret stay as they were", () => {
+			const { input } = widget("12.34");
+			input.selectionStart = 5;
+			input.selectionEnd = 5;
+			input.matches = (selector) => selector === "[data-money-input]";
+			const typed = {
+				target: input,
+				inputType: "insertText",
+				data: "5",
+				preventDefault: vi.fn(),
+			};
+			onBeforeInput(typed);
+			expect(typed.preventDefault).toHaveBeenCalledOnce();
+			expect(input.value).toBe("12.34");
+		});
+
+		it("lets a digit through that keeps two decimals or less, and deletions", () => {
+			const { input } = widget("12.3");
+			input.selectionStart = 4;
+			input.selectionEnd = 4;
+			input.matches = (selector) => selector === "[data-money-input]";
+			const digit = {
+				target: input,
+				inputType: "insertText",
+				data: "4",
+				preventDefault: vi.fn(),
+			};
+			onBeforeInput(digit);
+			expect(digit.preventDefault).not.toHaveBeenCalled();
+			const deletion = {
+				target: input,
+				inputType: "deleteContentBackward",
+				data: null,
+				preventDefault: vi.fn(),
+			};
+			onBeforeInput(deletion);
+			expect(deletion.preventDefault).not.toHaveBeenCalled();
+		});
+
+		it("cuts a pasted amount to two decimals, and updates the steps", () => {
+			browserStubs();
+			const { root, input, minus } = widget("12.3");
+			input.value = "12.345";
+			input.matches = (selector) => selector === "[data-money-input]";
+			input.closest = (selector) => (selector === "[data-money]" ? root : null);
+			onInput({ target: input });
+			expect(input.value).toBe("12.34");
+			expect(minus.disabled).toBe(false);
 		});
 	});
 });

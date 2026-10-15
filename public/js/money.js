@@ -161,6 +161,53 @@ export function press(root, button) {
 	}
 }
 
+/** ↑ and ↓ in the field change the amount by a cent, and by a dollar with Shift, as the original's number field did. */
+export function onKeydown(event) {
+	const input = event.target;
+	if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+	if (
+		!input.matches?.("[data-money-input]") ||
+		event.altKey ||
+		event.ctrlKey ||
+		event.metaKey
+	)
+		return;
+	const root = input.closest("[data-money]");
+	if (!root) return;
+	event.preventDefault();
+	const step = event.shiftKey ? 100 : 1;
+	nudge(root, event.key === "ArrowUp" ? step : -step);
+}
+
+/** A typed third decimal is refused before it lands: the box and the caret stay as they were. */
+export function onBeforeInput(event) {
+	const input = event.target;
+	if (
+		event.inputType !== "insertText" ||
+		!input.matches?.("[data-money-input]")
+	)
+		return;
+	if (
+		refusesInsert(
+			input.value,
+			input.selectionStart,
+			input.selectionEnd,
+			event.data ?? "",
+		)
+	)
+		event.preventDefault();
+}
+
+/** A pasted amount is cut to two decimals, then the steps follow the text. */
+export function onInput(event) {
+	const input = event.target;
+	if (!input.matches?.("[data-money-input]")) return;
+	const capped = capDecimals(input.value);
+	if (capped !== input.value) input.value = capped;
+	const root = input.closest("[data-money]");
+	if (root) update(root);
+}
+
 if (typeof document !== "undefined") {
 	// Shows the buttons and chips (CSS: html.js [data-money-js]).
 	document.documentElement.classList.add("js");
@@ -173,49 +220,7 @@ if (typeof document !== "undefined") {
 		if (button && root) press(root, button);
 	});
 
-	// As in the original's number field: ↑ / ↓ change the amount by a cent, and by a dollar with Shift.
-	document.addEventListener("keydown", (event) => {
-		const input = event.target;
-		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-		if (
-			!input.matches?.("[data-money-input]") ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey
-		)
-			return;
-		const root = input.closest("[data-money]");
-		if (!root) return;
-		event.preventDefault();
-		const step = event.shiftKey ? 100 : 1;
-		nudge(root, event.key === "ArrowUp" ? step : -step);
-	});
-
-	// A typed third decimal is refused before it lands: the box and the caret stay as they were.
-	document.addEventListener("beforeinput", (event) => {
-		const input = event.target;
-		if (
-			event.inputType !== "insertText" ||
-			!input.matches?.("[data-money-input]")
-		)
-			return;
-		if (
-			refusesInsert(
-				input.value,
-				input.selectionStart,
-				input.selectionEnd,
-				event.data ?? "",
-			)
-		)
-			event.preventDefault();
-	});
-
-	document.addEventListener("input", (event) => {
-		const input = event.target;
-		if (!input.matches?.("[data-money-input]")) return;
-		const capped = capDecimals(input.value);
-		if (capped !== input.value) input.value = capped;
-		const root = input.closest("[data-money]");
-		if (root) update(root);
-	});
+	document.addEventListener("keydown", onKeydown);
+	document.addEventListener("beforeinput", onBeforeInput);
+	document.addEventListener("input", onInput);
 }
