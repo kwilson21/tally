@@ -17,6 +17,7 @@ import {
 	unlinkPlanPayment,
 	updatePlan,
 } from "../db/planned-expenses";
+import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -43,20 +44,13 @@ function monthOptions(current: string, own?: string): PlanMonthOption[] {
 	}));
 }
 
-/**
- * Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). A header value must be
- * ASCII, so a non-ASCII character in a plan's name (a curly apostrophe) is written as \uXXXX, which the toast's JSON reads back.
- */
+/** Sets the toast on a Bills response, and its announcement (which defaults to the toast's words). */
 function withToast(
 	response: Response,
 	toast: Record<string, unknown> & { message: string },
 	announce = toast.message,
 ) {
-	const json = JSON.stringify({ toast, announce }).replace(
-		/[\u007f-\uffff]/g,
-		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-	);
-	response.headers.set("HX-Trigger", json);
+	response.headers.set("HX-Trigger", hxTrigger({ toast, announce }));
 	return response;
 }
 
@@ -235,6 +229,7 @@ plans.get("/plans/:id/delete", async (c) => {
  * A plan's own page, where its payment is linked (P101). `focusEditPlan` and `focusLinkHeading` take focus when the page is
  * drawn: Edit planned expense after its sheet's save, the Link a payment heading after an Unlink that changed nothing (#87).
  * `sheet` is a plan's sheet drawn over the page (#87); the sheet takes focus, so neither of those focuses applies then.
+ * `error` is a refused link's words: the picker shows them while the plan is unpaid, and the paid page above its Unlink (#623).
  */
 async function planPage(
 	c: Context<App>,
@@ -271,24 +266,31 @@ async function planPage(
 						: `Set aside for ${monthName(plan.month)}`}
 				</p>
 				{plan.transactionId ? (
-					<form
-						method="post"
-						action={`/plans/${plan.id}/unlink`}
-						hx-post={`/plans/${plan.id}/unlink`}
-						hx-target="body"
-						hx-swap="outerHTML"
-						class="mt-6 flex items-center justify-between gap-3 border-t border-rule pt-4"
-					>
-						<input type="hidden" name="from" value="plan" />
-						<p>
-							Paid by {plan.paidName} ·{" "}
-							{shortDay(plan.paidDate ?? today, today)} ·{" "}
-							{formatCents(plan.paidAmountCents ?? 0)}
-						</p>
-						<Button kind="secondary" type="submit">
-							Unlink
-						</Button>
-					</form>
+					<>
+						{error && (
+							<p role="alert" class="mt-2 text-over">
+								{error}
+							</p>
+						)}
+						<form
+							method="post"
+							action={`/plans/${plan.id}/unlink`}
+							hx-post={`/plans/${plan.id}/unlink`}
+							hx-target="body"
+							hx-swap="outerHTML"
+							class="mt-6 flex items-center justify-between gap-3 border-t border-rule pt-4"
+						>
+							<input type="hidden" name="from" value="plan" />
+							<p>
+								Paid by {plan.paidName} ·{" "}
+								{shortDay(plan.paidDate ?? today, today)} ·{" "}
+								{formatCents(plan.paidAmountCents ?? 0)}
+							</p>
+							<Button kind="secondary" type="submit">
+								Unlink
+							</Button>
+						</form>
+					</>
 				) : (
 					<PlanPaymentPicker
 						planId={plan.id}
@@ -344,6 +346,11 @@ plans.post("/plans/:id/link", async (c) => {
 			type: "success",
 		});
 	}
+	// A plan paid by the time its link is sent says so first, as a paid bill month does (decision 82, #623).
+	// It is read again here, so a link that lands after the route's first load gets the same sentence.
+	const now = await loadPlan(c.env.DB, id);
+	if (!now) return c.notFound();
+	if (now.transactionId) return planPage(c, id, `${now.name} is already paid.`);
 	// The refusal names what the payment already pays, in the bill side's words (decision 82).
 	const paid = Number.isInteger(transaction)
 		? await paysBillOrPlan(c.env.DB, transaction)
