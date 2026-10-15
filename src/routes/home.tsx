@@ -109,6 +109,11 @@ type HomeOptions = {
 	/** Move focus to this category's row: after a save, or when the sheet closes. */
 	focusId?: number;
 	focusSavingsGoal?: boolean;
+	/**
+	 * A save's own reply (P119 A, #71): the budget or the savings goal it saved gets the pencil tick, and every bar is
+	 * drawn still, so only the toast and the tick move. Cancel, Adjust's taps and a refused amount pass nothing.
+	 */
+	saved?: { categoryId?: number; savingsGoal?: boolean };
 	/** Adjust mode: − and + on every budgeted row (#94). */
 	adjusting?: boolean;
 	/** After a tap reaches a limit, focus goes to the row's other button. */
@@ -128,6 +133,7 @@ async function renderHome(
 		sheet,
 		focusId,
 		focusSavingsGoal,
+		saved,
 		adjusting,
 		nudgeFocus,
 		status = 200,
@@ -372,6 +378,7 @@ async function renderHome(
 											href="/savings-goal"
 											attrs={openAttrs("/savings-goal")}
 											autofocus={focusSavingsGoal}
+											saved={saved?.savingsGoal ? "toast" : undefined}
 										/>
 									)}
 									{hasSavingsGoal && !current && (
@@ -395,6 +402,10 @@ async function renderHome(
 												attrs={href ? openAttrs(href) : undefined}
 												reserveArrow={current && !adjusting}
 												autofocus={cat.id === focusId}
+												saved={
+													saved?.categoryId === cat.id ? "toast" : undefined
+												}
+												barsStill={saved !== undefined}
 												nudge={
 													current && adjusting && href
 														? {
@@ -658,7 +669,10 @@ home.post("/savings-goal", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
-	return renderHome(c, today, { focusSavingsGoal: true });
+	return renderHome(c, today, {
+		focusSavingsGoal: true,
+		saved: { savingsGoal: true },
+	});
 });
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.
@@ -712,7 +726,10 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 		}),
 	);
 	c.header("HX-Push-Url", "/");
-	return renderHome(c, today, { focusId: category.id });
+	return renderHome(c, today, {
+		focusId: category.id,
+		saved: { categoryId: category.id },
+	});
 });
 
 // One tap in Adjust mode (#94, decision 48): the budget moves to the next round $10, from this month
