@@ -12,17 +12,17 @@ export type MonthSpent = {
 };
 
 /**
- * The full calendar months this suggestion may use, oldest first: up to the last three months before today's month,
- * and only those after `firstCountedMonth`, since the first counted month is a part month (Plaid's history starts
- * partway through it, so it never counts). The current month is never full. No history means none.
+ * The full calendar months this suggestion may use, oldest first: up to the last three months before today's month.
+ * A month counts in full only from its 1st, so the first month counts when the history starts on its 1st, and is left
+ * out when it starts partway through (Plaid's history starts partway through that month, a part month). `firstDate` is
+ * the history's first date (YYYY-MM-DD), or null with no history, which means no full month. The current month is never full.
  */
-export function fullMonths(
-	firstCountedMonth: string | null,
-	today: string,
-): string[] {
-	if (firstCountedMonth === null) return [];
+export function fullMonths(firstDate: string | null, today: string): string[] {
+	if (firstDate === null) return [];
 	const current = today.slice(0, 7);
-	const earliest = monthsBefore(firstCountedMonth, -1);
+	const firstMonth = firstDate.slice(0, 7);
+	const earliest =
+		firstDate.slice(8) === "01" ? firstMonth : monthsBefore(firstMonth, -1);
 	const months: string[] = [];
 	for (let n = 3; n >= 1; n -= 1) {
 		const month = monthsBefore(current, n);

@@ -13,17 +13,28 @@ describe("fullMonths", () => {
 		expect(fullMonths(null, "2026-10-14")).toEqual([]);
 	});
 
-	it("never counts the first counted month, which is a part month", () => {
-		// History starts in August (a part month): only September counts before October.
-		expect(fullMonths("2026-08", "2026-10-14")).toEqual(["2026-09"]);
+	it("counts the first month in full when history starts on its 1st", () => {
+		expect(fullMonths("2026-08-01", "2026-10-14")).toEqual([
+			"2026-08",
+			"2026-09",
+		]);
 	});
 
-	it("has no full month when history starts in the month before this one", () => {
-		expect(fullMonths("2026-09", "2026-10-14")).toEqual([]);
+	it("never counts a first month that starts partway through, which is a part month", () => {
+		// History starts on the 2nd of August: August is a part month, so only September counts.
+		expect(fullMonths("2026-08-02", "2026-10-14")).toEqual(["2026-09"]);
+	});
+
+	it("counts a first month that starts on its 1st, when it is the only full month before this one", () => {
+		expect(fullMonths("2026-09-01", "2026-10-14")).toEqual(["2026-09"]);
+	});
+
+	it("has no full month when history starts partway through the month before this one", () => {
+		expect(fullMonths("2026-09-15", "2026-10-14")).toEqual([]);
 	});
 
 	it("never counts the current month, even on its first day", () => {
-		expect(fullMonths("2026-01", "2026-10-01")).toEqual([
+		expect(fullMonths("2026-01-01", "2026-10-01")).toEqual([
 			"2026-07",
 			"2026-08",
 			"2026-09",
@@ -31,7 +42,7 @@ describe("fullMonths", () => {
 	});
 
 	it("takes the last three full months, oldest first", () => {
-		expect(fullMonths("2026-01", "2026-10-14")).toEqual([
+		expect(fullMonths("2026-01-01", "2026-10-14")).toEqual([
 			"2026-07",
 			"2026-08",
 			"2026-09",
@@ -39,7 +50,7 @@ describe("fullMonths", () => {
 	});
 
 	it("crosses a year", () => {
-		expect(fullMonths("2025-06", "2026-02-03")).toEqual([
+		expect(fullMonths("2025-06-01", "2026-02-03")).toEqual([
 			"2025-11",
 			"2025-12",
 			"2026-01",
