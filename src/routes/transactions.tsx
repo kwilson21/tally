@@ -117,7 +117,7 @@ import { EmptyState } from "../views/empty-state";
 import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
 import type { HouseholdPerson } from "../views/household-people";
-import { HowLink } from "../views/how-link";
+import { HowFoot } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { LikelyAdd, LikelySheet } from "../views/likely-transactions";
@@ -663,7 +663,6 @@ async function renderList(
 					<Icon name="plus" class="size-5" /> Add cash
 				</Button>
 			</div>
-			<HowLink section="transactions" />
 
 			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results.
 			    Like the result count and Select, it waits for the first transaction (P40 A). */}
@@ -946,6 +945,9 @@ async function renderList(
 								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
 						</div>
+						{/* After the bar in the page order, so Tab still goes pager, then Select all, then here. The form's
+						    bottom padding sits below it, so the fixed bar never covers it. */}
+						<HowFoot section="transactions" />
 					</form>
 				) : (
 					<section id="results" class="mt-2" aria-label="Results">
@@ -999,6 +1001,7 @@ async function renderList(
 							))
 						)}
 						{pageNav}
+						<HowFoot section="transactions" />
 					</section>
 				)}
 				<div id="sheet">{sheet?.(categories.results, today)}</div>
@@ -1989,10 +1992,6 @@ function EditSheet({
 			{tx.excluded && tx.paysBill && (
 				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
 			)}
-			{/* Outside the form, so following it never happens by accident mid-edit. */}
-			<p>
-				<HowLink section="categorization" />
-			</p>
 			{tx.parentId === null && !tx.isSplit && !tx.income && (
 				<Button
 					kind="secondary"
@@ -2571,6 +2570,8 @@ function EditSheet({
 					)}
 				</form>
 			)}
+			{/* Outside the forms, so following it never happens by accident mid-edit. */}
+			<HowFoot section="categorization" />
 		</BottomSheet>
 	);
 }

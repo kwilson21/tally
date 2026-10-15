@@ -6,7 +6,6 @@ import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
 import { headlineAmountClass } from "./headline-amount";
-import { HowLink } from "./how-link";
 import { LedgerIllustration } from "./illustration";
 import { WhyLink } from "./why-link";
 
@@ -38,7 +37,7 @@ type Props = {
 	hasBudgets?: boolean;
 };
 
-/** The month, then Safe to spend, the status sentence, How this works, a stale-bank line when needed, and the Band. */
+/** The month, then Safe to spend, the status sentence, a stale-bank line when needed, and the Band. How this works is at Home's foot (HowFoot). */
 export function HomeTop({
 	month,
 	monthHeading,
@@ -90,7 +89,6 @@ export function HomeTop({
 				<p class="mt-1 text-muted">{dailyAmount}</p>
 			)}
 			{currentMonth && forecast}
-			<HowLink section="budget" />
 			{band && (
 				<div class={bankLine ? "mt-2" : "mt-4"}>
 					<Band href={band.href} detail={band.detail} older={band.older}>
