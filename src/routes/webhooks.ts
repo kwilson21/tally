@@ -12,6 +12,8 @@ type Webhook = {
 	webhook_type?: unknown;
 	webhook_code?: unknown;
 	error?: { error_code?: unknown };
+	/** On SYNC_UPDATES_AVAILABLE: Plaid's 90-day history is available (#581). */
+	historical_update_complete?: unknown;
 };
 
 const attentionCodes = new Set([
@@ -61,9 +63,12 @@ webhooks.post("/webhooks/plaid", async (c) => {
 		body.webhook_type === "TRANSACTIONS" &&
 		body.webhook_code === "SYNC_UPDATES_AVAILABLE"
 	) {
-		// Then Jev sorts what arrived, when the household's switch is on (spec §8.6, decision 68).
+		// Then Jev sorts what arrived, when the household's switch is on (spec §8.6, decision 68). A sync the webhook
+		// starts runs after Plaid said the history is in when historical_update_complete is true (#581).
 		c.executionCtx.waitUntil(
-			syncItemAndSort(c.env, item.id).catch((error: unknown) => {
+			syncItemAndSort(c.env, item.id, undefined, {
+				historyComplete: body.historical_update_complete === true,
+			}).catch((error: unknown) => {
 				const requestId =
 					error instanceof PlaidError ? error.request_id : undefined;
 				console.error(`plaid webhook sync error ${requestId ?? ""}`.trim());

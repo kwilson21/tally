@@ -454,6 +454,81 @@ describe("Plaid webhook route", () => {
 		expect(output).not.toContain(token);
 	});
 
+	it.each([true, false])(
+		"hands historical_update_complete %s to its sync, which sets history_complete_at only when true (#581)",
+		async (historicalComplete) => {
+			await env.DB.prepare(
+				"INSERT INTO plaid_items (plaid_item_id, access_token_encrypted, institution_name, linked_by) VALUES ('item-history', ?, 'Bank', 'person')",
+			)
+				.bind(await encryptToken("token-history", KEY))
+				.run();
+			const sign = await signer();
+			const body = JSON.stringify({
+				item_id: "item-history",
+				webhook_type: "TRANSACTIONS",
+				webhook_code: "SYNC_UPDATES_AVAILABLE",
+				historical_update_complete: historicalComplete,
+				initial_update_complete: true,
+			});
+			const { token, jwk } = await sign(body);
+			vi.stubGlobal(
+				"fetch",
+				vi.fn(async (input: RequestInfo | URL) => {
+					const url = String(input);
+					if (url.endsWith("/webhook_verification_key/get"))
+						return Response.json({ key: { ...jwk, expired_at: null } });
+					if (url.endsWith("/accounts/get"))
+						return Response.json({
+							accounts: [
+								{
+									account_id: "account-1",
+									name: "Checking",
+									type: "depository",
+									balances: { current: 10 },
+								},
+							],
+						});
+					return Response.json({
+						added: [],
+						modified: [],
+						removed: [],
+						next_cursor: "next",
+						has_more: false,
+					});
+				}),
+			);
+			const promises: Promise<unknown>[] = [];
+			const ctx = {
+				waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+				passThroughOnException() {},
+				props: {},
+			} as unknown as ExecutionContext;
+			vi.spyOn(console, "log").mockImplementation(() => {});
+			expect(
+				(
+					await app.request(
+						"http://tally.test/webhooks/plaid",
+						{
+							method: "POST",
+							body,
+							headers: {
+								"content-type": "application/json",
+								"Plaid-Verification": token,
+							},
+						},
+						env,
+						ctx,
+					)
+				).status,
+			).toBe(200);
+			await Promise.all(promises);
+			const at = await env.DB.prepare(
+				"SELECT history_complete_at AS at FROM plaid_items WHERE plaid_item_id = 'item-history'",
+			).first<{ at: string | null }>();
+			expect(at?.at !== null && at?.at !== undefined).toBe(historicalComplete);
+		},
+	);
+
 	it("applies a merchant rule to the new transactions a webhook sync brings in", async () => {
 		const category = await env.DB.prepare(
 			"SELECT id FROM categories WHERE archived = 0 ORDER BY sort_order LIMIT 1",
