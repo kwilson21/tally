@@ -469,9 +469,9 @@ function Brand() {
 				title="TallySteps"
 				tier="visual"
 				components={["TallySteps"]}
-				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; the next line's note says Next, and the words carry the state."
+				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; Next marks the line to act on once the questions are open, and the words carry the state."
 			>
-				<State label="Before a bank: none done, Link your bank is next">
+				<State label="Before a bank: none done, each line says how long it takes">
 					<TallySteps
 						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
 					/>
@@ -488,6 +488,17 @@ function Brand() {
 					/>
 				</State>
 				<State label="The catch-up evening: the rest come when the import is sorted">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="The evening, the history still coming in: no time promised">
 					<TallySteps
 						steps={setupSteps(
 							BANK_SYNCED,
@@ -554,7 +565,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says how far Tally has got and that the questions come. Once they are open, the Band says Three things to check."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got. Once the questions are open, the Band says Three things to check."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
@@ -584,6 +595,26 @@ function Brand() {
 							total: 1500,
 							sorted: 900,
 							fitsOneNight: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, the history still coming in: no time promised">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							historyIn: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, two banks: the line names neither">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
 						})}
 					/>
 				</State>
@@ -640,6 +671,8 @@ const firstWeek = (
 		phase,
 		drawn: strokesDrawn(record),
 		bankName: null,
+		bankCount: 1,
+		historyIn: true,
 		fitsOneNight: true,
 		sorted: 0,
 		total: 0,
@@ -652,7 +685,7 @@ const firstWeek = (
 			phase,
 			view.bankName,
 			FIRST_WEEK_TODAY,
-			view.fitsOneNight,
+			view.historyIn && view.fitsOneNight,
 		),
 	};
 };

@@ -9,6 +9,8 @@ const base: SetupView = {
 	steps: [],
 	bankName: null,
 	fitsOneNight: true,
+	bankCount: 1,
+	historyIn: true,
 	sorted: 0,
 	total: 0,
 };
@@ -52,6 +54,75 @@ describe("HomeSetup", () => {
 			"One. Tally's reading your last 90 days from Chase. Your questions will usually be ready by the morning.",
 		);
 		expect(html).toContain("Nothing for you to do until then.");
+	});
+
+	it("reading, with two connected banks: the evening line names neither bank", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankName: "Chase",
+			bankCount: 2,
+			fitsOneNight: true,
+			total: 40,
+			sorted: 0,
+		});
+		expect(html).toContain(
+			"One. Tally's reading your last 90 days. Your questions will usually be ready by the morning.",
+		);
+		expect(html).not.toContain("from Chase");
+	});
+
+	it("reading, with the history still coming in: no time is promised, and the bank is named with one connected", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankName: "Chase",
+			bankCount: 1,
+			historyIn: false,
+			fitsOneNight: true,
+			total: 40,
+			sorted: 0,
+		});
+		expect(html).toContain(
+			"One. Tally's reading your last 90 days from Chase. Your questions will be ready once it has read them all and sorted them.",
+		);
+		expect(html).not.toContain("by the morning");
+		expect(html).not.toContain("Tally's sorted");
+		expect(html).toContain("Nothing for you to do until then.");
+	});
+
+	it("reading, with the history still coming in and the import bigger than one night: still no time and no count", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankName: "Chase",
+			bankCount: 1,
+			historyIn: false,
+			fitsOneNight: false,
+			sorted: 900,
+			total: 1500,
+		});
+		expect(html).toContain(
+			"One. Tally's reading your last 90 days from Chase. Your questions will be ready once it has read them all and sorted them.",
+		);
+		expect(html).not.toContain("by the morning");
+		expect(html).not.toContain("Tally's sorted");
+		expect(html).not.toContain("900");
+	});
+
+	it("reading, with two banks and the history still coming in: the sentence names neither bank", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankName: "Chase",
+			bankCount: 2,
+			historyIn: false,
+			total: 40,
+		});
+		expect(html).toContain(
+			"One. Tally's reading your last 90 days. Your questions will be ready once it has read them all and sorted them.",
+		);
+		expect(html).not.toContain("from Chase");
 	});
 
 	it("reading, when the import takes more nights: the catch-up line counts the sorted", async () => {

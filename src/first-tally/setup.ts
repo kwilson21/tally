@@ -11,7 +11,12 @@ import {
 	STROKES,
 } from "../db/first-tally";
 import type { StepLine } from "../views/tally-steps";
-import { type GateBank, questionsOpen, readGateInputs } from "./gate";
+import {
+	banksHistoryIn,
+	type GateBank,
+	questionsOpen,
+	readGateInputs,
+} from "./gate";
 
 /**
  * before: no connected bank yet (Link a bank). reading: a bank is linked and the questions are shut (the import is
@@ -26,8 +31,12 @@ export type SetupView = {
 	drawn: number;
 	/** The five lines, in order (TallySteps). */
 	steps: StepLine[];
-	/** The first connected bank's name, or null before a bank is linked. */
+	/** The first connected bank's name, or null before a bank is linked (stroke one's note names it). */
 	bankName: string | null;
+	/** The connected banks, not the disconnected ones. Home's reading line names the bank only when there is one. */
+	bankCount: number;
+	/** Every connected bank's 90-day history is in (banksHistoryIn). Until it is, Home promises no time. */
+	historyIn: boolean;
 	/** Reading: what Jev still owes the import fits one night's allowance (§8.6), so the questions come by the morning. */
 	fitsOneNight: boolean;
 	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
@@ -45,18 +54,22 @@ const NAMES = [
 ];
 
 /**
- * The notes of the lines whose stroke isn't drawn. Before a bank and once the questions are open, the line the family acts
- * on says "Next" instead (setupSteps), so the first entry is never shown.
+ * The notes of the lines whose stroke isn't drawn, outside the reading phase. Before a bank no line says Next, so each
+ * says how long it takes, and the first entry shows only there: stroke one is drawn once a bank is linked. Once the
+ * questions are open, the first line not drawn says Next instead (setupSteps).
  */
 const QUESTION_NOTES = [
-	"",
+	"About a minute",
 	"One question",
 	"One question",
 	"One tap, or one at a time",
 	"Later",
 ];
 
-/** While the import is read and fits one night's AI allowance (§8.6), the questions come by the morning. */
+/**
+ * While the import is read, every bank's history is in, and it fits one night's AI allowance (§8.6): the questions come
+ * by the morning.
+ */
 const MORNING_NOTES = [
 	"",
 	"Tomorrow morning",
@@ -88,21 +101,20 @@ export function setupSteps(
 	phase: SetupPhase,
 	bankName: string | null,
 	today: string,
-	fitsOneNight: boolean,
+	byMorning: boolean,
 ): StepLine[] {
-	// The line the family acts on now says "Next": Link your bank before a bank, then the first stroke not yet drawn once
-	// the questions are open. While the import is read, or once the three questions are answered, there is nothing to act
-	// on, so no line says Next.
+	// The line the family acts on now says "Next": the first stroke not yet drawn once the questions are open. Before a
+	// bank no line says Next (each says how long it takes), and while the import is read, or once the three questions are
+	// answered, there is nothing to act on.
 	const next =
-		phase === "before"
-			? 0
-			: phase === "ready"
-				? STROKES.findIndex((stroke) => record?.strokes[stroke] === undefined)
-				: -1;
+		phase === "ready"
+			? STROKES.findIndex((stroke) => record?.strokes[stroke] === undefined)
+			: -1;
+	// byMorning is every bank's history in and the rest fitting one night (setupView): only then is the morning promised.
 	const notes =
 		phase !== "reading"
 			? QUESTION_NOTES
-			: fitsOneNight
+			: byMorning
 				? MORNING_NOTES
 				: CATCH_UP_NOTES;
 	return STROKES.map((stroke, i) => {
@@ -144,6 +156,7 @@ export function setupView({
 }): SetupView | null {
 	if (isSetUp(record)) return null;
 	const bankName = banks[0]?.name ?? null;
+	const historyIn = banksHistoryIn(banks);
 	// Answered is checked before the gate, so a bank linked after the answers (which shuts the gate again) doesn't send
 	// the family back to "reading" for questions they have already answered.
 	const phase: SetupPhase =
@@ -163,8 +176,16 @@ export function setupView({
 	return {
 		phase,
 		drawn: strokesDrawn(record),
-		steps: setupSteps(record, phase, bankName, today, fitsOneNight),
+		steps: setupSteps(
+			record,
+			phase,
+			bankName,
+			today,
+			historyIn && fitsOneNight,
+		),
 		bankName,
+		bankCount: banks.length,
+		historyIn,
 		fitsOneNight,
 		sorted: Math.max(0, total - waiting),
 		total,

@@ -19,11 +19,19 @@ function statusOf(view: SetupView): string {
 	if (view.phase === "ready") {
 		return `Tally sorted ${count(view.total)} overnight. Three things to check, and Safe to spend is written in at the end.`;
 	}
+	const drawn = view.drawn > 0 ? `${WORDS[view.drawn] ?? view.drawn}. ` : "";
+	// The bank is named only with one connected: with two, neither is, so the line never names the wrong one.
+	const from =
+		view.bankCount === 1 ? ` from ${view.bankName ?? "your bank"}` : "";
+	const reading = `${drawn}Tally's reading your last 90 days${from}.`;
+	// Until every bank's 90-day history is in, no time is promised and no count is shown: the import isn't complete yet.
+	if (!view.historyIn) {
+		return `${reading} Your questions will be ready once it has read them all and sorted them.`;
+	}
 	if (!view.fitsOneNight) {
 		return `Tally's sorted ${count(view.sorted)} of ${count(view.total)}. Your questions will be ready when it's done, usually in a night or two.`;
 	}
-	const drawn = view.drawn > 0 ? `${WORDS[view.drawn] ?? view.drawn}. ` : "";
-	return `${drawn}Tally's reading your last 90 days from ${view.bankName ?? "your bank"}. Your questions will usually be ready by the morning.`;
+	return `${reading} Your questions will usually be ready by the morning.`;
 }
 
 /**

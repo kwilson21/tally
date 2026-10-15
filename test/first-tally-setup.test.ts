@@ -40,12 +40,13 @@ describe("setupView: which setup state Home shows", () => {
 		expect(before?.drawn).toBe(0);
 		expect(before?.bankName).toBeNull();
 		expect(before?.steps.map((s) => [s.done, s.note])).toEqual([
-			[false, "Next"],
+			[false, "About a minute"],
 			[false, "One question"],
 			[false, "One question"],
 			[false, "One tap, or one at a time"],
 			[false, "Later"],
 		]);
+		expect(before?.steps.some((s) => s.note === "Next")).toBe(false);
 	});
 
 	it("ignores a stroke one that is still drawn when no bank is connected (the disconnect retake)", () => {
@@ -60,6 +61,7 @@ describe("setupView: which setup state Home shows", () => {
 			banks: [{ ...BANK, historyCompleteAt: null }],
 		});
 		expect(reading?.phase).toBe("reading");
+		expect(reading?.historyIn).toBe(false);
 		expect(reading?.drawn).toBe(1);
 		expect(reading?.bankName).toBe("Chase");
 		expect(reading?.steps[0]).toEqual({
@@ -70,8 +72,13 @@ describe("setupView: which setup state Home shows", () => {
 		expect(reading?.steps[1]).toEqual({
 			name: "Your pay",
 			done: false,
-			note: "Tomorrow morning",
+			note: "When it's done",
 		});
+		expect(reading?.steps.slice(1, 4).map((s) => s.note)).toEqual([
+			"When it's done",
+			"When it's done",
+			"When it's done",
+		]);
 		expect(reading?.steps[4]?.note).toBe("Later");
 	});
 
@@ -106,6 +113,41 @@ describe("setupView: which setup state Home shows", () => {
 		expect(ready?.steps[1]?.note).toBe("Next");
 	});
 
+	it("promises no time while any connected bank's history is still coming, even when another bank's is in", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const second = {
+			name: "Northline",
+			lastSyncedAt: "2026-10-13",
+			historyCompleteAt: null,
+		};
+		const reading = view({
+			record,
+			banks: [BANK, second],
+			waiting: 500,
+			total: 1500,
+			cap: 500,
+		});
+		expect(reading?.phase).toBe("reading");
+		expect(reading?.historyIn).toBe(false);
+		expect(reading?.steps.some((s) => s.note === "Tomorrow morning")).toBe(
+			false,
+		);
+	});
+
+	it("counts the connected banks and names the first one's, not the second's", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const two = view({
+			record,
+			banks: [BANK, { ...BANK, name: "Northline" }],
+			waiting: 0,
+			total: 10,
+		});
+		expect(two?.bankCount).toBe(2);
+		expect(two?.bankName).toBe("Chase");
+		expect(two?.steps[0]?.note).toBe("Chase, linked");
+		expect(view({ record, banks: [BANK] })?.bankCount).toBe(1);
+	});
+
 	it("stays in reading while a bank's history is still coming", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		expect(
@@ -135,6 +177,7 @@ describe("setupView: which setup state Home shows", () => {
 	it("keeps 'Tomorrow morning' on the lines when the import fits one night", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const fits = view({ record, banks: [BANK], waiting: 500, cap: 500 });
+		expect(fits?.historyIn).toBe(true);
 		expect(fits?.steps.slice(1).map((s) => s.note)).toEqual([
 			"Tomorrow morning",
 			"Tomorrow morning",
