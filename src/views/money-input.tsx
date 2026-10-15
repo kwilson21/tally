@@ -3,6 +3,7 @@
 // under it the Round-to and Last-month chips. public/js/money.js runs the buttons; the server draws
 // their starting state, and without the script they stay hidden and the field works on its own.
 import { formatCents, toCents } from "../money";
+import { Icon } from "./icons";
 
 type Props = {
 	id: string;
@@ -35,7 +36,14 @@ const cent =
 	"flex w-11 flex-1 items-center justify-center text-muted hover:bg-band hover:text-ink disabled:opacity-40";
 /** A chip under the field. Exported so a drawing of a chip the app doesn't have yet can't drift. */
 export const moneyChip =
-	"inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted tabular-nums hover:text-ink aria-pressed:opacity-50";
+	"group inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted tabular-nums hover:text-ink aria-pressed:text-ink";
+
+/** A chip's check: its slot is always in the chip, hidden until the chip is pressed, so a chip never changes width. */
+const Check = () => (
+	<span class="inline-flex invisible group-aria-pressed:visible">
+		<Icon name="check" class="size-4" />
+	</span>
+);
 
 /** The ▲ and ▼ of the cent arrows. */
 const Arrow = ({ up }: { up: boolean }) => (
@@ -65,8 +73,10 @@ export function MoneyInput({
 	inputAttributes,
 }: Props) {
 	const cents = centsOf(value);
-	const atZero = cents === null || cents === 0;
+	const unreadable = cents === null;
+	const atZero = unreadable || cents === 0;
 	const hasCents = cents !== null && cents % 100 !== 0;
+	const roundedCents = cents === null ? 0 : Math.ceil(cents / 100) * 100;
 	return (
 		<div data-money class="flex flex-col gap-2">
 			<label for={id} class="text-base text-ink">
@@ -96,6 +106,7 @@ export function MoneyInput({
 						id={id}
 						name={name}
 						value={value}
+						placeholder="0.00"
 						inputmode="decimal"
 						autocomplete="off"
 						data-money-input
@@ -103,7 +114,7 @@ export function MoneyInput({
 						autofocus={autofocus}
 						aria-invalid={error ? "true" : undefined}
 						aria-describedby={error ? `${id}-error` : undefined}
-						class={`-my-3 min-w-0 flex-1 self-stretch bg-transparent text-[1.75rem] font-bold tabular-nums focus-visible:outline-none ${error ? "field-shake" : ""}`}
+						class={`-my-3 min-w-0 flex-1 self-stretch bg-transparent text-[1.75rem] font-bold tabular-nums placeholder:font-normal placeholder:text-muted focus-visible:outline-none ${error ? "field-shake" : ""}`}
 					/>
 					<div
 						data-money-js
@@ -113,6 +124,7 @@ export function MoneyInput({
 							type="button"
 							data-nudge="1"
 							aria-label={`Increase ${label} by 1 cent`}
+							disabled={unreadable}
 							class={`${cent} rounded-tr-control`}
 						>
 							<Arrow up />
@@ -133,6 +145,7 @@ export function MoneyInput({
 					data-money-js
 					data-nudge="100"
 					aria-label={`Increase ${label} by $1`}
+					disabled={unreadable}
 					class={round}
 				>
 					+
@@ -148,11 +161,18 @@ export function MoneyInput({
 				</p>
 			)}
 			<div data-money-js class="flex flex-wrap justify-center gap-2">
-				<button type="button" data-roundup hidden={!hasCents} class={moneyChip}>
-					Round to{" "}
-					{hasCents
-						? formatCents(Math.ceil(cents / 100) * 100, { wholeDollars: true })
-						: ""}
+				<button
+					type="button"
+					data-roundup={hasCents ? String(roundedCents) : ""}
+					hidden={!hasCents}
+					aria-pressed="false"
+					class={moneyChip}
+				>
+					<Check />
+					<span data-roundup-label>
+						Round to{" "}
+						{hasCents ? formatCents(roundedCents, { wholeDollars: true }) : ""}
+					</span>
 				</button>
 				{lastMonthCents > 0 && (
 					<button
@@ -161,6 +181,7 @@ export function MoneyInput({
 						aria-pressed={String(cents === lastMonthCents)}
 						class={moneyChip}
 					>
+						<Check />
 						Last month: {formatCents(lastMonthCents)}
 					</button>
 				)}
@@ -171,6 +192,7 @@ export function MoneyInput({
 						aria-pressed={String(cents === averageCents)}
 						class={moneyChip}
 					>
+						<Check />
 						3-month average: {formatCents(averageCents)}
 					</button>
 				)}

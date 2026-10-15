@@ -57,6 +57,93 @@ describe("MoneyInput", () => {
 	});
 });
 
+/** The whole start tag of the button with this data-nudge value (1, -1, 100 or -100). */
+const stepTag = (html: string, nudge: string) =>
+	html.match(new RegExp(`<button[^>]*data-nudge="${nudge}"[^>]*>`))?.[0] ?? "";
+
+/** The whole start tag of the chip with this marker attribute. */
+const chipTag = (html: string, marker: string) =>
+	html.match(new RegExp(`<button[^>]*${marker}[^>]*>`))?.[0] ?? "";
+
+describe("MoneyInput's words and steps (decision 117)", () => {
+	it("shows a muted 0.00 placeholder in the box, in normal weight", () => {
+		const html = renderToString(
+			<MoneyInput id="amount" name="amount" label="Budget" value="" />,
+		);
+		expect(html).toMatch(/<input [^>]*placeholder="0\.00"[^>]*>/);
+		expect(html).toContain("placeholder:text-muted");
+		expect(html).toContain("placeholder:font-normal");
+	});
+
+	it("gives each chip a check slot that keeps its width, shown only when the chip is pressed", () => {
+		const html = renderToString(
+			<MoneyInput
+				id="amount"
+				name="amount"
+				label="Budget"
+				value="571.80"
+				lastMonthCents={57180}
+				averageCents={60245}
+			/>,
+		);
+		const last = chipTag(html, 'data-set="57180"');
+		expect(last).toContain("group");
+		expect(last).toContain("aria-pressed:text-ink");
+		expect(last).not.toContain("aria-pressed:opacity-50");
+		// The check's span is always in the chip, invisible until its pressed state shows it.
+		expect(html).toMatch(
+			/<span class="inline-flex invisible group-aria-pressed:visible">/,
+		);
+		expect(html.match(/group-aria-pressed:visible/g)).toHaveLength(3);
+	});
+
+	it("starts Round to unpressed, with its label kept apart from its check", () => {
+		const html = renderToString(
+			<MoneyInput id="amount" name="amount" label="Budget" value="612.45" />,
+		);
+		const round = chipTag(html, "data-roundup");
+		expect(round).toContain('aria-pressed="false"');
+		expect(html).toContain(
+			'<span data-roundup-label="true">Round to $613</span>',
+		);
+	});
+
+	it("turns all four steps off while the text can't be read, and hides Round to", () => {
+		const html = renderToString(
+			<MoneyInput
+				id="amount"
+				name="amount"
+				label="Budget"
+				value="six hundred"
+				error="Enter a dollar amount, like 250 or 250.50."
+			/>,
+		);
+		for (const nudge of ["100", "1", "-1", "-100"]) {
+			expect(stepTag(html, nudge)).toMatch(/\sdisabled[\s>=]/);
+		}
+		expect(chipTag(html, "data-roundup")).toMatch(/\shidden[\s>=]/);
+	});
+
+	it("keeps every step on for a readable amount", () => {
+		const html = renderToString(
+			<MoneyInput id="amount" name="amount" label="Budget" value="612.40" />,
+		);
+		for (const nudge of ["100", "1", "-1", "-100"]) {
+			expect(stepTag(html, nudge)).not.toMatch(/\sdisabled[\s>=]/);
+		}
+	});
+
+	it("waits for a number: the empty box keeps +$1 and ▲ on, and turns − and ▼ off", () => {
+		const html = renderToString(
+			<MoneyInput id="amount" name="amount" label="Budget" value="" />,
+		);
+		expect(stepTag(html, "-100")).toMatch(/\sdisabled[\s>=]/);
+		expect(stepTag(html, "-1")).toMatch(/\sdisabled[\s>=]/);
+		expect(stepTag(html, "100")).not.toMatch(/\sdisabled[\s>=]/);
+		expect(stepTag(html, "1")).not.toMatch(/\sdisabled[\s>=]/);
+	});
+});
+
 const draw = () =>
 	renderToString(
 		<MoneyInput id="amount" name="amount" label="Budget" value="700.00" />,
