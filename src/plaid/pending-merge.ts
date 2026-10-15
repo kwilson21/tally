@@ -32,8 +32,12 @@
  *   leaves the posted row in Needs category with the note. A refund of one of its parts is unlinked with the
  *   purchase's date (decision 99). When the posted row keeps its own split, a pending part's bill payment stays paid on
  *   the posted part with the same amount and category, and otherwise it is unlinked, with no dismissal, so the matcher
- *   may link it again when it still matches (decisions 99 and 105). A person's own Not this one on a pending part moves
- *   to the posted row, and each posted part starts with it.
+ *   may link it again when it still matches (decisions 99 and 105). A planned expense on a pending part moves the same way,
+ *   to the posted part with the same amount and category that no bill or plan pays; otherwise it is set aside again.
+ *   The parts then hang under the posted row, so a pending part's plan is set aside when the posted row already pays a
+ *   bill or a plan, and a pending part's bill is unlinked, with no dismissal, when the posted row pays a plan: no part
+ *   that moves under the posted row ever pays in the same payment group as a bill and a plan (decision 82).
+ *   A person's own Not this one on a pending part moves to the posted row, and each posted part starts with it.
  * - Tally's AI log of what it did (spec section 5) follows the category it counts: its row moves to the posted row
  *   only when the pending row's category moves with it, so a person's later change is counted only on a category
  *   Tally still holds. Otherwise the row keeps counting with no transaction. An income row always moves.
@@ -48,7 +52,12 @@ import {
 	purchaseDismissalsToPartsSql,
 } from "../bills/split-dismissals";
 import { UNPAID_BILLS_SQL } from "../bills/unpaid";
-import { jevAsksAboutSql, paysBillSql } from "../db/counted-month";
+import {
+	jevAsksAboutSql,
+	paysBillGroupSql,
+	paysBillOrPlanSql,
+	paysPlanGroupSql,
+} from "../db/counted-month";
 import { hasIncomeAnswerSql } from "../db/income";
 
 /** A person choice or Jev's stored answer means a posted flag already has an answer. */
@@ -59,6 +68,8 @@ function hasAnswerSql(personChoice: string, jevAnswer: string) {
 const PENDING =
 	"(SELECT id FROM transactions WHERE plaid_transaction_id = ?1 AND pending = 1)";
 const POSTED = "(SELECT id FROM transactions WHERE plaid_transaction_id = ?2)";
+/** The posted row's payment group (decision 82): the row, its split parent and its parts, as the triggers read it. */
+const POSTED_GROUP = `(SELECT g.id FROM transactions g WHERE g.id IN (${POSTED}, (SELECT parent_id FROM transactions WHERE id = ${POSTED})) OR g.parent_id = ${POSTED})`;
 const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 	SELECT 1 FROM plaid_items WHERE id = ?4 AND sync_lock_id = ?5 AND disconnected_at IS NULL)`;
 
@@ -66,11 +77,13 @@ const READY = `${PENDING} IS NOT NULL AND ${POSTED} IS NOT NULL AND EXISTS (
 const FROM_PENDING = `FROM transactions AS p WHERE p.id = ${PENDING} AND transactions.id = ${POSTED} AND ${READY}`;
 
 /**
- * Whether the posted row pays a bill once the pending row's bill payments have moved onto it (the bill statement below):
- * it pays one already, or a linked payment of the pending row moves to it. A dismissed payment moves too but doesn't pay.
+ * Whether the posted row pays a bill or a planned expense once the pending row's bill payments and planned expense have
+ * moved onto it (the bill and plan statements below): it pays one already, a linked payment of the pending row moves to
+ * it, or the pending row's own plan moves to it. A dismissed payment moves too but doesn't pay.
  */
-const POSTED_PAYS_ONCE_MOVED = `(${paysBillSql("transactions")} OR EXISTS (
-	SELECT 1 FROM bill_payments moved WHERE moved.status = 'linked' AND moved.transaction_id = ${PENDING}))`;
+const POSTED_PAYS_ONCE_MOVED = `(${paysBillOrPlanSql("transactions")} OR EXISTS (
+	SELECT 1 FROM bill_payments moved WHERE moved.status = 'linked' AND moved.transaction_id = ${PENDING})
+	OR EXISTS (SELECT 1 FROM planned_expenses moved WHERE moved.transaction_id = ${PENDING}))`;
 
 // A split part (`transactions`) has a choice of its own only when a person made it on that part (its source
 // is 'user', as saving the edit panel on the part records it) and it differs from the pending purchase's
@@ -105,7 +118,7 @@ const PERSON_TAKEN = takesDetailSql(
 /** Mirrors the first category statement: a person's pick on the pending row moves onto the posted row. */
 const LOG_PERSON_PICK = `p.category_source = 'user' AND p.category_id IS NOT NULL
 	AND COALESCE(t.category_source, '') != 'user'`;
-/** Mirrors Jev's category statement: Jev's answer moves onto a posted row with no category, at the same amount, never a split. */
+/** Mirrors JEV_CATEGORY_ARM (the Jev answer statement): Jev's category moves onto a posted row with no category, at the same amount, never a split. */
 const LOG_JEV_PICK = `p.category_confidence IS NOT NULL AND p.amount_cents = ?3
 	AND t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence IS NULL AND t.is_split = 0`;
 /** Mirrors the split statement that takes the pre-split category when the amount changed. */
@@ -120,7 +133,38 @@ const KEEP_PART = `(SELECT part.id FROM transactions part, transactions pp
 	WHERE pp.id = bill_payments.transaction_id AND part.parent_id = ${POSTED}
 	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
 	AND NOT EXISTS (SELECT 1 FROM bill_payments own WHERE own.transaction_id = part.id AND own.status = 'linked')
+	AND NOT ${paysPlanGroupSql("part")}
 	ORDER BY part.id LIMIT 1)`;
+
+/** A linked bill payment on a pending part that the posted part KEEP_PART picks keeps (the bill statement's first arm). */
+const PENDING_PART_KEPT = `transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${KEEP_PART} IS NOT NULL`;
+
+/**
+ * The posted row's part a pending part's planned expense moves to: KEEP_PART's twin for a plan (decision 82). A part is
+ * picked only when no bill or plan already pays its payment group, so the never-both triggers hold.
+ */
+const KEEP_PLAN_PART = `(SELECT part.id FROM transactions part, transactions pp
+	WHERE pp.id = planned_expenses.transaction_id AND part.parent_id = ${POSTED}
+	AND part.amount_cents = pp.amount_cents AND part.category_id IS pp.category_id
+	AND NOT ${paysBillGroupSql("part")} AND NOT ${paysPlanGroupSql("part")}
+	ORDER BY part.id LIMIT 1)`;
+
+/** Whether the posted row's payment group already pays a linked bill or a planned expense (POSTED_GROUP). */
+const POSTED_GROUP_PAYS = `(EXISTS (SELECT 1 FROM bill_payments other WHERE other.status = 'linked' AND other.transaction_id IN ${POSTED_GROUP})
+	OR EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP}))`;
+
+/**
+ * Jev's category arm of the Jev answer statement (STATEMENTS): a confident pick, or one below the threshold kept with its
+ * confidence, onto a posted row with no category and no confidence. The statement's shared guard adds the amount, the
+ * unset confidence and that the purchase isn't split.
+ */
+const JEV_CATEGORY_ARM = `p.category_confidence IS NOT NULL AND transactions.category_id IS NULL AND transactions.category_source IS NULL`;
+/**
+ * Jev's mixed-trip arm of the same statement (#233, #546): its pick, none-fit or mixed reading onto a posted row with a
+ * category of its own and no Jev answer. It moves no category.
+ */
+const JEV_MIXED_ARM = `(p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
+	AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL`;
 
 const STATEMENTS = [
 	// Tally's log of the pending row's category (spec section 5) moves to the posted row only when that category moves with
@@ -189,23 +233,21 @@ const STATEMENTS = [
 	 ${FROM_PENDING} AND p.own_name IS NOT NULL AND transactions.own_name IS NULL`,
 	// Tally's own answer, after the person's choices above, so it only fills what's still unanswered. Each
 	// answer was made for the pending amount, so it moves only while the amount is unchanged; a changed
-	// amount is a new question, as for any bank correction.
-	// Jev's category: a confident pick, or one below the threshold kept with its confidence (decision 27).
-	// A split purchase takes none of Jev's answers, here or in the statement below.
-	`UPDATE transactions SET category_id = p.category_id, category_source = p.category_source,
-		category_confidence = p.category_confidence, jev_category_id = p.jev_category_id,
-		jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed, jev_also_category_id = p.jev_also_category_id
-	 ${FROM_PENDING} AND p.category_confidence IS NOT NULL AND p.amount_cents = ?3
-	 AND transactions.category_id IS NULL AND transactions.category_source IS NULL
-	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
-	// Jev's pick, none-fit and mixed-trip reading move onto a posted row with a category of its own and no Jev answer, which
-	// the category statement above leaves alone. A split purchase keeps no mixed-trip reading, so it takes none. It moves no category, so it needs no ai_log arm.
-	`UPDATE transactions SET jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
+	// amount is a new question, as for any bank correction. A split purchase takes none of Jev's answers.
+	// One statement holds both of Jev's category arms (JEV_CATEGORY_ARM, JEV_MIXED_ARM): the first moves Jev's category
+	// (a confident pick, or one below the threshold kept with its confidence, decision 27), the second moves Jev's pick,
+	// none-fit and mixed-trip reading (#233) onto a posted row with a category of its own and no Jev answer. A row both
+	// arms match takes the first arm's category, as it did when the second statement ran after the first, which set the
+	// confidence the second requires to be unset. The second moves no category, so it needs no ai_log arm; the four Jev
+	// columns come from the pending row on either arm.
+	`UPDATE transactions SET
+		category_id = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_id ELSE transactions.category_id END,
+		category_source = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_source ELSE transactions.category_source END,
+		category_confidence = CASE WHEN ${JEV_CATEGORY_ARM} THEN p.category_confidence ELSE transactions.category_confidence END,
+		jev_category_id = p.jev_category_id, jev_none_fit = p.jev_none_fit, jev_mixed = p.jev_mixed,
 		jev_also_category_id = p.jev_also_category_id
-	 ${FROM_PENDING} AND p.amount_cents = ?3
-	 AND (p.jev_category_id IS NOT NULL OR p.jev_none_fit = 1 OR p.jev_mixed IS NOT NULL)
-	 AND transactions.jev_category_id IS NULL AND transactions.jev_none_fit = 0 AND transactions.jev_mixed IS NULL
-	 AND transactions.category_confidence IS NULL AND transactions.is_split = 0`,
+	 ${FROM_PENDING} AND p.amount_cents = ?3 AND transactions.category_confidence IS NULL AND transactions.is_split = 0
+	 AND (${JEV_CATEGORY_ARM} OR ${JEV_MIXED_ARM})`,
 	// A transfer or reimbursement flag that excluded it, which a person can undo on the posted row as before.
 	// It moves onto a row nothing excludes, and onto one Plaid excluded (a transfer category on the posted
 	// row), where it takes over the source: Jev's exclusion stands if Plaid drops the category later.
@@ -234,11 +276,24 @@ const STATEMENTS = [
 	`UPDATE transactions SET income_maybe_declined = MAX(transactions.income_maybe_declined, p.income_maybe_declined),
 		transfer_maybe_declined = MAX(transactions.transfer_maybe_declined, p.transfer_maybe_declined)
 	 ${FROM_PENDING} AND (p.income_maybe_declined = 1 OR p.transfer_maybe_declined = 1)`,
-	// A bill payment (and a dismissal) moves, unless the posted row is already linked to a bill.
+	// A bill payment (and a dismissal) moves, unless the posted row already pays a bill or a planned expense (a payment pays
+	// one of them, never both: migration 0053's triggers would refuse the move, so it is checked here first).
 	`UPDATE bill_payments SET transaction_id = ${POSTED}
 	 WHERE transaction_id = ${PENDING} AND ${READY}
-	 AND (status = 'dismissed' OR NOT EXISTS (
-		SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked'))`,
+	 AND (status = 'dismissed' OR (NOT EXISTS (
+	 SELECT 1 FROM bill_payments other WHERE other.transaction_id = ${POSTED} AND other.status = 'linked')
+	 AND NOT EXISTS (SELECT 1 FROM planned_expenses other WHERE other.transaction_id IN ${POSTED_GROUP})))`,
+	// A planned expense's payment moves the same way (spec section 5, every link moves to the posted row), unless the posted
+	// row already pays a bill or another plan. One on a pending part moves to the part KEEP_PLAN_PART picks. With no such part,
+	// a plan on a part whose posted row already pays is set aside here, since the reparent below would put the part in that
+	// payment group; otherwise it stays on its part, and the delete below sets it aside only if the part goes. OR IGNORE keeps
+	// a UNIQUE clash from failing the whole page: a plan that finds its part taken stays on its own part, as a bill's payment
+	// does (KEEP_PART).
+	`UPDATE OR IGNORE planned_expenses SET transaction_id = COALESCE(CASE WHEN transaction_id = ${PENDING} THEN ${POSTED} END, ${KEEP_PLAN_PART})
+	WHERE ${READY} AND (
+		(transaction_id = ${PENDING} AND NOT ${POSTED_GROUP_PAYS})
+		OR (transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${KEEP_PLAN_PART} IS NOT NULL)
+		OR (transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING}) AND ${KEEP_PLAN_PART} IS NULL AND ${POSTED_GROUP_PAYS}))`,
 	// Refunds, both ways.
 	`UPDATE transactions SET refund_of_id = ${POSTED}
 	 WHERE refund_of_id = ${PENDING} AND id != ${POSTED} AND ${READY}`,
@@ -301,9 +356,14 @@ const STATEMENTS = [
 	// When the posted row keeps its own split, a pending part's linked bill payment stays paid on the posted part with the
 	// same amount and category that has no payment of its own, as saveSplit keeps one (decision 99). When no such part is
 	// left for it (two pending payments for one posted part), OR IGNORE leaves it on the pending part, which unlinks it below.
-	`UPDATE OR IGNORE bill_payments SET transaction_id = ${KEEP_PART}
-	 WHERE status = 'linked' AND transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${PENDING})
-	 AND ${READY} AND ${KEEP_PART} IS NOT NULL`,
+	// A linked payment on a part the reparent moved under the posted row goes back to the pending row when the posted row pays
+	// a planned expense, so no part shares that plan's group. Re-pointing it is safe because the reparent has moved every part
+	// out of the pending row, and a plan on the pending row can't coexist with a bill on one of its parts (migration 0053), so
+	// the never-both trigger accepts it; the delete below then unlinks it, with no dismissal.
+	`UPDATE OR IGNORE bill_payments SET transaction_id = CASE WHEN ${PENDING_PART_KEPT} THEN ${KEEP_PART} ELSE ${PENDING} END
+	 WHERE status = 'linked' AND ${READY} AND (${PENDING_PART_KEPT}
+		OR (transaction_id IN (SELECT id FROM transactions WHERE parent_id = ${POSTED})
+		 AND EXISTS (SELECT 1 FROM planned_expenses WHERE transaction_id = ${POSTED})))`,
 	// A person's own Not this one on a pending part moves to the posted row, and each posted part starts with the posted
 	// row's (decision 105). Both run while the pending parts still hang under the pending row, before the delete below.
 	movePartDismissalsSql(PENDING, POSTED, READY),

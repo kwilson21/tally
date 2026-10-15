@@ -1,5 +1,19 @@
 import type { Child } from "hono/jsx";
 
+/**
+ * The htmx attributes that open a link as a sheet over the list it sits in: the page it fetches is swapped down to
+ * its #sheet, and the URL is pushed unless `pushUrl` is false (a sheet's own Delete and Cancel keep the URL they have).
+ */
+export function sheetAttrs(href: string, pushUrl = true) {
+	return {
+		"hx-get": href,
+		"hx-target": "#sheet",
+		"hx-select": "#sheet",
+		"hx-swap": "outerHTML",
+		"hx-push-url": String(pushUrl),
+	};
+}
+
 type Props = {
 	/** id of the sheet's heading. */
 	labelledBy: string;

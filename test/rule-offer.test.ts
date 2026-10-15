@@ -1325,4 +1325,27 @@ describe("rule offer edge cases (#372)", () => {
 			.first<{ default_category_id: number | null }>();
 		expect(rule?.default_category_id ?? null).toBeNull();
 	});
+
+	it("a Jev-marked transfer that is excluded but pays a planned expense already counts, so including it keeps Groceries and asks nothing", async () => {
+		await setCategory([ids[0], ids[1], ids[2]], groceries, "user");
+		await env.DB.prepare(
+			"UPDATE transactions SET flag_transfer = 1, excluded = 1, excluded_source = 'jev' WHERE id = ?",
+		)
+			.bind(ids[2])
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO planned_expenses (name, amount_cents, month, transaction_id, created_by) VALUES ('Car registration', 9000, ?, ?, 'demo')",
+		)
+			.bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), ids[2])
+			.run();
+		// A payment for a planned expense counts whatever its exclusion, so unticking Excluded adds no pick.
+		const included = await post(`/transactions/${ids[2]}`, edit(groceries));
+		expect(included.html).not.toContain(QUESTION);
+		const saved = await env.DB.prepare(
+			"SELECT excluded, category_id AS categoryId FROM transactions WHERE id = ?",
+		)
+			.bind(ids[2])
+			.first<{ excluded: number; categoryId: number }>();
+		expect(saved).toEqual({ excluded: 0, categoryId: groceries });
+	});
 });

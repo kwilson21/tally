@@ -533,6 +533,26 @@ describe("rowCaption", () => {
 		});
 	});
 
+	it("names the planned expense a payment paid, after its category, as a bill's is named", () => {
+		expect(
+			rowCaption({
+				...base,
+				categoryName: "Auto",
+				categoryId: 5,
+				paysPlan: true,
+				planName: "Car registration",
+			}),
+		).toEqual({
+			kind: "category",
+			caption: "Auto · paid Car registration",
+			tag: false,
+		});
+		// Uncategorized, the plan's name is its fact in the Needs category row, as a bill's is.
+		expect(
+			rowCaption({ ...base, paysPlan: true, planName: "Car registration" }),
+		).toEqual({ kind: "needs", caption: "paid Car registration", tag: true });
+	});
+
 	it("keeps the bank-change note beside the category it went back to, until a person decides", () => {
 		expect(
 			rowCaption({
