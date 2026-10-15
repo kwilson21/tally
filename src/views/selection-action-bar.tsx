@@ -63,7 +63,7 @@ export const LIST_LOAD_PAUSE = {
  * the fields that carry the rest of the selection: the page's rows, the line's rows, the all-mode flag and the
  * unticked rows (#321).
  */
-const TICKS =
+export const TICKS =
 	"#selection-form input[name=ids]:checked, #select-all-page input, #selection-form input[name=not-on-page-ids]";
 
 /**
@@ -83,6 +83,23 @@ export const NOT_ON_PAGE_IDS_FIELD = "not-on-page-ids";
  * page, search or filter (#350). The selection's own fields ride with them (#321).
  */
 export const TICKS_INCLUDE = { "hx-include": TICKS };
+
+/** The id of the selection form. Controls name it with a form attribute when they belong to it (#383). */
+export const SELECTION_FORM = "selection-form";
+
+/**
+ * A button that submits the selection form as a GET to `action` (#383). Without JavaScript it sends the ticks and
+ * the filter fields as they stand, since the form owns the boxes and those fields (by form attribute); with
+ * JavaScript, htmx cancels the submit and sends its own request (the button's htmx attributes), as a click on a
+ * submit button in a form does. Its own name and value, if any, come with it: a page button names the page.
+ */
+export const submitsSelection = (action: string) =>
+	({
+		type: "submit",
+		form: SELECTION_FORM,
+		formaction: action,
+		formmethod: "get",
+	}) as const;
 
 /**
  * The selection as address parameters, each only when it is set: the ticks and the held ticks as `ids` (each
