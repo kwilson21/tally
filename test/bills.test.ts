@@ -268,19 +268,23 @@ describe("Bills", () => {
 		},
 	);
 
-	it("has a How this works link to the Bills section, under the status sentence (decision 84)", async () => {
+	it("has a How this works link to the Bills section, at the foot of the page under a short rule (decision 111)", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills")
 		).text();
 		const link =
-			/<a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a>/;
+			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a><\/div><\/div>/;
 		expect(html).toMatch(link);
 		// Only the page's own link: each status heading's Why? goes to the same section too (#341).
 		expect(html.match(/aria-label="How this works: bills"/g)).toHaveLength(1);
-		const at = (text: string | RegExp) =>
-			typeof text === "string" ? html.indexOf(text) : html.search(text);
-		expect(at("bills to pay soon")).toBeLessThan(at(link));
-		expect(at(link)).toBeLessThan(at("Add a bill"));
+		const foot = html.search(link);
+		// Nothing but the sheet comes after the foot: the last bills section or the Inactive list is before it.
+		expect(
+			html.lastIndexOf("</section>", html.indexOf('id="sheet"')),
+		).toBeLessThan(foot);
+		expect(html.slice(foot, html.indexOf('id="sheet"'))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p|details)\b/,
+		);
 		// The section it points to is on How Tally works.
 		const how = await (
 			await exports.default.fetch("http://tally.test/how-it-works")
@@ -296,17 +300,18 @@ describe("Bills", () => {
 		expect(html).toContain('href="/how-it-works#bills"');
 	});
 
-	it("puts How this works under Possible bills' title, as on Bills", async () => {
+	it("puts How this works at the foot of Possible bills, after the list, under a short rule", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/find")
 		).text();
 		const link =
-			/<a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a>/;
+			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#bills" aria-label="How this works: bills" class="[^"]*min-h-11[^"]*">How this works<\/a><\/div><\/div>/;
 		expect(html).toMatch(link);
-		const at = (text: string | RegExp) =>
-			typeof text === "string" ? html.indexOf(text) : html.search(text);
-		expect(at("Possible bills</h1>")).toBeLessThan(at(link));
-		expect(at(link)).toBeLessThan(at("About the same amount"));
+		const foot = html.search(link);
+		expect(foot).toBeGreaterThan(html.indexOf('id="bill-finding-list"'));
+		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p)\b/,
+		);
 	});
 
 	// DESIGN.md Type roles: a page title is 5xl, so the title does not shrink on the Bills tab.

@@ -27,7 +27,8 @@ import { Fixed, PickedPill, Sheet } from "./proposal-parts";
 import { TITLE, tx } from "./proposals-phase5-transactions";
 import { Specimen } from "./specimen";
 
-const money = (cents: number) => formatCents(cents, { wholeDollars: true });
+export const money = (cents: number) =>
+	formatCents(cents, { wholeDollars: true });
 
 // ---------------------------------------------------------------------------------------------
 // Sample data, in the demo's style.
@@ -172,7 +173,7 @@ type PhoneProps = {
 	children?: Child;
 };
 
-function Phone({
+export function Phone({
 	label,
 	demo = true,
 	scrolled = false,
@@ -318,7 +319,13 @@ function Desk({ label, group = false, floating = false, children }: DeskProps) {
 }
 
 /** One picture of an option, with a caption in words above it. */
-function Shot({ caption, children }: { caption: string; children?: Child }) {
+export function Shot({
+	caption,
+	children,
+}: {
+	caption: string;
+	children?: Child;
+}) {
 	return (
 		<figure class="flex min-w-0 max-w-full flex-col gap-2">
 			<figcaption class="text-sm text-muted">{caption}</figcaption>
@@ -338,6 +345,8 @@ type ChoiceProps = {
 	cost?: string;
 	/** Why it's the recommended one, in one line. */
 	why?: string;
+	/** Carries the Recommended pill; by default, the option with a `why`. */
+	recommended?: boolean;
 	/** The owner picked this one (decision 111). */
 	picked?: boolean;
 	/** One more sentence under the idea. */
@@ -356,6 +365,7 @@ export function Choice({
 	note,
 	cost,
 	why,
+	recommended = Boolean(why),
 	picked,
 	extra,
 	width = "w-[392px]",
@@ -366,7 +376,7 @@ export function Choice({
 			<div class="flex flex-col gap-1">
 				<h4 class="flex flex-wrap items-center gap-x-2 font-semibold">
 					{name}
-					{why && (
+					{recommended && (
 						<span class="rounded-full border border-ink px-2.5 py-0.5 text-sm font-medium">
 							Recommended
 						</span>
@@ -394,7 +404,13 @@ export function Choices({ children }: { children?: Child }) {
 // Home: its top and its Budget list, as the real HomeTop and ProgressRow draw them at a phone's size.
 
 /** The big amount, at the phone's size (HomeTop's size; no lg: step, so it fits the frame). */
-function Amount({ tone = "", children }: { tone?: string; children?: Child }) {
+export function Amount({
+	tone = "",
+	children,
+}: {
+	tone?: string;
+	children?: Child;
+}) {
 	return (
 		<p
 			class={`font-serif text-6xl font-semibold tracking-tight whitespace-nowrap ${tone}`}
@@ -421,13 +437,14 @@ const FAMILY_BAND = (
  * status sentence, How this works (or none), and the Band. `month` false starts it at the amount,
  * for a picture of Home scrolled down.
  */
-function HomeTop({
+export function HomeTop({
 	label = "Safe to spend",
 	amount,
 	status,
 	howLink = <HowLink section="budget" />,
 	band,
 	month = true,
+	why = true,
 	children,
 }: {
 	label?: string;
@@ -436,6 +453,8 @@ function HomeTop({
 	howLink?: Child | false;
 	band?: Child;
 	month?: boolean;
+	/** The label's "Why?" link; a screen that already links Why? in its status sentence leaves it out. */
+	why?: boolean;
 	children?: Child;
 }) {
 	return (
@@ -448,7 +467,13 @@ function HomeTop({
 			<div class="mt-2 flex items-center justify-between gap-6">
 				<div>
 					<p class="text-lg text-muted">
-						{label} · <WhyLink section="budget" topic="safe to spend" />
+						{label}
+						{why && (
+							<>
+								{" "}
+								· <WhyLink section="budget" topic="safe to spend" />
+							</>
+						)}
 					</p>
 					{amount}
 				</div>
@@ -1399,7 +1424,7 @@ export function PolishRoundCProposals() {
 				</Fixed>
 				<p class="mt-6">
 					P124 A is picked for the demo's first visit; the family's first week
-					is being redrawn.
+					is P125 E.
 				</p>
 				<Choices>
 					<Choice

@@ -14,7 +14,7 @@ import {
 import { CategoryIcon } from "./category";
 import { EmptyState } from "./empty-state";
 import { headlineAmountClass } from "./headline-amount";
-import { HowLink } from "./how-link";
+import { HowFoot } from "./how-link";
 import { Icon } from "./icons";
 import { WhyLink } from "./why-link";
 
@@ -335,7 +335,6 @@ export function TrendsScreen({
 	return (
 		<div class="lg:max-w-2xl">
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Trends</h1>
-			<HowLink section="trends" />
 			{page.kind === "empty" && (
 				<EmptyState
 					kind="add"
@@ -449,6 +448,7 @@ export function TrendsScreen({
 					)}
 				</>
 			)}
+			<HowFoot section="trends" />
 		</div>
 	);
 }

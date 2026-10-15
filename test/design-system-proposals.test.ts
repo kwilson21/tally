@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { DECIDED } from "../src/design-system/proposals";
 import { endBarRatio } from "../src/design-system/proposals-phase5-picks";
 import { designSystem } from "../src/routes/design-system";
+import css from "../src/styles/app.css?raw";
 import { SIDEBAR_ITEMS, TAB_ITEMS } from "../src/views/nav";
 
 const get = async (path: string) => {
@@ -353,10 +354,9 @@ describe("GET /design-system/proposals", () => {
 		const ids = [...html.matchAll(/<section id="(p\d+[a-z0-9-]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-		// Every proposal from P23 to P127 is drawn, and each id is used once. P125 is not on main yet (its drawings are on another branch).
+		// Every proposal from P23 to P127 is drawn, and each id is used once.
 		const numbers = new Set(ids.map((id) => Number(id.match(/^p(\d+)/)?.[1])));
-		for (let n = 23; n <= 127; n++)
-			if (n !== 125) expect(numbers.has(n)).toBe(true);
+		for (let n = 23; n <= 127; n++) expect(numbers.has(n)).toBe(true);
 		expect(new Set(ids).size).toBe(ids.length);
 		// P31 (empty and early states) is signed off as drawn, so it has no options to weigh. So is
 		// every proposal from P91 to P109 (decision 82): the owner picked each from pictures, so the page
@@ -372,13 +372,15 @@ describe("GET /design-system/proposals", () => {
 			const recommended = section.match(/>Recommended</g)?.length ?? 0;
 			expect([id, recommended]).toEqual([id, asDrawn ? 0 : 1]);
 			// P118 and P119 give each option a reason (Why) after its trade-off, not only the recommended one.
-			const eachOption = id === "p118-rows" || id === "p119-saved";
+			// P125 gives each of its five options a reason too (its E is the one recommended).
+			const eachOption =
+				id === "p118-rows" || id === "p119-saved" || id === "p125-first-week";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
 				eachOption ? (section.match(/Trade-off: /g)?.length ?? 0) : recommended,
 			]);
-			// P34 on mark the owner's pick (decisions 72–86), and P118 to P124 mark the owner's picks (decision 111).
+			// P34 on mark the owner's pick (decisions 72–86), and P118 to P125 mark the owner's picks (decisions 111 and 114).
 			// P60 and P111 took two picks. P118, P120 and P121 mark a pick and its desktop drawing, which is the same option.
 			const picked = section.match(/>Picked</g)?.length ?? 0;
 			// P126 and P127 are open: the owner's pick is in words (P126) or not yet made (P127), so their pictures carry no Picked pill.
@@ -422,7 +424,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(79);
+		expect(DECIDED.length).toBe(80);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -448,7 +450,25 @@ describe("GET /design-system/proposals", () => {
 		}
 		const firstVisit = DECIDED.find((d) => d.title.startsWith("P124 ·"));
 		expect(firstVisit?.outcome).toContain("for the demo only");
-		expect(firstVisit?.outcome).toContain("first week was sent back");
+		expect(firstVisit?.outcome).toContain(
+			"The family's first week is P125 E (#95)",
+		);
+	});
+
+	it("lists P125 as decided with issue 95, decision 114 and option E, and the demo keeping P124 A", () => {
+		const entry = DECIDED.find((d) => d.title.startsWith("P125 ·"));
+		expect(entry?.title).toBe("P125 · A new family's first week");
+		expect(entry?.issue).toBe(95);
+		expect(entry?.outcome).toContain(
+			"Option E: until setup is done, Home names the notebook's five strokes",
+		);
+		expect(entry?.outcome).toContain(
+			"link your bank, your pay, your bills, your budgets, and Tally's first night on its own",
+		);
+		expect(entry?.outcome).toContain("rounded up to the next $10");
+		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
+		// P125 is the last entry: after P124 (issue 501), so the list stays in proposal order.
+		expect(DECIDED.at(-1)).toBe(entry);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -852,7 +872,7 @@ describe("GET /design-system/proposals", () => {
 		expect(buttons.filter((raw) => !attributes(raw).has("type"))).toEqual([]);
 	});
 
-	it("marks the owner's picks for P118 to P124 (decision 111): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
+	it("marks the owner's picks for P118 to P125 (decisions 111 and 114): each picked option carries the Picked pill, its desktop drawing too where it has one, and no other option does", async () => {
 		const { html } = await get("/design-system/proposals");
 		const picks = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
@@ -878,6 +898,9 @@ describe("GET /design-system/proposals", () => {
 		expect(picks("p122-more")).toEqual(["Option A · Contents page"]);
 		expect(picks("p123-feedback")).toEqual(["Option A · In the top line"]);
 		expect(picks("p124-first-visit")).toEqual(["Option A · The first page"]);
+		expect(picks("p125-first-week")).toEqual([
+			"Option E · The notebook, one question at a time",
+		]);
 	});
 
 	describe("P118 and P119 · the polish track, picked (#497, #71, decision 111)", () => {
@@ -1120,9 +1143,9 @@ describe("GET /design-system/proposals", () => {
 		expect(html).toContain(
 			"Drawn Oct 13. The owner&#39;s picks, marked Picked, are decision 111: what More shows, where Feedback lives, and what a first visit shows and teaches.",
 		);
-		// P124 A is the pick for the demo's first visit; the family's first week is still being redrawn.
+		// P124 A is the pick for the demo's first visit; the family's first week is P125 E (decision 114).
 		expect(html).toContain(
-			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is being redrawn.",
+			"P124 A is picked for the demo&#39;s first visit; the family&#39;s first week is P125 E.",
 		);
 		const section = (id: string) => {
 			const start = html.indexOf(`<section id="${id}"`);
@@ -1968,6 +1991,1040 @@ describe("GET /design-system/proposals, polish round B (P120 and P121)", () => {
 		expect(s).toContain(
 			'aria-label="At 1280: B · One filter strip, on desktop"',
 		);
+	});
+});
+
+// P125 (#95): a family's first week, five ways, drawn for the owner's pick and picked as E (decision 114). Proposal only: nothing in the app changes.
+describe("GET /design-system/proposals, polish round D (P125, a new family's first week)", () => {
+	// The P125 section, up to the next top-level section (its pictures can hold sections of their own).
+	const section = (html: string) => {
+		const start = html.indexOf('<section id="p125-first-week"');
+		expect(start).toBeGreaterThan(-1);
+		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
+		expect(end).toBeGreaterThan(start);
+		return html.slice(start, end);
+	};
+	// One option's heading and everything drawn under it, up to the next option's heading.
+	const option = (chunk: string, name: string) => {
+		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return chunk.slice(at, next);
+	};
+	// Each labelled picture in a chunk, from its label on.
+	const pictures = (chunk: string) =>
+		chunk.split('role="img" aria-label="').slice(1);
+	// Option A's lines 2 to 4 each name their own keyframes through a step class, so each turns found at its own point in the loop.
+	const STEP_CLASSES = [
+		"proposal-first-later",
+		"proposal-first-last",
+		"proposal-first-second-round",
+	];
+	const OPTIONS = [
+		"Option A · The Opening Entry",
+		"Option B · Pencil, then ink",
+		"Option C · The notebook fills in",
+		"Option D · Kitchen-table sitting",
+		"Option E · The notebook, one question at a time",
+	];
+
+	it("opens the page with its own section, after P126 and before the polish pass's picks, titled and dated as the brief asks", async () => {
+		const { html } = await get("/design-system/proposals");
+		const open = html.indexOf('<section aria-labelledby="polish5-title"');
+		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeLessThan(
+			html.indexOf('<section aria-labelledby="polish4-title"'),
+		);
+		expect(html).toContain(
+			'<h2 id="polish5-title" class="font-serif text-3xl font-semibold">Picked: the polish track, a new family&#39;s first week</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 14. The owner&#39;s pick, marked Picked, is decision 114: E, the notebook filled in one question at a time.",
+		);
+		expect(html).toContain('<section id="p125-first-week"');
+		expect(html).toContain(
+			'<h3 id="p125-first-week-title" class="text-xl font-semibold">P125 · A new family&#39;s first week</h3>',
+		);
+	});
+
+	it("draws five options: E recommended and picked (decision 114), each with its cost and its reason, all in the family's app", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const names = [...chunk.matchAll(/<h4 [^>]*>([^<]*)/g)].map(
+			(m) => m[1] ?? "",
+		);
+		expect(names).toEqual(OPTIONS);
+		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
+		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Recommended<");
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
+		expect(option(chunk, OPTIONS[4] ?? "")).toContain(">Picked<");
+		expect(chunk.match(/Trade-off: /g)?.length).toBe(5);
+		expect(chunk.match(/text-muted">Why: /g)?.length).toBe(5);
+		// The family's first week has no demo banner: none of these pictures draws one.
+		expect(chunk).not.toContain("Demo data. Nothing here is real.");
+		expect(chunk).toContain(
+			'<span class="font-medium">Already fixed by the spec: </span>Tally only suggests and a person decides (decision 101): nothing is saved until someone says yes;',
+		);
+	});
+
+	it("draws each stage as a phone picture with a caption in words, and each option's replay as one more", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).not.toContain("on desktop");
+		const stages = [11, 6, 7, 5, 9];
+		OPTIONS.forEach((name, i) => {
+			// Each picture's label, up to its closing quote: the words after it belong to other pictures too.
+			const labels = pictures(option(chunk, name)).map((p) =>
+				p.slice(0, p.indexOf('"')),
+			);
+			const phones = labels.filter((label) => label.endsWith(", on a phone"));
+			expect(phones, name).toHaveLength(stages[i] ?? 0);
+			// Each option's replay is labelled as one, and loops (a proposals-only class in app.css).
+			expect(
+				phones.filter((label) => label.toLowerCase().includes("replay")),
+				name,
+			).toHaveLength(1);
+		});
+		expect(
+			chunk.match(
+				/Replay, (every (5|6) seconds|a few minutes shortened to 8 seconds)/g,
+			)?.length,
+		).toBe(5);
+		// Every phone is 390 by 844 inside its 1px border: 392 by 846 drawn, as the Phone frame in proposals-polish-4 draws it.
+		expect(chunk.match(/h-\[846px\] w-\[392px\]/g)?.length).toBe(38);
+	});
+
+	it("loops each replay on its own clock: 8 s for A, 5 s for B, 6 s for C and D, all set from the rising token", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		// --duration-rising is 200 ms: a loop of 30 steps is 6 s and of 25 steps is 5 s.
+		const rising = Number(/--duration-rising: (\d+)ms/.exec(css)?.[1]);
+		expect(rising).toBe(200);
+		OPTIONS.forEach((name, i) => {
+			const classes = [
+				...new Set(option(chunk, name).match(/proposal-first-[a-z-]+/g) ?? []),
+			].filter((cls) => !STEP_CLASSES.includes(cls));
+			expect(classes.length, name).toBeGreaterThan(0);
+			for (const cls of classes) {
+				const loop = new RegExp(
+					`\\.${cls}\\s*\\{\\s*--loop: calc\\(var\\(--duration-rising\\) \\* (\\d+)\\);`,
+				).exec(css);
+				expect(loop, cls).not.toBeNull();
+				expect((rising * Number(loop?.[1])) / 1000, cls).toBe(
+					i === 0 ? 8 : i === 1 ? 5 : 6,
+				);
+			}
+		});
+	});
+
+	it("keeps one sample household in every option: $1,411 safe to spend, and the same 86 that need a category", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const name of OPTIONS) {
+			expect(option(chunk, name), name).toContain("$1,411");
+		}
+		expect(chunk).toContain("86 need a category");
+		expect(chunk).toContain("$186 of this month&#39;s spending");
+		expect(chunk).toContain("$4,050");
+		expect(chunk).toContain("$2,486");
+		expect(chunk).toContain("Harbor Property");
+		expect(chunk).toContain("Acme Corp");
+	});
+
+	it("draws the rest of the brief's sample household as its figures, in the same words", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const figure of [
+			"Chase · 412 lines · Jul 16 to Oct 13",
+			"Tally sorted 362 overnight",
+			"50 of 412 sorted",
+			"$4,900 came in and about $4,310 went out",
+			"6 moves between your own accounts",
+			"38 stores have cleaner names",
+			"Aug $610 · Sep $674",
+			"Aug $296 · Sep $340",
+			"8 that come back every month, about $2,062",
+			"about $2,062 a month",
+			"Bills still due this week",
+			"−$153",
+		]) {
+			expect(chunk, figure).toContain(figure);
+		}
+	});
+
+	it("says in words what each pencil state is, for a screen reader, as well as drawing it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).toContain(
+			'<span class="sr-only">Not pencilled in yet</span>',
+		);
+		expect(chunk).toContain("pencilled in, not kept yet");
+		expect(chunk).toContain("border-dashed border-muted");
+	});
+
+	it("draws the replays from proposal-only keyframes in app.css, each one resting on its end state under reduced motion", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const classes = [
+			...new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []),
+		].filter((cls) => !STEP_CLASSES.includes(cls));
+		expect(classes.length).toBeGreaterThan(0);
+		for (const cls of classes) {
+			expect(css, cls).toContain(`.${cls}`);
+			expect(css, cls).toMatch(new RegExp(`\\.${cls}\\s*\\{[^}]*animation:`));
+			expect(css, cls).toMatch(
+				new RegExp(
+					`@media \\(prefers-reduced-motion: reduce\\)\\s*\\{[\\s\\S]*?\\.${cls}[^{]*\\{\\s*animation: none`,
+				),
+			);
+		}
+		// The P125 keyframes are proposal-only and live in their own block.
+		expect(css).toContain("Proposals only (P125)");
+	});
+
+	it("words the first budget as rounded up to the next $10, and says in words each pencil state (a dashed amount, a dashed tag, a dashed tick)", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		expect(chunk).not.toContain("raised to the next $10");
+		expect(chunk.match(/rounded up to the next \$10/g)?.length).toBe(4);
+		// Option B's pencilled budget rows: each row says it is pencilled in, not kept yet.
+		expect(
+			option(chunk, OPTIONS[1] ?? "").match(/Pencilled in, not kept yet: /g)
+				?.length,
+		).toBe(2);
+		// Option A's line that needs a category is not ticked yet, and option D's suggested amount is not kept yet.
+		expect(option(chunk, OPTIONS[0] ?? "")).toContain(
+			'<span class="sr-only">Not ticked yet</span>',
+		);
+		expect(option(chunk, OPTIONS[3] ?? "")).toContain(
+			'<span class="sr-only">Suggested, not kept yet</span>',
+		);
+	});
+
+	// One labelled picture, from its label to the next picture's (the last one runs to the section's end).
+	const picture = (chunk: string, label: string) => {
+		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
+		expect(at, label).toBeGreaterThan(-1);
+		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+		return chunk.slice(at, next === -1 ? undefined : next);
+	};
+	// Every opening tag in a chunk whose class list has `cls` as one of its classes.
+	const tagsWith = (chunk: string, cls: string) =>
+		[...chunk.matchAll(/<[a-zA-Z]+\b[^>]*>/g)]
+			.map((m) => m[0])
+			.filter((tag) =>
+				(/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ").includes(cls),
+			);
+
+	it("carries each option's lines from the brief, word for word, in its pictures", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const LINES: Record<string, string[]> = {
+			[OPTIONS[0] ?? ""]: [
+				"Let Tally read first.",
+				"Link your bank and Tally does the dull part: it reads your last 90 days, tidies them up and writes you a first budget. You won&#39;t type a number.",
+				"Tally&#39;s part",
+				"Find your paycheck",
+				"Spot your bills",
+				"Leave out your transfers",
+				"Name your stores",
+				"Sort your spending",
+				"Write your first budget",
+				"Your part",
+				"Link a bank",
+				"Tally can only read your bank. It can&#39;t move money.",
+				"Found your paycheck",
+				"$2,450 every other Friday, from Acme Corp",
+				"Your bank wrote ",
+				"ACME CORP PAYROLL PPD ID 4432",
+				"Acme Corp",
+				"Spotted your bills",
+				"8 that come back every month, about $2,062",
+				"Harbor Property, Geico, Spectrum and 5 more",
+				"Left out your transfers",
+				"6 moves between your own accounts, so they don&#39;t count as spending",
+				"ONLINE TRANSFER TO SAV ...5678",
+				"Transfer to Savings",
+				"Named your stores",
+				"38 stores, from your bank&#39;s text",
+				"SQ *BLUE BOTTLE COF 0217",
+				"Blue Bottle Coffee",
+				"Once all 90 days are in",
+				"Reading Chase",
+				"142 transactions in so far, from Sep 14 to Oct 13.",
+				"You can close Tally. It keeps reading.",
+				"Linked Chase",
+				"Your last 90 days",
+				"All 412 are in, from Jul 16 to Oct 13. Tally sorts the rest tonight, and your first budget will be ready by about 6 a.m.",
+				"Nothing for you to do until then.",
+				"50 of 412 sorted so far. The rest tonight.",
+				"Ready by about 6 a.m.",
+				"Plaid&#39;s own screens",
+				"Pick your bank and sign in with Plaid. Tally never sees your bank password.",
+				"Reading Chase. The first month usually takes under a minute.",
+				"In a typical month, $4,900 came in and about $4,310 went out.",
+				"From Chase, Jul 16 to Oct 13. Tally sorted 362 overnight.",
+				"A first budget",
+				"Each line is what that category spent in a typical month, August and September, rounded up to the next $10.",
+				"Aug $610 · Sep $674",
+				"86 transactions Tally wasn&#39;t sure of · about $320 a month",
+				"Bills · 8",
+				"about $2,062 a month",
+				"Budgets",
+				"$4,050 a month",
+				"Safe to spend today",
+				"$1,411",
+				"Start with this budget",
+				"Untick any you&#39;d rather leave out. Once set, a budget can be changed on Home but not removed.",
+				"Set my own instead",
+				"Your first budget, from your own August and September.",
+				"86 need a category",
+				"$186 of this month&#39;s spending",
+			],
+			[OPTIONS[1] ?? ""]: [
+				"Link your bank, and Tally pencils in your whole budget from your last 90 days.",
+				"Tally can only read it. It can&#39;t move money.",
+				"Reading Chase. Tally pencils in your budget once it has sorted your 90 days: by about 6 a.m.",
+				"Pencilled in from your August and September. Ink it in when it looks right.",
+				"Safe to spend · in pencil",
+				"Paid $2,450 every other Friday by Acme Corp.",
+				"8 charges come back every month, about $2,062.",
+				"6 moves between your own accounts are left out; they aren&#39;t spending.",
+				"38 stores have cleaner names, dashed until you keep them.",
+				"Ink in this budget",
+				"12 budgets and 8 bills, all from your history",
+				"Ink in this budget",
+				"$4,050",
+				"a month",
+				"What each category spent in a typical month, August and September, rounded up to the next $10.",
+				"Budgets · 12 categories",
+				"Bills · 8, about $2,062 a month",
+				"Safe to spend becomes $1,411. Untick any you&#39;d rather leave out: once set, a budget can be changed but not removed.",
+				"Cancel",
+				"Ink it in",
+				"Inked in. Tap any line to change it.",
+			],
+			[OPTIONS[2] ?? ""]: [
+				"Welcome to Tally",
+				"One thing today.",
+				"Tally does the reading; you make the calls.",
+				"Link your bank",
+				"Tally can only read it. It can&#39;t move money.",
+				"Spent so far",
+				"$2,486",
+				"That&#39;s all for today. Tally sorts what it&#39;s sure of by tomorrow, so these will be fewer.",
+				"86 need a category",
+				"$186 of this month&#39;s spending",
+				"Budget 1 of 12",
+				"Rent",
+				"Last month: $1,600.00",
+				"3-month average: $1,600.00",
+				"Skip this one",
+				"Save and next",
+				"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+				"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You&#39;re set up.",
+				"Thursday: the fifth stroke crosses the four, and all five are ink",
+				"Five. You&#39;re set up.",
+			],
+			[OPTIONS[3] ?? ""]: [
+				"Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end.",
+				"Your pay first, then your bills, then a budget for each category that spent something.",
+				"14 questions from Tally",
+				"About three minutes. Most are one tap.",
+				"Your first page",
+				"4 of 14",
+				"From Chase · 412 lines · Jul 16 to Oct 13",
+				"Moves between your accounts · 6 left out",
+				"Paychecks · $4,900 in September",
+				"Costco · Groceries",
+				"Your bank shows Groceries spent $610 in August and $674 in September.",
+				"$650 a month",
+				"Make $650 a month your Groceries budget?",
+				"Tally&#39;s suggestion: a typical month, rounded up to the next $10. From October on.",
+				"Yes, $650 a month",
+				"Another amount",
+				"Not now",
+				"Budgets",
+				"$4,050",
+				"Spent so far in October",
+				"−$2,486",
+				"Bills still due this week",
+				"−$153",
+				"Safe to spend",
+				"$1,411",
+				"That&#39;s October, in your own numbers. Home keeps it up to date from here.",
+				"Go to Home",
+			],
+		};
+		for (const name of OPTIONS) {
+			for (const line of LINES[name] ?? []) {
+				expect(option(chunk, name), line).toContain(line);
+			}
+		}
+	});
+
+	it("gives each option its idea and its cost line, as the brief words them", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const IDEAS: Record<string, [string, string]> = {
+			[OPTIONS[0] ?? ""]: [
+				"Tally&#39;s part against yours: Tally finds your paycheck, bills and transfers, names your stores and writes a first budget, and you link a bank. Home fills itself in while Tally reads.",
+				"a first-budget rule (a spec line), a Home that is the entry until a budget exists, Plaid Link opened on Home (the approved plaid-link.js, loaded there while no bank is linked), and Home checking every 5 seconds while Tally reads (htmx polling, a new pattern here). The status line is the only thing read aloud: once when the first month is in and once when all 90 days are.",
+			],
+			[OPTIONS[1] ?? ""]: [
+				"Tally pencils your whole Home in from your history, dashed like every Tally guess, and one tap inks it in.",
+				"a first-budget rule (a spec line) and pencil versions of Home&#39;s number and rows; no new page.",
+			],
+			[OPTIONS[2] ?? ""]: [
+				"Each real step pencils one stroke into Home&#39;s notebook drawing; the morning after the fourth, the fifth crosses them and Home is just Home.",
+				"a kept record of the five steps, a budget walk, and checking for the import&#39;s end (htmx polling).",
+			],
+			[OPTIONS[3] ?? ""]: [
+				"Once Tally has sorted the last 90 days from your bank, it asks a few plain questions one at a time; each answer is written as a ledger line, and the sitting ends by ruling off your first Safe to spend.",
+				"a question page, a first-budget rule (a spec line) and one kept date for when the sitting ends.",
+			],
+			[OPTIONS[4] ?? ""]: [
+				"C&#39;s notebook shows how far along you are, and D&#39;s plain questions fill it in: your pay, your bills, then your budgets, all from your own last 90 days.",
+				"a kept record of the five strokes (one household setting), a question page, and a first-budget rule (a spec line); no polling, since the questions are ready the next morning.",
+			],
+		};
+		for (const name of OPTIONS) {
+			const [idea, cost] = IDEAS[name] ?? [];
+			expect(option(chunk, name), name).toContain(
+				`<p class="text-sm">${idea}</p>`,
+			);
+			expect(option(chunk, name), name).toContain(`Trade-off: ${cost}`);
+		}
+	});
+
+	it("rests each replay on its end state in the markup, the frame reduced motion shows, so every loop has one", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		// For each replay class: the classes its element must carry, and the ones it must not, at the end state.
+		const AT_REST: Record<string, { must?: string[]; not?: string[] }> = {
+			"proposal-first-status-first": { must: ["opacity-0"] },
+			"proposal-first-status-middle": { must: ["opacity-0"] },
+			"proposal-first-status-last": { not: ["opacity-0"] },
+			"proposal-first-title-first": { must: ["opacity-0"] },
+			"proposal-first-title-last": { not: ["opacity-0"] },
+			"proposal-first-promise": { must: ["opacity-0"] },
+			"proposal-first-label": { not: ["opacity-0"] },
+			"proposal-first-fact": { not: ["opacity-0", "translate-y-1"] },
+			"proposal-first-strike": { not: ["scale-x-0"] },
+			"proposal-first-name": { not: ["opacity-0"] },
+			"proposal-first-ink-text": { must: ["text-ink"] },
+			"proposal-first-pencil-off": { must: ["opacity-0"] },
+			"proposal-first-ink-on": { not: ["opacity-0"] },
+			"proposal-first-bar": { must: ["fill-ink"], not: ["scale-x-0"] },
+			"proposal-first-stroke": { must: ["stroke-ink"] },
+			"proposal-first-cross": { must: ["stroke-ink"] },
+			"proposal-first-line": { not: ["opacity-0", "translate-y-1"] },
+			"proposal-first-rule": { not: ["scale-x-0"] },
+			"proposal-first-amount": { not: ["opacity-0"] },
+			// Option E: the answered question rests at 40% in muted words, its button at rest, the Bills line in,
+			// the third stroke drawn and inked, and the counter at 3 of 5 (2 of 5 hidden).
+			"proposal-first-answer": { must: ["opacity-40", "text-muted"] },
+			"proposal-first-press": { must: ["bg-ink", "text-paper"] },
+			"proposal-first-bills": { not: ["opacity-0", "translate-y-1"] },
+			"proposal-first-draw": { must: ["stroke-ink"] },
+			"proposal-first-counter-before": { must: ["opacity-0"] },
+			"proposal-first-counter-after": { not: ["opacity-0"] },
+		};
+		const used = new Set(chunk.match(/proposal-first-[a-z-]+/g) ?? []);
+		for (const step of STEP_CLASSES) used.delete(step);
+		expect([...used].sort()).toEqual(Object.keys(AT_REST).sort());
+		for (const [cls, { must = [], not = [] }] of Object.entries(AT_REST)) {
+			const tags = tagsWith(chunk, cls);
+			expect(tags.length, cls).toBeGreaterThan(0);
+			for (const tag of tags) {
+				const classes = (/class="([^"]*)"/.exec(tag)?.[1] ?? "").split(" ");
+				for (const m of must) expect(classes, `${cls} needs ${m}`).toContain(m);
+				for (const n of not)
+					expect(classes, `${cls} must not carry ${n}`).not.toContain(n);
+			}
+		}
+	});
+
+	it("says 'pencil' in the label of every picture with a pencil state, and in words beside the pencil figures", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		for (const label of [
+			"Option B, before a bank, with the amount a pencil blank",
+			"Option B, that evening, with the amount still a pencil blank",
+			"Option B, pencilled in, the amount in pencil",
+			"Option B, the ink-in sheet over the pencilled Home",
+			"Option B, replay: the pencil inks in",
+			"Option C, that evening, one stroke in pencil",
+			"Option C, the budget walk, two strokes in pencil",
+			"Option C, four strokes in pencil",
+			"Option D, next morning, with the amount a pencil blank",
+			"Option D, a question page, the suggested amount in pencil",
+		]) {
+			picture(chunk, label);
+		}
+		// The strokes say they are pencil in words beside the count, and the picture that inks them says ink.
+		expect(
+			picture(chunk, "Option C, the budget walk, two strokes in pencil"),
+		).toContain(
+			'Your first tally · 2 of 5<span class="sr-only">, in pencil</span>',
+		);
+		expect(picture(chunk, "Option C, four strokes in pencil")).toContain(
+			"stroke-muted",
+		);
+		expect(picture(chunk, "Option C, five strokes in ink")).not.toContain(
+			"stroke-muted",
+		);
+		expect(option(chunk, OPTIONS[3] ?? "")).toContain(
+			'<span class="sr-only">Pencil blank, not written in yet</span>',
+		);
+	});
+
+	it("writes the replay's new answer last in the ledger, under Costco · Groceries", async () => {
+		const { html } = await get("/design-system/proposals");
+		const replay = picture(
+			section(html),
+			"Option D, replay: a new answer and the total",
+		);
+		expect(replay.indexOf("Costco · Groceries")).toBeGreaterThan(-1);
+		expect(replay.indexOf("Groceries, from October")).toBeGreaterThan(
+			replay.indexOf("Costco · Groceries"),
+		);
+	});
+
+	it("draws Option A's first picture as Tally's part and yours: six promises with blanks, then Your part, with its one button after it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const before = picture(section(html), "Option A, before a bank");
+		const promises = [
+			"Find your paycheck",
+			"Spot your bills",
+			"Leave out your transfers",
+			"Name your stores",
+			"Sort your spending",
+			"Write your first budget",
+		];
+		let at = before.indexOf("Tally&#39;s part");
+		expect(at).toBeGreaterThan(-1);
+		for (const promise of promises) {
+			const i = before.indexOf(`>${promise}<`);
+			expect(i, promise).toBeGreaterThan(at);
+			at = i;
+		}
+		expect(before.match(/Not done yet/g)?.length).toBe(6);
+		// Each promise is one 44 px line (min-h-11, with py-1 and nothing more), and the headline is text-4xl.
+		expect(
+			before.match(/flex min-h-11 items-center justify-between gap-3 py-1/g)
+				?.length,
+		).toBe(6);
+		expect(before).toContain(
+			'<h1 class="font-serif text-4xl font-semibold tracking-tight">Let Tally read first.</h1>',
+		);
+		const yours = before.indexOf(">Your part<");
+		expect(yours).toBeGreaterThan(at);
+		expect(before.match(/<button/g)?.length).toBe(1);
+		expect(before.indexOf("<button", yours)).toBeGreaterThan(yours);
+		expect(before.indexOf("Tally can only read your bank.")).toBeGreaterThan(
+			before.indexOf("<button", yours),
+		);
+	});
+
+	it("writes each found line's fact and draws the bank's own line struck through under it, with Tally's name and the words said aloud", async () => {
+		const { html } = await get("/design-system/proposals");
+		const evening = picture(section(html), "Option A, that evening");
+		for (const [bank, name] of [
+			["ACME CORP PAYROLL PPD ID 4432", "Acme Corp"],
+			["ONLINE TRANSFER TO SAV ...5678", "Transfer to Savings"],
+			["SQ *BLUE BOTTLE COF 0217", "Blue Bottle Coffee"],
+		] as const) {
+			const at = evening.indexOf(bank);
+			expect(at, bank).toBeGreaterThan(-1);
+			const strike = evening.indexOf(
+				'class="absolute inset-x-0 top-1/2 h-px origin-left bg-muted',
+				at,
+			);
+			expect(strike, bank).toBeGreaterThan(at);
+			expect(evening.indexOf(name, strike), name).toBeGreaterThan(strike);
+		}
+		expect(evening.match(/Your bank wrote /g)?.length).toBe(3);
+		expect(evening.match(/; Tally reads it as /g)?.length).toBe(3);
+		for (const fact of [
+			"$2,450 every other Friday, from Acme Corp",
+			"8 that come back every month, about $2,062",
+			"6 moves between your own accounts, so they don&#39;t count as spending",
+			"38 stores, from your bank&#39;s text",
+		]) {
+			expect(evening, fact).toContain(fact);
+		}
+	});
+
+	it("opens Plaid on Home over the dimmed Home, with a plain placeholder for Plaid's screens and no Plaid design in it", async () => {
+		const { html } = await get("/design-system/proposals");
+		const plaid = picture(
+			section(html),
+			"Option A, Plaid opened on Home, over the dimmed Home",
+		);
+		expect(plaid).toContain("Let Tally read first.");
+		expect(plaid).toContain("bg-ink/30");
+		expect(plaid).toContain("Plaid&#39;s own screens");
+		expect(plaid).toContain(
+			"Pick your bank and sign in with Plaid. Tally never sees your bank password.",
+		);
+		// The picture's own label names Plaid too; the words drawn inside it are the two in the sheet.
+		expect(
+			plaid.replace(/aria-label="[^"]*"/, "").match(/Plaid/g)?.length,
+		).toBe(2);
+		expect(plaid).toContain(
+			"h-40 rounded-control border-2 border-dashed border-muted",
+		);
+	});
+
+	it("draws a minute later with the first month in: lines 1 to 4 with three found and their proofs, line 2 still waiting, and nothing from line 5 on", async () => {
+		const { html } = await get("/design-system/proposals");
+		const minute = picture(
+			section(html),
+			"Option A, a minute later, with the first month in",
+		);
+		expect(minute).toContain("Reading Chase");
+		expect(minute).toContain(
+			"142 transactions in so far, from Sep 14 to Oct 13.",
+		);
+		expect(minute).toContain("You can close Tally. It keeps reading.");
+		expect(minute.match(/Your bank wrote /g)?.length).toBe(3);
+		expect(minute).toContain("Once all 90 days are in");
+		expect(minute.match(/Not done yet/g)?.length).toBe(1);
+		// Lines 5 and 6, Your part and Linked Chase wait for the evening's scrolled picture.
+		for (const later of [
+			"Sort your spending",
+			"Write your first budget",
+			"Your part",
+			"Linked Chase",
+			"Once they&#39;re all in",
+			"Tomorrow morning",
+		]) {
+			expect(minute, later).not.toContain(later);
+		}
+	});
+
+	it("ends the evening with lines 1 to 4 found and nothing after them, then lines 5 and 6 and Your part in a scrolled picture", async () => {
+		const { html } = await get("/design-system/proposals");
+		const chunk = section(html);
+		const evening = picture(chunk, "Option A, that evening");
+		for (const words of [
+			"Your last 90 days",
+			"All 412 are in, from Jul 16 to Oct 13.",
+			"Tally sorts the rest tonight, and your first budget will be ready by about 6 a.m.",
+			"Nothing for you to do until then.",
+		]) {
+			expect(evening, words).toContain(words);
+		}
+		// The evening picture ends after line 4, so it has no line 5, line 6 or Your part.
+		for (const later of [
+			"Sort your spending",
+			"Write your first budget",
+			"Your part",
+			"Linked Chase",
+		]) {
+			expect(evening, later).not.toContain(later);
+		}
+		const rest = picture(
+			chunk,
+			"Option A, that evening, scrolled: the rest, and your part",
+		);
+		expect(rest).toContain("Sort your spending");
+		expect(rest).toContain("50 of 412 sorted so far. The rest tonight.");
+		expect(rest).toContain("Write your first budget");
+		expect(rest).toContain("Ready by about 6 a.m.");
+		expect(rest).toContain(">Linked Chase<");
+	});
+
+	it("replays Option A over 8 seconds: the headline and status swap at 45%, and lines 1 to 4 turn found as the bank's lines arrive", async () => {
+		const { html } = await get("/design-system/proposals");
+		const replay = picture(
+			section(html),
+			"Option A, replay: Home fills itself in as the lines arrive",
+		);
+		expect(replay).toContain("replay");
+		// The headline swaps from Reading Chase to Your last 90 days; the status swaps three times, ending on the evening's words.
+		for (const words of [
+			"Reading Chase",
+			"Your last 90 days",
+			"Reading Chase. The first month usually takes under a minute.",
+			"142 transactions in so far, from Sep 14 to Oct 13.",
+			"All 412 are in, from Jul 16 to Oct 13. Tally sorts the rest tonight, and your first budget will be ready by about 6 a.m.",
+		]) {
+			expect(replay, words).toContain(words);
+		}
+		expect(replay.match(/proposal-first-title-first/g)?.length).toBe(1);
+		expect(replay.match(/proposal-first-title-last/g)?.length).toBe(1);
+		// Four lines turn found (1, 3, 4 and then 2), each with its promise leaving; the three struck lines are the three bank lines.
+		expect(replay.match(/proposal-first-promise/g)?.length).toBe(4);
+		expect(replay.match(/proposal-first-strike/g)?.length).toBe(3);
+		// Lines 1 to 4 only: no line 5 or 6, no sub, and no Your part.
+		for (const later of [
+			"Sort your spending",
+			"Write your first budget",
+			"50 of 412 sorted so far",
+			"Ready by about 6 a.m.",
+			"Once all 90 days are in",
+			"Your part",
+			"Linked Chase",
+			"proposal-first-sub",
+		]) {
+			expect(replay, later).not.toContain(later);
+		}
+	});
+
+	it("hides each bank line until its line turns found, and gives each line its own keyframes so each turns at its own point in the loop", async () => {
+		const { html } = await get("/design-system/proposals");
+		const replay = picture(
+			section(html),
+			"Option A, replay: Home fills itself in as the lines arrive",
+		);
+		// The bank's own line fades in with the fact, so no promise shows a bank line under it.
+		for (const bank of [
+			"ACME CORP PAYROLL PPD ID 4432",
+			"ONLINE TRANSFER TO SAV ...5678",
+			"SQ *BLUE BOTTLE COF 0217",
+		]) {
+			const at = replay.indexOf(bank);
+			expect(at, bank).toBeGreaterThan(-1);
+			const open = replay.lastIndexOf("<p ", at);
+			expect(replay.slice(open, at), bank).toContain("proposal-first-fact");
+		}
+		// Lines 2, 3 and 4 name their own keyframes through their step classes, and each name is declared in app.css.
+		for (const step of [
+			"proposal-first-second-round",
+			"proposal-first-later",
+			"proposal-first-last",
+		]) {
+			expect(replay, step).toContain(step);
+		}
+		const names = [
+			...css.matchAll(/--kf-[a-z]+: (replay-first-[a-z0-9-]+);/g),
+		].map((m) => m[1] ?? "");
+		expect(names).toHaveLength(15);
+		for (const name of names) {
+			expect(css, name).toContain(`@keyframes ${name} {`);
+		}
+	});
+
+	it("drops the old drawing's entry labels, headings and struck lines from Option A", async () => {
+		const { html } = await get("/design-system/proposals");
+		const a = option(section(html), OPTIONS[0] ?? "");
+		for (const gone of [
+			">Paid<",
+			">Comes back every month<",
+			">Left out<",
+			">Named<",
+			">Where it goes<",
+			"Tally&#39;s entry",
+			"What Tally fills in",
+			"Three of your lines",
+			"proposal-first-strike-later",
+			"proposal-first-strike-last",
+			"proposal-first-rows",
+			"7 paychecks since Jul 17",
+			"31 stores",
+		]) {
+			expect(a, gone).not.toContain(gone);
+		}
+	});
+
+	it("adds no client JavaScript: the section has no script", async () => {
+		const { html } = await get("/design-system/proposals");
+		expect(section(html)).not.toContain("<script");
+	});
+});
+
+// P125, round E (#95): the stroke list, the fixes to C and D, and option E (proposal only: nothing in the app changes).
+describe("GET /design-system/proposals, P125 round E (the stroke list, C and D fixed, option E)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const section = (html: string) => {
+		const start = html.indexOf('<section id="p125-first-week"');
+		expect(start).toBeGreaterThan(-1);
+		const end = html.indexOf('<section aria-labelledby="polish4-title"', start);
+		expect(end).toBeGreaterThan(start);
+		return html.slice(start, end);
+	};
+	// One labelled phone picture: from its label to the next picture's.
+	const picture = (chunk: string, label: string) => {
+		const at = chunk.indexOf(`role="img" aria-label="${label}, on a phone"`);
+		expect(at, label).toBeGreaterThan(-1);
+		const next = chunk.indexOf('role="img" aria-label="', at + 1);
+		return chunk.slice(at, next === -1 ? undefined : next);
+	};
+	// One option: from its heading to the next option's heading.
+	const option = (chunk: string, name: string) => {
+		const heads = [...chunk.matchAll(/<h4 /g)].map((m) => m.index ?? 0);
+		const at = heads.find((i) => chunk.slice(i, i + 400).includes(`>${name}`));
+		expect(at, name).toBeDefined();
+		const next = heads.find((i) => i > (at ?? 0));
+		return chunk.slice(at, next);
+	};
+	// The notebook's own strokes (its tally lines), not the list's glyphs: their coordinates are the notebook's.
+	const notebookStrokes = (s: string) =>
+		s.match(/<line x1="(41|46|53|60|67)" [^>]*stroke-(ink|muted)/g)?.length ??
+		0;
+	// The list's glyphs that are not done yet: a dashed stroke.
+	const dashedGlyphs = (s: string) =>
+		s.match(/stroke-dasharray="3 3"/g)?.length ?? 0;
+
+	it("draws the five strokes as a list under the notebook: each line's glyph, name and note, and a done line says so in words", async () => {
+		const chunk = section(await drawn());
+		const welcome = picture(chunk, "Option C, welcome");
+		expect(welcome).toContain("Your first tally · 0 of 5");
+		expect(welcome.match(/<li class="flex min-h-11/g)?.length).toBe(5);
+		expect(dashedGlyphs(welcome)).toBe(5);
+		expect(welcome).toContain("Link your bank");
+		expect(welcome).toContain("Next");
+		const evening = picture(
+			chunk,
+			"Option C, that evening, one stroke in pencil",
+		);
+		expect(evening).toContain("Your first tally · 1 of 5");
+		expect(evening).toContain("Chase, linked");
+		expect(evening).toContain('<span class="sr-only">, done</span>');
+		expect(evening).toContain("86 to go");
+		expect(dashedGlyphs(evening)).toBe(4);
+	});
+
+	it("draws C's bills step as its own picture: three strokes, step four Next, and the eight possible bills", async () => {
+		const chunk = section(await drawn());
+		const bills = picture(
+			chunk,
+			"Option C, the bills step, three strokes in pencil",
+		);
+		expect(bills).toContain(
+			"Three. Tally found 8 charges that come back every month. Keep the real ones and that&#39;s four.",
+		);
+		expect(bills).toContain("8 possible bills found");
+		expect(bills).toContain("From repeat charges in the last 3 months");
+		expect(bills).toContain("Your first tally · 3 of 5");
+		expect(bills).toContain("Keep a bill");
+		expect(dashedGlyphs(bills)).toBe(2);
+		expect(notebookStrokes(bills)).toBe(3);
+	});
+
+	it("says Harbor Property and 7 more at four strokes, and ends on Thursday with the fifth stroke done and $1,398", async () => {
+		const chunk = section(await drawn());
+		const four = picture(chunk, "Option C, four strokes in pencil");
+		expect(four).toContain("Harbor Property and 7 more");
+		expect(four).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+		);
+		expect(four).toContain("Your first tally · 4 of 5");
+		const thursday = picture(chunk, "Option C, five strokes in ink");
+		expect(thursday).toContain("$1,398");
+		expect(thursday).toContain(
+			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You&#39;re set up.",
+		);
+		expect(thursday).toContain("Your first tally · 5 of 5");
+		expect(thursday).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+		expect(dashedGlyphs(thursday)).toBe(0);
+	});
+
+	it("shows Your first tally · 2 of 5 on the Home behind the budget walk", async () => {
+		const chunk = section(await drawn());
+		const walk = picture(
+			chunk,
+			"Option C, the budget walk, two strokes in pencil",
+		);
+		expect(walk).toContain("Your first tally · 2 of 5");
+		expect(walk).toContain("Budget 1 of 12");
+	});
+
+	it("says where D's Groceries suggestion comes from, and asks a category with no history a question of its own", async () => {
+		const chunk = section(await drawn());
+		const question = picture(
+			chunk,
+			"Option D, a question page, the suggested amount in pencil",
+		);
+		expect(question).toContain(
+			"Your bank shows Groceries spent $610 in August and $674 in September.",
+		);
+		expect(question).toContain("From Chase · 412 lines · Jul 16 to Oct 13");
+		expect(question).toContain("Make $650 a month your Groceries budget?");
+		expect(question).toContain("Yes, $650 a month");
+		expect(question).toContain("Another amount");
+		expect(question).toContain("Not now");
+		expect(question).toContain("4 of 14");
+		expect(question).not.toContain(">Chase · 412 lines");
+		const none = picture(
+			chunk,
+			"Option D, a category with no history, a blank amount",
+		);
+		expect(none).toContain("13 of 14");
+		expect(none).toContain(
+			"Your bank shows nothing for Date Night in August or September.",
+		);
+		expect(none).toContain("Do you want a Date Night budget?");
+		expect(none).toContain("Date Night, a month");
+		expect(none).toContain("Save this budget");
+		expect(none).toContain("No Date Night budget");
+		expect(none).not.toContain("Last month: ");
+		expect(none).not.toContain("3-month average: ");
+		expect(none).not.toContain("Suggested, not kept yet");
+		expect(none).not.toContain("$650");
+	});
+
+	it("tells D's next morning that the questions come from the last 90 days, and that the pay, the bills and the budgets come next", async () => {
+		const chunk = section(await drawn());
+		const morning = picture(
+			chunk,
+			"Option D, next morning, with the amount a pencil blank",
+		);
+		expect(morning).toContain(
+			"Tally read your last 90 days from Chase and sorted 362 overnight. It has 14 questions for you, and Safe to spend is written in at the end.",
+		);
+		expect(morning).toContain(
+			"Your pay first, then your bills, then a budget for each category that spent something.",
+		);
+	});
+
+	it("draws option E's eight pictures and its replay, each with its words", async () => {
+		const chunk = section(await drawn());
+		const e = option(chunk, "Option E · The notebook, one question at a time");
+		const phones = [
+			...e.matchAll(/role="img" aria-label="([^"]*), on a phone"/g),
+		].map((m) => m[1] ?? "");
+		expect(phones).toHaveLength(9);
+		expect(
+			phones.filter((p) => p.toLowerCase().includes("replay")),
+		).toHaveLength(1);
+		const before = picture(
+			chunk,
+			"Option E, before a bank, five strokes in pencil",
+		);
+		expect(before).toContain("Five strokes, and you&#39;re set up.");
+		expect(before).toContain("Link a bank");
+		expect(before).toContain(
+			"Tally can only read your bank. It can&#39;t move money.",
+		);
+		expect(before).toContain("Your first tally · 0 of 5");
+		expect(before).toContain("About a minute");
+		expect(notebookStrokes(before)).toBe(0);
+		const evening = picture(chunk, "Option E, that evening, one stroke in ink");
+		expect(evening).toContain(
+			"One. Tally&#39;s reading your last 90 days from Chase. Your questions will be ready in the morning.",
+		);
+		expect(evening).toContain("Nothing for you to do until then.");
+		expect(evening.match(/Tomorrow morning/g)?.length).toBe(3);
+		expect(notebookStrokes(evening)).toBe(1);
+		const morning = picture(
+			chunk,
+			"Option E, next morning, three things to check",
+		);
+		expect(morning).toContain(
+			"Tally sorted 362 overnight. Three things to check, and Safe to spend is written in at the end.",
+		);
+		expect(morning).toContain("Three things to check");
+		expect(morning).toContain("About three minutes.");
+		const pay = picture(chunk, "Option E, your pay, one question");
+		expect(pay).toContain(
+			"Your bank shows ACME CORP PAYROLL paying $2,450 every other Friday, 7 times since Jul 17.",
+		);
+		expect(pay).toContain("Is this your pay?");
+		expect(pay).toContain("Yes, that&#39;s my pay");
+		expect(pay).toContain("No, it&#39;s something else");
+		expect(pay).toContain("From Chase · 412 lines · Jul 16 to Oct 13");
+		expect(pay).toContain("Moves between your accounts · 6 left out");
+		expect(pay).toContain("1 of 5");
+		expect(notebookStrokes(pay)).toBe(1);
+		const budgets = picture(
+			chunk,
+			"Option E, your budgets, keep all or one at a time",
+		);
+		expect(budgets).toContain("Keep all 12 budgets, $4,050 a month?");
+		expect(budgets).toContain("Keep all 12");
+		expect(budgets).toContain("One at a time");
+		expect(budgets).toContain(
+			"Once set, a budget can be changed on Home but not removed.",
+		);
+		expect(budgets).toContain("Pay · Acme Corp, $2,450 every other Friday");
+		expect(budgets).toContain("Bills · 8 kept, about $2,062 a month");
+		expect(budgets).toContain("7 more · $1,120 a month");
+		expect(budgets).toContain("Aug $610 · Sep $674");
+		for (const tag of ["$650", "$320", "$180", "$1,600"]) {
+			expect(budgets, tag).toContain(tag);
+		}
+		expect(budgets).toContain("3 of 5");
+		expect(notebookStrokes(budgets)).toBe(3);
+		const one = picture(chunk, "Option E, one at a time, Groceries");
+		expect(one).toContain("Budgets · 1 of 12");
+		expect(one).toContain("Skip this one");
+		expect(one).toContain("Make $650 a month your Groceries budget?");
+		expect(one).toContain("Yes, $650 a month");
+		expect(notebookStrokes(one)).toBe(3);
+		const total = picture(chunk, "Option E, ruled off, four strokes");
+		expect(total).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+		);
+		expect(total).toContain("$1,411");
+		expect(total).toContain("Go to Home");
+		expect(total).toContain("−$2,486");
+		expect(notebookStrokes(total)).toBe(4);
+		const thursday = picture(chunk, "Option E, Thursday, five strokes in ink");
+		expect(thursday).toContain("$1,398");
+		expect(thursday).toContain("Your first tally · 5 of 5");
+		expect(thursday).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+		expect(notebookStrokes(thursday)).toBe(5);
+		const replay = picture(
+			chunk,
+			"Option E, replay: the bills question is answered, its line writes in, and its stroke inks in the notebook",
+		);
+		// The replay is one phone: the notebook at size-20 beside the headline, its counter going from 2 of 5 to 3 of 5.
+		expect(replay).toContain("Your first page");
+		expect(replay).toContain("size-20");
+		expect(replay).not.toContain("size-12");
+		expect(replay).toContain("2 of 5");
+		expect(replay).toContain("3 of 5");
+		expect(notebookStrokes(replay)).toBe(3);
+		// The ledger: Pay is there, and the Bills line writes in after it.
+		expect(replay).toContain("Pay · Acme Corp, $2,450 every other Friday");
+		expect(replay).toContain("Bills · 8 kept, about $2,062 a month");
+		// The bills question as it was answered: the muted sentence, its heading, the primary button and the quiet one.
+		expect(replay).toContain(
+			"Your bank shows 8 charges that come back every month, about $2,062 in all: Harbor Property $1,600, Geico $142, Spectrum $70 and 5 more.",
+		);
+		expect(replay).toContain("Keep these 8 as bills?");
+		expect(replay).toContain("Keep these 8");
+		expect(replay).toContain("Choose which");
+		// Each moving part is a replay class of its own, and the answer's stroke is drawn, not a stroke-after delay.
+		for (const cls of [
+			"proposal-first-answer",
+			"proposal-first-press",
+			"proposal-first-bills",
+			"proposal-first-draw",
+			"proposal-first-counter-before",
+			"proposal-first-counter-after",
+		]) {
+			expect(replay, cls).toContain(cls);
+		}
+		expect(replay).not.toContain("proposal-first-stroke-after");
+		expect(replay).not.toContain("proposal-first-cross");
+	});
+
+	it("captions Option E's replay in words, every 6 seconds, as the brief words it", async () => {
+		const chunk = section(await drawn());
+		expect(chunk).toContain(
+			"Replay, every 6 seconds: you answer the bills question, its line is written in, and its stroke inks in the notebook.",
+		);
+	});
+
+	it("gives the Recommended and Picked pills to option E alone, and takes both off option A", async () => {
+		const chunk = section(await drawn());
+		expect(chunk.match(/>Recommended</g)?.length).toBe(1);
+		expect(chunk.match(/>Picked</g)?.length).toBe(1);
+		const e = option(chunk, "Option E · The notebook, one question at a time");
+		expect(e).toContain(">Recommended<");
+		expect(e).toContain(">Picked<");
+		const a = option(chunk, "Option A · The Opening Entry");
+		expect(a).not.toContain(">Recommended<");
+		expect(a).not.toContain(">Picked<");
 	});
 });
 
