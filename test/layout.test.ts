@@ -141,14 +141,17 @@ describe("where toasts sit", () => {
 	it("moves to the top edge, below the safe area, while a sheet is open on a phone", async () => {
 		const region = await toastRegion();
 		expect(region).toContain(
-			"max-lg:[body:has([role=dialog])_&]:top-[calc(0.75rem+var(--safe-area-top))]",
+			"max-lg:[body:has([role=dialog]:not([inert]_*))_&]:top-[calc(0.75rem+var(--safe-area-top))]",
 		);
-		expect(region).toContain("max-lg:[body:has([role=dialog])_&]:bottom-auto");
+		expect(region).toContain(
+			"max-lg:[body:has([role=dialog]:not([inert]_*))_&]:bottom-auto",
+		);
+		expect(region).not.toContain("[body:has([role=dialog])_&]");
 	});
 
 	it("sits 12 px above the Select action bar on a phone, unless a sheet is open", async () => {
 		expect(await toastRegion()).toContain(
-			"max-lg:[body:has(#selection-form):not(:has([role=dialog]))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)]",
+			"max-lg:[body:has(#selection-form):not(:has([role=dialog]:not([inert]_*)))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)]",
 		);
 	});
 

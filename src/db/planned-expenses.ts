@@ -49,7 +49,7 @@ const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "displ
  * a link a plan already holds (sync, an edit, an Undo): a plan on the whole payment stays paid after the payment is split,
  * while the rest still fits (decision 82). A new link never takes a split parent, so linking and the picker keep it false.
  */
-const canPayPlanSql = (
+export const canPayPlanSql = (
 	alias: string,
 	month: string,
 	exceptPlan?: string,
