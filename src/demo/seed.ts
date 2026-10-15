@@ -2,7 +2,7 @@
 // Nothing here is real. Designed totals are documented in the Phase 1b plan and asserted in test/seed.test.ts.
 
 import type { BudgetAmount } from "../budget";
-import { daysBefore } from "../dates";
+import { daysBefore, daysInMonth } from "../dates";
 
 export type SeedCategory = {
 	id: number;
@@ -232,27 +232,29 @@ export const NETFLIX = {
 export const seedMerchantKey = (rawName: string) =>
 	PLAID_MERCHANT_NAMES[rawName] ?? rawName;
 
-// This month, categorized: [targetDay, rawName, categoryId, cents]. Totals per the plan's table.
+// This month, categorized: [day, rawName, categoryId, cents]. Each is dated its day of the month (the month's last day
+// at most) and is there only once that day has come, so the month fills at a family's pace and Home's forecast agrees
+// with its sentence (#322). The 1st's Trader Joe's is there every day: it keeps id 94, which a screenshot uses.
 const THIS_MONTH: [number, string, number, number][] = [
-	[2, "TRADER JOE'S #552", GROCERIES, 6418],
-	[9, "COSTCO WHSE #0431", GROCERIES, 18742],
-	[16, "WHOLEFDS MKT 10233", GROCERIES, 9630],
-	[22, "TRADER JOE'S #552", GROCERIES, 6410],
+	[31, "TRADER JOE'S #552", GROCERIES, 7418],
+	[18, "COSTCO WHSE #0431", GROCERIES, 18742],
+	[24, "WHOLEFDS MKT 10233", GROCERIES, 8630],
+	[1, "TRADER JOE'S #552", GROCERIES, 6410],
 	[3, "BLUE BOTTLE COFFEE", EATING_OUT, 650],
-	[6, "CHIPOTLE 2291", EATING_OUT, 3840],
-	[12, "OLIVE GARDEN 1187", EATING_OUT, 11280],
-	[15, "MARIO'S PIZZA", EATING_OUT, 6430],
-	[19, "STARBUCKS STORE 5521", EATING_OUT, 1200],
-	[21, "THAI PALACE", EATING_OUT, 5200],
-	[4, "SHELL OIL 57442", GAS, 4820],
-	[11, "CHEVRON 0098812", GAS, 5210],
-	[17, "SHELL OIL 57442", GAS, 3770],
-	[20, "CHEVRON 0098812", GAS, 4800],
-	[5, "TARGET T-1432", KIDS, 7000],
-	[8, "YOUTH SOCCER LEAGUE", KIDS, 9000],
-	[18, "BARNES & NOBLE #2831", KIDS, 5000],
-	[7, "THE HOME DEPOT #6612", HOUSEHOLD, 6125],
-	[13, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
+	[8, "CHIPOTLE 2291", EATING_OUT, 3840],
+	[10, "OLIVE GARDEN 1187", EATING_OUT, 11280],
+	[13, "MARIO'S PIZZA", EATING_OUT, 10630],
+	[30, "STARBUCKS STORE 5521", EATING_OUT, 1200],
+	[20, "THAI PALACE", EATING_OUT, 7200],
+	[5, "SHELL OIL 57442", GAS, 4820],
+	[14, "CHEVRON 0098812", GAS, 4950],
+	[20, "SHELL OIL 57442", GAS, 6330],
+	[31, "CHEVRON 0098812", GAS, 2500],
+	[22, "TARGET T-1432", KIDS, 6000],
+	[26, "YOUTH SOCCER LEAGUE", KIDS, 9000],
+	[29, "BARNES & NOBLE #2831", KIDS, 6000],
+	[27, "THE HOME DEPOT #6612", HOUSEHOLD, 6125],
+	[28, "AMAZON.COM*RT4K2", HOUSEHOLD, 3375],
 ];
 
 // Suggested names for a few of the unnamed merchants below, waiting for a person (spec §7, §8.6). They show
@@ -265,21 +267,22 @@ const SUGGESTED_NAMES: Record<string, string[]> = {
 	"POS 4417 CITY PARKING": ["City Parking Garage", "City Parking Lot"],
 };
 
-// Twelve seed rows start without categories ($228.01); bill matching categorizes two of them.
+// Twelve seed rows start without categories ($121.52); bill matching categorizes two of them. They are there every day,
+// dated their day or today if that is earlier, so the ten left for a person ($104.54) are always this month's.
 // [targetDay, rawName, cents, displayName].
 const UNCATEGORIZED: [number, string, number, string | null][] = [
 	[22, "SQ *LOCAL BAKERY 4432", 1200, "Local Bakery"],
-	[3, "PAYPAL *XYZSHOP", 2349, null],
-	[5, "SQ *FARMERS MKT", 1800, null],
-	[6, "VENMO *J RIVERA", 4000, null],
-	[8, "TST* CORNER DELI", 1425, null],
-	[10, "AMZN MKTP US*2K4", 2799, null],
-	[11, "SP * CRAFTSUPPLY", 1980, null],
-	[13, "POS 4417 CITY PARKING", 800, null],
+	[3, "PAYPAL *XYZSHOP", 899, null],
+	[5, "SQ *FARMERS MKT", 700, null],
+	[6, "VENMO *J RIVERA", 1500, null],
+	[8, "TST* CORNER DELI", 825, null],
+	[10, "AMZN MKTP US*2K4", 999, null],
+	[11, "SP * CRAFTSUPPLY", 680, null],
+	[13, "POS 4417 CITY PARKING", 500, null],
 	[14, "CHECKCARD 0921 CVS", 1643, null],
 	[16, "APPLE.COM/BILL", 299, null],
 	[18, "GOOGLE *YOUTUBE", 1399, null],
-	[20, "DD *DOORDASH TACO", 3107, null],
+	[20, "DD *DOORDASH TACO", 1508, null],
 ];
 
 // Previous months' category totals in cents, oldest first (5 months ago → 1 month ago).
@@ -289,6 +292,43 @@ const HISTORY: Record<number, number[]> = {
 	[GAS]: [17000, 18200, 16500, 19000, 17600],
 	[KIDS]: [24000, 31000, 20500, 28000, 26000],
 	[HOUSEHOLD]: [12000, 21000, 14000, 9500, 18000],
+};
+
+/** The day of an earlier month the soccer league is paid, which the yearly Soccer bill is linked to (reset.ts). */
+export const SOCCER_DAY = 26;
+
+/**
+ * Each category's three purchases in an earlier month: [day of the month (its last day at most), percent of the
+ * month's total], in the order of its merchants above. They are spread through the month differently from this month's,
+ * and test/trends-seed.test.ts checks that Trends' same-days comparison stays under $400 on its dates (spec §8.3).
+ * Kids' second is the soccer league.
+ */
+const HISTORY_PARTS: Record<number, [number, number][]> = {
+	[GROCERIES]: [
+		[31, 17],
+		[1, 53],
+		[18, 30],
+	],
+	[EATING_OUT]: [
+		[28, 15],
+		[29, 25],
+		[10, 60],
+	],
+	[GAS]: [
+		[6, 11],
+		[13, 62],
+		[20, 27],
+	],
+	[KIDS]: [
+		[20, 34],
+		[SOCCER_DAY, 47],
+		[27, 19],
+	],
+	[HOUSEHOLD]: [
+		[24, 53],
+		[22, 27],
+		[5, 20],
+	],
 };
 
 export function monthOffset(today: string, monthsAgo: number): string {
@@ -399,25 +439,34 @@ export function buildSeed(today: string): Seed {
 	const thisMonth = today.slice(0, 7);
 	const todayDay = Number(today.slice(8, 10));
 	const clamp = (target: number) => day(thisMonth, Math.min(target, todayDay));
+	// A day of `month`, the month's last day at most.
+	const onDay = (month: string, target: number) =>
+		day(month, Math.min(target, daysInMonth(month)));
 	const transactions: SeedTransaction[] = [];
 
-	// Previous 5 months: three transactions per category (days 5, 14, 23), plus paychecks and the savings
-	// transfer. Their days are clamped to today's day-of-month, as this month's are, so on any day last
-	// month has spent about as much "by this time" as this month has: Trends' same-days comparison is
-	// fair (spec §8.3). From the 23rd on they fall on 5, 14 and 23 as written.
+	// Previous 5 months: three transactions per category (HISTORY_PARTS), plus paychecks and the savings transfer.
 	for (let monthsAgo = 5; monthsAgo >= 1; monthsAgo--) {
 		const month = monthOffset(today, monthsAgo);
 		// Childcare has no history of its own: its Fridays are only Daycare charges, added below.
 		for (const category of CATEGORIES.filter((c) => HISTORY[c.id])) {
 			const total = HISTORY[category.id]?.[5 - monthsAgo] ?? 0;
 			const merchants = MERCHANTS[category.id] ?? [];
-			const third = Math.floor(total / 3);
-			[third, third, total - 2 * third].forEach((cents, i) => {
-				const [rawName] = merchants[i % merchants.length] as [string, string];
+			const parts = HISTORY_PARTS[category.id] ?? [];
+			let left = total;
+			parts.forEach(([target, percent], i) => {
+				// The last part takes what is left, so the month's total is exact.
+				const cents =
+					i === parts.length - 1 ? left : Math.floor((total * percent) / 100);
+				left -= cents;
+				// Two and four months ago each part goes to the next merchant, so a store's charges a month apart
+				// differ and the bill finder never takes one for a bill.
+				const [rawName] = merchants[
+					(i + (monthsAgo % 2 === 0 ? 1 : 0)) % merchants.length
+				] as [string, string];
 				transactions.push(
 					spend(
 						i === 2 ? CARD : CHECKING,
-						day(month, Math.min([5, 14, 23][i] as number, todayDay)),
+						onDay(month, target),
 						rawName,
 						category.id,
 						cents,
@@ -432,10 +481,10 @@ export function buildSeed(today: string): Seed {
 		);
 	}
 
-	// This month.
+	// This month. A categorized row dated after today is dropped once ids are given (below), so ids never move.
 	for (const [target, rawName, categoryId, cents] of THIS_MONTH) {
 		transactions.push(
-			spend(CHECKING, clamp(target), rawName, categoryId, cents),
+			spend(CHECKING, onDay(thisMonth, target), rawName, categoryId, cents),
 		);
 	}
 	for (const [target, rawName, cents] of UNCATEGORIZED) {
@@ -587,6 +636,10 @@ export function buildSeed(today: string): Seed {
 	transactions.forEach((transaction, index) => {
 		transaction.id = index + 1;
 	});
+	// This month's purchases still to come aren't there yet (a split's parts go with their parent).
+	const upToToday = transactions.filter(
+		(transaction) => transaction.date <= today,
+	);
 
 	const startMonth = monthOffset(today, 5);
 	const budgetAmounts: BudgetAmount[] = [
@@ -686,10 +739,10 @@ export function buildSeed(today: string): Seed {
 		categories: CATEGORIES,
 		banks: BANKS,
 		accounts: ACCOUNTS,
-		balanceHistory: balanceHistory(today, transactions),
+		balanceHistory: balanceHistory(today, upToToday),
 		merchants,
 		budgetAmounts,
-		transactions,
+		transactions: upToToday,
 	};
 }
 

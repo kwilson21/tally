@@ -1786,22 +1786,27 @@ describe("cash lifecycle", () => {
 	});
 
 	it("is counted by Home and budgets", async () => {
-		const cash = await env.DB.prepare(
-			"SELECT amount_cents FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND category_id=1 LIMIT 1",
-		).first<{ amount_cents: number }>();
-		expect(cash?.amount_cents).toBe(2000);
-		const month = await loadMonth(
-			env.DB,
-			todayIn(DEFAULT_TIME_ZONE).slice(0, 7),
-		);
-		expect(month.transactions).toContainEqual(
-			expect.objectContaining({
-				categoryId: 1,
-				amountCents: 2000,
-				income: false,
-			}),
-		);
-		expect((await request("/")).html).toMatch(/\$395\s+of\s+\$700/);
+		// The last day of October, when every Groceries row of the demo is in (the demo's spending is paced, #322).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-31T15:00:00Z"));
+		try {
+			await resetDemo(env.DB, "2026-10-31");
+			const cash = await env.DB.prepare(
+				"SELECT amount_cents FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND category_id=1 LIMIT 1",
+			).first<{ amount_cents: number }>();
+			expect(cash?.amount_cents).toBe(2000);
+			const month = await loadMonth(env.DB, "2026-10");
+			expect(month.transactions).toContainEqual(
+				expect.objectContaining({
+					categoryId: 1,
+					amountCents: 2000,
+					income: false,
+				}),
+			);
+			expect((await request("/")).html).toMatch(/\$395\s+of\s+\$700/);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("is never touched by a Plaid sync", async () => {

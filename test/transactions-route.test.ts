@@ -373,14 +373,15 @@ describe("GET /transactions", () => {
 	});
 
 	it("pages through results with real links, 25 at a time", async () => {
-		// Pinned to October 11: the demo's two Daycare Fridays so far are in the count (40 with them).
+		// Pinned to October 20 (#322): the Costco split of the 18th and the three Daycare Fridays are in the count, and the
+		// Target refund is not (it counts in September with its purchase), 34 in all.
 		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-11T15:00:00Z"));
+		vi.setSystemTime(new Date("2026-10-20T15:00:00Z"));
 		try {
-			await resetDemo(env.DB, "2026-10-11");
+			await resetDemo(env.DB, "2026-10-20");
 			const first = (await get("/transactions")).html;
 			expect(first).toMatch(
-				/<p id="result-count"[^>]*>Showing 1–25 of 42 transactions in [A-Z][a-z]+<\/p>/,
+				/<p id="result-count"[^>]*>Showing 1–25 of 34 transactions in [A-Z][a-z]+<\/p>/,
 			);
 			expect(first).toMatch(/<nav aria-label="Pages"/);
 			expect(first).toContain("Page 1 of 2");
@@ -390,8 +391,8 @@ describe("GET /transactions", () => {
 			expect(first).not.toContain(">Newer<");
 
 			const second = (await get("/transactions?page=2")).html;
-			expect(rowCount(second)).toBe(17);
-			expect(second).toMatch(/Showing 26–42 of 42 transactions/);
+			expect(rowCount(second)).toBe(9);
+			expect(second).toMatch(/Showing 26–34 of 34 transactions/);
 			expect(second).toMatch(
 				/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 			);
