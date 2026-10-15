@@ -486,7 +486,7 @@ export const DECIDED: readonly {
 	{
 		title: "P127 · Safe to spend on a small phone",
 		outcome:
-			"Option A: no drawing below 390 px for amounts of 7 characters or fewer, and below 640 px for 8 or more characters, so the minus stays on its number (decision 116).",
+			"Option A: no drawing below 390 px for amounts of 7 characters or fewer, and below 640 px for 8 or more characters, and the minus stays on its number (decision 116).",
 		issue: 500,
 	},
 	{

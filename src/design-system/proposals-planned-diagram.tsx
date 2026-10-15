@@ -424,7 +424,7 @@ function ScaledRow({
 	);
 }
 
-/** P126 on the proposals page, drawn first: the Budget diagram with Planned, at 1280 and at 390. */
+/** P126 on the proposals page: the Budget diagram with Planned, at 1280 and at 390. */
 export function PlannedDiagramProposal() {
 	return (
 		<Specimen

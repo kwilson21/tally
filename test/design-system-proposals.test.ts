@@ -496,6 +496,10 @@ describe("GET /design-system/proposals", () => {
 			"Option A: no drawing below 390 px for amounts of 7 characters or fewer",
 		);
 		expect(entry?.outcome).toContain("640 px for 8 or more characters");
+		expect(entry?.outcome).toContain(
+			"640 px for 8 or more characters, and the minus stays on its number (decision 116).",
+		);
+		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
 		expect(DECIDED.at(-3)).toBe(entry);
 	});
@@ -3156,7 +3160,10 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		const chunk = block(await drawn(), "p127-safe-small");
 		const list = options(chunk);
 		expect(list.length).toBe(4);
-		expect(list[0]).toContain("Reference · Before #566");
+		expect(list[0]).toContain("Reference · Before #566&#39;s drawing rule");
+		expect(list[0]).toContain(
+			'aria-label="Reference · Before #566&#39;s drawing rule, 320 px wide, with $9,999, on a phone"',
+		);
 		expect(list[1]).toContain(`Option A · No drawing below ${N} px`);
 		expect(list[2]).toContain("Option B · A smaller drawing on phones");
 		expect(list[3]).toContain("Option C · The drawing under the amount");

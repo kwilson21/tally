@@ -242,11 +242,14 @@ export function SafeToSpendSmallProposal() {
 			</p>
 			<Choices>
 				<Choice
-					name="Reference · Before #566"
+					name="Reference · Before #566's drawing rule"
 					note="Before #566's drawing rule: the 112 px notebook sits beside the amount at every width, with the minus kept on its number."
 					width="w-[824px]"
 				>
-					<Pictures name="Reference · Before #566" layout="today" />
+					<Pictures
+						name="Reference · Before #566's drawing rule"
+						layout="today"
+					/>
 				</Choice>
 				<Choice
 					name="Option A · No drawing below 390 px (640 px for 8 or more characters)"
