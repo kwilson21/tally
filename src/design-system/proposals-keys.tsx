@@ -1,16 +1,16 @@
 // P128 (#72 and #516): where the `?` list of keyboard shortcuts lives, drawn for the owner's sign-off
 // before #72 is built (decision 109: the list is drawn and signed off in the catalog first). Every option
-// draws the same ledger of keys; the options differ only in where it sits. Below lg (no sidebar, no foot),
-// every option's More ends in a Keyboard shortcuts row that opens the same ledger, so one shared picture
-// draws that open row for all of them. Proposal only: nothing in the app changes. Pictures are inert and
-// labelled, like the rest of the page.
+// draws the same ledger of keys; the options differ only in where it sits. Below lg the sidebar is hidden
+// and the keys' details isn't drawn at the foot (How this works still is), so every option's More ends in a
+// Keyboard shortcuts row that opens the same ledger, and one shared picture draws that open row for all of
+// them. Proposal only: nothing in the app changes. Pictures are inert and labelled, like the rest of the page.
 
 import type { Child } from "hono/jsx";
-import { Button } from "../views/button";
 import { Colophon } from "../views/contents-list";
 import { FeedbackButton } from "../views/feedback-button";
 import { HowFoot } from "../views/how-link";
 import { Icon } from "../views/icons";
+import { SheetCancel } from "../views/sheet-footer";
 import { Fixed } from "./proposal-parts";
 import { TITLE } from "./proposals-phase5-transactions";
 import {
@@ -240,7 +240,7 @@ const pageEnd = (
 	</ul>
 );
 
-/** Option B's foot: How this works under its short rule (HowFoot), then the keys' details (open or closed). */
+/** B's foot and C's fallback: How this works under its short rule (HowFoot, which each page that has it draws at every width), then the keys' details, drawn on desktop only. */
 function Foot({ open = false }: { open?: boolean }) {
 	return (
 		<>
@@ -257,25 +257,24 @@ const homeTop = (
 	<HomeTop
 		amount={<Amount>$1,240</Amount>}
 		status="Eating Out is $36 over. Everything else is on track."
+		howLink={false}
 	/>
 );
 
 /**
- * Option C's sheet over Home on desktop: the BottomSheet's side panel over a dimmed page. Its Close sits in a
- * footer under the ledger, as BottomSheet's footer draws it, so the sheet can be shut without the backdrop.
+ * Option C's sheet over Home on desktop: the BottomSheet's side panel over a dimmed page. Its Cancel link sits in
+ * a footer under the ledger, as BottomSheet's footer draws it, so the sheet can be shut without the backdrop.
  */
 const sheetOverHome = (
 	<>
 		<div class="absolute inset-0 bg-ink/30" />
-		<div class="absolute inset-y-0 right-0 flex w-[28rem] flex-col border-l border-rule bg-paper">
-			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+		<div class="absolute inset-y-0 right-0 flex w-[28rem] flex-col rounded-l-sheet bg-paper">
+			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
 				<p class="font-serif text-2xl font-semibold">Keyboard shortcuts</p>
 				<Ledger />
 			</div>
-			<div class="shrink-0 border-t border-rule px-6 pt-3 pb-6">
-				<Button kind="secondary" type="button" class="w-full">
-					Close
-				</Button>
+			<div class="shrink-0 border-t border-rule px-5 pt-3 pb-5">
+				<SheetCancel href="#p128-keys" />
 			</div>
 		</div>
 	</>
@@ -367,8 +366,8 @@ export function KeyboardListProposal() {
 					name="B · At the foot of the page"
 					width="w-full"
 					recommended={false}
-					note="On desktop, Keyboard shortcuts sits at the foot of every page, under How this works, and opens downward. ? opens it and scrolls it into view. Below lg the foot is hidden, so ? opens More's Keyboard shortcuts row instead (from another page, it goes to More with the row open)."
-					cost="a details at every page's foot on desktop"
+					note="On desktop, Keyboard shortcuts sits under How this works at the foot of each page that has it, and opens downward. ? opens it and scrolls it into view. Below lg, How this works stays at the foot but Keyboard shortcuts isn't drawn there, so ? opens More's Keyboard shortcuts row instead (from another page, it goes to More with the row open)."
+					cost="a details under How this works on each desktop page that has it"
 					why="it adds no sidebar line, and the list sits in the same place at the foot of every page."
 				>
 					<Shot caption="The foot, closed">
@@ -391,8 +390,8 @@ export function KeyboardListProposal() {
 					name="C · A sheet, with the details as its fallback"
 					width="w-full"
 					recommended={false}
-					note="? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the page shows B's foot details on desktop and More's Keyboard shortcuts row below lg."
-					cost="sheet.js already exists; keyboard.js opens the sheet; the fallback is B's details"
+					note="? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the same list is B's details under How this works at the foot of each desktop page that has it, and More's Keyboard shortcuts row below lg."
+					cost="a ?keys param the server draws the sheet from over the page it was opened from, so Cancel, Escape and the backdrop close it as every sheet closes; keyboard.js opens it and sheet.js already makes it modal; without the script, the foot's details and More's row; a monospaced font token for the key chips; and a decision entry (decision 118), since decision 109's list was a disclosure only."
 					why="it's the sheet people already know from Add a bill, so the keys open what the app does everywhere else."
 				>
 					<Shot caption="Over Home on desktop: the sheet">

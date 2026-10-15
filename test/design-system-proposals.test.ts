@@ -3179,6 +3179,16 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		expect(a.match(PICTURE)?.length).toBe(3);
 		expect(b.match(PICTURE)?.length).toBe(3);
 		expect(c.match(PICTURE)?.length).toBe(3);
+		// Home's pictures draw no How this works link: the foot pictures carry it, Home's status does not.
+		for (const label of [
+			"A, the sidebar closed, on desktop",
+			"A, the sidebar open, on desktop",
+			"C, the sheet over Home, on desktop",
+		]) {
+			expect(pictureOf(chunk, label), label).not.toContain(
+				'aria-label="How this works: the budget"',
+			);
+		}
 		expect(a).toContain(
 			'role="img" aria-label="A, the sidebar closed, on desktop"',
 		);
@@ -3311,18 +3321,28 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 		}
 	});
 
-	it("gives C's sheet a Close button in a footer under the ledger", async () => {
+	it("draws C's sheet as the BottomSheet draws it: a rounded side panel, and a Cancel link in a footer under the ledger", async () => {
 		const chunk = section(await drawn());
 		const sheet = pictureOf(chunk, "C, the sheet over Home, on desktop");
+		// The panel: the sheet's rounded left corner, and no rule on its edge (BottomSheet's desktop side panel).
+		const panel = sheet.match(/<div class="([^"]*\binset-y-0 right-0\b[^"]*)"/);
+		expect(panel?.[1] ?? "").toMatch(/\brounded-l-sheet\b/);
+		expect(panel?.[1] ?? "").not.toMatch(/\bborder-l\b/);
+		// The body keeps BottomSheet's p-5, and the footer sits under the ledger on a rule.
+		const body = sheet.match(/<div class="([^"]*\boverflow-y-auto\b[^"]*)"/);
+		expect(body?.[1] ?? "").toMatch(/\bp-5\b/);
+		expect(body?.[1] ?? "").not.toMatch(/\bp-6\b/);
 		const ledgerEnd = sheet.indexOf(
 			"Keys don&#39;t work while you&#39;re typing in a field.",
 		);
 		expect(ledgerEnd).toBeGreaterThan(-1);
 		const footer = sheet.indexOf("border-t border-rule", ledgerEnd);
 		expect(footer).toBeGreaterThan(ledgerEnd);
+		// Cancel is the secondary link back to the list, full width, and there is no Close button.
 		expect(sheet.slice(footer)).toMatch(
-			/<button type="button" class="[^"]*\bw-full\b[^"]*">Close<\/button>/,
+			/<a href="#p128-keys" class="[^"]*\bw-full\b[^"]*">Cancel<\/a>/,
 		);
+		expect(sheet).not.toContain(">Close</button>");
 	});
 
 	it("gives each option its note, with where its list sits below lg, and no line about phones showing nothing", async () => {
@@ -3333,10 +3353,20 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			"On desktop, the sidebar&#39;s second group gains a third line, Keyboard shortcuts, with a keyboard icon. Opening it drops the ledger down inside the sidebar; ? opens it and moves focus to its summary. Below lg the sidebar is hidden, so ? opens More&#39;s Keyboard shortcuts row instead (from another page, it goes to More with the row open).",
 		);
 		expect(option(chunk, "B · At the foot")).toContain(
-			"On desktop, Keyboard shortcuts sits at the foot of every page, under How this works, and opens downward. ? opens it and scrolls it into view. Below lg the foot is hidden, so ? opens More&#39;s Keyboard shortcuts row instead (from another page, it goes to More with the row open).",
+			"On desktop, Keyboard shortcuts sits under How this works at the foot of each page that has it, and opens downward. ? opens it and scrolls it into view. Below lg, How this works stays at the foot but Keyboard shortcuts isn&#39;t drawn there, so ? opens More&#39;s Keyboard shortcuts row instead (from another page, it goes to More with the row open).",
 		);
 		expect(option(chunk, "C · A sheet")).toContain(
-			"? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the page shows B&#39;s foot details on desktop and More&#39;s Keyboard shortcuts row below lg.",
+			"? opens the list as a ledger sheet, the BottomSheet that #87 made modal, at any width. Without the script, the same list is B&#39;s details under How this works at the foot of each desktop page that has it, and More&#39;s Keyboard shortcuts row below lg.",
+		);
+	});
+
+	it("gives B and C their costs: the details under How this works, and C's sheet route, Cancel, its fallbacks and decision 118", async () => {
+		const chunk = section(await drawn());
+		expect(option(chunk, "B · At the foot")).toContain(
+			"a details under How this works on each desktop page that has it",
+		);
+		expect(option(chunk, "C · A sheet")).toContain(
+			"a ?keys param the server draws the sheet from over the page it was opened from, so Cancel, Escape and the backdrop close it as every sheet closes; keyboard.js opens it and sheet.js already makes it modal; without the script, the foot&#39;s details and More&#39;s row; a monospaced font token for the key chips; and a decision entry (decision 118), since decision 109&#39;s list was a disclosure only.",
 		);
 	});
 
