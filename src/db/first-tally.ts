@@ -47,40 +47,33 @@ export async function readFirstTally(
 	return row ? (JSON.parse(row.value) as FirstTally) : null;
 }
 
-/** The record to change: what is stored, or an empty one before the first week has anything written. */
-const readOrEmpty = async (db: D1Database): Promise<FirstTally> =>
-	(await readFirstTally(db)) ?? { strokes: {}, budgets: {} };
-
-/** Saves the whole record. The callers read, change one part, and write back. */
-export async function writeFirstTally(
-	db: D1Database,
-	record: FirstTally,
-): Promise<void> {
-	await db
-		.prepare(
-			"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-		)
-		.bind(KEY, JSON.stringify(record))
-		.run();
-}
+/**
+ * The record before the first week has anything written: the shape migration 0057 and readFirstTally expect. Each setter
+ * below starts from it on the first write, so the record is always the same shape.
+ */
+const EMPTY_RECORD = '{"strokes":{},"budgets":{}}';
 
 /** True once all five strokes are drawn, whether or not they carry a day. */
 export function isSetUp(record: FirstTally | null): boolean {
 	return STROKES.every((stroke) => record?.strokes[stroke] !== undefined);
 }
 
-/** Draws a stroke on a household day (or with no day). A stroke already drawn keeps its first day. */
+// Each setter is one upsert, so the json_* change is applied to what is stored when the write happens. Two writes that
+// overlap then keep each other's fields, where a read-then-write of the whole record would lose one of them.
+
+/** Draws a stroke on a household day (or with no day). json_insert never overwrites, so a stroke already drawn keeps its first day. */
 export async function markStroke(
 	db: D1Database,
 	stroke: Stroke,
 	day: string | null,
 ): Promise<void> {
-	const record = await readOrEmpty(db);
-	if (record.strokes[stroke] !== undefined) return;
-	await writeFirstTally(db, {
-		...record,
-		strokes: { ...record.strokes, [stroke]: day },
-	});
+	await db
+		.prepare(
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3))
+			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+		)
+		.bind(KEY, stroke, day)
+		.run();
 }
 
 /** Keeps the budgets step's answer for a category. The newest answer for a category replaces the one before it. */
@@ -89,11 +82,13 @@ export async function keepBudgetAnswer(
 	categoryId: number,
 	answer: BudgetAnswer,
 ): Promise<void> {
-	const record = await readOrEmpty(db);
-	await writeFirstTally(db, {
-		...record,
-		budgets: { ...record.budgets, [String(categoryId)]: answer },
-	});
+	await db
+		.prepare(
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)))
+			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.budgets."' || ?2 || '"', json(?3))`,
+		)
+		.bind(KEY, String(categoryId), JSON.stringify(answer))
+		.run();
 }
 
 /** Keeps the counts of the first night, once its sorting has all finished. */
@@ -101,6 +96,11 @@ export async function keepNightCounts(
 	db: D1Database,
 	counts: NightCounts,
 ): Promise<void> {
-	const record = await readOrEmpty(db);
-	await writeFirstTally(db, { ...record, night: counts });
+	await db
+		.prepare(
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.night', json(?2)))
+			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.night', json(?2))`,
+		)
+		.bind(KEY, JSON.stringify(counts))
+		.run();
 }

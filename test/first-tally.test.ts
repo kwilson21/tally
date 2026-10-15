@@ -8,7 +8,6 @@ import {
 	markStroke,
 	readFirstTally,
 	STROKES,
-	writeFirstTally,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 
@@ -74,13 +73,27 @@ describe("first_tally record", () => {
 		});
 	});
 
-	it("writes the whole record as one JSON value under first_tally", async () => {
-		await writeFirstTally(db, {
-			strokes: { bank: "2026-10-10" },
-			budgets: {},
-		});
+	it("stores the record as one JSON value under first_tally", async () => {
+		await markStroke(db, "bank", "2026-10-10");
 		expect(await stored()).toEqual({
 			value: JSON.stringify({ strokes: { bank: "2026-10-10" }, budgets: {} }),
+		});
+	});
+
+	it("keeps every field when the writes overlap, since each one changes only its own part", async () => {
+		await Promise.all([
+			keepBudgetAnswer(db, 3, { kind: "suggested", cents: 65000 }),
+			keepBudgetAnswer(db, 4, { kind: "skipped", cents: null }),
+			markStroke(db, "bank", "2026-10-13"),
+			keepNightCounts(db, { brought: 3, needYou: 1 }),
+		]);
+		expect(await readFirstTally(db)).toEqual({
+			strokes: { bank: "2026-10-13" },
+			budgets: {
+				"3": { kind: "suggested", cents: 65000 },
+				"4": { kind: "skipped", cents: null },
+			},
+			night: { brought: 3, needYou: 1 },
 		});
 	});
 
