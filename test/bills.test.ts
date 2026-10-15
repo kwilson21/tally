@@ -955,7 +955,9 @@ describe("Bills", () => {
 				await exports.default.fetch("http://tally.test/")
 			).text();
 			const headline =
-				html.match(/class="font-serif text-6xl[^"]*">([^<]*)</)?.[1] ?? "";
+				html.match(
+					/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
+				)?.[1] ?? "";
 			expect(headline).toMatch(/^\$\d/);
 			expect(html).toContain(
 				"Eating Out is $36 over. Everything else is on track.",
@@ -1652,7 +1654,7 @@ describe("Bills", () => {
 				.first("n");
 		const safeToSpend = async () =>
 			(await (await exports.default.fetch("http://tally.test/")).text()).match(
-				/class="font-serif text-6xl[^"]*">([^<]*)</,
+				/class="font-serif text-6xl[^"]*"><span class="whitespace-nowrap">([^<]*)</,
 			)?.[1];
 
 		beforeEach(async () => {

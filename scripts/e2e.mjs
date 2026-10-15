@@ -1468,6 +1468,141 @@ for (const width of [320, 390]) {
 	);
 }
 step("How Tally works doesn't scroll sideways at 320px or 390px");
+// #500: on a 320px phone the notebook drawing is left out below 390px (decision 116), so a seven-character amount has the
+// whole row and nothing scrolls sideways. Safe to spend moves one for one with this month's Groceries budget and savings
+// goal, so each write moves it to the target shown; the demo reset below restores the data.
+await page.setViewportSize({ width: 320, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+const safeToSpend = page.locator("p.text-6xl").first();
+await safeToSpend.waitFor();
+// Home's own month, read from its Months navigation: the household's month in its own zone (decision 67), not the clock's.
+const homeMonth = new URL(
+	await page
+		.locator('nav[aria-label="Months"] a[aria-current="page"]')
+		.getAttribute("href"),
+	BASE,
+).searchParams.get("month");
+assert.match(
+	homeMonth ?? "",
+	/^\d{4}-\d{2}$/,
+	`Home's month is not YYYY-MM: ${homeMonth}`,
+);
+const shownDollars = (text) => {
+	const match = text.match(/^([−-]?)\$([\d,]+)/);
+	assert(match, `Home's Safe to spend shows no amount: ${text}`);
+	return (match[1] ? -1 : 1) * Number(match[2].replaceAll(",", ""));
+};
+const shownAt = async () => shownDollars(await safeToSpend.textContent());
+// The notebook drawing is the row's last child. For amounts of up to seven characters it is display none below 390px and
+// block from 390px; longer amounts leave it out below 640px (decision 116).
+const drawingDisplay = () =>
+	safeToSpend.evaluate(
+		(el) => getComputedStyle(el.closest("div.flex").lastElementChild).display,
+	);
+const assertNarrowPhone = async (amount, what) => {
+	const text = await safeToSpend.textContent();
+	assert(text.startsWith(amount), `${what}: Safe to spend shows ${text}`);
+	assert.equal(
+		await drawingDisplay(),
+		"none",
+		`${what}: the notebook drawing shows at 320px`,
+	);
+	const scrollWidth = await page.evaluate(
+		() => document.documentElement.scrollWidth,
+	);
+	assert(
+		scrollWidth <= 320,
+		`${what} scrolls sideways at 320px: ${scrollWidth}px`,
+	);
+};
+const shownStart = await shownAt();
+writeLocalD1(
+	`INSERT OR REPLACE INTO budget_amounts (category_id, effective_month, amount_cents) SELECT id, '${homeMonth}', COALESCE((SELECT amount_cents FROM budget_amounts WHERE category_id = categories.id AND effective_month <= '${homeMonth}' ORDER BY effective_month DESC LIMIT 1), 0) + ${(9999 - shownStart) * 100} FROM categories WHERE name = 'Groceries'`,
+);
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+await assertNarrowPhone("$9,999", "Safe to spend at $9,999");
+step(
+	"at 320px Safe to spend shows $9,999 with the notebook drawing left out, and nothing scrolls sideways",
+);
+const shownHigh = await shownAt();
+writeLocalD1(
+	`INSERT OR REPLACE INTO savings_goal_amounts (effective_month, amount_cents) SELECT '${homeMonth}', COALESCE((SELECT amount_cents FROM savings_goal_amounts WHERE effective_month <= '${homeMonth}' ORDER BY effective_month DESC LIMIT 1), 0) + ${(shownHigh + 9999) * 100}`,
+);
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+await assertNarrowPhone("−$9,999", "Safe to spend at −$9,999");
+step(
+	"at 320px Safe to spend shows −$9,999 with the notebook drawing left out, and nothing scrolls sideways",
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+assert.equal(
+	await drawingDisplay(),
+	"block",
+	"the notebook drawing is left out at 390px",
+);
+assert.equal(
+	(await safeToSpend.textContent()).slice(0, 7),
+	"−$9,999",
+	"Safe to spend is not −$9,999 at 390px",
+);
+const [minusTop, dollarTop] = await safeToSpend.evaluate((el) => {
+	const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+	const topOf = (start) => {
+		const range = document.createRange();
+		range.setStart(text, start);
+		range.setEnd(text, start + 1);
+		return range.getBoundingClientRect().top;
+	};
+	return [topOf(0), topOf(1)];
+});
+assert(
+	Math.abs(minusTop - dollarTop) < 1,
+	`the minus sign and the number are on different lines at 390px (tops ${minusTop} and ${dollarTop})`,
+);
+step(
+	"at 390px the notebook drawing is back, and a negative Safe to spend keeps its minus sign on the number's line",
+);
+// #500 (P127 A, decision 116): −$19,999 is eight characters, and no eight-character amount fits beside the drawing with
+// 8px to spare at any phone width up to 430px, so the drawing waits for 640px and the amount has the whole row. The
+// savings goal rises by the gap from −$9,999 to −$19,999, the same write the steps above use.
+const shownLow = await shownAt();
+writeLocalD1(
+	`INSERT OR REPLACE INTO savings_goal_amounts (effective_month, amount_cents) SELECT '${homeMonth}', COALESCE((SELECT amount_cents FROM savings_goal_amounts WHERE effective_month <= '${homeMonth}' ORDER BY effective_month DESC LIMIT 1), 0) + ${(shownLow + 19999) * 100}`,
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+await safeToSpend.waitFor();
+const eightText = await safeToSpend.textContent();
+assert(
+	eightText.startsWith("−$19,999"),
+	`Safe to spend at 390px shows ${eightText}, not −$19,999`,
+);
+assert.equal(
+	await drawingDisplay(),
+	"none",
+	"the notebook drawing shows beside a −$19,999 Safe to spend at 390px",
+);
+const eightRow = await safeToSpend.evaluate((el) => {
+	const row = el.closest("div.flex");
+	return { scroll: row.scrollWidth, client: row.clientWidth };
+});
+assert(
+	eightRow.scroll <= eightRow.client,
+	`the Safe to spend row overflows at 390px: ${eightRow.scroll}px needed in ${eightRow.client}px`,
+);
+const eightPageWidth = await page.evaluate(
+	() => document.documentElement.scrollWidth,
+);
+assert(
+	eightPageWidth <= 390,
+	`−$19,999 scrolls sideways at 390px: ${eightPageWidth}px`,
+);
+step(
+	"at 390px a −$19,999 Safe to spend leaves the notebook drawing out, and nothing scrolls sideways",
+);
 // #534: Organize's Save is disabled while it posts (hx-disable), so a double click files the group once and the
 // question keeps its own address. Each Save is held for a moment, so the second click lands while the first is in flight.
 await page.setViewportSize({ width: 390, height: 844 });
