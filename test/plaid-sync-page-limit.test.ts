@@ -22,7 +22,8 @@ const KEY = btoa("01234567890123456789012345678901");
 const D1_BOUND_VALUES = 100;
 /**
  * The statements a page's batch holds beyond its rows: the lock renewal, the cursor, and the merchant names and
- * suggestions. Measured at 4 to 6 on this branch, so 10 leaves room without letting a new per-row statement through.
+ * suggestions, and the planned-expense check that unlinks a payment the bank changed. Measured at 5 to 7 on this branch, so
+ * 10 leaves room without letting a new per-row statement through.
  */
 const PAGE_STATEMENTS = 10;
 

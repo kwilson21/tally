@@ -1964,6 +1964,128 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		expect(payers).toContain(null);
 	});
 
+	/** A posted charge with no pending twin, stored by a sync, and a plan paid by it (Codex 4278749951). */
+	async function postedPlanPayment(item: number) {
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const payment = (await row("posted-1"))?.id as number;
+		return { payment, plan: await planPaidBy(payment) };
+	}
+
+	it("unlinks a plan whose payment the bank changes to a credit, and sets the plan aside again", async () => {
+		const item = await addItem();
+		const { plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [postedTx({ pending_transaction_id: null, amount: -12.34 })],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("unlinks a plan whose payment the bank moves out of its month and the next, and sets the plan aside again", async () => {
+		const item = await addItem();
+		const { plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("keeps a plan's payment when the bank changes its amount and it still fits the plan's month", async () => {
+		const item = await addItem();
+		const { payment, plan } = await postedPlanPayment(item);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [postedTx({ pending_transaction_id: null, amount: 20 })],
+			}),
+		);
+		expect(await planPayer(plan)).toBe(payment);
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(0);
+	});
+
+	it("unlinks a plan whose pending payment is posted outside its window, as the posted charge takes the row over", async () => {
+		const item = await addItem();
+		const plan = await planPaidBy(await syncPending(item));
+		await post(item, { date: "2026-11-03" });
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("unlinks a plan on one part of a split when the bank moves the purchase out of its window, since the parts move with it", async () => {
+		const item = await addItem();
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const [part] = await splitInto(
+			(await row("posted-1"))?.id as number,
+			600,
+			634,
+		);
+		const plan = await planPaidBy(part ?? 0);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
+	it("keeps a plan on a split purchase's whole payment while the bank's date still fits, and unlinks it once the date moves out", async () => {
+		const item = await addItem();
+		await syncItem(
+			opts,
+			item,
+			onePage({ added: [postedTx({ pending_transaction_id: null })] }),
+		);
+		const whole = (await row("posted-1"))?.id as number;
+		const plan = await planPaidBy(whole);
+		await splitInto(whole, 600, 634);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-09-30" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBe(whole);
+		await syncItem(
+			opts,
+			item,
+			onePage({
+				modified: [
+					postedTx({ pending_transaction_id: null, date: "2026-11-02" }),
+				],
+			}),
+		);
+		expect(await planPayer(plan)).toBeNull();
+		expect(await plansSetAsideCents(env.DB, "2026-09")).toBe(1234);
+	});
+
 	/** Transactions that a bill and a planned expense both pay: the never-both rule (spec section 5) the merge must keep. */
 	const bothPaying = async () =>
 		(

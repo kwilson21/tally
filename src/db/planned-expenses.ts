@@ -45,10 +45,31 @@ const PAYER_NAME = `COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "displ
  * The one rule that listing, linking and Undo all check (decision 82): money out, not split or income, in the plan's
  * month or the next, and paying neither a bill nor another plan. `alias` is the payment's table alias, `month` an SQL
  * expression for the plan's `YYYY-MM`. `exceptPlan` (an SQL expression for a plan id) is paysPlanGroupSql's: that plan's
- * own link doesn't count, so an edit of a paid plan can keep its payment.
+ * own link doesn't count, so an edit of a paid plan can keep its payment. `splitOk` drops the not-split test, for the check
+ * of a link a split purchase already holds: a plan on the whole payment stays paid while the rest still fits (decision 82).
  */
-const canPayPlanSql = (alias: string, month: string, exceptPlan?: string) =>
-	`(${alias}.amount_cents > 0 AND ${alias}.is_split = 0 AND ${alias}.flag_income = 0 AND substr(${alias}.date, 1, 7) IN (${month}, substr(date(${month} || '-01', '+1 month'), 1, 7)) AND NOT ${paysBillGroupSql(alias)} AND NOT ${paysPlanGroupSql(alias, exceptPlan)})`;
+const canPayPlanSql = (
+	alias: string,
+	month: string,
+	exceptPlan?: string,
+	splitOk = false,
+) =>
+	`(${alias}.amount_cents > 0 AND ${splitOk ? "" : `${alias}.is_split = 0 AND `}${alias}.flag_income = 0 AND substr(${alias}.date, 1, 7) IN (${month}, substr(date(${month} || '-01', '+1 month'), 1, 7)) AND NOT ${paysBillGroupSql(alias)} AND NOT ${paysPlanGroupSql(alias, exceptPlan)})`;
+
+/**
+ * A statement for after a bank change (src/plaid/sync.ts): it unlinks each plan whose payment the change touched, the
+ * payment itself or one of its split parts, and that canPayPlanSql no longer accepts, so the plan is set aside again.
+ * This is sync's rule for a payment the bank changed (decision 82): a link is kept only while it still fits. The plan's
+ * own link is left out of the check, as updatePlan leaves it out, so a plan never counts against itself, and a split
+ * purchase keeps its link (splitOk). Binds the changed Plaid ids as one JSON array (`?1`), then whatever `guard` binds.
+ */
+export function unlinkUnfitPlanPaymentsSql(guard: string) {
+	return `UPDATE planned_expenses SET transaction_id = NULL
+		WHERE transaction_id IN (SELECT t.id FROM transactions t WHERE t.plaid_transaction_id IN (SELECT value FROM json_each(?1))
+			OR t.parent_id IN (SELECT p.id FROM transactions p WHERE p.plaid_transaction_id IN (SELECT value FROM json_each(?1))))
+		AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id = planned_expenses.transaction_id AND ${canPayPlanSql("t", "planned_expenses.month", "planned_expenses.id", true)})
+		AND ${guard}`;
+}
 
 /**
  * A payer's name as bills show it (bills.tsx): its own name or its merchant's, else the bank's text tidied. The bank's

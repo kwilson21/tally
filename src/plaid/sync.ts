@@ -7,6 +7,7 @@ import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
 } from "../db/plaid-transfers";
+import { unlinkUnfitPlanPaymentsSql } from "../db/planned-expenses";
 import { unlinkOverRefundedSql } from "../db/refunded";
 import { plaidAmountToCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
@@ -890,6 +891,20 @@ export async function syncItem(
 					env.DB.prepare(unlinkOverRefundedSql(OWNS_LOCK)).bind(
 						transaction.transaction_id,
 						transaction.transaction_id,
+						itemRowId,
+						lockId,
+					),
+				);
+			}
+			// A payment the bank changed that no longer fits its plan's month unlinks the plan, which is set aside again
+			// (decision 82). One statement for the page's charges, after their amounts and dates are written in this batch.
+			const ids = [...added, ...page.modified].map(
+				(transaction) => transaction.transaction_id,
+			);
+			if (ids.length > 0) {
+				statements.push(
+					env.DB.prepare(unlinkUnfitPlanPaymentsSql(OWNS_LOCK)).bind(
+						JSON.stringify(ids),
 						itemRowId,
 						lockId,
 					),
