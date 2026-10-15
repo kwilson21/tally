@@ -94,6 +94,18 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain("Needs category\u00a0·\u00a0");
 	});
 
+	it("shows More's contents list in its three states, the demo's colophon and the family's version line (P122 A)", async () => {
+		const { html } = await get("/design-system");
+		const more =
+			html.split('id="more-contents"')[1]?.split("</section>")[0] ?? "";
+		expect(more).toContain("Accounts, 3 accounts");
+		expect(more).toContain("Settings, 3 to check");
+		expect(more).toContain("Needs attention");
+		expect(more).toContain("None linked yet");
+		expect(more).toContain("Tally demo · resets every night");
+		expect(more).toContain("Tally v2026.10.12 · 9e5e14d");
+	});
+
 	it("shows every component in DESIGN.md's table", async () => {
 		const { html } = await get("/design-system");
 		const shown = specimens(html)
