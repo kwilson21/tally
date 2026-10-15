@@ -3524,7 +3524,10 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		// Today's desktop pictures are the real money input; A's hold the check and the Round to chip where they belong.
 		expect(cents).toContain("data-money");
 		expect(last).toContain("data-money");
-		expect(chipOf(last, "Last month:")).toContain("aria-pressed:opacity-50");
+		expect(chipOf(last, "Last month:")).toContain("aria-pressed:text-ink");
+		expect(chipOf(last, "Last month:")).not.toContain(
+			"aria-pressed:opacity-50",
+		);
 		expect(chipOf(last, "Last month:")).toContain('aria-pressed="true"');
 		expect(centsA).toContain("Round to $613");
 		expect(checkTokens(chipOf(lastA, "Last month:"))).toContain(
@@ -3547,18 +3550,19 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		const chunk = section(await drawn());
 		const today = (i: number) =>
 			picture(row(chunk, i), `Today on main, ${TAGS[i]}`);
-		// Empty: no placeholder, Round to kept but hidden, and both chips offered.
+		// Empty: the muted 0.00 placeholder (decision 117), Round to kept but hidden, and both chips offered.
 		expect(today(0)).toContain("data-money");
-		expect(today(0)).not.toContain("placeholder=");
+		expect(today(0)).toContain('placeholder="0.00"');
 		expect(chipOf(today(0), "Round to")).toMatch(/\shidden(=""|\s|>)/);
 		expect(today(0)).toContain("Last month: $571.80");
 		expect(today(0)).toContain("3-month average: $602.45");
 		// With cents: Round to $613 appears, and the box reads 612.45.
 		expect(today(1)).toContain('value="612.45"');
 		expect(today(1)).toContain("Round to $613");
-		// Equal to last month: the chip is pressed and fades, and Round to $572 appears too.
+		// Equal to last month: the chip is pressed and its words go ink, and Round to $572 appears too.
 		expect(chipOf(today(2), "Last month:")).toContain('aria-pressed="true"');
-		expect(chipOf(today(2), "Last month:")).toContain(
+		expect(chipOf(today(2), "Last month:")).toContain("aria-pressed:text-ink");
+		expect(chipOf(today(2), "Last month:")).not.toContain(
 			"aria-pressed:opacity-50",
 		);
 		expect(today(2)).toContain("Round to $572");
@@ -3567,15 +3571,17 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 		expect(nudges(today(3)).find((n) => n.nudge === "-100")?.disabled).toBe(
 			true,
 		);
-		// Error: the words the parser gives sit under the box, and + stays on.
+		// Error: the words the parser gives sit under the box, and all four steps are off (decision 117).
 		expect(today(4)).toContain('role="alert"');
 		expect(today(4)).toContain("Enter a dollar amount, like 250 or 250.50.");
-		expect(nudges(today(4)).find((n) => n.nudge === "100")?.disabled).toBe(
-			false,
-		);
+		for (const nudge of ["100", "1", "-1", "-100"]) {
+			expect(nudges(today(4)).find((n) => n.nudge === nudge)?.disabled).toBe(
+				true,
+			);
+		}
 	});
 
-	it("option A: the empty box shows a muted 0.00 placeholder, which today's empty box doesn't", async () => {
+	it("options A and B: the empty box shows a muted 0.00 placeholder, as today's does", async () => {
 		const chunk = section(await drawn());
 		const a = picture(row(chunk, 0), "Option A, empty");
 		expect(a).toContain('placeholder="0.00"');
