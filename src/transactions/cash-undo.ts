@@ -1,4 +1,4 @@
-import { paysBillGroupSql, paysPlanGroupSql } from "../db/counted-month";
+import { canPayPlanSql } from "../db/planned-expenses";
 import { refundFitsSql } from "../db/refunded";
 
 type Row = Record<string, unknown>;
@@ -250,8 +250,8 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 					marker,
 				),
 		);
-		// A plan the entry or a part paid is paid again by the restored row, once its payment group pays no bill or other
-		// plan (paysBillGroupSql, paysPlanGroupSql). Its id is the plan's own, since the delete only unlinked it.
+		// A plan the entry or a part paid is paid again by the restored row, if canPayPlanSql accepts it for the plan's month
+		// as it is now, as restorePlanDelete does (splitOk). Its id is the plan's own, since the delete only unlinked it.
 		if (snapshot.plans.length > 0)
 			writes.push(
 				db
@@ -265,7 +265,7 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 						FROM json_each(?) AS plans
 						WHERE planned_expenses.id = json_extract(plans.value, '$.id') AND planned_expenses.transaction_id IS NULL
 						AND EXISTS (SELECT 1 FROM transactions nt WHERE nt.id = (SELECT new_id FROM targets WHERE old_id = json_extract(plans.value, '$.transaction_id'))
-							AND NOT ${paysBillGroupSql("nt")} AND NOT ${paysPlanGroupSql("nt")})
+							AND ${canPayPlanSql("nt", "planned_expenses.month", undefined, true)})
 						AND EXISTS (SELECT 1 FROM cash_delete_holds WHERE token=? AND restore_marker=?)`,
 					)
 					.bind(
@@ -318,6 +318,21 @@ export async function restoreCashDelete(db: D1Database, token: string) {
 				)
 			)
 				lostLinks.push(link.name);
+		// A plan the Undo didn't pay again (its month moved, or another payment took it) is named the way a refund link is.
+		// A plan deleted during the window has no row, so it is not named.
+		if (snapshot.plans.length > 0) {
+			const plans = await db
+				.prepare(
+					"SELECT id, name, transaction_id AS transactionId FROM planned_expenses WHERE id IN (SELECT value FROM json_each(?))",
+				)
+				.bind(JSON.stringify(snapshot.plans.map(({ id }) => id)))
+				.all<{ id: number; name: string; transactionId: number | null }>();
+			for (const plan of plans.results) {
+				const paid = snapshot.plans.find(({ id }) => id === plan.id);
+				if (paid && plan.transactionId !== mappedId(paid.transaction_id))
+					lostLinks.push(plan.name);
+			}
+		}
 		return {
 			name: hold.display_name,
 			lostLinks,
