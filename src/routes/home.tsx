@@ -33,6 +33,7 @@ import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
+import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
 import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
@@ -479,6 +480,7 @@ async function renderHome(
 								</ul>
 							</section>
 						)}
+						{current && <HowFoot section="budget" />}
 					</div>
 					<div id="sheet">
 						{sheet?.(spent, data.savingsGoalCents, transactionCount)}

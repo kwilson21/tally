@@ -117,7 +117,7 @@ import { EmptyState } from "../views/empty-state";
 import { FilterSelect } from "../views/filter-select";
 import { FormField } from "../views/form-field";
 import type { HouseholdPerson } from "../views/household-people";
-import { HowLink } from "../views/how-link";
+import { HowFoot } from "../views/how-link";
 import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { LikelyAdd, LikelySheet } from "../views/likely-transactions";
@@ -663,7 +663,6 @@ async function renderList(
 					<Icon name="plus" class="size-5" /> Add cash
 				</Button>
 			</div>
-			<HowLink section="transactions" />
 
 			{/* Works as a plain GET form; htmx re-requests the same URL and swaps in only the results.
 			    Like the result count and Select, it waits for the first transaction (P40 A). */}
@@ -1001,6 +1000,7 @@ async function renderList(
 						{pageNav}
 					</section>
 				)}
+				<HowFoot section="transactions" />
 				<div id="sheet">{sheet?.(categories.results, today)}</div>
 			</div>
 		</Layout>,
@@ -1989,10 +1989,6 @@ function EditSheet({
 			{tx.excluded && tx.paysBill && (
 				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
 			)}
-			{/* Outside the form, so following it never happens by accident mid-edit. */}
-			<p>
-				<HowLink section="categorization" />
-			</p>
 			{tx.parentId === null && !tx.isSplit && !tx.income && (
 				<Button
 					kind="secondary"
@@ -2571,6 +2567,8 @@ function EditSheet({
 					)}
 				</form>
 			)}
+			{/* Outside the forms, so following it never happens by accident mid-edit. */}
+			<HowFoot section="categorization" />
 		</BottomSheet>
 	);
 }

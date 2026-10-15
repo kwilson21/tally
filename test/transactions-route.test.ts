@@ -1039,3 +1039,33 @@ describe("GET /transactions: Account and Show", () => {
 		}
 	});
 });
+
+// P124 A (decision 111): How this works is at the foot of the list, under a short rule, after the results and the pager.
+describe("How this works at the foot of Transactions", () => {
+	const FOOT =
+		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#transactions" aria-label="How this works: transactions" class="[^"]*">How this works<\/a><\/div><\/div>/;
+
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	});
+
+	it.each([
+		["the list", "/transactions"],
+		["Select mode", "/transactions?select=1"],
+	])(
+		"comes after the results in %s, with nothing after it but the sheet",
+		async (_, path) => {
+			const { html } = await get(path);
+			const foot = html.search(FOOT);
+			expect(foot).toBeGreaterThan(-1);
+			const sheet = html.indexOf('id="sheet"');
+			expect(html.lastIndexOf('aria-label="Results"', foot)).toBeGreaterThan(
+				-1,
+			);
+			expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
+			expect(html.slice(foot, sheet)).not.toMatch(
+				/<(section|ul|li|h[1-6]|p|form)\b/,
+			);
+		},
+	);
+});

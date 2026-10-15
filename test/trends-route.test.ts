@@ -324,3 +324,32 @@ describe("outside the demo", () => {
 		expect(html).not.toMatch(/jev/i);
 	});
 });
+
+// P124 A (decision 111): How this works is at the foot of Trends, under a short rule, after every section.
+describe("How this works at the foot of Trends", () => {
+	const FOOT =
+		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#trends" aria-label="How this works: trends" class="[^"]*">How this works<\/a><\/div><\/div>/;
+
+	it("comes last on the full page, after Going well and every other category", async () => {
+		const { html } = await get("/trends");
+		const foot = html.search(FOOT);
+		expect(foot).toBeGreaterThan(html.indexOf("Going well"));
+		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p|svg)\b/,
+		);
+	});
+
+	it("comes last on the early state, after All spending", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const last = monthsBefore(today.slice(0, 7), 1);
+		await env.DB.prepare("DELETE FROM transactions WHERE date < ?")
+			.bind(`${last}-02`)
+			.run();
+		const { html } = await get("/trends");
+		const foot = html.search(FOOT);
+		expect(foot).toBeGreaterThan(html.indexOf("Trends fill in as months pass"));
+		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p|svg)\b/,
+		);
+	});
+});

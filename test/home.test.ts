@@ -1011,3 +1011,23 @@ describe("GET /?month= before a linked refund's date", () => {
 		expect(html).toContain("April ended");
 	});
 });
+
+// P124 A (decision 111): How this works is at Home's foot, under a short rule, after everything else on the page.
+describe("How this works at the foot of Home", () => {
+	const FOOT =
+		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#budget" aria-label="How this works: the budget" class="[^"]*">How this works<\/a><\/div><\/div>/;
+
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	});
+
+	it("comes after the Budget list and any Bills due soon, with nothing after it but the sheet", async () => {
+		const { html } = await home();
+		const foot = html.search(FOOT);
+		expect(foot).toBeGreaterThan(-1);
+		const sheet = html.indexOf('id="sheet"');
+		// The last section of the page comes before the foot; no section, list or heading follows it.
+		expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
+		expect(html.slice(foot, sheet)).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
+	});
+});
