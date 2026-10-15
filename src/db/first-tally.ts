@@ -3,6 +3,8 @@
 // and the counts of the first night after stroke four. A household set up before the feature shipped has all five
 // strokes drawn with no day (migration 0057), so it reads as set up.
 
+import type { PayDeposit } from "../first-tally/pay";
+
 /** The five strokes of the first week (P125 E): link a bank, your pay, your bills, your budgets, and the night's count. */
 export const STROKES = ["bank", "pay", "bills", "budgets", "count"] as const;
 export type Stroke = (typeof STROKES)[number];
@@ -25,6 +27,12 @@ export type NightCounts = {
 /** The pay step's answer for one merchant: Yes, it's the family's pay, or No, it isn't (spec §8.8). */
 export type PayAnswer = "yes" | "no";
 
+/**
+ * One pay answer as recorded: the answer, and the deposits it covered (the ones the question asked about, which a Yes
+ * marked as income). The ledger reads those deposits, so a change made later elsewhere adds nothing to the line.
+ */
+export type PayRecord = { answer: PayAnswer; deposits: PayDeposit[] };
+
 /** What the bills step kept: how many bills, and their monthly total in cents, summed over each Keep. */
 export type BillsKept = { kept: number; cents: number };
 
@@ -39,7 +47,7 @@ export type FirstTally = {
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
 	/** The pay step's answers so far, by merchant key (the store's raw name); a merchant answered again keeps the newest. */
-	pay?: Record<string, PayAnswer>;
+	pay?: Record<string, PayRecord>;
 	/** What the bills step kept so far, absent until a Keep kept a bill. */
 	bills?: BillsKept;
 };
@@ -123,14 +131,14 @@ export async function keepNightCounts(
 export function payAnswerStatement(
 	db: D1Database,
 	merchant: string,
-	answer: PayAnswer,
+	record: PayRecord,
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, ?3))))
-			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, ?3)))`,
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json(?3)))))
+			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json(?3))))`,
 		)
-		.bind(KEY, merchant, answer);
+		.bind(KEY, merchant, JSON.stringify(record));
 }
 
 /**

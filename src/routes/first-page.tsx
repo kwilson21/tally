@@ -8,6 +8,7 @@ import {
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
+import { hxTrigger } from "../htmx";
 import { FirstPageBody, type Motion, NO_MOTION } from "../views/first-page";
 import { Layout } from "../views/layout";
 
@@ -29,10 +30,10 @@ function notOpen(c: Context<App>) {
 }
 
 /**
- * What the answer changed between the page before it and the page after: the ledger line it wrote (its index, since the
- * ledger is in merchant order, not answer order), and the strokes it drew. The strokes are the next indexes after the
- * `drawn` already there (the bank's stroke is index 0, so the first drawn after it is index 1). One answer can draw
- * two, when the step after it has nothing to ask.
+ * What the answer changed between the page before it and the page after: the ledger line it wrote (its index; the ledger
+ * is in answer order, the pay lines first and then the bills line), and the strokes it drew. The strokes are the next
+ * indexes after the `drawn` already there (the bank's stroke is index 0, so the first drawn after it is index 1). One
+ * answer can draw two, when the step after it has nothing to ask.
  */
 function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
 	const written = after.ledger.findIndex(
@@ -56,7 +57,7 @@ function answered(
 ) {
 	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
 	return c.html(<FirstPageBody model={model} focus motion={motion} />, 200, {
-		"HX-Trigger": JSON.stringify({
+		"HX-Trigger": hxTrigger({
 			toast: { message, type: "success" },
 			announce: message,
 		}),
@@ -96,7 +97,7 @@ firstPage.post("/first-page/pay", async (c) => {
 		// Nothing left to ask about this merchant: the swap shows the page as it is, and changes nothing.
 		return answered(c, before, "That one is already answered.", NO_MOTION);
 	}
-	await answerPay(c.env.DB, key, answer, actor(c));
+	await answerPay(c.env.DB, merchant, answer, actor(c));
 	const after = await settleAndLoad(c.env.DB, today);
 	return answered(
 		c,

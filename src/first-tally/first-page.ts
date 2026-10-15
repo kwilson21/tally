@@ -1,8 +1,8 @@
 // The question page's data (P125 E, spec §8.8, decision 114): what the family's own bank shows, which pay and bills are
 // still to ask, and the ledger of what they answered. A reload asks only what is still open. The ledger reads what the
-// answers recorded in first_tally (each pay answer, and the bills step's kept count and total) and the deposits a Yes
-// marked, so a change made elsewhere, in the Transactions panel or on Bills, adds no line. The strokes never overwrite a
-// stroke's first day (markStroke, keepBillsStep).
+// answers recorded in first_tally (each pay answer with the deposits it covered, and the bills step's kept count and
+// total), so a change made elsewhere, in the Transactions panel or on Bills, adds no line. The strokes never overwrite
+// a stroke's first day (markStroke, keepBillsStep).
 
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
@@ -13,6 +13,7 @@ import {
 	keepBillsStep,
 	markStroke,
 	type PayAnswer,
+	type PayRecord,
 	payAnswerStatement,
 	readFirstTally,
 	STROKES,
@@ -90,11 +91,12 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 /**
  * Yes and No on a merchant's money in: each row the question covers is marked income or not, as the person's choice
  * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). The answer is recorded in the
- * same batch. Returns the rows changed (0 when the merchant has nothing left to ask).
+ * same batch, with the deposits the question asked about (`merchant.deposits`, read just before this write). Returns the
+ * rows changed (0 when the merchant has nothing left to ask).
  */
 export async function answerPay(
 	db: D1Database,
-	key: string,
+	merchant: PayMerchant,
 	answer: PayAnswer,
 	who: string,
 ): Promise<number> {
@@ -103,8 +105,11 @@ export async function answerPay(
 			.prepare(
 				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")} AND ${merchantKeySql("transactions")} = ?`,
 			)
-			.bind(answer === "yes" ? 1 : 0, who, key),
-		payAnswerStatement(db, key, answer),
+			.bind(answer === "yes" ? 1 : 0, who, merchant.key),
+		payAnswerStatement(db, merchant.key, {
+			answer,
+			deposits: merchant.deposits,
+		}),
 	]);
 	return changed?.meta.changes ?? 0;
 }
@@ -141,44 +146,31 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 }
 
 /**
- * The ledger lines of the pay answers the page recorded (first_tally's `pay`), in answer order: "Pay · {Merchant}, …" for
- * a Yes, from the deposits that Yes marked income, and "Not pay · {Merchant}" for a No. A money-in row that a
- * Transactions-panel review or a split part marked is not an answer, so it adds no line.
+ * The ledger lines of the pay answers (first_tally's `pay`), in answer order: "Pay · {Merchant}, …" for a Yes, from the
+ * deposits that Yes covered, as recorded with the answer, so a deposit marked later in the Transactions panel adds
+ * nothing. A No writes no line.
  */
 async function payLedger(
 	db: D1Database,
-	pay: Record<string, PayAnswer> | undefined,
+	pay: Record<string, PayRecord> | undefined,
 ): Promise<string[]> {
-	const answers = Object.entries(pay ?? {});
-	if (answers.length === 0) return [];
+	const yeses = Object.entries(pay ?? {}).filter(
+		([, record]) => record.answer === "yes" && record.deposits.length > 0,
+	);
+	if (yeses.length === 0) return [];
 	const { results } = await db
 		.prepare(
-			`SELECT ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date,
-				t.flag_income AS flag, -t.amount_cents AS cents
-			FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
-			WHERE t.amount_cents < 0 AND t.excluded = 0 AND t.is_split = 0 AND t.parent_id IS NULL
-			AND t.refund_of_id IS NULL AND t.income_source = 'user' AND ${merchantKeySql("t")} IN (SELECT value FROM json_each(?1))
-			ORDER BY key, t.date`,
+			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
 		)
-		.bind(JSON.stringify(answers.map(([key]) => key)))
-		.all<PayRow & { flag: number }>();
-	const byKey = new Map<string, { name: string; yes: PayDeposit[] }>();
-	for (const row of results) {
-		const entry = byKey.get(row.key) ?? {
-			name: row.displayName || tidyName(row.key),
-			yes: [],
-		};
-		if (row.flag === 1) entry.yes.push({ date: row.date, cents: row.cents });
-		byKey.set(row.key, entry);
-	}
-	return answers.flatMap(([key, answer]) => {
-		const entry = byKey.get(key);
-		const name = entry?.name ?? tidyName(key);
-		if (answer === "no") return [`Not pay · ${name}`];
-		return entry && entry.yes.length > 0
-			? [payLedgerLine({ name, deposits: entry.yes })]
-			: [];
-	});
+		.bind(JSON.stringify(yeses.map(([key]) => key)))
+		.all<{ key: string; displayName: string | null }>();
+	const names = new Map(results.map((row) => [row.key, row.displayName]));
+	return yeses.map(([key, record]) =>
+		payLedgerLine({
+			name: names.get(key) || tidyName(key),
+			deposits: record.deposits,
+		}),
+	);
 }
 
 /** The ledger line of what the bills step kept, from its record (first_tally's `bills`), or null when nothing was kept. */

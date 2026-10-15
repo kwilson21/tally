@@ -116,17 +116,40 @@ describe("the pay answers and the bills step's record (P125 E)", () => {
 				`INSERT INTO household_settings (key, value) VALUES ('first_tally', '{"strokes":{"bank":"2026-10-10"}}')`,
 			)
 			.run();
-		await payAnswerStatement(db, 'ACME "CORP"', "yes").run();
-		await payAnswerStatement(db, "SIDE GIG", "no").run();
-		await payAnswerStatement(db, "SIDE GIG", "yes").run();
+		await payAnswerStatement(db, 'ACME "CORP"', {
+			answer: "yes",
+			deposits: [{ date: "2026-10-01", cents: 245000 }],
+		}).run();
+		await payAnswerStatement(db, "SIDE GIG", {
+			answer: "no",
+			deposits: [],
+		}).run();
+		await payAnswerStatement(db, "SIDE GIG", {
+			answer: "yes",
+			deposits: [{ date: "2026-10-01", cents: 245000 }],
+		}).run();
 		const record = await readFirstTally(db);
 		expect(record?.strokes).toEqual({ bank: "2026-10-10" });
-		expect(record?.pay).toEqual({ 'ACME "CORP"': "yes", "SIDE GIG": "yes" });
+		expect(record?.pay).toEqual({
+			'ACME "CORP"': {
+				answer: "yes",
+				deposits: [{ date: "2026-10-01", cents: 245000 }],
+			},
+			"SIDE GIG": {
+				answer: "yes",
+				deposits: [{ date: "2026-10-01", cents: 245000 }],
+			},
+		});
 	});
 
 	it("starts the pay answers on a record that has none yet", async () => {
-		await payAnswerStatement(db, "ACME CORP", "no").run();
-		expect((await readFirstTally(db))?.pay).toEqual({ "ACME CORP": "no" });
+		await payAnswerStatement(db, "ACME CORP", {
+			answer: "no",
+			deposits: [],
+		}).run();
+		expect((await readFirstTally(db))?.pay).toEqual({
+			"ACME CORP": { answer: "no", deposits: [] },
+		});
 	});
 
 	it("draws the bills stroke and records what the step kept in one write, adding each Keep to the count and the total", async () => {

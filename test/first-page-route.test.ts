@@ -547,6 +547,10 @@ describe("the answer's motion", () => {
 			/class="py-2 text-ink first-line-new">Pay · Acme Corp,/,
 		);
 		expect(html).not.toMatch(/first-line-new">Pay · Zed Co/);
+		// The ledger is in answer order: Zed was answered first, though its name sorts after Acme's.
+		expect(html.indexOf("Pay · Zed Co")).toBeLessThan(
+			html.indexOf("Pay · Acme Corp"),
+		);
 	});
 });
 
@@ -755,47 +759,64 @@ describe("the pay question's scope", () => {
 });
 
 describe("the pay ledger reads what the page recorded", () => {
-	it("doesn't add a pay line for an income review made in the Transactions panel", async () => {
-		await deposits("PANEL PAY", 245000, 2);
+	/**
+	 * Acme Corp, with the two deposits the pay question asks about (flagged income, not yet decided), and two it leaves
+	 * out: a deposit the Transactions panel marked as income, and a split part. Yes answers the two.
+	 */
+	async function acmeYesWithExtras() {
 		await db
 			.prepare(
-				"UPDATE transactions SET income_source = 'user' WHERE raw_name = 'PANEL PAY'",
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp')",
 			)
 			.run();
-		const { html } = await get("/first-page");
-		expect(textOf(html)).not.toContain("Pay · ");
-		expect(textOf(html)).toContain("Tally didn't spot a paycheck.");
-	});
-
-	it("doesn't add a pay line for a split part", async () => {
+		await deposits("ACME CORP", 245000, 2);
+		await deposits("ACME CORP", 90000, 1, 14, { income_source: "user" });
 		await txn({
-			raw_name: "COSTCO",
+			raw_name: "ACME CORP",
 			date: TODAY,
 			amount_cents: 18742,
 			is_split: 1,
 		});
 		const parent = await db
-			.prepare("SELECT id FROM transactions WHERE raw_name = 'COSTCO'")
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'ACME CORP' AND is_split = 1",
+			)
 			.first<{ id: number }>();
 		await txn({
-			raw_name: "COSTCO PART",
+			raw_name: "ACME CORP",
 			date: TODAY,
 			amount_cents: -6000,
 			parent_id: parent?.id,
 			flag_income: 1,
 			income_source: "user",
 		});
+		await post("/first-page/pay", { merchant: "ACME CORP", answer: "yes" });
+	}
+
+	it("a deposit the Transactions panel marked adds nothing to a Yes's pay line", async () => {
+		await acmeYesWithExtras();
 		const { html } = await get("/first-page");
-		expect(textOf(html)).not.toContain("Pay · ");
+		expect(textOf(html)).toMatch(/Pay · Acme Corp, \$2,450 every other \w+/);
+		expect(textOf(html)).not.toContain("$900");
+		expect(textOf(html).match(/Pay · /g)).toHaveLength(1);
 	});
 
-	it("keeps the Not pay line for a No answer", async () => {
+	it("a split part adds nothing to a Yes's pay line, and no extra line appears", async () => {
+		await acmeYesWithExtras();
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toMatch(/Pay · Acme Corp, \$2,450 every other \w+/);
+		expect(textOf(html)).not.toContain("$60");
+		expect(textOf(html).match(/Pay · /g)).toHaveLength(1);
+	});
+
+	it("adds no ledger line for a No answer, and the bank's lines show again", async () => {
 		await deposits("TRANSFER IN", 50000, 2, 14, {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
 		await post("/first-page/pay", { merchant: "TRANSFER IN", answer: "no" });
 		const { html } = await get("/first-page");
-		expect(textOf(html)).toMatch(/Not pay · /);
+		expect(textOf(html)).not.toMatch(/Not pay|Pay · /);
+		expect(textOf(html)).toContain("From Chase");
 	});
 });

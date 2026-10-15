@@ -143,8 +143,9 @@ export const incomeAskedSql = (alias: string, afterNo = false) =>
  * which a person hasn't decided yet (`income_source` isn't 'user'). It is not the review's question (incomeAskedSql),
  * on purpose: it doesn't read `credit_reviewed`, which is about held credits and not "is this your pay?", so a credit the
  * review treats as reviewed but Tally flagged as income is still asked; and it asks every income guess a person hasn't
- * decided, even the ones the review wouldn't ask. Refunds, split parts, transfers and excluded rows are left out, as the
- * review leaves them out. The page's query and its Yes and No write both use it, so they can't disagree.
+ * decided, even the ones the review wouldn't ask. Refunds, split parts and transfers are left out, and so is every excluded
+ * row: that is the real difference from the review, which keeps the excluded rows that pay a bill or a plan
+ * (paysBillOrPlanSql). The page's query and its Yes and No write both use it, so they can't disagree.
  */
 export const payAskedSql = (alias: string) =>
 	`(${alias}.amount_cents < 0 AND ${alias}.excluded = 0 AND ${alias}.parent_id IS NULL AND ${alias}.is_split = 0
