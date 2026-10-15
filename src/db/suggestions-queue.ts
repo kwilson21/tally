@@ -124,7 +124,7 @@ const cardLabel = (row: {
  * (no confidence, or one the row hides) is outside the range. `BETWEEN` takes the whole basis points strictly
  * between the bounds. The bounds are code constants, so they are written in, as `categoryAskedSql` does.
  */
-const unsureSql = (confidence: string) => {
+export const unsureSql = (confidence: string) => {
 	const { above, below } = unsureBounds();
 	return `CAST((${confidence}) * ${BASIS_POINTS} AS INTEGER) BETWEEN ${above + 1} AND ${below - 1}`;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BIG_BILL_CENTS } from "../src/bills/guards";
 import type { BillSuggestion } from "../src/bills/find";
+import { BIG_BILL_CENTS } from "../src/bills/guards";
 import {
 	billsLedgerLine,
 	billsMutedLine,
