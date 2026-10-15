@@ -28,7 +28,10 @@ export function isUnsure(
 	return basis < below && basis > above;
 }
 
-/** A low-confidence credit is a visible income guess only until someone decides what it is. */
+/**
+ * A low-confidence credit is a visible income guess only until someone decides what it is. A payment for a bill or a
+ * planned expense counts whatever its exclusion (decision 82), so it is asked as the income queue asks it (incomeAskedSql).
+ */
 export function maybeIncomeVisible({
 	amountCents,
 	income,
@@ -36,6 +39,7 @@ export function maybeIncomeVisible({
 	creditReviewed,
 	excluded,
 	paysBill,
+	paysPlan,
 }: {
 	amountCents: number;
 	income: boolean;
@@ -43,12 +47,13 @@ export function maybeIncomeVisible({
 	creditReviewed: boolean;
 	excluded?: boolean;
 	paysBill?: boolean;
+	paysPlan?: boolean;
 }): boolean {
 	return (
 		amountCents < 0 &&
 		!income &&
 		!creditReviewed &&
-		!(excluded && !paysBill) &&
+		!(excluded && !paysBill && !paysPlan) &&
 		incomeConfidence != null &&
 		isUnsure(incomeConfidence)
 	);

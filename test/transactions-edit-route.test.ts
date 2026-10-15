@@ -318,6 +318,35 @@ describe("GET /transactions/:id", () => {
 		expect(reviewedPanel).not.toContain("Tally&#39;s guess · 71% sure");
 	});
 
+	it("asks about an excluded credit that pays a planned expense as Maybe income, in the list and the edit panel", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_settings(key,value) VALUES('ai_income','on') ON CONFLICT(key) DO UPDATE SET value='on'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents=-2500, credit_reviewed=0, income_confidence=0.5, excluded=1 WHERE id=?",
+		)
+			.bind(bakery)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',2500,'2026-10',?,'demo')",
+		)
+			.bind(bakery)
+			.run();
+		const { html: list } = await get(
+			"/transactions?show=all&month=all&q=BAKERY",
+		);
+		const row = list.slice(list.indexOf(`data-transaction="${bakery}"`));
+		expect(row.slice(0, row.indexOf("</li>"))).toContain("Maybe income");
+		expect(row.slice(0, row.indexOf("</li>"))).not.toContain("Review credit");
+		const { html } = await get(`/transactions/${bakery}`);
+		const sheet = html.slice(html.indexOf('role="dialog"'));
+		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
+		const incomeLabel = sheet.match(
+			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+		);
+		expect(incomeLabel?.[1]).toContain("border-dashed");
+	});
+
 	it.each([0.1999, 0.2, 0.2001, 0.7949, 0.795, 0.7999, 0.8, 0.8001])(
 		"saves the income answer consistently at %s",
 		async (score) => {
