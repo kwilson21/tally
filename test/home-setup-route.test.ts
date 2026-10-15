@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { encryptToken } from "../src/plaid/token-crypto";
+import { accounts } from "../src/routes/accounts";
 import { home } from "../src/routes/home";
 
 // Home during a new family's first week (P125 E, spec §8.8), through the route: the family app only, Link a bank with
@@ -13,6 +15,7 @@ const plaidFamily = {
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 } as unknown as Env;
+const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const PLAID_MODULE = 'src="/js/plaid-link.js"';
 
 const page = async (bindings: Env) => {
@@ -102,5 +105,67 @@ describe("Home during setup", () => {
 		expect(html).toContain("Nothing for you to do until then.");
 		expect(html).not.toContain("Three things to check");
 		expect(html).not.toContain("Link a bank");
+	});
+
+	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and Home offers Link a bank again", async () => {
+		const bank = await env.DB.prepare(
+			"SELECT MIN(id) AS id FROM plaid_items",
+		).first<{ id: number }>();
+		const id = bank?.id ?? 0;
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != ?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = ?",
+		)
+			.bind(await encryptToken("route-access-token", KEY), id)
+			.run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({})),
+		);
+
+		const response = await accounts.request(
+			`/accounts/${id}/disconnect`,
+			{
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+				},
+				body: "",
+			},
+			plaidFamily,
+		);
+		vi.unstubAllGlobals();
+		expect(response.status).toBeLessThan(400);
+		const stored = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(stored?.value ?? "null")).toEqual({
+			strokes: {},
+			budgets: {},
+		});
+
+		const html = await page(plaidFamily);
+		expect(html).toContain("Five strokes, and you're set up.");
+		expect(html).toContain("Link a bank");
+		expect(html).toContain(PLAID_MODULE);
 	});
 });

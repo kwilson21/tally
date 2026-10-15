@@ -86,6 +86,26 @@ describe("HomeSetup", () => {
 		expect(html).not.toContain("Link a bank");
 	});
 
+	it("reading: the notebook sits at the right under a heading only screen readers hear (the picked drawing has no visible title)", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankName: "Chase",
+			total: 40,
+		});
+		expect(html).toMatch(/<h1[^>]*class="sr-only"[^>]*>Your first week<\/h1>/);
+		expect(html).toContain("justify-end");
+		expect(html).not.toContain("Five strokes");
+	});
+
+	it("before a bank: the headline stays visible, with the notebook at its right", async () => {
+		const html = await top({}, "<button>Link a bank</button>");
+		expect(html).toMatch(
+			/<h1[^>]*class="min-w-0 font-serif text-4xl[^"]*"[^>]*>Five strokes, and you're set up\.<\/h1>/,
+		);
+		expect(html).not.toContain("Your first week");
+	});
+
 	it("marks the status for focus after a Plaid redraw", async () => {
 		const html = await top({
 			phase: "reading",

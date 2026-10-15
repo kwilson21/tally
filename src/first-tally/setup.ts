@@ -41,24 +41,38 @@ const NAMES = [
 	"Tomorrow · Tally keeps count on its own",
 ];
 
-/** The note of a line whose stroke isn't drawn, by phase. "Next" marks the line the family can act on now. */
-const WHEN: Record<SetupPhase, readonly string[]> = {
-	before: [
-		"Next",
-		"One question",
-		"One question",
-		"One tap, or one at a time",
-		"Later",
-	],
-	reading: [
-		"",
-		"Tomorrow morning",
-		"Tomorrow morning",
-		"Tomorrow morning",
-		"Later",
-	],
-	ready: ["", "Next", "One question", "One tap, or one at a time", "Later"],
-};
+/**
+ * The notes of the lines whose stroke isn't drawn. Before a bank and once the questions are open, the line the family acts
+ * on says "Next" instead (setupSteps), so the first entry is never shown.
+ */
+const QUESTION_NOTES = [
+	"",
+	"One question",
+	"One question",
+	"One tap, or one at a time",
+	"Later",
+];
+
+/** While the import is read and fits one night's AI allowance (§8.6), the questions come by the morning. */
+const MORNING_NOTES = [
+	"",
+	"Tomorrow morning",
+	"Tomorrow morning",
+	"Tomorrow morning",
+	"Later",
+];
+
+/**
+ * While an import bigger than one night is read: no time is promised, since the status says "when it's done" (#585: never
+ * promise what a failed run can't keep).
+ */
+const CATCH_UP_NOTES = [
+	"",
+	"When it's done",
+	"When it's done",
+	"When it's done",
+	"Later",
+];
 
 /** Strokes drawn so far: a stroke with a key in the record is drawn, whether or not it has a day. */
 export function strokesDrawn(record: FirstTally | null): number {
@@ -71,11 +85,26 @@ export function setupSteps(
 	phase: SetupPhase,
 	bankName: string | null,
 	today: string,
+	fitsOneNight: boolean,
 ): StepLine[] {
+	// The line the family acts on now says "Next": Link your bank before a bank, then the first stroke not yet drawn once
+	// the questions are open. While the import is read there is nothing to act on.
+	const next =
+		phase === "before"
+			? 0
+			: phase === "ready"
+				? STROKES.findIndex((stroke) => record?.strokes[stroke] === undefined)
+				: -1;
+	const notes =
+		phase !== "reading"
+			? QUESTION_NOTES
+			: fitsOneNight
+				? MORNING_NOTES
+				: CATCH_UP_NOTES;
 	return STROKES.map((stroke, i) => {
 		const drawn = record?.strokes[stroke] !== undefined;
 		const day = record?.strokes[stroke] ?? null;
-		let note = WHEN[phase][i] ?? "";
+		let note = i === next ? "Next" : (notes[i] ?? "");
 		if (drawn) {
 			note =
 				i === 0
@@ -122,12 +151,13 @@ export function setupView({
 					})
 				? "ready"
 				: "reading";
+	const fitsOneNight = waiting <= cap;
 	return {
 		phase,
 		drawn: strokesDrawn(record),
-		steps: setupSteps(record, phase, bankName, today),
+		steps: setupSteps(record, phase, bankName, today, fitsOneNight),
 		bankName,
-		fitsOneNight: waiting <= cap,
+		fitsOneNight,
 		sorted: Math.max(0, total - waiting),
 		total,
 	};

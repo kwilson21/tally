@@ -697,6 +697,53 @@ describe("Plaid routes", () => {
 		expect(JSON.stringify(errors.mock.calls)).not.toContain("access-private");
 	});
 
+	it("removes the Plaid item when reading the first week fails after the exchange", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const plaidRequests: string[] = [];
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', 'not json') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		).run();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidRequests.push(String(input));
+			if (String(input).endsWith("/item/public_token/exchange")) {
+				return Response.json({
+					access_token: "access-private",
+					item_id: "item-first-week",
+				});
+			}
+			if (String(input).endsWith("/item/get")) {
+				return Response.json({ item: {} });
+			}
+			return Response.json({ request_id: "req-remove" });
+		});
+		try {
+			const response = await post(
+				"/plaid/exchange",
+				jwt,
+				"public_token=single-use",
+			);
+			expect(response.status).toBe(502);
+			expect(plaidRequests.at(-1)).toBe(
+				"https://sandbox.plaid.com/item/remove",
+			);
+			expect(
+				(
+					await env.DB.prepare("SELECT COUNT(*) n FROM plaid_items").first<{
+						n: number;
+					}>()
+				)?.n,
+			).toBe(0);
+		} finally {
+			await env.DB.prepare(
+				"DELETE FROM household_settings WHERE key = 'first_tally'",
+			).run();
+		}
+	});
+
 	it("rejects a duplicate Plaid item id and removes the second Item", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});

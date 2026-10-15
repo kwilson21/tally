@@ -34,16 +34,22 @@ export function HomeSetup({
 	linkBank?: Child;
 }) {
 	const { phase } = view;
+	const before = phase === "before";
 	return (
 		<section class="mt-2" aria-labelledby="setup-title">
-			<div class="flex items-center justify-between gap-4">
+			{/* The picked drawing shows no title once a bank is linked: the heading is for screen readers, the notebook at the right. */}
+			<div
+				class={`flex items-center gap-4 ${before ? "justify-between" : "justify-end"}`}
+			>
 				<h1
 					id="setup-title"
-					class="min-w-0 font-serif text-4xl font-semibold tracking-tight"
+					class={
+						before
+							? "min-w-0 font-serif text-4xl font-semibold tracking-tight"
+							: "sr-only"
+					}
 				>
-					{phase === "before"
-						? "Five strokes, and you're set up."
-						: "Your first week"}
+					{before ? "Five strokes, and you're set up." : "Your first week"}
 				</h1>
 				<Notebook strokes={view.drawn} ink size="size-24" />
 			</div>

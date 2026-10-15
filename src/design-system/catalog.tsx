@@ -472,7 +472,7 @@ function Brand() {
 			>
 				<State label="Before a bank: none done, Link your bank is next">
 					<TallySteps
-						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY)}
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
 					/>
 				</State>
 				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
@@ -482,12 +482,30 @@ function Brand() {
 							"reading",
 							"Chase",
 							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="The catch-up evening: the rest come when the import is sorted">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
 						)}
 					/>
 				</State>
 				<State label="Questions ready: Your pay is next">
 					<TallySteps
-						steps={setupSteps(BANK_SYNCED, "ready", "Chase", FIRST_WEEK_TODAY)}
+						steps={setupSteps(
+							BANK_SYNCED,
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
 					/>
 				</State>
 				<State label="All five drawn, each with its day">
@@ -506,6 +524,7 @@ function Brand() {
 							"ready",
 							"Chase",
 							FIRST_WEEK_TODAY,
+							true,
 						)}
 					/>
 				</State>
@@ -569,16 +588,27 @@ const firstWeek = (
 	record: FirstTally | null,
 	phase: SetupPhase,
 	extra: Partial<SetupView> = {},
-): SetupView => ({
-	phase,
-	drawn: strokesDrawn(record),
-	steps: setupSteps(record, phase, extra.bankName ?? null, FIRST_WEEK_TODAY),
-	bankName: null,
-	fitsOneNight: true,
-	sorted: 0,
-	total: 0,
-	...extra,
-});
+): SetupView => {
+	const view = {
+		phase,
+		drawn: strokesDrawn(record),
+		bankName: null,
+		fitsOneNight: true,
+		sorted: 0,
+		total: 0,
+		...extra,
+	};
+	return {
+		...view,
+		steps: setupSteps(
+			record,
+			phase,
+			view.bankName,
+			FIRST_WEEK_TODAY,
+			view.fitsOneNight,
+		),
+	};
+};
 const BANK_SYNCED: FirstTally = {
 	strokes: { bank: "2026-10-13" },
 	budgets: {},

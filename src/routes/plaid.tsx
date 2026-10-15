@@ -188,9 +188,11 @@ plaid.post("/plaid/exchange", async (c) => {
 			logPlaidRequestId(error);
 		}
 		// Linking draws stroke one on the household's day, in the same batch as the bank (spec §8.8). The setup
-		// announcement is said only while the first week is still to do.
-		const settingUp = !isSetUp(await readFirstTally(c.env.DB));
+		// announcement is said only while the first week is still to do. The read sits inside the try, so a failure
+		// there removes the Item too: Plaid's token is never stored.
+		let settingUp: boolean;
 		try {
+			settingUp = !isSetUp(await readFirstTally(c.env.DB));
 			const encrypted = await encryptToken(
 				exchanged.access_token,
 				c.env.TOKEN_ENCRYPTION_KEY as string,

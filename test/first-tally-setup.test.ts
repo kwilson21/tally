@@ -114,6 +114,59 @@ describe("setupView: which setup state Home shows", () => {
 		).toBe("reading");
 	});
 
+	it("gives the catch-up lines no time: an import bigger than one night says 'When it's done', as the status does", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const catchUp = view({
+			record,
+			banks: [BANK],
+			waiting: 600,
+			total: 1500,
+			cap: 500,
+		});
+		expect(catchUp?.fitsOneNight).toBe(false);
+		expect(catchUp?.steps.slice(1).map((s) => s.note)).toEqual([
+			"When it's done",
+			"When it's done",
+			"When it's done",
+			"Later",
+		]);
+	});
+
+	it("keeps 'Tomorrow morning' on the lines when the import fits one night", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const fits = view({ record, banks: [BANK], waiting: 500, cap: 500 });
+		expect(fits?.steps.slice(1).map((s) => s.note)).toEqual([
+			"Tomorrow morning",
+			"Tomorrow morning",
+			"Tomorrow morning",
+			"Later",
+		]);
+	});
+
+	it("says Next on the first line not drawn once the questions are open", () => {
+		const record: FirstTally = {
+			strokes: { bank: "2026-10-13", pay: "2026-10-13" },
+			budgets: {},
+		};
+		const ready = view({ record, banks: [BANK], waiting: 0, total: 362 });
+		expect(ready?.phase).toBe("ready");
+		expect(ready?.steps).toEqual([
+			{ name: "Link your bank", done: true, note: "Chase, linked" },
+			{ name: "Your pay", done: true, note: "Oct 13" },
+			{ name: "Your bills", done: false, note: "Next" },
+			{
+				name: "Your budgets",
+				done: false,
+				note: "One tap, or one at a time",
+			},
+			{
+				name: "Tomorrow · Tally keeps count on its own",
+				done: false,
+				note: "Later",
+			},
+		]);
+	});
+
 	it("names the done lines by their day, and an undated stroke has no day", () => {
 		const record: FirstTally = {
 			strokes: { bank: "2026-10-13", pay: "2026-10-13", bills: null },
