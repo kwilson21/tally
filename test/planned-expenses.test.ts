@@ -18,7 +18,7 @@ import {
 	plansSetAsideCents,
 	restorePlanDelete,
 } from "../src/db/planned-expenses";
-import { removeSplit, saveSplit } from "../src/db/transactions";
+import { removeSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { loadBillRows } from "../src/routes/bills";
@@ -2047,6 +2047,13 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 			],
 			"demo",
 		);
+	/** A $50 refund from the bank account, linked to the cash entry `id` (the refund a cash amount can't drop below). */
+	const refundOf = (id: number, refundId: number) =>
+		env.DB.prepare(
+			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,refund_of_id,flag_income) SELECT ?,id,?,-5000,'REFUND FIXTURE',?,0 FROM accounts WHERE type!='cash' LIMIT 1",
+		)
+			.bind(refundId, dateIn(MONTH), id)
+			.run();
 
 	it("moving a cash entry's date to the month before its plan's unlinks the plan, and the save says so", async () => {
 		const id = await cashEntry(18000, dateIn(MONTH));
@@ -2099,13 +2106,37 @@ describe("a cash entry's date that takes its plan's payment out of the plan's mo
 	it("a refused cash save, with an amount below its linked refunds, unlinks nothing", async () => {
 		const id = await cashEntry(18000, dateIn(MONTH));
 		const planId = await plan("Car registration", 18000, MONTH, id);
-		await env.DB.prepare(
-			"INSERT INTO transactions(id,account_id,date,amount_cents,raw_name,refund_of_id,flag_income) SELECT 9850,id,?,-5000,'REFUND FIXTURE',?,0 FROM accounts WHERE type!='cash' LIMIT 1",
-		)
-			.bind(dateIn(MONTH), id)
-			.run();
+		await refundOf(id, 9850);
 		const refused = await editCash(id, dateIn(LAST_MONTH), "40");
 		expect(refused.status).toBe(422);
+		expect(await linkOf(planId)).toBe(id);
+	});
+
+	it("a save refused by the batch's gate unlinks nothing either, though the route's own check let it through", async () => {
+		const id = await cashEntry(18000, dateIn(MONTH));
+		const planId = await plan("Car registration", 18000, MONTH, id);
+		await refundOf(id, 9851);
+		const result = await saveEdit(
+			env.DB,
+			id,
+			{
+				categoryId: null,
+				alwaysForMerchant: false,
+				displayName: null,
+				note: null,
+				excluded: false,
+				income: false,
+				creditReviewed: false,
+				cashDate: dateIn(LAST_MONTH),
+				cashAmountCents: 4000,
+			},
+			"demo",
+		);
+		expect(result).toEqual({
+			saved: false,
+			cashError: "refund",
+			refundCents: 5000,
+		});
 		expect(await linkOf(planId)).toBe(id);
 	});
 });
