@@ -15,6 +15,24 @@ type LayoutProps = {
 	children?: Child;
 };
 
+/**
+ * The demo's line above every page, at every width, with Start here as its one ink link: the first section of
+ * How Tally works (spec §8.8, P124 A, #549). The family app has none.
+ */
+export function DemoBanner() {
+	return (
+		<p class="bg-band py-2 text-center text-sm text-muted">
+			Demo data. Nothing here is real. ·{" "}
+			<a
+				href="/how-it-works#start-here"
+				class="inline-flex min-h-11 items-center font-medium text-ink underline underline-offset-4"
+			>
+				Start here
+			</a>
+		</p>
+	);
+}
+
 export function Layout({
 	title = "Tally",
 	active,
@@ -63,11 +81,7 @@ export function Layout({
 				>
 					Skip to content
 				</a>
-				{demo && (
-					<p class="bg-band py-2 text-center text-sm text-muted">
-						Demo data. Nothing here is real.
-					</p>
-				)}
+				{demo && <DemoBanner />}
 				<div class="mx-auto flex max-w-6xl gap-10 px-5 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:px-8">
 					<aside class="hidden w-56 shrink-0 py-8 lg:block">
 						<div class="mb-8">

@@ -229,6 +229,7 @@ export function filterMatch(
 	namesOn: boolean,
 	detailsOn: boolean,
 	ids?: number[],
+	splitParents = false,
 ) {
 	const where: string[] = [];
 	const args: (string | number)[] = [];
@@ -251,8 +252,11 @@ export function filterMatch(
 	// The bank sent one transaction; a split's parts are a person's own division of it (the demo's raw view).
 	if (f.raw) where.push("t.parent_id IS NULL");
 	// Ticked rows that are not in the list on screen (#350): split parents have no tick, and an unknown id drops out.
+	// Start here names a split parent too, since its line is still the bank's (splitParents).
 	if (ids) {
-		where.push("t.is_split = 0 AND t.id IN (SELECT value FROM json_each(?))");
+		where.push(
+			`${splitParents ? "" : "t.is_split = 0 AND "}t.id IN (SELECT value FROM json_each(?))`,
+		);
 		args.push(JSON.stringify(ids));
 	}
 	const shown = (f.raw ? RAW_SHOW_SQL : SHOW_SQL)[f.show];
@@ -311,6 +315,8 @@ export async function listTransactions(
 	f: Filters,
 	/** Only these transactions, unpaged and whatever the filters (see listRowsByIds). */
 	ids?: number[],
+	/** With `ids`, keep a split parent (Start here's bank line for transaction 110, which the list draws as split). */
+	splitParents = false,
 ): Promise<{
 	rows: ListRow[];
 	total: number;
@@ -329,6 +335,7 @@ export async function listTransactions(
 		namesOn,
 		detailsOn,
 		ids,
+		splitParents,
 	);
 	// The row shows the category it counts in, so a linked refund shows its purchase's.
 	const from = `FROM transactions t
@@ -513,6 +520,88 @@ export async function listRowsByIds(
 		ids,
 	);
 	return rows;
+}
+
+/** Transaction 110 is Local Bakery after a reset (test/seed.test.ts keeps that true); the demo's Start here and Things to try use it. */
+export const DEMO_BAKERY_ID = 110;
+
+/** Start here's bank lines (spec §8.8): each is Tally's own row as the list draws it, or null when there is none. */
+export type StartHereLines = {
+	/** The month the lines are from: transaction 110's, the seed's, or the caller's when 110 is gone. */
+	month: string;
+	/** The month's latest paycheck. */
+	paycheck: ListRow | null;
+	/** The month's latest transfer. */
+	transfer: ListRow | null;
+	/** Transaction 110, Local Bakery after a reset (a split parent keeps its place). */
+	bakery: ListRow | null;
+	/** The month's bank-dated count, as /transactions?raw=1&month=<month> shows it. */
+	lineCount: number;
+};
+
+/**
+ * The demo's Start here lines (spec §8.8), for the month of transaction 110, which the seed dates in the
+ * month it was made for; `fallbackMonth` (today's) is used when 110 is gone, with no bakery line. A line the
+ * month doesn't have is null, so the page never shows a made-up row.
+ */
+export async function startHereRows(
+	db: D1Database,
+	fallbackMonth: string,
+): Promise<StartHereLines> {
+	const bakeryDate = await db
+		.prepare("SELECT date FROM transactions WHERE id = ?")
+		.bind(DEMO_BAKERY_ID)
+		.first<{ date: string }>();
+	const month = bakeryDate?.date.slice(0, 7) ?? fallbackMonth;
+	const latest = (flag: "flag_income" | "flag_transfer") =>
+		db
+			.prepare(
+				`SELECT id FROM transactions WHERE ${flag} = 1 AND parent_id IS NULL AND substr(date, 1, 7) = ? ORDER BY date DESC, id DESC LIMIT 1`,
+			)
+			.bind(month)
+			.first<{ id: number }>();
+	const [paycheck, transfer] = await Promise.all([
+		latest("flag_income"),
+		latest("flag_transfer"),
+	]);
+	const ids = [paycheck?.id, transfer?.id, DEMO_BAKERY_ID].filter(
+		(id): id is number => id !== undefined,
+	);
+	const [{ rows }, { total }] = await Promise.all([
+		listTransactions(
+			db,
+			{
+				q: "",
+				month: "all",
+				category: null,
+				account: null,
+				show: "all",
+				uncategorized: false,
+				page: 1,
+				raw: false,
+			},
+			ids,
+			true,
+		),
+		listTransactions(db, {
+			q: "",
+			month,
+			category: null,
+			account: null,
+			show: "all",
+			uncategorized: false,
+			page: 1,
+			raw: true,
+		}),
+	]);
+	const line = (id?: number) => rows.find((row) => row.id === id) ?? null;
+	return {
+		month,
+		paycheck: line(paycheck?.id),
+		transfer: line(transfer?.id),
+		bakery: line(DEMO_BAKERY_ID),
+		lineCount: total,
+	};
 }
 
 /**

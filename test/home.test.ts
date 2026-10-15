@@ -509,9 +509,10 @@ describe("GET / with the demo seed", () => {
 		);
 	});
 
-	it("links the uncategorized count to the filtered list", async () => {
+	it("says the uncategorized count in the Band, which opens Organize (Things to try no longer offers a list link on Home)", async () => {
 		const { html } = await home();
-		expect(html).toContain('href="/transactions?uncategorized=1"');
+		expect(html).toContain('href="/transactions/organize"');
+		expect(html).not.toContain('href="/transactions?uncategorized=1"');
 		expect(html).toMatch(
 			/10<span class="sr-only"> transactions<\/span> need\s+a\s+category/,
 		);
@@ -873,7 +874,7 @@ describe("GET / with the demo seed", () => {
 		);
 	});
 
-	it("puts the number first: the month, budget remaining, the Band, Budget, then Things to try (#92)", async () => {
+	it("puts the number first: the month, budget remaining, the Band, then Budget; Things to try lives in Start here (#92, spec §9)", async () => {
 		const { html } = await home();
 		const at = (s: string) => html.indexOf(s);
 		expect(html).toMatch(/<h1 class="font-serif text-2xl[^"]*">/);
@@ -883,7 +884,7 @@ describe("GET / with the demo seed", () => {
 		expect(at('10<span class="sr-only"> transactions')).toBeLessThan(
 			at(">Budget<"),
 		);
-		expect(at(">Budget<")).toBeLessThan(at("New here? Things to try"));
+		expect(html).not.toContain("Things to try");
 	});
 
 	it("gives the top and the Budget list one width on desktop (H6)", async () => {

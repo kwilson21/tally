@@ -469,11 +469,14 @@ describe("GET /transactions", () => {
 		expect(html).toContain("No transactions match these filters.");
 	});
 
-	it("is where Home's band link lands", async () => {
+	it("is where Home's band link lands: Organize, and the Needs category filter lists the 10", async () => {
 		const home = (await get("/")).html;
-		const href = home.match(/href="(\/transactions\?[^"]+)"/)?.[1];
-		expect(href).toBe("/transactions?uncategorized=1");
-		expect(rowCount((await get(href as string)).html)).toBe(10);
+		const href = home.match(/href="(\/transactions\/organize)"/)?.[1];
+		expect(href).toBe("/transactions/organize");
+		expect((await get(href as string)).html).toMatch(/<h1[^>]*>Organize<\/h1>/);
+		expect(rowCount((await get("/transactions?uncategorized=1")).html)).toBe(
+			10,
+		);
 	});
 });
 

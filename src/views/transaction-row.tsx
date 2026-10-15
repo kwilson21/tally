@@ -148,6 +148,7 @@ export function TransactionRow({
 	attrs,
 	autofocus,
 	bare = false,
+	bankText = true,
 }: {
 	row: ListRow;
 	href?: string;
@@ -157,6 +158,8 @@ export function TransactionRow({
 	autofocus?: boolean;
 	/** Leave out the list item when another interactive row owns the wrapper. */
 	bare?: boolean;
+	/** Show the bank's text under a row that needs a category; off where the text is already struck above it (Start here). */
+	bankText?: boolean;
 }) {
 	const { kind, caption: said, tag } = rowCaption(row);
 	// A bank change's sentence keeps its place on the row over a Maybe category; the edit panel still shows the suggestion.
@@ -184,7 +187,9 @@ export function TransactionRow({
 	// Counts in…) it goes first, so it is always the first thing read.
 	const pending = row.pending === true;
 	const caption =
-		pending && kind === "needs" && tag && said === row.rawName ? null : said;
+		(pending || !bankText) && kind === "needs" && tag && said === row.rawName
+			? null
+			: said;
 	const guessedNoteShown = Boolean(
 		row.noteGuessed && kind === "needs" && caption === row.note,
 	);
