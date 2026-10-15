@@ -4,7 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
-import { AuditRoundTwoProposals } from "./proposals-audit-2";
+import { AuditRoundTwoPicks, MonthDotsProposal } from "./proposals-audit-2";
 import { AutofillProposals } from "./proposals-autofill";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
@@ -30,7 +30,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 118), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 121), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -490,6 +490,24 @@ export const DECIDED: readonly {
 			"Option A: a muted 0.00 when empty, a check on the chip that matches the box, the steps off while the text can't be read, and five keyboard and screen-reader fixes; the centred layout stays (decision 117).",
 		issue: 80,
 	},
+	{
+		title: "P130 · One Why per page",
+		outcome:
+			"Option A: one Why? per page, beside the page's summary sentence (Bills' 5 bills to pay soon, Trends' headline); section headings carry none (decision 121).",
+		issue: 603,
+	},
+	{
+		title: "P131 · A bill's page",
+		outcome:
+			"Option A: a quiet ledger of months, one ruled row each with its status in muted words; a charge Tally found is its own row with Link it, months with no payment fold into one row, and no filled status pills (decision 121).",
+		issue: 604,
+	},
+	{
+		title: "P132 · What a past month's result says",
+		outcome:
+			"Option A: the number, stamp and bars stay, and one muted line under them names the biggest causes, from the categories over budget and the positive spending with no budget, by amount, linking to them (decision 121).",
+		issue: 605,
+	},
 ];
 
 /** The proposals page body. */
@@ -509,7 +527,16 @@ export function Proposals() {
 				</a>
 			</p>
 
-			<AuditRoundTwoProposals />
+			<section aria-labelledby="audit2-title" class="mt-10">
+				<h2 id="audit2-title" class="font-serif text-3xl font-semibold">
+					Open: the month dots, from the second design audit
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn again Oct 15 for #605: the owner chose A's idea, each month's
+					dot marking how it ended, and asked for a better look.
+				</p>
+				<MonthDotsProposal />
+			</section>
 
 			<section aria-labelledby="p127-title" class="mt-10">
 				<h2 id="p127-title" class="font-serif text-3xl font-semibold">
@@ -531,6 +558,18 @@ export function Proposals() {
 					Budget diagram without its boxes shrinking.
 				</p>
 				<PlannedDiagramProposal />
+			</section>
+
+			<section aria-labelledby="audit2-picks-title" class="mt-12">
+				<h2 id="audit2-picks-title" class="font-serif text-3xl font-semibold">
+					Picked: from the second design audit
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's picks, marked Picked, are decision 121: P130
+					A, one Why per page; P131 A, a quiet ledger of months; P132 A, one
+					line names the cause.
+				</p>
+				<AuditRoundTwoPicks />
 			</section>
 
 			<section aria-labelledby="p128-title" class="mt-12">

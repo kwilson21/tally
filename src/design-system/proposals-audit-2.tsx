@@ -29,7 +29,7 @@ import { Icon, ROW_OPENS, RowArrow } from "../views/icons";
 import { MonthEnd, monthEndLabels, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import { TrendGroup, TrendRow, TrendsTop } from "../views/trends";
-import { WhyLink } from "../views/why-link";
+import { WhyLink, type WhySection } from "../views/why-link";
 import { Fixed } from "./proposal-parts";
 import { EndBars } from "./proposals-phase5-picks";
 import { Choice, Choices, Desk, Phone, Shot } from "./proposals-polish-4";
@@ -185,7 +185,7 @@ const SEP_BUDGETS: BudgetRow[] = [
 		name: "Household",
 		icon: "household",
 		color: "cat-ochre",
-		spentCents: 24400,
+		spentCents: 24447,
 		budgetCents: 25000,
 	},
 ];
@@ -226,18 +226,24 @@ const SAMPLE_BUDGETS: BudgetRow[] = [
 ];
 
 /**
- * The strip's results, from the demo: positive is under budget, negative is over (May to September). A
- * null is a month with no budgets. The demo has no such month, so April, before any budget was set, is a
- * sample of one; its dot holds an empty ring.
+ * The demo's months, from its budgets and all its counted spending, Not budgeted included (spec §6, "How a
+ * finished month ended"). A null month had no budgets: April, before any budget was set, is a sample of
+ * one. October is so far, so its spending is to date. August's spending is its budgeted rows ($1,556.48)
+ * and the $277.11 in Needs a category, which Home counts toward its result too: it ends $134 over.
  */
-const RESULT_CENTS: Record<string, number | null> = {
+const MONTHS: Record<
+	string,
+	{ budgetCents: number; spentCents: number } | null
+> = {
 	"2026-04": null,
-	"2026-05": 31000,
-	"2026-06": 9800,
-	"2026-07": 31500,
-	"2026-08": -13400,
-	"2026-09": -213400,
+	"2026-05": { budgetCents: 165000, spentCents: 134000 },
+	"2026-06": { budgetCents: 165000, spentCents: 155200 },
+	"2026-07": { budgetCents: 165000, spentCents: 133500 },
+	"2026-08": { budgetCents: 170000, spentCents: 183359 },
+	"2026-09": { budgetCents: 170000, spentCents: 383447 },
+	"2026-10": { budgetCents: 394000, spentCents: 253500 },
 };
+const FIRST_MONTH = "2026-05";
 const STRIP_MONTHS = [
 	"2026-04",
 	"2026-05",
@@ -273,12 +279,14 @@ export type Cause = { name: string; cents: number; budgeted: boolean };
 
 /**
  * The sentence that names a month's cause in one line, or "" when there is none. It takes the two
- * largest causes by amount (ties keep the order given), and says "Most of it" only when those two
+ * largest causes by amount (ties keep the order given; a cause of $0 or less, such as a refund, is no
+ * cause), and says "Most of it" only when those two
  * are over half of the month's overspend, "Part of it" otherwise. When both are unbudgeted it says
  * so once, when both are over budget once, and when they mix each names its own.
  */
 export function monthCause(causes: Cause[], overCents: number): string {
 	const largest = causes
+		.filter((cause) => cause.cents > 0)
 		.map((cause, index) => ({ cause, index }))
 		.sort((a, b) => b.cause.cents - a.cause.cents || a.index - b.index)
 		.slice(0, 2)
@@ -300,7 +308,7 @@ export function monthCause(causes: Cause[], overCents: number): string {
 	return `${lead}: ${each.join(" and ")}.`;
 }
 
-/** The causes of a month's overspend: each over-budget category by how far over, then each unbudgeted one by its spending. */
+/** The causes of a month's overspend: each over-budget category by how far over, then each unbudgeted one by its spending (only spending above $0). */
 function causesOf(rows: BudgetRow[], unbudgeted: Unbudgeted[]): Cause[] {
 	return [
 		...rows
@@ -310,12 +318,50 @@ function causesOf(rows: BudgetRow[], unbudgeted: Unbudgeted[]): Cause[] {
 				cents: row.spentCents - row.budgetCents,
 				budgeted: true,
 			})),
-		...unbudgeted.map((row) => ({
-			name: row.name,
-			cents: row.spentCents,
-			budgeted: false,
-		})),
+		...unbudgeted
+			.filter((row) => row.spentCents > 0)
+			.map((row) => ({
+				name: row.name,
+				cents: row.spentCents,
+				budgeted: false,
+			})),
 	];
+}
+
+// ---------------------------------------------------------------------------------------------
+// A finished month's result, as Home works it out (budget.ts): its budgets less all its counted
+// spending, Not budgeted included, so a refund in a category counts back.
+
+/** A month's result in integer cents from its rows: positive is under budget, negative is over. */
+function resultCents(rows: BudgetRow[], unbudgeted: Unbudgeted[]): number {
+	const budget = rows.reduce((sum, row) => sum + row.budgetCents, 0);
+	const spent = rows.reduce((sum, row) => sum + row.spentCents, 0);
+	return (
+		budget - spent - unbudgeted.reduce((sum, row) => sum + row.spentCents, 0)
+	);
+}
+
+/** A strip month's result in cents, or null for a month with no budgets. */
+function resultOf(item: string): number | null {
+	const month = MONTHS[item] ?? null;
+	return month ? month.budgetCents - month.spentCents : null;
+}
+
+/** A strip month's link name for a screen reader: its result in words, no budgets, or so far. */
+function monthWords(item: string): string {
+	const label = monthName(item);
+	if (item === CURRENT) return `${label}, so far`;
+	const result = resultOf(item);
+	if (result === null) return `${label}, no budgets`;
+	return `${label}, ended ${dollars(Math.abs(result))} ${result < 0 ? "over" : "under"}`;
+}
+
+/** What a strip month's mark says: under or over its budgets, no budgets, or the current month. */
+function stateOf(item: string): "under" | "over" | "empty" | "current" {
+	if (item === CURRENT) return "current";
+	const result = resultOf(item);
+	if (result === null) return "empty";
+	return result < 0 ? "over" : "under";
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -355,16 +401,16 @@ function GroupHeading({
 					{why}
 				</>
 			)}
-			<span class="ml-auto shrink-0">{dollars(totalCents)}</span>
+			<span class="ml-auto shrink-0">{formatCents(totalCents)}</span>
 		</div>
 	);
 }
 
-/** B's Why?: the same link to the same section, in muted words, underlined only on hover and focus. */
-function QuietWhy({ topic }: { topic: string }) {
+/** B's Why?: the same link to its section of How Tally works, in muted words, underlined only on hover and focus. */
+function QuietWhy({ section, topic }: { section: WhySection; topic: string }) {
 	return (
 		<a
-			href="/how-it-works#bills"
+			href={`/how-it-works#${section}`}
 			aria-label={`Why? ${topic}`}
 			class="inline-flex min-h-11 min-w-11 items-center justify-center text-sm text-muted no-underline hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 		>
@@ -472,21 +518,92 @@ function BillsTop({
 	);
 }
 
-/** Trends' top at 390: the headline with its Why?, then Going well and Worth a look, with or without theirs. */
-function TrendsPicture({ idPrefix, why }: { idPrefix: string; why: boolean }) {
+type TrendsMode = "today" | "a" | "b";
+
+/**
+ * One of Trends' two groups: TrendGroup as the route draws it, with its terracotta Why? beside the title
+ * (today) or none (A). B draws the same markup with a muted Why? instead.
+ */
+function TrendsGroup({
+	mode,
+	id,
+	title,
+	icon,
+	tone,
+	topic,
+	children,
+}: {
+	mode: TrendsMode;
+	id: string;
+	title: string;
+	icon: "check" | "arrow-up";
+	tone: "text-ok" | "text-ink";
+	topic: string;
+	children?: Child;
+}) {
+	if (mode !== "b")
+		return (
+			<TrendGroup
+				id={id}
+				title={title}
+				icon={icon}
+				tone={tone}
+				why={mode === "today" ? topic : undefined}
+			>
+				{children}
+			</TrendGroup>
+		);
+	return (
+		<section aria-labelledby={`${id}-title`}>
+			<div class="mt-3 flex items-center gap-2 text-sm text-muted">
+				<h2 id={`${id}-title`} class="flex items-center gap-2">
+					<span class={tone}>
+						<Icon name={icon} class="size-4" />
+					</span>
+					{title}
+				</h2>
+				<span aria-hidden="true">·</span>
+				<QuietWhy section="trends" topic={topic} />
+			</div>
+			<ul class="divide-y divide-rule border-y border-rule">{children}</ul>
+		</section>
+	);
+}
+
+/**
+ * Trends' top at 390: the headline, then Going well and Worth a look. The Why? links are "today" beside the
+ * headline and each group, "a" beside the headline only, and "b" muted beside the headline and each group.
+ */
+function TrendsPicture({
+	idPrefix,
+	mode,
+}: {
+	idPrefix: string;
+	mode: TrendsMode;
+}) {
+	const sentence = "$341 less than by this time in September.";
 	return (
 		<>
-			<TrendsTop
-				month="October"
-				spent="$2,535"
-				sentence="$341 less than by this time in September."
-			/>
-			<TrendGroup
+			{mode === "b" ? (
+				<>
+					<TrendsTop month="October" spent="$2,535" />
+					<p class="mt-1 flex flex-wrap items-center gap-x-2 font-serif text-lg italic">
+						{sentence}
+						<span class="font-sans not-italic">
+							<QuietWhy section="trends" topic="this month against last" />
+						</span>
+					</p>
+				</>
+			) : (
+				<TrendsTop month="October" spent="$2,535" sentence={sentence} />
+			)}
+			<TrendsGroup
+				mode={mode}
 				id={`${idPrefix}-well`}
 				title="Going well"
 				icon="check"
 				tone="text-ok"
-				why={why ? "going well" : undefined}
+				topic="going well"
 			>
 				<TrendRow
 					id={`${idPrefix}-groceries`}
@@ -497,13 +614,14 @@ function TrendsPicture({ idPrefix, why }: { idPrefix: string; why: boolean }) {
 					months={GROCERIES_MONTHS}
 					label="Spending by month: May $640, June $655, July $610, August $690, September $672, October so far $395."
 				/>
-			</TrendGroup>
-			<TrendGroup
+			</TrendsGroup>
+			<TrendsGroup
+				mode={mode}
 				id={`${idPrefix}-look`}
 				title="Worth a look"
 				icon="arrow-up"
 				tone="text-ink"
-				why={why ? "worth a look" : undefined}
+				topic="worth a look"
 			>
 				<TrendRow
 					id={`${idPrefix}-eating`}
@@ -514,7 +632,7 @@ function TrendsPicture({ idPrefix, why }: { idPrefix: string; why: boolean }) {
 					months={EATING_MONTHS}
 					label="Spending by month: May $170, June $195, July $215, August $240, September $262, October so far $286."
 				/>
-			</TrendGroup>
+			</TrendsGroup>
 		</>
 	);
 }
@@ -525,7 +643,12 @@ function quietHeading(group: Group, totalCents: number) {
 		<GroupHeading
 			group={group}
 			totalCents={totalCents}
-			why={<QuietWhy topic={GROUP_LOOK[group].text.toLowerCase()} />}
+			why={
+				<QuietWhy
+					section="bills"
+					topic={GROUP_LOOK[group].text.toLowerCase()}
+				/>
+			}
 		/>
 	);
 }
@@ -701,13 +824,13 @@ function LedgerMonths({ opened }: { opened: boolean }) {
 				</li>
 			)}
 			<li class="py-2">
-				<details open={opened}>
+				<details class="group" open={opened}>
 					<summary
 						class={`flex min-h-11 cursor-pointer list-none items-center gap-3 text-ink ${ROW_OPENS}`}
 					>
 						<span class="min-w-0 flex-1 text-lg">April to August</span>
 						<span class="text-sm text-muted">No payment</span>
-						<RowArrow />
+						<RowArrow class="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
 					</summary>
 					<ul class="divide-y divide-rule">
 						{quiet.map((m) => (
@@ -745,17 +868,26 @@ const INITIALS = "JFMAMJJASOND";
 const needsRow = (period: string) =>
 	STREAMING.some((m) => m.period === period && m.status !== "paid");
 
+/** A month's status in words, as the year strip says it to a screen reader. */
+function yearStatus(period: string): "paid" | "due" | "no payment linked" {
+	const status = STREAMING.find((m) => m.period === period)?.status;
+	if (status === "paid") return "paid";
+	// The two upcoming months, and January to March, are still to come.
+	if (status === "upcoming" || period > CURRENT) return "due";
+	return "no payment linked";
+}
+
 function YearStrip({ idPrefix }: { idPrefix: string }) {
 	const mark = (period: string) => {
-		const status = STREAMING.find((m) => m.period === period)?.status;
+		const status = yearStatus(period);
 		if (status === "paid")
 			return (
 				<span data-mark="paid" class="text-ok">
 					<Icon name="check" class="size-4" />
 				</span>
 			);
-		// A ring for the months still to come (the two upcoming, and January to March), a dash for an unpaid past month.
-		if (status === "upcoming" || period > CURRENT)
+		// A ring for the months still to come, a dash for an unpaid past month.
+		if (status === "due")
 			return (
 				<span data-mark="due" class="size-3 rounded-full border-2 border-ink" />
 			);
@@ -772,7 +904,7 @@ function YearStrip({ idPrefix }: { idPrefix: string }) {
 							{INITIALS[Number(period.slice(5)) - 1]}
 						</span>
 						{mark(period)}
-						<span class="sr-only">{monthName(period)}</span>
+						<span class="sr-only">{`${monthName(period)}, ${yearStatus(period)}`}</span>
 					</>
 				);
 				return (
@@ -859,7 +991,7 @@ function TodayMonth({ chartId }: { chartId: string }) {
 			<MonthEnd
 				chartId={chartId}
 				monthName="September"
-				amountCents={-213400}
+				amountCents={resultCents(SEP_BUDGETS, SEP_UNBUDGETED)}
 				rows={summaries(SEP_BUDGETS)}
 			/>
 			<PastNotBudgeted items={SEP_UNBUDGETED} />
@@ -871,16 +1003,15 @@ function TodayMonth({ chartId }: { chartId: string }) {
 function CauseMonth({
 	idPrefix,
 	name,
-	overCents,
 	rows,
 	unbudgeted,
 }: {
 	idPrefix: string;
 	name: string;
-	overCents: number;
 	rows: BudgetRow[];
 	unbudgeted: Unbudgeted[];
 }) {
+	const overCents = -resultCents(rows, unbudgeted);
 	const sentence = monthCause(causesOf(rows, unbudgeted), overCents);
 	const linked = unbudgeted.length > 0;
 	return (
@@ -946,12 +1077,18 @@ function SplitMonth({
 // ---------------------------------------------------------------------------------------------
 // P133: the month dots.
 
-/** A's strip: MonthNavigation's arrows, title and months, each finished month's dot holding its result as a mark. */
-function MarkedStrip({ month }: { month: string }) {
-	const arrow = (direction: "previous" | "next") => (
+/** The strip's arrows, as MonthNavigation draws them: solid to a month, dashed and faded where there is none. */
+function StripArrow({
+	direction,
+	target,
+}: {
+	direction: "previous" | "next";
+	target?: string;
+}) {
+	return (
 		<span
 			aria-hidden="true"
-			class="inline-flex size-11 shrink-0 items-center justify-center rounded-full border border-muted text-ink"
+			class={`inline-flex size-11 shrink-0 items-center justify-center rounded-full ${target ? "border border-muted text-ink" : "border border-dashed border-rule text-muted/40"}`}
 		>
 			<Icon
 				name="chevron-right"
@@ -959,89 +1096,298 @@ function MarkedStrip({ month }: { month: string }) {
 			/>
 		</span>
 	);
+}
+
+const abbr = (item: string) => monthName(item).slice(0, 3);
+
+/**
+ * The month strip under the title, as MonthNavigation draws it: the arrows, the title and Months' links,
+ * each link 44px and named for a screen reader with its result in words. `cell` draws what a link holds.
+ */
+function MonthStrip({
+	month,
+	cell,
+}: {
+	month: string;
+	cell: (item: string, shown: boolean) => Child;
+}) {
+	const previous = month > FIRST_MONTH ? monthsBefore(month, 1) : undefined;
+	const next = month < CURRENT ? monthsBefore(month, -1) : undefined;
 	return (
 		<div>
 			<div class="flex items-center gap-3">
-				{arrow("previous")}
+				<StripArrow direction="previous" target={previous} />
 				<h1 class="font-serif text-2xl font-semibold tracking-tight">
 					{monthName(month)}
 				</h1>
-				{arrow("next")}
+				<StripArrow direction="next" target={next} />
 			</div>
 			<nav aria-label="Months" class="mt-2">
 				<ol class="flex flex-wrap">
-					{STRIP_MONTHS.map((item) => {
-						const current = item === CURRENT;
-						const selected = item === month;
-						const cents = RESULT_CENTS[item] ?? null;
-						const words = current
-							? `${monthName(item)}, this month`
-							: cents === null
-								? `${monthName(item)}, no budgets`
-								: `${monthName(item)}, ended ${dollars(Math.abs(cents))} ${cents < 0 ? "over" : "under"}`;
-						const mark = current ? null : cents === null ? (
-							<span
-								data-mark="empty"
-								class="size-3 rounded-full border-2 border-muted"
-							/>
-						) : cents < 0 ? (
-							<svg
-								data-mark="over"
-								aria-hidden="true"
-								viewBox="0 0 16 16"
-								class="size-4 text-over"
+					{STRIP_MONTHS.map((item) => (
+						<li>
+							<a
+								href={`/?month=${item}`}
+								aria-current={item === month ? "page" : undefined}
+								class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm text-muted no-underline"
 							>
-								<path
-									d="M3 8h10"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-								/>
-							</svg>
-						) : (
-							<span data-mark="under" class="text-ok">
-								<Icon name="check" class="size-4" />
-							</span>
-						);
-						return (
-							<li>
-								<a
-									href={`/?month=${item}`}
-									aria-current={selected ? "page" : undefined}
-									class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm text-muted no-underline"
-								>
-									<span
-										aria-hidden="true"
-										class={`flex size-8 items-center justify-center rounded-full border border-rule ${selected ? "border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper" : ""} ${current ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
-									>
-										{mark}
-									</span>
-									<span aria-hidden="true">{monthName(item).slice(0, 3)}</span>
-									<span class="sr-only">{words}</span>
-								</a>
-							</li>
-						);
-					})}
+								{cell(item, item === month)}
+								<span class="sr-only">{monthWords(item)}</span>
+							</a>
+						</li>
+					))}
 				</ol>
 			</nav>
 		</div>
 	);
 }
 
-// ---------------------------------------------------------------------------------------------
-// The section: four proposals, each with today beside two options.
-
-export function AuditRoundTwoProposals() {
+/** A (marks in outline, as first drawn): a check, a minus or an empty ring in a ringed disc. */
+function markedCell(item: string, shown: boolean) {
+	const state = stateOf(item);
+	const mark =
+		state === "under" ? (
+			<span data-mark="under" class="text-ok">
+				<Icon name="check" class="size-4" />
+			</span>
+		) : state === "over" ? (
+			<svg
+				data-mark="over"
+				aria-hidden="true"
+				viewBox="0 0 16 16"
+				class="size-4 text-over"
+			>
+				<path
+					d="M3 8h10"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+				/>
+			</svg>
+		) : state === "empty" ? (
+			<span
+				data-mark="empty"
+				class="size-3 rounded-full border-2 border-muted"
+			/>
+		) : (
+			<span data-mark="current" class="size-2 rounded-full bg-muted/45" />
+		);
 	return (
-		<section aria-labelledby="audit2-title" class="mt-10">
-			<h2 id="audit2-title" class="font-serif text-3xl font-semibold">
-				Open: from the second design audit
-			</h2>
-			<p class="mt-2 max-w-prose text-muted">
-				Drawn Oct 15 for the owner's picks on #603, #604 and #605, each beside
-				today's screen.
-			</p>
+		<>
+			<span
+				aria-hidden="true"
+				class={`flex size-8 items-center justify-center rounded-full border border-rule ${shown ? "border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper" : ""} ${state === "current" ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
+			>
+				{mark}
+			</span>
+			<span aria-hidden="true">{abbr(item)}</span>
+		</>
+	);
+}
 
+/**
+ * C (Tally strokes): each finished month is TallyMark's stroke, 4px wide and 24px tall. A month over its
+ * budgets is struck through by a brick diagonal, as TallyMark's fifth stroke crosses its four.
+ */
+function strokesCell(item: string, shown: boolean) {
+	const state = stateOf(item);
+	const stroke =
+		state === "empty" ? (
+			<svg
+				data-mark="empty"
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				class="size-6 text-muted"
+			>
+				<line
+					x1="12"
+					y1="2"
+					x2="12"
+					y2="22"
+					stroke="currentColor"
+					stroke-width="4"
+					stroke-linecap="round"
+					stroke-dasharray="0 6"
+				/>
+			</svg>
+		) : state === "current" ? (
+			// 15 of 31 days is about half the month, so the stroke reaches halfway up, from the bottom.
+			<svg
+				data-mark="current"
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				class="size-6 text-muted/45"
+			>
+				<line
+					x1="12"
+					y1="14.4"
+					x2="12"
+					y2="22"
+					stroke="currentColor"
+					stroke-width="4"
+					stroke-linecap="round"
+				/>
+			</svg>
+		) : (
+			<svg
+				data-mark={state}
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				class="size-6 text-ink"
+			>
+				<line
+					x1="12"
+					y1="2"
+					x2="12"
+					y2="22"
+					stroke="currentColor"
+					stroke-width="4"
+					stroke-linecap="round"
+				/>
+				{state === "over" && (
+					<line
+						x1="4"
+						y1="18"
+						x2="20"
+						y2="6"
+						class="text-over"
+						stroke="currentColor"
+						stroke-width="2.25"
+						stroke-linecap="round"
+					/>
+				)}
+			</svg>
+		);
+	return (
+		<>
+			<span class="flex h-6 items-end">{stroke}</span>
+			<span aria-hidden="true" class={shown ? "text-ink" : ""}>
+				{abbr(item)}
+			</span>
+			<span aria-hidden="true" class={`h-0.5 w-4 ${shown ? "bg-ink" : ""}`} />
+		</>
+	);
+}
+
+/**
+ * D (Filled tokens): a 28px disc, green with a check when under, brick with a minus when over, paper with a
+ * dashed rim for no budgets, and an ink ring with a dot for the current month.
+ */
+function tokensCell(item: string, shown: boolean) {
+	const state = stateOf(item);
+	const disc =
+		state === "under"
+			? "bg-ok"
+			: state === "over"
+				? "bg-over"
+				: state === "empty"
+					? "border border-dashed border-muted bg-paper"
+					: "border-2 border-ink bg-paper";
+	const mark =
+		state === "under" ? (
+			<Icon name="check" class="size-4 text-paper" />
+		) : state === "over" ? (
+			<svg aria-hidden="true" viewBox="0 0 16 16" class="size-4 text-paper">
+				<path
+					d="M3 8h10"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+				/>
+			</svg>
+		) : state === "current" ? (
+			<span class="size-1.5 rounded-full bg-ink" />
+		) : null;
+	return (
+		<>
+			<span
+				data-mark={state}
+				aria-hidden="true"
+				class={`flex size-7 items-center justify-center rounded-full ${disc} ${shown ? "ring-2 ring-ink ring-offset-2 ring-offset-paper" : ""}`}
+			>
+				{mark}
+			</span>
+			<span aria-hidden="true" class={shown ? "text-ink" : ""}>
+				{abbr(item)}
+			</span>
+		</>
+	);
+}
+
+/**
+ * E (Mini bars): each finished month's bar is its spent over its budget, to 120%, with a hairline at 100% (25px
+ * up a 30px track). The part above the hairline is brick. A month with no budgets is a dotted outline.
+ */
+function barsCell(item: string, shown: boolean) {
+	const state = stateOf(item);
+	const month = MONTHS[item] ?? null;
+	const height = month
+		? Math.round(Math.min(month.spentCents / month.budgetCents, 1.2) * 25)
+		: 0;
+	const bar =
+		state === "empty" ? (
+			<rect
+				x="0.5"
+				y="5"
+				width="5"
+				height="25"
+				fill="none"
+				class="stroke-muted"
+				stroke-dasharray="2 2"
+			/>
+		) : (
+			<>
+				<line
+					x1="-2"
+					x2="8"
+					y1="5"
+					y2="5"
+					class="stroke-muted"
+					stroke-width="0.5"
+				/>
+				<rect
+					x="0"
+					y={30 - Math.min(height, 25)}
+					width="6"
+					height={Math.min(height, 25)}
+					class={state === "current" ? "fill-muted/45" : "fill-ink"}
+				/>
+				{height > 25 && (
+					<rect
+						x="0"
+						y={30 - height}
+						width="6"
+						height={height - 25}
+						class="fill-over"
+					/>
+				)}
+			</>
+		);
+	return (
+		<>
+			<svg
+				data-mark={state}
+				aria-hidden="true"
+				viewBox="0 0 6 30"
+				class="h-[30px] w-1.5 overflow-visible"
+			>
+				{bar}
+			</svg>
+			<span aria-hidden="true" class={shown ? "text-ink" : ""}>
+				{abbr(item)}
+			</span>
+		</>
+	);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The sections (proposals.tsx draws each under its own heading): P130 to P132, picked on Oct 15, and
+// P133, open again.
+
+/** P130 to P132, picked on Oct 15 (decision 121): the Picked section's proposals. */
+export function AuditRoundTwoPicks() {
+	return (
+		<>
 			<Specimen
 				id="p130-why"
 				title="P130 · One Why per page"
@@ -1070,12 +1416,13 @@ export function AuditRoundTwoProposals() {
 						</Shot>
 						<Shot caption="Trends' top at 390 px">
 							<Phone label="Today, Trends' top" tab="trends">
-								<TrendsPicture idPrefix="p130-today" why />
+								<TrendsPicture idPrefix="p130-today" mode="today" />
 							</Phone>
 						</Shot>
 					</Choice>
 					<Choice
 						name="Option A · One Why, beside the summary"
+						picked
 						note="One Why per page, where the page says its sum. Every heading's rule is in How Tally works' Bills section, which the one link opens."
 						cost="WhyLink moves; no new component."
 						why="five links to one place become one, and terracotta goes back to meaning a real next step."
@@ -1093,7 +1440,7 @@ export function AuditRoundTwoProposals() {
 						</Shot>
 						<Shot caption="Trends' top at 390 px: the headline keeps its Why?, the two groups lose theirs">
 							<Phone label="Option A, Trends' top" tab="trends">
-								<TrendsPicture idPrefix="p130-a" why={false} />
+								<TrendsPicture idPrefix="p130-a" mode="a" />
 							</Phone>
 						</Shot>
 					</Choice>
@@ -1114,6 +1461,11 @@ export function AuditRoundTwoProposals() {
 							<Desk label="Option B, Bills' top" active="bills">
 								<BillsTop idPrefix="p130-b-desk" heading={quietHeading} />
 							</Desk>
+						</Shot>
+						<Shot caption="Trends' top at 390 px: each Why? muted">
+							<Phone label="Option B, Trends' top" tab="trends">
+								<TrendsPicture idPrefix="p130-b" mode="b" />
+							</Phone>
 						</Shot>
 					</Choice>
 				</Choices>
@@ -1157,6 +1509,7 @@ export function AuditRoundTwoProposals() {
 					</Choice>
 					<Choice
 						name="Option A · A quiet ledger of months"
+						picked
 						note="Each month is one ruled row, its status in muted words: October · Paid Oct 15 · $2.99 with a small check, or November · Due Nov 15 · $2.99. A charge Tally found is a row of its own, with Link it."
 						extra="A charge Tally found asks to be linked; months nothing was paid say so once, instead of 'Not paid' six times."
 						cost="BillOccurrenceRow redrawn; the fold is a details."
@@ -1256,6 +1609,7 @@ export function AuditRoundTwoProposals() {
 					</Choice>
 					<Choice
 						name="Option A · One line names the cause"
+						picked
 						note="Under the headline and stamp, one muted sentence: Most of it had no budget: Childcare $960 and Rent $1,200. The sentence links to the Not budgeted list. The stamp, the number and the bars stay."
 						extra="Name the two largest causes, from the categories over and the unbudgeted ones, by amount; say Most of it only when they're over half."
 						cost="one sentence from numbers MonthEnd already has."
@@ -1272,7 +1626,6 @@ export function AuditRoundTwoProposals() {
 								<CauseMonth
 									idPrefix="p132-a-sep"
 									name="September"
-									overCents={213400}
 									rows={SEP_BUDGETS}
 									unbudgeted={SEP_UNBUDGETED}
 								/>
@@ -1288,7 +1641,6 @@ export function AuditRoundTwoProposals() {
 								<CauseMonth
 									idPrefix="p132-a-desk"
 									name="September"
-									overCents={213400}
 									rows={SEP_BUDGETS}
 									unbudgeted={SEP_UNBUDGETED}
 								/>
@@ -1302,7 +1654,6 @@ export function AuditRoundTwoProposals() {
 								<CauseMonth
 									idPrefix="p132-a-sample"
 									name="March"
-									overCents={22000}
 									rows={SAMPLE_BUDGETS}
 									unbudgeted={[]}
 								/>
@@ -1348,86 +1699,143 @@ export function AuditRoundTwoProposals() {
 					</Choice>
 				</Choices>
 			</Specimen>
+		</>
+	);
+}
 
-			<Specimen
-				id="p133-month-dots"
-				title="P133 · The month dots"
-				tier="visual"
-				sentence="The strip under the month title is a grey disc for each finished month, ink for the month shown and a ring for the current one. Pick what the discs say. Each picture is the strip at 390 px on October and on September, and at 1280 px."
-			>
-				<Fixed>
-					Each month's link keeps its name for a screen reader, with its result
-					in words, never only its mark.
-				</Fixed>
-				<Choices>
-					<Choice
-						name="Today (current)"
-						note="A grey disc for each finished month, ink for the month shown, and a ring for the current month."
-					>
-						<Shot caption="October at 390 px: the strip under the title">
-							<Phone label="Today, the month dots, October" tab="home">
-								<MonthNavigation
-									month={CURRENT}
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-								/>
-							</Phone>
-						</Shot>
-						<Shot caption="September at 390 px">
-							<Phone label="Today, the month dots, September" tab="home">
-								<MonthNavigation
-									month="2026-09"
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-								/>
-							</Phone>
-						</Shot>
-					</Choice>
-					<Choice
-						name="Option A · Each dot shows how its month ended"
-						note="A finished month's dot holds a small mark: a check for under budget, a minus for over, or an empty ring for a month with no budgets. The month's initial stays under it, and the link's name says the result."
-						cost="MonthNavigation takes each month's result, which Home already works out for the shown month."
-						why="it says something the page knows, and it stays words-first for screen readers."
-						width="w-[722px]"
-					>
-						<Shot caption="October at 390 px: April is a sample month with no budgets, an empty ring">
-							<Phone label="Option A, the month dots, October" tab="home">
-								<MarkedStrip month={CURRENT} />
-							</Phone>
-						</Shot>
-						<Shot caption="September at 390 px: the shown month keeps its ink ring">
-							<Phone label="Option A, the month dots, September" tab="home">
-								<MarkedStrip month="2026-09" />
-							</Phone>
-						</Shot>
-						<Shot caption="October at 1280 px">
-							<Desk label="Option A, the month dots, October" active="home">
-								<MarkedStrip month={CURRENT} />
-							</Desk>
-						</Shot>
-					</Choice>
-					<Choice
-						name="Option B · Plain dots, the words on the shown month only"
-						note="Keep the dots grey. Under the strip, the shown month's result in one muted line."
-						cost="a line under the strip."
-						why="the quietest change."
-						recommended={false}
-					>
-						<Shot caption="September at 390 px: the one line under the strip">
-							<Phone label="Option B, the month dots, September" tab="home">
-								<MonthNavigation
-									month="2026-09"
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-								/>
-								<p class="mt-2 text-sm text-muted">
-									September · ended $2,134 over
-								</p>
-							</Phone>
-						</Shot>
-					</Choice>
-				</Choices>
-			</Specimen>
-		</section>
+/** P133, the Open section's proposal: the month dots, Today beside four looks (decision 121's redraw). */
+export function MonthDotsProposal() {
+	return (
+		<Specimen
+			id="p133-month-dots"
+			title="P133 · The month dots"
+			tier="visual"
+			sentence="The strip under the month title marks each finished month. Five looks are drawn, from today's grey disc to marks that say how each month ended. Pick what the marks say. Each picture is the strip at 390 px on October and on September, and at 1280 px."
+		>
+			<Fixed>
+				Each month's link keeps its name for a screen reader, with its result in
+				words, never only its mark.
+			</Fixed>
+			<Choices>
+				<Choice
+					name="Today (current)"
+					note="A grey disc for each finished month, ink for the month shown, and a ring for the current month."
+				>
+					<Shot caption="October at 390 px: the strip under the title">
+						<Phone label="Today, the month dots, October" tab="home">
+							<MonthNavigation
+								month={CURRENT}
+								firstMonth="2026-05"
+								currentMonth={CURRENT}
+							/>
+						</Phone>
+					</Shot>
+					<Shot caption="September at 390 px">
+						<Phone label="Today, the month dots, September" tab="home">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth={CURRENT}
+							/>
+						</Phone>
+					</Shot>
+				</Choice>
+				<Choice
+					name="Option A · Marks in outline, as first drawn"
+					note="A finished month's dot holds a small mark: a check for under budget, a minus for over, or an empty ring for a month with no budgets. The month's initial stays under it, and the link's name says the result."
+					cost="MonthNavigation takes each month's result, which Home already works out for the shown month."
+					why="it says something the page knows, and it stays words-first for screen readers."
+					recommended={false}
+					width="w-[722px]"
+				>
+					<Shot caption="October at 390 px: April is the sample month with no budgets, an empty ring">
+						<Phone label="Option A, the month dots, October" tab="home">
+							<MonthStrip month={CURRENT} cell={markedCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="September at 390 px: the shown month keeps its ink ring">
+						<Phone label="Option A, the month dots, September" tab="home">
+							<MonthStrip month="2026-09" cell={markedCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="October at 1280 px">
+						<Desk label="Option A, the month dots, October" active="home">
+							<MonthStrip month={CURRENT} cell={markedCell} />
+						</Desk>
+					</Shot>
+				</Choice>
+				<Choice
+					name="Option C · Tally strokes"
+					note="The strip becomes Tally's own tally: a stroke per month, struck through when it went over."
+					cost="MonthNavigation draws strokes from each month's result; no new token"
+					why="it ties the month strip to Tally's mark and reads by shape, not colour"
+					width="w-[722px]"
+				>
+					<Shot caption="October at 390 px: April is the sample month with no budgets">
+						<Phone label="Option C, the month dots, October" tab="home">
+							<MonthStrip month={CURRENT} cell={strokesCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="September at 390 px">
+						<Phone label="Option C, the month dots, September" tab="home">
+							<MonthStrip month="2026-09" cell={strokesCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="October at 1280 px: April is the sample month with no budgets">
+						<Desk label="Option C, the month dots, October" active="home">
+							<MonthStrip month={CURRENT} cell={strokesCell} />
+						</Desk>
+					</Shot>
+				</Choice>
+				<Choice
+					name="Option D · Filled tokens"
+					note="Each month reads at a glance, colour and mark together."
+					cost="MonthNavigation draws tokens from each month's result"
+					why="the clearest at a glance, like a habit tracker"
+					recommended={false}
+					width="w-[722px]"
+				>
+					<Shot caption="October at 390 px: April is the sample month with no budgets">
+						<Phone label="Option D, the month dots, October" tab="home">
+							<MonthStrip month={CURRENT} cell={tokensCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="September at 390 px">
+						<Phone label="Option D, the month dots, September" tab="home">
+							<MonthStrip month="2026-09" cell={tokensCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="October at 1280 px: April is the sample month with no budgets">
+						<Desk label="Option D, the month dots, October" active="home">
+							<MonthStrip month={CURRENT} cell={tokensCell} />
+						</Desk>
+					</Shot>
+				</Choice>
+				<Choice
+					name="Option E · Mini bars"
+					note="Each month shows how far under or over, not just which."
+					cost="MonthNavigation draws bars from each month's spent and budget"
+					why="it shows size, not only direction"
+					recommended={false}
+					width="w-[722px]"
+				>
+					<Shot caption="October at 390 px: April is the sample month with no budgets">
+						<Phone label="Option E, the month dots, October" tab="home">
+							<MonthStrip month={CURRENT} cell={barsCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="September at 390 px">
+						<Phone label="Option E, the month dots, September" tab="home">
+							<MonthStrip month="2026-09" cell={barsCell} />
+						</Phone>
+					</Shot>
+					<Shot caption="October at 1280 px: April is the sample month with no budgets">
+						<Desk label="Option E, the month dots, October" active="home">
+							<MonthStrip month={CURRENT} cell={barsCell} />
+						</Desk>
+					</Shot>
+				</Choice>
+			</Choices>
+		</Specimen>
 	);
 }
