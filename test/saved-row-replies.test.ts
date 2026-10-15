@@ -372,6 +372,73 @@ describe("a Settings person save marks the row it changed", () => {
 	});
 });
 
+describe("a cash entry's Undo restore marks its row", () => {
+	/** Deletes a plain cash entry from the current month; returns its row and the Undo token its toast offers. */
+	async function deleteCashEntry() {
+		const entry = await env.DB.prepare(
+			"SELECT t.id, t.raw_name FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.type='cash' AND t.is_split=0 AND t.parent_id IS NULL AND t.date LIKE ? ORDER BY t.id LIMIT 1",
+		)
+			.bind(`${todayIn(DEFAULT_TIME_ZONE).slice(0, 7)}-%`)
+			.first<{ id: number; raw_name: string }>();
+		if (!entry) throw new Error("cash seed missing");
+		const { res } = await post(`/transactions/${entry.id}/delete`, {
+			back: "/transactions",
+			confirm: "1",
+		});
+		expect(res.status).toBe(200);
+		const token = JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.undo;
+		return { raw_name: entry.raw_name, token: token as string };
+	}
+
+	it("marks the restored row on the ordinary toast stay, and keeps its focus", async () => {
+		const { raw_name, token } = await deleteCashEntry();
+		const { res, html } = await post("/transactions/undo-cash-delete", {
+			token,
+			back: "/transactions",
+		});
+		const feedback = JSON.parse(res.headers.get("HX-Trigger") ?? "{}");
+		// The restore's own toast is a plain one: no Undo to offer, so four seconds.
+		expect(feedback.toast.undo).toBeUndefined();
+		// A restore takes new ids, so the entry is found by what it was, as the newest row of that name.
+		const restoredId = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE raw_name=? ORDER BY id DESC LIMIT 1",
+			)
+				.bind(raw_name)
+				.first<{ id: number }>()
+		)?.id;
+		expect(marked(html)).toBe(1);
+		const tag = linkTag(html, `/transactions/${restoredId}(?:\\?[^"]*)?`);
+		expect(tag).toMatch(/\brow-saved\b/);
+		expect(tag).not.toMatch(/row-saved-undo/);
+		expect(tag).toMatch(/\bautofocus\b/);
+	});
+
+	it("marks nothing when the same Undo token is posted again", async () => {
+		const { token } = await deleteCashEntry();
+		await post("/transactions/undo-cash-delete", {
+			token,
+			back: "/transactions",
+		});
+		const { res, html } = await post("/transactions/undo-cash-delete", {
+			token,
+			back: "/transactions",
+		});
+		expect(
+			JSON.parse(res.headers.get("HX-Trigger") ?? "{}").toast.message,
+		).toBe("That cash entry is already back.");
+		expect(marked(html)).toBe(0);
+	});
+
+	it("marks nothing when the Undo token was never issued", async () => {
+		const { html } = await post("/transactions/undo-cash-delete", {
+			token: "00000000-0000-4000-8000-000000000000",
+			back: "/transactions",
+		});
+		expect(marked(html)).toBe(0);
+	});
+});
+
 describe("nothing but a save's own reply marks a row", () => {
 	it("marks nothing when Cancel closes the budget sheet", async () => {
 		const { html } = await get("/?focus=1", true);

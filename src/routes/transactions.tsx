@@ -220,13 +220,14 @@ type ListOptions = {
 	/** After a save: focus this row, or the result count if it left the list. */
 	focusId?: number;
 	/**
-	 * After the edit panel's save (P119 A, #71): this row's arrow gives way to the pencil tick. Only that save's reply
-	 * passes it, never a Cancel, Select mode or a bulk change.
+	 * After a save (P119 A, #71): this row's arrow gives way to the pencil tick. Only a save's own reply passes it: the
+	 * edit panel's, or a cash entry's Undo restore. Never a Cancel, Select mode or a bulk change.
 	 */
 	savedId?: number;
 	/**
 	 * How the saved row is marked: "toast" for the toast's four seconds (the default), "undo" for the ten a toast that
-	 * offers Undo stays (#70's saves, #510 and #511, pass it). The Undo restore itself is not marked here.
+	 * offers Undo stays (#70's saves, #510 and #511, pass it). An Undo restore is marked on the "toast" stay, since its
+	 * own toast is a plain four-second one.
 	 */
 	savedMark?: "toast" | "undo";
 	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
@@ -4442,8 +4443,9 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	);
 	c.header("HX-Push-Url", back);
 	if (wasFirstVisit && restoredNow) swapWholePage(c);
-	// The restored row takes focus when this list shows it; otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
+	// The restored row takes focus when this list shows it, and the saved tick (P119 A); otherwise toast.js moves focus to the heading as the Undo toast ends (#397).
 	return renderList(c, today, filtersFrom(c, today, back), {
 		restoredId: restoredNow?.id,
+		savedId: restoredNow?.id,
 	});
 });

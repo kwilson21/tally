@@ -569,7 +569,8 @@ html:not(.js) [data-money-js] {
  * 10 s an Undo toast stays. Under reduced motion there is no draw and no movement: the tick appears and goes on
  * the same stay, as a step, and the arrow comes back as a step at that same stop. The arrow has its own still
  * keyframes (saved-arrow-still, saved-arrow-undo-still) for that: the moving ones would hold it back to the stay's
- * end, leaving the slot empty. row-saved-held is the catalog's still picture: the tick drawn, the arrow back under it.
+ * end, leaving the slot empty. row-saved-held is the catalog's still picture: the tick drawn in the arrow's place, the
+ * arrow hidden under it.
  */
 @keyframes saved-draw {
 	from {
