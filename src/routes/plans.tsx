@@ -336,13 +336,14 @@ plans.post("/plans/:id/link", async (c) => {
 		Number.isInteger(transaction) &&
 		transaction > 0 &&
 		(await linkPlanPayment(c.env.DB, id, transaction));
-	if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
 	// Linking stays on the plan's page, which now shows it paid (decision 101), as the bill page's link does.
-	if (linked)
+	if (linked) {
+		if (!c.req.header("HX-Request")) return c.redirect(`/plans/${id}`, 303);
 		return withToast(await planPage(c, id), {
 			message: "Payment linked",
 			type: "success",
 		});
+	}
 	// The refusal names what the payment already pays, in the bill side's words (decision 82).
 	const paid = Number.isInteger(transaction)
 		? await paysBillOrPlan(c.env.DB, transaction)

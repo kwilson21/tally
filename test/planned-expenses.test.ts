@@ -26,12 +26,13 @@ import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
-const post = (path: string, form: Record<string, string>) =>
+const post = (path: string, form: Record<string, string>, htmx = true) =>
 	exports.default.fetch(BASE + path, {
 		method: "POST",
+		redirect: "manual",
 		headers: {
 			Origin: BASE,
-			"HX-Request": "true",
+			...(htmx ? { "HX-Request": "true" } : {}),
 			"content-type": "application/x-www-form-urlencoded",
 		},
 		body: new URLSearchParams(form),
@@ -683,6 +684,75 @@ describe("Bills' Planned group, Band and sheet", () => {
 			transaction_id: "9707",
 		});
 		expect(await billed.text()).toContain("That payment already pays a bill.");
+	});
+
+	it("without JavaScript, a payment that already pays a planned expense gets the refusal page with its reason in a role=alert, and no link", async () => {
+		const other = await plan("Lawn service", 9000, MONTH);
+		await payment(9720, 9000);
+		await plan("Car registration", 9000, MONTH, 9720);
+		const refused = await post(
+			`/plans/${other}/link`,
+			{ transaction_id: "9720" },
+			false,
+		);
+		expect(refused.status).toBe(200);
+		expect(refused.headers.get("Location")).toBeNull();
+		expect(await refused.text()).toMatch(
+			/role="alert"[^>]*>That payment already pays a planned expense\./,
+		);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(other)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBeNull();
+	});
+
+	it("without JavaScript, a payment that already pays a bill gets the refusal page with its reason in a role=alert, and no link", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9721,'Gym',9000,3,'monthly','GYM FIXTURE')",
+		).run();
+		await payment(9722, 9000);
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9721,?,9722,'user','linked')",
+		)
+			.bind(MONTH)
+			.run();
+		const other = await plan("Lawn service", 9000, MONTH);
+		const refused = await post(
+			`/plans/${other}/link`,
+			{ transaction_id: "9722" },
+			false,
+		);
+		expect(refused.status).toBe(200);
+		expect(refused.headers.get("Location")).toBeNull();
+		expect(await refused.text()).toMatch(
+			/role="alert"[^>]*>That payment already pays a bill\./,
+		);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(other)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBeNull();
+	});
+
+	it("without JavaScript, a link that is made redirects back to the plan's page and writes the link", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		await payment(9723, 18000);
+		const linked = await post(
+			`/plans/${id}/link`,
+			{ transaction_id: "9723" },
+			false,
+		);
+		expect(linked.status).toBe(303);
+		expect(linked.headers.get("Location")).toBe(`/plans/${id}`);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBe(9723);
 	});
 
 	it("unlinks from the plan's own page, which answers with that page, unpaid, and says Payment unlinked", async () => {
