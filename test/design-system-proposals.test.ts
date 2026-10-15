@@ -729,15 +729,12 @@ describe("GET /design-system/proposals", () => {
 		expect(picture(p114c)).not.toContain(cant);
 		expect(p114).toContain("decision 85");
 
-		// P115: the money box in the 12px control corner (picked, decision 85, Q61 A). Date and Where
-		// are in the picture too and use rounded-control, so the money box is found by its own markup:
-		// its box by its fixed size, its cent arrows by their outer corners. The 8px option was retired
-		// with the token-test exception that drew it, so no picture here may set an 8px corner.
+		// P115: the money box in the 12px control corner (picked); B keeps the 8px it had. Date and
+		// Where are in both pictures and use rounded-control, so the money box is found by its own
+		// markup: its box by its fixed size, its cent arrows by their outer corners.
 		const p115 = section("p115-money-corners");
 		const box = (pic: string) =>
 			pic.match(/<div class="([^"]*min-h-\[90px\][^"]*)"/)?.[1] ?? "";
-		expect(p115).not.toContain("Option B · ");
-		expect(p115).not.toContain("Keep 8px");
 		const p115a = option(p115, "Option A · ");
 		expect(picked(p115a) && recommended(p115a)).toBe(true);
 		const p115aPicture = picture(p115a);
@@ -747,14 +744,28 @@ describe("GET /design-system/proposals", () => {
 		expect(p115aPicture).toContain("rounded-br-control");
 		expect(p115aPicture).not.toContain("rounded-lg");
 		expect(p115aPicture).not.toContain("rounded-tr-lg");
-		expect(p115aPicture).not.toContain("rounded-br-lg");
+		const p115b = option(p115, "Option B · ");
+		expect(picked(p115b)).toBe(false);
+		const p115bPicture = picture(p115b);
+		expect(p115bPicture).toContain("data-money");
+		// B's wrapper turns all three of the money box's corners back to 8px, and only those.
+		for (const [control, eight] of [
+			["rounded-control", "rounded-lg"],
+			["rounded-tr-control", "rounded-tr-lg"],
+			["rounded-br-control", "rounded-br-lg"],
+		] as const)
+			expect(p115bPicture).toContain(
+				`[&amp;_[data-money]_.${control}]:${eight}`,
+			);
 		expect(p115).toContain("decision 85");
-		// The picture draws the same form, so no id may repeat, or a label would point at another field.
+		// The two pictures draw the same form twice: no id may repeat, or a label would point at the
+		// other picture's field.
 		const p115Ids = [...p115.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
 		expect(p115Ids.length).toBeGreaterThan(2);
 		expect(new Set(p115Ids).size).toBe(p115Ids.length);
-		for (const [, target] of p115aPicture.matchAll(/<label for="([^"]+)"/g))
-			expect(p115aPicture).toContain(` id="${target}"`);
+		for (const pic of [p115aPicture, p115bPicture])
+			for (const [, target] of pic.matchAll(/<label for="([^"]+)"/g))
+				expect(pic).toContain(` id="${target}"`);
 
 		// P116: the budget sheet with a second chip, the 3-month average (picked), or Last month alone.
 		const p116 = section("p116-budget-average");
