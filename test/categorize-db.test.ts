@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { JEV_THRESHOLD } from "../src/ai/categorize";
+import { decide } from "../src/ai/decide";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	applyMerchantRules,
@@ -14,6 +16,7 @@ const db = env.DB;
 const TODAY = "2026-09-22";
 const GROCERIES = 1;
 const EATING_OUT = 2;
+const GAS = 3;
 
 const idOf = async (rawName: string) =>
 	(
@@ -881,6 +884,130 @@ describe("a credit whose category Jev answered unsure, asked for its income (dec
 		).toBe(false);
 		expect(await row(id)).toEqual(before);
 	});
+
+	// Every category column is set, so a save that writes any of them shows. Jev's answer was unsure, so the
+	// category is unset and its suggestion (Groceries), mixed reading (0.3) and also-category (Gas) are kept.
+	const setCategoryAnswer = async (id: number) =>
+		db
+			.prepare(
+				`UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, credit_reviewed_by = NULL,
+					category_id = NULL, category_source = NULL, category_confidence = 0.4,
+					jev_category_id = ?, jev_none_fit = 0, jev_mixed = 0.3, jev_also_category_id = ?,
+					transfer_confidence = 0.4, flag_transfer = 0, flag_reimbursement = 0, excluded = 0,
+					excluded_source = NULL, income_confidence = NULL
+				WHERE id = ?`,
+			)
+			.bind(GROCERIES, GAS, id)
+			.run();
+	// The twelve columns a catch-up save keeps as they are: Jev's category answer, its transfer answer and exclusion.
+	const categoryAnswer = (id: number) =>
+		db
+			.prepare(
+				`SELECT category_id, category_source, category_confidence, jev_category_id, jev_none_fit, jev_mixed,
+					jev_also_category_id, transfer_confidence, flag_transfer, flag_reimbursement, excluded, excluded_source
+				FROM transactions WHERE id = ?`,
+			)
+			.bind(id)
+			.first<Record<string, unknown>>();
+	const incomeSourceOf = (id: number) =>
+		db
+			.prepare("SELECT income_source FROM transactions WHERE id = ?")
+			.bind(id)
+			.first<{ income_source: string | null }>();
+	const ALL_CATEGORIES = [
+		{ id: GROCERIES, name: "Groceries" },
+		{ id: EATING_OUT, name: "Eating Out" },
+		{ id: GAS, name: "Gas" },
+	];
+
+	it("with categories on, keeps Jev's category answer and stores only its income answer", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await setCategoryAnswer(id);
+		const before = await categoryAnswer(id);
+		expect(
+			await saveJevResult(
+				db,
+				id,
+				decision({
+					categoryId: EATING_OUT,
+					suggestedCategoryId: EATING_OUT,
+					confidence: 0.95,
+					mixedProbability: 0.9,
+					alsoCategoryId: null,
+					flags: { transfer: true, reimbursement: false, income: false },
+					flagConfidence: { transfer: 0.95, reimbursement: 0, income: 0.3 },
+				}),
+				{ switches: { income: true, categories: true } },
+			),
+		).toBe(true);
+		expect(await categoryAnswer(id)).toEqual(before);
+		expect(await row(id)).toMatchObject({
+			credit_reviewed: 0,
+			income_confidence: 0.3,
+		});
+		expect((await pendingForJev(db, 40)).map((p) => p.id)).not.toContain(id);
+	});
+
+	it("with categories off, keeps the suggestion, mixed reading and transfer answer, and stores only its income answer", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await setCategoryAnswer(id);
+		const before = await categoryAnswer(id);
+		expect(
+			await saveJevResult(
+				db,
+				id,
+				decide(
+					{
+						category: { label: "Eating Out", confidence: 0.95 },
+						flags: { transfer: 0.95, reimbursement: 0, income: 0.3 },
+						mixed: { probability: 0.9, also: "Gas" },
+					},
+					ALL_CATEGORIES,
+					JEV_THRESHOLD,
+					{ categories: false },
+				),
+				{ switches: { income: true, categories: false } },
+			),
+		).toBe(true);
+		expect(await categoryAnswer(id)).toEqual(before);
+		expect(await row(id)).toMatchObject({
+			credit_reviewed: 0,
+			income_confidence: 0.3,
+		});
+		expect((await pendingForJev(db, 40)).map((p) => p.id)).not.toContain(id);
+	});
+
+	it.each([true, false])(
+		"with categories %s, a sure yes for its income flags it and keeps Jev's category answer",
+		async (categories) => {
+			const id = await idOf("VENMO *J RIVERA");
+			await setCategoryAnswer(id);
+			const before = await categoryAnswer(id);
+			expect(
+				await saveJevResult(
+					db,
+					id,
+					decide(
+						{
+							category: { label: "Eating Out", confidence: 0.95 },
+							flags: { transfer: 0, reimbursement: 0, income: 0.95 },
+							mixed: { probability: 0.9, also: "Gas" },
+						},
+						ALL_CATEGORIES,
+						JEV_THRESHOLD,
+						{ categories },
+					),
+					{ switches: { income: true, categories } },
+				),
+			).toBe(true);
+			expect(await categoryAnswer(id)).toEqual(before);
+			expect(await row(id)).toMatchObject({
+				flag_income: 1,
+				credit_reviewed: 1,
+			});
+			expect(await incomeSourceOf(id)).toEqual({ income_source: "jev" });
+		},
+	);
 });
 
 describe("the Maybe edges Jev's answer is saved at (spec §8.6)", () => {

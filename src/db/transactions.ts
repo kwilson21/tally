@@ -2831,7 +2831,8 @@ async function saveJevAnswer(
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
  * uncategorized with no source, so a person's choice made in the meantime always wins. A credit whose stored category
  * confidence is set, since Jev answered its category unsure with income off, is still written for its income answer
- * while income is on (decision 79).
+ * while income is on (decision 79). Such a credit has only its income fields written; its stored category answer
+ * (category, suggestion, mixed reading, transfer answer and exclusion) is kept as it was.
  * A transfer or reimbursement flag also excludes the transaction (spec §6), which a person can undo
  * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
  * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
@@ -2900,20 +2901,24 @@ export async function saveJevResult(
 	const update = db
 		.prepare(
 			`UPDATE transactions SET
-				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_id END,
-				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL THEN ? ELSE category_source END,
-			category_confidence = ?,
+				-- A credit asked only for its income (its category confidence is set, decision 79) keeps its stored category answer.
+				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_id END,
+				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_source END,
+			category_confidence = COALESCE(category_confidence, ?),
 			income_confidence = CASE WHEN ${plaidSetIncomeSql("transactions")} OR income_source IN ('user', 'jev') OR credit_reviewed_by = 'user' THEN NULL WHEN ? = 1 AND amount_cents <= 0 AND ? < ? THEN ? ELSE NULL END,
-			transfer_confidence = CASE WHEN excluded_source = 'user' THEN transfer_confidence WHEN ? = 1 AND ? < ? THEN ? ELSE NULL END,
+			transfer_confidence = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN transfer_confidence WHEN ? = 1 AND ? < ? THEN ? ELSE NULL END,
 			-- A credit counts only after a confident category (non-income classification) or an income decision.
-			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((? = 1 AND ? >= ? AND (? IS NULL OR ? <= ?)) OR ? = 1) THEN 1 ELSE credit_reviewed END,
-				jev_category_id = ?, jev_none_fit = ?, jev_mixed = ?, jev_also_category_id = ?,
-				flag_transfer = CASE WHEN excluded_source = 'user' THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
+			credit_reviewed = CASE WHEN amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0 AND credit_reviewed_by IS NULL AND ((category_confidence IS NULL AND ? = 1 AND ? >= ? AND (? IS NULL OR ? <= ?)) OR ? = 1) THEN 1 ELSE credit_reviewed END,
+				jev_category_id = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_category_id END,
+				jev_none_fit = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_none_fit END,
+				jev_mixed = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_mixed END,
+				jev_also_category_id = CASE WHEN category_confidence IS NULL THEN ? ELSE jev_also_category_id END,
+				flag_transfer = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN flag_transfer ELSE MAX(flag_transfer, ?) END, flag_reimbursement = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN flag_reimbursement ELSE MAX(flag_reimbursement, ?) END,
 				-- Income is money coming in: Jev's income answer never marks money out (a positive amount).
 				flag_income = CASE WHEN income_source = 'user' OR credit_reviewed_by = 'user' OR (income_source IS NULL AND flag_income = 1) THEN flag_income WHEN amount_cents > 0 THEN 0 ELSE ? END,
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
-				excluded = CASE WHEN excluded_source = 'user' THEN excluded ELSE MAX(excluded, ?) END,
-				excluded_source = CASE WHEN excluded_source = 'user' OR ? = 0 THEN excluded_source ELSE 'jev' END,
+				excluded = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN excluded ELSE MAX(excluded, ?) END,
+				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
 				updated_at = datetime('now')
 			WHERE id = ? AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0
