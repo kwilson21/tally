@@ -5,7 +5,7 @@ import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
-import { headlineAmountClass } from "./headline-amount";
+import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
 import { LedgerIllustration } from "./illustration";
 import { WhyLink } from "./why-link";
 
@@ -69,7 +69,8 @@ export function HomeTop({
 					<p
 						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 					>
-						{amount}
+						{/* One unbreakable run, so a minus sign never sits alone above its number (#500). The class is on this span, not the <p>, so the "as of" pill stays free to wrap onto its own line. */}
+						<span class="whitespace-nowrap">{amount}</span>
 						{currentMonth && bankDate && (
 							<span class="ml-3 inline-flex min-h-8 items-center rounded-full border border-dashed border-muted px-3 align-middle font-sans text-sm font-normal text-muted">
 								as of {bankDate}
@@ -77,7 +78,10 @@ export function HomeTop({
 						)}
 					</p>
 				</div>
-				<LedgerIllustration />
+				{/* Below 390px, and wider for longer amounts, the notebook is left out so the row never spills (#500, P127 A, decision 116). */}
+				<div class={`hidden shrink-0 ${homeDrawingClass(amount)}`}>
+					<LedgerIllustration />
+				</div>
 			</div>
 			<p class="mt-3 font-serif text-lg italic">
 				{over

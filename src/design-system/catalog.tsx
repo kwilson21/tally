@@ -3596,6 +3596,26 @@ const SHEET_FOOTER_SPEC: UseSpecText = {
 	words: "Cancel, and the main action's verb: Save, Add, Send.",
 };
 
+// The money input's use spec (#80, decision 117): the eight questions DESIGN.md asks of an interactive component.
+const MONEY_SPEC: UseSpecText = {
+	purpose:
+		"Set an amount in dollars and cents by typing, by small steps, or with one tap on an amount Tally already knows.",
+	affordance:
+		"A round −$1 and +$1 either side of a box, with ▲ and ▼ cent arrows inside its right edge. Under it, centred chips: Round to $X when there are cents, and Last month: $X and 3-month average: $X when they're above $0.",
+	states:
+		"Empty: a muted 0.00 in the box, and − and ▼ are off. $0: − and ▼ are off. With cents: Round to appears. Equal to a chip: that chip is ticked, with a check and its words in ink. After Round to: it stays ticked until the amount changes again. Unreadable text: all four steps are off, and Round to is hidden.",
+	feedback:
+		"Each step or chip says the new amount in the announcer, as “$1,234.50”, and each press replaces the last announcement. A refused amount shows its words in the field's error line, in role=alert, and Save refuses it there.",
+	input:
+		"Touch: every button and cent arrow is 44px. Keyboard: Tab goes −$1, the field, ▲, ▼, +$1, then the chips left to right. In the field, ↑ and ↓ change the amount by 1¢, and Shift+↑ and Shift+↓ by $1. Alt, Ctrl and Cmd arrows are left to the browser, and Enter submits. A typed third decimal is refused, with the box and the caret left as they were; a pasted 12.345 is cut to 12.34. Screen reader: “Budget from October on, edit text, 612.45”; “Decrease Budget from October on by $1”; “Last month: $571.80, toggle button, pressed”. The $ is hidden.",
+	motion:
+		"An error shakes the box once, and reduced motion turns that off. Nothing else moves: a chip's check appears at once.",
+	edges:
+		"Empty counts as $0 for the steps: + gives $1.00, ▲ gives $0.01, and ↓ does nothing. The floor is $0 and the box has no ceiling of its own, so Save refuses an amount over the limit with its own words. Round to offers the next dollar whenever there are cents. Without JavaScript the buttons and chips are hidden and the field works alone.",
+	words:
+		"“Decrease Budget from October on by $1”, “Increase … by 1 cent”, and the chips' own words: Round to $X, Last month: $X, 3-month average: $X.",
+};
+
 function Controls() {
 	return (
 		<Group id="controls" title="Controls">
@@ -4846,6 +4866,7 @@ function Controls() {
 						<MoneyInput {...s.props} />
 					</State>
 				))}
+				<UseSpec spec={MONEY_SPEC} />
 			</Specimen>
 		</Group>
 	);

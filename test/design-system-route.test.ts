@@ -142,6 +142,21 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/\| SavingsGoalSheet \|/);
 	});
 
+	it("documents the money input's use spec, and draws its empty box and its states", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="money-input"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toContain("How it&#39;s used");
+		for (const [, label] of USE_SPEC_PARTS) {
+			expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+		}
+		// The empty box shows the muted 0.00 placeholder (decision 117), and the dimmed chip is gone.
+		expect(section).toContain('placeholder="0.00"');
+		expect(section).toContain("Empty: a muted 0.00");
+		expect(section).toContain("Equal to last month: its chip is ticked");
+		expect(section).not.toContain("its chip is dimmed");
+	});
+
 	it("shows the budget sheet in its three states, each with its own ids, and documents it", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="budget-sheet"'));
