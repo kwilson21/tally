@@ -834,6 +834,55 @@ describe("saveJevResult", () => {
 	});
 });
 
+describe("a credit whose category Jev answered unsure, asked for its income (decision 79)", () => {
+	// A credit with a stored category confidence and no income answer yet, as Jev leaves it with income off.
+	const setUnsureCategory = async (id: number) =>
+		db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -1200, credit_reviewed = 0, credit_reviewed_by = NULL, category_confidence = 0.4, income_confidence = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+
+	it("with income on, stores the income answer, and the row leaves the queue", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await setUnsureCategory(id);
+		expect(
+			await saveJevResult(
+				db,
+				id,
+				decision({
+					categoryId: null,
+					confidence: 0.5,
+					flagConfidence: { transfer: 0, reimbursement: 0, income: 0.3 },
+				}),
+				{ switches: { income: true, categories: true } },
+			),
+		).toBe(true);
+		expect(await row(id)).toMatchObject({ income_confidence: 0.3 });
+		expect((await pendingForJev(db, 40)).map((p) => p.id)).not.toContain(id);
+	});
+
+	it("with income off, rejects the answer and changes nothing", async () => {
+		const id = await idOf("VENMO *J RIVERA");
+		await setUnsureCategory(id);
+		const before = await row(id);
+		expect(
+			await saveJevResult(
+				db,
+				id,
+				decision({
+					categoryId: null,
+					confidence: 0.5,
+					flagConfidence: { transfer: 0, reimbursement: 0, income: 0.3 },
+				}),
+				{ switches: { income: false, categories: true } },
+			),
+		).toBe(false);
+		expect(await row(id)).toEqual(before);
+	});
+});
+
 describe("the Maybe edges Jev's answer is saved at (spec §8.6)", () => {
 	// Sure is 0.8 and up for a yes and 0.2 and down for a no; 0.7999 and 0.2001 are the first unsure values.
 	// A guess is kept as a Maybe only below 0.8, and a credit counts once its category is sure (0.8 or more)

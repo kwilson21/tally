@@ -88,15 +88,31 @@ describe("countWaitingForJev", () => {
 			...over,
 		};
 		const columns = Object.keys(row);
-		await db
+		const inserted = await db
 			.prepare(
 				`INSERT INTO transactions (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
 			)
 			.bind(...Object.values(row))
 			.run();
+		return inserted.meta.last_row_id;
 	}
 	const count = (categories: boolean, income: boolean) =>
 		countWaitingForJev(db, { categories, income });
+	/** The stored income answer and its flag, for a row. */
+	const incomeOf = (id: number) =>
+		db
+			.prepare(
+				"SELECT income_confidence, flag_income FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ income_confidence: number | null; flag_income: number }>();
+	/** Jev's unsure category answer on a credit: the category is unsure, so the row still waits for income. */
+	const unsureCategory = {
+		categoryId: null,
+		suggestedCategoryId: null,
+		confidence: 0.4,
+		flags: { transfer: false, reimbursement: false, income: false },
+	};
 
 	beforeEach(async () => {
 		await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
@@ -155,29 +171,68 @@ describe("countWaitingForJev", () => {
 		expect(await count(false, true)).toBe(0);
 	});
 
-	it("does not hold the gate for a credit whose category Jev answered with income off, since the queue never asks its income", async () => {
+	it("asks a credit for its income once income is back on, when its category was answered with income off", async () => {
 		await saveAiSwitches(db, { categories: true, income: false });
-		await txn({ amount_cents: -5000 });
-		const row = await db
-			.prepare("SELECT id FROM transactions WHERE plaid_transaction_id = ?")
-			.bind(`gate-${n}`)
-			.first<{ id: number }>();
-		expect(row).not.toBeNull();
+		const id = await txn({ amount_cents: -5000 });
+		expect(
+			await saveJevResult(db, id, unsureCategory, {
+				switches: { income: false, categories: true },
+			}),
+		).toBe(true);
+		expect(await pendingForJev(db, 100, { income: false })).toEqual([]);
+		expect(await count(true, false)).toBe(0);
+
+		await saveAiSwitches(db, { income: true });
+		expect((await pendingForJev(db, 100)).map((p) => p.id)).toEqual([id]);
+		expect(await count(true, true)).toBe(1);
+		expect(await count(false, true)).toBe(1);
+
+		// Jev's income answer is unsure too: it is stored, so the row leaves the queue and the gate.
 		expect(
 			await saveJevResult(
 				db,
-				row?.id ?? 0,
+				id,
 				{
-					categoryId: null,
-					suggestedCategoryId: null,
-					confidence: 0.4,
-					flags: { transfer: false, reimbursement: false, income: false },
+					...unsureCategory,
+					flagConfidence: { transfer: 0, reimbursement: 0, income: 0.3 },
 				},
-				{ switches: { income: false, categories: true } },
+				{ switches: { income: true, categories: true } },
 			),
 		).toBe(true);
+		expect(await incomeOf(id)).toEqual({
+			income_confidence: 0.3,
+			flag_income: 0,
+		});
 		expect(await pendingForJev(db, 100)).toEqual([]);
 		expect(await count(true, true)).toBe(0);
+	});
+
+	it("takes a credit out of the gate once Jev's income answer is a sure yes, which flags it", async () => {
+		await saveAiSwitches(db, { categories: true, income: false });
+		const id = await txn({ amount_cents: -5000 });
+		await saveJevResult(db, id, unsureCategory, {
+			switches: { income: false, categories: true },
+		});
+		await saveAiSwitches(db, { income: true });
+		expect(
+			await saveJevResult(
+				db,
+				id,
+				{
+					...unsureCategory,
+					flags: { transfer: false, reimbursement: false, income: true },
+					flagConfidence: { transfer: 0, reimbursement: 0, income: 0.95 },
+				},
+				{ switches: { income: true, categories: true } },
+			),
+		).toBe(true);
+		expect(await incomeOf(id)).toEqual({
+			income_confidence: null,
+			flag_income: 1,
+		});
+		expect(await pendingForJev(db, 100)).toEqual([]);
+		expect(await count(true, true)).toBe(0);
+		expect(await count(false, true)).toBe(0);
 	});
 
 	it("treats a row Jev failed on as sorted, so it never holds the gate", async () => {
@@ -215,6 +270,50 @@ describe("countWaitingForJev", () => {
 		await txn({ excluded: 1, excluded_source: "plaid" });
 		await txn({ category_id: 1, category_source: "user", note: "" });
 		expect(await count(true, true)).toBe(0);
+	});
+
+	describe("agrees with the queue the gate counts for", () => {
+		/**
+		 * One row for each way a question can wait: an unasked purchase, an unasked credit, a credit Jev answered unsure
+		 * with income off (its category is unsure, so its income is still unasked), a credit Jev failed on, and a row that
+		 * only needs details. Returns the failed row's id.
+		 */
+		async function seedQueue() {
+			await txn();
+			await txn({ amount_cents: -5000 });
+			await txn({
+				amount_cents: -5000,
+				category_confidence: 0.4,
+				jev_category_id: 1,
+			});
+			const failed = await txn({
+				amount_cents: -5000,
+				jev_failed_at: "2026-10-12",
+			});
+			await txn({ category_id: 1, category_source: "user", note: "" });
+			return failed;
+		}
+
+		it.each([
+			[true, true, 3],
+			[true, false, 2],
+			[false, false, 0],
+		])(
+			"with categories %s and income %s, counts the rows the queue asks about that Jev did not fail on",
+			async (categories, income, expected) => {
+				const failed = await seedQueue();
+				const asked = (
+					await pendingForJev(db, 100, { categories, income })
+				).filter((pending) => pending.id !== failed);
+				expect(asked).toHaveLength(expected);
+				expect(await count(categories, income)).toBe(expected);
+			},
+		);
+
+		it("with categories off and income on, counts only the credits: the queue also asks a purchase, the gate does not (spec §8.8)", async () => {
+			await seedQueue();
+			expect(await count(false, true)).toBe(2);
+		});
 	});
 });
 
