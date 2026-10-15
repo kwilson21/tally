@@ -23,6 +23,18 @@ export function savedRowClass(saved?: SavedMark): string {
 }
 
 /**
+ * The mark a list row gets from a save (P119 A, #71): the saved row gets `mark` (the toast's stay, or the Undo
+ * toast's ten seconds), and no other row does. Every list passes it, so a row's mark is only ever the save's.
+ */
+export function listRowMark(
+	rowId: number,
+	savedId?: number,
+	mark: "toast" | "undo" = "toast",
+): SavedMark | undefined {
+	return rowId === savedId ? mark : undefined;
+}
+
+/**
  * The tick, in a 20px box: the arrow's own size, so it takes the arrow's place. It sits in the same grid cell as the
  * arrow (SavedSlot), which CSS shows and hides by the row's class.
  */

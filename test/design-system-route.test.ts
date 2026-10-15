@@ -731,15 +731,17 @@ describe("GET /design-system in the demo", () => {
 		expect(tag).toContain("hx-ignore");
 		const section =
 			html.split('id="time-zone-row"')[1]?.split("</section>")[0] ?? "";
-		// Four rows, each in an inert box so nothing in them can be tapped or can take focus.
-		expect(section.match(/<details/g)).toHaveLength(4);
-		expect(section.match(/<div inert/g)).toHaveLength(4);
+		// Five rows, each in an inert box so nothing in them can be tapped or can take focus.
+		expect(section.match(/<details/g)).toHaveLength(5);
+		expect(section.match(/<div inert/g)).toHaveLength(5);
 		// Closed, open (the chevron's turned state is the open attribute), and the error one open too.
 		expect(
 			[...section.matchAll(/<details[^>]*>/g)].map((m) =>
 				/\sopen(\s|>|=)/.test(m[0]),
 			),
-		).toEqual([false, true, true, false]);
+		).toEqual([false, true, true, false, false]);
+		// The saved row held still: its tick in the chevron's place (P119 A, #71).
+		expect(section.match(/row-saved-held/g)).toHaveLength(1);
 		expect(section).toContain("Eastern");
 		expect(section).toContain("Puerto Rico");
 		expect(section).toMatch(

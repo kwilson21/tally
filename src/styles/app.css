@@ -567,7 +567,9 @@ html:not(.js) [data-money-js] {
  * tick holds for the toast's own stay, then the arrow comes back. Each stay is a token, and its stops are the
  * toast's (the toast block above), so the tick is gone before the toast is: at 96.25% of 4 s, or 98.5% of the
  * 10 s an Undo toast stays. Under reduced motion there is no draw and no movement: the tick appears and goes on
- * the same stay, as a step. row-saved-held is the catalog's still picture: the tick drawn, the arrow back under it.
+ * the same stay, as a step, and the arrow comes back as a step at that same stop. The arrow has its own still
+ * keyframes (saved-arrow-still, saved-arrow-undo-still) for that: the moving ones would hold it back to the stay's
+ * end, leaving the slot empty. row-saved-held is the catalog's still picture: the tick drawn, the arrow back under it.
  */
 @keyframes saved-draw {
 	from {
@@ -615,6 +617,25 @@ html:not(.js) [data-money-js] {
 		opacity: 1;
 	}
 }
+/* Reduced motion's arrow: opacity alone, a step that shows at the tick's own hide stop, so the slot is never empty. */
+@keyframes saved-arrow-still {
+	0% {
+		opacity: 0;
+	}
+	96.25%,
+	100% {
+		opacity: 1;
+	}
+}
+@keyframes saved-arrow-undo-still {
+	0% {
+		opacity: 0;
+	}
+	98.5%,
+	100% {
+		opacity: 1;
+	}
+}
 .row-saved .saved-tick {
 	animation:
 		saved-draw var(--duration-confirm) ease-out both,
@@ -646,10 +667,10 @@ html:not(.js) [data-money-js] {
 		animation: saved-tick-undo var(--duration-undo-toast) step-end both;
 	}
 	.row-saved .saved-arrow {
-		animation: saved-arrow var(--duration-toast) step-end both;
+		animation: saved-arrow-still var(--duration-toast) step-end both;
 	}
 	.row-saved-undo .saved-arrow {
-		animation: saved-arrow-undo var(--duration-undo-toast) step-end both;
+		animation: saved-arrow-undo-still var(--duration-undo-toast) step-end both;
 	}
 }
 

@@ -150,6 +150,7 @@ import {
 	type RuleOfferValue,
 	ruleOfferAnnouncement,
 } from "../views/rule-offer";
+import { listRowMark } from "../views/saved-tick";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import {
 	FOCUS_FIRST_TICK,
@@ -220,9 +221,14 @@ type ListOptions = {
 	focusId?: number;
 	/**
 	 * After the edit panel's save (P119 A, #71): this row's arrow gives way to the pencil tick. Only that save's reply
-	 * passes it, never a Cancel, Select mode or a bulk change. Undo's restore (#70) will pass the same id, marked undo.
+	 * passes it, never a Cancel, Select mode or a bulk change.
 	 */
 	savedId?: number;
+	/**
+	 * How the saved row is marked: "toast" for the toast's four seconds (the default), "undo" for the ten a toast that
+	 * offers Undo stays (#70's saves, #510 and #511, pass it). The Undo restore itself is not marked here.
+	 */
+	savedMark?: "toast" | "undo";
 	/** After Undo restores a cash entry: focus its row when this list shows it. Nothing else is focused here; toast.js moves focus when the Undo toast ends (#397). */
 	restoredId?: number;
 	/** "Only October" asked for focus on the result count, since its link goes (#211). */
@@ -310,6 +316,7 @@ async function renderList(
 		sheet,
 		focusId,
 		savedId,
+		savedMark,
 		restoredId,
 		countFocus = false,
 		status = 200,
@@ -991,7 +998,7 @@ async function renderList(
 													autofocus={
 														row.id === focusId || row.id === restoredId
 													}
-													saved={row.id === savedId ? "toast" : undefined}
+													saved={listRowMark(row.id, savedId, savedMark)}
 													// Opening swaps in only the sheet, so the list keeps its place.
 													attrs={{
 														"hx-get": href,
@@ -4097,8 +4104,10 @@ async function savePanel(
 	c.header("HX-Push-Url", back);
 	// A rule offer and a category made here never both apply: an offer needs three picks of a category, and a
 	// category made in this save has only this one.
-	if (ruleOffer) return renderRuleOffer(c, today, back, ruleOffer, tx.id);
-	if (panel) return renderLikely(c, today, filters, panel);
+	// The row this save saved is marked, and the question or sheet it draws keeps it marked behind (P119 A, #71).
+	if (ruleOffer)
+		return renderRuleOffer(c, today, back, ruleOffer, tx.id, tx.id);
+	if (panel) return renderLikely(c, today, filters, panel, tx.id);
 	return renderList(c, today, filters, { focusId: tx.id, savedId: tx.id });
 }
 
@@ -4252,8 +4261,10 @@ function renderLikely(
 		categoryName: string;
 		rows: LikelyRow[];
 	},
+	saved?: number,
 ) {
 	return renderList(c, today, filters, {
+		savedId: saved,
 		sheet: () => (
 			<LikelySheet
 				savedId={panel.savedId}
@@ -4278,7 +4289,8 @@ function renderLikely(
 
 /**
  * The rule offer after a save. `savedId` is the transaction that was saved, so closing the question puts focus on
- * its row (#87); a Select-mode save names no one row, so its close goes to the list.
+ * its row (#87); a Select-mode save names no one row, so its close goes to the list. `saved` is the row whose tick the
+ * reply draws (P119 A, #71): only the edit panel's htmx save passes it, never Cancel, Select or a cash save.
  */
 function renderRuleOffer(
 	c: Context<App>,
@@ -4286,8 +4298,10 @@ function renderRuleOffer(
 	back: string,
 	value: RuleOfferValue,
 	savedId?: number,
+	saved?: number,
 ) {
 	return renderList(c, today, filtersFrom(c, today, back), {
+		savedId: saved,
 		sheet: () => (
 			<BottomSheet
 				labelledBy="rule-offer-title"

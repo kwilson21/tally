@@ -1,10 +1,12 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
 import type { ListRow } from "../src/db/transactions";
+import { HouseholdPeople } from "../src/views/household-people";
 import { RowArrow } from "../src/views/icons";
 import { ProgressRow } from "../src/views/progress-row";
-import { SavedTick, savedRowClass } from "../src/views/saved-tick";
+import { listRowMark, SavedTick, savedRowClass } from "../src/views/saved-tick";
 import { SavingsGoalRow } from "../src/views/savings-goal-row";
+import { TimeZoneRow } from "../src/views/time-zone-row";
 import { TransactionRow } from "../src/views/transaction-row";
 
 // P119 A (decision 111, #71): a save's own reply marks its row, and the pencil tick takes the arrow's place
@@ -50,6 +52,22 @@ describe("savedRowClass", () => {
 		expect(savedRowClass("undo")).toBe("row-saved-undo");
 		expect(savedRowClass("held")).toBe("row-saved-held");
 		expect(savedRowClass(undefined)).toBe("");
+	});
+});
+
+describe("listRowMark", () => {
+	it("marks the saved row with a toast's mark by default", () => {
+		expect(listRowMark(7, 7)).toBe("toast");
+	});
+
+	it("marks the saved row undo when its toast offers Undo", () => {
+		expect(listRowMark(7, 7, "undo")).toBe("undo");
+	});
+
+	it("marks no other row, and nothing when there was no save", () => {
+		expect(listRowMark(8, 7)).toBeUndefined();
+		expect(listRowMark(8, 7, "undo")).toBeUndefined();
+		expect(listRowMark(7)).toBeUndefined();
 	});
 });
 
@@ -133,6 +151,86 @@ describe("ProgressRow that opens", () => {
 
 	it("marks nothing with no link, as an archived category's row", () => {
 		const html = budget({ saved: "toast", href: undefined });
+		expect(html).not.toContain("row-saved");
+		expect(html).not.toContain("saved-tick");
+	});
+});
+
+// P119 A (#71): the Settings rows a save redraws. A row gets the tick only when its save's reply names it (the route
+// tests in test/saved-row-replies.test.ts say which); these are the markup facts of the components alone.
+describe("TimeZoneRow that a save just changed", () => {
+	const zone = (saved?: "toast" | "held") =>
+		TimeZoneRow({ zone: "America/New_York", saved }).toString();
+
+	it("marks its row with row-saved and draws the tick once", () => {
+		const html = zone("toast");
+		expect(classCount(html, "row-saved")).toBe(1);
+		expect(classCount(html, "saved-tick")).toBe(1);
+		expect(html).not.toContain("row-saved-undo");
+	});
+
+	it("puts the chevron in the arrow's slot, so the tick takes its place and the chevron keeps its turn", () => {
+		expect(zone("toast")).toMatch(
+			/<span class="saved-arrow[^"]*"><span class="shrink-0 text-muted transition-transform group-open:rotate-90/,
+		);
+	});
+
+	it("draws the catalog's still picture with row-saved-held", () => {
+		const html = zone("held");
+		expect(classCount(html, "row-saved-held")).toBe(1);
+		expect(classCount(html, "saved-tick")).toBe(1);
+	});
+
+	it("marks nothing without a save", () => {
+		const html = zone();
+		expect(html).not.toContain("row-saved");
+		expect(html).not.toContain("saved-tick");
+	});
+});
+
+describe("HouseholdPeople that a save just changed", () => {
+	const people = [
+		{ id: 1, name: "Everyone" },
+		{ id: 2, name: "Kids" },
+		{ id: 3, name: "Morgan" },
+	];
+	const list = (saved?: { id: number; mark: "toast" | "held" }) =>
+		HouseholdPeople({ people, saved }).toString();
+
+	/** The opening tag of the disclosure that holds `marker`, found by walking back from the marker to its <details>. */
+	const detailsOf = (html: string, marker: string) => {
+		const at = html.indexOf(marker);
+		const start = at < 0 ? -1 : html.lastIndexOf("<details", at);
+		return start < 0 ? "" : html.slice(start, html.indexOf(">", start) + 1);
+	};
+
+	it("marks only the named person's row, with the tick in its chevron's place", () => {
+		const html = list({ id: 3, mark: "toast" });
+		expect(classCount(html, "row-saved")).toBe(1);
+		expect(classCount(html, "saved-tick")).toBe(1);
+		expect(detailsOf(html, 'value="3"')).toMatch(/\brow-saved\b/);
+		expect(html).toMatch(/<span class="saved-arrow[^"]*"><svg/);
+	});
+
+	it("never marks Everyone, the first row, even when it is named", () => {
+		const html = list({ id: 1, mark: "toast" });
+		expect(html).not.toContain("row-saved");
+		expect(html).not.toContain("saved-tick");
+	});
+
+	it("never marks Add a person", () => {
+		const html = list({ id: 3, mark: "toast" });
+		expect(detailsOf(html, "Add a person")).not.toMatch(/row-saved/);
+	});
+
+	it("draws the catalog's still picture with row-saved-held", () => {
+		const html = list({ id: 2, mark: "held" });
+		expect(classCount(html, "row-saved-held")).toBe(1);
+		expect(detailsOf(html, 'value="2"')).toMatch(/\brow-saved-held\b/);
+	});
+
+	it("marks nothing without a save", () => {
+		const html = list();
 		expect(html).not.toContain("row-saved");
 		expect(html).not.toContain("saved-tick");
 	});

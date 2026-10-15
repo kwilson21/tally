@@ -1057,6 +1057,8 @@ describe("the saved row's tick", () => {
 			"saved-tick-undo",
 			"saved-arrow",
 			"saved-arrow-undo",
+			"saved-arrow-still",
+			"saved-arrow-undo-still",
 		])
 			for (const r of keyframes(name))
 				expect([...r.decls.keys()], name).toEqual(["opacity"]);
@@ -1078,6 +1080,52 @@ describe("the saved row's tick", () => {
 				"saved-draw",
 			);
 		}
+	});
+
+	it("brings the arrow back under reduced motion as a step, on its own still keyframes, for the same stay as the tick", () => {
+		const reduceAnimation = (selector: string) =>
+			rules
+				.find((r) => inReduce(r) && selectorsOf(r).includes(selector))
+				?.decls.get("animation") ?? "";
+		expect(reduceAnimation(".row-saved .saved-arrow")).toContain(
+			"saved-arrow-still",
+		);
+		expect(reduceAnimation(".row-saved .saved-arrow")).toMatch(/\bstep-end\b/);
+		expect(reduceAnimation(".row-saved .saved-arrow")).toContain(
+			"var(--duration-toast)",
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toContain(
+			"saved-arrow-undo-still",
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toMatch(
+			/\bstep-end\b/,
+		);
+		expect(reduceAnimation(".row-saved-undo .saved-arrow")).toContain(
+			"var(--duration-undo-toast)",
+		);
+	});
+
+	it("shows the arrow at the tick's own hide stop, so under reduced motion the slot is never empty", () => {
+		expect(stop("saved-arrow-still", "0%")?.decls.get("opacity")).toBe("0");
+		expect(stop("saved-arrow-still", "96.25%")?.decls.get("opacity")).toBe("1");
+		expect(stop("saved-arrow-undo-still", "0%")?.decls.get("opacity")).toBe(
+			"0",
+		);
+		expect(stop("saved-arrow-undo-still", "98.5%")?.decls.get("opacity")).toBe(
+			"1",
+		);
+		// The first stop the tick hides at is the first stop the arrow shows at, for both stays.
+		const firstAt = (name: string, opacity: string) =>
+			Math.min(
+				...keyframes(name)
+					.filter((r) => r.decls.get("opacity") === opacity)
+					.flatMap(selectorsOf)
+					.map((percent) => Number.parseFloat(percent)),
+			);
+		expect(firstAt("saved-tick", "0")).toBe(firstAt("saved-arrow-still", "1"));
+		expect(firstAt("saved-tick-undo", "0")).toBe(
+			firstAt("saved-arrow-undo-still", "1"),
+		);
 	});
 
 	it("draws nothing in the catalog's held picture, which shows the tick at its full draw with the arrow back under it", () => {

@@ -4255,17 +4255,20 @@ function Controls() {
 				components={["HouseholdPeople"]}
 				sentence="Names a transaction can be for, shared by the household and never used as logins (P89 A, decision 81)."
 			>
-				<div inert class="max-w-3xl border-t border-rule">
-					<HouseholdPeople
-						people={[
-							{ id: 1, name: "Everyone" },
-							{ id: 2, name: "Kids" },
-							{ id: 3, name: "Morgan" },
-						]}
-						openId={2}
-						addOpen
-					/>
-				</div>
+				<State label="Saved, held still: Morgan's chevron gives way to the pencil tick, with Kids open (P119 A, #71)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<HouseholdPeople
+							people={[
+								{ id: 1, name: "Everyone" },
+								{ id: 2, name: "Kids" },
+								{ id: 3, name: "Morgan" },
+							]}
+							openId={2}
+							addOpen
+							saved={{ id: 3, mark: "held" }}
+						/>
+					</div>
+				</State>
 				<UseSpec spec={HOUSEHOLD_PEOPLE_SPEC} />
 			</Specimen>
 			<Specimen
@@ -4315,6 +4318,18 @@ function Controls() {
 						<TimeZoneRow
 							id="ds-zone-narrow"
 							zone="America/Puerto_Rico"
+							action="#"
+							back="#"
+							backSwap="#"
+						/>
+					</div>
+				</State>
+				<State label="Saved, held still: the pencil tick in the chevron's place, as the toast stays (P119 A, #71)">
+					<div inert class="max-w-3xl border-t border-rule">
+						<TimeZoneRow
+							id="ds-zone-saved"
+							zone="America/New_York"
+							saved="held"
 							action="#"
 							back="#"
 							backSwap="#"

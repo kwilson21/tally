@@ -138,6 +138,240 @@ describe("a Settings category save marks its row", () => {
 	});
 });
 
+describe("a save that asks a question marks its own row, when it is the edit panel's", () => {
+	const MERCHANT = "rule-offer-store";
+	const edit = (category: number) => ({
+		category: String(category),
+		merchant: "",
+		merchant_was: "",
+		name_pick: "",
+		note: "",
+		excluded: "0",
+		income: "0",
+		creditReviewed: "0",
+		back: "/transactions",
+	});
+	let groceries: number;
+	let picks: number[];
+
+	beforeEach(async () => {
+		groceries = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Groceries'",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare("INSERT INTO merchants (raw_name) VALUES (?)")
+			.bind(MERCHANT)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, ?, 1000, ?, ?), (1, ?, 1000, ?, ?), (1, ?, 1000, ?, ?), (1, ?, 1000, ?, ?)",
+		)
+			.bind(
+				...Array.from({ length: 4 }, () => [
+					todayIn(DEFAULT_TIME_ZONE),
+					MERCHANT,
+					MERCHANT,
+				]).flat(),
+			)
+			.run();
+		picks = (
+			await env.DB.prepare(
+				"SELECT id FROM transactions WHERE merchant_name = ? ORDER BY id",
+			)
+				.bind(MERCHANT)
+				.all<{ id: number }>()
+		).results.map((row) => row.id);
+	});
+
+	/** Two Groceries picks by the person, so the next one is the third and asks. */
+	const twoPicks = () =>
+		env.DB.prepare(
+			"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id IN (?, ?)",
+		)
+			.bind(groceries, picks[0], picks[1])
+			.run();
+
+	it("marks exactly the saved row when its edit panel save raises the rule offer", async () => {
+		await post(`/transactions/${picks[0]}`, edit(groceries));
+		await post(`/transactions/${picks[1]}`, edit(groceries));
+		const third = await post(`/transactions/${picks[2]}`, edit(groceries));
+		expect(third.html).toContain("Always use Groceries for rule-offer-store?");
+		expect(marked(third.html)).toBe(1);
+		expect(linkTag(third.html, `/transactions/${picks[2]}[^"]*`)).toMatch(
+			/\brow-saved\b/,
+		);
+	});
+
+	it("marks nothing when a cash entry's save raises the rule offer", async () => {
+		await twoPicks();
+		const cash = await post("/transactions/cash", {
+			date: todayIn(DEFAULT_TIME_ZONE),
+			amount: "10.00",
+			merchant: MERCHANT,
+			category: String(groceries),
+			note: "",
+			back: "/transactions",
+		});
+		expect(cash.html).toContain("Always use Groceries for rule-offer-store?");
+		expect(marked(cash.html)).toBe(0);
+	});
+
+	it("marks nothing when a Select-mode save raises the rule offer", async () => {
+		await twoPicks();
+		const selected = await post("/transactions/select/category/save", {
+			ids: String(picks[2]),
+			category: String(groceries),
+			back: "/transactions?select=1",
+		});
+		expect(selected.html).toContain(
+			"Always use Groceries for rule-offer-store?",
+		);
+		expect(marked(selected.html)).toBe(0);
+	});
+});
+
+describe("a save that opens the likely transactions marks its own row", () => {
+	beforeEach(async () => {
+		// Two more bakery charges this month, still needing a category; one is the same merchant as the bakery.
+		const month = todayIn(DEFAULT_TIME_ZONE).slice(0, 7);
+		for (const [day, cents] of [
+			["01", 1200],
+			["02", 900],
+		] as const)
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name) VALUES (1, ?, ?, 'SQ *LOCAL BAKERY 4432')",
+			)
+				.bind(`${month}-${day}`, cents)
+				.run();
+	});
+
+	it("marks exactly the saved row when the new category's save opens the Likely sheet", async () => {
+		const saved = await post(`/transactions/${bakery}`, {
+			merchant: "Local Bakery",
+			merchant_was: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			category: "new",
+			new_category_name: "Pet Care",
+		});
+		expect(saved.html).toContain("These might belong too:");
+		expect(marked(saved.html)).toBe(1);
+		expect(linkTag(saved.html, `/transactions/${bakery}[^"]*`)).toMatch(
+			/\brow-saved\b/,
+		);
+	});
+});
+
+/** The opening tag of the disclosure that holds `marker`, found by walking back from the marker to its own <details>. */
+const detailsOf = (html: string, marker: string) => {
+	const at = html.indexOf(marker);
+	const start = at < 0 ? -1 : html.lastIndexOf("<details", at);
+	return start < 0 ? "" : html.slice(start, html.indexOf(">", start) + 1);
+};
+
+describe("a Settings add or time zone save marks the row it changed", () => {
+	it("marks exactly the category an Add form just added", async () => {
+		const { res, html } = await post("/settings/categories", {
+			name: "Pet Care",
+		});
+		expect(res.status).toBe(200);
+		const id = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Pet Care'",
+			).first<{ id: number }>()
+		)?.id;
+		expect(marked(html)).toBe(1);
+		expect(detailsOf(html, `data-row="${id}"`)).toMatch(/\brow-saved\b/);
+	});
+
+	it("marks nothing when the new category's name is taken", async () => {
+		const { res, html } = await post("/settings/categories", { name: "gas" });
+		expect(res.status).toBe(422);
+		expect(marked(html)).toBe(0);
+	});
+
+	it("marks the time zone row when a valid zone is saved", async () => {
+		const { res, html } = await post("/settings/time-zone", {
+			time_zone: "America/Chicago",
+		});
+		expect(res.status).toBe(200);
+		expect(marked(html)).toBe(1);
+		expect(detailsOf(html, 'id="time-zone-disclosure"')).toMatch(
+			/\brow-saved\b/,
+		);
+	});
+
+	it("marks nothing when the zone is refused", async () => {
+		const { res, html } = await post("/settings/time-zone", {
+			time_zone: "Mars/Olympus",
+		});
+		expect(res.status).toBe(422);
+		expect(marked(html)).toBe(0);
+	});
+});
+
+describe("a Settings person save marks the row it changed", () => {
+	let kids: number;
+
+	beforeEach(async () => {
+		kids = (
+			await env.DB.prepare(
+				"INSERT INTO household_people (name) VALUES ('Kids') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+	});
+
+	it("marks exactly the person a rename just saved, and keeps that row open", async () => {
+		const { res, html } = await post("/settings/people", {
+			action: "rename",
+			person_id: String(kids),
+			name: "Kidz",
+		});
+		expect(res.status).toBe(200);
+		expect(marked(html)).toBe(1);
+		const row = detailsOf(html, `name="person_id" value="${kids}"`);
+		expect(row).toMatch(/\brow-saved\b/);
+		expect(row).toMatch(/\sopen\b/);
+	});
+
+	it("marks nothing when the renamed name is taken", async () => {
+		const { res, html } = await post("/settings/people", {
+			action: "rename",
+			person_id: String(kids),
+			name: "Everyone",
+		});
+		expect(res.status).toBe(422);
+		expect(marked(html)).toBe(0);
+	});
+
+	it("marks exactly the person an Add form just added, never Everyone or Add a person", async () => {
+		const { res, html } = await post("/settings/people", {
+			action: "add",
+			name: "Morgan",
+		});
+		expect(res.status).toBe(200);
+		const morgan = (
+			await env.DB.prepare(
+				"SELECT id FROM household_people WHERE name = 'Morgan'",
+			).first<{ id: number }>()
+		)?.id;
+		expect(marked(html)).toBe(1);
+		expect(detailsOf(html, `name="person_id" value="${morgan}"`)).toMatch(
+			/\brow-saved\b/,
+		);
+		expect(detailsOf(html, "Always available")).not.toMatch(/row-saved/);
+		expect(detailsOf(html, "Add a person")).not.toMatch(/row-saved/);
+	});
+
+	it("marks nothing when a person is removed", async () => {
+		const { html } = await post("/settings/people", {
+			remove: "1",
+			person_id: String(kids),
+		});
+		expect(marked(html)).toBe(0);
+	});
+});
+
 describe("nothing but a save's own reply marks a row", () => {
 	it("marks nothing when Cancel closes the budget sheet", async () => {
 		const { html } = await get("/?focus=1", true);
