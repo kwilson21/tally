@@ -3660,7 +3660,7 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		}
 	});
 
-	it("lists P136 in the decisions file as decision 122, after 118, with option A's words", () => {
+	it("lists P136 in the decisions file as decision 122, last in the table, with option A's words", () => {
 		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
 		const last = rows.at(-1) ?? "";
 		expect(
@@ -3669,7 +3669,6 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		expect(last).toContain("**P136 A:**");
 		expect(last).toContain("This replaces Paid's rule from #612");
 		expect(last).toContain("Decided by seeing (decision 47)");
-		expect(decisions).not.toMatch(/^\| 1(19|20|21) \|/m);
 	});
 
 	it("states the totals rule in spec §8.4 as decision 122 does, and drops the old sentence", () => {

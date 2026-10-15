@@ -10,6 +10,7 @@ import {
 	RENT_CENTS,
 	RENT_PAYEE,
 	type SeedBalance,
+	SOCCER_DAY,
 	seedMerchantKey,
 } from "./seed";
 
@@ -306,9 +307,8 @@ function demoBills(
 	transactions: { date: string; rawName: string; amountCents: number }[],
 ): (string | number | null)[][] {
 	const day = Number(today.slice(8, 10));
-	// The soccer payment the yearly bill is linked to, so its amount matches. History is dated the
-	// 14th, or today's day-of-month when that is earlier (src/demo/seed.ts).
-	const soccerDay = Math.min(14, day);
+	// The soccer payment the yearly bill is linked to, so its amount matches (src/demo/seed.ts).
+	const soccerDay = SOCCER_DAY;
 	const paidSoccer = {
 		cents:
 			transactions.find(

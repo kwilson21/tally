@@ -153,9 +153,10 @@ describe("saveEdit", () => {
 			...(await loadMonth(db, "2026-09")),
 			unpaidDueBillsCents: 0,
 		});
+		// Eating Out's rows dated up to the 22nd are $336, and the Bakery's $12 makes $348 (the demo's paced spending, #322).
 		expect(
 			summary.categories.find((c) => c.id === EATING_OUT)?.spentCents,
-		).toBe(29800);
+		).toBe(34800);
 	});
 
 	it("excludes a transaction, which leaves Needs category and spending (spec §6, #27)", async () => {

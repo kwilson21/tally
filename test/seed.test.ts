@@ -9,13 +9,13 @@ import { buildSeed, monthOffset, RENT_PAYEE } from "../src/demo/seed";
 import { chartStart, netWorthSeries, netWorthView } from "../src/net-worth";
 
 describe("buildSeed", () => {
-	// Childcare is Daycare's $240 on each Friday of the month up to today (paid, so spent and not set aside).
+	// The demo's spending is paced through the month (#322), so a month's designed totals are whole only on its last day.
+	// Childcare is Daycare's $240 on each Friday of the month (paid, so spent and not set aside).
 	it.each([
-		["2026-09-22", 72000],
-		["2026-09-01", 0],
+		["2026-09-30", 96000],
 		["2026-02-28", 96000],
 		["2027-01-31", 120000],
-	])("designed totals hold on %s", (today, childcareCents) => {
+	])("designed totals hold on the last day, %s", (today, childcareCents) => {
 		const seed = buildSeed(today);
 		const month = today.slice(0, 7);
 		// A linked refund counts in its purchase's month (spec §6). The late Rent part is dated this month's 1st but
@@ -50,7 +50,7 @@ describe("buildSeed", () => {
 		);
 		expect(spent).toEqual({
 			Groceries: 39458,
-			"Eating Out": 28600,
+			"Eating Out": 34800,
 			Gas: 18600,
 			Kids: 21000,
 			Household: 15041,
@@ -58,12 +58,19 @@ describe("buildSeed", () => {
 			// Rent's $600 this month, against its own $1,200 budget (#205).
 			Rent: 60000,
 		});
-		expect(summary.uncategorized).toEqual({ spentCents: 22801, count: 12 });
+		expect(summary.uncategorized).toEqual({ spentCents: 12152, count: 12 });
 		expect(summary.incomeCents).toBe(490000);
 		// Childcare's $1,040 budget adds to what is budgeted; its paid Fridays are spent. Rent's $1,200 budget adds
-		// too, less its $600 spent.
+		// too, less its $600 spent. The $245 is the designed rest with Eating Out at $286 and the uncategorized rows at
+		// $228.01; they are $348 and $121.52 now (#322), and Safe to spend moves by what they moved.
 		expect(summary.safeToSpendCents).toBe(
-			24500 + 104000 + 120000 - childcareCents - 60000,
+			24500 +
+				(28600 - 34800) +
+				(22801 - 12152) +
+				104000 +
+				120000 -
+				childcareCents -
+				60000,
 		);
 	});
 
@@ -93,6 +100,78 @@ describe("buildSeed", () => {
 	it("never dates a transaction after today", () => {
 		const seed = buildSeed("2026-09-03");
 		expect(seed.transactions.every((t) => t.date <= "2026-09-03")).toBe(true);
+	});
+
+	// The e2e steps and the screenshots use these rows by raw name and by id (#322). Every id stays put on every day,
+	// because the rows after today are dropped only once ids are given.
+	it.each(Array.from({ length: 7 }, (_, i) => `2026-10-0${i + 1}`))(
+		"has Local Bakery and the other uncategorized rows from the 1st, and the same ids, on %s",
+		(today) => {
+			const seed = buildSeed(today);
+			const uncategorized = [
+				"SQ *LOCAL BAKERY 4432",
+				"PAYPAL *XYZSHOP",
+				"SQ *FARMERS MKT",
+				"VENMO *J RIVERA",
+				"TST* CORNER DELI",
+				"AMZN MKTP US*2K4",
+				"SP * CRAFTSUPPLY",
+				"POS 4417 CITY PARKING",
+				"CHECKCARD 0921 CVS",
+				"APPLE.COM/BILL",
+				"GOOGLE *YOUTUBE",
+				"DD *DOORDASH TACO",
+			];
+			for (const rawName of uncategorized)
+				expect(
+					seed.transactions.some(
+						(t) =>
+							t.rawName === rawName &&
+							t.categoryId === null &&
+							t.date.startsWith("2026-10"),
+					),
+					rawName,
+				).toBe(true);
+			expect(seed.transactions.filter((t) => t.id === 94)[0]?.rawName).toBe(
+				"TRADER JOE'S #552",
+			);
+			expect(seed.transactions.filter((t) => t.id === 110)[0]?.rawName).toBe(
+				"SQ *LOCAL BAKERY 4432",
+			);
+			expect(seed.transactions.filter((t) => t.id === 116)[0]?.rawName).toBe(
+				"SP * CRAFTSUPPLY",
+			);
+			expect(seed.transactions.filter((t) => t.id === 118)[0]?.rawName).toBe(
+				"CHECKCARD 0921 CVS",
+			);
+		},
+	);
+
+	it("keeps earlier months' category totals as the history says, whatever the day", () => {
+		for (const today of ["2026-10-01", "2026-10-15", "2026-10-31"]) {
+			const seed = buildSeed(today);
+			// A linked refund counts in its purchase's month, as Trends counts it (spec §6).
+			const countedDate = (t: (typeof seed.transactions)[number]) =>
+				seed.transactions.find((p) => p.id === t.refundOfId)?.date ?? t.date;
+			const totals = (categoryId: number) =>
+				[5, 4, 3, 2, 1].map((monthsAgo) =>
+					seed.transactions
+						.filter(
+							(t) =>
+								countedDate(t).startsWith(monthOffset(today, monthsAgo)) &&
+								t.categoryId === categoryId,
+						)
+						.reduce((sum, t) => sum + t.amountCents, 0),
+				);
+			// The history table in src/demo/seed.ts, oldest month first, plus what else those months hold: Kids' last
+			// month has P19's Target purchase ($84.99) less its refund ($24.99), and Household's last two months have
+			// the repeat services ($61.48, YouTube, Procreate and the gym), with Apple's $2.99 in the last.
+			expect(totals(1), today).toEqual([64000, 65500, 61000, 69000, 67200]);
+			expect(totals(3), today).toEqual([17000, 18200, 16500, 19000, 17600]);
+			expect(totals(2), today).toEqual([17000, 19500, 21500, 24000, 26200]);
+			expect(totals(4), today).toEqual([24000, 31000, 20500, 28000, 32000]);
+			expect(totals(5), today).toEqual([12000, 21000, 14000, 15648, 24447]);
+		}
 	});
 
 	// The designed totals above include Netflix's $17.99 in Household, and Safe to spend is $17.99 lower.
@@ -467,8 +546,8 @@ describe("resetDemo", () => {
 	});
 
 	it("replaces all data with the seed, and running it twice gives the same result", async () => {
-		await resetDemo(env.DB, "2026-09-22");
-		await resetDemo(env.DB, "2026-09-22");
+		await resetDemo(env.DB, "2026-09-30");
+		await resetDemo(env.DB, "2026-09-30");
 
 		const data = await loadMonth(env.DB, "2026-09");
 		const summary = summarizeMonth({
@@ -476,10 +555,16 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		// Childcare's $1,040 budget less the three Fridays paid so far in September ($720), and Rent's $1,200 budget less
-		// the $600 paid so far this month.
+		// Childcare's $1,040 budget less the four Fridays paid in September ($960), and Rent's $1,200 budget less the
+		// $600 paid this month, on the last day when the month's spending is all in (#322). The $245 rest is as above.
 		expect(summary.safeToSpendCents).toBe(
-			24500 + 104000 + 120000 - 72000 - 60000,
+			24500 +
+				(28600 - 34800) +
+				(22801 - 12152) +
+				104000 +
+				120000 -
+				96000 -
+				60000,
 		);
 		expect(summary.uncategorized.count).toBe(10);
 

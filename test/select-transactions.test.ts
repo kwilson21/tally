@@ -1408,11 +1408,13 @@ describe("select several transactions", () => {
 
 	it("changes exactly the rows the link ticked when an action follows", async () => {
 		// The demo seed follows the date, and on some days the page's rows add a sentence to the announce: a ticked
-		// refund moves its purchase, or three picks of one merchant offer a rule. Pinned to a day with neither (#528).
+		// refund moves its purchase, or three picks of one merchant offer a rule. Pinned to a day with neither (#528):
+		// the 15th, with October's list, where the Target refund counts in September (its purchase's month) and isn't
+		// listed, and Daycare has two Fridays so far (#322).
 		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-07T16:00:00Z"));
-		await resetDemo(env.DB, "2026-10-07");
-		const ids = rowIds(await pageHtml("month=all&select=1"));
+		vi.setSystemTime(new Date("2026-10-15T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-15");
+		const ids = rowIds(await pageHtml("month=2026-10&select=1"));
 		const before = (await snapshot()) as SnapshotRow[];
 		const res = await post(
 			"/transactions/select/category/save",
