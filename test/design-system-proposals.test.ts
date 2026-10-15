@@ -3050,10 +3050,10 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		390: "pr-2",
 	};
 	const ROOM_PX: Record<number, number> = { 320: 64, 360: 16, 390: 8 };
-	// Option A's drawing shows from this frame width up (the measured fit, as home-top.tsx's cost note says).
-	const N = 375;
-	// The one frame height: the tallest picture's content (Option C's), measured in Chrome at 1280 px.
-	const FRAME_HEIGHT = 522;
+	// Option A's drawing shows from this frame width up: decision 116's 390 px edge for amounts of 7 characters or fewer.
+	const N = 390;
+	// The one frame height: the tallest picture's content, Option C's, measured in Chrome at 1280, 390 and 320 px.
+	const FRAME_HEIGHT = 478;
 
 	it("opens the page with its section first, titled and dated as the brief asks", async () => {
 		const html = await drawn();
@@ -3113,7 +3113,8 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 			expect(frame[1]).toContain("@container");
 		});
 		// Every frame shares one height: the tallest picture's content, measured in Chrome. Not the 420 px of
-		// the first draft, nor the 442 px before How this works, nor the 498 px before the Start here link.
+		// the first draft, nor the 442 px before How this works, nor the 498 px before the Start here link,
+		// nor the 522 px with How this works under the status.
 		const heights = new Set(
 			frames.map((frame) => frame[1]?.match(/h-\[\d+px\]/)?.[0]),
 		);
@@ -3121,6 +3122,7 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		expect(heights.has("h-[420px]")).toBe(false);
 		expect(heights.has("h-[442px]")).toBe(false);
 		expect(heights.has("h-[498px]")).toBe(false);
+		expect(heights.has("h-[522px]")).toBe(false);
 		expect(heights.has(`h-[${FRAME_HEIGHT}px]`)).toBe(true);
 	});
 
@@ -3162,14 +3164,28 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		expect(amounts.filter((a) => a === "$9,999").length).toBe(12);
 	});
 
-	it("hides option A's drawing below 375 px and shows it from 375 px up, by the frame's own width", async () => {
+	it("hides option A's drawing below 390 px and shows it from 390 px up, by the frame's own width", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
 		const [, a = ""] = options(chunk);
 		expect(a).toMatch(
 			new RegExp(`class="[^"]*\\bhidden\\b[^"]*@min-\\[${N}px\\]:block`),
 		);
 		expect(a).not.toContain("@min-[360px]");
+		expect(a).not.toContain("@min-[375px]");
 		expect(a).not.toMatch(/size-18/);
+	});
+
+	it("words Option A as decision 116's rule: no drawing below 390 px for 7 characters or fewer, below 640 px for 8 or more", async () => {
+		const chunk = block(await drawn(), "p127-safe-small");
+		const [, a = ""] = options(chunk);
+		expect(a).toContain("390 px");
+		expect(a).toContain("640 px");
+		expect(a).toContain("7 characters or fewer");
+		expect(a).toContain("8 or more");
+		expect(a).toContain(
+			"No picture&#39;s amount reaches 8 characters, so the pictures show only the 390 px edge.",
+		);
+		expect(a).not.toContain("375");
 	});
 
 	it("puts the real month navigation in every picture, inside its inert page, so its links take no focus", async () => {
@@ -3194,22 +3210,13 @@ describe("GET /design-system/proposals, P127 · Safe to spend on a small phone (
 		}
 	});
 
-	it("draws How this works after the status sentence in every picture, as the demo Home does", async () => {
+	it("draws no How this works in P127's pictures: main's HomeTop leaves it to HowFoot at Home's foot (#592)", async () => {
 		const chunk = block(await drawn(), "p127-safe-small");
-		const link = 'aria-label="How this works: the budget"';
-		expect(
-			chunk.match(/aria-label="How this works: the budget"/g)?.length,
-		).toBe(24);
-		for (const picture of pictures(chunk)) {
-			// The label names the amount; the slice runs on into the next picture, so read only this label.
-			const label = picture.slice(0, picture.indexOf('"'));
-			const status = label.includes("with −$9,999")
-				? "Over budget this month."
-				: "Eating Out is $36 over.";
-			const at = picture.indexOf(status);
-			expect(at).toBeGreaterThan(-1);
-			expect(picture.indexOf(link)).toBeGreaterThan(at);
-		}
+		expect(chunk).not.toContain('aria-label="How this works: the budget"');
+		expect(chunk).not.toContain(">How this works<");
+		// Every picture still draws its status sentence: 12 under $9,999 and 12 under −$9,999.
+		expect(chunk.match(/Eating Out is \$36 over\./g)?.length).toBe(12);
+		expect(chunk.match(/Over budget this month\./g)?.length).toBe(12);
 	});
 
 	it("draws option B's drawing at 72 px (size-18) with a 16 px gap on phones", async () => {

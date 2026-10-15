@@ -1,17 +1,17 @@
 // P127 (#500 part 1): Home's Safe to spend row on a small phone, drawn for the owner's pick (decision 47).
 // Each picture is Home's top as the app draws it, in a frame 320, 360 or 390 px wide, so its content lays out
-// at that width. Each one draws the demo banner, with its Start here link, above the masthead and How this works
-// after the status, as the demo Home does. The frame is a container, so a width rule reads the frame, not the
-// window. Whatever runs past the frame's right edge shows past a terracotta guide line, in the room the wrapper
-// leaves; the caption is the fit measured in Chrome at those widths. Every frame is 522 px tall, the tallest
-// picture's content, so nothing spills onto its caption. The pictures include #566's fix for the minus
-// (#500 part 2, not on main yet), which keeps the minus with its number, so the amount never wraps.
+// at that width. Each one draws the demo banner, with its Start here link, above the masthead, as the demo Home
+// does. How this works sits at Home's foot since #592, so the pictures leave it out. The frame is a container,
+// so a width rule reads the frame, not the window. Whatever runs past the frame's right edge shows past a
+// terracotta guide line, in the room the wrapper leaves; the caption is the fit measured in Chrome at those
+// widths. Every frame is 478 px tall, the tallest picture's content (Option C's), so nothing spills onto its
+// caption. The pictures include #566's fix for the minus (#500 part 2, not on main yet), which keeps the minus
+// with its number, so the amount never wraps.
 
 import { formatCents } from "../money";
 import { Wordmark } from "../views/brand";
 import { FeedbackButton } from "../views/feedback-button";
 import { headlineAmountClass } from "../views/headline-amount";
-import { HowLink } from "../views/how-link";
 import { LedgerIllustration } from "../views/illustration";
 import { DemoBanner } from "../views/layout";
 import { MonthNavigation } from "../views/month-navigation";
@@ -34,7 +34,7 @@ const FRAME_WIDTH: Record<Width, string> = {
 	390: "w-[390px]",
 };
 
-/** Where the drawing goes on a phone: beside the amount as today, left out below 375 px, 72 px beside it, or under the amount. */
+/** Where the drawing goes on a phone: beside the amount as today, left out below 390 px, 72 px beside it, or under the amount. */
 type Layout = "today" | "hide" | "small" | "under";
 
 /** The six pictures of an option, in order: 320, 360, then 390 px, each with $9,999 above −$9,999 (width-major). */
@@ -69,7 +69,7 @@ const FITS: Record<Layout, string[]> = {
 function Drawing({ layout }: { layout: Exclude<Layout, "under"> }) {
 	const look = {
 		today: "shrink-0 [&>svg]:size-28",
-		hide: "hidden @min-[375px]:block shrink-0 [&>svg]:size-28",
+		hide: "hidden @min-[390px]:block shrink-0 [&>svg]:size-28",
 		small: "shrink-0 [&>svg]:size-18",
 	}[layout];
 	return (
@@ -82,7 +82,7 @@ function Drawing({ layout }: { layout: Exclude<Layout, "under"> }) {
 /**
  * Home's top as HomeTop draws it at a phone's width. The pictures include #566's fix for the minus: the
  * real month navigation, Safe to spend with its Why? link, the amount with the minus kept with its number,
- * the status sentence, and How this works after it, as main's HomeTop draws it.
+ * and the status sentence. How this works is left out: since #592 it sits at Home's foot, not here.
  */
 function HomeTop({
 	amount,
@@ -125,7 +125,6 @@ function HomeTop({
 							<LedgerIllustration />
 						</div>
 					</div>
-					<HowLink section="budget" />
 				</>
 			) : (
 				<>
@@ -139,7 +138,6 @@ function HomeTop({
 						<Drawing layout={layout} />
 					</div>
 					<p class="mt-3 font-serif text-lg italic">{status}</p>
-					<HowLink section="budget" />
 				</>
 			)}
 		</>
@@ -159,7 +157,7 @@ const ROOM: Record<Width, string> = {
  * Home does. The frame's own overflow stays visible, so a spill shows past the line; its wrapper leaves
  * room for it and scrolls only past that. The room is per width, in ROOM: 320 px keeps 64 px for its
  * widest spill (55 px), 360 px keeps 16 px for its own (15 px), and 390 px never spills, so it keeps 8 px.
- * The widest row is then 390 px, 2 × 398 + 16 = 812 px, inside the 824 px card. The frame is 522 px tall,
+ * The widest row is then 390 px, 2 × 398 + 16 = 812 px, inside the 824 px card. The frame is 478 px tall,
  * the tallest picture's content (Option C's, measured in Chrome at 1280, 390 and 320 px), so no picture runs past
  * its bottom.
  */
@@ -180,7 +178,7 @@ function Screen({
 			<div
 				role="img"
 				aria-label={`${name}, ${width} px wide, with ${amount}, on a phone`}
-				class={`@container relative h-[522px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
+				class={`@container relative h-[478px] shrink-0 ${FRAME_WIDTH[width]} rounded-control bg-paper ring-1 ring-inset ring-ink`}
 			>
 				<div inert>
 					<DemoBanner />
@@ -252,13 +250,13 @@ export function SafeToSpendSmallProposal() {
 					<Pictures name="Reference · Today on main" layout="today" />
 				</Choice>
 				<Choice
-					name="Option A · No drawing below 375 px"
-					note="Under 375 px the notebook is left out, so the amount has the whole row; from 375 px up it stays beside the amount, as today."
-					cost="a wrapper div with hidden min-[375px]:block around the drawing in home-top.tsx. Home is 8 px shorter at 320 and 360 px and the same at 390 px."
+					name="Option A · No drawing below 390 px"
+					note="Below 390 px the notebook is left out for amounts of 7 characters or fewer, like $9,999 and −$9,999, and below 640 px for 8 or more, like −$19,999 and $199,999, so the amount has the whole row. Elsewhere it stays beside the amount, as today. No picture's amount reaches 8 characters, so the pictures show only the 390 px edge."
+					cost="a wrapper div around the drawing in home-top.tsx, hidden below 390 px for 7 characters or fewer and below 640 px for 8 or more. Home is 8 px shorter at 320 and 360 px and the same at 390 px."
 					why="it fits all six pictures, and of those options it changes Home's height least."
 					width="w-[824px]"
 				>
-					<Pictures name="Option A · No drawing below 375 px" layout="hide" />
+					<Pictures name="Option A · No drawing below 390 px" layout="hide" />
 				</Choice>
 				<Choice
 					name="Option B · A smaller drawing on phones"
