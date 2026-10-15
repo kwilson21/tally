@@ -4283,21 +4283,36 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		}
 	});
 
-	it("draws P131 A's folded row and its opened picture, with no filled status pill", async () => {
+	it("draws P131 A's September charge as its own row, April to August folded, with no filled status pill", async () => {
 		const chunk = specimen(await drawn(), "p131-bill-page");
+		expect(chunk).toContain(
+			"Tally found asks to be linked; months nothing was paid say so once, instead of &#39;Not paid&#39; six times.",
+		);
 		const closed = picture(chunk, `Option A, a bill&#39;s page${PHONE}`);
-		expect(closed).toContain("April to September");
-		expect(closed).toContain("6 months with no payment linked");
-		expect(closed).toContain("Link them");
+		// September has a charge Tally found: one row, with Link it as its action (the one terracotta step).
+		expect(closed).toContain("September");
+		expect(closed).toContain("A $2.99 charge on Sep 23 looks like this");
+		expect(closed.split("Link it").length - 1).toBe(1);
+		expect(closed).toContain('text-accent">Link it</span>');
+		// April to August had no charge: one folded row, reading No payment.
+		expect(closed).toContain("April to August");
+		expect(closed).toContain("No payment");
+		expect(closed).not.toContain("April to September");
+		expect(closed).not.toContain("Link them");
+		expect(closed).not.toContain("6 months");
 		// The demo banner is bg-band too, so a status pill is its class with the rounded box around it.
 		expect(closed).not.toContain("rounded-control bg-band px-2");
 		expect(closed).not.toContain("<details open");
 		const opened = picture(
 			chunk,
-			`Option A, a bill&#39;s page, with April to September opened${PHONE}`,
+			`Option A, a bill&#39;s page, with April to August opened${PHONE}`,
 		);
 		expect(opened).toContain("<details open");
-		expect(opened.split("Link a payment").length - 1).toBe(6);
+		// The five months under the fold each say Link a payment in muted words, not terracotta ones.
+		expect(
+			opened.split('text-sm text-muted">Link a payment</span>').length - 1,
+		).toBe(5);
+		expect(opened).not.toContain('text-accent">Link a payment');
 		expect(opened).not.toContain("rounded-control bg-band px-2");
 	});
 
@@ -4379,6 +4394,9 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		const october = picture(chunk, `Option A, the month dots, October${PHONE}`);
 		expect(october.split('data-mark="under"').length - 1).toBe(3);
 		expect(october.split('data-mark="over"').length - 1).toBe(2);
+		// April sits before any budget was set, so its dot holds an empty ring, named as having no budgets.
+		expect(october.split('data-mark="empty"').length - 1).toBe(1);
+		expect(october).toContain("April, no budgets");
 		expect(october).toContain("September, ended $2,134 over");
 		expect(october).toContain("August, ended $134 over");
 		expect(october).toContain("May, ended $310 under");

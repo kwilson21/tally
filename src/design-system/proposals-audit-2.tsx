@@ -11,7 +11,7 @@
 
 import type { Child } from "hono/jsx";
 import type { CategorySummary } from "../budget";
-import { monthName } from "../dates";
+import { monthName, monthsBefore, shortDay } from "../dates";
 import { formatCents } from "../money";
 import type { MonthPoint } from "../trends";
 import {
@@ -100,12 +100,20 @@ type Month = {
 	month: string;
 	status: "upcoming" | "paid" | "not-paid";
 	due: string;
+	/** A charge Tally found that matches this month and asks to be linked (the demo's lookalike). */
+	charge?: boolean;
 };
 const STREAMING: Month[] = [
 	{ period: "2026-12", month: "December", status: "upcoming", due: "Dec 15" },
 	{ period: "2026-11", month: "November", status: "upcoming", due: "Nov 15" },
 	{ period: "2026-10", month: "October", status: "paid", due: "Oct 15" },
-	{ period: "2026-09", month: "September", status: "not-paid", due: "Sep 15" },
+	{
+		period: "2026-09",
+		month: "September",
+		status: "not-paid",
+		due: "Sep 15",
+		charge: true,
+	},
 	{ period: "2026-08", month: "August", status: "not-paid", due: "Aug 15" },
 	{ period: "2026-07", month: "July", status: "not-paid", due: "Jul 15" },
 	{ period: "2026-06", month: "June", status: "not-paid", due: "Jun 15" },
@@ -119,6 +127,14 @@ const OCTOBER_PAYMENT: OccurrencePayment = {
 	amountCents: 299,
 	matchedBy: "auto",
 };
+/**
+ * The demo's Apple.com/bill lookalike (seed.ts's streaming block): eight days after the prior month's
+ * due day, which is min(16, today's day). On Oct 15 that is Sep 23.
+ */
+const LOOKALIKE = shortDay(
+	`${monthsBefore(CURRENT, 1)}-${String(Math.min(16, Number(TODAY.slice(8, 10))) + 8).padStart(2, "0")}`,
+	TODAY,
+);
 
 /** A category with a budget, as September's bars show it. */
 type BudgetRow = {
@@ -209,8 +225,13 @@ const SAMPLE_BUDGETS: BudgetRow[] = [
 	},
 ];
 
-/** The strip's results, from the demo: positive is under budget, negative is over (May to September). */
-const RESULT_CENTS: Record<string, number> = {
+/**
+ * The strip's results, from the demo: positive is under budget, negative is over (May to September). A
+ * null is a month with no budgets. The demo has no such month, so April, before any budget was set, is a
+ * sample of one; its dot holds an empty ring.
+ */
+const RESULT_CENTS: Record<string, number | null> = {
+	"2026-04": null,
 	"2026-05": 31000,
 	"2026-06": 9800,
 	"2026-07": 31500,
@@ -218,6 +239,7 @@ const RESULT_CENTS: Record<string, number> = {
 	"2026-09": -213400,
 };
 const STRIP_MONTHS = [
+	"2026-04",
 	"2026-05",
 	"2026-06",
 	"2026-07",
@@ -638,9 +660,13 @@ function LedgerRow({
 	);
 }
 
-/** A: each month one ruled row, and the unlinked months folded into one row with a single Link them. */
+/**
+ * A (P131): each month one ruled row. A charge Tally found is a row of its own, with Link it; the months
+ * nothing was paid fold into one row, April to August, that opens to its five muted rows.
+ */
 function LedgerMonths({ opened }: { opened: boolean }) {
-	const unlinked = STREAMING.filter((m) => m.status === "not-paid");
+	const charge = STREAMING.find((m) => m.charge);
+	const quiet = STREAMING.filter((m) => m.status === "not-paid" && !m.charge);
 	return (
 		<>
 			{STREAMING.filter((m) => m.status === "upcoming").map((m) => (
@@ -657,23 +683,34 @@ function LedgerMonths({ opened }: { opened: boolean }) {
 				<span class="min-w-0 flex-1 text-lg">October</span>
 				<span class="text-sm text-muted">Paid Oct 15 · $2.99</span>
 			</li>
-			<li class="py-2">
-				<div class="flex min-h-11 items-center justify-between gap-3">
-					<span class="text-lg">April to September</span>
+			{charge && (
+				<li>
 					<a
-						href="/bills/1/occurrences/2026-04/link#payment-picker"
-						class="inline-flex min-h-11 items-center text-accent"
+						href={`/bills/1/occurrences/${charge.period}/link#payment-picker`}
+						class={`flex min-h-11 items-center gap-3 py-2 text-ink no-underline ${ROW_OPENS}`}
 					>
-						Link them
+						<span class="min-w-0 flex-1">
+							<span class="block text-lg">{charge.month}</span>
+							<span class="block text-sm text-muted">
+								A $2.99 charge on {LOOKALIKE} looks like this
+							</span>
+						</span>
+						<span class="text-accent">Link it</span>
+						<RowArrow />
 					</a>
-				</div>
-				<p class="text-sm text-muted">6 months with no payment linked</p>
-				<details open={opened} class="mt-1">
-					<summary class="flex min-h-11 cursor-pointer list-none items-center text-sm text-muted">
-						Show the six months
+				</li>
+			)}
+			<li class="py-2">
+				<details open={opened}>
+					<summary
+						class={`flex min-h-11 cursor-pointer list-none items-center gap-3 text-ink ${ROW_OPENS}`}
+					>
+						<span class="min-w-0 flex-1 text-lg">April to August</span>
+						<span class="text-sm text-muted">No payment</span>
+						<RowArrow />
 					</summary>
 					<ul class="divide-y divide-rule">
-						{unlinked.map((m) => (
+						{quiet.map((m) => (
 							<LedgerRow
 								period={m.period}
 								month={m.month}
@@ -936,11 +973,18 @@ function MarkedStrip({ month }: { month: string }) {
 					{STRIP_MONTHS.map((item) => {
 						const current = item === CURRENT;
 						const selected = item === month;
-						const cents = RESULT_CENTS[item] ?? 0;
+						const cents = RESULT_CENTS[item] ?? null;
 						const words = current
 							? `${monthName(item)}, this month`
-							: `${monthName(item)}, ended ${dollars(Math.abs(cents))} ${cents < 0 ? "over" : "under"}`;
-						const mark = current ? null : cents < 0 ? (
+							: cents === null
+								? `${monthName(item)}, no budgets`
+								: `${monthName(item)}, ended ${dollars(Math.abs(cents))} ${cents < 0 ? "over" : "under"}`;
+						const mark = current ? null : cents === null ? (
+							<span
+								data-mark="empty"
+								class="size-3 rounded-full border-2 border-muted"
+							/>
+						) : cents < 0 ? (
 							<svg
 								data-mark="over"
 								aria-hidden="true"
@@ -1113,13 +1157,13 @@ export function AuditRoundTwoProposals() {
 					</Choice>
 					<Choice
 						name="Option A · A quiet ledger of months"
-						note="Each month is one ruled row: October · Paid Oct 15 · $2.99 with a small check, or November · Due Nov 15 · $2.99. The months with no payment linked fold into one row."
-						extra="A month nobody linked says just that, once, instead of Not paid six times."
+						note="Each month is one ruled row, its status in muted words: October · Paid Oct 15 · $2.99 with a small check, or November · Due Nov 15 · $2.99. A charge Tally found is a row of its own, with Link it."
+						extra="A charge Tally found asks to be linked; months nothing was paid say so once, instead of 'Not paid' six times."
 						cost="BillOccurrenceRow redrawn; the fold is a details."
 						why="the page stops reading like six missed bills, and its one repeated link becomes one."
 						width="w-[722px]"
 					>
-						<Shot caption="Streaming at 390 px: the six months folded">
+						<Shot caption="Streaming at 390 px: April to August folded into one row">
 							<Phone label="Option A, a bill's page" tab="bills">
 								<BillPage head={<QuietHead />}>
 									<Payments>
@@ -1128,9 +1172,9 @@ export function AuditRoundTwoProposals() {
 								</BillPage>
 							</Phone>
 						</Shot>
-						<Shot caption="The same at 390 px, with April to September opened">
+						<Shot caption="The same at 390 px, with April to August opened">
 							<Phone
-								label="Option A, a bill's page, with April to September opened"
+								label="Option A, a bill's page, with April to August opened"
 								tab="bills"
 							>
 								<BillPage head={<QuietHead />}>
@@ -1346,7 +1390,7 @@ export function AuditRoundTwoProposals() {
 						why="it says something the page knows, and it stays words-first for screen readers."
 						width="w-[722px]"
 					>
-						<Shot caption="October at 390 px">
+						<Shot caption="October at 390 px: April is a sample month with no budgets, an empty ring">
 							<Phone label="Option A, the month dots, October" tab="home">
 								<MarkedStrip month={CURRENT} />
 							</Phone>
