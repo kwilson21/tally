@@ -20,9 +20,11 @@ describe("MonthEnd budget bars", () => {
 	it("keeps cents in the chart accessible name for tiny amounts", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="tiny"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -43,9 +45,11 @@ describe("MonthEnd budget bars", () => {
 	it("keeps five categories in one row without the scrolling cue", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="five"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(5)}
 			/>,
 		);
@@ -75,9 +79,11 @@ describe("MonthEnd budget bars", () => {
 		] as const) {
 			const html = renderToString(
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId={`n-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -98,9 +104,11 @@ describe("MonthEnd budget bars", () => {
 		(count) => {
 			const html = renderToString(
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId={count === 12 ? "twelve" : `n-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -224,9 +232,11 @@ describe("MonthEnd budget bars", () => {
 		for (const count of [5, 7, 12]) {
 			const html = renderToString(
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId={`budget-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -258,9 +268,11 @@ describe("MonthEnd budget bars", () => {
 		(cents, expected, overageCents, overage) => {
 			const html = renderToString(
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId="money"
 					monthName="September"
 					amountCents={cents}
+					unbudgeted={[]}
 					rows={[
 						{
 							id: 1,
@@ -284,9 +296,11 @@ describe("MonthEnd budget bars", () => {
 	it("is not stamped Over or Under when no category had a budget", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="no-budgets"
 				monthName="September"
 				amountCents={-5700}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -299,9 +313,11 @@ describe("MonthEnd budget bars", () => {
 	it("still stamps Over when a budgeted category is overspent", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="budgeted-over"
 				monthName="September"
 				amountCents={-5700}
+				unbudgeted={[]}
 				rows={rows(1)}
 			/>,
 		);
@@ -313,9 +329,11 @@ describe("MonthEnd budget bars", () => {
 	it("still stamps Under with the unsigned amount when a budgeted category is under", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="budgeted-under"
 				monthName="September"
 				amountCents={5700}
+				unbudgeted={[]}
 				rows={rows(1)}
 			/>,
 		);
@@ -326,9 +344,11 @@ describe("MonthEnd budget bars", () => {
 	it("sizes a negative result with its minus sign counted, as #514 does (#519)", () => {
 		const nine = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="nine"
 				monthName="September"
 				amountCents={-99999900}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -336,9 +356,11 @@ describe("MonthEnd budget bars", () => {
 		expect(nine).toContain("max-sm:text-5xl");
 		const eight = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="eight"
 				monthName="September"
 				amountCents={-9999900}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -349,9 +371,11 @@ describe("MonthEnd budget bars", () => {
 	it("never shows negative zero", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="zero"
 				monthName="September"
 				amountCents={-1}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -362,9 +386,11 @@ describe("MonthEnd budget bars", () => {
 	it("keeps short category labels at their natural width", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="short"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -387,15 +413,19 @@ describe("MonthEnd budget bars", () => {
 		const html = renderToString(
 			<>
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId="a"
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(6)}
 				/>
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId="b"
 					monthName="October"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(6)}
 				/>
 			</>,
@@ -420,9 +450,11 @@ describe("MonthEnd budget bars", () => {
 	it("caps long category and overage labels while preserving full accessible names", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="long"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -471,9 +503,11 @@ describe("MonthEnd budget bars", () => {
 	it("gives a ten-category chart its phone width with the cue, and 667px in the wide copy without it (#300)", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="ten-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(10)}
 			/>,
 		);
@@ -508,9 +542,11 @@ describe("MonthEnd budget bars", () => {
 		(count, width, step) => {
 			const html = renderToString(
 				<MonthEnd
+					needsCategoryCents={0}
 					chartId={`wide-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -537,9 +573,11 @@ describe("MonthEnd budget bars", () => {
 	it("caps the wide copy's labels at 56 for ten categories, and the phone copy's at 62 (#300)", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="ten-caps"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(10)}
 			/>,
 		);
@@ -558,9 +596,11 @@ describe("MonthEnd budget bars", () => {
 	it("keeps the cue's 44px in every copy of a chart with eleven categories (#300)", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="eleven-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(11)}
 			/>,
 		);
@@ -573,9 +613,11 @@ describe("MonthEnd budget bars", () => {
 	it("leaves a chart of five categories at 350px with no cue width (#300)", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="five-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(5)}
 			/>,
 		);
@@ -588,9 +630,11 @@ describe("MonthEnd budget bars", () => {
 	it("lets the amount and its stamp wrap when a large result doesn't fit one line (#311)", () => {
 		const html = renderToString(
 			<MonthEnd
+				needsCategoryCents={0}
 				chartId="large"
 				monthName="September"
 				amountCents={100_000_000}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);

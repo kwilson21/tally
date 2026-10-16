@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { billTotalsForRows, calculateBillTotals } from "../src/bills/totals";
 import { budgetForMonth, summarizeMonth } from "../src/budget";
+import { monthCause, monthCauses } from "../src/budgets/month-cause";
 import {
 	DEFAULT_TIME_ZONE,
 	daysInMonth,
@@ -418,13 +419,71 @@ describe("GET / with the demo seed", () => {
 		}
 		const selected = links.find((link) => link[1] === viewedMonth);
 		expect(selected?.[2]).toContain('aria-current="page"');
-		expect(selected?.[3]).toContain("bg-ink");
+		expect(selected?.[3]).toContain("ring-ink");
 		const current = links.find((link) => link[1] === currentMonth);
 		expect(current?.[3]).toContain(
 			"ring-2 ring-accent ring-offset-2 ring-offset-paper",
 		);
 		expect(current?.[3]).toContain("bg-muted/45");
-		expect(current?.[3]).toContain(", this month");
+		expect(current?.[3]).toContain(", so far");
+	});
+
+	it("names a finished over month's biggest causes under its stamp, linked to Not budgeted", async () => {
+		const month = "2026-09";
+		const data = await loadMonth(env.DB, month);
+		const summary = summarizeMonth({ month, ...data, unpaidDueBillsCents: 0 });
+		const budgeted = new Set(summary.categories.map((cat) => cat.id));
+		const unbudgeted = data.categories
+			.filter((cat) => !budgeted.has(cat.id))
+			.map((cat) => ({
+				name: cat.name,
+				spentCents: data.transactions
+					.filter((t) => t.categoryId === cat.id && !t.income)
+					.reduce((sum, t) => sum + t.amountCents, 0),
+			}));
+		const over = summary.totalSpentCents - summary.totalBudgetCents;
+		const cause = monthCause(
+			monthCauses(
+				summary.categories,
+				unbudgeted,
+				summary.uncategorized.spentCents,
+			),
+			over,
+		);
+		if (!cause) throw new Error("September has no cause to name");
+		expect(cause.text.startsWith("Most of it had no budget:")).toBe(true);
+		expect(cause.named.every((named) => named.kind === "unbudgeted")).toBe(
+			true,
+		);
+
+		const { html } = await homeAt(month);
+		expect(html).toContain(`<a href="#${month}-not-budgeted"`);
+		expect(html).toContain(`id="${month}-not-budgeted"`);
+		expect(html).toContain(cause.text);
+		// The strip's name for September says the same number as MonthEnd prints.
+		const shown = html.match(
+			/aria-label="September ended"[\s\S]*?whitespace-nowrap[^>]*>([^<]+)</,
+		)?.[1];
+		expect(shown).toBeTruthy();
+		expect(html).toContain(`September, ended ${shown} over`);
+	});
+
+	it("follows the nightly demo reset: August's pet spending is Needs a category, and August ends over", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-16T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-16", { categoryExample: true });
+		const { html } = await homeAt("2026-08");
+		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain("Needs a category $277");
+		expect(html).toContain('<a href="#2026-08-needs-category"');
+		expect(html).toContain('<li id="2026-08-needs-category"');
+	});
+
+	it("gives a finished month that ended under budget no cause line, and marks it under", async () => {
+		const { html } = await homeAt("2026-05");
+		expect(html).not.toContain("Most of it");
+		expect(html).not.toContain("Part of it");
+		expect(html).toMatch(/data-mark="under"[^>]*>/);
 	});
 
 	it("renders an HTML page titled Tally", async () => {
@@ -861,7 +920,7 @@ describe("GET / with the demo seed", () => {
 		expect(html).toMatch(/whitespace-nowrap[^"]*">\$30<\/p>/);
 		expect(html).toContain("border-ok text-ok");
 		expect(html).toContain(
-			'<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>',
+			'<h3 id="2026-09-not-budgeted" class="mt-6 text-sm text-muted">Not budgeted</h3>',
 		);
 		expect(html).toMatch(
 			/Needs a category<\/span><span class="text-right text-lg">\$50<\/span>/,

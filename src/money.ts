@@ -62,6 +62,16 @@ export function centsToAmount(cents: number): string {
 	return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
+/**
+ * A finished month's amount as MonthEnd, its cause line and the month strip's words say it: whole dollars, except a
+ * nonzero amount under $1 keeps its cents so it never reads $0.
+ */
+export function wholeUnlessTiny(cents: number): string {
+	return formatCents(cents, {
+		wholeDollars: cents === 0 || Math.abs(cents) >= 100,
+	});
+}
+
 /** Formats integer cents for display. */
 export function formatCents(
 	cents: number,
