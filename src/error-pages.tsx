@@ -39,9 +39,17 @@ export function retryHref(
 // the request's hx-select. It gets no body to swap instead, and HX-Reswap: none says so.
 const isHtmx = (c: Context<App>) => Boolean(c.req.header("HX-Request"));
 
+// The keys sheet (#72, #655, #667): keyboard.js's ? and the sheet's close ask for #keys, which htmx names by its tag and id.
+// Such a GET gets the page, so Layout draws the sheet from the address or leaves #keys empty, with a 200 htmx swaps.
+const isKeysRequest = (c: Context<App>) =>
+	c.req.method === "GET" &&
+	isHtmx(c) &&
+	c.req.header("HX-Target") === "div#keys";
+
 /** The app's own 404: any address nothing answers, and any route that reports a missing record. */
 export const notFoundPage: NotFoundHandler<App> = (c) => {
-	if (isHtmx(c)) {
+	const keys = isKeysRequest(c);
+	if (isHtmx(c) && !keys) {
 		// The toast and the announcer say it (CLAUDE.md's HTMX feedback rule); the page stays as it was.
 		const message = "This page isn't here.";
 		c.header("HX-Reswap", "none");
@@ -59,7 +67,7 @@ export const notFoundPage: NotFoundHandler<App> = (c) => {
 		>
 			<ErrorPage kind="404" />
 		</Layout>,
-		404,
+		keys ? 200 : 404,
 	);
 };
 
@@ -79,13 +87,8 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 	);
 	// Layout's noSwap already keeps a 500 out of the page; saying so here too means it never swaps.
 	// No toast from here: toast.js shows "Couldn't save" or "Couldn't load" for a 500 itself.
-	// The keys sheet (#72, #655): keyboard.js's ? and the sheet's close ask for #keys, which htmx names by its tag and id.
-	// Such a GET gets the page, so Layout draws the sheet from the address or leaves #keys empty, with a 200 htmx swaps
-	// (htmx doesn't swap a 500, and the page behind already shows this one).
-	const keys =
-		c.req.method === "GET" &&
-		isHtmx(c) &&
-		c.req.header("HX-Target") === "div#keys";
+	// A keys request gets the page, not an empty 500: htmx doesn't swap a 500, and the page behind already shows this one.
+	const keys = isKeysRequest(c);
 	if (isHtmx(c) && !keys) {
 		c.header("HX-Reswap", "none");
 		return c.body(null, 500);
