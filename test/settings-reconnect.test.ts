@@ -653,6 +653,41 @@ describe("bank sign-in reminder Settings", () => {
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
 	});
 
+	// A flip and a Remove now send separate requests, so both can be in flight: each one's answer must hold up whatever
+	// order they land in. The route tests run them in sequence; the markup test covers the separate scopes.
+	it("a switch save then a Remove leave the switch On and the address gone", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		await saveBankSignInEmails(env.DB, false);
+		await post("/settings/bank-sign-in-emails", { enabled: "on" });
+		const removed = await post("/settings/bank-sign-in-emails", {
+			enabled: "on",
+			remove: "dana@example.com",
+		});
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const block = emailsBlock(removed.html);
+		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(block).not.toContain("dana@example.com");
+		expect(block).toContain("riley@example.com");
+	});
+
+	it("a Remove then a switch save leave the switch On and the address gone", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		await saveBankSignInEmails(env.DB, false);
+		await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
+		});
+		const flipped = await post("/settings/bank-sign-in-emails", {
+			enabled: "on",
+		});
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const block = emailsBlock(flipped.html);
+		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(block).not.toContain("dana@example.com");
+		expect(block).toContain("riley@example.com");
+	});
+
 	it("shows the people the switch goes to as round initials, with their addresses read aloud", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		await noteHouseholdMember(env.DB, "riley@example.com", 100);

@@ -100,26 +100,49 @@ describe("GET each Settings page", () => {
 });
 
 describe("Switches save when flipped", () => {
-	it("the AI switches post on change and keep Save only inside noscript", async () => {
+	it("the AI switches post on their own change and keep Save only inside noscript", async () => {
 		const { html } = await get("/settings/ai");
-		expect(html).toMatch(/<form[^>]*hx-post="\/settings\/ai"[^>]*>/);
-		expect(html).toMatch(/hx-trigger="change, submit"/);
+		const switches = [...html.matchAll(/<input[^>]*role="switch"[^>]*>/g)].map(
+			(m) => m[0],
+		);
+		expect(switches).toHaveLength(5);
+		for (const raw of switches) {
+			expect(raw).toContain('hx-post="/settings/ai"');
+			expect(raw).toContain('hx-trigger="change"');
+		}
+		// The form itself posts nothing, so one change never sends two requests.
+		expect(html).not.toMatch(/<form[^>]*hx-trigger=/);
 		expect(html).toMatch(/<noscript>[\s\S]*?Save[\s\S]*?<\/noscript>/);
 		expect(html.indexOf('id="ai-save"')).toBeGreaterThan(
 			html.indexOf("<noscript>"),
 		);
 	});
 
-	it("the bank sign-in emails switch posts on change and keeps Save only inside noscript", async () => {
+	it("the bank sign-in emails switch posts on its own change, Remove posts on submit, and both swap the one stable wrapper's body", async () => {
 		const { html } = await get("/settings/household");
-		expect(html).toMatch(/hx-trigger="change, submit"/);
 		expect(html).toMatch(/<noscript>[\s\S]*?Save[\s\S]*?<\/noscript>/);
-		// Each flip replaces the one before it, so the switch and the toast always show the last save.
-		const form =
-			html.split('id="household-emails"')[1]?.match(/<form[^>]*>/)?.[0] ?? "";
-		expect(form).toContain('hx-sync="replace"');
-		expect(form).toContain('hx-trigger="change, submit"');
-		expect(form).toContain('hx-target="#household-emails"');
+		// The wrapper stays on the page and its body is what each answer replaces, so answers never nest or pile up.
+		expect(html).toMatch(
+			/<div id="household-emails"><div id="household-emails-body">/,
+		);
+		expect(html.match(/id="household-emails-body"/g)).toHaveLength(1);
+		const block = html.split('id="household-emails"')[1] ?? "";
+		const switchTag = block.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
+		const form = block.match(/<form[^>]*>/)?.[0] ?? "";
+		expect(switchTag).toContain('hx-post="/settings/bank-sign-in-emails"');
+		// Each flip replaces the one before it, on the switch's own queue; a Remove keeps the form's default queue.
+		expect(switchTag).toContain('hx-trigger="change"');
+		expect(switchTag).toContain('hx-sync="replace"');
+		expect(form).toContain('hx-post="/settings/bank-sign-in-emails"');
+		expect(form).not.toContain("hx-sync");
+		// No hx-trigger on the form: htmx's default trigger for a form is its submit, and a Remove is that submit.
+		expect(form).not.toContain("hx-trigger");
+		expect(form).toContain("data-switches-revert");
+		for (const tag of [switchTag, form]) {
+			expect(tag).toContain('hx-target="#household-emails"');
+			expect(tag).toContain('hx-select="#household-emails-body"');
+			expect(tag).toContain('hx-swap="innerHTML"');
+		}
 	});
 
 	it("a flipped AI switch answers with the page, its focus on that switch, the toast and announce", async () => {

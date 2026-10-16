@@ -174,11 +174,10 @@ describe("GET /settings: the AI suggestions group", () => {
 		const form = group(html).match(/<form[^>]*>/)?.[0] ?? "";
 		expect(form).toContain('method="post"');
 		expect(form).toContain('action="/settings/ai"');
-		expect(form).toContain('hx-post="/settings/ai"');
-		expect(form).toContain('hx-trigger="change, submit"');
-		expect(form).toContain('hx-target="#ai-suggestions"');
-		expect(form).toContain('hx-select="#ai-suggestions"');
-		expect(form).toContain('hx-swap="outerHTML"');
+		// The form sends no request of its own: each switch posts its own change (below), so none reaches the form twice.
+		expect(form).not.toContain("hx-");
+		// A switch whose auto-save fails goes back to how the page drew it (toast.js, data-switches-revert).
+		expect(form).toContain("data-switches-revert");
 		expect(group(html).match(/<form/g)).toHaveLength(1);
 		const buttons = [...group(html).matchAll(/<button[^>]*>/g)];
 		expect(buttons).toHaveLength(1);
@@ -192,6 +191,28 @@ describe("GET /settings: the AI suggestions group", () => {
 		);
 		// Resting, not asking for focus: only the answer to a flip does.
 		expect(buttons[0]?.[0]).not.toContain("autofocus");
+	});
+
+	it("gives each switch its own request, keyed by its own feature, all on the form's one queue", async () => {
+		const { html } = await get("/settings/ai");
+		const raws = [
+			...group(html).matchAll(/<input[^>]*role="switch"[^>]*>/g),
+		].map((m) => m[0]);
+		expect(raws).toHaveLength(5);
+		for (const raw of raws) {
+			const name = raw.match(/name="([^"]*)"/)?.[1];
+			expect(raw).toContain('hx-post="/settings/ai"');
+			expect(raw).toContain('hx-trigger="change"');
+			// htmx 4 reads hx-vals only from the element that sent the request, so each switch carries its own key.
+			expect(raw).toContain(
+				`hx-vals="{&quot;flipped&quot;:&quot;${name}&quot;}"`,
+			);
+			// One shared queue (the form), replace: a flip cancels the one before it, and no two can answer out of order.
+			expect(raw).toContain('hx-sync="closest form:replace"');
+			expect(raw).toContain('hx-target="#ai-suggestions"');
+			expect(raw).toContain('hx-select="#ai-suggestions"');
+			expect(raw).toContain('hx-swap="outerHTML"');
+		}
 	});
 
 	it("draws the switches it shows On in a hidden field, empty once all are off", async () => {
@@ -317,6 +338,43 @@ describe("POST /settings/ai", () => {
 		const { html } = await post("/settings/ai", { income: "on" });
 		// Every switch starts on, so the one this save turned off is names.
 		expect(html).toMatch(/<input[^>]*name="names"[^>]*autofocus/);
+	});
+
+	it("focuses the switch named by flipped, even when the page drew none On", async () => {
+		// The page drew nothing On, and this save posts categories and income On too. The person turned on income, so it takes focus.
+		const { html } = await post("/settings/ai", {
+			categories: "on",
+			income: "on",
+			drawnOn: "",
+			flipped: "income",
+		});
+		expect(html).toMatch(/<input[^>]*name="income"[^>]*autofocus/);
+		expect(html).not.toMatch(/<input[^>]*name="categories"[^>]*autofocus/);
+		expect(autofocusCount(html)).toBe(1);
+	});
+
+	it("falls back to the drawn comparison when flipped is an unknown value or left out", async () => {
+		const drawnOn = "names details categories income sortOnArrival";
+		const withUnknown = await post("/settings/ai", {
+			details: "on",
+			categories: "on",
+			income: "on",
+			sortOnArrival: "on",
+			drawnOn,
+			flipped: "not-a-switch",
+		});
+		expect(withUnknown.html).toMatch(/<input[^>]*name="names"[^>]*autofocus/);
+		expect(autofocusCount(withUnknown.html)).toBe(1);
+		// No script: a plain Save posts no flipped, so the switch the page drew On and the save left off is found.
+		const plain = await post("/settings/ai", {
+			details: "on",
+			categories: "on",
+			income: "on",
+			sortOnArrival: "on",
+			drawnOn,
+		});
+		expect(plain.html).toMatch(/<input[^>]*name="names"[^>]*autofocus/);
+		expect(autofocusCount(plain.html)).toBe(1);
 	});
 
 	it("focuses the switch the person flipped, found from the switches the page drew On", async () => {

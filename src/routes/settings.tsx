@@ -225,6 +225,8 @@ const SORT_NEEDS =
 const SORT_GREYED = "sortOnArrivalGreyed";
 /** Which switches the page drew On, so a save can tell which one the person flipped. */
 const DRAWN_ON = "drawnOn";
+/** The switch a flip posted, sent with that switch's own request (its hx-vals): the one that takes focus after the save. */
+const FLIPPED = "flipped";
 /** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
 const drawnOnOf = (switches: AiSwitches) =>
 	AI_FEATURES.filter((f) => switches[f.key])
@@ -232,8 +234,10 @@ const drawnOnOf = (switches: AiSwitches) =>
 		.join(" ");
 
 /**
- * The AI switches (#606): the form posts when one is flipped, and the page answers with itself, focus back on the
- * switch that changed. Save shows only without the script. Nothing else in the form is posted.
+ * The AI switches (#606): each switch posts its own change, the page answers with itself, focus back on the switch
+ * that changed. The switches share the form's one queue (replace), so a flip cancels the one before it. The form
+ * carries no request of its own, so a change is sent once. Save shows only without the script. The form's other
+ * fields (the drawn state, the greyed sorting switch) still go with every flip.
  */
 function AiSwitchForm({
 	switches,
@@ -246,16 +250,7 @@ function AiSwitchForm({
 	const nothingToSort =
 		!switches.categories && !switches.income && !switches.details;
 	return (
-		<form
-			method="post"
-			action="/settings/ai"
-			hx-post="/settings/ai"
-			hx-trigger="change, submit"
-			hx-sync="replace"
-			hx-target="#ai-suggestions"
-			hx-select="#ai-suggestions"
-			hx-swap="outerHTML"
-		>
+		<form method="post" action="/settings/ai" data-switches-revert>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
 				{AI_FEATURES.map((f) => (
 					<li>
@@ -268,6 +263,13 @@ function AiSwitchForm({
 							disabled={f.key === "sortOnArrival" && nothingToSort}
 							note={SORT_NEEDS}
 							autofocus={focus === f.key}
+							hx-post="/settings/ai"
+							hx-trigger="change"
+							hx-vals={JSON.stringify({ [FLIPPED]: f.key })}
+							hx-sync="closest form:replace"
+							hx-target="#ai-suggestions"
+							hx-select="#ai-suggestions"
+							hx-swap="outerHTML"
 						/>
 					</li>
 				))}
@@ -959,13 +961,17 @@ settings.post("/settings/ai", async (c) => {
 	const before = await readAiSwitches(c.env.DB);
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
-	// The switch that was flipped keeps focus after the save (#606): the one that differs from what the page drew
-	// On (DRAWN_ON), so another tab that saved the same value doesn't move it. A page drawn before DRAWN_ON existed
-	// is compared with what was saved before this save.
+	// The switch that was flipped keeps focus after the save (#606). A flip posts its own key (FLIPPED, from its own
+	// request). A plain Save, with no script, posts none, so it's the one that differs from what the page drew On
+	// (DRAWN_ON): another tab that saved the same value doesn't move it. A page drawn before DRAWN_ON existed is
+	// compared with what was saved before this save.
+	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
 	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
-	const flipped = AI_FEATURES.find(
-		(f) => f.key in next && next[f.key] !== drawn.includes(f.key),
-	)?.key;
+	const flipped =
+		posted ??
+		AI_FEATURES.find(
+			(f) => f.key in next && next[f.key] !== drawn.includes(f.key),
+		)?.key;
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,

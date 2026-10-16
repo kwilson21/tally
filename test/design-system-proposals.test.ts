@@ -158,9 +158,9 @@ function firesByItself(html: string): string[] {
 	return (
 		[...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
 			.map((m) => m[0])
-			// A switch that saves when flipped (#606) posts on its own change: a press that inert stops. Its form is still
-			// checked by the inert test above.
-			.filter((raw) => !/\shx-trigger="change, submit"/.test(raw))
+			// A switch that saves when flipped (#606) posts on its own change: a press that inert stops. Its form has no
+			// hx-trigger (htmx's default for a form is its submit), and both are checked by the inert test above.
+			.filter((raw) => !/\shx-trigger="change"/.test(raw))
 			.filter((raw) =>
 				[...attributes(raw).keys()].some((name) =>
 					names.some((p) => name.startsWith(p)),

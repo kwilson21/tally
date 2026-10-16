@@ -8,7 +8,10 @@ import {
 	replayLinksEnabled,
 	screenshotPreviewEnabled,
 } from "../src/feedback/diagnostics";
-import { sanitizeFeedbackMessage } from "../src/feedback/privacy";
+import {
+	sanitizeFeedbackMessage,
+	sanitizeFeedbackRoute,
+} from "../src/feedback/privacy";
 import {
 	feedback,
 	fileFeedbackIssue,
@@ -71,6 +74,37 @@ function postFields(fields: Record<string, string>, headers = {}) {
 		redirect: "manual" as const,
 	};
 }
+
+describe("feedback from a Settings page keeps its page", () => {
+	it.each([
+		"/settings/categories",
+		"/settings/rules",
+		"/settings/household",
+		"/settings/people",
+		"/settings/ai",
+		"/settings/data",
+	])("maps %s to /settings", (path) => {
+		expect(sanitizeFeedbackRoute(path)).toBe("/settings");
+	});
+
+	it("maps a Settings page with a query string or a trailing slash to /settings", () => {
+		expect(sanitizeFeedbackRoute("/settings/categories?open=3")).toBe(
+			"/settings",
+		);
+		expect(sanitizeFeedbackRoute("/settings/ai/")).toBe("/settings");
+	});
+
+	it("leaves a path that only starts like a Settings page, or an unknown one, as other", () => {
+		expect(sanitizeFeedbackRoute("/settingsx")).toBe("/other");
+		expect(sanitizeFeedbackRoute("/settings/nope")).toBe("/other");
+	});
+
+	it("gives the route /settings in a feedback context sent from /settings/ai", () => {
+		expect(normalizeFeedbackContext({}, "/settings/ai")).toMatchObject({
+			route: "/settings",
+		});
+	});
+});
 
 describe("feedback diagnostic safeguards", () => {
 	const userAgent =
