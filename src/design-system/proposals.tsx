@@ -4,6 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
@@ -504,6 +505,30 @@ export const DECIDED: readonly {
 		issue: 80,
 	},
 	{
+		title: "P130 · One Why per page",
+		outcome:
+			"Option A: one Why? per page, beside the page's summary sentence (Bills' 5 bills to pay soon, Trends' headline); section headings carry none (decision 121).",
+		issue: 603,
+	},
+	{
+		title: "P131 · A bill's page",
+		outcome:
+			"Option A: a quiet ledger of months, one ruled row each with its status in muted words; a charge Tally found is its own row with Link it, months with no payment fold into one row, and no filled status pills (decision 121).",
+		issue: 604,
+	},
+	{
+		title: "P132 · What a past month's result says",
+		outcome:
+			"Option A: the number, stamp and bars stay, and one muted line under the number and stamp, above the bars, names the biggest causes, from the categories over budget and the positive spending with no budget, by amount, linking to them (decision 121).",
+		issue: 605,
+	},
+	{
+		title: "P133 · The month dots",
+		outcome:
+			"Option A: each finished month's dot in the month strip holds a small mark, a check for under budget, a minus for over, or an empty ring for a month with no budgets; the shown month keeps its ink ring and the current month its ring; each month's link names its result in words (decision 121). C, D and E stay drawn, not picked.",
+		issue: 605,
+	},
+	{
 		title: "P134 · Settings",
 		outcome:
 			"Option A: Settings becomes a short contents page drawn like More (P122 A), with the suggestions Band above; each section opens its own page with Settings as the back link; switches save when flipped, each rule names its category once with Remove as a quiet link, an empty Never suggest is one muted line, and Household keeps who gets the bank sign-in emails (decision 120).",
@@ -550,6 +575,18 @@ export function Proposals() {
 					aren't listed.
 				</p>
 				<BillsTotalsProposal />
+			</section>
+
+			<section aria-labelledby="audit2-picks-title" class="mt-12">
+				<h2 id="audit2-picks-title" class="font-serif text-3xl font-semibold">
+					Picked: from the second design audit
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's picks, marked Picked, are decision 121: P130
+					A, one Why per page; P131 A, a quiet ledger of months; P132 A, one
+					line names the cause; P133 A, marks in outline.
+				</p>
+				<AuditRoundTwoPicks />
 			</section>
 
 			<section aria-labelledby="audit3-title" class="mt-12">
