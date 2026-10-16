@@ -27,11 +27,11 @@ export const dollarsWords = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
 /**
- * How often the deposits came, from the gaps between their distinct days (two on one day count once): every week,
- * or every weekday when all the deposits share one weekday, when every gap is 6 to 8 days; every other week, or every
- * other weekday when they share one (what a fortnightly paycheck does, a holiday shift aside); twice a month, for gaps
- * about two weeks apart that aren't all one fortnight's; or every month. Null with fewer than two distinct days, with
- * any gap under 6 days (no named cadence has those), or with a gap none of these fits (a skipped week is none of them).
+ * How often the deposits came, from the gaps between their distinct days (two on one day count once). Each cadence
+ * needs every gap in its own window: every week, or every weekday when all the deposits share one weekday, when every
+ * gap is 6 to 8 days; every other week, or every other weekday when they share one (what a fortnightly paycheck does, a
+ * holiday shift aside), when every gap is 13 to 15; twice a month, every gap 13 to 17; or every month, every gap 28 to
+ * 33. Null when no cadence fits every gap (a skipped week, or one long gap among short ones, is none of them).
  */
 export function cadenceOf(dates: string[]): string | null {
 	const sorted = [...new Set(dates)].sort();
@@ -39,21 +39,18 @@ export function cadenceOf(dates: string[]): string | null {
 	const gaps = sorted
 		.slice(1)
 		.map((date, i) => epochDay(date) - epochDay(sorted[i] as string));
-	if (Math.min(...gaps) < 6) return null;
-	const median = [...gaps].sort((a, b) => a - b)[
-		Math.floor(gaps.length / 2)
-	] as number;
+	const every = (low: number, high: number) =>
+		gaps.every((gap) => gap >= low && gap <= high);
 	const latest = sorted[sorted.length - 1] as string;
 	const oneWeekday = sorted.every(
 		(date) => weekdayOf(date) === weekdayOf(latest),
 	);
-	const weekly = gaps.every((gap) => gap >= 6 && gap <= 8);
-	const fortnightly = gaps.every((gap) => gap >= 13 && gap <= 15);
-	if (weekly) return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
-	if (median >= 13 && median <= 15 && fortnightly)
+	if (every(6, 8))
+		return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
+	if (every(13, 15))
 		return oneWeekday ? `every other ${weekdayOf(latest)}` : "every other week";
-	if (median >= 13 && median <= 17) return "twice a month";
-	if (median >= 25 && median <= 35) return "every month";
+	if (every(13, 17)) return "twice a month";
+	if (every(28, 33)) return "every month";
 	return null;
 }
 

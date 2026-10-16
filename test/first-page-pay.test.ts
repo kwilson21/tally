@@ -114,6 +114,20 @@ describe("cadenceOf", () => {
 			]),
 		).toBeNull();
 	});
+
+	it("gives no cadence when one gap of a fortnightly series is 45 days, though the median is a fortnight", () => {
+		// Gaps 14, 14, 45: most gaps are a fortnight, but the cadence must hold for every gap, not the median.
+		expect(
+			cadenceOf(["2026-07-01", "2026-07-15", "2026-07-29", "2026-09-12"]),
+		).toBeNull();
+	});
+
+	it("gives no cadence when one gap of a monthly series is 60 days, though the median is a month", () => {
+		// Gaps 30, 30, 60: the median is a month, but the 60-day gap fits no cadence.
+		expect(
+			cadenceOf(["2026-05-01", "2026-05-31", "2026-06-30", "2026-08-29"]),
+		).toBeNull();
+	});
 });
 
 describe("amountWords", () => {
@@ -206,6 +220,18 @@ describe("payLedgerLine", () => {
 			payLedgerLine({
 				name: "Acme Corp",
 				deposits: deposits(["2026-07-17"], 245000),
+			}),
+		).toBe("Pay · Acme Corp, $2,450");
+	});
+
+	it("drops the cadence when one gap breaks it, even if most gaps are a fortnight", () => {
+		expect(
+			payLedgerLine({
+				name: "Acme Corp",
+				deposits: deposits(
+					["2026-07-01", "2026-07-15", "2026-07-29", "2026-09-12"],
+					245000,
+				),
 			}),
 		).toBe("Pay · Acme Corp, $2,450");
 	});
