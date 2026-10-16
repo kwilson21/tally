@@ -82,8 +82,8 @@ export function keyboard(doc, win) {
 		keydown(event) {
 			if (event.defaultPrevented || event.isComposing) return;
 			if (event.ctrlKey || event.altKey || event.metaKey) return;
-			// Shift is part of ? and nothing else.
-			if (event.shiftKey && event.key !== "?") return;
+			// Shift is part of ? and of / (on layouts such as German, where / needs it); a shifted letter or arrow does nothing.
+			if (event.shiftKey && event.key !== "?" && event.key !== "/") return;
 			const active = doc.activeElement ?? doc.body;
 			if (active.closest(FIELD) || openSheet(doc)) return;
 			// Caps Lock makes a letter's key a capital; a letter is read the same either way.

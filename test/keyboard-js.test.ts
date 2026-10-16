@@ -198,6 +198,29 @@ describe("/ (search)", () => {
 			"/transactions?focus=search",
 		);
 	});
+
+	it("takes Shift as part of / on a layout where / needs it, such as German", () => {
+		const page = new FakePage();
+		const search = el(page, "input", {
+			id: "q",
+			"aria-keyshortcuts": "/",
+		});
+		const { keydown, win } = setup(page);
+		const event = press("/", { shiftKey: true });
+		keydown(event);
+		expect(page.activeElement).toBe(search);
+		expect(event.preventDefault).toHaveBeenCalled();
+		expect(win.location.assign).not.toHaveBeenCalled();
+	});
+
+	it("goes to Transactions for Shift with / on a page without search", () => {
+		const page = new FakePage();
+		const { keydown, win } = setup(page);
+		keydown(press("/", { shiftKey: true }));
+		expect(win.location.assign).toHaveBeenCalledWith(
+			"/transactions?focus=search",
+		);
+	});
 });
 
 describe("? (the keys sheet)", () => {
@@ -488,7 +511,7 @@ describe("the guards", () => {
 		}
 	});
 
-	it("takes Shift only as part of ?", () => {
+	it("takes Shift only as part of ? and /", () => {
 		const page = new FakePage();
 		const [first] = list(page);
 		setup(page).keydown(press("J", { shiftKey: true }));
