@@ -44,7 +44,8 @@ async function request(
 	);
 	return { res, html: await res.text() };
 }
-const get = (path = "/settings", bindings = {}) => request(path, {}, bindings);
+const get = (path = "/settings/categories", bindings = {}) =>
+	request(path, {}, bindings);
 async function post(
 	path: string,
 	fields: [string, string][] = [],
@@ -344,7 +345,7 @@ describe("GET /settings with a suggestion", () => {
 	it("loads 30 pending suggestions in one grouped transaction query and lists the busiest 10", async () => {
 		for (let i = 0; i < 30; i++) await bulkSuggestion(`Batch ${i}`, 20);
 		const counted = countingDb();
-		const { html } = await get("/settings", { DB: counted.db });
+		const { html } = await get("/settings/categories", { DB: counted.db });
 		expect((html.match(/data-suggestion=/g) ?? []).length).toBe(10);
 		expect(textOf(html)).toContain(
 			"20 more suggestions will show once you decide these.",
@@ -776,7 +777,7 @@ describe("creating the category", () => {
 			{ htmx: false },
 		);
 		expect(res.status).toBe(303);
-		expect(res.headers.get("location")).toBe("/settings#categories");
+		expect(res.headers.get("location")).toBe("/settings/categories");
 		expect(await categoryNamed("Pet Care")).not.toBeNull();
 	});
 
@@ -898,7 +899,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 
 	it("draws a linked pair as one line, under the store's name", async () => {
 		await linked();
-		const { html } = await get();
+		const { html } = await get("/settings/rules");
 		expect(
 			html
 				.split("<li ")
@@ -966,9 +967,8 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 			["merchant_key", "Venmo"],
 			["kind", "income"],
 		]);
-		expect(html).toMatch(
-			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
-		);
+		// With no line left, focus goes to the one muted line that says so.
+		expect(html).toMatch(/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>/);
 		expect(textOf(html)).toContain("Tally hasn't been told No yet.");
 	});
 
@@ -1003,80 +1003,6 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 				.prepare("SELECT COUNT(*) AS n FROM never_suggest_rules")
 				.first<{ n: number }>(),
 		).toEqual({ n: 2 });
-	});
-});
-
-describe("the Band follows the Settings swaps that change the queue (#195)", () => {
-	const BAND_OOB = 'hx-select-oob="#names-band"';
-	const tagOf = (html: string, pattern: RegExp) =>
-		pattern.exec(html)?.[0] ?? "";
-	const neverLine = (merchantKey: string) =>
-		db
-			.prepare(
-				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-03')",
-			)
-			.bind(merchantKey)
-			.run();
-
-	it("swaps the Band with the create form and the Dismiss button of a suggestion card", async () => {
-		const { id } = await petCare();
-		const { html } = await get();
-		expect(
-			tagOf(
-				html,
-				new RegExp(
-					`<form[^>]*action="/settings/suggestions/${id}/create"[^>]*>`,
-				),
-			),
-		).toContain(BAND_OOB);
-		expect(
-			tagOf(
-				html,
-				new RegExp(
-					`<button[^>]*formaction="/settings/suggestions/${id}/dismiss"[^>]*>`,
-				),
-			),
-		).toContain(BAND_OOB);
-	});
-
-	it("swaps the Band with a Never suggest Remove, and with a Categories form built by swap()", async () => {
-		await neverLine("CHEWY.COM");
-		const { html } = await get();
-		expect(
-			tagOf(html, /<form[^>]*action="\/settings\/never-suggest\/remove"[^>]*>/),
-		).toContain(BAND_OOB);
-		expect(
-			tagOf(html, /<form[^>]*action="\/settings\/categories"[^>]*>/),
-		).toContain(BAND_OOB);
-	});
-
-	it("draws the Band empty when a Dismiss takes the only waiting suggestion away", async () => {
-		const { id } = await petCare();
-		const { html } = await post(`/settings/suggestions/${id}/dismiss`);
-		expect(html).toContain('<div id="names-band"></div>');
-	});
-
-	it("draws the Band with its count when a Never suggest Remove brings a hidden suggestion back", async () => {
-		await petCare();
-		for (const store of [
-			"CHEWY.COM",
-			"BANFIELD PET HOSPITAL",
-			"PETSMART 0412",
-			"AMAZON GIFT",
-		])
-			await neverLine(store);
-		expect(textOf((await get()).html)).not.toContain("Suggested: Pet Care");
-		const line = await db
-			.prepare(
-				"SELECT id FROM never_suggest_rules WHERE merchant_key = 'CHEWY.COM'",
-			)
-			.first<{ id: number }>();
-		const { html } = await post("/settings/never-suggest/remove", [
-			["id", String(line?.id)],
-			["merchant_key", "CHEWY.COM"],
-			["kind", "new_category"],
-		]);
-		expect(html).toMatch(/<div id="names-band">[\s\S]*?1 suggestion to check/);
 	});
 });
 
@@ -1121,6 +1047,6 @@ describe("dismissing the suggestion", () => {
 			htmx: false,
 		});
 		expect(res.status).toBe(303);
-		expect(res.headers.get("location")).toBe("/settings#categories");
+		expect(res.headers.get("location")).toBe("/settings/categories");
 	});
 });

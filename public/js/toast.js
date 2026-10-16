@@ -1,6 +1,7 @@
 // Shows HX-Trigger "toast" messages and speaks "announce" messages to screen readers.
 // Text only (textContent), never HTML.
-// A request that fails says so too (spec §8.5, decision 72): see the htmx:error listeners below.
+// A request that fails says so too (spec §8.5, decision 72): see the htmx:error listeners below. A switch whose
+// auto-save fails goes back to how the page drew it, when its form carries data-switches-revert.
 (() => {
 	const DISPLAY_MS = 4000;
 	const SVG_NS = "http://www.w3.org/2000/svg";
@@ -254,7 +255,8 @@
 	document.addEventListener("announce", onAnnounce);
 
 	// A failed request shows an error toast, and the page is left as it is, so an open sheet keeps
-	// what was typed. htmx 4's names: htmx:error is a request that never got an answer (the network
+	// what was typed (a switch's form is the one exception: failed() resets it to the drawn state).
+	// htmx 4's names: htmx:error is a request that never got an answer (the network
 	// dropped, or it timed out); htmx:response:error is any 4xx or 5xx reply, and only a 500 is a failure here: it's
 	// what an unhandled error sends, and Layout's noSwap keeps it out of the page. Every other 4xx
 	// and 5xx carries its own message on purpose, such as a field's error (422) or a bank that
@@ -275,6 +277,11 @@
 	// The guarded button each failed request sent, keyed by the request's ctx.
 	const guardedButtons = new WeakMap();
 	function failed(ctx) {
+		// A switch whose auto-save failed goes back to how the page drew it (#606): its form opts in with
+		// data-switches-revert, and reset() puts each control back to its drawn (default) state. Other forms keep what
+		// was typed (decision 72). The request's form is set by htmx; a switch's closest form covers a request without one.
+		const form = ctx?.request?.form ?? ctx?.sourceElement?.closest?.("form");
+		if (form?.hasAttribute?.("data-switches-revert")) form.reset();
 		if (
 			ctx?.sourceElement?.hasAttribute?.("hx-disable") &&
 			ctx.request?.submitter

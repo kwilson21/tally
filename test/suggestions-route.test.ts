@@ -2698,7 +2698,7 @@ describe("the answered", () => {
 
 describe("Settings' Never suggest list", () => {
 	it("says Tally hasn't been told No yet when the list is empty", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		expect(textOf(html)).toContain("Tally hasn't been told No yet.");
 	});
 
@@ -2719,7 +2719,7 @@ describe("Settings' Never suggest list", () => {
 			},
 			true,
 		);
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
 		expect(textOf(html)).toMatch(/You said No on [A-Z][a-z]{2} \d{1,2}/);
 		const rule = await row(
@@ -2746,7 +2746,7 @@ describe("Settings' Never suggest list", () => {
 			)
 			.bind(VENMO, `${year - 1}-12-31`)
 			.run();
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		expect(textOf(html)).toContain(`You said No on Dec 31, ${year - 1}`);
 	});
 
@@ -2768,7 +2768,7 @@ describe("Settings' Never suggest list", () => {
 		const rule = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules",
 		);
-		const search = await get("/settings?rules_search=Match");
+		const search = await get("/settings/rules?rules_search=Match");
 		expect(search.html).toMatch(
 			/never-suggest\/remove"[\s\S]*?name="rules_search" value="Match"/,
 		);
@@ -2793,7 +2793,7 @@ describe("Settings' Never suggest list", () => {
 		});
 		expect(plain.res.status).toBe(303);
 		expect(plain.res.headers.get("location")).toBe(
-			"/settings?rules_search=Match#merchant-rules",
+			"/settings/rules?rules_search=Match",
 		);
 	});
 
@@ -2802,7 +2802,7 @@ describe("Settings' Never suggest list", () => {
 			id: "999999",
 		});
 		expect(res.status).toBe(303);
-		expect(res.headers.get("location")).toBe("/settings#merchant-rules");
+		expect(res.headers.get("location")).toBe("/settings/rules");
 	});
 
 	it("after Remove, focus moves to the next line's Remove, or to the heading when none is left", async () => {
@@ -2835,7 +2835,7 @@ describe("Settings' Never suggest list", () => {
 			true,
 		);
 		expect(last.html).toMatch(
-			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
+			/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest: Tally/,
 		);
 	});
 
@@ -2865,7 +2865,7 @@ describe("Settings' Never suggest list", () => {
 			true,
 		);
 		expect(empty.html).toMatch(
-			/<h3[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest<\/h3>/,
+			/<p[^>]*tabindex="-1"[^>]*autofocus[^>]*>Never suggest: Tally/,
 		);
 	});
 });
@@ -2936,7 +2936,7 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 		expect(await stored()).toEqual(["Venmo:income"]);
 		expect(await incomeAsked()).toEqual([]);
 		// Settings shows the store's one line, under its name.
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		expect(neverLineForms(html)).toBe(1);
 		expect(textOf(html)).toContain("Never suggest income for Venmo");
 		const line = await row(
@@ -2974,7 +2974,7 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 		);
 		expect(await stored()).toEqual([`${VENMO}:income`]);
 		expect(await incomeAsked()).toEqual([]);
-		expect(neverLineForms((await get("/settings")).html)).toBe(1);
+		expect(neverLineForms((await get("/settings/rules")).html)).toBe(1);
 		const line = await row(
 			"SELECT id, merchant_key, kind FROM never_suggest_rules WHERE merchant_key = ?",
 			VENMO,

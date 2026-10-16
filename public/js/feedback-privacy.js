@@ -58,6 +58,13 @@ export function sanitizeFeedbackRoute(value) {
 		const pathname = new URL(value, "https://tally.invalid").pathname;
 		if (ROUTES.has(pathname)) return pathname;
 		if (/^\/transactions\/[^/]+\/?$/.test(pathname)) return "/transactions";
+		// Settings' subpages report as Settings: the page the person was on, not a route the set doesn't list (#606).
+		if (
+			/^\/settings\/(?:categories|rules|household|people|ai|data)\/?$/.test(
+				pathname,
+			)
+		)
+			return "/settings";
 		if (/^\/accounts\/[^/]+(?:\/disconnect)?\/?$/.test(pathname))
 			return "/accounts";
 		if (/^\/budget(?:\/[^/]+)?\/?$/.test(pathname)) return "/budget";

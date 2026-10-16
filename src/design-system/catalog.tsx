@@ -117,6 +117,11 @@ import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
+import {
+	SettingsContents,
+	SubpageHead,
+	settingsPlaces,
+} from "../views/settings-pages";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { StartHere } from "../views/start-here";
@@ -3795,7 +3800,7 @@ function Controls() {
 				sentence="A primary, secondary, or quiet text action, rendered as a button or link."
 			>
 				<div class="flex flex-wrap gap-3">
-					{(["primary", "secondary", "text"] as const).map((kind) => (
+					{(["primary", "secondary", "text", "quiet"] as const).map((kind) => (
 						<>
 							<State label={`${kind}, rest`}>
 								<Button kind={kind} type="button">
@@ -3803,7 +3808,9 @@ function Controls() {
 										? "Save"
 										: kind === "secondary"
 											? "Cancel"
-											: "Archive"}
+											: kind === "quiet"
+												? "Remove"
+												: "Archive"}
 								</Button>
 							</State>
 							<State label={`${kind}, disabled`}>
@@ -3812,7 +3819,9 @@ function Controls() {
 										? "Save"
 										: kind === "secondary"
 											? "Cancel"
-											: "Archive"}
+											: kind === "quiet"
+												? "Remove"
+												: "Archive"}
 								</Button>
 							</State>
 						</>
@@ -4634,6 +4643,7 @@ function Controls() {
 				<State label="Saved, held still: Morgan's chevron gives way to the pencil tick, with Kids open (P119 A, #71)">
 					<div inert class="max-w-3xl border-t border-rule">
 						<HouseholdPeople
+							head={<SubpageHead title="People" titleId="people-title" />}
 							people={[
 								{ id: 1, name: "Everyone" },
 								{ id: 2, name: "Kids" },
@@ -5744,6 +5754,76 @@ function SettingsGroup() {
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
+				id="settings-contents"
+				title="Settings contents page"
+				tier="visual"
+				components={["SettingsContents", "ContentsList", "Band"]}
+				sentence="Settings is a short contents page drawn like More (P122 A, decision 120): each section's icon, its name, what it holds and a live count on a dotted leader, with the suggestions Band above the list. Each row opens its own page."
+			>
+				<State label="The demo's counts, with five suggestions to check">
+					<SettingsContents
+						waiting={5}
+						places={settingsPlaces({
+							categories: { count: 7, budgetCents: 394000 },
+							merchants: 3,
+							zone: "America/New_York",
+							bankEmailsOn: true,
+							people: 0,
+							aiOff: 0,
+							sorted: 23,
+							month: "2026-10",
+						})}
+					/>
+				</State>
+				<State label="Some switches off, two people, and no suggestions waiting">
+					<SettingsContents
+						waiting={0}
+						places={settingsPlaces({
+							categories: { count: 1, budgetCents: null },
+							merchants: 1,
+							zone: "America/Chicago",
+							bankEmailsOn: false,
+							people: 2,
+							aiOff: 2,
+							sorted: 1,
+							month: "2026-10",
+						})}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="settings-subpage"
+				title="Settings subpage head"
+				tier="visual"
+				components={["SubpageHead", "Switch"]}
+				sentence="Each Settings section is its own page: Settings is the first link, in reading order, then the section's name as the one h1 and its content. A switch in it saves when flipped (decision 120)."
+			>
+				<State label="Household, with the bank sign-in emails switch just flipped on">
+					<SubpageHead title="Household" titleId="catalog-household-title" />
+					<div inert class="mt-4">
+						<Switch
+							id="catalog-emails-switch"
+							name="enabled"
+							label="Bank sign-in emails"
+							checked
+							autofocus
+						/>
+					</div>
+				</State>
+				<State label="Categories">
+					<SubpageHead title="Categories" titleId="catalog-categories-title" />
+				</State>
+				<State label="AI suggestions">
+					<SubpageHead
+						title="AI suggestions"
+						titleId="catalog-ai-suggestions-title"
+					/>
+				</State>
+				<State label="Your data">
+					<SubpageHead title="Your data" titleId="catalog-your-data-title" />
+				</State>
+			</Specimen>
+			<Specimen
 				id="reconnect-reminders"
 				title="Bank sign-in emails"
 				tier="visual"
@@ -5783,6 +5863,12 @@ function SettingsGroup() {
 				<State label="More than 20 merchants · search and count">
 					<MerchantRules
 						id="catalog-merchant-rules"
+						head={
+							<SubpageHead
+								title="Tally's rules"
+								titleId="catalog-merchant-rules-title"
+							/>
+						}
 						today="2026-10-10"
 						total={34}
 						rules={[

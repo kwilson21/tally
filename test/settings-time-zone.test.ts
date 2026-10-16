@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { saveAiSwitches } from "../src/db/ai-switches";
+import { readAiSwitches, saveAiSwitches } from "../src/db/ai-switches";
 import { saveTimeZone } from "../src/db/time-zone";
 import { resetDemo } from "../src/demo/reset";
 
@@ -72,21 +72,23 @@ afterEach(() => {
 });
 
 describe("GET /settings: the Household group", () => {
-	it("sits under Categories and above AI suggestions, headed Household", async () => {
-		const { res, html } = await get("/settings");
+	it("is its own page, headed Household, with Settings as its back link", async () => {
+		const { res, html } = await get("/settings/household");
 		expect(res.status).toBe(200);
 		expect(html).toMatch(
 			/<section id="household" aria-labelledby="household-title"/,
 		);
-		expect(html).toMatch(/<h2 id="household-title"[^>]*>Household<\/h2>/);
-		const at = (needle: string) => html.indexOf(needle);
-		expect(at('id="categories"')).toBeLessThan(at('id="household"'));
-		expect(at('id="household"')).toBeLessThan(at('id="ai-suggestions"'));
-		expect(at('id="ai-suggestions"')).toBeLessThan(at('id="your-data-title"'));
+		expect(html).toMatch(/<h1 id="household-title"[^>]*>Household<\/h1>/);
+		expect(html.indexOf('<a href="/settings"')).toBeLessThan(
+			html.indexOf("<h1"),
+		);
+		// People and the AI switches are pages of their own now.
+		expect(html).not.toContain('id="ai-suggestions"');
+		expect(html).not.toContain('id="household-people"');
 	});
 
 	it("is one disclosure row, closed, saying Time zone with Eastern at the right and a chevron", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		expect(group(html).match(/<details/g)).toHaveLength(1);
 		const details = group(html).match(/<details[^>]*>/)?.[0] ?? "";
 		expect(details).not.toMatch(/\sopen(\s|>|=)/);
@@ -104,13 +106,13 @@ describe("GET /settings: the Household group", () => {
 
 	it("says the saved zone's everyday name, and has it chosen when opened", async () => {
 		await saveTimeZone(env.DB, "Pacific/Honolulu");
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		expect(textOf(summary(html)).trim()).toBe("Time zone Hawaii");
 		expect(chosen(html)).toBe("Pacific/Honolulu");
 	});
 
 	it("opens to a labeled select of the six US zones and then Other time zones, with Eastern chosen to start", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		const g = group(html);
 		const select = g.match(/<select[^>]*>/)?.[0] ?? "";
 		expect(select).toContain('name="time_zone"');
@@ -140,7 +142,7 @@ describe("GET /settings: the Household group", () => {
 	});
 
 	it("says in a muted line what the zone decides, and what it leaves alone", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		expect(textOf(group(html))).toContain(
 			"Decides when a new month starts and when a bill is due. Transactions keep the bank's dates.",
 		);
@@ -151,7 +153,7 @@ describe("GET /settings: the Household group", () => {
 	});
 
 	it("has Save and Cancel in a form that works without JavaScript and swaps with it", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		const form = group(html).match(/<form[^>]*>/)?.[0] ?? "";
 		expect(form).toContain('method="post"');
 		expect(form).toContain('action="/settings/time-zone"');
@@ -169,15 +171,15 @@ describe("GET /settings: the Household group", () => {
 		// Cancel is a link back to the group: it closes the row without JavaScript, and with it
 		// swaps only the row back, with focus on it.
 		const cancel = group(html).match(/<a[^>]*>\s*Cancel\s*<\/a>/)?.[0] ?? "";
-		expect(cancel).toContain('href="/settings#household"');
-		expect(cancel).toContain('hx-get="/settings?focus=zone"');
+		expect(cancel).toContain('href="/settings/household"');
+		expect(cancel).toContain('hx-get="/settings/household?focus=zone"');
 		expect(cancel).toContain('hx-target="#time-zone-disclosure"');
 		expect(cancel).toContain('hx-select="#time-zone-disclosure"');
 		expect(cancel).toContain('hx-swap="outerHTML"');
 	});
 
 	it("Save and Cancel swap only the time zone row, so the bank sign-in emails block and the people list are left alone", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		const form = group(html).match(/<form[^>]*>/)?.[0] ?? "";
 		expect(form).toContain('hx-target="#time-zone-disclosure"');
 		expect(form).toContain('hx-select="#time-zone-disclosure"');
@@ -200,14 +202,14 @@ describe("GET /settings: the Household group", () => {
 	});
 
 	it("never names Jev, and shows no error before anything was refused", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/household");
 		expect(group(html)).not.toMatch(/jev/i);
 		expect(group(html)).not.toContain('role="alert"');
 		expect(group(html)).not.toContain("aria-invalid");
 	});
 
 	it("puts focus on the row for Cancel's swap, and leaves it closed", async () => {
-		const { html } = await get("/settings?focus=zone");
+		const { html } = await get("/settings/household?focus=zone");
 		expect(summary(html)).toContain("autofocus");
 		const details = group(html).match(/<details[^>]*>/)?.[0] ?? "";
 		expect(details).not.toMatch(/\sopen(\s|>|=)/);
@@ -215,11 +217,10 @@ describe("GET /settings: the Household group", () => {
 		expect(html.match(/autofocus/g)).toHaveLength(1);
 	});
 
-	it("keeps the rest of Settings", async () => {
-		const { html } = await get("/settings");
-		expect(html).toContain("Add category");
-		expect(html).toContain("AI suggestions");
-		expect(html).toContain("Download transactions (CSV)");
+	it("leaves the other sections on their own pages", async () => {
+		const { html } = await get("/settings/household");
+		expect(html).not.toContain("Add category");
+		expect(html).not.toContain("Download transactions (CSV)");
 	});
 });
 
@@ -276,7 +277,7 @@ describe("POST /settings/time-zone", () => {
 			false,
 		);
 		expect(res.status).toBe(303);
-		expect(res.headers.get("Location")).toBe("/settings#household");
+		expect(res.headers.get("Location")).toBe("/settings/household");
 		expect(res.headers.get("HX-Trigger")).toBeNull();
 		expect(await savedZone()).toBe("America/Los_Angeles");
 	});
@@ -309,7 +310,7 @@ describe("POST /settings/time-zone", () => {
 			expect(chosen(html)).toBe("America/Denver");
 			expect(textOf(summary(html)).trim()).toBe("Time zone Mountain");
 			// The rest of Settings is still there.
-			expect(html).toContain("Add category");
+			expect(html).toContain('id="household"');
 		},
 	);
 
@@ -365,15 +366,12 @@ describe("POST /settings/time-zone", () => {
 		).toEqual(before.settings.results);
 	});
 
-	it("leaves the AI suggestions as they were", async () => {
+	it("leaves the AI suggestions as they were, on their own page", async () => {
 		await saveAiSwitches(env.DB, { income: false });
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "America/Chicago",
-		});
-		expect(html).toContain('id="ai-suggestions"');
-		const ai =
-			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
-		const income = ai.match(/<input[^>]*name="income"[^>]*>/)?.[0] ?? "";
+		await post("/settings/time-zone", { time_zone: "America/Chicago" });
+		expect((await readAiSwitches(env.DB)).income).toBe(false);
+		const ai = await get("/settings/ai");
+		const income = ai.html.match(/<input[^>]*name="income"[^>]*>/)?.[0] ?? "";
 		expect(income).not.toMatch(/\schecked(\s|>|=)/);
 	});
 
@@ -417,37 +415,14 @@ describe("today follows the saved zone", () => {
 describe("a save that moves the household into another month", () => {
 	// 03:30 UTC on Nov 1 is 23:30 Eastern on Oct 31 (October), and already Nov 1 in London
 	// (November). Groceries' budget changes on Nov 1, and Household, which has none in October,
-	// gets one, so the two months show different budgets and different notes under a row's name.
+	// gets one, so the two months show different budgets.
 	const LATE_OCTOBER = "2026-11-01T03:30:00Z";
 
-	/** The Categories section's markup, up to the next section. */
-	const categories = (html: string) =>
-		html.split('id="categories"')[1]?.split("</section>")[0] ?? "";
-	/** The tag that opens the Categories section. */
-	const categoriesTag = (html: string) =>
-		html.match(/<section[^>]*id="categories"[^>]*>/)?.[0] ?? "";
 	/** What a row's closed summary says about its budget: "$950 a month" or "No budget". */
 	const amountOf = (html: string, id: number) =>
 		textOf(
 			`<span ${html.split(`id="cat-${id}-amount"`)[1]?.split("</summary>")[0] ?? ""}`,
 		).trim();
-	/** The line in an open row about its budget: "No budget yet. Add one on Home". */
-	const noteOf = (html: string, id: number) =>
-		textOf(
-			`<p ${html.split(`id="cat-${id}-budget-note"`)[1]?.split("</p>")[0] ?? ""}`,
-		).trim();
-	/** Every element the answer marks to be swapped out of band: its tag name and id. */
-	const oob = (html: string) =>
-		[...html.matchAll(/<(\w+)\s[^>]*\bhx-swap-oob="true"[^>]*>/g)].map((m) => ({
-			tag: m[1],
-			id: m[0].match(/\bid="([^"]*)"/)?.[1],
-		}));
-	const activeIds = async () =>
-		(
-			await env.DB.prepare(
-				"SELECT id FROM categories WHERE archived = 0 ORDER BY id",
-			).all<{ id: number }>()
-		).results.map((row) => row.id);
 
 	beforeEach(async () => {
 		at(LATE_OCTOBER);
@@ -460,120 +435,25 @@ describe("a save that moves the household into another month", () => {
 		).run();
 	});
 
-	it("starts with October's budgets on Settings", async () => {
-		const { html } = await get("/settings");
+	it("shows October's budgets on Categories, where the month's amounts are drawn", async () => {
+		const { html } = await get("/settings/categories");
 		expect(amountOf(html, 1)).toBe("$950 a month");
 		expect(amountOf(html, 5)).toBe("No budget");
-		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
 		expect(html).not.toContain("hx-swap-oob");
 	});
 
-	it("sends each row's amount and budget line out of band, with the new month's, and nothing else of Categories", async () => {
+	it("answers with the Household page and sends nothing out of band, since no amount is drawn there", async () => {
 		const { res, html } = await post("/settings/time-zone", {
 			time_zone: "Europe/London",
 		});
 		expect(res.status).toBe(200);
-		// htmx 4 takes each element with hx-swap-oob from the response and swaps it into the page by
-		// its id, before the main swap picks the time zone row out of what's left.
-		const ids = await activeIds();
-		expect(ids.length).toBeGreaterThan(1);
-		expect(oob(html)).toEqual(
-			ids.flatMap((id) => [
-				{ tag: "span", id: `cat-${id}-amount` },
-				{ tag: "p", id: `cat-${id}-budget-note` },
-			]),
-		);
-		expect(amountOf(html, 1)).toBe("$900 a month");
-		expect(amountOf(html, 5)).toBe("$300 a month");
-		expect(noteOf(html, 5)).toBe("Change its budget on Home");
-		// A row's link has an id, so htmx can put focus back on it if it had it.
-		expect(html).toContain('id="cat-5-budget-link"');
-		// Still the Household group, with the toast, the announcement and focus as before.
-		expect(textOf(summary(html)).trim()).toBe("Time zone London");
-		expect(summary(html)).toContain("autofocus");
-		expect(trigger(res)).toEqual({
-			toast: { message: "Saved time zone", type: "success" },
-			announce: "Saved time zone. Months and bills now follow London time.",
-		});
+		expect(html).toContain('id="household"');
+		expect(html).not.toContain("hx-swap-oob");
 	});
 
-	it("never marks a row, its edit form, a field or a button, so an open edit, its draft and focus stay", async () => {
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "Europe/London",
-		});
-		// The Categories section, each row and its edit form are in the answer but not swapped.
-		expect(categoriesTag(html)).not.toContain("hx-swap-oob");
-		expect(categories(html)).toContain('<form id="cat-1-form"');
-		expect(categories(html)).toContain('id="c1-name"');
-		expect(html).not.toMatch(
-			/<(section|details|summary|form|input|select|button|a|label)\s[^>]*hx-swap-oob/,
-		);
-		// What is marked is only each row's amount span and budget-line paragraph.
-		expect(new Set(oob(html).map((o) => o.tag))).toEqual(
-			new Set(["span", "p"]),
-		);
-	});
-
-	it("does the same going back to the earlier month", async () => {
+	it("the Categories page then draws the new month's budgets", async () => {
 		await post("/settings/time-zone", { time_zone: "Europe/London" });
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "America/New_York",
-		});
-		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$950 a month");
-		expect(amountOf(html, 5)).toBe("No budget");
-		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
-	});
-
-	it("sends the amounts when the month stays the same too, unchanged", async () => {
-		// Chicago is still October at this moment, as Eastern is.
-		const { res, html } = await post("/settings/time-zone", {
-			time_zone: "America/Chicago",
-		});
-		expect(res.status).toBe(200);
-		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$950 a month");
-		expect(amountOf(html, 5)).toBe("No budget");
-	});
-
-	it("sends the new month's amounts when the page was drawn before midnight and both zones have moved on", async () => {
-		// Drawn at 23:30 Eastern on Oct 31; saved at 01:30 Eastern on Nov 1, when Chicago is in
-		// November too. The two zones agree, but the page still shows October.
-		at("2026-11-01T06:30:00Z");
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "America/Chicago",
-		});
-		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$900 a month");
-		expect(amountOf(html, 5)).toBe("$300 a month");
-	});
-
-	it("sends them after a refused save too, so the corrected one still brings the new month", async () => {
-		at("2026-11-01T06:30:00Z");
-		const refused = await post("/settings/time-zone", {
-			time_zone: "Not/AZone",
-		});
-		expect(refused.res.status).toBe(422);
-		const { html } = await post("/settings/time-zone", {
-			time_zone: "America/Chicago",
-		});
-		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$900 a month");
-	});
-
-	it("keeps a refusal and a fresh visit free of it, and the page a plain browser lands on shows the new month", async () => {
-		const refused = await post("/settings/time-zone", {
-			time_zone: "Not/AZone",
-		});
-		expect(refused.res.status).toBe(422);
-		expect(refused.html).not.toContain("hx-swap-oob");
-		const noScript = await post(
-			"/settings/time-zone",
-			{ time_zone: "Europe/London" },
-			false,
-		);
-		expect(noScript.res.status).toBe(303);
-		const landed = await get("/settings");
+		const landed = await get("/settings/categories");
 		expect(amountOf(landed.html, 1)).toBe("$900 a month");
 		expect(landed.html).not.toContain("hx-swap-oob");
 	});
