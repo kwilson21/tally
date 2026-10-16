@@ -642,6 +642,33 @@ describe("a keys response that comes after another sheet opened or the address m
 		expect(event.preventDefault).toHaveBeenCalled();
 	});
 
+	it("gives focus back to Undo when the address moved while the keys loaded and the response was dropped", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded, ended, settled } = setup(page, win);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		// ? blurred Undo, so focus is on nothing while the keys load.
+		expect(page.activeElement).toBe(page.body);
+		win.location.search = "?month=2026-10";
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09",
+		);
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+		// The drop leaves the return to ended(), which gives focus back to Undo when the request finishes.
+		ended(finishEvent(region, "issuing"));
+		expect(page.activeElement).toBe(undo);
+		const focusesAfterDrop = undo.focusCount;
+		// No sheet ever opened in #keys, so this settle is not a close: it must not focus Undo a second time.
+		settled(settleEvent(region));
+		expect(undo.focusCount).toBe(focusesAfterDrop);
+	});
+
 	it("is kept when the address is the one the request was made from, and the sheet still closes to its opener", () => {
 		const page = new FakePage();
 		const [first] = list(page);
@@ -701,6 +728,36 @@ describe("a keys response that comes after another sheet opened or the address m
 		responded(event);
 		expect(event.preventDefault).toHaveBeenCalled();
 	});
+
+	it.each([
+		["with the address unchanged", false],
+		["with the address moved as well", true],
+	])(
+		"forgets the opener at once when a sheet outside #keys opened while the keys loaded (%s)",
+		(_, moved) => {
+			const page = new FakePage();
+			const [first] = list(page);
+			const region = el(page, "div", { id: "keys" });
+			const sheetRegion = el(page, "div", { id: "sheet" });
+			const win = windowFor("?month=2026-09");
+			const { keydown, responded, ended } = setup(page, win);
+			page.activeElement = first;
+			keydown(press("?", { shiftKey: true }));
+			const otherSheet = el(page, "section", { "data-sheet": "" }, sheetRegion);
+			if (moved) win.location.search = "?month=2026-10";
+			const event = requestEvent(
+				region,
+				moved ? "http://localhost/transactions?month=2026-09" : undefined,
+			);
+			responded(event);
+			expect(event.preventDefault).toHaveBeenCalled();
+			// The other sheet closes before the request ends, so ended() would give focus back to the row if the return survived.
+			remove(page, otherSheet);
+			page.activeElement = page.body;
+			ended(finishEvent(region, "issuing"));
+			expect(first.focusCount).toBe(0);
+		},
+	);
 
 	it("is kept when the keys sheet itself closes, since its sheet is inside #keys", () => {
 		const page = new FakePage();

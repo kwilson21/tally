@@ -228,10 +228,11 @@ export function keyboard(doc, win) {
 		},
 		/**
 		 * A keys response is thrown away when a sheet outside #keys opened while it loaded: its swap would put the keys
-		 * sheet over that one. It is also thrown away when the address moved since the request was made (HX-Current-URL,
-		 * which htmx sends with every request), so a filter's push is not followed by this older address. htmx returns
-		 * before the swap when htmx:after:request is cancelled, so no address is pushed either. The keys sheet's own
-		 * close is kept, since its sheet is inside #keys.
+		 * sheet over that one, so that drop forgets the return at once. It is also thrown away when the address moved since
+		 * the request was made (HX-Current-URL, which htmx sends with every request), so a filter's push is not followed
+		 * by this older address; that drop keeps the return, and ended() gives focus back to it (Undo, say) when the request
+		 * finishes. htmx returns before the swap when htmx:after:request is cancelled, so no address is pushed either. The
+		 * keys sheet's own close is kept, since its sheet is inside #keys.
 		 */
 		responded(event) {
 			const target = event.detail?.ctx?.target;
@@ -243,7 +244,7 @@ export function keyboard(doc, win) {
 				!!from && pathAndQuery(new URL(from)) !== pathAndQuery(win.location);
 			if (!otherSheet && !moved) return;
 			event.preventDefault();
-			forget();
+			if (otherSheet) forget();
 		},
 	};
 }
