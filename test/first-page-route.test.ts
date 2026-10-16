@@ -3,7 +3,9 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
+import { AI_SWITCHES_ALL_ON } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
+import { suggestionQueue } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
@@ -1355,6 +1357,64 @@ describe("the pay question's scope", () => {
 		const { html } = await get("/first-page");
 		expect(html).toContain("REVIEWED PAY");
 		expect(html.match(/Is this your pay\?/g)?.length).toBe(1);
+	});
+});
+
+describe("a Never suggest income line doesn't hide the pay question (#651)", () => {
+	/** An unflagged deposit Tally is unsure is income (a Maybe guess), from a merchant with a Never suggest income line. */
+	async function hiddenDeposit(
+		raw: string,
+		over: Record<string, unknown> = {},
+	) {
+		await deposits(raw, 245000, 2, 14, {
+			flag_income: 0,
+			income_confidence: 0.5,
+			...over,
+		});
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'income', '2026-10-03')",
+			)
+			.bind(raw)
+			.run();
+	}
+
+	it("asks the unflagged deposit, since the pay step asks every income guess a person hasn't decided", async () => {
+		await hiddenDeposit("NEVER PAY");
+		expect((await payMerchants(db)).map((m) => m.key)).toEqual(["NEVER PAY"]);
+		const { html } = await get("/first-page");
+		expect(html).toContain("Is this your pay?");
+		expect(html).toContain("NEVER PAY");
+	});
+
+	it("Yes on that question marks each deposit as income, as the person's choice", async () => {
+		await hiddenDeposit("NEVER PAY");
+		await answerAsShown("yes");
+		const rows = await db
+			.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'NEVER PAY'",
+			)
+			.all<{ flag_income: number; income_source: string }>();
+		expect(rows.results).toHaveLength(2);
+		expect(
+			rows.results.every(
+				(row) => row.flag_income === 1 && row.income_source === "user",
+			),
+		).toBe(true);
+		expect(await payMerchants(db)).toEqual([]);
+	});
+
+	it("the review still leaves the same deposit out, since it honours Never suggest", async () => {
+		await hiddenDeposit("NEVER PAY");
+		const queue = await suggestionQueue(db, AI_SWITCHES_ALL_ON);
+		expect(queue.filter((item) => item.kind === "income")).toEqual([]);
+	});
+
+	it("a deposit the person already said No to stays left out, with or without the Never suggest line", async () => {
+		await hiddenDeposit("NEVER PAY", { income_maybe_declined: 1 });
+		expect(await payMerchants(db)).toEqual([]);
+		await db.prepare("DELETE FROM never_suggest_rules").run();
+		expect(await payMerchants(db)).toEqual([]);
 	});
 });
 
