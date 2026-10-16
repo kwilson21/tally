@@ -2095,8 +2095,9 @@ function Rows() {
 					"LedgerPriceRow",
 					"PriceChanged",
 					"BillPaymentPicker",
+					"PaymentRow",
 				]}
-				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments as rows, the five closest first, then Show all N charges, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”, inside that fold."
 			>
 				<State label="Head: the name, its amount, the bank's text">
 					<div inert>
@@ -2447,6 +2448,135 @@ function Rows() {
 								{ value: "2026-09", label: "September" },
 								{ value: "2026-10", label: "October" },
 							]}
+						/>
+					</div>
+				</State>
+				<State label="Seven payments: the closest five as rows, the rest folded">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+								{
+									id: 3,
+									displayName: "Power Co",
+									date: "2026-09-22",
+									dateLabel: "Sep 22",
+									amountCents: 14300,
+								},
+								{
+									id: 4,
+									displayName: "Utility Pay",
+									date: "2026-09-21",
+									dateLabel: "Sep 21",
+									amountCents: 13900,
+								},
+								{
+									id: 5,
+									displayName: "Bank transfer",
+									date: "2026-09-20",
+									dateLabel: "Sep 20",
+									amountCents: 14600,
+								},
+								{
+									id: 6,
+									displayName: "Venmo",
+									date: "2026-09-19",
+									dateLabel: "Sep 19",
+									amountCents: 12500,
+								},
+								{
+									id: 7,
+									displayName: "Grocery",
+									date: "2026-09-18",
+									dateLabel: "Sep 18",
+									amountCents: 9900,
+								},
+								{
+									id: 8,
+									displayName: "Market",
+									date: "2026-09-17",
+									dateLabel: "Sep 17",
+									amountCents: 9500,
+								},
+							]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="A payment said Not this one to, checked, opens the fold">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+								{
+									id: 3,
+									displayName: "Power Co",
+									date: "2026-09-22",
+									dateLabel: "Sep 22",
+									amountCents: 14300,
+								},
+								{
+									id: 4,
+									displayName: "Utility Pay",
+									date: "2026-09-21",
+									dateLabel: "Sep 21",
+									amountCents: 13900,
+								},
+								{
+									id: 5,
+									displayName: "Bank transfer",
+									date: "2026-09-20",
+									dateLabel: "Sep 20",
+									amountCents: 14600,
+								},
+								{
+									id: 7,
+									displayName: "Grocery",
+									date: "2026-09-18",
+									dateLabel: "Sep 18",
+									amountCents: 9900,
+								},
+								{
+									id: 6,
+									displayName: "Venmo",
+									date: "2026-09-19",
+									dateLabel: "Sep 19",
+									amountCents: 12500,
+									turnedAway: true,
+								},
+							]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+							selectedTransactionId={6}
 						/>
 					</div>
 				</State>
@@ -2913,6 +3043,7 @@ function Rows() {
 					"PlanBand",
 					"PlanSheet",
 					"PlanPaymentPicker",
+					"PaymentRow",
 				]}
 				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with a Move to Nov button (this month's short name) and a Drop button (decision 101)."
 			>
@@ -3057,6 +3188,38 @@ function Rows() {
 								dateLabel: "Nov 3",
 								amountCents: 18000,
 								displayName: "DMV",
+								excluded: false,
+							},
+							{
+								id: 13,
+								date: "2026-10-31",
+								dateLabel: "Oct 31",
+								amountCents: 18500,
+								displayName: "Target",
+								excluded: false,
+							},
+							{
+								id: 14,
+								date: "2026-10-29",
+								dateLabel: "Oct 29",
+								amountCents: 17500,
+								displayName: "Gas station",
+								excluded: false,
+							},
+							{
+								id: 15,
+								date: "2026-10-28",
+								dateLabel: "Oct 28",
+								amountCents: 19000,
+								displayName: "Shell",
+								excluded: false,
+							},
+							{
+								id: 16,
+								date: "2026-10-27",
+								dateLabel: "Oct 27",
+								amountCents: 16000,
+								displayName: "Amazon",
 								excluded: false,
 							},
 							{

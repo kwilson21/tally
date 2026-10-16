@@ -982,7 +982,7 @@ describe("GET /design-system in the demo", () => {
 		expect(page).toContain("Update the bill to $17.99");
 		expect(page).toContain("Not this bill");
 		// An excluded payment in the picker says so in words.
-		expect(page).toContain("Zelle · Sep 23 · $142.00 · Excluded");
+		expect(page).toContain("Sep 23 · Excluded");
 		expect(page).toContain("How it&#39;s used");
 		for (const [, label] of USE_SPEC_PARTS)
 			expect(page).toContain(`<dt class="font-medium">${label}</dt>`);
@@ -992,6 +992,19 @@ describe("GET /design-system in the demo", () => {
 			/\| PriceChanged \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
 		);
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
+	});
+
+	it("shows both pickers' payments as rows, the closest five then Show all N charges (#645, P138 A)", async () => {
+		const { html } = await get("/design-system");
+		const bill =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		const plan =
+			html.split('id="planned-expense"')[1]?.split('id="bill-finding"')[0] ??
+			"";
+		expect(bill).toContain("Show all 7 charges");
+		expect(bill).toContain("Show all 6 charges");
+		expect(plan).toContain("Show all 6 charges");
+		expect(design).toMatch(/\| PaymentRow \|/);
 	});
 
 	it("shows the ledger's states in the bill page's specimen: paid, found, folded closed and open, and no filled pill (#604)", async () => {
@@ -1073,8 +1086,9 @@ describe("GET /design-system in the demo", () => {
 			page
 				.split(`>${label}</p>`)[1]
 				?.match(/<section id="payment-picker"[\s\S]*?<\/section>/)?.[0] ?? "";
-		// Four pickers: the one with payments, the one with a payment turned away (#340), the page's empty one, and a chosen month with none.
-		expect(page.match(/<section id="payment-picker"/g)).toHaveLength(4);
+		// Six pickers: the one with payments, the one with a payment turned away (#340), the one with seven payments under Show all (#645),
+		// the one whose turned-away payment is checked inside the fold, the page's empty one, and a chosen month with none.
+		expect(page.match(/<section id="payment-picker"/g)).toHaveLength(6);
 		const chosen = pickerAfter("Chosen month with no payments");
 		expect(chosen).toContain("No payments to link");
 		expect(chosen.match(/name="period"/g)).toHaveLength(2);
