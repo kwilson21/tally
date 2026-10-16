@@ -10,7 +10,7 @@
 // is a prototype here, drawn with the same classes; src/views stays as it is.
 
 import type { Child } from "hono/jsx";
-import type { CategorySummary } from "../budget";
+import { monthCause, monthCauses } from "../budgets/month-cause";
 import { monthName, monthsBefore, shortDay } from "../dates";
 import { formatCents } from "../money";
 import type { MonthPoint } from "../trends";
@@ -26,10 +26,16 @@ import {
 } from "../views/bill-row";
 import { Button } from "../views/button";
 import { Icon, ROW_OPENS, RowArrow } from "../views/icons";
-import { MonthEnd, monthEndLabels, PastNotBudgeted } from "../views/month-end";
-import { MonthNavigation } from "../views/month-navigation";
+import { monthEndLabels, PastNotBudgeted } from "../views/month-end";
+import {
+	MonthDot,
+	MonthNavigation,
+	monthMark,
+	monthResultWords,
+} from "../views/month-navigation";
 import { TrendGroup, TrendRow, TrendsTop } from "../views/trends";
 import { WhyLink, type WhySection } from "../views/why-link";
+import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import { Fixed } from "./proposal-parts";
 import { EndBars } from "./proposals-phase5-picks";
 import { Choice, Choices, Desk, Phone, Shot } from "./proposals-polish-4";
@@ -272,63 +278,6 @@ const EATING_MONTHS: MonthPoint[] = [
 ];
 
 // ---------------------------------------------------------------------------------------------
-// The cause sentence (P132 A): from integer cents, the two largest causes by amount.
-
-/** One cause of a month's overspend: an over-budget category (its amount over) or an unbudgeted one (its spending). */
-export type Cause = { name: string; cents: number; budgeted: boolean };
-
-/**
- * The sentence that names a month's cause in one line, or "" when there is none. It takes the two
- * largest causes by amount (ties keep the order given; a cause of $0 or less, such as a refund, is no
- * cause), and says "Most of it" only when those two
- * are over half of the month's overspend, "Part of it" otherwise. When both are unbudgeted it says
- * so once, when both are over budget once, and when they mix each names its own.
- */
-export function monthCause(causes: Cause[], overCents: number): string {
-	const largest = causes
-		.filter((cause) => cause.cents > 0)
-		.map((cause, index) => ({ cause, index }))
-		.sort((a, b) => b.cause.cents - a.cause.cents || a.index - b.index)
-		.slice(0, 2)
-		.sort((a, b) => a.index - b.index)
-		.map(({ cause }) => cause);
-	if (largest.length === 0) return "";
-	const shareCents = largest.reduce((sum, cause) => sum + cause.cents, 0);
-	const lead = shareCents * 2 > overCents ? "Most of it" : "Part of it";
-	const amount = (cause: Cause) => `${cause.name} ${dollars(cause.cents)}`;
-	if (largest.every((cause) => !cause.budgeted))
-		return `${lead} had no budget: ${largest.map(amount).join(" and ")}.`;
-	if (largest.every((cause) => cause.budgeted))
-		return `${lead} was over budget: ${largest.map(amount).join(" and ")}.`;
-	const each = largest.map((cause) =>
-		cause.budgeted
-			? `${amount(cause)} over`
-			: `${amount(cause)} with no budget`,
-	);
-	return `${lead}: ${each.join(" and ")}.`;
-}
-
-/** The causes of a month's overspend: each over-budget category by how far over, then each unbudgeted one by its spending (only spending above $0). */
-function causesOf(rows: BudgetRow[], unbudgeted: Unbudgeted[]): Cause[] {
-	return [
-		...rows
-			.filter((row) => row.spentCents > row.budgetCents)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents - row.budgetCents,
-				budgeted: true,
-			})),
-		...unbudgeted
-			.filter((row) => row.spentCents > 0)
-			.map((row) => ({
-				name: row.name,
-				cents: row.spentCents,
-				budgeted: false,
-			})),
-	];
-}
-
-// ---------------------------------------------------------------------------------------------
 // A finished month's result, as Home works it out (budget.ts): its budgets less all its counted
 // spending, Not budgeted included, so a refund in a category counts back.
 
@@ -347,22 +296,12 @@ function resultOf(item: string): number | null {
 	return month ? month.budgetCents - month.spentCents : null;
 }
 
-/** A strip month's link name for a screen reader: its result in words, no budgets, or so far. */
-function monthWords(item: string): string {
-	const label = monthName(item);
-	if (item === CURRENT) return `${label}, so far`;
-	const result = resultOf(item);
-	if (result === null) return `${label}, no budgets`;
-	return `${label}, ended ${dollars(Math.abs(result))} ${result < 0 ? "over" : "under"}`;
-}
+/** A strip month's link name for a screen reader, as MonthNavigation words it. */
+const monthWords = (item: string) =>
+	monthResultWords(monthName(item), resultOf(item), item === CURRENT);
 
-/** What a strip month's mark says: under or over its budgets, no budgets, or the current month. */
-function stateOf(item: string): "under" | "over" | "empty" | "current" {
-	if (item === CURRENT) return "current";
-	const result = resultOf(item);
-	if (result === null) return "empty";
-	return result < 0 ? "over" : "under";
-}
+/** A strip month's mark, as MonthNavigation draws it. */
+const stateOf = (item: string) => monthMark(resultOf(item), item === CURRENT);
 
 // ---------------------------------------------------------------------------------------------
 // P130: Bills' top and Trends' top.
@@ -955,18 +894,6 @@ function YearMonths({ idPrefix }: { idPrefix: string }) {
 // ---------------------------------------------------------------------------------------------
 // P132: a finished month's result.
 
-/** The categories as MonthEnd takes them: each budget and spending, and whether it went over. */
-function summaries(rows: BudgetRow[]): CategorySummary[] {
-	return rows.map((row, index) => ({
-		id: index,
-		name: row.name,
-		budgetCents: row.budgetCents,
-		spentCents: row.spentCents,
-		leftCents: row.budgetCents - row.spentCents,
-		over: row.spentCents > row.budgetCents,
-	}));
-}
-
 /** EndBars' rows: each budgeted category with its short label, as MonthEnd gives them. */
 function barRows(rows: BudgetRow[]) {
 	const labels = monthEndLabels(rows.map((row) => row.name));
@@ -986,27 +913,30 @@ function OverStamp() {
 	);
 }
 
-/** Today's month: MonthEnd and Not budgeted, as the app draws them, with no sentence. */
-function TodayMonth({ chartId }: { chartId: string }) {
+/** Today's month, as the app drew it before the cause line (P132): the number and stamp, the bars, then Not budgeted. */
+function TodayMonth() {
 	return (
 		<>
 			<MonthNavigation
 				month="2026-09"
 				firstMonth="2026-05"
 				currentMonth={CURRENT}
+				results={DEMO_MONTH_RESULTS}
 			/>
-			<MonthEnd
-				chartId={chartId}
-				monthName="September"
-				amountCents={resultCents(SEP_BUDGETS, SEP_UNBUDGETED)}
-				rows={summaries(SEP_BUDGETS)}
-			/>
+			<p class="mt-4 text-lg text-muted">September ended</p>
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+				<p class="whitespace-nowrap font-serif text-6xl font-semibold tracking-tight text-over">
+					{dollars(-resultCents(SEP_BUDGETS, SEP_UNBUDGETED))}
+				</p>
+				<OverStamp />
+			</div>
+			<EndBars rows={barRows(SEP_BUDGETS)} />
 			<PastNotBudgeted items={SEP_UNBUDGETED} />
 		</>
 	);
 }
 
-/** A: the number and stamp, then one muted sentence naming the cause (linked to Not budgeted), then the bars. */
+/** A: the number and stamp, then one muted sentence naming the cause (linked to what it names), then the bars. */
 function CauseMonth({
 	idPrefix,
 	name,
@@ -1019,8 +949,7 @@ function CauseMonth({
 	unbudgeted: Unbudgeted[];
 }) {
 	const overCents = -resultCents(rows, unbudgeted);
-	const sentence = monthCause(causesOf(rows, unbudgeted), overCents);
-	const linked = unbudgeted.length > 0;
+	const cause = monthCause(monthCauses(rows, unbudgeted), overCents);
 	return (
 		<>
 			<p class="mt-4 text-lg text-muted">{name} ended</p>
@@ -1030,20 +959,20 @@ function CauseMonth({
 				</p>
 				<OverStamp />
 			</div>
-			<p class="mt-2 text-muted">
-				{linked ? (
+			{cause && (
+				<p class="mt-2 text-muted">
 					<a
-						href={`#${idPrefix}-not-budgeted`}
+						href={`#${cause.toNotBudgeted ? `${idPrefix}-not-budgeted` : `${idPrefix}-bars`}`}
 						class="inline-flex min-h-11 items-center text-muted underline underline-offset-4"
 					>
-						{sentence}
+						{cause.text}
 					</a>
-				) : (
-					sentence
-				)}
-			</p>
-			<EndBars rows={barRows(rows)} />
-			{linked && (
+				</p>
+			)}
+			<div id={`${idPrefix}-bars`}>
+				<EndBars rows={barRows(rows)} />
+			</div>
+			{unbudgeted.length > 0 && (
 				<div id={`${idPrefix}-not-budgeted`}>
 					<PastNotBudgeted items={unbudgeted} />
 				</div>
@@ -1149,46 +1078,11 @@ function MonthStrip({
 	);
 }
 
-/** A (marks in outline, as first drawn): a check, a minus or an empty ring in a ringed disc. */
+/** A (marks in outline, as first drawn): MonthNavigation's real dot, with its mark in a ringed disc. */
 function markedCell(item: string, shown: boolean) {
-	const state = stateOf(item);
-	const mark =
-		state === "under" ? (
-			<span data-mark="under" class="text-ok">
-				<Icon name="check" class="size-4" />
-			</span>
-		) : state === "over" ? (
-			<svg
-				data-mark="over"
-				aria-hidden="true"
-				viewBox="0 0 16 16"
-				class="size-4 text-over"
-			>
-				<path
-					d="M3 8h10"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-				/>
-			</svg>
-		) : state === "empty" ? (
-			<span
-				data-mark="empty"
-				class="size-3 rounded-full border-2 border-muted"
-			/>
-		) : (
-			<span data-mark="current" class="size-2 rounded-full bg-muted/45" />
-		);
-	// One ring at most: the current month's accent, as MonthNavigation draws it, else the shown month's ink.
-	const ring = state === "current" ? "ring-accent" : shown ? "ring-ink" : "";
 	return (
 		<>
-			<span
-				aria-hidden="true"
-				class={`flex size-8 items-center justify-center rounded-full border border-rule ${ring ? `ring-2 ${ring} ring-offset-2 ring-offset-paper` : ""}`}
-			>
-				{mark}
-			</span>
+			<MonthDot mark={stateOf(item)} shown={shown} />
 			<span aria-hidden="true">{abbr(item)}</span>
 		</>
 	);
@@ -1606,12 +1500,12 @@ export function AuditRoundTwoPicks() {
 					>
 						<Shot caption="September at 390 px: the top of the month">
 							<Phone label="Today, September" tab="home">
-								<TodayMonth chartId="p132-today-phone" />
+								<TodayMonth />
 							</Phone>
 						</Shot>
 						<Shot caption="September at 1280 px">
 							<Desk label="Today, September" active="home">
-								<TodayMonth chartId="p132-today-desk" />
+								<TodayMonth />
 							</Desk>
 						</Shot>
 					</Choice>
@@ -1630,6 +1524,7 @@ export function AuditRoundTwoPicks() {
 									month="2026-09"
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 								<CauseMonth
 									idPrefix="p132-a-sep"
@@ -1645,6 +1540,7 @@ export function AuditRoundTwoPicks() {
 									month="2026-09"
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 								<CauseMonth
 									idPrefix="p132-a-desk"
@@ -1682,6 +1578,7 @@ export function AuditRoundTwoPicks() {
 									month="2026-09"
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 								<SplitMonth
 									idPrefix="p132-b-phone"
@@ -1696,6 +1593,7 @@ export function AuditRoundTwoPicks() {
 									month="2026-09"
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 								<SplitMonth
 									idPrefix="p132-b-desk"
@@ -1729,6 +1627,7 @@ export function AuditRoundTwoPicks() {
 									month={CURRENT}
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 							</Phone>
 						</Shot>
@@ -1738,6 +1637,7 @@ export function AuditRoundTwoPicks() {
 									month="2026-09"
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 							</Phone>
 						</Shot>
@@ -1747,6 +1647,7 @@ export function AuditRoundTwoPicks() {
 									month={CURRENT}
 									firstMonth="2026-05"
 									currentMonth={CURRENT}
+									results={DEMO_MONTH_RESULTS}
 								/>
 							</Desk>
 						</Shot>

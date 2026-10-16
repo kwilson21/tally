@@ -1,14 +1,14 @@
 import type { CategorySummary } from "../budget";
-import { formatCents } from "../money";
+import { monthCause, monthCauses } from "../budgets/month-cause";
+import { wholeUnlessTiny } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
 import { categoryRowAmount, REFUND_WORDS } from "./category-amount";
 import { headlineAmountClass } from "./headline-amount";
 
-const wholeUnlessTiny = (cents: number) =>
-	formatCents(cents, {
-		wholeDollars: cents === 0 || Math.abs(cents) >= 100,
-	});
+/** The id of a finished month's Not budgeted heading, which its cause line links to (P132 A). */
+export const notBudgetedId = (chartId: string) => `${chartId}-not-budgeted`;
+
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
 	"Eating Out": "Eating",
@@ -225,9 +225,15 @@ function EndBars({
 			</svg>
 		);
 	};
-	if (!scrolls) return <div class="mt-4">{chart(false)}</div>;
+	// The wrapper's id is the bars' target for a finished month's cause line (MonthEnd).
+	if (!scrolls)
+		return (
+			<div id={`${chartId}-bars`} class="mt-4">
+				{chart(false)}
+			</div>
+		);
 	return (
-		<div class="relative mt-4">
+		<div id={`${chartId}-bars`} class="relative mt-4">
 			{/* biome-ignore lint/a11y/useSemanticElements: this scroll container must expose role=region explicitly */}
 			<div
 				role="region"
@@ -330,17 +336,24 @@ export function MonthEnd({
 	monthName,
 	amountCents,
 	rows,
+	unbudgeted,
 }: {
 	chartId: string;
 	monthName: string;
 	amountCents: number;
 	rows: CategorySummary[];
+	/** Categories with no budget and their spending: a cause of an Over month (P132 A). */
+	unbudgeted: { name: string; spentCents: number }[];
 }) {
 	// With no budgeted category there is no stamp, and a negative result keeps its minus sign in ink, like Home's Safe to spend (#519).
 	const budgeted = rows.length > 0;
 	const over = budgeted && amountCents < 0;
 	const sign = !budgeted && amountCents < 0 ? "−" : "";
 	const amount = sign + wholeUnlessTiny(Math.abs(amountCents));
+	// Only an Over month names its causes; the line links to the Not budgeted list when a named cause has no budget, else to the bars.
+	const cause = over
+		? monthCause(monthCauses(rows, unbudgeted), -amountCents)
+		: null;
 	return (
 		<section aria-label={`${monthName} ended`}>
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
@@ -359,6 +372,16 @@ export function MonthEnd({
 					</span>
 				)}
 			</div>
+			{cause && (
+				<p class="mt-2 text-muted">
+					<a
+						href={`#${cause.toNotBudgeted ? notBudgetedId(chartId) : `${chartId}-bars`}`}
+						class="inline-flex min-h-11 items-center text-muted underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+					>
+						{cause.text}
+					</a>
+				</p>
+			)}
 			<EndBars rows={rows} chartId={chartId} />
 		</section>
 	);
@@ -368,10 +391,13 @@ export function MonthEnd({
 export function PastNotBudgeted({
 	items,
 	needsCategory,
+	id,
 }: {
 	items: { name: string; icon: string; color: string; spentCents: number }[];
 	/** The month's uncategorized money, named once as the list's last row (#310). */
 	needsCategory?: { spentCents: number; count: number };
+	/** The heading's id, which a finished month's cause line links to (notBudgetedId). */
+	id?: string;
 }) {
 	// Shown when the result includes uncategorized money: a non-zero amount, or transactions that net to $0.
 	const needs =
@@ -381,7 +407,9 @@ export function PastNotBudgeted({
 	if (items.length === 0 && !needs) return null;
 	return (
 		<>
-			<h3 class="mt-6 text-sm text-muted">Not budgeted</h3>
+			<h3 id={id} class="mt-6 text-sm text-muted">
+				Not budgeted
+			</h3>
 			<ul class="divide-y divide-rule">
 				{items.map((item) => (
 					<li class="flex min-h-11 items-center gap-4 py-2">

@@ -20,7 +20,7 @@ import {
 	INCLUDED,
 } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
-import { firstCountedMonth, loadMonth } from "../db/month";
+import { firstCountedMonth, loadMonth, monthResults } from "../db/month";
 import { plansSetAsideCents } from "../db/planned-expenses";
 import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
@@ -37,8 +37,8 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
-import { MonthEnd, PastNotBudgeted } from "../views/month-end";
-import { MonthNavigation } from "../views/month-navigation";
+import { MonthEnd, notBudgetedId, PastNotBudgeted } from "../views/month-end";
+import { MonthNavigation, stripMonths } from "../views/month-navigation";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
@@ -274,6 +274,11 @@ async function renderHome(
 		...cat,
 		spentCents: spent(cat.id),
 	}));
+	// Every month the strip links to gets its result in one query (MonthEnd's number, read the same way).
+	const results = await monthResults(
+		c.env.DB,
+		stripMonths(month, firstMonth, currentMonth),
+	);
 
 	return c.html(
 		<Layout
@@ -293,6 +298,7 @@ async function renderHome(
 										month={month}
 										firstMonth={firstMonth}
 										currentMonth={currentMonth}
+										results={results}
 									/>
 								}
 								safeToSpendCents={summary.safeToSpendCents}
@@ -342,6 +348,7 @@ async function renderHome(
 									month={month}
 									firstMonth={firstMonth}
 									currentMonth={currentMonth}
+									results={results}
 								/>
 								<MonthEnd
 									chartId={month}
@@ -350,6 +357,7 @@ async function renderHome(
 										summary.totalBudgetCents - summary.totalSpentCents
 									}
 									rows={summary.categories}
+									unbudgeted={pastNotBudgeted}
 								/>
 								<a
 									href="/"
@@ -433,6 +441,7 @@ async function renderHome(
 							)}
 							{!current ? (
 								<PastNotBudgeted
+									id={notBudgetedId(month)}
 									items={pastNotBudgeted}
 									needsCategory={summary.uncategorized}
 								/>

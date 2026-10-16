@@ -23,6 +23,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="tiny"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -46,6 +47,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="five"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(5)}
 			/>,
 		);
@@ -78,6 +80,7 @@ describe("MonthEnd budget bars", () => {
 					chartId={`n-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -101,6 +104,7 @@ describe("MonthEnd budget bars", () => {
 					chartId={count === 12 ? "twelve" : `n-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -227,6 +231,7 @@ describe("MonthEnd budget bars", () => {
 					chartId={`budget-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -261,6 +266,7 @@ describe("MonthEnd budget bars", () => {
 					chartId="money"
 					monthName="September"
 					amountCents={cents}
+					unbudgeted={[]}
 					rows={[
 						{
 							id: 1,
@@ -287,6 +293,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="no-budgets"
 				monthName="September"
 				amountCents={-5700}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -302,6 +309,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="budgeted-over"
 				monthName="September"
 				amountCents={-5700}
+				unbudgeted={[]}
 				rows={rows(1)}
 			/>,
 		);
@@ -316,6 +324,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="budgeted-under"
 				monthName="September"
 				amountCents={5700}
+				unbudgeted={[]}
 				rows={rows(1)}
 			/>,
 		);
@@ -329,6 +338,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="nine"
 				monthName="September"
 				amountCents={-99999900}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -339,6 +349,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="eight"
 				monthName="September"
 				amountCents={-9999900}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -352,6 +363,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="zero"
 				monthName="September"
 				amountCents={-1}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);
@@ -365,6 +377,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="short"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -390,12 +403,14 @@ describe("MonthEnd budget bars", () => {
 					chartId="a"
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(6)}
 				/>
 				<MonthEnd
 					chartId="b"
 					monthName="October"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(6)}
 				/>
 			</>,
@@ -423,6 +438,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="long"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={[
 					{
 						id: 1,
@@ -474,6 +490,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="ten-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(10)}
 			/>,
 		);
@@ -511,6 +528,7 @@ describe("MonthEnd budget bars", () => {
 					chartId={`wide-${count}`}
 					monthName="September"
 					amountCents={0}
+					unbudgeted={[]}
 					rows={rows(count)}
 				/>,
 			);
@@ -540,6 +558,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="ten-caps"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(10)}
 			/>,
 		);
@@ -561,6 +580,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="eleven-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(11)}
 			/>,
 		);
@@ -576,6 +596,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="five-wide"
 				monthName="September"
 				amountCents={0}
+				unbudgeted={[]}
 				rows={rows(5)}
 			/>,
 		);
@@ -591,6 +612,7 @@ describe("MonthEnd budget bars", () => {
 				chartId="large"
 				monthName="September"
 				amountCents={100_000_000}
+				unbudgeted={[]}
 				rows={[]}
 			/>,
 		);

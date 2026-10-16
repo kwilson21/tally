@@ -4887,9 +4887,11 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("writes the cause sentence from integer cents, with Most of it only when the causes are over half", async () => {
-		const { monthCause } = await import(
-			"../src/design-system/proposals-audit-2"
-		);
+		const { monthCause: rule } = await import("../src/budgets/month-cause");
+		const monthCause = (
+			causes: Parameters<typeof rule>[0],
+			overCents: number,
+		) => rule(causes, overCents)?.text ?? "";
 		expect(
 			monthCause(
 				[
@@ -4930,9 +4932,11 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("leaves out a category with a net refund from the causes, whether or not it has a budget", async () => {
-		const { monthCause } = await import(
-			"../src/design-system/proposals-audit-2"
-		);
+		const { monthCause: rule } = await import("../src/budgets/month-cause");
+		const monthCause = (
+			causes: Parameters<typeof rule>[0],
+			overCents: number,
+		) => rule(causes, overCents)?.text ?? "";
 		expect(
 			monthCause(
 				[
