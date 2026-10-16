@@ -157,22 +157,29 @@ describe("the keys' details and More's row", () => {
 });
 
 describe("the rows keyboard.js moves between", () => {
-	// Each row is a link with data-row, named by the address it opens: the attribute is checked on that element.
+	// Each row is a link with data-row, named by the address it opens: `href` is that address's pattern (a regular
+	// expression's text), and the attribute is checked on the same <a> element.
 	const openRow = (href: string) =>
-		new RegExp(
-			`<a\\b(?=[^>]*\\bhref="${href}\\d+")(?=[^>]*\\bdata-row="")[^>]*>`,
-		);
+		new RegExp(`<a\\b(?=[^>]*\\bhref="${href}")(?=[^>]*\\bdata-row="")[^>]*>`);
 
 	it("marks a transaction row as a row a person opens", async () => {
-		expect(await page("/transactions")).toMatch(openRow("/transactions/"));
+		expect(await page("/transactions")).toMatch(openRow("/transactions/\\d+"));
 	});
 
 	it("marks Home's category row as a row a person opens", async () => {
-		expect(await page("/")).toMatch(openRow("/budget/"));
+		expect(await page("/")).toMatch(openRow("/budget/\\d+"));
+	});
+
+	it("marks Home's savings goal row as a row a person opens", async () => {
+		expect(await page("/")).toMatch(openRow("/savings-goal"));
 	});
 
 	it("marks a bill row as a row a person opens", async () => {
-		expect(await page("/bills")).toMatch(openRow("/bills/"));
+		expect(await page("/bills")).toMatch(openRow("/bills/\\d+"));
+	});
+
+	it("marks a planned expense row on Bills as a row a person opens", async () => {
+		expect(await page("/bills")).toMatch(openRow("/plans/\\d+/edit"));
 	});
 });
 

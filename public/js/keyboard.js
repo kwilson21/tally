@@ -11,8 +11,8 @@
 // only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
-// The row a person opens, marked on transaction, Home's category and bill rows. Only a link can take focus, so a
-// details row (Settings' category rows) is passed over.
+// The row a person opens, marked on transaction, Home's savings goal and category rows, and Bills' bill and planned
+// expense rows. Only a link can take focus, so a details row (Settings' category rows) is passed over.
 const ROW = "a[data-row]";
 // A region that scrolls sideways (month-end's chart) keeps the arrows for itself.
 const SIDEWAYS = "[data-sideways]";
