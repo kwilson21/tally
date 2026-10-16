@@ -659,11 +659,18 @@ export function buildSeed(today: string): Seed {
 		},
 		{ categoryId: KIDS, effectiveMonth: startMonth, amountCents: 30000 },
 		{ categoryId: HOUSEHOLD, effectiveMonth: startMonth, amountCents: 25000 },
-		// $1,040 is $240 a week for 52 weeks, spread over 12 months: about four Fridays of Daycare a month.
+		// $1,200 is five Fridays of Daycare at $240, so the month with five Fridays stays within it (#631).
 		{
 			categoryId: CHILDCARE,
 			effectiveMonth: monthOffset(today, 0),
-			amountCents: 104000,
+			amountCents: 120000,
+		},
+		// This month's Groceries budget is $950, not $700, so the last week's bills and Childcare's fifth Friday leave
+		// Safe to spend at $0 or more (#631). Earlier months keep $700, as they were.
+		{
+			categoryId: GROCERIES,
+			effectiveMonth: monthOffset(today, 0),
+			amountCents: 95000,
 		},
 	];
 
