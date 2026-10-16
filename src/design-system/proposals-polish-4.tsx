@@ -167,7 +167,7 @@ type PhoneProps = {
 	/** What sits at the wordmark's right, in the masthead line. */
 	masthead?: Child;
 	/** The tab bar, with this tab current; none for a picture without one. */
-	tab?: NavKey | "more";
+	tab?: NavKey;
 	/** Drawn over the screen, as the feedback pill is fixed to it. */
 	overlay?: Child;
 	children?: Child;
@@ -218,7 +218,7 @@ export function Phone({
 }
 
 /** The tab bar as BottomTabs draws it, pinned to the screen's foot, with the current tab in accent. */
-function Tabs({ current }: { current: NavKey | "more" }) {
+function Tabs({ current }: { current: NavKey }) {
 	const tabs = [
 		...SIDEBAR_ITEMS.slice(0, 4),
 		{ key: "more", label: "More", icon: "more" as IconName },
@@ -253,12 +253,12 @@ type DeskProps = {
 	extra?: Child;
 	/** A taller window, for a picture with more to draw than 560px holds (900px, or 1200px for a full sidebar). */
 	tall?: 900 | 1200;
+	/** The sidebar's current page, Home by default (P136 draws Bills). */
+	active?: NavKey;
 	/** Drawn over the window, as a sheet is drawn over the page behind it. */
 	overlay?: Child;
 	/** The pill at the window's corner, where it sits on desktop today. */
 	floating?: boolean;
-	/** The sidebar item in accent: Home unless a picture is of another place. */
-	current?: NavKey;
 	children?: Child;
 };
 
@@ -268,9 +268,9 @@ export function Desk({
 	group = false,
 	extra,
 	tall,
+	active = "home",
 	overlay,
 	floating = false,
-	current = "home",
 	children,
 }: DeskProps) {
 	return (
@@ -293,7 +293,7 @@ export function Desk({
 											<li>
 												<a
 													href={item.href}
-													class={`flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${item.key === current ? "text-accent" : "text-ink"}`}
+													class={`flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${item.key === active ? "text-accent" : "text-ink"}`}
 												>
 													<Icon name={item.icon} />
 													{item.label}

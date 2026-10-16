@@ -1665,7 +1665,7 @@ await settleReplies();
 await settle();
 assert.equal(organizeSaves.length, 1, "a double click sends one Save");
 assert(
-	new URL(page.url()).searchParams.has("saved"),
+	new URL(page.url()).searchParams.has("store"),
 	`the question keeps its own address: ${page.url()}`,
 );
 await page.unroute(isOrganizeSave);

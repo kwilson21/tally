@@ -716,7 +716,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="1280: the page's first screen">
-						<Desk label="Reference, Settings" current="settings">
+						<Desk label="Reference, Settings" active="settings">
 							<TodayTop base={9200} />
 						</Desk>
 					</Shot>
@@ -735,7 +735,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="The contents page at 1280, with the sidebar">
-						<Desk label="Option A, contents" current="settings" tall={900}>
+						<Desk label="Option A, contents" active="settings" tall={900}>
 							<ContentsPage />
 						</Desk>
 					</Shot>
@@ -783,7 +783,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="1280, with the sidebar">
-						<Desk label="Option B, Settings" current="settings">
+						<Desk label="Option B, Settings" active="settings">
 							<TidyTop />
 						</Desk>
 					</Shot>
@@ -897,7 +897,7 @@ function P135() {
 						</Phone>
 					</Shot>
 					<Shot caption="The Suggestions page, at 1280">
-						<Desk label="Option A, Suggestions page" current="settings">
+						<Desk label="Option A, Suggestions page" active="settings">
 							<SuggestionsPage>
 								<OneCard skip />
 							</SuggestionsPage>

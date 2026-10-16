@@ -6,6 +6,7 @@
 import { AiProposals } from "./proposals-ai";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
 import { AutofillProposals } from "./proposals-autofill";
+import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
 import { DetailsProposals } from "./proposals-details";
 import { FollowupProposals } from "./proposals-followups";
@@ -30,7 +31,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 120), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 122), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -514,6 +515,12 @@ export const DECIDED: readonly {
 			"Option A: one suggestion card with one set of words wherever Tally asks it: Tally's guess, “A new category: Pet Care”, its transactions as ruled rows with one checkbox each, and Create Pet Care or Not now; in Organize, when the merchant is in a waiting suggestion, the card sits above the chips (decision 120).",
 		issue: 607,
 	},
+	{
+		title: "P136 · What Bills' section totals count",
+		outcome:
+			"Option A: each status heading's total counts every occurrence of its group in the month, listed or not, so Paid this month counts every bill payment made this month as Upcoming counts every occurrence still due; a muted line under a heading names the occurrences it counts that aren't listed (“Includes Daycare's Fridays on Oct 2 and 9”, up to two bills by name, then “and N more”) (decision 122).",
+		issue: 602,
+	},
 ];
 
 /** The proposals page body. */
@@ -532,6 +539,18 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="p136-title" class="mt-12">
+				<h2 id="p136-title" class="font-serif text-3xl font-semibold">
+					Picked: what Bills' totals count
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's pick, marked Picked, is decision 122: A,
+					each heading counts every occurrence in the month and says which ones
+					aren't listed.
+				</p>
+				<BillsTotalsProposal />
+			</section>
 
 			<section aria-labelledby="audit3-title" class="mt-12">
 				<h2 id="audit3-title" class="font-serif text-3xl font-semibold">
