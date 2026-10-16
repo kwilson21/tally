@@ -415,6 +415,39 @@ await page.locator('[role="dialog"]').waitFor({ state: "detached" });
 assert.equal(await rows(), 8);
 step("excluding a transaction takes it out of the list, leaving 8");
 
+// The merchant rule tick's check reads only its own checkbox (#701): the folded category row above the tick holds a checked
+// radio, which must not show the check while the tick is unticked, and ticking the tick shows it.
+await goto(`${BASE}/transactions?q=${encodeURIComponent("Local Bakery")}`, {
+	waitUntil: "networkidle",
+});
+await page
+	.getByRole("link", { name: /Local Bakery/ })
+	.first()
+	.click();
+await page.locator('[role="dialog"]').waitFor();
+await page.locator("#edit-category summary").click();
+await page.locator("#sheet").getByText("Groceries", { exact: true }).click();
+const ruleTick = page.locator("#edit-category label", {
+	has: page.locator('input[name="always"]'),
+});
+const ruleCheckDisplay = () =>
+	ruleTick
+		.locator(".selection-mark > span")
+		.evaluate((check) => getComputedStyle(check).display);
+assert.equal(await ruleTick.locator('input[name="always"]').isChecked(), false);
+assert.equal(
+	await ruleCheckDisplay(),
+	"none",
+	"a checked category radio must not show the unticked rule tick's check",
+);
+await ruleTick.click();
+assert.equal(await ruleCheckDisplay(), "flex", "ticking shows the check");
+await page.getByRole("link", { name: "Cancel" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "hidden" });
+step(
+	"a category chosen in the folded row doesn't show the merchant rule tick's check until the tick is ticked",
+);
+
 // The keys (#72): j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on that row.
 await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
 await page.keyboard.press("j");
