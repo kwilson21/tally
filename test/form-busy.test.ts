@@ -49,7 +49,7 @@ describe("htmx posting forms", () => {
 		await env.DB.prepare(
 			"UPDATE categories SET archived = 1 WHERE id = 5",
 		).run();
-		const html = await get("/settings");
+		const html = await get("/settings/categories");
 		const forms = htmxForms(html);
 		expect(forms.length).toBeGreaterThan(0);
 		expect(html).toMatch(

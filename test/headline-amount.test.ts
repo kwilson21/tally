@@ -103,6 +103,8 @@ describe("MonthEnd result", () => {
 				chartId: "result",
 				monthName: "September",
 				amountCents,
+				unbudgeted: [],
+				needsCategoryCents: 0,
 				rows: [
 					{
 						id: 1,

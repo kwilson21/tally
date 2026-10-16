@@ -16,6 +16,7 @@ import { LedgerIllustration } from "../views/illustration";
 import { DemoBanner } from "../views/layout";
 import { MonthNavigation } from "../views/month-navigation";
 import { WhyLink } from "../views/why-link";
+import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import { Choice, Choices } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -112,6 +113,7 @@ function HomeTop({
 				month="2026-10"
 				firstMonth="2026-05"
 				currentMonth="2026-10"
+				results={DEMO_MONTH_RESULTS}
 			/>
 			{layout === "under" ? (
 				<>
