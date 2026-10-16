@@ -69,6 +69,9 @@ export function Layout({
 					content={JSON.stringify({
 						noSwap: [204, 304, 500],
 						defaultTimeout: 0,
+						// A morph copies a reply's attributes, which would close a <details> the person opened (the reply
+						// draws it closed). `open` is left as the page has it, so a morph neither closes nor opens one (#661).
+						morphIgnore: ["data-htmx-powered", "open"],
 					})}
 				/>
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml" />

@@ -118,6 +118,17 @@ describe("app shell", () => {
 			0,
 		);
 	});
+
+	it("keeps a disclosure's open state through a morph swap, which htmx 4 would otherwise close", async () => {
+		const html = await home();
+		const content =
+			html.match(/<meta name="htmx-config" content="([^"]*)"/)?.[1] ?? "{}";
+		// A morph copies each reply's attributes onto the page's element, and a reply that lacks `open` closes a
+		// <details> the person opened. Ignoring `open` keeps it (the category choice's folded row, #661).
+		expect(JSON.parse(content.replaceAll("&quot;", '"')).morphIgnore).toEqual(
+			expect.arrayContaining(["data-htmx-powered", "open"]),
+		);
+	});
 });
 
 // Toasts sit in Tally's frame, never over the page (issue #348, decision 101): a phone keeps them
