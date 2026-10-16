@@ -393,6 +393,48 @@ describe("Organize: the card above the chips", () => {
 		expect(html).not.toContain("Dismiss");
 	});
 
+	it("counts a merchant once, however many of its purchases the suggestion holds", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1500, 'PETSMART 0412', 'Petsmart', 1, ?)",
+		)
+			.bind(`${THIS}-03`, suggestion)
+			.run();
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain('name="group" value="Chewy"');
+		expect(html).toContain(
+			"Tally suggested a new category for this and 1 more: Pet Care",
+		);
+	});
+
+	it("counts each other merchant once, however many purchases it has", async () => {
+		// Two Banfield charges are two purchases of one other merchant: the card counts the merchant, not the charges.
+		for (const day of ["04", "05"])
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, 'BANFIELD PET HOSPITAL', 'Banfield Pet Hospital', 1, ?)",
+			)
+				.bind(`${THIS}-${day}`, suggestion)
+				.run();
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain('name="group" value="Chewy"');
+		expect(html).toContain(
+			"Tally suggested a new category for this and 2 more: Pet Care",
+		);
+	});
+
+	it("counts two purchases Organize shows under one name as one merchant", async () => {
+		// No Plaid name, so the key is the bank text; its tidied name is Petsmart, the name Organize's group shows.
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1500, 'PETSMART 0598', NULL, 1, ?)",
+		)
+			.bind(`${THIS}-07`, suggestion)
+			.run();
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain('name="group" value="Chewy"');
+		expect(html).toContain(
+			"Tally suggested a new category for this and 1 more: Pet Care",
+		);
+	});
+
 	it("shows the sentence as the card's one headline, and no Skip in the card", async () => {
 		const { html } = await get("/transactions/organize");
 		const sentence =
@@ -433,6 +475,8 @@ describe("Organize: the card above the chips", () => {
 	it("Create makes the category with the suggestion's purchases and files them", async () => {
 		const { res, html } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
+			["shown", String(chewy)],
+			["shown", String(petsmart)],
 		]);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Trigger")).toContain(
@@ -455,6 +499,8 @@ describe("Organize: the card above the chips", () => {
 		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
 		const { res } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
+			["shown", String(chewy)],
+			["shown", String(petsmart)],
 		]);
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"That suggestion was changed somewhere else. Here's the current list.",
@@ -467,6 +513,8 @@ describe("Organize: the card above the chips", () => {
 		).run();
 		const { res, html } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
+			["shown", String(chewy)],
+			["shown", String(petsmart)],
 		]);
 		await env.DB.prepare("DROP TRIGGER file_during_create").run();
 		expect(res.status).toBe(200);
@@ -485,10 +533,187 @@ describe("Organize: the card above the chips", () => {
 	it("Create without JavaScript leaves Organize's address", async () => {
 		const { res } = await post(
 			"/transactions/organize/suggestion",
-			[["suggestion", String(suggestion)]],
+			[
+				["suggestion", String(suggestion)],
+				["shown", String(chewy)],
+				["shown", String(petsmart)],
+			],
 			false,
 		);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
+	});
+});
+
+/** The fields Organize's card posts: its suggestion, and each purchase it showed. */
+const fields = (...shown: number[]): [string, string][] => [
+	["suggestion", String(suggestion)],
+	...shown.map((id): [string, string] => ["shown", String(id)]),
+];
+
+const CHANGED =
+	"That suggestion was changed somewhere else. Here's the current list.";
+
+describe("Organize: Create files only the purchases the card showed", () => {
+	it("the card carries one hidden shown for each purchase it counts", async () => {
+		const { html } = await get("/transactions/organize");
+		const card = cardMarkup(html, "Tally suggested a new category");
+		expect(card).toContain(`name="shown" value="${chewy}"`);
+		expect(card).toContain(`name="shown" value="${petsmart}"`);
+	});
+
+	it("files nothing, and draws the card with every purchase, when one was added after the card was drawn", async () => {
+		await get("/transactions/organize");
+		const third = (
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 500, 'CHEWY.COM', 'Chewy', 1, ?) RETURNING id",
+			)
+				.bind(`${THIS}-06`, suggestion)
+				.first<{ id: number }>()
+		)?.id as number;
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy, petsmart),
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(CHANGED);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}, ${third}) AND category_id IS NULL AND category_suggestion_id = ${suggestion}`,
+			),
+		).toBe(3);
+		const card = cardMarkup(html, "Tally suggested a new category");
+		for (const id of [chewy, petsmart, third])
+			expect(card).toContain(`name="shown" value="${id}"`);
+	});
+
+	it("files nothing when a purchase was filed elsewhere after the card was drawn", async () => {
+		await get("/transactions/organize");
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ?",
+		)
+			.bind(petsmart)
+			.run();
+		const { res } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy, petsmart),
+		);
+		expect(res.headers.get("HX-Trigger")).toContain(CHANGED);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id = ${chewy} AND category_id IS NULL`,
+			),
+		).toBe(1);
+	});
+
+	it("says it changed, and files nothing, when the card sent no purchases", async () => {
+		const { res } = await post("/transactions/organize/suggestion", fields());
+		expect(res.headers.get("HX-Trigger")).toContain(CHANGED);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
+			),
+		).toBe(2);
+	});
+
+	it("without JavaScript, shows the changed words as the card's error, and files nothing", async () => {
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy),
+			false,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
+			'<p role="alert" class="text-sm text-over">That suggestion was changed somewhere else. Here&#39;s the current list.</p>',
+		);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
+			),
+		).toBe(2);
+	});
+});
+
+describe("Organize: a refused Create shows its reason in the card", () => {
+	const FULL = "Tally has room for 50 categories. Archive one to add another.";
+
+	beforeEach(async () => {
+		// Fills Tally to its 50 active categories, as fillTo does in category-suggestions-db, so the Create is refused.
+		const active =
+			(await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+			)) ?? 0;
+		for (let i = active; i < 50; i++)
+			await env.DB.prepare(
+				"INSERT INTO categories (name, icon, color, sort_order) VALUES (?, 'tag', 'cat-blue', ?)",
+			)
+				.bind(`Filler ${i}`, 100 + i)
+				.run();
+	});
+
+	it("without JavaScript, answers 422 with the reason under the card's headline, and files nothing", async () => {
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			[
+				["suggestion", String(suggestion)],
+				["shown", String(chewy)],
+				["shown", String(petsmart)],
+			],
+			false,
+		);
+		expect(res.status).toBe(422);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
+			`<p role="alert" class="text-sm text-over">${FULL}</p>`,
+		);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
+			),
+		).toBe(2);
+	});
+
+	it("with JavaScript, answers 422 with the same reason in the card, and no toast", async () => {
+		const { res, html } = await post("/transactions/organize/suggestion", [
+			["suggestion", String(suggestion)],
+			["shown", String(chewy)],
+			["shown", String(petsmart)],
+		]);
+		expect(res.status).toBe(422);
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
+			`<p role="alert" class="text-sm text-over">${FULL}</p>`,
+		);
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
 	});
 });

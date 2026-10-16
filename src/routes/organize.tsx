@@ -12,6 +12,7 @@ import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
+	type OrganizeGroup,
 	organizeGroups,
 	saveOrganizeGroup,
 	setOrganizeRule,
@@ -65,6 +66,18 @@ function waitingSuggestion(
 	);
 }
 
+/** The suggestion's other merchants, each counted once: its stores outside this group, by the name each shows (decision 120). */
+function otherMerchants(
+	suggestion: NewCategorySuggestion,
+	group: OrganizeGroup,
+): number {
+	return new Set(
+		suggestion.stores
+			.filter((store) => !group.merchantKeys.includes(store.merchantKey))
+			.map((store) => store.merchant),
+	).size;
+}
+
 async function renderOrganize(
 	c: Context<App>,
 	values?: Values,
@@ -77,6 +90,8 @@ async function renderOrganize(
 	 * joins the announcement when the list ends on it. Without it, the caller's own header stands.
 	 */
 	trigger?: Trigger,
+	/** The card's own reason, when its Create was refused or the suggestion changed (decision 120). */
+	cardError?: string,
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
@@ -163,20 +178,18 @@ async function renderOrganize(
 							</p>
 							<p class="mt-1 text-sm text-muted">From {sources}</p>
 						</div>
-						{/* Tally's guess for this merchant sits above the chips (decision 120): its Create files the suggestion's purchases. */}
+						{/* Tally's guess for this merchant sits above the chips (decision 120): its Create files the purchases the card counts. */}
 						{waiting && (
 							<div class="mt-5">
 								<OrganizeNewCategoryCard
 									name={waiting.name}
 									existing={waiting.existing ?? undefined}
 									archived={waiting.archived}
-									others={
-										waiting.rows.filter(
-											(row) => !group.merchantKeys.includes(row.merchantKey),
-										).length
-									}
+									others={otherMerchants(waiting, group)}
 									action={`/transactions/organize/suggestion${query.size ? `?${query}` : ""}`}
 									suggestionId={waiting.suggestionId}
+									shown={waiting.rows.map((row) => row.transactionId)}
+									error={cardError}
 								/>
 							</div>
 						)}
@@ -308,8 +321,10 @@ organize.get("/transactions/organize", async (c) => {
 });
 
 /**
- * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase of the suggestion
- * ticked. Organize stays where it is: its list is drawn again with the next merchant, with a toast that says what was made.
+ * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase the card showed
+ * ticked and filed. Create files only what the card showed (`shown`): when the suggestion's purchases no longer match
+ * them, it files nothing and says the suggestion changed. Organize stays where it is: its list is drawn again with the
+ * next merchant, with a toast that says what was made, and a refused Create shows its reason in the card.
  */
 organize.post("/transactions/organize/suggestion", async (c) => {
 	const form = await c.req.formData();
@@ -327,21 +342,33 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		);
 		return renderOrganize(c, undefined, 200, true);
 	};
+	// The card's own reason, drawn on the page: a refused Create, or the changed words without JavaScript.
+	const onCard = (status: 200 | 422, message: string) =>
+		renderOrganize(c, undefined, status, true, undefined, undefined, message);
 	if (!item) return answered(CHANGED_SUGGESTION);
 	const ids = item.rows.map((row) => row.transactionId);
+	const shown = new Set(
+		form
+			.getAll("shown")
+			.map(Number)
+			.filter((n) => Number.isInteger(n) && n > 0),
+	);
+	if (shown.size !== ids.length || !ids.every((id) => shown.has(id))) {
+		if (!c.req.header("HX-Request")) return onCard(200, CHANGED_SUGGESTION);
+		return answered(CHANGED_SUGGESTION);
+	}
 	const result = await createFromSuggestion(
 		c.env.DB,
 		suggestionId,
 		{ ticked: ids, shown: ids, notes: {} },
 		actor(c),
 	);
-	// Organize ticks every purchase, so "empty" means another tab filed them: the same answer as "gone".
-	if (!result.ok)
-		return answered(
-			result.reason === "gone" || result.reason === "empty"
-				? CHANGED_SUGGESTION
-				: (result.error ?? "That category couldn't be made."),
-		);
+	// Organize ticks every purchase the card showed, so "empty" means another tab filed them: the same answer as "gone".
+	if (!result.ok) {
+		if (result.reason === "gone" || result.reason === "empty")
+			return answered(CHANGED_SUGGESTION);
+		return onCard(422, result.error ?? "That category couldn't be made.");
+	}
 	await askAgainLeftOut(
 		c.env as Env & { JEV_API_KEY?: string },
 		result.leftOut,

@@ -153,6 +153,7 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 		action: "/transactions/organize/suggestion",
 		suggestionId: 7001,
 		others: 2,
+		shown: [7101, 7102, 7103],
 	};
 
 	it("says the suggestion covers this merchant and the others, and offers Create and Pick a category below", () => {
@@ -164,6 +165,7 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 		expect(html).toContain(">Create Pet Care<");
 		expect(html).toContain('href="#organize-category"');
 		expect(html).toContain("Pick a category below");
+		expect(html).not.toContain('role="alert"');
 	});
 
 	it("reads in the singular when the suggestion is only this merchant's", () => {
@@ -171,11 +173,25 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 		expect(html).toContain("Tally suggested a new category for this: Pet Care");
 	});
 
-	it("posts only the suggestion's id, with no ticks, rows or note fields", () => {
+	it("posts the suggestion's id and one hidden shown per purchase, with no ticks or note fields", () => {
 		const html = String(<OrganizeNewCategoryCard {...ORGANIZE} />);
 		expect(html).toContain('name="suggestion" value="7001"');
+		for (const id of ORGANIZE.shown)
+			expect(html).toContain(`name="shown" value="${id}"`);
 		expect(html).not.toContain('type="checkbox"');
 		expect(html).not.toContain("note_");
+	});
+
+	it("shows a refused Create's reason under the headline, as Settings' card does", () => {
+		const html = String(
+			<OrganizeNewCategoryCard
+				{...ORGANIZE}
+				error="Tally has room for 50 categories. Archive one to add another."
+			/>,
+		);
+		expect(html).toContain(
+			'<p role="alert" class="text-sm text-over">Tally has room for 50 categories. Archive one to add another.</p>',
+		);
 	});
 
 	it("has no No and no Dismiss", () => {

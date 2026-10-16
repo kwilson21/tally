@@ -145,8 +145,9 @@ export function NewCategoryCard({
 
 /**
  * Organize's short form of the card, above its chips (decision 120, P135 A): Tally's guess for the merchant on screen,
- * with the suggestion's other purchases counted, then Create (the card's own Create, with every purchase ticked) and a
- * link that moves focus to the chips. It sends only the suggestion's id.
+ * with the suggestion's other merchants counted, then Create (the card's own Create, with every purchase ticked) and a
+ * link that moves focus to the chips. It sends the suggestion's id and each purchase the card counts (`shown`), so
+ * Create files only those. A refused Create's reason shows under the headline, as NewCategoryCard shows its error.
  */
 export function OrganizeNewCategoryCard({
 	name,
@@ -155,15 +156,21 @@ export function OrganizeNewCategoryCard({
 	others,
 	action,
 	suggestionId,
+	shown,
+	error,
 }: {
 	name: string;
 	existing?: string;
 	archived?: boolean;
-	/** The suggestion's purchases outside this merchant. */
+	/** The suggestion's other merchants, each counted once. */
 	others: number;
 	/** Where Create posts: Organize's own address for it. */
 	action: string;
 	suggestionId: number;
+	/** The purchases the card counts, each sent as `shown`. */
+	shown: number[];
+	/** A refused Create's reason, drawn under the headline. */
+	error?: string;
 }) {
 	const more = others === 0 ? "" : ` and ${others} more`;
 	return (
@@ -182,6 +189,14 @@ export function OrganizeNewCategoryCard({
 			<h2 class="text-lg">
 				Tally suggested a new category for this{more}: {name}
 			</h2>
+			{error && (
+				<p role="alert" class="text-sm text-over">
+					{error}
+				</p>
+			)}
+			{shown.map((id) => (
+				<input type="hidden" name="shown" value={String(id)} />
+			))}
 			<div class="flex flex-wrap items-center gap-3">
 				<Button type="submit">{createWords(name, existing, archived)}</Button>
 				<Button kind="text" href="#organize-category">

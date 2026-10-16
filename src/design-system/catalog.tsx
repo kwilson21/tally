@@ -3517,6 +3517,19 @@ function Rows() {
 							others={2}
 							action="/transactions/organize/suggestion"
 							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+						/>
+					</div>
+				</State>
+				<State label="Organize: a refused Create, with its reason under the headline">
+					<div class="max-w-xl" inert>
+						<OrganizeNewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							others={2}
+							action="/transactions/organize/suggestion"
+							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+							error="Tally has room for 50 categories. Archive one to add another."
 						/>
 					</div>
 				</State>
