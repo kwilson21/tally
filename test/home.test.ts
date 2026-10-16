@@ -442,10 +442,19 @@ describe("GET / with the demo seed", () => {
 					.reduce((sum, t) => sum + t.amountCents, 0),
 			}));
 		const over = summary.totalSpentCents - summary.totalBudgetCents;
-		const cause = monthCause(monthCauses(summary.categories, unbudgeted), over);
+		const cause = monthCause(
+			monthCauses(
+				summary.categories,
+				unbudgeted,
+				summary.uncategorized.spentCents,
+			),
+			over,
+		);
 		if (!cause) throw new Error("September has no cause to name");
 		expect(cause.text.startsWith("Most of it had no budget:")).toBe(true);
-		expect(cause.toNotBudgeted).toBe(true);
+		expect(cause.named.every((named) => named.kind === "unbudgeted")).toBe(
+			true,
+		);
 
 		const { html } = await homeAt(month);
 		expect(html).toContain(`<a href="#${month}-not-budgeted"`);
@@ -457,6 +466,17 @@ describe("GET / with the demo seed", () => {
 		)?.[1];
 		expect(shown).toBeTruthy();
 		expect(html).toContain(`September, ended ${shown} over`);
+	});
+
+	it("follows the nightly demo reset: August's pet spending is Needs a category, and August ends over", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-16T16:00:00Z"));
+		await resetDemo(env.DB, "2026-10-16", { categoryExample: true });
+		const { html } = await homeAt("2026-08");
+		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
+		expect(html).toContain("Needs a category $277");
+		expect(html).toContain('<a href="#2026-08-needs-category"');
+		expect(html).toContain('<li id="2026-08-needs-category"');
 	});
 
 	it("gives a finished month that ended under budget no cause line, and marks it under", async () => {

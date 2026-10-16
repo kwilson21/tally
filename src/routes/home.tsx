@@ -38,7 +38,7 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
-import { MonthEnd, notBudgetedId, PastNotBudgeted } from "../views/month-end";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation, stripMonths } from "../views/month-navigation";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
@@ -356,6 +356,7 @@ async function renderHome(
 									}
 									rows={summary.categories}
 									unbudgeted={pastNotBudgeted}
+									needsCategoryCents={summary.uncategorized.spentCents}
 								/>
 								<a
 									href="/"
@@ -439,7 +440,7 @@ async function renderHome(
 							)}
 							{!current ? (
 								<PastNotBudgeted
-									id={notBudgetedId(month)}
+									chartId={month}
 									items={pastNotBudgeted}
 									needsCategory={summary.uncategorized}
 								/>

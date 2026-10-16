@@ -28,9 +28,10 @@ describe("MonthEnd cause line", () => {
 						{ name: "Childcare", spentCents: 96000 },
 						{ name: "Rent", spentCents: 120000 },
 					]}
+					needsCategoryCents={0}
 				/>
 				<PastNotBudgeted
-					id="sep-cause-not-budgeted"
+					chartId="sep-cause"
 					items={[
 						{
 							name: "Childcare",
@@ -63,6 +64,7 @@ describe("MonthEnd cause line", () => {
 				amountCents={-22000}
 				rows={[row("Eating Out", 25000, 43000), row("Kids", 30000, 34000)]}
 				unbudgeted={[]}
+				needsCategoryCents={0}
 			/>,
 		);
 		expect(html).toMatch(
@@ -79,6 +81,7 @@ describe("MonthEnd cause line", () => {
 				amountCents={31000}
 				rows={[row("Eating Out", 25000, 26000)]}
 				unbudgeted={[{ name: "Rent", spentCents: 120000 }]}
+				needsCategoryCents={0}
 			/>,
 		);
 		expect(html).not.toContain("Most of it");
@@ -94,10 +97,73 @@ describe("MonthEnd cause line", () => {
 				amountCents={-120000}
 				rows={[]}
 				unbudgeted={[{ name: "Rent", spentCents: 120000 }]}
+				needsCategoryCents={0}
 			/>,
 		);
 		expect(html).not.toContain("Most of it");
 		expect(html).not.toContain("Part of it");
 		expect(html).not.toContain(">Over<");
+	});
+
+	it("links each named cause to its own place when the kinds differ: the bars for over, the Not budgeted heading for no budget", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="X"
+				monthName="September"
+				amountCents={-138000}
+				rows={[row("Eating Out", 25000, 43000)]}
+				unbudgeted={[{ name: "Rent", spentCents: 120000 }]}
+				needsCategoryCents={0}
+			/>,
+		);
+		expect(html).toMatch(
+			/<p class="mt-2 text-muted">Most of it: <a href="#X-bars"[^>]*>Eating Out \$180 over<\/a> and <a href="#X-not-budgeted"[^>]*>Rent \$1,200 with no budget<\/a>\.<\/p>/,
+		);
+	});
+
+	it("links Rent and Needs a category to two places, the Not budgeted heading and the Needs a category row", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="X"
+				monthName="September"
+				amountCents={-144900}
+				rows={[row("Groceries", 70000, 67200)]}
+				unbudgeted={[{ name: "Rent", spentCents: 120000 }]}
+				needsCategoryCents={27700}
+			/>,
+		);
+		expect(html).toMatch(
+			/<p class="mt-2 text-muted">Most of it had no budget: <a href="#X-not-budgeted"[^>]*>Rent \$1,200<\/a> and <a href="#X-needs-category"[^>]*>Needs a category \$277<\/a>\.<\/p>/,
+		);
+	});
+
+	it("keeps one whole-line link for a sentence whose causes are all over budget", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="X"
+				monthName="September"
+				amountCents={-22000}
+				rows={[row("Eating Out", 25000, 43000), row("Kids", 30000, 34000)]}
+				unbudgeted={[]}
+				needsCategoryCents={0}
+			/>,
+		);
+		expect(
+			html.match(/<p class="mt-2 text-muted"><a href="#X-bars"/g),
+		).toHaveLength(1);
+	});
+});
+
+describe("PastNotBudgeted with a chart id", () => {
+	it("gives the Not budgeted heading and the Needs a category row their ids", () => {
+		const html = renderToString(
+			<PastNotBudgeted
+				chartId="X"
+				items={[]}
+				needsCategory={{ spentCents: 27700, count: 1 }}
+			/>,
+		);
+		expect(html).toContain('<h3 id="X-not-budgeted"');
+		expect(html).toMatch(/<li id="X-needs-category" class="[^"]*">/);
 	});
 });

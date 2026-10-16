@@ -4,10 +4,12 @@
 // Thursday, Oct 15: Streaming's months, Bills' rows, September's result and the month strip. Where the
 // app has a component that draws the part, the real one draws it (BillRow, BillStatusHeading,
 // BillMonthlyTotal, BillOccurrenceRow, WhyLink, TrendsTop, TrendGroup, TrendRow, MonthNavigation,
-// MonthEnd, PastNotBudgeted). Where an option changes a part that the app's component doesn't take
-// (a heading without its Why?, a month's dot with its mark, a sentence between a month's stamp and its
-// bars), or where a real component has a fixed id that a page can't repeat (PlanBand), the picture
-// is a prototype here, drawn with the same classes; src/views stays as it is.
+// PastNotBudgeted). Where an option changes a part that the app's component doesn't take (a heading
+// without its Why?, a month's dot with its mark, a sentence between a month's stamp and its bars), or
+// where a real component has a fixed id that a page can't repeat (PlanBand), the picture is a prototype
+// here, drawn with the same classes; src/views stays as it is. The Today pictures are hand-drawn
+// baselines of today's screen too: P132's Today, which the app drew before MonthEnd's cause line, and
+// P133's Today strips, main's grey discs drawn here, since the real strip now draws P133 A's marks.
 
 import type { Child } from "hono/jsx";
 import { monthCause, monthCauses } from "../budgets/month-cause";
@@ -917,12 +919,7 @@ function OverStamp() {
 function TodayMonth() {
 	return (
 		<>
-			<MonthNavigation
-				month="2026-09"
-				firstMonth="2026-05"
-				currentMonth={CURRENT}
-				results={DEMO_MONTH_RESULTS}
-			/>
+			<MonthStrip month="2026-09" cell={todayCell} words={todayWords} />
 			<p class="mt-4 text-lg text-muted">September ended</p>
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<p class="whitespace-nowrap font-serif text-6xl font-semibold tracking-tight text-over">
@@ -949,7 +946,7 @@ function CauseMonth({
 	unbudgeted: Unbudgeted[];
 }) {
 	const overCents = -resultCents(rows, unbudgeted);
-	const cause = monthCause(monthCauses(rows, unbudgeted), overCents);
+	const cause = monthCause(monthCauses(rows, unbudgeted, 0), overCents);
 	return (
 		<>
 			<p class="mt-4 text-lg text-muted">{name} ended</p>
@@ -962,7 +959,7 @@ function CauseMonth({
 			{cause && (
 				<p class="mt-2 text-muted">
 					<a
-						href={`#${cause.toNotBudgeted ? `${idPrefix}-not-budgeted` : `${idPrefix}-bars`}`}
+						href={`#${cause.named.some((named) => named.kind !== "over") ? `${idPrefix}-not-budgeted` : `${idPrefix}-bars`}`}
 						class="inline-flex min-h-11 items-center text-muted underline underline-offset-4"
 					>
 						{cause.text}
@@ -1038,14 +1035,17 @@ const abbr = (item: string) => monthName(item).slice(0, 3);
 
 /**
  * The month strip under the title, as MonthNavigation draws it: the arrows, the title and Months' links,
- * each link 44px and named for a screen reader with its result in words. `cell` draws what a link holds.
+ * each link 44px and named for a screen reader with its result in words (or in `words`). `cell` draws what a link holds.
  */
 function MonthStrip({
 	month,
 	cell,
+	words = monthWords,
 }: {
 	month: string;
 	cell: (item: string, shown: boolean) => Child;
+	/** A link's name for a screen reader; by default its result in words (P133 A). */
+	words?: (item: string) => string;
 }) {
 	const previous = month > FIRST_MONTH ? monthsBefore(month, 1) : undefined;
 	const next = month < CURRENT ? monthsBefore(month, -1) : undefined;
@@ -1068,7 +1068,7 @@ function MonthStrip({
 								class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm text-muted no-underline"
 							>
 								{cell(item, item === month)}
-								<span class="sr-only">{monthWords(item)}</span>
+								<span class="sr-only">{words(item)}</span>
 							</a>
 						</li>
 					))}
@@ -1077,6 +1077,23 @@ function MonthStrip({
 		</div>
 	);
 }
+
+/** Today's dot, hand-drawn as main drew it before P133: a grey disc, ink for the shown month, a ring for the current one. */
+function todayCell(item: string, shown: boolean) {
+	return (
+		<>
+			<span
+				aria-hidden="true"
+				class={`size-8 rounded-full ${shown ? "bg-ink" : "bg-muted/45"} ${item === CURRENT ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
+			/>
+			<span aria-hidden="true">{abbr(item)}</span>
+		</>
+	);
+}
+
+/** Today's link name, as main had it: the month, with "this month" on the current one. */
+const todayWords = (item: string) =>
+	`${monthName(item)}${item === CURRENT ? ", this month" : ""}`;
 
 /** A (marks in outline, as first drawn): MonthNavigation's real dot, with its mark in a ringed disc. */
 function markedCell(item: string, shown: boolean) {
@@ -1623,31 +1640,28 @@ export function AuditRoundTwoPicks() {
 					>
 						<Shot caption="October at 390 px: the strip under the title">
 							<Phone label="Today, the month dots, October" tab="home">
-								<MonthNavigation
+								<MonthStrip
 									month={CURRENT}
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-									results={DEMO_MONTH_RESULTS}
+									cell={todayCell}
+									words={todayWords}
 								/>
 							</Phone>
 						</Shot>
 						<Shot caption="September at 390 px">
 							<Phone label="Today, the month dots, September" tab="home">
-								<MonthNavigation
+								<MonthStrip
 									month="2026-09"
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-									results={DEMO_MONTH_RESULTS}
+									cell={todayCell}
+									words={todayWords}
 								/>
 							</Phone>
 						</Shot>
 						<Shot caption="October at 1280 px">
 							<Desk label="Today, the month dots, October" active="home">
-								<MonthNavigation
+								<MonthStrip
 									month={CURRENT}
-									firstMonth="2026-05"
-									currentMonth={CURRENT}
-									results={DEMO_MONTH_RESULTS}
+									cell={todayCell}
+									words={todayWords}
 								/>
 							</Desk>
 						</Shot>

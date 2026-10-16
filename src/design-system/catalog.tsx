@@ -87,7 +87,7 @@ import { MerchantRuleTick } from "../views/merchant-rule-tick";
 import { MerchantRules, NeverSuggestList } from "../views/merchant-rules";
 import { MixedTripLine } from "../views/mixed-trip-line";
 import { MoneyInput } from "../views/money-input";
-import { MonthEnd, notBudgetedId, PastNotBudgeted } from "../views/month-end";
+import { MonthEnd, PastNotBudgeted } from "../views/month-end";
 import { MonthNavigation } from "../views/month-navigation";
 import {
 	NameChoices,
@@ -1199,6 +1199,7 @@ function HomeTopGroup() {
 								results={{ ...DEMO_MONTH_RESULTS, "2026-09": 8600 }}
 							/>
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september"
 								monthName="September"
 								amountCents={8600}
@@ -1276,6 +1277,7 @@ function HomeTopGroup() {
 								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -231200 }}
 							/>
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-cause-no-budget"
 								monthName="September"
 								amountCents={-231200}
@@ -1303,7 +1305,7 @@ function HomeTopGroup() {
 								]}
 							/>
 							<PastNotBudgeted
-								id={notBudgetedId("catalog-cause-no-budget")}
+								chartId="catalog-cause-no-budget"
 								items={[
 									{
 										name: "Childcare",
@@ -1326,6 +1328,7 @@ function HomeTopGroup() {
 					<Picture label="September 2026 ended $220 over; Eating Out $180 and Kids $40 over their budgets, so the line says Most of it was over budget">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-cause-over-budget"
 								monthName="September"
 								amountCents={-22000}
@@ -1352,6 +1355,48 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
+				<State label="An Over month whose causes sit in two places: its over-budget category links to the bars and Needs a category to its row">
+					<Picture label="September 2026 ended $429 over; Eating Out finished $180 over its budget and $277 is Needs a category, so the line says Most of it and links each cause to where it's listed">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -42900 }}
+							/>
+							<MonthEnd
+								chartId="catalog-cause-two-places"
+								monthName="September"
+								amountCents={-42900}
+								unbudgeted={[]}
+								needsCategoryCents={27700}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 67200,
+										leftCents: 2800,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-two-places"
+								items={[]}
+								needsCategory={{ spentCents: 27700, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
 				<State label="The month strip on this month: its dot is a plain dot in an accent ring, and its link says so far">
 					<Picture label="October, so far, in the month strip: a plain dot in an accent ring, with the finished months' marks beside it">
 						<div class="max-w-2xl">
@@ -1365,7 +1410,7 @@ function HomeTopGroup() {
 					</Picture>
 				</State>
 				<State label="The month strip on a finished month: its mark in a bordered dot, its ink ring on the shown month, and its words name the result">
-					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with May and August under beside it">
+					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with August over and May under beside it">
 						<div class="max-w-2xl">
 							<MonthNavigation
 								month="2026-09"
@@ -1380,6 +1425,7 @@ function HomeTopGroup() {
 					<Picture label="$100 budget, $20 categorized and $50 uncategorized: $30 under, with Needs a category at the end of Not budgeted">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={5000}
 								chartId="catalog-needs-category"
 								monthName="September"
 								amountCents={3000}
@@ -1423,6 +1469,7 @@ function HomeTopGroup() {
 					<Picture label="A seven-figure finished amount in the 280px column of a 320px phone, one size smaller, with its Under stamp dropping beneath it">
 						<div class="w-[320px] max-w-full px-5">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-large-result"
 								monthName="September"
 								amountCents={100_000_000}
@@ -1445,6 +1492,7 @@ function HomeTopGroup() {
 					<Picture label="September 2026 ended with no budgets set: −$57 in ink as the result, with no Over or Under stamp">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september-no-budgets"
 								monthName="September"
 								amountCents={-5700}
@@ -1470,6 +1518,7 @@ function HomeTopGroup() {
 					<Picture label="Five categories in one row with no scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-five"
 								monthName="September"
 								amountCents={0}
@@ -1490,6 +1539,7 @@ function HomeTopGroup() {
 					<Picture label="Ten categories at lg, the last one over budget, with the budget word clear of its bar">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-ten-wide"
 								monthName="September"
 								amountCents={16000}
@@ -1521,6 +1571,7 @@ function HomeTopGroup() {
 					<Picture label="Twelve categories in one row with a fade, arrow and sideways scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve"
 								monthName="September"
 								amountCents={0}
@@ -1541,6 +1592,7 @@ function HomeTopGroup() {
 					<Picture label="The twelve-category chart cue stays still under reduced motion">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve-reduced-motion"
 								monthName="September"
 								amountCents={0}

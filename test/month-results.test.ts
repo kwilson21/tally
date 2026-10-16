@@ -62,7 +62,7 @@ describe("monthResults", () => {
 	});
 
 	it("gives the demo's results that the catalog and proposal pictures draw, as the demo shows them on 2026-10-16", async () => {
-		await resetDemo(env.DB, "2026-10-16");
+		await resetDemo(env.DB, "2026-10-16", { categoryExample: true });
 		const results = await monthResults(env.DB, Object.keys(DEMO_MONTH_RESULTS));
 		expect(results).toEqual(DEMO_MONTH_RESULTS);
 	});

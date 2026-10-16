@@ -1,5 +1,10 @@
 import type { CategorySummary } from "../budget";
-import { monthCause, monthCauses } from "../budgets/month-cause";
+import {
+	type CauseKind,
+	monthCause,
+	monthCauses,
+	type NamedCause,
+} from "../budgets/month-cause";
 import { wholeUnlessTiny } from "../money";
 import { endBarRatio } from "./bar";
 import { CategoryIcon } from "./category";
@@ -8,6 +13,9 @@ import { headlineAmountClass } from "./headline-amount";
 
 /** The id of a finished month's Not budgeted heading, which its cause line links to (P132 A). */
 export const notBudgetedId = (chartId: string) => `${chartId}-not-budgeted`;
+
+/** The id of a finished month's Needs a category row, which its cause line links to (decision 121). */
+export const needsCategoryId = (chartId: string) => `${chartId}-needs-category`;
 
 const SHORT_NAMES: Record<string, string> = {
 	Groceries: "Groc.",
@@ -332,6 +340,15 @@ function EndBars({
 	);
 }
 
+const CAUSE_LINK =
+	"inline-flex min-h-11 items-center text-muted underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+
+/** Where a named cause is listed: an over-budget category in the bars, the rest in Not budgeted or its Needs a category row. */
+function causeHref(chartId: string, kind: CauseKind) {
+	if (kind === "over") return `#${chartId}-bars`;
+	return `#${kind === "unbudgeted" ? notBudgetedId(chartId) : needsCategoryId(chartId)}`;
+}
+
 /** A finished month's net budget result and its category bars. */
 export function MonthEnd({
 	chartId,
@@ -339,6 +356,7 @@ export function MonthEnd({
 	amountCents,
 	rows,
 	unbudgeted,
+	needsCategoryCents,
 }: {
 	chartId: string;
 	monthName: string;
@@ -346,15 +364,20 @@ export function MonthEnd({
 	rows: CategorySummary[];
 	/** Categories with no budget and their spending: a cause of an Over month (P132 A). */
 	unbudgeted: { name: string; spentCents: number }[];
+	/** The month's uncategorized money: a cause of an Over month, named Needs a category (decision 121). */
+	needsCategoryCents: number;
 }) {
 	// With no budgeted category there is no stamp, and a negative result keeps its minus sign in ink, like Home's Safe to spend (#519).
 	const budgeted = rows.length > 0;
 	const over = budgeted && amountCents < 0;
 	const sign = !budgeted && amountCents < 0 ? "−" : "";
 	const amount = sign + wholeUnlessTiny(Math.abs(amountCents));
-	// Only an Over month names its causes; the line links to the Not budgeted list when a named cause has no budget, else to the bars.
+	// Only an Over month names its causes. When they all share a place the line is one link to it; otherwise each named cause links to its own.
 	const cause = over
-		? monthCause(monthCauses(rows, unbudgeted), -amountCents)
+		? monthCause(
+				monthCauses(rows, unbudgeted, needsCategoryCents),
+				-amountCents,
+			)
 		: null;
 	return (
 		<section aria-label={`${monthName} ended`}>
@@ -374,18 +397,46 @@ export function MonthEnd({
 					</span>
 				)}
 			</div>
-			{cause && (
-				<p class="mt-2 text-muted">
-					<a
-						href={`#${cause.toNotBudgeted ? notBudgetedId(chartId) : `${chartId}-bars`}`}
-						class="inline-flex min-h-11 items-center text-muted underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-					>
-						{cause.text}
-					</a>
-				</p>
-			)}
+			{cause && <CauseLine chartId={chartId} cause={cause} />}
 			<EndBars rows={rows} chartId={chartId} />
 		</section>
+	);
+}
+
+/**
+ * A finished month's cause line. When its named causes share a place it is one link to that place; when they don't,
+ * the lead and the joining words are plain muted text and each named cause links to its own place (decision 121).
+ */
+function CauseLine({
+	chartId,
+	cause,
+}: {
+	chartId: string;
+	cause: { text: string; lead: string; named: NamedCause[] };
+}) {
+	const [first] = cause.named;
+	if (!first) return null;
+	if (cause.named.every((named) => named.kind === first.kind))
+		return (
+			<p class="mt-2 text-muted">
+				<a href={causeHref(chartId, first.kind)} class={CAUSE_LINK}>
+					{cause.text}
+				</a>
+			</p>
+		);
+	return (
+		<p class="mt-2 text-muted">
+			{cause.lead}
+			{cause.named.map((named, index) => (
+				<>
+					{index > 0 && " and "}
+					<a href={causeHref(chartId, named.kind)} class={CAUSE_LINK}>
+						{named.words}
+					</a>
+				</>
+			))}
+			.
+		</p>
 	);
 }
 
@@ -393,13 +444,13 @@ export function MonthEnd({
 export function PastNotBudgeted({
 	items,
 	needsCategory,
-	id,
+	chartId,
 }: {
 	items: { name: string; icon: string; color: string; spentCents: number }[];
 	/** The month's uncategorized money, named once as the list's last row (#310). */
 	needsCategory?: { spentCents: number; count: number };
-	/** The heading's id, which a finished month's cause line links to (notBudgetedId). */
-	id?: string;
+	/** The month's chart id: the heading and the Needs a category row take the ids its cause line links to (decision 121). */
+	chartId?: string;
 }) {
 	// Shown when the result includes uncategorized money: a non-zero amount, or transactions that net to $0.
 	const needs =
@@ -409,7 +460,10 @@ export function PastNotBudgeted({
 	if (items.length === 0 && !needs) return null;
 	return (
 		<>
-			<h3 id={id} class="mt-6 text-sm text-muted">
+			<h3
+				id={chartId ? notBudgetedId(chartId) : undefined}
+				class="mt-6 text-sm text-muted"
+			>
 				Not budgeted
 			</h3>
 			<ul class="divide-y divide-rule">
@@ -426,7 +480,10 @@ export function PastNotBudgeted({
 					</li>
 				))}
 				{needs && (
-					<li class="flex min-h-11 items-center gap-4 py-2">
+					<li
+						id={chartId ? needsCategoryId(chartId) : undefined}
+						class="flex min-h-11 items-center gap-4 py-2"
+					>
 						<CategoryIcon icon="list" color="" />
 						<span class="min-w-0 flex-1 truncate text-lg">
 							Needs a category
