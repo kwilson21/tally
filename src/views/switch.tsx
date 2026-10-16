@@ -15,6 +15,10 @@ type Props = {
 	disabled?: boolean;
 	/** With `disabled`, what it needs, in words, so the greying never rests on color alone. */
 	note?: string;
+	/** What a form reads when it's on: "on" by default; the edit panel's fields read "1" (decision 111). */
+	value?: string;
+	/** Other ids that describe it, after its muted line, such as a Tally's-guess line drawn beside it. */
+	describedBy?: string;
 	/** Focus this switch after a swap, so a flip that answered with the page leaves focus on it (#606). */
 	autofocus?: boolean;
 	/**
@@ -48,10 +52,16 @@ export function Switch({
 	checked,
 	disabled,
 	note,
+	value = "on",
+	describedBy: alsoDescribedBy,
 	autofocus,
 	...requestAttrs
 }: Props) {
-	const describedBy = [hint && `${id}-hint`, disabled && note && `${id}-note`]
+	const describedBy = [
+		hint && `${id}-hint`,
+		disabled && note && `${id}-note`,
+		alsoDescribedBy,
+	]
 		.filter(Boolean)
 		.join(" ");
 	return (
@@ -66,7 +76,7 @@ export function Switch({
 				role="switch"
 				id={id}
 				name={name}
-				value="on"
+				value={value}
 				checked={checked}
 				disabled={disabled}
 				autofocus={autofocus}

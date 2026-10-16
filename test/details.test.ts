@@ -500,8 +500,12 @@ describe("transaction detail guesses", () => {
 		expect(guessed).toContain("Tally&#39;s guess");
 		expect(guessed).toContain("Tally uses these when it picks a category.");
 		expect(guessed).toContain('href="/how-it-works#categorization"');
-		expect(guessed.indexOf("Looks right")).toBeLessThan(
-			guessed.lastIndexOf("Groceries"),
+		// P120 B: the category leads the panel; the four details and Looks right follow it.
+		expect(guessed.indexOf('id="edit-category"')).toBeLessThan(
+			guessed.indexOf('id="detail-name"'),
+		);
+		expect(guessed.indexOf("Looks right")).toBeGreaterThan(
+			guessed.indexOf('id="detail-for"'),
 		);
 	});
 
