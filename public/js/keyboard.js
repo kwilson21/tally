@@ -81,7 +81,7 @@ export function rowsOf(doc) {
 export function keyboard(doc, win) {
 	let returnTo = null;
 	let armed = false;
-	// The #fragment the page had when the keys sheet opened. The sheet's address has none, so its close puts it back.
+	// The #fragment the page had when the keys sheet opened. The sheet's address has none, so its open and its close put it back.
 	let keptHash = "";
 	// A second ? sends nothing until that keys request ends (its finish) or #keys itself settles. A Back aborts it.
 	let loading = false;
@@ -100,6 +100,20 @@ export function keyboard(doc, win) {
 		armed = false;
 		returnTo = null;
 		keptHash = "";
+	}
+
+	/**
+	 * Puts the page's #fragment back on the address when it has none. replaceState keeps htmx's state and neither scrolls
+	 * nor adds a history entry. The sheet's address has no fragment, so this runs when the sheet opens (Select mode's
+	 * reply pushes an address the server built, without one) and when it closes.
+	 */
+	function keepFragment(fragment) {
+		if (fragment && !win.location.hash)
+			win.history.replaceState(
+				win.history.state,
+				"",
+				win.location.pathname + win.location.search + fragment,
+			);
 	}
 
 	/** Focuses the page's heading: the first h1 in #main, or else #main, as toast.js's focusHeading does. */
@@ -199,21 +213,17 @@ export function keyboard(doc, win) {
 			const sheet = openSheet(doc);
 			if (sheet) {
 				// Only the keys sheet's own open arms the return; a different sheet's settle changes nothing.
-				if (region.contains(sheet)) armed = true;
+				if (region.contains(sheet)) {
+					armed = true;
+					keepFragment(keptHash);
+				}
 				return;
 			}
 			// A settle with no sheet open ends the keys' return: it was the close (a failed request is ended(), below).
 			const back = armed ? returnTo : null;
 			const fragment = armed ? keptHash : "";
 			forget();
-			// The close's address has no fragment, so the page's own goes back on. replaceState keeps htmx's state and
-			// neither scrolls nor adds a history entry.
-			if (fragment && !win.location.hash)
-				win.history.replaceState(
-					win.history.state,
-					"",
-					win.location.pathname + win.location.search + fragment,
-				);
+			keepFragment(fragment);
 			// When the opener is gone (a Back redrew the page, or an Undo left its toast), focus goes to the page's heading,
 			// but only from nothing, as ended() gives it back.
 			if (back?.isConnected) back.focus();
