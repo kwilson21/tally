@@ -90,7 +90,10 @@ describe("htmx posting forms", () => {
 		const forms = htmxForms(await get("/transactions/organize"));
 		expect(forms).toHaveLength(1);
 		expect(forms[0]).toContain('hx-post="/transactions/organize"');
-		expect(forms[0]).toContain('hx-disable="findAll button[type=submit]"');
+		expect(forms[0]).toContain(
+			'hx-disable="#organize-page button[type=submit]"',
+		);
+		expect(forms[0]).toContain('hx-sync="#organize-page:drop"');
 	});
 
 	it("disables the transaction editor submit button and labels its save", async () => {

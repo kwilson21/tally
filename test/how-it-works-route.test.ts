@@ -1094,3 +1094,168 @@ describe("Start here's month and count (#502)", () => {
 		);
 	});
 });
+
+describe("each section's exact rules fold under its picture (decision 126, P137 A, #644)", () => {
+	const SECTIONS = [
+		"budget",
+		"transactions",
+		"exclusions",
+		"categorization",
+		"names",
+		"bills",
+		"trends",
+		"what-ai-did",
+		"net-worth",
+	];
+	/** The section's markup, or "" if the page has none. */
+	const sectionOf = (html: string, id: string) =>
+		html.match(
+			new RegExp(`<section[^>]*id="${id}"[\\s\\S]*?<\\/section>`),
+		)?.[0] ?? "";
+	/** The section's one fold, from its <details> to its </details>. */
+	const foldOf = (section: string) =>
+		section.match(/<details[\s\S]*<\/details>/)?.[0] ?? "";
+	const pages = [
+		["the demo", async () => (await get("/how-it-works")).html],
+		[
+			"the family app",
+			async () =>
+				await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		],
+	] as const;
+
+	describe.each(pages)("in %s", (_name, load) => {
+		it.each(SECTIONS)(
+			"%s has one closed fold, as its last child, after its picture and example",
+			async (id) => {
+				const section = sectionOf(await load(), id);
+				expect(section, "the section renders").not.toBe("");
+				expect(section.match(/<details/g)?.length ?? 0, "one fold").toBe(1);
+				expect(section, "closed by default").not.toMatch(
+					/<details[^>]* open[ >=]/,
+				);
+				expect(section, "the fold is the last child").toMatch(
+					/<div class="mt-3"><details class="group border-b border-rule"[^>]*>[\s\S]*<\/details><\/div><\/section>$/,
+				);
+				const fold = foldOf(section);
+				const at = section.indexOf("<details");
+				for (const picture of ['role="img"', "bg-band"]) {
+					const last = section.lastIndexOf(picture);
+					if (last !== -1)
+						expect(last, `${picture} comes before the fold`).toBeLessThan(at);
+				}
+				expect(
+					section.replace(fold, ""),
+					"no rules outside the fold",
+				).not.toMatch(/<(ul|ol|li)[ >]/);
+				expect(fold, "the rules list is in the fold").toMatch(
+					/<(ul class="mt-3 list-disc space-y-1 pl-5"|ol class="mt-3 list-decimal space-y-1 pl-5")>/,
+				);
+			},
+		);
+
+		it.each(SECTIONS)(
+			"%s's fold says 'The exact rules' and then its rule count, which is the rules inside it",
+			async (id) => {
+				const fold = foldOf(sectionOf(await load(), id));
+				const summary = fold.slice(
+					fold.indexOf("<summary"),
+					fold.indexOf("</summary>"),
+				);
+				const label = summary.indexOf("The exact rules");
+				const count = summary.match(/(\d+) (rules?)</);
+				expect(label, "the label").toBeGreaterThanOrEqual(0);
+				expect(count, "the rule count").not.toBeNull();
+				expect(label, "the label comes first").toBeLessThan(count?.index ?? -1);
+				const body = fold.slice(fold.indexOf("</summary>"));
+				const rules =
+					(body.match(/<li[ >]/g) ?? []).length +
+					(body.match(/<p[ >]/g) ?? []).length;
+				expect(rules, "rules inside the fold").toBeGreaterThan(0);
+				expect(Number(count?.[1]), "the count matches the rules").toBe(rules);
+				expect(count?.[2]).toBe(rules === 1 ? "rule" : "rules");
+			},
+		);
+
+		it("keeps Categories' four steps and five rule paragraphs in the fold, in order", async () => {
+			const section = decodeHtml(sectionOf(await load(), "categorization"));
+			const fold = decodeHtml(foldOf(section));
+			const rules = [
+				"A person's choice, which nothing overwrites.",
+				"A merchant rule:",
+				"A bill: a payment linked",
+				"AI model, which each night picks",
+				"After a person picks the same category",
+				"A trip looks mixed when",
+				"See every rule in Settings",
+				"A suggested category is only an idea",
+				"With Fill in details on",
+			];
+			let previous = -1;
+			for (const rule of rules) {
+				expect(section.split(rule), `${rule} appears once`).toHaveLength(2);
+				const at = fold.indexOf(rule);
+				expect(at, `${rule} is in the fold`).toBeGreaterThan(previous);
+				previous = at;
+			}
+			expect(fold.match(/<ol class="mt-3 list-decimal/g)).toHaveLength(1);
+		});
+
+		it("keeps Bills' intro and four groups where they are, before its picture and the fold", async () => {
+			const section = decodeHtml(sectionOf(await load(), "bills"));
+			const intro = section.indexOf(
+				"Bills puts each active bill in one of four groups:",
+			);
+			const groups = section.indexOf("<dl");
+			const picture = section.indexOf('role="img"');
+			const fold = section.indexOf("<details");
+			expect(intro).toBeGreaterThanOrEqual(0);
+			expect(groups).toBeGreaterThan(intro);
+			// Bills' picture renders only with a paid bill, so the order is checked when it does.
+			if (picture !== -1) expect(picture).toBeGreaterThan(groups);
+			expect(fold).toBeGreaterThan(groups);
+			expect(foldOf(section)).not.toContain("<dl");
+		});
+
+		it("leaves Architecture as it was, with no fold", async () => {
+			const html = await load();
+			const architecture = sectionOf(html, "architecture");
+			if (architecture !== "") expect(architecture).not.toContain("<details");
+		});
+	});
+
+	it("keeps each fold last in the family app with no data, after the empty-state sentences", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM budget_amounts"),
+			env.DB.prepare("DELETE FROM savings_goal_amounts"),
+			env.DB.prepare("DELETE FROM planned_expenses"),
+			env.DB.prepare("DELETE FROM balance_history"),
+			env.DB.prepare("DELETE FROM accounts"),
+		]);
+		const html = await (
+			await howItWorks.request("/how-it-works", {}, notDemo)
+		).text();
+		for (const id of SECTIONS) {
+			const section = sectionOf(html, id);
+			expect(section, `${id} renders`).not.toBe("");
+			expect(section.match(/<details/g)?.length ?? 0, `${id} one fold`).toBe(1);
+			expect(section, `${id}'s fold is last`).toMatch(
+				/<div class="mt-3"><details class="group border-b border-rule"[^>]*>[\s\S]*<\/details><\/div><\/section>$/,
+			);
+		}
+		const budget = sectionOf(html, "budget");
+		expect(budget).toContain("No budgets have been set yet.");
+		expect(budget.indexOf("No budgets have been set yet.")).toBeLessThan(
+			budget.indexOf("<details"),
+		);
+		expect(sectionOf(html, "transactions")).toContain(
+			"There are no transactions this month yet.",
+		);
+		expect(sectionOf(html, "net-worth")).toContain(
+			"There are no accounts to add up yet.",
+		);
+	});
+});

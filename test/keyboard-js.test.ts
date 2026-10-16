@@ -656,6 +656,97 @@ describe("a settle of another request leaves the keys sheet's return alone (htmx
 	});
 });
 
+describe("an Undo while the keys sheet is open keeps ?keys in the address (htmx:after:settle)", () => {
+	// The sheet's ? pushes the address with ?keys before the sheet settles. An Undo's reply pushes the address its toast
+	// saved (no ?keys, no fragment) and swaps #page, which does not hold #keys, since the sheet is drawn outside #main.
+	it("puts ?keys back, with the fragment the sheet kept, when another region settles after an Undo's push", () => {
+		const page = new FakePage();
+		const syncRegion = el(page, "div", { id: "sync" });
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09", "#budget");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.search = "?month=2026-09&keys";
+		el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+		win.location.search = "?month=2026-09";
+		win.location.hash = "";
+		settled(settleEvent(syncRegion));
+		expect(win.history.replaceState).toHaveBeenCalledTimes(1);
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions?month=2026-09&keys#budget",
+		);
+	});
+
+	it("puts ?keys back when the Undo's own swap of #page settles", () => {
+		const page = new FakePage();
+		const pageRegion = el(page, "div", { id: "page" });
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09", "#budget");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.search = "?month=2026-09&keys";
+		el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		win.location.search = "?month=2026-09";
+		win.location.hash = "";
+		settled(settleEvent(pageRegion));
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions?month=2026-09&keys#budget",
+		);
+	});
+
+	it("closes to the address without ?keys once the sheet is taken away, and keeps the fragment in place", () => {
+		const page = new FakePage();
+		const pageRegion = el(page, "div", { id: "page" });
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09", "#budget");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.search = "?month=2026-09&keys";
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		win.location.search = "?month=2026-09";
+		win.location.hash = "";
+		settled(settleEvent(pageRegion));
+		// The close's push has no keys, and its swap takes the sheet away.
+		remove(page, sheet);
+		win.location.hash = "";
+		settled(settleEvent(region));
+		expect(win.history.replaceState).toHaveBeenLastCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions?month=2026-09#budget",
+		);
+	});
+
+	it("does nothing when no keys sheet is open, so an address without ?keys stays as the push left it", () => {
+		const page = new FakePage();
+		const pageRegion = el(page, "div", { id: "page" });
+		el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09", "#budget");
+		const { settled } = setup(page, win);
+		settled(settleEvent(pageRegion));
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+	});
+
+	it("does nothing while another sheet is open outside #keys", () => {
+		const page = new FakePage();
+		const pageRegion = el(page, "div", { id: "page" });
+		el(page, "div", { id: "keys" });
+		el(page, "section", { "data-sheet": "" });
+		const win = windowFor("?month=2026-09", "#budget");
+		const { settled } = setup(page, win);
+		settled(settleEvent(pageRegion));
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+	});
+});
+
 describe("a keys request that ends (htmx:finally:request)", () => {
 	it.each(["before", "after"])(
 		"keeps the return of a successful keys swap when its finish comes %s the settle",
@@ -1049,6 +1140,8 @@ describe("a history restore that takes the keys sheet away (the browser's Back)"
 		const { keydown, settled } = setup(page, win);
 		page.activeElement = second;
 		keydown(press("?", { shiftKey: true }));
+		// The address the sheet opened with has ?keys, so no push leaves the sheet without it.
+		win.location.search = "?keys";
 		const sheet = el(page, "section", { "data-sheet": "" }, region);
 		settled(settleEvent(region));
 		const main = el(page, "main", { id: "main" });
@@ -1059,6 +1152,7 @@ describe("a history restore that takes the keys sheet away (the browser's Back)"
 		expect(heading.focusCount).toBe(0);
 		expect(win.history.replaceState).not.toHaveBeenCalled();
 		remove(page, sheet);
+		win.location.search = "";
 		win.location.hash = "";
 		settled(settleEvent(region));
 		expect(second.focusCount).toBe(1);

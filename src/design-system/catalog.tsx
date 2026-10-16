@@ -61,7 +61,6 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { CategoryGrid } from "../views/category-grid";
 import { AddCategoryRow, CategoryRow } from "../views/category-row";
-import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
 import { DetailRow } from "../views/detail-row";
@@ -144,6 +143,10 @@ import {
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { StartHere } from "../views/start-here";
+import {
+	NewCategoryCard,
+	OrganizeNewCategoryCard,
+} from "../views/suggestion-card";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
@@ -208,6 +211,15 @@ import {
 	SWIPE_MOTION_TOKENS,
 	TYPE_ROLES,
 } from "./tokens";
+
+/** The sample suggestion's purchases as the new-category card reads them: each a name, an amount and a day. */
+const SUGGESTION_CARD_ROWS = CATEGORY_SUGGESTION.rows.map((row) => ({
+	id: row.id,
+	name: row.displayName,
+	amountCents: row.amountCents,
+	date: row.date,
+}));
+const SUGGESTION_CARD_TODAY = "2026-10-16";
 
 const SECTIONS = [
 	["foundation", "Foundation"],
@@ -3450,42 +3462,84 @@ function Rows() {
 				<UseSpec spec={LIKELY_SPEC} />
 			</Specimen>
 			<Specimen
-				id="category-suggestion-card"
-				title="CategorySuggestionCard"
+				id="suggestion-card"
+				title="NewCategoryCard and OrganizeNewCategoryCard"
 				tier="visual"
 				components={[
-					"CategorySuggestionCard",
-					"SelectableTransactionRow",
+					"NewCategoryCard",
+					"OrganizeNewCategoryCard",
+					"AskFirst",
 					"Button",
 					"WhyLink",
 				]}
-				sentence="An open dashed card shows a suggested category and its transactions; each real round checkbox decides which transactions go in, and only unticked rows reveal a note."
+				sentence="One card for a suggested new category, the same in Settings and on the Suggestions page: Tally's guess, one headline, the purchases as ruled rows with one checkbox each, then Create and No, with Why? after No. An unticked row keeps its note. No puts the question in the card's place. Organize shows a short form above its chips."
 			>
-				<State label="P30 A: three selected, one unticked with a note">
+				<State label="All ticked: Create Pet Care, then No, with Why? after it">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							ticked={[31, 32, 33]}
-							notes={{ 34: "Birthday present" }}
+						<NewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							rows={SUGGESTION_CARD_ROWS}
+							today={SUGGESTION_CARD_TODAY}
+							tickName="ids"
+							form={{}}
+							answers={{ create: { type: "button" }, no: { type: "button" } }}
 						/>
 					</div>
 				</State>
-				<State label="An archived category has this name: Restore Pet Care">
+				<State label="One unticked, with its note under it">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							existing="Pet Care"
-							archived
-							ticked={[31, 32, 33]}
+						<NewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							rows={SUGGESTION_CARD_ROWS}
+							today={SUGGESTION_CARD_TODAY}
+							tickName="ids"
+							ticked={[32, 33]}
+							notes={{ 31: "Birthday present" }}
+							form={{}}
+							answers={{ create: { type: "button" }, no: { type: "button" } }}
 						/>
 					</div>
 				</State>
-				<State label="The family already has this category: Add to Pet Care">
+				<State label="After No: the question in the card's place">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							existing="Pet Care"
-							ticked={[31, 32, 33]}
+						<AskFirst
+							action="/settings/suggestions/30/dismiss"
+							target="#categories"
+							kind="new_category"
+							id="new-30"
+							name={CATEGORY_SUGGESTION.name}
+							stores={[
+								{ merchantKey: "CHEWY", label: "Chewy" },
+								{ merchantKey: "PETSMART", label: "Petsmart" },
+								{
+									merchantKey: "BANFIELD PET HOSPITAL",
+									label: "Banfield Pet Hospital",
+								},
+							]}
+							focus
+						/>
+					</div>
+				</State>
+				<State label="Organize: the short form above the chips, with Create and Pick a category below">
+					<div class="max-w-xl" inert>
+						<OrganizeNewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							others={3}
+							action="/transactions/organize/suggestion"
+							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+						/>
+					</div>
+				</State>
+				<State label="Organize: a refused Create, with its reason under the headline">
+					<div class="max-w-xl" inert>
+						<OrganizeNewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							others={3}
+							action="/transactions/organize/suggestion"
+							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+							error="Tally has room for 50 categories. Archive one to add another."
 						/>
 					</div>
 				</State>
