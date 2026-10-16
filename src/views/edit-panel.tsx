@@ -168,8 +168,9 @@ export function countsWithPurchase(
  * purchase is locked: the choice is disabled and drawn open, with the purchase's category and the "Counts in" line.
  * The choice sits in its own wrapper, which the category lock route draws again when Count as income or Reviewed
  * changes (`#edit-category`). A locked choice's last pick sits in hidden fields after the disabled fieldset, since a
- * browser posts nothing from a disabled one. A trip that looks mixed (#233) draws its split line in the choice. The
- * merchant rule tick (#353, `rule`) follows the choices in both states.
+ * browser posts nothing from a disabled one. A trip that looks mixed (#233) draws its split line under the chips, or
+ * under the folded row, so it shows with the row closed. The merchant rule tick (#353, `rule`) follows the choices in
+ * both states.
  */
 export function CategoryChoice({
 	tx,
@@ -219,6 +220,14 @@ export function CategoryChoice({
 	const source = savedChoice
 		? categorySource(tx, unsureGuess, purchase !== undefined)
 		: undefined;
+	// A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts.
+	const mixedLine = !purchase && mixed && (
+		<MixedTripLine
+			first={mixed.first.name}
+			second={mixed.second.name}
+			href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+		/>
+	);
 	const choiceValue: Child = values.newCategory ? (
 		<span class="text-accent">New category</span>
 	) : (
@@ -250,14 +259,8 @@ export function CategoryChoice({
 				newCategory
 				newChecked={!purchase && values.newCategory === true}
 			/>
-			{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
-			{!purchase && mixed && (
-				<MixedTripLine
-					first={mixed.first.name}
-					second={mixed.second.name}
-					href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
-				/>
-			)}
+			{/* Under the chips while they're open. Once folded it's drawn under the row instead (below), outside the row's details. */}
+			{!folded && mixedLine}
 			{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
 			<NewCategoryName
 				id="new-category-name"
@@ -289,21 +292,24 @@ export function CategoryChoice({
 	return (
 		<div id="edit-category">
 			{folded ? (
-				<FoldedRow
-					label="Category"
-					open={openFolded}
-					sub={source}
-					value={choiceValue}
-				>
-					<fieldset
-						class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
-						aria-describedby={errors.category ? "category-error" : undefined}
+				<>
+					<FoldedRow
+						label="Category"
+						open={openFolded}
+						sub={source}
+						value={choiceValue}
 					>
-						<legend class="sr-only">Category</legend>
-						{choices}
-					</fieldset>
-					{ruleTick}
-				</FoldedRow>
+						<fieldset
+							class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+							aria-describedby={errors.category ? "category-error" : undefined}
+						>
+							<legend class="sr-only">Category</legend>
+							{choices}
+						</fieldset>
+						{ruleTick}
+					</FoldedRow>
+					{mixedLine}
+				</>
 			) : (
 				<>
 					<fieldset
