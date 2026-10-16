@@ -2026,6 +2026,17 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
 	});
 
+	// Decision 118: a sheet's foot has no keys' details, so the keys are only ever drawn on the page behind it.
+	it("draws no Keyboard shortcuts disclosure in the edit sheet's foot", async () => {
+		const html = (await get(`/transactions/${bakery}`)).html;
+		const sheet = html.slice(
+			html.indexOf('id="edit-title"'),
+			html.indexOf("</section>", html.indexOf('id="edit-title"')),
+		);
+		expect(sheet).toContain("How this works");
+		expect(sheet).not.toContain("Keyboard shortcuts");
+	});
+
 	// P124 A (decision 111): the sheet's How this works sits at its foot, under a short rule, after Save.
 	it("puts How this works at the foot of the edit sheet, after Save", async () => {
 		const html = (await get(`/transactions/${bakery}`)).html;

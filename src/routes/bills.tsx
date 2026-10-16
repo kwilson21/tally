@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { addressOf } from "../address";
 import {
 	type AmountRow,
 	amountForMonth,
@@ -392,7 +393,7 @@ export async function page(
 			title="Bills · Tally"
 			active="bills"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path}
+			currentPath={addressOf(c)}
 		>
 			{/* #page is the swap target of a toast's Undo (toast.js), as on Home and the transactions list. */}
 			<div id="page" class="max-w-2xl">
@@ -903,7 +904,7 @@ bills.get("/bills/find", async (c) => {
 			title="Possible bills · Tally"
 			active="bills"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path}
+			currentPath={addressOf(c)}
 		>
 			<div class="max-w-2xl">
 				<a href="/bills" class="inline-flex min-h-11 items-center">
@@ -1576,7 +1577,7 @@ async function billPage(
 			title={`${bill.name} · Tally`}
 			active="bills"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path}
+			currentPath={addressOf(c)}
 		>
 			{/* #page is what an Undo toast swaps in (toast.js), as on the Transactions page. */}
 			<div id="page" class="max-w-2xl">
