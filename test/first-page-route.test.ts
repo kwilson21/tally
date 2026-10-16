@@ -59,8 +59,9 @@ async function post(
 	path: string,
 	fields: Record<string, string> | [string, string][],
 	htmx = false,
+	DB: D1Database = db,
 ) {
-	const res = await family.fetch(path, {
+	const res = await app(false, DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
 		headers: {
@@ -150,6 +151,27 @@ async function answerFor(key: string, answer: "yes" | "no", htmx = false) {
 		],
 		htmx,
 	);
+}
+
+/**
+ * The test database with `hook` run once, against the database itself, just before its first batch: the write a sync or
+ * a competing answer makes between a reply's check and its own batch. Every other call forwards to the database.
+ */
+function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
+	let raced = false;
+	return new Proxy(db, {
+		get(target, prop) {
+			if (prop === "batch" && !raced) {
+				return async (statements: D1PreparedStatement[]) => {
+					raced = true;
+					await hook(target);
+					return target.batch(statements);
+				};
+			}
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
 }
 
 const trigger = (res: Response) =>
@@ -484,25 +506,24 @@ describe("Yes and No writes", () => {
 				.run();
 			await expectNothingMarked(merchant);
 		});
+
+		it("changes nothing when a shown deposit's merchant key changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
 	});
 
 	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
-		let raced = false;
 		// The competing Yes lands just before this reply's own batch, so the reply's No changes no row.
-		const racing = new Proxy(db, {
-			get(target, prop) {
-				if (prop === "batch" && !raced) {
-					return async (statements: D1PreparedStatement[]) => {
-						raced = true;
-						await answerPay(target, merchant, "yes", "person@example.com");
-						return target.batch(statements);
-					};
-				}
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
-			},
+		const racing = raceBeforeBatch(async (target) => {
+			await answerPay(target, merchant, "yes", "person@example.com");
 		});
 		const res = await app(false, racing).fetch("/first-page/pay", {
 			method: "POST",
@@ -537,27 +558,16 @@ describe("Yes and No writes", () => {
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
-		let raced = false;
 		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
-		const racing = new Proxy(db, {
-			get(target, prop) {
-				if (prop === "batch" && !raced) {
-					return async (statements: D1PreparedStatement[]) => {
-						raced = true;
-						await txn({
-							raw_name: "ACME CORP PAYROLL",
-							date: daysBefore(TODAY, 7),
-							amount_cents: -245000,
-							flag_income: 1,
-							plaid_category: "INCOME",
-						});
-						return target.batch(statements);
-					};
-				}
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
+		const racing = raceBeforeBatch(() =>
+			txn({
+				raw_name: "ACME CORP PAYROLL",
+				date: daysBefore(TODAY, 7),
+				amount_cents: -245000,
+				flag_income: 1,
+				plaid_category: "INCOME",
+			}),
+		);
 		const res = await app(false, racing).fetch("/first-page/pay", {
 			method: "POST",
 			redirect: "manual",
@@ -797,6 +807,51 @@ describe("A pay answer answers what the page showed", () => {
 			true,
 		);
 		await expectRefused(res, html, "2 times since");
+	});
+
+	it("says the deposits changed when a sync corrects a shown deposit between the check and the answer", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const racing = raceBeforeBatch(async (target) => {
+			await target
+				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+		});
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "yes"],
+			],
+			true,
+			racing,
+		);
+		await expectRefused(res, html, "$2,450 to $2,500");
+	});
+
+	it("says the deposits changed when a sync renames a shown deposit's merchant between the check and the answer", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const racing = raceBeforeBatch(async (target) => {
+			await target
+				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+		});
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "yes"],
+			],
+			true,
+			racing,
+		);
+		// The renamed deposit is now its own merchant, 'ACME', which sorts first and is asked first.
+		await expectRefused(res, html, "once, on");
 	});
 
 	it("marks nothing when the form posts no deposit field", async () => {

@@ -102,13 +102,13 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 /**
  * Yes and No on a merchant's money in: each row the question showed is marked income or not, as the person's choice
  * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). The answer covers only the
- * deposits the page showed: the UPDATE is bound to each shown deposit's id, day and cents (shownPayValues, the same
- * values the form carries). It is all or nothing. If a shown deposit's day or cents was corrected by a sync since the
- * read, or nothing asks about one any more, the UPDATE changes 0 rows, so the record below writes nothing and the route
- * redraws the page. A per-row check would not be enough: the record would still store the skipped row's old day or cents.
- * A deposit that arrives between the question and the answer is not in the snapshot, so it stays unanswered and is asked
- * next. The answer is recorded in the same batch, each deposit by its transaction id under the answer. Returns the rows
- * changed (0 when the merchant has nothing left to ask, or the shown deposits changed).
+ * deposits the page showed: the UPDATE is bound to each shown deposit's id, merchant key, day and cents (shownPayValues,
+ * the same values the form carries). It is all or nothing. If a sync corrected a shown deposit's day, cents or merchant
+ * since the read, or nothing asks about one any more, the UPDATE changes 0 rows, so the record below writes nothing and
+ * the route asks the question again. A per-row check would not be enough: the record would still store the skipped row's
+ * old day, cents or merchant key. A deposit that arrives between the question and the answer is not in the snapshot, so
+ * it stays unanswered and is asked next. The answer is recorded in the same batch, each deposit by its transaction id
+ * under the answer. Returns the rows changed (0 when the merchant has nothing left to ask, or the shown deposits changed).
  */
 export async function answerPay(
 	db: D1Database,
@@ -127,7 +127,8 @@ export async function answerPay(
 				AND transactions.id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
 				AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM transactions s
 					WHERE s.id = json_extract(j.value, '$.id') AND s.date = json_extract(j.value, '$.date')
-					AND -s.amount_cents = json_extract(j.value, '$.cents') AND ${payAskedSql("s")}))`,
+					AND -s.amount_cents = json_extract(j.value, '$.cents')
+					AND ${merchantKeySql("s")} = json_extract(j.value, '$.key') AND ${payAskedSql("s")}))`,
 			)
 			.bind(answer === "yes" ? 1 : 0, who, shown, shown),
 		payAnswerStatement(db, merchant.key, { [answer]: deposits }),
