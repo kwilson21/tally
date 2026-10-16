@@ -44,10 +44,17 @@ export function Layout({
 	children,
 }: LayoutProps) {
 	// The keys sheet is open when the address has keys in it (decision 118); its close is the same address without them.
-	const address = new URL(currentPath, "http://tally.local");
-	const keysOpen = address.searchParams.has("keys");
-	address.searchParams.delete("keys");
-	const keysCloseHref = `${address.pathname}${address.search}`;
+	// The address is split, not parsed: a path such as //%zz is not a URL, so parsing it would throw (a 404 would become a
+	// 500). A path that starts with more than one "/" is drawn from one, so its close link stays on this site.
+	const at = currentPath.indexOf("?");
+	const path = (at === -1 ? currentPath : currentPath.slice(0, at)).replace(
+		/^\/+/,
+		"/",
+	);
+	const query = new URLSearchParams(at === -1 ? "" : currentPath.slice(at + 1));
+	const keysOpen = query.has("keys");
+	query.delete("keys");
+	const keysCloseHref = query.size ? `${path}?${query}` : path;
 	return (
 		<html lang="en">
 			<head>

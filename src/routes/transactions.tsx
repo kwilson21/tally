@@ -607,8 +607,14 @@ async function renderList(
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
-	if (selecting && htmx && selectPushBase !== undefined)
-		c.header("HX-Push-Url", selectModeHref(selectPushBase, current));
+	// A reply to ?keys keeps keys too, since htmx takes this header over the push the keys sheet asked for (#72).
+	if (selecting && htmx && selectPushBase !== undefined) {
+		const pushed = selectModeHref(selectPushBase, current);
+		c.header(
+			"HX-Push-Url",
+			new URL(c.req.url).searchParams.has("keys") ? `${pushed}&keys` : pushed,
+		);
+	}
 
 	return c.html(
 		<Layout

@@ -16,7 +16,9 @@ const SEARCH_PAGE = "/transactions?focus=search";
 
 /** The keys sheet's address: this page's own, with keys after its query. */
 export function keysHref({ pathname, search }) {
-	return `${pathname}${search ? `${search}&` : "?"}keys`;
+	// A path that starts with more than one "/" would lead to another host, so it is kept to one.
+	const path = pathname.replace(/^\/+/, "/");
+	return `${path}${search ? `${search}&` : "?"}keys`;
 }
 
 /**
@@ -84,7 +86,9 @@ export function keyboard(doc, win) {
 			if (event.shiftKey && event.key !== "?") return;
 			const active = doc.activeElement ?? doc.body;
 			if (active.closest(FIELD) || openSheet(doc)) return;
-			switch (event.key) {
+			// Caps Lock makes a letter's key a capital; a letter is read the same either way.
+			const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+			switch (key) {
 				case "/": {
 					const search = controlFor(doc, "/");
 					event.preventDefault();
@@ -107,7 +111,7 @@ export function keyboard(doc, win) {
 				}
 				case "j":
 				case "k":
-					moveRow(event.key, active);
+					moveRow(key, active);
 					return;
 				case "e":
 					if (!active.hasAttribute("data-row")) return;
@@ -117,11 +121,11 @@ export function keyboard(doc, win) {
 				default: {
 					// ← and → (Home's month links) and u (the Undo toast) are the page's own controls, named by their key.
 					if (
-						(event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+						(key === "ArrowLeft" || key === "ArrowRight") &&
 						active.closest(SIDEWAYS)
 					)
 						return;
-					const control = controlFor(doc, event.key);
+					const control = controlFor(doc, key);
 					if (!control) return;
 					event.preventDefault();
 					control.click();

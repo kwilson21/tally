@@ -129,10 +129,22 @@ describe("the keys' details and More's row", () => {
 });
 
 describe("the rows keyboard.js moves between", () => {
-	it("marks a transaction row, a bill row and Home's category row as a row a person opens", async () => {
-		expect(await page("/transactions")).toContain("data-row");
-		expect(await page("/")).toContain("data-row");
-		expect(await page("/bills")).toContain("data-row");
+	// Each row is a link with data-row, named by the address it opens: the attribute is checked on that element.
+	const openRow = (href: string) =>
+		new RegExp(
+			`<a\\b(?=[^>]*\\bhref="${href}\\d+")(?=[^>]*\\bdata-row="")[^>]*>`,
+		);
+
+	it("marks a transaction row as a row a person opens", async () => {
+		expect(await page("/transactions")).toMatch(openRow("/transactions/"));
+	});
+
+	it("marks Home's category row as a row a person opens", async () => {
+		expect(await page("/")).toMatch(openRow("/budget/"));
+	});
+
+	it("marks a bill row as a row a person opens", async () => {
+		expect(await page("/bills")).toMatch(openRow("/bills/"));
 	});
 });
 
@@ -183,5 +195,54 @@ describe("the demo and the family's app", () => {
 		expect(shell).toMatch(
 			/<div class="mt-2 hidden lg:block"><details class="group">/,
 		);
+	});
+});
+
+describe("an address the layout cannot parse as a URL", () => {
+	// Layout splits the address rather than parsing it, so a path such as //%zz is a 404 (not a 500), and its keys
+	// sheet closes to a path on this site, never to a link that starts with // (another host).
+	it("is a 404 for a malformed path, as for any path nothing answers", async () => {
+		const res = await exports.default.fetch("http://tally.test//%zz");
+		expect(res.status).toBe(404);
+	});
+
+	it("draws its keys sheet closed to a path on this site, never a link that starts with //", async () => {
+		const res = await exports.default.fetch(
+			"http://tally.test//evil.example/x?keys",
+		);
+		const html = decodeAttributes(await res.text());
+		expect(res.status).toBe(404);
+		expect(keysRegion(html)).toContain('hx-get="/evil.example/x"');
+		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="\/\//);
+	});
+});
+
+describe("the address a Select-mode reply pushes", () => {
+	// htmx takes a reply's HX-Push-Url over the push the request asked for, so a reply to ?keys keeps keys in it, and
+	// a reload of the address shows the sheet still.
+	it("keeps ?keys in the pushed address when a Select-mode reply is asked for it", async () => {
+		const res = await exports.default.fetch(
+			"http://tally.test/transactions?select=1&keys",
+			{ headers: { "HX-Request": "true" } },
+		);
+		const pushed = new URL(
+			res.headers.get("HX-Push-Url") ?? "",
+			"http://tally.test",
+		);
+		expect(pushed.searchParams.has("select")).toBe(true);
+		expect(pushed.searchParams.has("keys")).toBe(true);
+	});
+
+	it("does not add keys to the pushed address when the reply was not asked for them", async () => {
+		const res = await exports.default.fetch(
+			"http://tally.test/transactions?select=1",
+			{ headers: { "HX-Request": "true" } },
+		);
+		const pushed = new URL(
+			res.headers.get("HX-Push-Url") ?? "",
+			"http://tally.test",
+		);
+		expect(pushed.searchParams.has("select")).toBe(true);
+		expect(pushed.searchParams.has("keys")).toBe(false);
 	});
 });

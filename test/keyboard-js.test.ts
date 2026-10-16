@@ -167,6 +167,12 @@ describe("keysHref (the address of the keys sheet)", () => {
 			keysHref({ pathname: "/transactions", search: "?month=2026-09" }),
 		).toBe("/transactions?month=2026-09&keys");
 	});
+
+	it("keeps the address on this site: a path that starts with // is drawn from one /", () => {
+		expect(keysHref({ pathname: "//evil.example/x", search: "" })).toBe(
+			"/evil.example/x?keys",
+		);
+	});
 });
 
 describe("/ (search)", () => {
@@ -423,6 +429,26 @@ describe("u (undoes the change its toast shows)", () => {
 		const event = press("u");
 		setup(page).keydown(event);
 		expect(event.preventDefault).not.toHaveBeenCalled();
+	});
+});
+
+describe("Caps Lock (a letter reads the same with it on)", () => {
+	// With Caps Lock on, a letter's event key is a capital and no Shift is held: the keys still act.
+	it("moves between rows, opens a row and presses Undo for a capital letter", () => {
+		const page = new FakePage();
+		const [first, second] = list(page);
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" });
+		const { keydown } = setup(page);
+		keydown(press("J"));
+		expect(page.activeElement).toBe(first);
+		keydown(press("J"));
+		expect(page.activeElement).toBe(second);
+		keydown(press("K"));
+		expect(page.activeElement).toBe(first);
+		keydown(press("E"));
+		expect(first.clicks).toBe(1);
+		keydown(press("U"));
+		expect(undo.clicks).toBe(1);
 	});
 });
 
