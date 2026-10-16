@@ -17,6 +17,13 @@ import { monthName, monthsBefore, shortDay } from "../dates";
 import { formatCents } from "../money";
 import type { MonthPoint } from "../trends";
 import {
+	BillHead,
+	LedgerDisclosure,
+	LedgerMonth,
+	LedgerPayments,
+	PaidCheck,
+} from "../views/bill-ledger";
+import {
 	BillOccurrenceRow,
 	type OccurrencePayment,
 } from "../views/bill-occurrence-row";
@@ -623,13 +630,11 @@ function TodayHead() {
 /** P120 B's head (decision 111): the name as the one headline, its amount in muted words, the bank's text small under it. */
 function QuietHead() {
 	return (
-		<div class="flex flex-col gap-1">
-			<h1 class="font-serif text-3xl font-semibold tracking-tight">
-				Streaming
-			</h1>
-			<p class="text-muted">$2.99 a month, due the 15th</p>
-			<p class="text-sm text-muted">APPLE.COM/BILL</p>
-		</div>
+		<BillHead
+			name="Streaming"
+			amount="$2.99 a month, due the 15th"
+			bankText="APPLE.COM/BILL"
+		/>
 	);
 }
 
@@ -738,59 +743,47 @@ function LedgerMonths({ opened }: { opened: boolean }) {
 	return (
 		<>
 			{STREAMING.filter((m) => m.status === "upcoming").map((m) => (
-				<LedgerRow
-					period={m.period}
+				<LedgerMonth
+					href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
 					month={m.month}
-					detail={`Due ${m.due} · $2.99`}
+					words={`Due ${m.due} · $2.99`}
 				/>
 			))}
-			<LedgerRow
-				period="2026-10"
+			<LedgerDisclosure
 				month="October"
-				detail="Paid Oct 15 · $2.99"
-				mark={
-					<span class="text-ok">
-						<Icon name="check" class="size-4" />
-					</span>
-				}
-			/>
+				words="Paid Oct 15 · $2.99"
+				mark={<PaidCheck />}
+			>
+				<LedgerPayments
+					billId={1}
+					period="2026-10"
+					payments={[OCTOBER_PAYMENT]}
+				/>
+			</LedgerDisclosure>
 			{charge && (
-				<li>
-					<a
-						href={`/bills/1/occurrences/${charge.period}/link#payment-picker`}
-						class={`flex min-h-11 items-center gap-3 py-2 text-ink no-underline ${ROW_OPENS}`}
-					>
-						<span class="min-w-0 flex-1">
-							<span class="block text-lg">{charge.month}</span>
-							<span class="block text-sm text-muted">
-								A $2.99 charge on {LOOKALIKE} looks like this
-							</span>
-						</span>
-						<span class="text-accent">Link it</span>
-						<RowArrow />
-					</a>
-				</li>
+				<LedgerMonth
+					href={`/bills/1/occurrences/${charge.period}/link#payment-picker`}
+					month={charge.month}
+					sub={`A $2.99 charge on ${LOOKALIKE} looks like this`}
+					action={<span class="text-accent">Link it</span>}
+				/>
 			)}
-			<li class="py-2">
-				<details class="group" open={opened}>
-					<summary
-						class={`flex min-h-11 cursor-pointer list-none items-center gap-3 text-ink ${ROW_OPENS}`}
-					>
-						<span class="min-w-0 flex-1 text-lg">April to August</span>
-						<span class="text-sm text-muted">No payment</span>
-						<RowArrow class="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
-					</summary>
-					<ul class="divide-y divide-rule">
-						{quiet.map((m) => (
-							<LedgerRow
-								period={m.period}
-								month={m.month}
-								detail="Link a payment"
-							/>
-						))}
-					</ul>
-				</details>
-			</li>
+			<LedgerDisclosure
+				month="April to August"
+				words="No payment"
+				sr="5 months with no payment"
+				open={opened}
+			>
+				<ul class="divide-y divide-rule">
+					{quiet.map((m) => (
+						<LedgerMonth
+							href={`/bills/1/occurrences/${m.period}/link#payment-picker`}
+							month={m.month}
+							words="Link a payment"
+						/>
+					))}
+				</ul>
+			</LedgerDisclosure>
 		</>
 	);
 }
