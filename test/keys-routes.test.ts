@@ -155,6 +155,18 @@ describe("the keys' targets name their keys (aria-keyshortcuts)", () => {
 	});
 });
 
+describe("the ids the keys sheet owns", () => {
+	// The catalog draws the same ledger and sheet, so its own ids must not reuse the container's or the sheet's title.
+	it("draws one #keys container and no keys-title on /design-system, and one of each with the sheet open", async () => {
+		const closed = await page("/design-system");
+		expect(closed.split('id="keys"')).toHaveLength(2);
+		expect(closed).not.toContain('id="keys-title"');
+		const open = await page("/design-system?keys");
+		expect(open.split('id="keys"')).toHaveLength(2);
+		expect(open.split('id="keys-title"')).toHaveLength(2);
+	});
+});
+
 describe("the demo and the family's app", () => {
 	// The family's app signs in through Cloudflare Access before any page, so its shell is drawn directly: the same
 	// Layout and HowFoot every page uses, with demo off.

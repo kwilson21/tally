@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { hxTrigger } from "../htmx";
@@ -114,7 +115,7 @@ async function renderOrganize(
 			title="Organize · Tally"
 			active="transactions"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<div id="organize-page" class="lg:max-w-3xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">

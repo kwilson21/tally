@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { addressOf } from "../address";
 import {
 	Catalog,
 	LedgerSheetSpecimen,
@@ -22,7 +23,7 @@ designSystem.get("/design-system", (c) =>
 			title="Design system · Tally"
 			demo
 			scripts={["/js/ds.js"]}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<Catalog />
 		</Layout>,
@@ -34,7 +35,7 @@ designSystem.get("/design-system/bottom-sheet", (c) =>
 		<Layout
 			title="BottomSheet · Design system · Tally"
 			demo
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<SheetSpecimen />
 		</Layout>,
@@ -46,7 +47,7 @@ designSystem.get("/design-system/ledger-sheet", (c) =>
 		<Layout
 			title="Ledger sheet · Design system · Tally"
 			demo
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<LedgerSheetSpecimen />
 		</Layout>,
@@ -58,7 +59,7 @@ designSystem.get("/design-system/proposals", (c) =>
 		<Layout
 			title="Proposals · Design system · Tally"
 			demo
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<Proposals />
 		</Layout>,

@@ -323,6 +323,18 @@ describe("j and k (the rows of a list)", () => {
 		setup(page).keydown(press("j"));
 		expect(page.activeElement).toBe(live);
 	});
+
+	it("passes over a details row (Settings' category rows), which cannot take focus", () => {
+		const page = new FakePage();
+		const category = el(page, "details", { "data-row": "3" });
+		const [first, second] = list(page);
+		const { keydown } = setup(page);
+		keydown(press("j"));
+		expect(page.activeElement).toBe(first);
+		keydown(press("j"));
+		expect(page.activeElement).toBe(second);
+		expect(category.focusCount).toBe(0);
+	});
 });
 
 describe("e (opens the focused row)", () => {

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { accountsByBank } from "../db/accounts";
 import { suggestionQueue } from "../db/suggestions-queue";
@@ -30,7 +31,7 @@ for (const item of PLACEHOLDERS) {
 			<Layout
 				title={`${item.label} · Tally`}
 				active={item.key}
-				currentPath={c.req.path + new URL(c.req.url).search}
+				currentPath={addressOf(c)}
 				demo={c.env.DEMO === "true"}
 			>
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
@@ -55,7 +56,7 @@ destinations.get("/more", async (c) => {
 			title="More · Tally"
 			active="more"
 			demo={demo}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ContentsList

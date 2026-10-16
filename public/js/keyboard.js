@@ -6,8 +6,9 @@
 // Pages say what they can do with data attributes and aria-keyshortcuts; this script only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
-// The row a person opens, marked on transaction, Home's category and bill rows.
-const ROW = "[data-row]";
+// The row a person opens, marked on transaction, Home's category and bill rows. Only a link can take focus, so a
+// details row (Settings' category rows) is passed over.
+const ROW = "a[data-row]";
 // A region that scrolls sideways (month-end's chart) keeps the arrows for itself.
 const SIDEWAYS = "[data-sideways]";
 // The list that takes the search when a page has no search of its own.

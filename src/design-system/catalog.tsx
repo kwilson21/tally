@@ -189,7 +189,7 @@ const SECTIONS = [
 	["controls", "Controls"],
 	["ledger-form", "Ledger form"],
 	["feedback", "Feedback and sheets"],
-	["keys", "Keyboard shortcuts"],
+	["shortcuts", "Keyboard shortcuts"],
 	["demo", "Guidance"],
 	["diagrams", "Diagrams"],
 ] as const;
@@ -5008,7 +5008,7 @@ function Feedback() {
 /** The keys (#72, decisions 109 and 118): the chip, the ledger, the details in the foot and in More, and the sheet's body. */
 function Keys() {
 	return (
-		<Group id="keys" title="Keyboard shortcuts">
+		<Group id="shortcuts" title="Keyboard shortcuts">
 			<Specimen
 				id="key-chip"
 				title="Key"
@@ -5084,7 +5084,7 @@ function Keys() {
 				sentence="The sheet ? opens: its title and the ledger, in a BottomSheet over the page. Cancel, Escape and the backdrop close it back to the same page. The sheet's frame is the BottomSheet specimen above; this is its body."
 			>
 				<div class="max-w-md rounded-sheet border border-rule bg-paper p-5">
-					<KeysSheetBody />
+					<KeysSheetBody titleId="keys-specimen-title" />
 				</div>
 			</Specimen>
 		</Group>

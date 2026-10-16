@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import {
 	type UnpaidBill,
@@ -616,7 +617,7 @@ async function renderList(
 				(sheet ? "Edit transaction · Tally" : "Transactions · Tally")
 			}
 			active="transactions"
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 			demo={isDemo(c)}
 		>
 			<div class="flex items-center justify-between gap-3 lg:max-w-3xl">

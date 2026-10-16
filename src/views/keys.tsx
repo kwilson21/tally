@@ -128,14 +128,15 @@ export function KeysDetails({
 	);
 }
 
-/** The keys sheet's body: its title, in the ledger-sheet title role, and the ledger. The sheet's frame is BottomSheet's. */
-export function KeysSheetBody() {
+/**
+ * The keys sheet's body: its title, in the ledger-sheet title role, and the ledger. The sheet's frame is BottomSheet's.
+ * `titleId` names the title: the real sheet passes the id BottomSheet is labelled by, and a catalog drawing passes its
+ * own, so the page never holds two titles with one id.
+ */
+export function KeysSheetBody({ titleId }: { titleId: string }) {
 	return (
 		<>
-			<h2
-				id="keys-title"
-				class="font-serif text-2xl font-semibold tracking-tight"
-			>
+			<h2 id={titleId} class="font-serif text-2xl font-semibold tracking-tight">
 				Keyboard shortcuts
 			</h2>
 			<div class="mt-4">
@@ -151,6 +152,7 @@ export function KeysSheetBody() {
  * #keys back empty, so the list keeps its place.
  */
 export function KeysSheet({ closeHref }: { closeHref: string }) {
+	const titleId = "keys-title";
 	const closeAttrs = {
 		"hx-get": closeHref,
 		"hx-target": "#keys",
@@ -160,12 +162,12 @@ export function KeysSheet({ closeHref }: { closeHref: string }) {
 	};
 	return (
 		<BottomSheet
-			labelledBy="keys-title"
+			labelledBy={titleId}
 			closeHref={closeHref}
 			closeAttrs={closeAttrs}
 			footer={<SheetCancel href={closeHref} attrs={closeAttrs} />}
 		>
-			<KeysSheetBody />
+			<KeysSheetBody titleId={titleId} />
 		</BottomSheet>
 	);
 }

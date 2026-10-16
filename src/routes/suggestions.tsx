@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
 import {
@@ -284,7 +285,7 @@ async function renderScreen(
 	return c.html(
 		<Screen
 			demo={c.env.DEMO === "true"}
-			address={c.req.path + new URL(c.req.url).search}
+			address={addressOf(c)}
 			input={{
 				skipped,
 				again,
