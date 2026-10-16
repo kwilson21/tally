@@ -365,7 +365,7 @@ export function endBarRatio(spentCents: number, budgetCents: number) {
  * that went over pokes above the line in brick and says by how much; a bar is capped inside the
  * chart, so its "+$X" is always in view above it. "budget" sits in the right margin, clear of every bar.
  */
-function EndBars({ rows }: { rows: Row[] }) {
+export function EndBars({ rows }: { rows: Row[] }) {
 	const W = 350;
 	const left = 4;
 	const areaRight = 292;
