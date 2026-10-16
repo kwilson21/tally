@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { Button } from "./button";
 import { Icon } from "./icons";
 import { type SavedMark, SavedSlot, savedRowClass } from "./saved-tick";
@@ -12,24 +13,27 @@ const chevron = (
 	/>
 );
 
-/** The household's shared list of names. Everyone is the fixed first choice. */
+/**
+ * The household's shared list of names (the People page, #606). Everyone is the fixed first choice. `head` is the
+ * page's back link and title, drawn first inside the section, so a swap brings them back and focus can land on them.
+ */
 export function HouseholdPeople({
 	people,
+	head,
 	openId,
 	addOpen = false,
 	error,
 	errorPersonId,
-	focus = false,
 	value = "",
 	saved,
 	action = "/settings/people",
 }: {
 	people: HouseholdPerson[];
+	head?: Child;
 	openId?: number;
 	addOpen?: boolean;
 	error?: string;
 	errorPersonId?: number;
-	focus?: boolean;
 	value?: string;
 	/**
 	 * The person row a save just changed (P119 A, #71): its chevron gives way to the pencil tick. Only a name's own row
@@ -42,16 +46,9 @@ export function HouseholdPeople({
 		<section
 			id="household-people"
 			aria-labelledby="people-title"
-			class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+			class="lg:max-w-3xl"
 		>
-			<h3
-				id="people-title"
-				tabIndex={-1}
-				autofocus={focus}
-				class="font-serif text-2xl font-semibold"
-			>
-				People
-			</h3>
+			{head}
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
 				{people.map((person, index) => {
 					const mark =
@@ -141,8 +138,8 @@ export function HouseholdPeople({
 								<Button type="submit">Add</Button>
 								<Button
 									kind="secondary"
-									href="/settings#household"
-									hx-get="/settings?peopleFocus=1"
+									href="/settings/people"
+									hx-get="/settings/people?peopleFocus=1"
 									hx-target="#household-people"
 									hx-select="#household-people"
 									hx-swap="outerHTML"

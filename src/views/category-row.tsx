@@ -11,10 +11,7 @@ import { TextInput } from "./text-input";
 const amount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents % 100 === 0 });
 
-/**
- * Every form on the page swaps the Categories section in place; without JavaScript it posts normally. The
- * Band above Categories follows the review queue, so each swap also draws it again (`hx-select-oob`).
- */
+/** Every form on the Categories page swaps its section in place; without JavaScript it posts normally. */
 export const swap = (url: string, indicator: string) => ({
 	method: "post" as const,
 	action: url,
@@ -23,7 +20,6 @@ export const swap = (url: string, indicator: string) => ({
 	"hx-indicator": `#${indicator}`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
-	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -37,7 +33,6 @@ const action = (url: string, formId: string) => ({
 	"hx-disable": `#${formId} button[type=submit]`,
 	"hx-target": "#categories",
 	"hx-select": "#categories",
-	"hx-select-oob": "#names-band",
 	"hx-swap": "outerHTML",
 });
 
@@ -87,7 +82,6 @@ export function CategoryRow({
 	focus,
 	values,
 	errors,
-	budgetsOob,
 	saved,
 }: {
 	category: SettingsCategory;
@@ -99,16 +93,11 @@ export function CategoryRow({
 	focus: boolean;
 	values?: { name: string };
 	errors?: CategoryErrors;
-	/** The household moved into another month, so the amount and budget line go out of band. */
-	budgetsOob?: boolean;
 	/** The row whose save just answered: its chevron gives way to the pencil tick (P119 A, #71). */
 	saved?: SavedMark;
 }) {
 	const url = `/settings/categories/${c.id}`;
 	const formId = `cat-${c.id}-form`;
-	// A month-crossing time zone save swaps just the two month-dependent parts of the row, out of
-	// band by their ids, so an edit someone has open, its draft and its focus are left alone.
-	const oob = budgetsOob ? "true" : undefined;
 	return (
 		<details
 			class={`group border-b border-rule${saved ? ` ${savedRowClass(saved)}` : ""}`}
@@ -118,11 +107,7 @@ export function CategoryRow({
 			<summary data-category={c.id} class={summaryClass} autofocus={focus}>
 				<CategoryIcon icon={c.icon} color={c.color} />
 				<span class="min-w-0 truncate text-lg font-medium">{c.name}</span>
-				<span
-					id={`cat-${c.id}-amount`}
-					class="ml-auto shrink-0 tabular-nums"
-					hx-swap-oob={oob}
-				>
+				<span id={`cat-${c.id}-amount`} class="ml-auto shrink-0 tabular-nums">
 					{c.budgetCents === null ? (
 						<span class="text-muted">No budget</span>
 					) : (
@@ -149,11 +134,7 @@ export function CategoryRow({
 						name={open && values ? values.name : c.name}
 						errors={open ? errors : undefined}
 					/>
-					<p
-						id={`cat-${c.id}-budget-note`}
-						class="text-muted"
-						hx-swap-oob={oob}
-					>
+					<p id={`cat-${c.id}-budget-note`} class="text-muted">
 						{c.budgetCents === null ? "No budget yet. " : ""}
 						<a
 							href={`/budget/${c.id}`}
@@ -170,10 +151,10 @@ export function CategoryRow({
 							Save
 						</Button>
 						<Button
-							href="/settings"
+							href="/settings/categories"
 							kind="secondary"
 							// Back to the list with focus on this row, so the change is announced.
-							hx-get={`/settings?focus=${c.id}`}
+							hx-get={`/settings/categories?focus=${c.id}`}
 							hx-target="#categories"
 							hx-select="#categories"
 							hx-swap="outerHTML"

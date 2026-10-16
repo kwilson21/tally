@@ -155,13 +155,18 @@ function firesByItself(html: string): string[] {
 	const names = ["hx-trigger", "hx-on"].flatMap((name) =>
 		spellings(name, HTMX.prefix),
 	);
-	return [...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
-		.map((m) => m[0])
-		.filter((raw) =>
-			[...attributes(raw).keys()].some((name) =>
-				names.some((p) => name.startsWith(p)),
-			),
-		);
+	return (
+		[...markup.matchAll(/<[a-z][a-z0-9-]*\b[^>]*>/gi)]
+			.map((m) => m[0])
+			// A switch that saves when flipped (#606) posts on its own change: a press that inert stops. Its form has no
+			// hx-trigger (htmx's default for a form is its submit), and both are checked by the inert test above.
+			.filter((raw) => !/\shx-trigger="change"/.test(raw))
+			.filter((raw) =>
+				[...attributes(raw).keys()].some((name) =>
+					names.some((p) => name.startsWith(p)),
+				),
+			)
+	);
 }
 
 /**

@@ -571,7 +571,7 @@ describe("bank sign-in reminder Settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO household_members (email, last_seen_at) VALUES ('old@example.com', datetime('now', '-91 days')), ('recent@example.com', datetime('now', '-89 days'))",
 		).run();
-		const response = await exports.default.fetch(`${BASE}/settings`);
+		const response = await exports.default.fetch(`${BASE}/settings/household`);
 		const settingsHtml = await response.text();
 		const reminders = emailsBlock(settingsHtml);
 		expect(reminders).toContain("recent@example.com");
@@ -591,14 +591,28 @@ describe("bank sign-in reminder Settings", () => {
 		expect(sent).toEqual(["recent@example.com"]);
 	});
 
-	it("saves the household switch, keeps the disclosure open and focuses Save", async () => {
-		const { html } = await post("/settings/bank-sign-in-emails", {});
+	it("saves the household switch, keeps the disclosure open and focuses the switch", async () => {
+		const { res, html } = await post("/settings/bank-sign-in-emails", {});
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
 		const block = emailsBlock(html);
 		expect(block).toContain(">Off<");
 		expect(block).toMatch(/<details [^>]*open=""/);
-		expect(block).toMatch(/autofocus=""[^>]*>Save<\/button>/);
+		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*autofocus/);
+		expect(block).toMatch(/<noscript>[\s\S]*Save[\s\S]*<\/noscript>/);
 		expect(block).not.toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: { message: "Saved bank sign-in emails", type: "success" },
+			announce: "Bank sign-in emails Off.",
+		});
+
+		const on = await post("/settings/bank-sign-in-emails", { enabled: "on" });
+		expect(JSON.parse(on.res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
+			"Bank sign-in emails On.",
+		);
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const onBlock = emailsBlock(on.html);
+		expect(onBlock).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(onBlock).toMatch(/id="bank-sign-in-emails"[^>]*autofocus/);
 	});
 
 	it("keeps the address disclosure open and focuses the next Remove or its summary", async () => {
@@ -639,10 +653,45 @@ describe("bank sign-in reminder Settings", () => {
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
 	});
 
+	// A flip and a Remove now send separate requests, so both can be in flight: each one's answer must hold up whatever
+	// order they land in. The route tests run them in sequence; the markup test covers the separate scopes.
+	it("a switch save then a Remove leave the switch On and the address gone", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		await saveBankSignInEmails(env.DB, false);
+		await post("/settings/bank-sign-in-emails", { enabled: "on" });
+		const removed = await post("/settings/bank-sign-in-emails", {
+			enabled: "on",
+			remove: "dana@example.com",
+		});
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const block = emailsBlock(removed.html);
+		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(block).not.toContain("dana@example.com");
+		expect(block).toContain("riley@example.com");
+	});
+
+	it("a Remove then a switch save leave the switch On and the address gone", async () => {
+		await noteHouseholdMember(env.DB, "dana@example.com", 100);
+		await noteHouseholdMember(env.DB, "riley@example.com", 100);
+		await saveBankSignInEmails(env.DB, false);
+		await post("/settings/bank-sign-in-emails", {
+			remove: "dana@example.com",
+		});
+		const flipped = await post("/settings/bank-sign-in-emails", {
+			enabled: "on",
+		});
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const block = emailsBlock(flipped.html);
+		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(block).not.toContain("dana@example.com");
+		expect(block).toContain("riley@example.com");
+	});
+
 	it("shows the people the switch goes to as round initials, with their addresses read aloud", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		await noteHouseholdMember(env.DB, "riley@example.com", 100);
-		const response = await exports.default.fetch(`${BASE}/settings`);
+		const response = await exports.default.fetch(`${BASE}/settings/household`);
 		const block = emailsBlock(await response.text());
 		expect(block).toContain(
 			'<p class="sr-only">Goes to dana@example.com, riley@example.com</p>',
@@ -657,7 +706,7 @@ describe("bank sign-in reminder Settings", () => {
 	});
 
 	it("shows no initials and no sentence about who gets the emails when no one has signed in", async () => {
-		const response = await exports.default.fetch(`${BASE}/settings`);
+		const response = await exports.default.fetch(`${BASE}/settings/household`);
 		const block = emailsBlock(await response.text());
 		expect(block).not.toContain("Goes to");
 		expect(block).not.toContain('<ul aria-hidden="true"');
@@ -691,16 +740,13 @@ describe("bank sign-in reminder Settings", () => {
 		);
 	});
 
-	it("places the Bank sign-in emails switch in Household, after the time zone and before the people", async () => {
-		const response = await exports.default.fetch(`${BASE}/settings`);
+	it("places the Bank sign-in emails switch in Household, after the time zone", async () => {
+		const response = await exports.default.fetch(`${BASE}/settings/household`);
 		const html = await response.text();
 		const order = [
-			'id="categories"',
-			'id="merchant-rules"',
 			'id="household"',
 			'id="time-zone"',
 			'id="bank-sign-in-emails"',
-			'id="household-people"',
 		].map((marker) => html.indexOf(marker));
 		expect(order.every((index) => index > -1)).toBe(true);
 		expect(order).toEqual([...order].sort((a, b) => a - b));

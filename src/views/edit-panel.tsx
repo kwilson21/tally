@@ -721,7 +721,7 @@ export function EditSheet({
 					tx.refundOfId != null && (
 						<p class="text-sm text-muted">
 							Remove it in Settings, under{" "}
-							<a href="/settings#merchant-rules">Tally's rules</a>.
+							<a href="/settings/rules">Tally's rules</a>.
 						</p>
 					)}
 				{/* A setting about this transaction, so a switch, not a category's pill (audit E2, decision 73). */}

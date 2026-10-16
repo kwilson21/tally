@@ -51,7 +51,6 @@ export function CategorySuggestionCard({
 				hx-post={`/settings/suggestions/${suggestion.id}/create`}
 				hx-target="#categories"
 				hx-select="#categories"
-				hx-select-oob="#names-band"
 				hx-swap="outerHTML"
 				class="pb-2"
 			>
@@ -99,7 +98,6 @@ export function CategorySuggestionCard({
 						hx-post={`/settings/suggestions/${suggestion.id}/dismiss`}
 						hx-target="#categories"
 						hx-select="#categories"
-						hx-select-oob="#names-band"
 						hx-swap="outerHTML"
 					>
 						Dismiss

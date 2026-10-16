@@ -275,46 +275,36 @@ describe("namesToReview with several bank texts for one merchant", () => {
 	});
 });
 
-describe("saving the names switch redraws the Band above Categories", () => {
-	const bandOf = (html: string) =>
-		html.match(/<div id="names-band">[\s\S]*?<\/div>(?=\s*<section)/)?.[0] ??
-		"";
-
-	it("always has a place for it, and the group asks for it to be drawn again with the switch", async () => {
+describe("the names switch and the Band on the contents page (#606)", () => {
+	it("draws the Band above the contents list while suggestions wait", async () => {
+		await twoMerchants();
 		const { html } = await get("/settings");
-		expect(html).toContain('<div id="names-band">');
-		expect(html).toMatch(
-			/<form[^>]*action="\/settings\/ai"[^>]*hx-select-oob="#names-band"/,
+		expect(textOf(html)).toContain("2 suggestions to check");
+		expect(html.indexOf('href="/settings/suggestions"')).toBeLessThan(
+			html.indexOf('href="/settings/categories"'),
 		);
 	});
 
-	it("takes the Band away when the switch is saved off, and says so", async () => {
+	it("announces that the Band took its suggestions away when the switch is saved off, and draws no Band on the AI page", async () => {
 		await twoMerchants();
-		expect(bandOf((await get("/settings")).html)).toContain(
-			"2 suggestions to check",
-		);
 		const { res, html } = await post(
 			"/settings/ai",
 			{ categories: "on", income: "on" },
 			true,
 		);
 		expect(res.status).toBe(200);
-		expect(html).toContain('<div id="names-band">');
+		expect(html).toContain('id="ai-suggestions"');
 		expect(html).not.toContain('href="/settings/suggestions"');
 		expect(trigger(res).announce).toContain("Nothing to check.");
 	});
 
-	it("brings the Band back when the switch is saved on, with its count in the announcement", async () => {
+	it("announces the count when the switch is saved on again", async () => {
 		await twoMerchants();
 		await saveAiSwitches(db, { names: false });
-		const { res, html } = await post(
+		const { res } = await post(
 			"/settings/ai",
 			{ names: "on", categories: "on", income: "on" },
 			true,
-		);
-		expect(textOf(html)).toContain("2 suggestions to check");
-		expect(html).toMatch(
-			/<div id="names-band"><div[^>]*><a href="\/settings\/suggestions"/,
 		);
 		expect(trigger(res).announce).toContain("2 suggestions to check.");
 	});
@@ -329,10 +319,12 @@ describe("saving the names switch redraws the Band above Categories", () => {
 		expect(trigger(res).announce).not.toMatch(/merchant name/);
 	});
 
-	it("without JavaScript the save redirects, and the Settings page it lands on has the right Band", async () => {
+	it("without JavaScript the save redirects to the AI page, and the contents page has no Band once nothing waits", async () => {
 		await twoMerchants();
 		const { res } = await post("/settings/ai", { income: "on" }, false);
 		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/settings/ai");
+		await settleSuggestion(db, BLUE, { kind: "keep" });
 		expect((await get("/settings")).html).not.toContain(
 			'href="/settings/suggestions"',
 		);
@@ -365,7 +357,7 @@ describe("settleSuggestion", () => {
 });
 
 describe("Settings", () => {
-	it("leads to the review with a Band counting the merchants to check, above Categories", async () => {
+	it("leads to the review with a Band counting the merchants to check, above the contents list", async () => {
 		await twoMerchants();
 		const { html } = await get("/settings");
 		expect(html).toMatch(/<a href="\/settings\/suggestions"[^>]*>/);
@@ -373,7 +365,7 @@ describe("Settings", () => {
 		expect(text).toContain("2 suggestions to check");
 		expect(text).toContain("Tally's guesses; you decide");
 		expect(html.indexOf('href="/settings/suggestions"')).toBeLessThan(
-			html.indexOf('id="categories"'),
+			html.indexOf('href="/settings/categories"'),
 		);
 	});
 
@@ -406,7 +398,7 @@ describe("Settings", () => {
 	});
 
 	it("has a Suggest store names switch in the AI suggestions group, on to start", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/ai");
 		const group =
 			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
 		const first = group.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";

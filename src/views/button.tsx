@@ -1,12 +1,14 @@
 import type { Child, JSX } from "hono/jsx";
 
-type Kind = "primary" | "secondary" | "text";
+type Kind = "primary" | "secondary" | "text" | "quiet";
 
 const LOOK: Record<Kind, string> = {
 	primary: "min-h-11 rounded-control bg-ink px-5 text-paper",
 	secondary:
 		"inline-flex min-h-11 items-center justify-center rounded-control border border-ink px-5 text-ink no-underline",
 	text: "min-h-11 px-2 text-accent",
+	/** A Remove: muted and underlined, so it never reads as a next step (#606). */
+	quiet: "min-h-11 px-2 text-sm text-muted underline",
 };
 
 type Props = Omit<JSX.IntrinsicElements["button"], "class"> & {
