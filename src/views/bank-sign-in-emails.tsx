@@ -9,8 +9,9 @@ const INITIAL_LOOKS = ["bg-accent", "bg-ok", "bg-muted"];
  * The Bank sign-in emails block under Household (P107 "In Settings", decision 82, #606): the shared
  * Switch, the people it goes to as round initials, and a plain "Who gets them" disclosure that lists each
  * address with its Remove. The Switch saves when flipped: the form posts on change, and with htmx it swaps
- * only this block, with focus back on the Switch. Save shows only without the script (in noscript). A Remove
- * sends its address as `remove`. The route and the catalog both render it, so they can't drift apart.
+ * only this block, with focus back on the Switch. A second flip replaces the first request, so the switch and
+ * the toast always show the last save. Save shows only without the script (in noscript). A Remove sends its
+ * address as `remove`. The route and the catalog both render it, so they can't drift apart.
  */
 export function BankSignInEmails({
 	on,
@@ -42,6 +43,7 @@ export function BankSignInEmails({
 				action={action}
 				hx-post={action}
 				hx-trigger="change, submit"
+				hx-sync="replace"
 				hx-target="#household-emails"
 				hx-select="#household-emails"
 				hx-swap="outerHTML"

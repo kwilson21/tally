@@ -592,7 +592,7 @@ describe("bank sign-in reminder Settings", () => {
 	});
 
 	it("saves the household switch, keeps the disclosure open and focuses the switch", async () => {
-		const { html } = await post("/settings/bank-sign-in-emails", {});
+		const { res, html } = await post("/settings/bank-sign-in-emails", {});
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
 		const block = emailsBlock(html);
 		expect(block).toContain(">Off<");
@@ -600,6 +600,19 @@ describe("bank sign-in reminder Settings", () => {
 		expect(block).toMatch(/id="bank-sign-in-emails"[^>]*autofocus/);
 		expect(block).toMatch(/<noscript>[\s\S]*Save[\s\S]*<\/noscript>/);
 		expect(block).not.toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(JSON.parse(res.headers.get("HX-Trigger") ?? "{}")).toMatchObject({
+			toast: { message: "Saved bank sign-in emails", type: "success" },
+			announce: "Bank sign-in emails Off.",
+		});
+
+		const on = await post("/settings/bank-sign-in-emails", { enabled: "on" });
+		expect(JSON.parse(on.res.headers.get("HX-Trigger") ?? "{}").announce).toBe(
+			"Bank sign-in emails On.",
+		);
+		expect(await readBankSignInEmails(env.DB)).toBe(true);
+		const onBlock = emailsBlock(on.html);
+		expect(onBlock).toMatch(/id="bank-sign-in-emails"[^>]*checked/);
+		expect(onBlock).toMatch(/id="bank-sign-in-emails"[^>]*autofocus/);
 	});
 
 	it("keeps the address disclosure open and focuses the next Remove or its summary", async () => {

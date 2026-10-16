@@ -47,6 +47,12 @@ const inputs = (html: string) =>
 		name: m[0].match(/name="([^"]*)"/)?.[1],
 		on: /\schecked(\s|>|=)/.test(m[0]),
 	}));
+/** How many switches in the group take focus when the answer lands (autofocus). */
+const autofocusCount = (html: string) =>
+	group(html).match(/autofocus/g)?.length ?? 0;
+/** The hidden field that lists the switches the page drew On (DRAWN_ON). */
+const drawnOnField = (html: string) =>
+	group(html).match(/<input[^>]*name="drawnOn"[^>]*>/)?.[0] ?? "";
 /** Whether the named switch's input is disabled (greyed out). */
 const disabled = (html: string, name: string) =>
 	[...group(html).matchAll(/<input[^>]*role="switch"[^>]*>/g)].some(
@@ -187,6 +193,18 @@ describe("GET /settings: the AI suggestions group", () => {
 		// Resting, not asking for focus: only the answer to a flip does.
 		expect(buttons[0]?.[0]).not.toContain("autofocus");
 	});
+
+	it("draws the switches it shows On in a hidden field, empty once all are off", async () => {
+		const { html } = await get("/settings/ai");
+		expect(drawnOnField(html)).toContain('type="hidden"');
+		expect(drawnOnField(html)).toContain(
+			'value="names details categories income sortOnArrival"',
+		);
+		await saveAiSwitches(env.DB, allOff);
+		expect(drawnOnField((await get("/settings/ai")).html)).toContain(
+			'value=""',
+		);
+	});
 });
 
 describe("POST /settings/ai", () => {
@@ -299,6 +317,50 @@ describe("POST /settings/ai", () => {
 		const { html } = await post("/settings/ai", { income: "on" });
 		// Every switch starts on, so the one this save turned off is names.
 		expect(html).toMatch(/<input[^>]*name="names"[^>]*autofocus/);
+	});
+
+	it("focuses the switch the person flipped, found from the switches the page drew On", async () => {
+		// The page drew all five On, and the person turned only categories off.
+		const { html } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			income: "on",
+			sortOnArrival: "on",
+			drawnOn: "names details categories income sortOnArrival",
+		});
+		expect(html).toMatch(/<input[^>]*name="categories"[^>]*autofocus/);
+		expect(autofocusCount(html)).toBe(1);
+		expect(html).not.toMatch(/<input[^>]*name="names"[^>]*autofocus/);
+	});
+
+	it("focuses the flipped switch when another tab already saved the same value", async () => {
+		// Another tab turned income off first; this page still drew it On, and the person turned it off too.
+		await saveAiSwitches(env.DB, { income: false });
+		const { html } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			sortOnArrival: "on",
+			drawnOn: "names details categories income sortOnArrival",
+		});
+		expect(await readAiSwitches(env.DB)).toMatchObject({ income: false });
+		expect(html).toMatch(/<input[^>]*name="income"[^>]*autofocus/);
+		expect(autofocusCount(html)).toBe(1);
+	});
+
+	it("focuses the switch flipped here, not one another tab changed", async () => {
+		// Another tab turned names off; this page still drew names On, so the save posts it On again.
+		await saveAiSwitches(env.DB, { names: false });
+		const { html } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			sortOnArrival: "on",
+			drawnOn: "names details categories income sortOnArrival",
+		});
+		expect(await readAiSwitches(env.DB)).toMatchObject({ income: false });
+		expect(html).toMatch(/<input[^>]*name="income"[^>]*autofocus/);
+		expect(autofocusCount(html)).toBe(1);
 	});
 
 	it("leaves the rest of Settings and the time zone as they were", async () => {

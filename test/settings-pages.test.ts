@@ -114,6 +114,12 @@ describe("Switches save when flipped", () => {
 		const { html } = await get("/settings/household");
 		expect(html).toMatch(/hx-trigger="change, submit"/);
 		expect(html).toMatch(/<noscript>[\s\S]*?Save[\s\S]*?<\/noscript>/);
+		// Each flip replaces the one before it, so the switch and the toast always show the last save.
+		const form =
+			html.split('id="household-emails"')[1]?.match(/<form[^>]*>/)?.[0] ?? "";
+		expect(form).toContain('hx-sync="replace"');
+		expect(form).toContain('hx-trigger="change, submit"');
+		expect(form).toContain('hx-target="#household-emails"');
 	});
 
 	it("a flipped AI switch answers with the page, its focus on that switch, the toast and announce", async () => {

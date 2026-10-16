@@ -223,6 +223,13 @@ const SORT_NEEDS =
 	"Needs Fill in details, Categories and exclusions, or Income on.";
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
+/** Which switches the page drew On, so a save can tell which one the person flipped. */
+const DRAWN_ON = "drawnOn";
+/** The DRAWN_ON value for these switches: the keys that are On, separated by spaces. */
+const drawnOnOf = (switches: AiSwitches) =>
+	AI_FEATURES.filter((f) => switches[f.key])
+		.map((f) => f.key)
+		.join(" ");
 
 /**
  * The AI switches (#606): the form posts when one is flipped, and the page answers with itself, focus back on the
@@ -266,6 +273,7 @@ function AiSwitchForm({
 				))}
 			</ul>
 			{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
+			<input type="hidden" name={DRAWN_ON} value={drawnOnOf(switches)} />
 			<noscript>
 				<div class="mt-4">
 					<Button id="ai-save" type="submit">
@@ -951,8 +959,13 @@ settings.post("/settings/ai", async (c) => {
 	const before = await readAiSwitches(c.env.DB);
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
-	// The switch that was flipped keeps focus after the save (#606).
-	const flipped = AI_FEATURES.find((f) => before[f.key] !== now[f.key])?.key;
+	// The switch that was flipped keeps focus after the save (#606): the one that differs from what the page drew
+	// On (DRAWN_ON), so another tab that saved the same value doesn't move it. A page drawn before DRAWN_ON existed
+	// is compared with what was saved before this save.
+	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
+	const flipped = AI_FEATURES.find(
+		(f) => f.key in next && next[f.key] !== drawn.includes(f.key),
+	)?.key;
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
