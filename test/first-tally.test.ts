@@ -140,28 +140,27 @@ describe("first_tally record", () => {
 });
 
 describe("the pay answers' record (P125 E)", () => {
-	it("keeps each merchant's answer by its key, a key with a quote in it included, and the newest answer for a merchant", async () => {
+	it("keeps each merchant's answers by its key, a key with a quote in it included, and a merchant answered again keeps both its Yes and its No deposits", async () => {
 		await markStroke(db, "bank", "2026-10-10");
 		await payBatch('ACME "CORP"', {
-			answer: "yes",
-			deposits: [{ date: "2026-10-01", cents: 245000 }],
+			yes: { "1": { date: "2026-10-01", cents: 245000 } },
 		});
-		await payBatch("SIDE GIG", { answer: "no", deposits: [] });
 		await payBatch("SIDE GIG", {
-			answer: "yes",
-			deposits: [{ date: "2026-10-01", cents: 245000 }],
+			no: { "2": { date: "2026-10-02", cents: 4000 } },
+		});
+		await payBatch("SIDE GIG", {
+			yes: { "3": { date: "2026-10-03", cents: 4000 } },
 		});
 		const record = await readFirstTally(db);
 		expect(record?.strokes).toEqual({ bank: "2026-10-10" });
 		expect(record?.pay).toEqual({
 			'ACME "CORP"': {
-				answer: "yes",
-				deposits: [{ date: "2026-10-01", cents: 245000 }],
+				yes: { "1": { date: "2026-10-01", cents: 245000 } },
 				at: 0,
 			},
 			"SIDE GIG": {
-				answer: "yes",
-				deposits: [{ date: "2026-10-01", cents: 245000 }],
+				no: { "2": { date: "2026-10-02", cents: 4000 } },
+				yes: { "3": { date: "2026-10-03", cents: 4000 } },
 				at: 1,
 			},
 		});
@@ -169,36 +168,83 @@ describe("the pay answers' record (P125 E)", () => {
 
 	it("starts the pay answers on a record that has none yet", async () => {
 		await markStroke(db, "bank", null);
-		await payBatch("ACME CORP", { answer: "no", deposits: [] });
+		await payBatch("ACME CORP", {
+			no: { "7": { date: "2026-10-01", cents: 4000 } },
+		});
 		expect((await readFirstTally(db))?.pay).toEqual({
-			"ACME CORP": { answer: "no", deposits: [], at: 0 },
+			"ACME CORP": { no: { "7": { date: "2026-10-01", cents: 4000 } }, at: 0 },
 		});
 	});
 
 	it("keeps a merchant's place in the order first answered, and a re-answer keeps it, a numeric key included", async () => {
 		await markStroke(db, "bank", "2026-10-10");
 		await payBatch("ACME CORP", {
-			answer: "yes",
-			deposits: [{ date: "2026-10-01", cents: 245000 }],
+			yes: { "1": { date: "2026-10-01", cents: 245000 } },
 		});
 		await payBatch("1234", {
-			answer: "yes",
-			deposits: [{ date: "2026-10-02", cents: 9000 }],
+			yes: { "3": { date: "2026-10-02", cents: 9000 } },
 		});
-		await payBatch("ACME CORP", { answer: "no", deposits: [] });
+		await payBatch("ACME CORP", {
+			no: { "2": { date: "2026-10-08", cents: 245000 } },
+		});
 		const pay = (await readFirstTally(db))?.pay;
-		expect(pay?.["ACME CORP"]).toEqual({ answer: "no", deposits: [], at: 0 });
+		expect(pay?.["ACME CORP"]).toEqual({
+			yes: { "1": { date: "2026-10-01", cents: 245000 } },
+			no: { "2": { date: "2026-10-08", cents: 245000 } },
+			at: 0,
+		});
 		expect(pay?.["1234"]?.at).toBe(1);
 	});
 
 	it("gives a key with a quote in it the next place, since no key is ever put in a JSON path", async () => {
 		await markStroke(db, "bank", "2026-10-10");
-		await payBatch("ACME CORP", { answer: "no", deposits: [] });
+		await payBatch("ACME CORP", {
+			no: { "5": { date: "2026-10-01", cents: 4000 } },
+		});
 		await payBatch('ACME "CORP"', {
-			answer: "yes",
-			deposits: [{ date: "2026-10-01", cents: 245000 }],
+			yes: { "6": { date: "2026-10-01", cents: 245000 } },
 		});
 		expect((await readFirstTally(db))?.pay?.['ACME "CORP"']?.at).toBe(1);
+	});
+
+	it("a Yes again for a new deposit adds it to the Yes deposits, and keeps the ones already there", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await payBatch("ACME CORP", {
+			yes: {
+				"1": { date: "2026-09-17", cents: 245000 },
+				"2": { date: "2026-10-01", cents: 245000 },
+			},
+		});
+		await payBatch("ACME CORP", {
+			yes: { "3": { date: "2026-10-15", cents: 245000 } },
+		});
+		expect((await readFirstTally(db))?.pay?.["ACME CORP"]).toEqual({
+			yes: {
+				"1": { date: "2026-09-17", cents: 245000 },
+				"2": { date: "2026-10-01", cents: 245000 },
+				"3": { date: "2026-10-15", cents: 245000 },
+			},
+			at: 0,
+		});
+	});
+
+	it("a Yes again that repeats a deposit keeps one entry for it", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await payBatch("ACME CORP", {
+			yes: {
+				"1": { date: "2026-09-17", cents: 245000 },
+				"2": { date: "2026-10-01", cents: 245000 },
+			},
+		});
+		await payBatch("ACME CORP", {
+			yes: {
+				"2": { date: "2026-10-01", cents: 245000 },
+				"3": { date: "2026-10-15", cents: 245000 },
+			},
+		});
+		expect(
+			Object.keys((await readFirstTally(db))?.pay?.["ACME CORP"]?.yes ?? {}),
+		).toEqual(["1", "2", "3"]);
 	});
 
 	it("writes no record for an answer whose own change touched no row", async () => {
@@ -206,8 +252,7 @@ describe("the pay answers' record (P125 E)", () => {
 		await db.batch([
 			db.prepare("UPDATE transactions SET flag_income = flag_income WHERE 0"),
 			payAnswerStatement(db, "ACME CORP", {
-				answer: "yes",
-				deposits: [],
+				yes: { "1": { date: "2026-10-01", cents: 245000 } },
 			}),
 		]);
 		expect((await readFirstTally(db))?.pay).toBeUndefined();

@@ -27,15 +27,19 @@ export type NightCounts = {
 /** The pay step's answer for one merchant: Yes, it's the family's pay, or No, it isn't (spec §8.8). */
 export type PayAnswer = "yes" | "no";
 
-/** One pay answer as given: the answer, and the deposits it covered (the ones the question asked about, which a Yes marked as income). */
-export type PayAnswerRecord = { answer: PayAnswer; deposits: PayDeposit[] };
+/** The deposits one answer covered, each by its transaction id (a string key, since the record is JSON). */
+export type PayDeposits = Record<string, PayDeposit>;
 
 /**
- * One pay answer as recorded: that answer, and `at`, the merchant's place in the order the merchants were first answered
- * (0 for the first; a merchant answered again keeps its place). The ledger reads the deposits, so a change made later
- * elsewhere adds nothing to the line, and it sorts the lines by `at`.
+ * One merchant's pay answers as recorded: the deposits answered Yes (`yes`) and the deposits answered No (`no`), each by
+ * its transaction id, and `at`, the merchant's place in the order the merchants were first answered (0 for the first; a
+ * merchant answered again keeps its place). The ledger reads the Yes deposits, so a change made later elsewhere adds
+ * nothing to the line, and it sorts the lines by `at`.
  */
-export type PayRecord = PayAnswerRecord & { at: number };
+export type PayRecord = { yes?: PayDeposits; no?: PayDeposits; at: number };
+
+/** What one answer writes into a merchant's record: its Yes deposits, or its No deposits (the other key is left as it is). */
+export type PayAnswerRecord = Pick<PayRecord, "yes"> | Pick<PayRecord, "no">;
 
 /** What the bills step kept: how many bills, and their monthly total in cents, added to as each bill is kept. */
 export type BillsKept = { kept: number; cents: number };
@@ -50,7 +54,10 @@ export type FirstTally = {
 	budgets: Record<string, BudgetAnswer>;
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
-	/** The pay step's answers so far, by merchant key (the store's raw name); a merchant answered again keeps the newest answer and its place (`at`). */
+	/**
+	 * The pay step's answers so far, by merchant key (the store's raw name): the deposits each merchant answered Yes or No,
+	 * and its place (`at`). A merchant asked again adds its new deposits to them (payAnswerStatement).
+	 */
 	pay?: Record<string, PayRecord>;
 	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
 	bills?: BillsKept;
@@ -130,9 +137,11 @@ export async function keepNightCounts(
 /**
  * The record's write of one pay answer. It goes in the same batch, right after the answer's own UPDATE (answerPay), and
  * lands only when that UPDATE changed rows (`WHERE changes() > 0`), so a stale answer that changes nothing leaves the
- * record as the first answer set it, and the record and the flags always agree. The merchant's key is bound as a
- * value and merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch
- * also creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
+ * record as the first answer set it, and the record and the flags always agree. The answer's deposits are bound as one
+ * keyed object, `{"yes": {…}}` or `{"no": {…}}`, and json_patch merges it key by key: a deposit answered before keeps its
+ * entry, a new one adds to it, and a No adds to `no` without touching `yes`. The merchant's key is bound as a value and
+ * merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch also
+ * creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
  * answered, which are never removed) for a merchant new to the record, and the place it already has for one answered again.
  */
 export function payAnswerStatement(

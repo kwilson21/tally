@@ -104,6 +104,13 @@ function depositFields(merchant: PayMerchant): [string, string][] {
 	]);
 }
 
+/** A merchant's deposits as the pay record keeps them under one answer: each by its transaction id. */
+function byId(merchant: PayMerchant) {
+	return Object.fromEntries(
+		merchant.ids.map((id, i) => [String(id), merchant.deposits[i]]),
+	);
+}
+
 /** Keep, as the page's own form does it: the page is read, and the charges it shows are the ones posted. */
 async function keepAsShown(htmx = false) {
 	return post(
@@ -401,9 +408,11 @@ describe("Yes and No writes", () => {
 			)
 			.all();
 		expect(after.results).toEqual(before.results);
-		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.answer).toBe(
-			"yes",
-		);
+		expect(
+			Object.keys(
+				(await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.yes ?? {},
+			),
+		).toHaveLength(2);
 	});
 
 	it("a second answer from a stale read changes nothing and leaves the first's record and flags agreeing", async () => {
@@ -414,8 +423,7 @@ describe("Yes and No writes", () => {
 		).toBeGreaterThan(0);
 		expect(await answerPay(db, merchant, "no", "person@example.com")).toBe(0);
 		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]).toEqual({
-			answer: "yes",
-			deposits: merchant.deposits,
+			yes: byId(merchant),
 			at: 0,
 		});
 		const rows = await db
@@ -471,9 +479,11 @@ describe("Yes and No writes", () => {
 		expect(html).not.toContain("Saved");
 		expect(html).not.toContain("Is this your pay?");
 		expect(textOf(html)).toMatch(/Pay · /);
-		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.answer).toBe(
-			"yes",
-		);
+		expect(
+			Object.keys(
+				(await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.yes ?? {},
+			),
+		).toHaveLength(2);
 	});
 
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
@@ -525,10 +535,142 @@ describe("Yes and No writes", () => {
 			.first<{ n: number }>();
 		expect(answered?.n).toBe(2);
 		const record = await readFirstTally(db);
-		expect(record?.pay?.["ACME CORP PAYROLL"]?.deposits).toHaveLength(2);
+		expect(
+			Object.keys(record?.pay?.["ACME CORP PAYROLL"]?.yes ?? {}),
+		).toHaveLength(2);
 		expect(record?.strokes.pay).toBeUndefined();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain("ACME CORP PAYROLL paying");
+	});
+});
+
+describe("a merchant asked again keeps every Yes in its pay line", () => {
+	/** The ledger's pay lines, as the page words them. */
+	const payLines = (html: string) =>
+		[...html.matchAll(/<li class="[^"]*">([^<]*)<\/li>/g)]
+			.map((match) => match[1] ?? "")
+			.filter((text) => text.startsWith("Pay · "));
+
+	/**
+	 * Acme Corp, two Yes-answered deposits two weeks apart, then a third paycheck two weeks after the latest, which the
+	 * page asks about on its own. The first answer is Yes, so the merchant is asked again for the third.
+	 */
+	async function acmeAskedAgain() {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp')",
+			)
+			.run();
+		await txn({
+			raw_name: "ACME CORP",
+			date: daysBefore(TODAY, 28),
+			amount_cents: -245000,
+			flag_income: 1,
+			plaid_category: "INCOME",
+		});
+		await txn({
+			raw_name: "ACME CORP",
+			date: daysBefore(TODAY, 14),
+			amount_cents: -245000,
+			flag_income: 1,
+			plaid_category: "INCOME",
+		});
+		await answerAsShown("yes");
+		await txn({
+			raw_name: "ACME CORP",
+			date: TODAY,
+			amount_cents: -245000,
+			flag_income: 1,
+			plaid_category: "INCOME",
+		});
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("paying $2,450, once, on");
+		expect(html.match(/Is this your pay\?/g)?.length).toBe(1);
+	}
+
+	it("a merchant asked again for a new paycheck keeps one pay line over every deposit answered Yes", async () => {
+		await acmeAskedAgain();
+		const { res } = await answerAsShown("yes", true);
+		expect(trigger(res).toast?.message).toBe("Saved: Acme Corp is your pay.");
+		expect(
+			Object.keys((await readFirstTally(db))?.pay?.["ACME CORP"]?.yes ?? {}),
+		).toHaveLength(3);
+		const { html } = await get("/first-page");
+		const weekday = new Date(`${TODAY}T00:00:00Z`).toLocaleDateString("en-US", {
+			weekday: "long",
+			timeZone: "UTC",
+		});
+		expect(payLines(html)).toEqual([
+			`Pay · Acme Corp, $2,450 every other ${weekday}`,
+		]);
+	});
+
+	it("a later No on a new deposit leaves the earlier Yes line as it was", async () => {
+		await acmeAskedAgain();
+		const before = payLines((await get("/first-page")).html);
+		expect(before).toHaveLength(1);
+		const yesBefore = Object.keys(
+			(await readFirstTally(db))?.pay?.["ACME CORP"]?.yes ?? {},
+		);
+		expect(yesBefore).toHaveLength(2);
+		const { res, html } = await answerAsShown("no", true);
+		const message = "Saved: that deposit from Acme Corp isn't your pay.";
+		expect(trigger(res).toast).toEqual({ message, type: "success" });
+		expect(trigger(res).announce).toBe(message);
+		expect(html).not.toContain("Is this your pay?");
+		const after = await get("/first-page");
+		expect(payLines(after.html)).toEqual(before);
+		const record = (await readFirstTally(db))?.pay?.["ACME CORP"];
+		expect(Object.keys(record?.yes ?? {})).toEqual(yesBefore);
+		const newId = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'ACME CORP' AND date = ?",
+			)
+			.bind(TODAY)
+			.first<{ id: number }>();
+		expect(record?.no).toEqual({
+			[String(newId?.id)]: { date: TODAY, cents: 245000 },
+		});
+		const row = await db
+			.prepare(
+				"SELECT income_source, flag_income FROM transactions WHERE id = ?",
+			)
+			.bind(newId?.id ?? 0)
+			.first<{ income_source: string; flag_income: number }>();
+		expect(row).toEqual({ income_source: "user", flag_income: 0 });
+	});
+
+	it("a No on several new deposits says how many it kept apart, when the merchant had a Yes line", async () => {
+		await acmeAskedAgain();
+		await answerAsShown("yes");
+		for (const days of [7, 0]) {
+			await txn({
+				raw_name: "ACME CORP",
+				date: daysBefore(TODAY, days),
+				amount_cents: -245000,
+				flag_income: 1,
+				plaid_category: "INCOME",
+			});
+		}
+		const { res } = await answerAsShown("no", true);
+		const message = "Saved: those 2 deposits from Acme Corp aren't your pay.";
+		expect(trigger(res).toast?.message).toBe(message);
+	});
+
+	it("a No with no Yes line before it keeps the plain words", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp')",
+			)
+			.run();
+		await deposits("ACME CORP", 50000, 2, 14, {
+			flag_income: 0,
+			income_confidence: 0.5,
+		});
+		const { res } = await answerAsShown("no", true);
+		expect(trigger(res).toast?.message).toBe(
+			"Saved: Acme Corp isn't your pay.",
+		);
 	});
 });
 

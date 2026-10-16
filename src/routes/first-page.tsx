@@ -1,11 +1,13 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { householdToday } from "../dates";
+import type { PayAnswer } from "../db/first-tally";
 import { keepReply, keepShown } from "../first-tally/bills";
 import {
 	answerPay,
 	type FirstPageModel,
 	keepBills,
+	type PayMerchant,
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
@@ -133,18 +135,35 @@ firstPage.post("/first-page/pay", async (c) => {
 		);
 	// A competing answer changed no row first: the page as it is now, and nothing written. The re-read is fresh, since
 	// `before` may be stale by now.
+	const hadYesLine = before.ledger.some(
+		(line) => line.id === `pay:${merchant.key}`,
+	);
 	if ((await answerPay(c.env.DB, merchant, answer, actor(c))) === 0)
 		return stale(c, await settleAndLoad(c.env.DB, today));
 	const after = await settleAndLoad(c.env.DB, today);
 	return answered(
 		c,
 		after,
-		answer === "yes"
-			? `Saved: ${merchant.name} is your pay.`
-			: `Saved: ${merchant.name} isn't your pay.`,
+		paySaved(answer, merchant, hadYesLine),
 		motionOf(before, after, answer === "yes" ? `pay:${merchant.key}` : null),
 	);
 });
+
+/**
+ * The words a pay answer saves. A No for a merchant whose Yes line is already there says only what it covered, since
+ * that line stays on the page and still reads the earlier Yes deposits.
+ */
+function paySaved(
+	answer: PayAnswer,
+	merchant: PayMerchant,
+	hadYesLine: boolean,
+): string {
+	if (answer === "yes") return `Saved: ${merchant.name} is your pay.`;
+	if (!hadYesLine) return `Saved: ${merchant.name} isn't your pay.`;
+	return merchant.ids.length === 1
+		? `Saved: that deposit from ${merchant.name} isn't your pay.`
+		: `Saved: those ${merchant.ids.length} deposits from ${merchant.name} aren't your pay.`;
+}
 
 firstPage.post("/first-page/bills", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
