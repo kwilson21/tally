@@ -165,13 +165,28 @@ function requestEvent(target: FakeNode | null) {
 	return { detail: { ctx: { target } }, preventDefault: vi.fn() };
 }
 
-/** The keyboard for a page and window, with the page's own keydown, htmx settle and request events as the browser sends them. */
+/** htmx's htmx:after:settle for a swap, which fires on the swap's target: the region the swap put in. */
+function settleEvent(target: FakeNode) {
+	return { target };
+}
+
+/** htmx's htmx:finally:request for a request that ended, with the target, status and swap its ctx reports. */
+function finishEvent(
+	target: FakeNode | null,
+	status: string,
+	swap = "outerHTML",
+) {
+	return { detail: { ctx: { target, status, swap } } };
+}
+
+/** The keyboard for a page and window, with the page's own keydown, htmx settle, finish and request events as the browser sends them. */
 function setup(page: FakePage, win = windowFor()) {
 	const keys = keyboard(page, win);
 	return {
 		win,
 		keydown: (event: ReturnType<typeof press>) => keys.keydown(event),
-		settled: () => keys.settled(),
+		settled: (event: ReturnType<typeof settleEvent>) => keys.settled(event),
+		ended: (event: ReturnType<typeof finishEvent>) => keys.ended(event),
 		responded: (event: ReturnType<typeof requestEvent>) =>
 			keys.responded(event),
 	};
@@ -279,13 +294,14 @@ describe("? (the keys sheet)", () => {
 	it("gives focus back to what opened it once the sheet closes", () => {
 		const page = new FakePage();
 		const [, second] = list(page);
+		const region = el(page, "div", { id: "keys" });
 		const win = windowFor();
 		const { keydown, settled } = setup(page, win);
 		page.activeElement = second;
 		keydown(press("?", { shiftKey: true }));
-		// The sheet arrives: htmx settles with the keys sheet on the page.
-		const sheet = el(page, "section", { "data-sheet": "" }, page.body);
-		settled();
+		// The sheet arrives: htmx settles the keys region with the keys sheet in it.
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
 		expect(second.focusCount).toBe(0);
 		// Its close swaps the sheet away, and the next settle gives focus back.
 		sheet.parentElement?.children.splice(
@@ -293,7 +309,7 @@ describe("? (the keys sheet)", () => {
 			1,
 		);
 		page.nodes.splice(page.nodes.indexOf(sheet), 1);
-		settled();
+		settled(settleEvent(region));
 		expect(second.focusCount).toBe(1);
 		expect(page.activeElement).toBe(second);
 	});
@@ -301,23 +317,29 @@ describe("? (the keys sheet)", () => {
 	it("does not return focus to an old opener once a later sheet closes, when the keys never opened", () => {
 		const page = new FakePage();
 		const [first] = list(page);
-		const { keydown, settled } = setup(page);
+		const region = el(page, "div", { id: "keys" });
+		const sheetRegion = el(page, "div", { id: "sheet" });
+		const win = windowFor("", "#budget");
+		const { keydown, ended, settled } = setup(page, win);
 		page.activeElement = first;
 		keydown(press("?", { shiftKey: true }));
-		// The sheet never arrives: a request settles with no sheet open, which ends the keys' return.
-		settled();
-		const sheet = el(page, "section", { "data-sheet": "" }, page.body);
-		settled();
-		page.nodes.splice(page.nodes.indexOf(sheet), 1);
-		settled();
+		// The keys request fails: the sheet never arrives, and the request's end forgets the return.
+		ended(finishEvent(region, "error: TypeError"));
+		// A row's sheet then opens and closes in its own region, which the keys' return does not follow.
+		const sheet = el(page, "section", { "data-sheet": "" }, sheetRegion);
+		settled(settleEvent(sheetRegion));
+		remove(page, sheet);
+		settled(settleEvent(sheetRegion));
 		expect(first.focusCount).toBe(0);
+		expect(win.history.replaceState).not.toHaveBeenCalled();
 	});
 
 	it("gives focus to nothing when the page had none to return to", () => {
 		const page = new FakePage();
-		const { keydown, settled } = setup(page);
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, ended } = setup(page);
 		keydown(press("?", { shiftKey: true }));
-		settled();
+		ended(finishEvent(region, "error: TypeError"));
 		expect(page.activeElement).toBe(page.body);
 	});
 
@@ -340,12 +362,12 @@ describe("? (the keys sheet)", () => {
 		keydown(press("?", { shiftKey: true }));
 		const region = el(page, "div", { id: "keys" });
 		const sheet = el(page, "section", { "data-sheet": "" }, region);
-		settled();
+		settled(settleEvent(region));
 		expect(win.history.replaceState).not.toHaveBeenCalled();
 		// Its close swaps the sheet away and pushes the address without a fragment.
 		remove(page, sheet);
 		win.location.hash = "";
-		settled();
+		settled(settleEvent(region));
 		expect(win.history.replaceState).toHaveBeenCalledWith(
 			{ htmx: true },
 			"",
@@ -357,22 +379,24 @@ describe("? (the keys sheet)", () => {
 		const plain = new FakePage();
 		const plainWin = windowFor();
 		const plainKeys = setup(plain, plainWin);
+		const plainRegion = el(plain, "div", { id: "keys" });
 		plainKeys.keydown(press("?", { shiftKey: true }));
-		const plainSheet = el(plain, "section", { "data-sheet": "" });
-		plainKeys.settled();
+		const plainSheet = el(plain, "section", { "data-sheet": "" }, plainRegion);
+		plainKeys.settled(settleEvent(plainRegion));
 		remove(plain, plainSheet);
-		plainKeys.settled();
+		plainKeys.settled(settleEvent(plainRegion));
 		expect(plainWin.history.replaceState).not.toHaveBeenCalled();
 
 		const kept = new FakePage();
 		const keptWin = windowFor("", "#budget");
 		const keptKeys = setup(kept, keptWin);
+		const keptRegion = el(kept, "div", { id: "keys" });
 		keptKeys.keydown(press("?", { shiftKey: true }));
-		const keptSheet = el(kept, "section", { "data-sheet": "" });
-		keptKeys.settled();
+		const keptSheet = el(kept, "section", { "data-sheet": "" }, keptRegion);
+		keptKeys.settled(settleEvent(keptRegion));
 		remove(kept, keptSheet);
 		keptWin.location.hash = "#budget";
-		keptKeys.settled();
+		keptKeys.settled(settleEvent(keptRegion));
 		expect(keptWin.history.replaceState).not.toHaveBeenCalled();
 	});
 
@@ -380,6 +404,7 @@ describe("? (the keys sheet)", () => {
 		const page = new FakePage();
 		const toasts = el(page, "div", { id: "toasts" });
 		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const region = el(page, "div", { id: "keys" });
 		const win = windowFor();
 		const { keydown, settled } = setup(page, win);
 		page.activeElement = undo;
@@ -387,10 +412,10 @@ describe("? (the keys sheet)", () => {
 		expect(page.activeElement).toBe(page.body);
 		expect(win.htmx.ajax).toHaveBeenCalledTimes(1);
 		// The sheet arrives, then its close swaps it away, and the next settle gives focus back to Undo.
-		const sheet = el(page, "section", { "data-sheet": "" }, page.body);
-		settled();
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
 		remove(page, sheet);
-		settled();
+		settled(settleEvent(region));
 		expect(page.activeElement).toBe(undo);
 	});
 
@@ -411,12 +436,168 @@ describe("? (the keys sheet)", () => {
 		const { settled } = setup(page, win);
 		remove(page, sheet);
 		win.location.hash = "";
-		settled();
+		settled(settleEvent(region));
 		expect(win.history.replaceState).toHaveBeenCalledWith(
 			{ htmx: true },
 			"",
 			"/transactions#budget",
 		);
+	});
+});
+
+describe("a settle of another request leaves the keys sheet's return alone (htmx:after:settle)", () => {
+	it("keeps the opener and the fragment when another request settles while the keys load", () => {
+		const page = new FakePage();
+		const [, second] = list(page);
+		const syncRegion = el(page, "div", { id: "sync" });
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("", "#budget");
+		const { keydown, settled } = setup(page, win);
+		page.activeElement = second;
+		keydown(press("?", { shiftKey: true }));
+		// Sync now settles while the keys load: it is not the keys region, so the return stays.
+		settled(settleEvent(syncRegion));
+		// The keys sheet arrives in #keys; its close swaps it away and pushes the address without the fragment.
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		win.location.hash = "";
+		settled(settleEvent(region));
+		expect(second.focusCount).toBe(1);
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions#budget",
+		);
+	});
+
+	it("keeps Undo as the opener when another request settles while the keys load", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const syncRegion = el(page, "div", { id: "sync" });
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, settled } = setup(page);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		settled(settleEvent(syncRegion));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		settled(settleEvent(region));
+		expect(page.activeElement).toBe(undo);
+	});
+});
+
+describe("a keys request that ends (htmx:finally:request)", () => {
+	it.each(["before", "after"])(
+		"keeps the return of a successful keys swap when its finish comes %s the settle",
+		(order) => {
+			const page = new FakePage();
+			const [, second] = list(page);
+			const region = el(page, "div", { id: "keys" });
+			const win = windowFor("", "#budget");
+			const { keydown, settled, ended } = setup(page, win);
+			page.activeElement = second;
+			keydown(press("?", { shiftKey: true }));
+			const sheet = el(page, "section", { "data-sheet": "" }, region);
+			if (order === "before") ended(finishEvent(region, "swapped"));
+			settled(settleEvent(region));
+			if (order === "after") ended(finishEvent(region, "swapped"));
+			remove(page, sheet);
+			win.location.hash = "";
+			settled(settleEvent(region));
+			expect(second.focusCount).toBe(1);
+			expect(win.history.replaceState).toHaveBeenCalledWith(
+				{ htmx: true },
+				"",
+				"/transactions#budget",
+			);
+		},
+	);
+
+	it("leaves the return of a failed close alone, so the retried close still gives focus back", () => {
+		const page = new FakePage();
+		const [, second] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("", "#budget");
+		const { keydown, settled, ended } = setup(page, win);
+		page.activeElement = second;
+		keydown(press("?", { shiftKey: true }));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		// The close fails and the sheet stays up, so its return stays for the retried Escape or Cancel.
+		ended(finishEvent(region, "error: TypeError"));
+		expect(second.focusCount).toBe(0);
+		remove(page, sheet);
+		win.location.hash = "";
+		settled(settleEvent(region));
+		expect(second.focusCount).toBe(1);
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions#budget",
+		);
+	});
+
+	it("does nothing for another request's finish", () => {
+		const page = new FakePage();
+		const [, second] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const sheetRegion = el(page, "div", { id: "sheet" });
+		const { keydown, settled, ended } = setup(page);
+		page.activeElement = second;
+		keydown(press("?", { shiftKey: true }));
+		ended(finishEvent(sheetRegion, "error: TypeError"));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		settled(settleEvent(region));
+		expect(second.focusCount).toBe(1);
+	});
+
+	it("leaves focus where the person moved it during the load", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const [, second] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, ended } = setup(page);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		second.focus();
+		ended(finishEvent(region, "error: TypeError"));
+		expect(page.activeElement).toBe(second);
+		expect(undo.focusCount).toBe(0);
+	});
+
+	// A keys request that fails at the network, or gets a 500 that toast.js keeps out of the page, ends with no sheet.
+	it.each([
+		["fails at the network", "error: TypeError: Failed to fetch", "outerHTML"],
+		["gets a 500 that is not swapped", "swapped", "none"],
+	])("gives focus back to Undo when the keys request %s", (_, status, swap) => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const region = el(page, "div", { id: "keys" });
+		const sheetRegion = el(page, "div", { id: "sheet" });
+		const win = windowFor("", "#budget");
+		const { keydown, ended, settled } = setup(page, win);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		// ? blurred Undo, so focus is on nothing. The request ends with no swap, and focus goes back to Undo.
+		expect(page.activeElement).toBe(page.body);
+		ended(finishEvent(region, status, swap));
+		expect(page.activeElement).toBe(undo);
+		const focusesAfterFailure = undo.focusCount;
+		// A later, unrelated sheet opens and closes in its own region: Undo is not focused again.
+		const sheet = el(page, "section", { "data-sheet": "" }, sheetRegion);
+		settled(settleEvent(sheetRegion));
+		remove(page, sheet);
+		win.location.hash = "";
+		settled(settleEvent(sheetRegion));
+		expect(undo.focusCount).toBe(focusesAfterFailure);
+		expect(win.history.replaceState).not.toHaveBeenCalled();
 	});
 });
 
@@ -460,14 +641,16 @@ describe("a keys response that comes after another sheet opened (htmx:after:requ
 		const page = new FakePage();
 		const [first] = list(page);
 		const region = el(page, "div", { id: "keys" });
-		const { keydown, responded, settled } = setup(page);
+		const sheetRegion = el(page, "div", { id: "sheet" });
+		const { keydown, ended, responded, settled } = setup(page);
 		page.activeElement = first;
 		keydown(press("?", { shiftKey: true }));
-		const other = el(page, "section", { "data-sheet": "" }, page.body);
+		const other = el(page, "section", { "data-sheet": "" }, sheetRegion);
 		responded(requestEvent(region));
-		settled();
+		ended(finishEvent(region, "issuing"));
+		settled(settleEvent(sheetRegion));
 		remove(page, other);
-		settled();
+		settled(settleEvent(sheetRegion));
 		expect(first.focusCount).toBe(0);
 	});
 });

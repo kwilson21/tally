@@ -3,9 +3,10 @@
 // opens the row focus is on (Enter already does, on a link), ← and → go to the previous and next month on Home, and u
 // presses the Undo of the toast on screen. Shift is part of ? and of / and nothing else. No key acts while focus is in
 // a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys then). The sheet keeps the
-// page's #fragment, and a keys response that arrives after another sheet opened is dropped. Without this script every
-// page works as a plain page: the keys are a details at the foot, and More lists them. Pages say what they can do with
-// data attributes and aria-keyshortcuts; this script only reads them.
+// page's #fragment, and a keys response that arrives after another sheet opened is dropped. Only a swap of #keys moves
+// the sheet's return, and a keys request that ends without a swap gives focus back (to Undo) and forgets it. Without
+// this script every page works as a plain page: the keys are a details at the foot, and More lists them. Pages say
+// what they can do with data attributes and aria-keyshortcuts; this script only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
 // The row a person opens, marked on transaction, Home's category and bill rows. Only a link can take focus, so a
@@ -58,7 +59,8 @@ export function rowsOf(doc) {
 /**
  * The keys for one page. `doc` is the document and `win` the window (its location, and htmx for the keys sheet). The
  * sheet's close returns focus to whatever opened it, once htmx has swapped the sheet away: `settled` is htmx's
- * after-settle, and it only acts after the sheet has been seen open.
+ * after-settle, and it acts only on a swap of #keys, after the sheet has been seen open. `ended` is htmx's
+ * finally-request, and clears the return when a keys request ends without a swap.
  */
 export function keyboard(doc, win) {
 	let returnTo = null;
@@ -154,12 +156,15 @@ export function keyboard(doc, win) {
 				}
 			}
 		},
-		settled() {
+		settled(event) {
+			// Only a swap of #keys opens or closes the sheet, so another request's settle (Sync now, a row's sheet)
+			// leaves the return alone.
+			if (event?.target?.id !== "keys") return;
 			if (openSheet(doc)) {
 				armed = true;
 				return;
 			}
-			// A settle with no sheet open ends the keys' return: it was the close, or nothing ever opened (a failed request).
+			// A #keys settle with no sheet open ends the keys' return: it was the close (a failed request is ended(), below).
 			const back = armed ? returnTo : null;
 			const fragment = armed ? keptHash : "";
 			forget();
@@ -172,6 +177,25 @@ export function keyboard(doc, win) {
 					win.location.pathname + win.location.search + fragment,
 				);
 			if (back?.isConnected) back.focus();
+		},
+		/** A keys request that ends with no swap forgets the return, and refocuses its opener if focus is on nothing. */
+		ended(event) {
+			const ctx = event.detail?.ctx;
+			if (ctx?.target?.id !== "keys") return;
+			// A swap's settle ends the return, so a finish that comes first leaves it for that settle.
+			if (ctx.status === "swapped" && ctx.swap !== "none") return;
+			const sheet = openSheet(doc);
+			// A failed close leaves the sheet up, so its return stays for the retried Escape or Cancel.
+			if (sheet && doc.getElementById("keys")?.contains(sheet)) return;
+			// A sheet that opened meanwhile takes the focus with it, so the old opener gets none back.
+			const back = sheet ? null : returnTo;
+			forget();
+			// Focus moves back only from nothing (an Undo that ? blurred), so a person who moved it keeps it.
+			if (
+				back?.isConnected &&
+				(doc.activeElement === doc.body || !doc.activeElement)
+			)
+				back.focus();
 		},
 		/**
 		 * A keys response is thrown away when a sheet outside #keys opened while it loaded: its swap would put the keys
@@ -193,7 +217,12 @@ export function keyboard(doc, win) {
 if (typeof document !== "undefined") {
 	const keys = keyboard(document, window);
 	document.addEventListener("keydown", (event) => keys.keydown(event));
-	document.addEventListener("htmx:after:settle", () => keys.settled());
+	document.addEventListener("htmx:after:settle", (event) =>
+		keys.settled(event),
+	);
+	document.addEventListener("htmx:finally:request", (event) =>
+		keys.ended(event),
+	);
 	document.addEventListener("htmx:after:request", (event) =>
 		keys.responded(event),
 	);
