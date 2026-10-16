@@ -213,6 +213,8 @@ export function TransactionRow({
 				href={href}
 				autofocus={autofocus}
 				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
+				// The rows keyboard.js moves between (j and k) and opens (e): the ones a person opens.
+				data-row={href ? "" : undefined}
 				{...attrs}
 			>
 				<RowIcon row={row} kind={kind} />

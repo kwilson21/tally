@@ -334,9 +334,15 @@ describe("How this works at the foot of Trends", () => {
 		const { html } = await get("/trends");
 		const foot = html.search(FOOT);
 		expect(foot).toBeGreaterThan(html.indexOf("Going well"));
-		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
-			/<(section|ul|li|h[1-6]|p|svg)\b/,
-		);
+		// The keys' details on desktop (decision 118) may follow the foot: they are not a section.
+		expect(
+			html
+				.slice(foot, html.indexOf("</main>"))
+				.replace(
+					/<div class="mt-2 hidden lg:block">[\s\S]*?<\/details><\/div>/,
+					"",
+				),
+		).not.toMatch(/<(section|ul|li|h[1-6]|p|svg)\b/);
 	});
 
 	it("comes last on the early state, after All spending", async () => {
@@ -348,8 +354,13 @@ describe("How this works at the foot of Trends", () => {
 		const { html } = await get("/trends");
 		const foot = html.search(FOOT);
 		expect(foot).toBeGreaterThan(html.indexOf("Trends fill in as months pass"));
-		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
-			/<(section|ul|li|h[1-6]|p|svg)\b/,
-		);
+		expect(
+			html
+				.slice(foot, html.indexOf("</main>"))
+				.replace(
+					/<div class="mt-2 hidden lg:block">[\s\S]*?<\/details><\/div>/,
+					"",
+				),
+		).not.toMatch(/<(section|ul|li|h[1-6]|p|svg)\b/);
 	});
 });

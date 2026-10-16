@@ -17,6 +17,14 @@ export function personChoseIncomeSql(alias: string): string {
 	return `(${alias}.income_source = 'user' OR ${alias}.credit_reviewed_by = 'user')`;
 }
 
+/**
+ * The SET of a person's income answer on a money-in row: their own choice (`income_source` = 'user', which Plaid and Jev
+ * can't take back), with the guess cleared. The review's Yes and the first page's Yes and No write it, so they can't
+ * drift. It binds the flag (1 for income, 0 for not), then who answered.
+ */
+export const PERSON_INCOME_SET_SQL =
+	"flag_income = ?, income_source = 'user', income_confidence = NULL, updated_by = ?, updated_at = datetime('now')";
+
 /** Plaid's own INCOME category set the flag, and nobody has taken it over since. */
 export function plaidSetIncomeSql(alias: string): string {
 	return `(${alias}.flag_income = 1 AND ${alias}.income_source IS NULL AND ${alias}.plaid_category = '${PLAID_INCOME_CATEGORY}')`;

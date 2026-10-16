@@ -52,6 +52,7 @@ export function SavingsGoalRow({
 					href={href}
 					autofocus={autofocus}
 					class={`flex min-h-11 items-start gap-4 py-3 text-ink no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent${goalSet ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
+					data-row=""
 					{...attrs}
 				>
 					{content}

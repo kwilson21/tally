@@ -62,6 +62,7 @@ function Wrap({
 			href={href}
 			autofocus={autofocus}
 			class={`${box} ${ROW_OPENS}${saved ? ` ${savedRowClass(saved)}` : ""}`}
+			data-row=""
 			{...attrs}
 		>
 			{children}

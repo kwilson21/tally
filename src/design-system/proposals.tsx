@@ -4,6 +4,8 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
+import { AuditRoundTwoPicks } from "./proposals-audit-2";
+import { AuditRoundThreeProposals } from "./proposals-audit-3";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
@@ -503,6 +505,42 @@ export const DECIDED: readonly {
 		issue: 80,
 	},
 	{
+		title: "P130 · One Why per page",
+		outcome:
+			"Option A: one Why? per page, beside the page's summary sentence (Bills' 5 bills to pay soon, Trends' headline); section headings carry none (decision 121).",
+		issue: 603,
+	},
+	{
+		title: "P131 · A bill's page",
+		outcome:
+			"Option A: a quiet ledger of months, one ruled row each with its status in muted words; a charge Tally found is its own row with Link it, months with no payment fold into one row, and no filled status pills (decision 121).",
+		issue: 604,
+	},
+	{
+		title: "P132 · What a past month's result says",
+		outcome:
+			"Option A: the number, stamp and bars stay, and one muted line under the number and stamp, above the bars, names the biggest causes, from the categories over budget and the positive spending with no budget, by amount, linking to them (decision 121).",
+		issue: 605,
+	},
+	{
+		title: "P133 · The month dots",
+		outcome:
+			"Option A: each finished month's dot in the month strip holds a small mark, a check for under budget, a minus for over, or an empty ring for a month with no budgets; the shown month keeps its ink ring and the current month its ring; each month's link names its result in words (decision 121). C, D and E stay drawn, not picked.",
+		issue: 605,
+	},
+	{
+		title: "P134 · Settings",
+		outcome:
+			"Option A: Settings becomes a short contents page drawn like More (P122 A), with the suggestions Band above; each section opens its own page with Settings as the back link; switches save when flipped, each rule names its category once with Remove as a quiet link, an empty Never suggest is one muted line, and Household keeps who gets the bank sign-in emails (decision 120).",
+		issue: 606,
+	},
+	{
+		title: "P135 · Category suggestions",
+		outcome:
+			"Option A: one suggestion card with one set of words wherever Tally asks it: Tally's guess, “A new category: Pet Care”, its transactions as ruled rows with one checkbox each, and Create Pet Care or No, where No retires the suggestion and asks “Don't suggest Pet Care again?”; in Organize, when the merchant is in a waiting suggestion, the card sits above the chips (decision 120).",
+		issue: 607,
+	},
+	{
 		title: "P136 · What Bills' section totals count",
 		outcome:
 			"Option A: each status heading's total counts every occurrence of its group in the month, listed or not, so Paid this month counts every bill payment made this month as Upcoming counts every occurrence still due; a muted line under a heading names the occurrences it counts that aren't listed (“Includes Daycare's Fridays on Oct 2 and 9”, up to two bills by name, then “and N more”) (decision 122).",
@@ -537,6 +575,30 @@ export function Proposals() {
 					aren't listed.
 				</p>
 				<BillsTotalsProposal />
+			</section>
+
+			<section aria-labelledby="audit2-picks-title" class="mt-12">
+				<h2 id="audit2-picks-title" class="font-serif text-3xl font-semibold">
+					Picked: from the second design audit
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's picks, marked Picked, are decision 121: P130
+					A, one Why per page; P131 A, a quiet ledger of months; P132 A, one
+					line names the cause; P133 A, marks in outline.
+				</p>
+				<AuditRoundTwoPicks />
+			</section>
+
+			<section aria-labelledby="audit3-title" class="mt-12">
+				<h2 id="audit3-title" class="font-serif text-3xl font-semibold">
+					Picked: from the second design audit, Settings and suggestions
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 15. The owner's picks, marked Picked, are decision 120: A,
+					Settings as a contents page, and A, one card for a category
+					suggestion.
+				</p>
+				<AuditRoundThreeProposals />
 			</section>
 
 			<section aria-labelledby="p128-title" class="mt-12">

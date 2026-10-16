@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { householdToday, monthName, monthsBefore, shortDay } from "../dates";
 import {
 	holdPlanDelete,
@@ -250,7 +251,7 @@ async function planPage(
 			title={`${plan.name} · Tally`}
 			active="bills"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path}
+			currentPath={addressOf(c)}
 		>
 			<div class="max-w-2xl">
 				<a href="/bills" class="inline-flex min-h-11 items-center text-accent">

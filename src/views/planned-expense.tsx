@@ -73,6 +73,7 @@ export function PlannedRow({
 					href={href}
 					class={`${look} text-ink no-underline`}
 					autofocus={autofocus}
+					data-row=""
 					{...sheetAttrs(href)}
 				>
 					{content}
