@@ -3554,8 +3554,7 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
  * sheet was read, a bill payment on a part that changed since then, or the bank's amount changed. Only the amount change
  * says the bank's amount moved.
  *
- * PLACEHOLDER (#638): no split sentence covers a bill payment that changed, so this one reuses the planned expense's
- * shape until the owner picks the words.
+ * The bill-payment sentence is the owner's pick for #638 (Oct 16).
  */
 export const splitRefusedError = (planLinked: boolean, billLinked = false) =>
 	planLinked
