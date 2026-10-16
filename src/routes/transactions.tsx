@@ -3530,8 +3530,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 /**
- * The words a refused split save says (saveSplit): a planned expense linked to a part after the sheet was read, or the
- * bank's amount changed. Only the amount change says the bank's amount moved.
+ * The words a refused split save says (saveSplit): a planned expense linked to a part, or moved between parts, after the
+ * sheet was read, or the bank's amount changed. Only the amount change says the bank's amount moved.
  */
 export const splitRefusedError = (planLinked: boolean) =>
 	planLinked
