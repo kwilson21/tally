@@ -1,9 +1,11 @@
 // Keyboard shortcuts (#72, decisions 109 and 118). The keys: / moves focus to search (or opens Transactions with
-// it focused), ? opens the keys sheet, j and k move between a list's rows, e opens the row focus is on (Enter already
-// does, on a link), ← and → go to the previous and next month on Home, and u presses the Undo of the toast on screen.
-// No key acts while focus is in a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys
-// then). Without this script every page works as a plain page: the keys are a details at the foot, and More lists them.
-// Pages say what they can do with data attributes and aria-keyshortcuts; this script only reads them.
+// it focused), ? opens the keys sheet (focus on an Undo toast moves into it), j and k move between a list's rows, e
+// opens the row focus is on (Enter already does, on a link), ← and → go to the previous and next month on Home, and u
+// presses the Undo of the toast on screen. Shift is part of ? and of / and nothing else. No key acts while focus is in
+// a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys then). The sheet keeps the
+// page's #fragment, and a keys response that arrives after another sheet opened is dropped. Without this script every
+// page works as a plain page: the keys are a details at the foot, and More lists them. Pages say what they can do with
+// data attributes and aria-keyshortcuts; this script only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
 // The row a person opens, marked on transaction, Home's category and bill rows. Only a link can take focus, so a
