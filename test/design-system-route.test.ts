@@ -682,6 +682,16 @@ describe("GET /design-system in the demo", () => {
 			);
 	});
 
+	it("counts the three other merchants of the Organize card's fixture in both states, as the fixture's four merchants do", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="suggestion-card"')[1]?.split("</section>")[0] ?? "";
+		const sentence =
+			"Tally suggested a new category for this and 3 more: Pet Care";
+		expect(section.split(sentence).length - 1).toBe(2);
+		expect(section).not.toContain("and 2 more");
+	});
+
 	it("shows a guessed name in TransactionRow with the sparkles icon, dashed, and says so in DESIGN.md", async () => {
 		const { html } = await get("/design-system");
 		const section =

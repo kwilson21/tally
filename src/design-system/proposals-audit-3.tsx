@@ -2,12 +2,14 @@
 // as the screens it changes, so the owner decides by seeing (decision 47). Proposal only: nothing in the app
 // changes. Every picture is inert and labelled, like the rest of the page. Where the app's own components draw
 // the same at a phone's size they are used as they are (Band, ContentsList, CategoryRow, CategoryIcon, Switch,
-// Chip, NewCategoryChip, Button, WhyLink, Icon, SuggestionCard, CategorySuggestionCard); the screens an option
-// changes are prototypes in tokens, and their captions say so. The sample data is the demo's (src/demo/reset.ts
+// Chip, NewCategoryChip, Button, WhyLink, Icon). The two suggestion pictures' Today is a hand-drawn baseline of today's cards, kept here as P135's "today" since
+// main's cards are now the one card (decision 120): TodaySettingsCard, TodaySuggestionCard and TodayGuess. The screens
+// an option changes are prototypes in tokens, and their captions say so. The sample data is the demo's (src/demo/reset.ts
 // and seed.ts): seven categories with $3,940 a month, one person (Everyone), Eastern time, and the Pet Care
 // suggestion for Chewy, Petsmart and Banfield Pet Hospital, in August.
 
 import type { Child } from "hono/jsx";
+import { shortDay } from "../dates";
 import type { PendingSuggestion } from "../db/category-suggestions";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
@@ -17,13 +19,13 @@ import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { CategoryRow } from "../views/category-row";
-import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { ContentsList, type Place } from "../views/contents-list";
 import { FeedbackButton } from "../views/feedback-button";
 import { Icon } from "../views/icons";
 import { NewCategoryChip } from "../views/new-category-choice";
-import { SuggestionCard } from "../views/suggestion-review";
+import { SelectableTransactionRow } from "../views/selectable-transaction-row";
+import { joinStores, MaybeQuestion } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { TextInput } from "../views/text-input";
 import { WhyLink } from "../views/why-link";
@@ -864,6 +866,228 @@ function P134() {
 }
 
 // ---------------------------------------------------------------------------------------------
+/**
+ * Today's Settings card for a suggested category, as main drew it before #607 (decision 120): a dashed card with a tag,
+ * "Suggested: {name}", ticked rows with a dashed icon beside each check, and "Create {name}", "Dismiss" and Why?. The
+ * reference picture keeps it, so it shows what it showed.
+ */
+function TodaySettingsCard({
+	suggestion,
+	error,
+	ticked,
+	notes,
+	existing,
+	archived,
+}: {
+	suggestion: PendingSuggestion;
+	error?: string;
+	ticked?: number[];
+	notes?: Record<number, string>;
+	existing?: string;
+	archived?: boolean;
+}) {
+	return (
+		<details
+			class="mt-3 rounded-control border border-dashed border-ink px-3"
+			data-suggestion={suggestion.id}
+			open
+		>
+			<summary class="flex min-h-11 list-none items-center gap-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+				<Icon name="tag" class="size-6" />
+				<span class="min-w-0 flex-1">
+					<span class="block text-lg">Suggested: {suggestion.name}</span>
+					<span class="block text-sm text-muted">
+						Untick any that don't belong.
+					</span>
+				</span>
+			</summary>
+			{error && (
+				<p role="alert" class="text-sm text-over">
+					{error}
+				</p>
+			)}
+			<form
+				method="post"
+				action={`/settings/suggestions/${suggestion.id}/create`}
+				hx-post={`/settings/suggestions/${suggestion.id}/create`}
+				hx-target="#categories"
+				hx-select="#categories"
+				hx-swap="outerHTML"
+				class="pb-2"
+			>
+				<ul class="mt-2 divide-y divide-rule border-t border-rule">
+					{suggestion.rows.map((row) => {
+						const checked = ticked ? ticked.includes(row.id) : true;
+						return (
+							<SelectableTransactionRow
+								row={row}
+								checked={checked}
+								after={
+									<>
+										<input type="hidden" name="shown" value={row.id} />
+										<div class="hidden supports-[selector(:has(*))]:group-has-[input[type=checkbox]:not(:checked)]/tx:block">
+											<TextInput
+												id={`note-${row.id}`}
+												name={`note_${row.id}`}
+												label={`A note for ${row.displayName} (optional)`}
+												value={notes?.[row.id] ?? ""}
+												maxlength={500}
+												placeholder="Only used if you untick it"
+												hint="Tally sorts it again right away, with your note."
+												surface="paper"
+												class="w-full"
+											/>
+										</div>
+									</>
+								}
+							/>
+						);
+					})}
+				</ul>
+				<div class="flex flex-wrap items-center gap-2 py-3">
+					<Button kind="secondary" type="submit" name="action" value="create">
+						{existing
+							? archived
+								? `Restore ${existing}`
+								: `Add to ${existing}`
+							: `Create ${suggestion.name}`}
+					</Button>
+					<Button
+						kind="text"
+						type="submit"
+						formaction={`/settings/suggestions/${suggestion.id}/dismiss`}
+						hx-post={`/settings/suggestions/${suggestion.id}/dismiss`}
+						hx-target="#categories"
+						hx-select="#categories"
+						hx-swap="outerHTML"
+					>
+						Dismiss
+					</Button>
+					<WhyLink section="categorization" topic="suggested categories" />
+				</div>
+			</form>
+		</details>
+	);
+}
+
+// Today's Suggestions page for a new category, as main drew it before #607 (decision 120): the merchants as the headline,
+// "Maybe new: Pet Care", the purchases as pills, and "Yes, create Pet Care" or "No", with Skip under it. Kept here, a copy
+// as the rest of this file keeps today's parts, so the reference picture still shows what it showed; the live Suggestions
+// page now draws the one card.
+
+/** Tally's guess with its Why? link, as the review screen drew it before #607 (spec §8.6, P87 B). */
+function TodayGuess({
+	sure,
+	section,
+}: {
+	sure?: number;
+	section: "categorization";
+}) {
+	return (
+		<p class="flex flex-wrap items-center gap-x-2 text-sm text-ink">
+			<span class="inline-flex items-center gap-1.5">
+				<Icon name="sparkles" class="size-4" />
+				Tally's guess{sure === undefined ? "" : ` · ${sure}% sure`}
+			</span>
+			<WhyLink section={section} topic="Tally's guess" />
+		</p>
+	);
+}
+
+/** The Suggestions page's new-category item as main drew it before #607: the reference copy of the old card. */
+function TodaySuggestionCard({
+	action,
+	item,
+	today,
+	skipHref,
+}: {
+	action: string;
+	item: Extract<SuggestionItem, { kind: "new_category" }>;
+	today: string;
+	skipHref: string;
+	categories?: { id: number; name: string }[];
+}) {
+	const count = item.rows.length;
+	return (
+		<div class="flex flex-col gap-5">
+			<div>
+				<h2
+					id="suggestion-title"
+					class="font-serif text-3xl font-semibold tracking-tight wrap-anywhere outline-none"
+				>
+					{joinStores(item.stores.map((store) => store.merchant))}
+				</h2>
+				<p class="text-muted">
+					{count} {count === 1 ? "transaction" : "transactions"} ·{" "}
+					{shortDay(item.date, today)}
+				</p>
+			</div>
+			<MaybeQuestion>Maybe new: {item.name}</MaybeQuestion>
+			<TodayGuess section="categorization" />
+			<form
+				method="post"
+				action={action}
+				hx-post={action}
+				hx-disable="#suggestions-page button[type=submit]"
+				hx-sync="#suggestions-page:drop"
+				hx-target="#suggestions-page"
+				hx-select="#suggestions-page"
+				hx-swap="outerHTML"
+				class="flex flex-col gap-4"
+			>
+				<input type="hidden" name="id" value={item.id} />
+				<p class="text-sm text-muted">Untick any that don't belong.</p>
+				<ul class="flex flex-wrap gap-2">
+					{item.rows.map((row) => (
+						<li>
+							<input
+								type="hidden"
+								name="shown"
+								value={String(row.transactionId)}
+							/>
+							<Chip
+								type="checkbox"
+								name="ticked"
+								value={String(row.transactionId)}
+								checked
+							>
+								{row.label} · {formatCents(Math.abs(row.amountCents))} ·{" "}
+								{shortDay(row.date, today)}
+							</Chip>
+						</li>
+					))}
+				</ul>
+				<div class="flex flex-col gap-3">
+					<Button type="submit" name="answer" value="yes" class="w-full">
+						{item.existing
+							? item.archived
+								? `Yes, restore ${item.existing}`
+								: `Yes, add to ${item.existing}`
+							: `Yes, create ${item.name}`}
+					</Button>
+					<Button
+						kind="secondary"
+						type="submit"
+						name="answer"
+						value="no"
+						class="w-full"
+					>
+						No
+					</Button>
+				</div>
+			</form>
+			<p class="text-center">
+				<a
+					href={skipHref}
+					class="inline-flex min-h-11 items-center text-accent"
+				>
+					Skip
+				</a>
+			</p>
+		</div>
+	);
+}
+
 // P135 · Category suggestions (#607): one card and one set of words, or one place to answer.
 
 function P135() {
@@ -894,7 +1118,7 @@ function P135() {
 							masthead={PILL}
 						>
 							<h2 class="font-serif text-3xl font-semibold">Categories</h2>
-							<CategorySuggestionCard suggestion={PET_SUGGESTION} />
+							<TodaySettingsCard suggestion={PET_SUGGESTION} />
 						</Phone>
 					</Shot>
 					<Shot caption="The Suggestions page, at 390">
@@ -904,7 +1128,7 @@ function P135() {
 							masthead={PILL}
 						>
 							<SuggestionsPage>
-								<SuggestionCard
+								<TodaySuggestionCard
 									action="/settings/suggestions"
 									item={PET_ITEM}
 									today={TODAY}

@@ -6,6 +6,7 @@ import { Button } from "./button";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { NameChoices } from "./name-choices";
+import { NewCategoryCard } from "./suggestion-card";
 import { WhyLink } from "./why-link";
 
 /** The dashed "Maybe …" tag at question size: the one question on a screen (spec §8.6, P42 A). */
@@ -56,19 +57,20 @@ function StoreFields({ stores }: { stores: { merchantKey: string }[] }) {
 }
 
 /**
- * The attributes every answer form shares: it posts to the screen's address and swaps the whole page.
- * hx-disable turns every answer button on the screen off while a request runs, so a double click can't
- * queue a second answer (#460). hx-sync puts every answer form on the screen in one request queue, and that
- * queue drops an answer sent while another is running, so a second press can't queue one either.
+ * The attributes every answer form shares: it posts to the screen's address and swaps the whole page, or the
+ * `scope` it is drawn in (Settings' categories, for a question that replaces its card). hx-disable turns every
+ * answer button in that scope off while a request runs, so a double click can't queue a second answer (#460).
+ * hx-sync puts every answer form in the scope in one request queue, and that queue drops an answer sent while
+ * another is running, so a second press can't queue one either.
  */
-const answerForm = (action: string) => ({
+const answerForm = (action: string, scope = "#suggestions-page") => ({
 	method: "post" as const,
 	action,
 	"hx-post": action,
-	"hx-disable": "#suggestions-page button[type=submit]",
-	"hx-sync": "#suggestions-page:drop",
-	"hx-target": "#suggestions-page",
-	"hx-select": "#suggestions-page",
+	"hx-disable": `${scope} button[type=submit]`,
+	"hx-sync": `${scope}:drop`,
+	"hx-target": scope,
+	"hx-select": scope,
 	"hx-swap": "outerHTML",
 });
 
@@ -78,6 +80,7 @@ const answerForm = (action: string) => ({
  */
 export function AskFirst({
 	action,
+	target,
 	kind,
 	id,
 	name,
@@ -87,6 +90,8 @@ export function AskFirst({
 }: {
 	/** The screen's address, with its skips: the answer posts there. */
 	action: string;
+	/** The element the answer swaps in place of, when the question is drawn outside the Suggestions page. */
+	target?: string;
 	kind: "income" | "transfer" | "new_category";
 	id: string;
 	/** The suggested new category's name ("Pet Care"). */
@@ -121,7 +126,7 @@ export function AskFirst({
 				Don't suggest {subject} again for {labels}?
 			</h2>
 			<p>Say yes and Tally stops asking this for {labels}.</p>
-			<form {...answerForm(action)} class="grid grid-cols-2 gap-3">
+			<form {...answerForm(action, target)} class="grid grid-cols-2 gap-3">
 				<input type="hidden" name="id" value={id} />
 				<input type="hidden" name="kind" value={kind} />
 				<StoreFields stores={stores} />
@@ -167,7 +172,12 @@ export function SuggestionCard({
 	/** Active categories, for Something else on a category guess. */
 	categories: { id: number; name: string }[];
 	/** What the form held when it was posted (the Name row, or the ticks), shown again with its error. */
-	values?: { picked?: string | null; own?: string; ticked?: number[] };
+	values?: {
+		picked?: string | null;
+		own?: string;
+		ticked?: number[];
+		notes?: Record<number, string>;
+	};
 	error?: string;
 	focus?: boolean;
 }) {
@@ -175,13 +185,11 @@ export function SuggestionCard({
 		<div class="flex flex-col gap-5">
 			{item.kind === "name" ? (
 				<NameHeading item={item} focus={focus} />
-			) : item.kind === "new_category" ? (
-				<NewCategoryHeading item={item} today={today} focus={focus} />
-			) : (
+			) : item.kind !== "new_category" ? (
 				<TransactionHeading item={item} today={today} focus={focus} />
-			)}
-			{/* A name's error sits under its Name row, where its choice is (NameChoices), so it is not repeated here. */}
-			{error && item.kind !== "name" && (
+			) : null}
+			{/* A name's error sits under its Name row, where its choice is (NameChoices); a new category's sits in its card. */}
+			{error && item.kind !== "name" && item.kind !== "new_category" && (
 				<p role="alert" class="text-sm text-over">
 					{error}
 				</p>
@@ -225,16 +233,30 @@ export function SuggestionCard({
 				</>
 			)}
 			{item.kind === "new_category" && (
-				<>
-					<MaybeQuestion>Maybe new: {item.name}</MaybeQuestion>
-					<Guess section="categorization" />
-					<NewCategoryForm
-						action={action}
-						item={item}
-						today={today}
-						ticked={values?.ticked}
-					/>
-				</>
+				<NewCategoryCard
+					name={item.name}
+					rows={item.rows.map((row) => ({
+						id: row.transactionId,
+						name: row.label,
+						amountCents: row.amountCents,
+						date: row.date,
+					}))}
+					today={today}
+					tickName="ticked"
+					ticked={values?.ticked}
+					notes={values?.notes}
+					existing={item.existing ?? undefined}
+					archived={item.archived}
+					error={error}
+					titleId="suggestion-title"
+					focus={focus}
+					form={answerForm(action)}
+					hidden={<input type="hidden" name="id" value={item.id} />}
+					answers={{
+						create: { type: "submit", name: "answer", value: "yes" },
+						no: { type: "submit", name: "answer", value: "no" },
+					}}
+				/>
 			)}
 			{item.kind === "name" && (
 				<>
@@ -291,34 +313,6 @@ function TransactionHeading({
 			<p class="mt-1 text-sm text-muted wrap-anywhere">{item.bankText}</p>
 			<p class="text-muted">
 				{formatCents(Math.abs(item.amountCents))} · {shortDay(item.date, today)}
-			</p>
-		</div>
-	);
-}
-
-function NewCategoryHeading({
-	item,
-	today,
-	focus,
-}: {
-	item: Extract<SuggestionItem, { kind: "new_category" }>;
-	today: string;
-	focus: boolean;
-}) {
-	const count = item.rows.length;
-	return (
-		<div>
-			<h2
-				id="suggestion-title"
-				tabindex={focus ? -1 : undefined}
-				autofocus={focus || undefined}
-				class="font-serif text-3xl font-semibold tracking-tight wrap-anywhere outline-none"
-			>
-				{joinStores(item.stores.map((store) => store.merchant))}
-			</h2>
-			<p class="text-muted">
-				{count} {count === 1 ? "transaction" : "transactions"} ·{" "}
-				{shortDay(item.date, today)}
 			</p>
 		</div>
 	);
@@ -464,67 +458,5 @@ function SomethingElse({
 				</Button>
 			</form>
 		</details>
-	);
-}
-
-/**
- * A new category: each purchase ticked to go in, and Yes or No. One form holds the ticks, so Yes sends
- * them; Tally names the purchases it shows (`shown`) so the server can check each tick.
- */
-function NewCategoryForm({
-	action,
-	item,
-	today,
-	ticked,
-}: {
-	action: string;
-	item: Extract<SuggestionItem, { kind: "new_category" }>;
-	today: string;
-	/** The ticks a refused answer posted; left out, every purchase starts ticked. */
-	ticked?: number[];
-}) {
-	return (
-		<form {...answerForm(action)} class="flex flex-col gap-4">
-			<input type="hidden" name="id" value={item.id} />
-			<p class="text-sm text-muted">Untick any that don't belong.</p>
-			<ul class="flex flex-wrap gap-2">
-				{item.rows.map((row) => (
-					<li>
-						<input
-							type="hidden"
-							name="shown"
-							value={String(row.transactionId)}
-						/>
-						<Chip
-							type="checkbox"
-							name="ticked"
-							value={String(row.transactionId)}
-							checked={ticked ? ticked.includes(row.transactionId) : true}
-						>
-							{row.label} · {formatCents(Math.abs(row.amountCents))} ·{" "}
-							{shortDay(row.date, today)}
-						</Chip>
-					</li>
-				))}
-			</ul>
-			<div class="flex flex-col gap-3">
-				<Button type="submit" name="answer" value="yes" class="w-full">
-					{item.existing
-						? item.archived
-							? `Yes, restore ${item.existing}`
-							: `Yes, add to ${item.existing}`
-						: `Yes, create ${item.name}`}
-				</Button>
-				<Button
-					kind="secondary"
-					type="submit"
-					name="answer"
-					value="no"
-					class="w-full"
-				>
-					No
-				</Button>
-			</div>
-		</form>
 	);
 }

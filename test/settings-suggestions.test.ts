@@ -230,7 +230,7 @@ beforeEach(async () => {
 });
 
 describe("GET /settings with a suggestion", () => {
-	it("shows the picked dashed card with the tag, muted instruction, ticked rows, and actions", async () => {
+	it("shows the one card: Tally's guess, its headline, ruled rows with one checkbox each, and Create and No", async () => {
 		const { id, ids } = await petCare();
 		const { res, html } = await get();
 		expect(res.status).toBe(200);
@@ -239,54 +239,42 @@ describe("GET /settings with a suggestion", () => {
 		const at = section.indexOf(`data-suggestion="${id}"`);
 		expect(at).toBeGreaterThan(section.indexOf('data-category="5"'));
 		expect(at).toBeLessThan(section.indexOf("Add category"));
-		const cardStart = section.lastIndexOf("<details", at);
+		const cardStart = section.lastIndexOf("<form", at);
 		const card = section.slice(
 			cardStart,
 			section.indexOf('data-row="new"', at),
 		);
+		// One card (decision 120, P135 A): no dashed box, no dashed icon, and no pills.
+		expect(card).toContain("rounded-control border border-rule");
+		expect(card).not.toContain("border-dashed");
+		expect(card).not.toContain("rounded-full");
+		expect(card).toMatch(/<svg[^>]*data-icon="sparkles"/);
+		expect(card).toContain("A new category: Pet Care");
 		expect(card).toMatch(
-			/<details[^>]*class="[^"]*rounded-control border border-dashed border-ink/,
+			/<p class="text-sm text-muted">Untick any that don&#39;t belong\.<\/p>/,
 		);
-		expect(card).toMatch(/<svg[^>]*data-icon="tag"/);
-		expect(card).toMatch(
-			/<span class="block text-sm text-muted">Untick any that don&#39;t belong\.<\/span>/,
-		);
-		const text = textOf(html);
-		expect(text).toContain("Suggested: Pet Care");
-		expect(text).toContain("Untick any that don't belong.");
 		for (const n of ids) {
-			const row = card.slice(card.indexOf(`data-transaction="${n}"`));
-			const item = row.slice(0, row.indexOf("</li>") + 5);
-			expect(item).toMatch(
-				/<input class="peer sr-only" type="checkbox" name="ids"/,
+			expect(card).toMatch(
+				new RegExp(`<input type="checkbox" name="ids" value="${n}"`),
 			);
-			expect(item).toMatch(
-				/<label[^>]*class="group relative flex min-h-16 min-w-11/,
-			);
-			expect(item).toMatch(/selection-mark[^"]*size-7[^"]*rounded-full/);
-			expect(item).toMatch(/peer-checked:border-ink peer-checked:bg-band/);
-			expect(item).toMatch(/aria-labelledby="select-[^"]+-name"/);
-			expect(item).toContain('data-icon="circle-dashed"');
-			expect(item).toContain("Needs category");
-			expect(item).toContain(`value="${n}"`);
 			expect(html).toContain(`name="shown" value="${n}"`);
 		}
+		const text = textOf(html);
 		expect(text).toContain("Chewy.com");
 		expect(text).toContain("$189.00");
 		expect(text).toContain("Create Pet Care");
 		expect(text).not.toContain("Create Pet Care with 4");
-		expect(text).toContain("Dismiss");
+		expect(card).not.toContain("Dismiss");
+		expect(card).not.toContain("Not now");
+		expect(card.indexOf("Create Pet Care")).toBeLessThan(card.indexOf(">No<"));
+		expect(card.indexOf(">No<")).toBeLessThan(card.indexOf("Why?"));
+		expect(card).toMatch(
+			/<button[^>]*name="action" value="create"[^>]*>Create Pet Care<\/button>/,
+		);
+		expect(card).toMatch(
+			/<button[^>]*formaction="[^"]+\/dismiss"[^>]*>No<\/button>/,
+		);
 		expect(html).toContain(`href="/how-it-works#categorization"`);
-		expect(card.indexOf("Create Pet Care")).toBeLessThan(
-			card.indexOf("Dismiss"),
-		);
-		expect(card.indexOf("Dismiss")).toBeLessThan(card.indexOf("Why?</a>"));
-		expect(card).toMatch(
-			/<button type="submit" name="action" value="create" class="[^"]*border border-ink[^"]*">Create Pet Care<\/button>/,
-		);
-		expect(card).toMatch(
-			/<button type="submit" formaction="[^"]+\/dismiss"[^>]*class="[^"]*text-accent[^"]*">Dismiss<\/button>/,
-		);
 	});
 
 	it("gives each transaction a note field that shows only while it is unticked, with no script", async () => {
@@ -336,9 +324,9 @@ describe("GET /settings with a suggestion", () => {
 			subs.push(await addTx(raw, 1299));
 		await saveSuggestion(db, "Subscriptions", subs);
 		const { html } = await get();
-		const names = [
-			...textOf(html).matchAll(/Suggested: ([A-Za-z ]+?)(?=Untick)/g),
-		].map((m) => m[1]);
+		const names = [...html.matchAll(/A new category: ([^<]+)</g)].map(
+			(m) => m[1],
+		);
 		expect(names).toEqual(["Subscriptions", "Pet Care"]);
 	});
 
@@ -363,27 +351,29 @@ describe("GET /settings with a suggestion", () => {
 			)
 			.bind(ids[0], ids[1])
 			.run();
-		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
+		expect(textOf((await get()).html)).toContain("A new category: Pet Care");
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id=1,category_source='user' WHERE id IN (?,?)",
 			)
 			.bind(ids[2], ids[3])
 			.run();
-		expect(textOf((await get()).html)).not.toContain("Suggested: Pet Care");
+		expect(textOf((await get()).html)).not.toContain(
+			"A new category: Pet Care",
+		);
 	});
 
 	it("keeps pending suggestions visible when Guess categories is off", async () => {
 		await petCare();
 		await saveAiSwitches(db, { categories: false });
-		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
+		expect(textOf((await get()).html)).toContain("A new category: Pet Care");
 		await saveAiSwitches(db, { categories: true });
-		expect(textOf((await get()).html)).toContain("Suggested: Pet Care");
+		expect(textOf((await get()).html)).toContain("A new category: Pet Care");
 	});
 
 	it("shows no suggestion row when there is none", async () => {
 		const { html } = await get();
-		expect(textOf(html)).not.toContain("Suggested:");
+		expect(textOf(html)).not.toContain("A new category:");
 		expect(html).not.toContain("data-suggestion=");
 	});
 });
@@ -728,7 +718,7 @@ describe("creating the category", () => {
 		});
 		expect(res.status).toBe(422);
 		expect(html).toMatch(
-			/role="alert"[^>]*>[^<]*Tick at least one transaction, or dismiss this suggestion\./,
+			/role="alert"[^>]*>[^<]*Tick at least one transaction, or say No to this suggestion\./,
 		);
 		expect(await categoryNamed("Pet Care")).toBeNull();
 		expect(await status(id)).toBe("pending");
@@ -1007,7 +997,7 @@ describe("Remove takes a store's linked Never suggest lines away together (decis
 });
 
 describe("dismissing the suggestion", () => {
-	it("turns it down, creates nothing, moves nothing, and says Tally won't suggest it again", async () => {
+	it("turns it down, creates nothing, moves nothing, and asks Don't suggest Pet Care again in the card's place", async () => {
 		const { id, ids } = await petCare();
 		const had = await db
 			.prepare("SELECT COUNT(*) AS n FROM categories")
@@ -1023,11 +1013,14 @@ describe("dismissing the suggestion", () => {
 			)?.n,
 		).toBe(had?.n);
 		for (const n of ids) expect((await row(n))?.category_id).toBeNull();
-		expect(trigger(res)).toEqual({
-			toast: { message: "Dismissed Pet Care", type: "success" },
-			announce: "Dismissed Pet Care. Tally won't suggest it again.",
-		});
+		// No retires the card and asks decision 101's question where it was, with focus on the question (decision 120).
+		expect(html).toContain("Don&#39;t suggest Pet Care again for");
+		expect(html).toContain('id="suggestion-title"');
+		expect(html).toContain('value="ask_yes"');
+		expect(html).toContain('value="ask_not_now"');
+		expect(html).not.toContain("A new category: Pet Care");
 		expect(html).not.toContain("data-suggestion=");
+		expect(res.headers.get("HX-Trigger")).toBeNull();
 		expect(waitUntil).not.toHaveBeenCalled();
 	});
 
@@ -1041,12 +1034,17 @@ describe("dismissing the suggestion", () => {
 		);
 	});
 
-	it("without JavaScript, posts and goes back to Settings at Categories", async () => {
+	it("without JavaScript, No shows the same question on the page", async () => {
 		const { id } = await petCare();
-		const { res } = await post(`/settings/suggestions/${id}/dismiss`, [], {
-			htmx: false,
-		});
-		expect(res.status).toBe(303);
-		expect(res.headers.get("location")).toBe("/settings/categories");
+		const { res, html } = await post(
+			`/settings/suggestions/${id}/dismiss`,
+			[],
+			{
+				htmx: false,
+			},
+		);
+		expect(res.status).toBe(200);
+		expect(html).toContain("Don&#39;t suggest Pet Care again for");
+		expect(html).toContain('value="ask_yes"');
 	});
 });

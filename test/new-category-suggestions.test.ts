@@ -64,7 +64,7 @@ beforeEach(async () => {
 describe("Settings' Suggested card for a category that already exists", () => {
 	it("says Create while the category is missing, and Add to once a person has made it", async () => {
 		const before = await get();
-		expect(before.html).toContain("Suggested: Pet Care");
+		expect(before.html).toContain("A new category: Pet Care");
 		expect(before.html).toContain(">Create Pet Care<");
 
 		await env.DB.prepare(
@@ -72,7 +72,7 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		).run();
 
 		const after = await get();
-		expect(after.html).toContain("Suggested: Pet Care");
+		expect(after.html).toContain("A new category: Pet Care");
 		expect(after.html).toContain(">Add to Pet Care<");
 		expect(after.html).not.toContain(">Create Pet Care<");
 	});
@@ -151,7 +151,7 @@ describe("Settings' Suggested card for a category that already exists", () => {
 		).run();
 
 		const after = await get();
-		expect(after.html).toContain("Suggested: école");
+		expect(after.html).toContain("A new category: école");
 		expect(after.html).toContain(">Add to École<");
 		expect(after.html).not.toContain(">Add to école<");
 		expect(after.html).not.toContain(">Create école<");
@@ -185,7 +185,7 @@ describe("Settings' Suggested card for an archived category with that name (deci
 
 		const { html } = await get();
 
-		expect(html).toContain("Suggested: Pet Care");
+		expect(html).toContain("A new category: Pet Care");
 		expect(html).toContain(">Restore Pet Care<");
 		expect(html).not.toContain(">Create Pet Care<");
 		expect(html).not.toContain(">Add to Pet Care<");
