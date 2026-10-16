@@ -129,6 +129,22 @@ describe("the keys' details and More's row", () => {
 		}
 	});
 
+	it("titles More's row groups with h2, since More's h1 is the only heading above them", async () => {
+		const html = await page("/more");
+		expect(html).toContain(
+			'<h2 class="text-sm font-medium text-muted">Anywhere</h2>',
+		);
+		expect(html).not.toContain(
+			'<h3 class="text-sm font-medium text-muted">Anywhere</h3>',
+		);
+	});
+
+	it("titles a desktop foot's groups with h3, under the page's own headings", async () => {
+		expect(await page("/transactions")).toContain(
+			'<h3 class="text-sm font-medium text-muted">Anywhere</h3>',
+		);
+	});
+
 	it("ends More's contents with a Keyboard shortcuts row, drawn below lg only", async () => {
 		const html = await page("/more");
 		expect(html).toMatch(

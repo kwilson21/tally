@@ -67,13 +67,19 @@ function RowKeys({ row }: { row: Row }) {
 	);
 }
 
-/** The ledger of keys: the same list the sheet, the foot's details and More's row all show. */
-export function Ledger() {
+/**
+ * The ledger of keys: the same list the sheet, the foot's details and More's row all show. Each group's label is an h3
+ * under a sheet's title or a page's own heading; More's row passes `level` 2, since More's h1 is the only heading above it.
+ */
+export function Ledger({ level = 3 }: { level?: 2 | 3 }) {
+	const Heading = level === 2 ? "h2" : "h3";
 	return (
 		<div class="flex flex-col gap-3">
 			{LEDGER.map((section) => (
 				<div>
-					<h3 class="text-sm font-medium text-muted">{section.heading}</h3>
+					<Heading class="text-sm font-medium text-muted">
+						{section.heading}
+					</Heading>
 					<ul class="mt-1 divide-y divide-rule border-y border-rule">
 						{section.rows.map((row) => (
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
@@ -122,7 +128,7 @@ export function KeysDetails({
 				{row && turn}
 			</summary>
 			<div class={row ? "pb-3" : "mt-3"}>
-				<Ledger />
+				<Ledger level={row ? 2 : 3} />
 			</div>
 		</details>
 	);
