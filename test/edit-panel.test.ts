@@ -197,6 +197,52 @@ describe("the category leads the panel (P120 B)", () => {
 		}
 	});
 
+	it("opens the category row when a save posts a category archived since the panel opened", async () => {
+		await pickedByTally();
+		const groceriesId = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Groceries'",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",
+		).run();
+		// The panel was opened before the archive, so it posts the archived category explicitly.
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: String(groceriesId),
+			name_pick: "own",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		const block = categoryBlock(html);
+		expect(block).toContain('id="category-error" role="alert"');
+		expect(block).toContain("Pick a category from the list.");
+		expect(block).toContain('<details class="group border-b border-rule"');
+		const detailsTag =
+			block.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
+			"";
+		expect(detailsTag).toContain(" open");
+		// The row's close is past the merchant rule tick, so search the panel from the category block on.
+		const from = html.indexOf('id="edit-category"');
+		const detailsAt = html.indexOf(
+			'<details class="group border-b border-rule"',
+			from,
+		);
+		const alertAt = html.indexOf('id="category-error"', from);
+		expect(alertAt).toBeGreaterThan(detailsAt);
+		expect(alertAt).toBeLessThan(html.indexOf("</details>", detailsAt));
+		const row = await env.DB.prepare(
+			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first<{ categoryId: number | null }>();
+		expect(row?.categoryId).toBe(groceriesId);
+	});
+
 	it("names the posted rule's category on a lock redraw, not its id", async () => {
 		const merchantKey = (
 			await env.DB.prepare(

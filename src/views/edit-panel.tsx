@@ -237,9 +237,10 @@ export function CategoryChoice({
 	// Folded once it has one (or New category is chosen, which the row says).
 	const folded =
 		!purchase && !needsCategory && (chosen !== undefined || values.newCategory);
-	// Open by itself only for New category. A category error doesn't need it: both category errors leave the choice
-	// unset or unknown, so `chosen` is undefined and the row isn't folded at all, and the error shows in the grid.
-	const openFolded = values.newCategory === true;
+	// Opens by itself for New category or a category error, so an error is never inside a closed row (a saved category
+	// archived since the panel opened still folds the row).
+	const openFolded =
+		values.newCategory === true || errors.category !== undefined;
 	// The line says how the saved category was settled. A redraw after a refused save with another choice posted says
 	// nothing about the saved one, so the line goes unless the posted choice is the saved category or Tally's guess.
 	const savedChoice =
