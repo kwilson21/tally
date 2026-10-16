@@ -99,28 +99,33 @@ export function questionsAnswered(record: FirstTally | null): boolean {
 
 /**
  * The statement that draws a stroke on a household day (or with no day), for a batch with other writes (one transaction).
- * json_insert never overwrites, so a stroke already drawn keeps its first day.
+ * json_insert never overwrites, so a stroke already drawn keeps its first day. `guard` is an SQL condition checked in the
+ * same statement, so a stroke is drawn only while it holds: the pay and bills strokes pass NO_PAY_LEFT_SQL, so a deposit
+ * that arrived after the step's own read leaves them undrawn. It is code, never input (like EMPTY_RECORD). With no guard
+ * the write is the same as before.
  */
 export function strokeStatement(
 	db: D1Database,
 	stroke: Stroke,
 	day: string | null,
+	guard = "1",
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3))
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
 			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
 		)
 		.bind(KEY, stroke, day);
 }
 
-/** Draws a stroke on a household day (or with no day). */
+/** Draws a stroke on a household day (or with no day); strokeStatement has the guard. */
 export async function markStroke(
 	db: D1Database,
 	stroke: Stroke,
 	day: string | null,
+	guard = "1",
 ): Promise<void> {
-	await strokeStatement(db, stroke, day).run();
+	await strokeStatement(db, stroke, day, guard).run();
 }
 
 /** The four strokes a disconnected bank takes back before setup is done: all but the night's count. */
