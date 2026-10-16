@@ -26,11 +26,11 @@ describe("settingsCategories", () => {
 		await setArchived(db, 5, true);
 		const { active, archived } = await settingsCategories(db, MONTH);
 		expect(active.map((c) => [c.name, c.budgetCents])).toEqual([
-			["Groceries", 70000],
+			["Groceries", 95000],
 			["Eating Out", 25000],
 			["Gas", 20000],
 			["Kids", 30000],
-			["Childcare", 104000],
+			["Childcare", 120000],
 			["Rent", 120000],
 		]);
 		expect(archived.map((c) => c.name)).toEqual(["Household"]);
@@ -55,7 +55,7 @@ describe("saveCategory", () => {
 		await saveCategory(db, 1, { name: "Food at home" });
 		expect(await names()).toContain("Food at home");
 		expect((await settingsCategories(db, MONTH)).active[0]?.budgetCents).toBe(
-			70000,
+			95000,
 		);
 	});
 });

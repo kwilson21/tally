@@ -271,8 +271,9 @@ export async function loadBillRows(db: D1Database, today: string) {
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
 				});
 			}
-		// A weekly or every-two-weeks bill's next occurrence is set aside once it falls due, even when it is in
-		// next month (an unpaid Friday on Oct 30 with Nov 6 due in a week). Only that one is needed beyond the month.
+		// A weekly or every-two-weeks bill's next occurrence is due soon once it falls due, even when it is in next
+		// month (an unpaid Friday on Oct 30 with Nov 6 due in a week). Safe to spend sets it aside only in its own
+		// month (decision 123). Only that one is needed beyond the month.
 		const stepDays =
 			b.frequency === "weekly" ? 7 : b.frequency === "biweekly" ? 14 : 0;
 		const nextDue = stepDays ? daysBefore(occurrence.dueDate, -stepDays) : "";

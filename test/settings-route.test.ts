@@ -58,7 +58,7 @@ describe("GET /settings", () => {
 			"Childcare",
 			"Rent",
 		]);
-		expect(textOf(html)).toContain("$700 a month");
+		expect(textOf(html)).toContain("$950 a month");
 		// Budgets are changed on Home (decision 38); each row links there.
 		expect(html).not.toContain(`Budget from ${THIS_MONTH()} on`);
 		expect(html).not.toContain('name="budget"');

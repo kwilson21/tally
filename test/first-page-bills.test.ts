@@ -143,6 +143,13 @@ describe("keepShown", () => {
 		expect(keepShown([{ ...netflix, dueDay: 6 }], [shown])).toEqual([]);
 	});
 
+	it("does not keep a charge whose name changed since the form showed it", () => {
+		const shown = shownBillValue({ ...netflix, displayName: "Netflix" });
+		expect(
+			keepShown([{ ...netflix, displayName: "Netflix Plus" }], [shown]),
+		).toEqual([]);
+	});
+
 	it("does not keep a charge the form never showed", () => {
 		expect(keepShown([netflix, spotify], [shownBillValue(netflix)])).toEqual([
 			netflix,
