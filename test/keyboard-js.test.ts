@@ -467,6 +467,70 @@ describe("? (the keys sheet)", () => {
 			"/transactions#budget",
 		);
 	});
+
+	it("ignores a second ? while the sheet loads, so a key repeat sends one request", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		const again = press("?", { shiftKey: true });
+		keydown(again);
+		expect(again.preventDefault).toHaveBeenCalled();
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(1);
+		// Once the sheet is in, a ? is the open sheet's own key, and it sends nothing either.
+		el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["fails at the network", "error: TypeError: Failed to fetch", "outerHTML"],
+		["gets a 500 that is not swapped", "swapped", "none"],
+	])(
+		"takes a ? again once a keys request that %s has ended",
+		(_, status, swap) => {
+			const page = new FakePage();
+			const region = el(page, "div", { id: "keys" });
+			const win = windowFor();
+			const { keydown, ended } = setup(page, win);
+			keydown(press("?", { shiftKey: true }));
+			ended(finishEvent(region, status, swap));
+			keydown(press("?", { shiftKey: true }));
+			expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	it("takes a ? again once a keys response dropped for a moved address has ended", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded, ended } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.search = "?month=2026-10";
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09",
+		);
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+		ended(finishEvent(region, "issuing"));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+	});
+
+	it("takes a ? again when #keys settles for a request that never finished, as a history restore leaves it", () => {
+		const page = new FakePage();
+		el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		// A history restore drops the queued keys request without a finish, and redraws the body with #keys in it.
+		settled(settleEvent(page.body));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+	});
 });
 
 describe("a settle of another request leaves the keys sheet's return alone (htmx:after:settle)", () => {
