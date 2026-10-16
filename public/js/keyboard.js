@@ -115,6 +115,8 @@ export function keyboard(doc, win) {
 				case "?": {
 					event.preventDefault();
 					returnTo = active === doc.body ? null : active;
+					// Focus on an Undo toast is blurred so the sheet can take focus (sheet.js moves it only from nothing).
+					if (doc.getElementById("toasts")?.contains(active)) active.blur();
 					keptHash = win.location.hash;
 					const url = keysHref(win.location);
 					// The address is pushed as given: htmx reads a boolean push as a path, so `true` would push "/true".

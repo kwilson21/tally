@@ -79,6 +79,10 @@ class FakeNode {
 		this.focusCount += 1;
 		if (this.doc) this.doc.activeElement = this;
 	}
+	blur() {
+		if (this.doc?.activeElement === this)
+			this.doc.activeElement = this.doc.body;
+	}
 	scrollIntoView(options: unknown) {
 		this.scrolls.push(options);
 	}
@@ -370,6 +374,33 @@ describe("? (the keys sheet)", () => {
 		keptWin.location.hash = "#budget";
 		keptKeys.settled();
 		expect(keptWin.history.replaceState).not.toHaveBeenCalled();
+	});
+
+	it("moves focus out of an Undo toast for the sheet, and back to Undo when the sheet closes", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const win = windowFor();
+		const { keydown, settled } = setup(page, win);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		expect(page.activeElement).toBe(page.body);
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(1);
+		// The sheet arrives, then its close swaps it away, and the next settle gives focus back to Undo.
+		const sheet = el(page, "section", { "data-sheet": "" }, page.body);
+		settled();
+		remove(page, sheet);
+		settled();
+		expect(page.activeElement).toBe(undo);
+	});
+
+	it("leaves focus on a row where it is: only an Undo toast gives focus up", () => {
+		const page = new FakePage();
+		const [, second] = list(page);
+		el(page, "div", { id: "toasts" });
+		page.activeElement = second;
+		setup(page).keydown(press("?", { shiftKey: true }));
+		expect(page.activeElement).toBe(second);
 	});
 
 	it("restores the fragment when a sheet that was open on load closes", () => {

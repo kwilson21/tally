@@ -536,6 +536,19 @@ await page
 	.waitFor({ state: "detached" });
 const undo = page.locator('#toasts button[aria-keyshortcuts="u"]');
 await undo.waitFor();
+// ? from the Undo toast moves focus into the keys sheet, and Escape gives it back to Undo while the toast still shows (#72).
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"keys-title",
+	"? from the Undo toast moves focus into the keys sheet",
+);
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(
+	() => document.activeElement?.getAttribute("aria-keyshortcuts") === "u",
+);
 await page.keyboard.press("Control+u");
 assert.equal(await undo.count(), 1, "Ctrl with u leaves the Undo toast up");
 await page.keyboard.press("u");
