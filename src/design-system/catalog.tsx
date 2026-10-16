@@ -6263,6 +6263,10 @@ const FIRST_WEEK_PAY = {
 	ids: FIRST_WEEK_PAY_DEPOSITS.map((_, i) => i + 1),
 };
 const FIRST_WEEK_PAY_LINE = "Pay · Acme Corp, $2,450 every other Friday";
+const FIRST_WEEK_PAY_ENTRY = {
+	id: "pay:ACME CORP PAYROLL",
+	text: FIRST_WEEK_PAY_LINE,
+};
 const FIRST_WEEK_CHARGES: BillSuggestion[] = [
 	{
 		rawName: "NETFLIX.COM",
@@ -6343,7 +6347,7 @@ function FirstWeekGroup() {
 						id="first-page-bills"
 						model={page({
 							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_LINE],
+							ledger: [FIRST_WEEK_PAY_ENTRY],
 							payAnswered: true,
 							pay: [],
 							keep: FIRST_WEEK_CHARGES,
@@ -6357,7 +6361,7 @@ function FirstWeekGroup() {
 						id="first-page-answered"
 						model={page({
 							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_LINE],
+							ledger: [FIRST_WEEK_PAY_ENTRY],
 							payAnswered: true,
 							pay: [],
 							keep: FIRST_WEEK_CHARGES,
@@ -6372,7 +6376,7 @@ function FirstWeekGroup() {
 						id="first-page-empty"
 						model={page({
 							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_LINE],
+							ledger: [FIRST_WEEK_PAY_ENTRY],
 							payAnswered: true,
 							pay: [],
 							waiting: [FIRST_WEEK_GYM],
@@ -6386,8 +6390,8 @@ function FirstWeekGroup() {
 						model={page({
 							drawn: 3,
 							ledger: [
-								FIRST_WEEK_PAY_LINE,
-								"Bills · 2 kept, about $27 a month",
+								FIRST_WEEK_PAY_ENTRY,
+								{ id: "bills", text: "Bills · 2 kept, about $27 a month" },
 							],
 							payAnswered: true,
 							pay: [],

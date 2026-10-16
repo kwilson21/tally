@@ -30,17 +30,23 @@ function notOpen(c: Context<App>) {
 }
 
 /**
- * What the answer changed between the page before it and the page after: the ledger line it wrote (its index; the
- * ledger is in the order each merchant was first answered, the pay lines first and then the bills line), and the
- * strokes it drew. The strokes are the next indexes after the `drawn` already there (the bank's stroke is index 0, so
- * the first drawn after it is index 1). One answer can draw two, when the step after it has nothing to ask.
+ * What the answer changed between the page before it and the page after: the ledger line it wrote, found by the line's
+ * id (`written`, null when it wrote none) so two lines that read the same are told apart, and the strokes it drew. The
+ * ledger is in the order each merchant was first answered, the pay lines first and then the bills line. The strokes are
+ * the next indexes after the `drawn` already there (the bank's stroke is index 0, so the first drawn after it is index
+ * 1). One answer can draw two, when the step after it has nothing to ask.
  */
-function motionOf(before: FirstPageModel, after: FirstPageModel): Motion {
-	const written = after.ledger.findIndex(
-		(line) => !before.ledger.includes(line),
-	);
+function motionOf(
+	before: FirstPageModel,
+	after: FirstPageModel,
+	written: string | null,
+): Motion {
+	const index =
+		written === null
+			? -1
+			: after.ledger.findIndex((line) => line.id === written);
 	return {
-		line: written === -1 ? null : written,
+		line: index === -1 ? null : index,
 		strokes: Array.from(
 			{ length: after.drawn - before.drawn },
 			(_, i) => before.drawn + i,
@@ -119,7 +125,7 @@ firstPage.post("/first-page/pay", async (c) => {
 		answer === "yes"
 			? `Saved: ${merchant.name} is your pay.`
 			: `Saved: ${merchant.name} isn't your pay.`,
-		motionOf(before, after),
+		motionOf(before, after, answer === "yes" ? `pay:${merchant.key}` : null),
 	);
 });
 
@@ -136,5 +142,10 @@ firstPage.post("/first-page/bills", async (c) => {
 			: bills.kept === 1
 				? "Kept 1 bill."
 				: `Kept ${bills.kept} bills.`;
-	return answered(c, after, message, motionOf(before, after));
+	return answered(
+		c,
+		after,
+		message,
+		motionOf(before, after, bills.kept > 0 ? "bills" : null),
+	);
 });

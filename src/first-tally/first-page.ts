@@ -49,8 +49,11 @@ export type FirstPageModel = {
 	/** The strokes drawn so far, of five. */
 	drawn: number;
 	head: BankHead | null;
-	/** The answers so far, in ledger order. */
-	ledger: string[];
+	/**
+	 * The answers so far, in ledger order. `id` names the line for the reply that wrote it (`pay:` and the merchant key for
+	 * a pay line, `bills` for the bills line), so a reply finds its own line even when two lines read the same.
+	 */
+	ledger: { id: string; text: string }[];
 	/** True once the family has answered a pay question (Yes or No), so an empty pay step is not the one to say so. */
 	payAnswered: boolean;
 	/** The pay merchants still to ask, in order. */
@@ -160,7 +163,7 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 async function payLedger(
 	db: D1Database,
 	pay: Record<string, PayRecord> | undefined,
-): Promise<string[]> {
+): Promise<{ id: string; text: string }[]> {
 	const yeses = Object.entries(pay ?? {})
 		.filter(
 			([, record]) => record.answer === "yes" && record.deposits.length > 0,
@@ -174,18 +177,21 @@ async function payLedger(
 		.bind(JSON.stringify(yeses.map(([key]) => key)))
 		.all<{ key: string; displayName: string | null }>();
 	const names = new Map(results.map((row) => [row.key, row.displayName]));
-	return yeses.map(([key, record]) =>
-		payLedgerLine({
+	return yeses.map(([key, record]) => ({
+		id: `pay:${key}`,
+		text: payLedgerLine({
 			name: names.get(key) || tidyName(key),
 			deposits: record.deposits,
 		}),
-	);
+	}));
 }
 
 /** The ledger line of what the bills step kept, from its record (first_tally's `bills`), or null when nothing was kept. */
-function billsLedger(bills: BillsKept | undefined): string | null {
+function billsLedger(
+	bills: BillsKept | undefined,
+): { id: string; text: string } | null {
 	return bills && bills.kept > 0
-		? billsLedgerLine(bills.kept, bills.cents)
+		? { id: "bills", text: billsLedgerLine(bills.kept, bills.cents) }
 		: null;
 }
 

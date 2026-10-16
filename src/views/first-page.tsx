@@ -115,10 +115,11 @@ function Waiting({ count }: { count: number }) {
  * The ledger's lines: the answers so far in ink; before any answer, the bank's head lines in muted words.
  */
 export function ledgerLines(
-	answers: string[],
+	answers: { text: string }[],
 	head: BankHead | null,
 ): LedgerLine[] {
-	if (answers.length > 0) return answers.map((text) => ({ text, ink: true }));
+	if (answers.length > 0)
+		return answers.map((line) => ({ text: line.text, ink: true }));
 	if (!head) return [];
 	const count = head.lines === 1 ? "1 line" : `${head.lines} lines`;
 	return [
@@ -292,9 +293,7 @@ export function FirstPageBody({
 	/** The root's id: the page's is `first-page`, which the swap targets; the catalog's states name their own. */
 	id?: string;
 }) {
-	const billsAnswered = model.ledger.some((line) =>
-		line.startsWith("Bills · "),
-	);
+	const billsAnswered = model.ledger.some((line) => line.id === "bills");
 	return (
 		<div id={id}>
 			<FirstPage

@@ -732,6 +732,31 @@ describe("the answer's motion", () => {
 		);
 	});
 
+	it("rises the line its own reply wrote, when two ledger lines read the same", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME A', 'Acme Corp'), ('ACME B', 'Acme Corp')",
+			)
+			.run();
+		await deposits("ACME A", 245000, 2);
+		await deposits("ACME B", 245000, 2);
+		await post("/first-page/pay", { merchant: "ACME A", answer: "yes" }, true);
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME B", answer: "yes" },
+			true,
+		);
+		const lines = [
+			...html.matchAll(/<li class="([^"]*)">([^<]*)<\/li>/g),
+		].filter((match) => match[2]?.startsWith("Pay · Acme Corp"));
+		expect(lines).toHaveLength(2);
+		expect(lines[0]?.[2]).toBe(lines[1]?.[2]);
+		expect(lines.map((match) => match[1]?.includes("first-line-new"))).toEqual(
+			[false, true],
+		);
+		expect(html.match(/first-line-new/g)).toHaveLength(1);
+	});
+
 	it("keeps the answer order for a numeric merchant key, which JSON lists first", async () => {
 		await db
 			.prepare(
