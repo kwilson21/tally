@@ -67,6 +67,13 @@ beforeEach(async () => {
 const count = async (sql: string) =>
 	(await env.DB.prepare(sql).first<{ n: number }>())?.n;
 
+/** The markup from the card's sentence to the end of its form, so a check reads only the card. */
+function cardMarkup(html: string, sentence: string): string {
+	const start = html.indexOf(sentence);
+	expect(start).toBeGreaterThan(-1);
+	return html.slice(start, html.indexOf("</form>", start));
+}
+
 describe("Settings: one card, and No asks in its place", () => {
 	it("draws the one card, with Create and No and no Dismiss", async () => {
 		const { html } = await get("/settings/categories");
@@ -75,6 +82,11 @@ describe("Settings: one card, and No asks in its place", () => {
 		expect(html).toContain(">No<");
 		expect(html).not.toContain("Dismiss");
 		expect(html).not.toContain("Suggested: Pet Care");
+	});
+
+	it("has no Skip in the card: Skip is the Suggestions page's alone", async () => {
+		const { html } = await get("/settings/categories");
+		expect(cardMarkup(html, "A new category: Pet Care")).not.toContain("Skip");
 	});
 
 	it("No retires the suggestion, and asks Don't suggest Pet Care again in the card's place", async () => {
@@ -227,6 +239,29 @@ describe("Organize: the card above the chips", () => {
 		expect(html).not.toContain("Dismiss");
 	});
 
+	it("shows the sentence as the card's one headline, and no Skip in the card", async () => {
+		const { html } = await get("/transactions/organize");
+		const sentence =
+			"Tally suggested a new category for this and 1 more: Pet Care";
+		expect(html).toContain(`<h2 class="text-lg">${sentence}</h2>`);
+		expect(cardMarkup(html, sentence)).not.toContain("Skip");
+	});
+
+	it("shows no card for the first merchant when it is not in the waiting suggestion", async () => {
+		// Costco has two charges, so its group sorts first (most charges first) and is the one on screen.
+		for (const day of ["01", "03"]) {
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit) VALUES (1, ?, 9000, 'COSTCO WHSE', 'Costco', 1)",
+			)
+				.bind(`${THIS}-${day}`)
+				.run();
+		}
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain('name="group" value="Costco"');
+		expect(html).not.toContain("Tally suggested a new category");
+		expect(html).not.toContain(">Create Pet Care<");
+	});
+
 	it("shows no card once the suggestion is answered", async () => {
 		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
 		const { html } = await get("/transactions/organize");
@@ -260,6 +295,16 @@ describe("Organize: the card above the chips", () => {
 				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_source = 'user' AND category_id IS NOT NULL`,
 			),
 		).toBe(2);
+	});
+
+	it("an answer for a suggestion already answered says it changed, as Settings says", async () => {
+		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+		const { res } = await post("/transactions/organize/suggestion", [
+			["suggestion", String(suggestion)],
+		]);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"That suggestion was changed somewhere else. Here's the current list.",
+		);
 	});
 
 	it("Create without JavaScript leaves Organize's address", async () => {

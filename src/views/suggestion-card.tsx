@@ -179,9 +179,9 @@ export function OrganizeNewCategoryCard({
 		>
 			<input type="hidden" name="suggestion" value={String(suggestionId)} />
 			<Guess />
-			<p class="text-lg">
+			<h2 class="text-lg">
 				Tally suggested a new category for this{more}: {name}
-			</p>
+			</h2>
 			<div class="flex flex-wrap items-center gap-3">
 				<Button type="submit">{createWords(name, existing, archived)}</Button>
 				<Button kind="text" href="#organize-category">
