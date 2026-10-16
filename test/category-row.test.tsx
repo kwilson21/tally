@@ -50,18 +50,6 @@ describe("CategoryRow, closed", () => {
 		expect(html).toContain("No budget yet. ");
 		expect(html).toContain(">Add one on Home</a>");
 	});
-
-	it("carries the month's changes out of band only when the household moved into another month", () => {
-		expect(row()).not.toContain("hx-swap-oob");
-		const html = row({ budgetsOob: true });
-		expect(html.match(/hx-swap-oob="true"/g)).toHaveLength(2);
-		expect(html).toMatch(
-			/<span\s[^>]*id="cat-1-amount"[^>]*hx-swap-oob="true"/,
-		);
-		expect(html).toMatch(
-			/<p\s[^>]*id="cat-1-budget-note"[^>]*hx-swap-oob="true"/,
-		);
-	});
 });
 
 describe("CategoryRow, open", () => {
@@ -183,10 +171,10 @@ describe("AddCategoryRow", () => {
 });
 
 describe("CategoryRow's swaps", () => {
-	it("swaps the whole Categories section, and the Band above it, as the list always has", () => {
+	it("swaps the whole Categories section, as the list always has", () => {
 		const html = row({ open: true });
 		expect(html).toContain('hx-target="#categories"');
 		expect(html).toContain('hx-select="#categories"');
-		expect(html).toContain('hx-select-oob="#names-band"');
+		expect(html).not.toContain("hx-select-oob");
 	});
 });

@@ -45,9 +45,9 @@ beforeEach(async () => {
 
 describe("GET /settings", () => {
 	it("lists the categories with this month's budget, each opening in place to rename", async () => {
-		const { res, html } = await get("/settings");
+		const { res, html } = await get("/settings/categories");
 		expect(res.status).toBe(200);
-		expect(html).toMatch(/<h1[^>]*>Settings<\/h1>/);
+		expect(html).toMatch(/<h1[^>]*>Categories<\/h1>/);
 		expect(html).toMatch(/<section id="categories"/);
 		expect(rowNames(html)).toEqual([
 			"Groceries",
@@ -79,14 +79,13 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE Z', 'Zed', 1), ('RULE A', 'Acme', 2)",
 		).run();
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
-		expect((html.match(/Tally&#39;s rules/g) ?? []).length).toBe(1);
+		expect((html.match(/<h1[^>]*>Tally&#39;s rules<\/h1>/g) ?? []).length).toBe(
+			1,
+		);
 		expect(rules.indexOf("Acme")).toBeLessThan(rules.indexOf("Zed"));
 		expect(rules).toContain("Always for these merchants");
-		expect(rules).toContain(
-			"What Tally does on its own, and what it won&#39;t suggest.",
-		);
 	});
 
 	it("uses the transaction display name for rule order and searches display and bank names", async () => {
@@ -106,19 +105,19 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${extra}`,
 		).run();
-		const html = (await get("/settings")).html;
+		const html = (await get("/settings/rules")).html;
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
 		expect(rules.indexOf("Local Bakery")).toBeLessThan(
 			rules.indexOf("Zed Chosen"),
 		);
 		for (const query of ["CAFÉ", "café", "cafe", "Cafe"]) {
 			const searched = (
-				await get(`/settings?rules_search=${encodeURIComponent(query)}`)
+				await get(`/settings/rules?rules_search=${encodeURIComponent(query)}`)
 			).html;
 			expect(searched).toContain("Café");
 			expect(searched).not.toContain("Zed Chosen");
 		}
-		const byBank = (await get("/settings?rules_search=BAKERY")).html;
+		const byBank = (await get("/settings/rules?rules_search=BAKERY")).html;
 		expect(byBank).toContain("Local Bakery");
 	});
 
@@ -126,7 +125,7 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			"UPDATE merchants SET default_category_id = NULL",
 		).run();
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		expect(html).toContain("No merchants have an Always rule yet.");
 	});
 
@@ -148,15 +147,15 @@ describe("GET /settings", () => {
 		await env.DB.prepare(
 			`INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ${twenty}`,
 		).run();
-		const exactlyTwenty = await get("/settings");
+		const exactlyTwenty = await get("/settings/rules");
 		expect(exactlyTwenty.html).not.toContain('name="rules_search"');
 		await env.DB.prepare(
 			"INSERT INTO merchants (raw_name, display_name, default_category_id) VALUES ('RULE 20', 'Cobalt', 2)",
 		).run();
-		const twentyOne = await get("/settings");
+		const twentyOne = await get("/settings/rules");
 		expect(twentyOne.html).toContain('name="rules_search"');
 		expect(twentyOne.html).toContain("21 merchants, A to Z");
-		const narrowed = await get("/settings?rules_search=co");
+		const narrowed = await get("/settings/rules?rules_search=co");
 		expect(narrowed.html).toContain('value="co"');
 		expect(narrowed.html).toContain("2 merchants matching “co”");
 		expect(narrowed.html).toContain("Paused while Groceries is archived");
@@ -171,7 +170,7 @@ describe("GET /settings", () => {
 			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name) VALUES (1, '2026-09-01', -100, 'COUNT BANK TEXT', 'RULE COUNT TEST'), (1, '2026-09-02', -200, 'COUNT BANK TEXT', 'RULE COUNT TEST'), (1, '2026-09-03', -300, 'COUNT BANK TEXT', 'RULE COUNT TEST')",
 		).run();
 
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/rules");
 		const rules = html.slice(html.indexOf('id="merchant-rules"'));
 		expect(rules).toMatch(/Count Test[\s\S]*Always Groceries · 3 transactions/);
 	});
@@ -303,7 +302,7 @@ describe("GET /settings", () => {
 			merchant: "RULE FOCUS A",
 		});
 		expect(empty.html).toMatch(
-			/<h2 id="merchant-rules-title" tabindex="-1" autofocus/,
+			/<h2 id="merchant-rules-always" tabindex="-1" autofocus/,
 		);
 	});
 
@@ -439,7 +438,7 @@ describe("GET /settings", () => {
 			rules_search: "Unique",
 		});
 		expect(only.html).toMatch(
-			/<h2 id="merchant-rules-title" tabindex="-1" autofocus/,
+			/<h2 id="merchant-rules-always" tabindex="-1" autofocus/,
 		);
 	});
 
@@ -463,7 +462,7 @@ describe("GET /settings", () => {
 
 	it("shows an empty state when there are no active categories", async () => {
 		await env.DB.prepare("UPDATE categories SET archived = 1").run();
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/categories");
 		expect(html).toContain("No active categories.");
 		expect(html).toContain("Add one below, or restore an archived category.");
 		expect(html).toContain("Archived (7)");
@@ -471,7 +470,7 @@ describe("GET /settings", () => {
 
 	it("does not suggest restoring when there are no archived categories", async () => {
 		await env.DB.prepare("DELETE FROM categories").run();
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/categories");
 		expect(html).toContain("No active categories.");
 		expect(html).toContain("Add one below.");
 		expect(html).not.toContain("restore an archived category");
@@ -479,9 +478,9 @@ describe("GET /settings", () => {
 	});
 });
 
-describe("GET /settings?open=<id>", () => {
+describe("GET /settings/categories?open=<id>", () => {
 	it("opens that category's row", async () => {
-		const { html } = await get("/settings?open=3");
+		const { html } = await get("/settings/categories?open=3");
 		expect(html).toMatch(/<details[^>]*data-row="3"[^>]*\bopen/);
 		expect(html).not.toMatch(/<details[^>]*data-row="1"[^>]*\bopen/);
 	});
@@ -517,7 +516,7 @@ describe("saving a category", () => {
 			false,
 		);
 		expect(res.status).toBe(303);
-		expect(res.headers.get("Location")).toBe("/settings");
+		expect(res.headers.get("Location")).toBe("/settings/categories");
 	});
 
 	it("is a 404 for a category that doesn't exist", async () => {
@@ -566,11 +565,10 @@ describe("a page left open while someone else changed a category", () => {
 
 describe("Cancel", () => {
 	it("closes the row and moves focus back to it, so the change is announced", async () => {
-		const { html: open } = await get("/settings?open=3");
-		expect(open).toMatch(
-			/<a href="\/settings"[^>]*hx-get="\/settings\?focus=3"[^>]*>Cancel<\/a>/,
-		);
-		const { html } = await get("/settings?focus=3");
+		const { html: open } = await get("/settings/categories?open=3");
+		expect(open).toMatch(/href="\/settings\/categories"/);
+		expect(open).toMatch(/hx-get="\/settings\/categories\?focus=3"/);
+		const { html } = await get("/settings/categories?focus=3");
 		expect(html).toMatch(/<summary data-category="3"[^>]*autofocus/);
 		expect(html).not.toMatch(/<details[^>]*data-row="3"[^>]*\bopen/);
 	});
@@ -631,9 +629,9 @@ describe("household people", () => {
 	});
 
 	it("Cancel returns the focused household people section", async () => {
-		const { html } = await get("/settings?peopleFocus=1");
+		const { html } = await get("/settings/people?peopleFocus=1");
 		const people = html.slice(html.indexOf('id="household-people"'));
-		expect(people).toMatch(/<h3[^>]*id="people-title"[^>]*autofocus/);
+		expect(people).toMatch(/<h1[^>]*id="people-title"[^>]*autofocus/);
 	});
 });
 

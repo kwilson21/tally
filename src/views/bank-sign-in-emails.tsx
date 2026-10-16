@@ -6,11 +6,11 @@ import { Switch } from "./switch";
 const INITIAL_LOOKS = ["bg-accent", "bg-ok", "bg-muted"];
 
 /**
- * The Bank sign-in emails block under Household (P107 "In Settings", decision 82): the shared
- * Switch, the people it goes to as round initials, a plain "Who gets them" disclosure that lists each
- * address with its Remove, and one Save. Save and each Remove share one plain form that posts to
- * /settings/bank-sign-in-emails (a Remove sends its address as `remove`), and with htmx it swaps only
- * this block. The route and the catalog both render it, so they can't drift apart.
+ * The Bank sign-in emails block under Household (P107 "In Settings", decision 82, #606): the shared
+ * Switch, the people it goes to as round initials, and a plain "Who gets them" disclosure that lists each
+ * address with its Remove. The Switch saves when flipped: the form posts on change, and with htmx it swaps
+ * only this block, with focus back on the Switch. Save shows only without the script (in noscript). A Remove
+ * sends its address as `remove`. The route and the catalog both render it, so they can't drift apart.
  */
 export function BankSignInEmails({
 	on,
@@ -29,8 +29,8 @@ export function BankSignInEmails({
 	error?: string;
 	/** The disclosure is open: it stays open after a swap, and an error opens it. */
 	open?: boolean;
-	/** Where focus goes after a swap: Save, the "Who gets them" summary, or an address's Remove. */
-	focus?: "save" | "summary" | "remove";
+	/** Where focus goes after a swap: the Switch, the "Who gets them" summary, or an address's Remove. */
+	focus?: "switch" | "summary" | "remove";
 	/** The address whose Remove takes focus. */
 	focusEmail?: string;
 	action?: string;
@@ -41,6 +41,7 @@ export function BankSignInEmails({
 				method="post"
 				action={action}
 				hx-post={action}
+				hx-trigger="change, submit"
 				hx-target="#household-emails"
 				hx-select="#household-emails"
 				hx-swap="outerHTML"
@@ -50,6 +51,7 @@ export function BankSignInEmails({
 					name="enabled"
 					label="Bank sign-in emails"
 					checked={on}
+					autofocus={focus === "switch"}
 				/>
 				{recipients.length > 0 && (
 					<div class="flex items-center gap-2 pb-1">
@@ -104,11 +106,11 @@ export function BankSignInEmails({
 						</ul>
 					)}
 				</details>
-				<div class="pb-4">
-					<Button type="submit" autofocus={focus === "save"}>
-						Save
-					</Button>
-				</div>
+				<noscript>
+					<div class="pb-4">
+						<Button type="submit">Save</Button>
+					</div>
+				</noscript>
 			</form>
 		</div>
 	);

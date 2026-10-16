@@ -704,7 +704,7 @@ describe("transaction detail guesses", () => {
 			.run();
 		const { html } = await get("/transactions?month=all");
 		expect(textOf(html)).toContain("Add the people in your household");
-		expect(html).toContain('href="/settings#household"');
+		expect(html).toContain('href="/settings/household"');
 	});
 
 	it("clearing a guessed note records the person's decision against future guesses", async () => {
@@ -1203,13 +1203,13 @@ describe("household people and details switch", () => {
 
 	it("returns focus to the people section after a save or remove", async () => {
 		const add = await post("/settings/people", { action: "add", name: "Kids" });
-		expect(add.html).toMatch(/<h3 id="people-title"[^>]*autofocus/);
+		expect(add.html).toMatch(/<h1 id="people-title"[^>]*autofocus/);
 	});
 
-	it("shows household people in Settings and allows adding one without JavaScript", async () => {
+	it("shows household people on the People page and allows adding one without JavaScript", async () => {
 		const tx = await charge();
-		const { html } = await get("/settings");
-		expect(textOf(html)).toContain("Household");
+		const { html } = await get("/settings/people");
+		expect(textOf(html)).toContain("People");
 		expect(textOf(html)).toContain("Add a person");
 		const added = await post("/settings/people", {
 			action: "add",
@@ -1255,7 +1255,7 @@ describe("household people and details switch", () => {
 	});
 
 	it("saves all five switches together and treats an omitted details checkbox as off", async () => {
-		const { html } = await get("/settings");
+		const { html } = await get("/settings/ai");
 		expect(html).toContain('name="details"');
 		await post("/settings/ai", {
 			names: "on",

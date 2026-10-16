@@ -23,8 +23,8 @@ export function TimeZoneRow({
 	saved,
 	id = "time-zone",
 	action = "/settings/time-zone",
-	back = "/settings#household",
-	backSwap = "/settings?focus=zone",
+	back = "/settings/household",
+	backSwap = "/settings/household?focus=zone",
 }: {
 	/** The household's saved zone, as its IANA name. */
 	zone: string;

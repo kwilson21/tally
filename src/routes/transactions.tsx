@@ -640,7 +640,7 @@ async function renderList(
 			</div>
 			{firstVisit === null && peoplePrompt && (
 				<Band
-					href="/settings#household"
+					href="/settings/household"
 					detail="Add names Tally can suggest for who a purchase was for."
 				>
 					Add the people in your household
@@ -2489,7 +2489,7 @@ function EditSheet({
 					tx.refundOfId != null && (
 						<p class="text-sm text-muted">
 							Remove it in Settings, under{" "}
-							<a href="/settings#merchant-rules">Tally's rules</a>.
+							<a href="/settings/rules">Tally's rules</a>.
 						</p>
 					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">

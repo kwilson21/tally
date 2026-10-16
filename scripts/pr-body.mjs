@@ -34,8 +34,14 @@ export const PAGES = [
 	{ name: "accounts", path: "/accounts" },
 	{ name: "documents", path: "/documents" },
 	{ name: "settings", path: "/settings" },
+	{ name: "settings-categories", path: "/settings/categories" },
+	{ name: "settings-rules", path: "/settings/rules" },
+	{ name: "settings-household", path: "/settings/household" },
+	{ name: "settings-people", path: "/settings/people" },
+	{ name: "settings-ai", path: "/settings/ai" },
+	{ name: "settings-data", path: "/settings/data" },
 	// Gas's row open for editing, as in the round 5 study.
-	{ name: "settings-edit", path: "/settings?open=3" },
+	{ name: "settings-edit", path: "/settings/categories?open=3" },
 	// The one review screen for every "Maybe …" (issue #195) that Settings' Band leads to; /settings/names redirects here.
 	{ name: "settings-suggestions", path: "/settings/suggestions" },
 	{ name: "more", path: "/more" },

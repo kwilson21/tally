@@ -15,6 +15,8 @@ type Props = {
 	disabled?: boolean;
 	/** With `disabled`, what it needs, in words, so the greying never rests on color alone. */
 	note?: string;
+	/** Focus this switch after a swap, so a flip that answered with the page leaves focus on it (#606). */
+	autofocus?: boolean;
 };
 
 /**
@@ -35,6 +37,7 @@ export function Switch({
 	checked,
 	disabled,
 	note,
+	autofocus,
 }: Props) {
 	const describedBy = [hint && `${id}-hint`, disabled && note && `${id}-note`]
 		.filter(Boolean)
@@ -54,6 +57,7 @@ export function Switch({
 				value="on"
 				checked={checked}
 				disabled={disabled}
+				autofocus={autofocus}
 				aria-labelledby={`${id}-label`}
 				aria-describedby={describedBy || undefined}
 				class="sr-only"

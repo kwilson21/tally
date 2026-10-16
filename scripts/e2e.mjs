@@ -698,7 +698,7 @@ step(
 );
 
 // Reorder through htmx: the button inside the edit form must send its own direction.
-await goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+await goto(`${BASE}/settings/categories`, { waitUntil: "networkidle" });
 await page.locator('summary[data-category="3"]').click();
 await page
 	.locator('details[data-row="3"]')

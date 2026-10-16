@@ -256,7 +256,7 @@ describe("POST /transactions/organize", () => {
 		expect(res.headers.get("Location")).toBe("/transactions/organize");
 		expect(await ruleOf("SQ *LOCAL BAKERY 4432")).toBe(2);
 		const settingsHtml = await (
-			await exports.default.fetch("http://tally.test/settings")
+			await exports.default.fetch("http://tally.test/settings/rules")
 		).text();
 		const rules = settingsHtml.slice(
 			settingsHtml.indexOf('id="merchant-rules"'),

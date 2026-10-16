@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { shortDay } from "../dates";
 import {
 	type NeverSuggestRule,
@@ -20,9 +21,13 @@ export type MerchantRule = {
 	transactions: number;
 };
 
-/** The shared Settings heading and its Always list, with a GET search and one Remove form per rule. */
+/**
+ * Tally's rules (decision 120, #606): the page's section, with a GET search and one Remove form per rule. `head`
+ * is the page's back link and title, drawn first, so a swap of the section brings them back too.
+ */
 export function MerchantRules({
 	id = "merchant-rules",
+	head,
 	rules,
 	total,
 	search = "",
@@ -34,8 +39,10 @@ export function MerchantRules({
 	today,
 }: {
 	id?: string;
+	/** The page's back link and h1, drawn first. */
+	head?: Child;
 	rules: MerchantRule[];
-	/** The "Never suggest" lines, under the same heading (issue #195). */
+	/** The "Never suggest" lines, under the same page (issue #195). */
 	neverRules?: NeverSuggestRule[];
 	/** Where focus goes after a "Never suggest" Remove (issue #195). */
 	neverFocus?: NeverSuggestFocus;
@@ -51,31 +58,28 @@ export function MerchantRules({
 		? `${rules.length} merchants matching “${search}”`
 		: `${total} merchants, A to Z`;
 	return (
-		<section id={id} aria-labelledby={`${id}-title`} class="mt-8 lg:max-w-3xl">
-			<h2
-				id={`${id}-title`}
-				tabindex={focusHeading ? -1 : undefined}
-				autofocus={focusHeading || undefined}
-				class="font-serif text-3xl font-semibold"
-			>
-				Tally's rules
-			</h2>
-			<p class="mt-1 text-muted">
-				What Tally does on its own, and what it won't suggest.
-			</p>
+		<section id={id} aria-labelledby={`${id}-title`} class="mt-6 lg:max-w-3xl">
+			{head}
 			{error && (
 				<p role="alert" class="mt-3 text-sm text-over">
 					{error}
 				</p>
 			)}
 			<div class="mt-5">
-				<h3 class="text-xl font-semibold">Always for these merchants</h3>
+				<h2
+					id={`${id}-always`}
+					tabindex={focusHeading ? -1 : undefined}
+					autofocus={focusHeading || undefined}
+					class="font-serif text-2xl font-semibold"
+				>
+					Always for these merchants
+				</h2>
 				{total > MERCHANT_RULE_SEARCH_THRESHOLD && (
 					<form
 						method="get"
-						action="/settings"
+						action="/settings/rules"
 						class="mt-3 flex flex-col gap-2 sm:flex-row"
-						hx-get="/settings"
+						hx-get="/settings/rules"
 						hx-trigger="input delay:300ms, submit"
 						hx-sync="replace"
 						hx-target={`#${id}-results`}
@@ -120,54 +124,58 @@ export function MerchantRules({
 						/>
 					) : (
 						<ul class="mt-2 divide-y divide-rule border-y border-rule">
-							{rules.map((rule, index) => (
-								<li class="flex min-h-16 items-center gap-4 py-2">
-									<CategoryIcon icon={rule.icon} color={rule.color} />
-									<span class="min-w-0 flex-1">
-										<span class="block text-lg leading-6">
-											{rule.merchant}{" "}
-											<span class="whitespace-nowrap">
-												<span aria-hidden="true">→ </span>
-												<span class="sr-only">is always </span>
-												{rule.category}
+							{rules.map((rule, index) => {
+								const count = `${rule.transactions} ${rule.transactions === 1 ? "transaction" : "transactions"}`;
+								return (
+									<li class="flex min-h-16 items-center gap-4 py-2">
+										<CategoryIcon icon={rule.icon} color={rule.color} />
+										<span class="min-w-0 flex-1">
+											<span class="block text-lg leading-6">
+												<span aria-hidden="true">
+													{`${rule.merchant} · Always ${rule.category} · ${count}`}
+												</span>
+												<span class="sr-only">
+													{`${rule.merchant} is always ${rule.category}, ${count}`}
+												</span>
 											</span>
+											{rule.archived && (
+												<span class="block text-sm text-muted">
+													Paused while {rule.category} is archived
+												</span>
+											)}
 										</span>
-										<span class="block leading-6 text-muted">
-											Always {rule.category} · {rule.transactions}{" "}
-											{rule.transactions === 1 ? "transaction" : "transactions"}
-										</span>
-										{rule.archived && (
-											<span class="block text-sm text-muted">
-												Paused while {rule.category} is archived
-											</span>
-										)}
-									</span>
-									<form
-										method="post"
-										action="/settings/merchant-rules/remove"
-										hx-post="/settings/merchant-rules/remove"
-										hx-target={`#${id}`}
-										hx-select={`#${id}`}
-										hx-swap="outerHTML"
-									>
-										<input
-											type="hidden"
-											name="merchant"
-											value={rule.merchantKey}
-										/>
-										{search && (
-											<input type="hidden" name="rules_search" value={search} />
-										)}
-										<Button
-											type="submit"
-											kind="text"
-											autofocus={focusRuleIndex === index || undefined}
+										<form
+											method="post"
+											action="/settings/merchant-rules/remove"
+											hx-post="/settings/merchant-rules/remove"
+											hx-target={`#${id}`}
+											hx-select={`#${id}`}
+											hx-swap="outerHTML"
 										>
-											Remove<span class="sr-only"> {rule.merchant}</span>
-										</Button>
-									</form>
-								</li>
-							))}
+											<input
+												type="hidden"
+												name="merchant"
+												value={rule.merchantKey}
+											/>
+											{search && (
+												<input
+													type="hidden"
+													name="rules_search"
+													value={search}
+												/>
+											)}
+											<Button
+												type="submit"
+												kind="quiet"
+												class="shrink-0"
+												autofocus={focusRuleIndex === index || undefined}
+											>
+												Remove<span class="sr-only"> {rule.merchant}</span>
+											</Button>
+										</form>
+									</li>
+								);
+							})}
 						</ul>
 					)}
 				</div>
@@ -183,13 +191,13 @@ export function MerchantRules({
 	);
 }
 
-/** Where focus goes after a "Never suggest" Remove: a line's Remove by its position, or the heading. */
+/** Where focus goes after a "Never suggest" Remove: a line's Remove by its position, or the one line that says none. */
 export type NeverSuggestFocus = { index?: number; heading?: boolean };
 
 /**
- * The "Never suggest" list under the same heading (issue #195, decision 101): one line per No the family
- * said Yes to, the day of it, and a Remove whose name says which line it takes away. `target` is the id of
- * the section the Remove swaps (the MerchantRules section it sits in), so the swap finds it wherever it is drawn.
+ * The "Never suggest" list (issue #195, decision 101, #606): one line per No the family said Yes to, the day of
+ * it, and a quiet Remove whose name says which line it takes away. With no lines it is one muted line, not an
+ * empty state. `target` is the id of the section the Remove swaps (the MerchantRules section it sits in).
  */
 export function NeverSuggestList({
 	rules,
@@ -206,63 +214,62 @@ export function NeverSuggestList({
 	target: string;
 	focus?: NeverSuggestFocus;
 }) {
-	return (
-		<div class="mt-8">
-			<h3
+	if (rules.length === 0)
+		return (
+			<p
 				tabindex={focus.heading ? -1 : undefined}
 				autofocus={focus.heading || undefined}
-				class="text-xl font-semibold"
+				class="mt-8 text-muted"
 			>
-				Never suggest
-			</h3>
-			{rules.length === 0 ? (
-				<EmptyState kind="done" sentence="Tally hasn't been told No yet." />
-			) : (
-				<ul class="mt-2 divide-y divide-rule border-y border-rule">
-					{rules.map((rule, index) => {
-						const line = neverSuggestRuleLine(rule);
-						return (
-							<li class="flex min-h-16 items-center gap-4 py-2">
-								<span class="min-w-0 flex-1">
-									<span class="block text-lg leading-6">{line}</span>
-									<span class="block leading-6 text-muted">
-										You said No on {shortDay(rule.decidedOn, today)}
-									</span>
+				Never suggest: Tally hasn't been told No yet.
+			</p>
+		);
+	return (
+		<div class="mt-8">
+			<h2 class="font-serif text-2xl font-semibold">Never suggest</h2>
+			<ul class="mt-2 divide-y divide-rule border-y border-rule">
+				{rules.map((rule, index) => {
+					const line = neverSuggestRuleLine(rule);
+					return (
+						<li class="flex min-h-16 items-center gap-4 py-2">
+							<span class="min-w-0 flex-1">
+								<span class="block text-lg leading-6">{line}</span>
+								<span class="block leading-6 text-muted">
+									You said No on {shortDay(rule.decidedOn, today)}
 								</span>
-								<form
-									method="post"
-									action="/settings/never-suggest/remove"
-									hx-post="/settings/never-suggest/remove"
-									hx-disable="findAll button[type=submit]"
-									hx-target={`#${target}`}
-									hx-select={`#${target}`}
-									// A line back in place can bring a suggestion back to the review, so the Band follows.
-									hx-select-oob="#names-band"
-									hx-swap="outerHTML"
+							</span>
+							<form
+								method="post"
+								action="/settings/never-suggest/remove"
+								hx-post="/settings/never-suggest/remove"
+								hx-disable="findAll button[type=submit]"
+								hx-target={`#${target}`}
+								hx-select={`#${target}`}
+								hx-swap="outerHTML"
+							>
+								<input type="hidden" name="id" value={String(rule.id)} />
+								<input
+									type="hidden"
+									name="merchant_key"
+									value={rule.merchantKey}
+								/>
+								<input type="hidden" name="kind" value={rule.kind} />
+								{search && (
+									<input type="hidden" name="rules_search" value={search} />
+								)}
+								<Button
+									type="submit"
+									kind="quiet"
+									class="shrink-0"
+									autofocus={focus.index === index || undefined}
 								>
-									<input type="hidden" name="id" value={String(rule.id)} />
-									<input
-										type="hidden"
-										name="merchant_key"
-										value={rule.merchantKey}
-									/>
-									<input type="hidden" name="kind" value={rule.kind} />
-									{search && (
-										<input type="hidden" name="rules_search" value={search} />
-									)}
-									<Button
-										type="submit"
-										kind="text"
-										autofocus={focus.index === index || undefined}
-									>
-										Remove<span class="sr-only"> {line}</span>
-									</Button>
-								</form>
-							</li>
-						);
-					})}
-				</ul>
-			)}
+									Remove<span class="sr-only"> {line}</span>
+								</Button>
+							</form>
+						</li>
+					);
+				})}
+			</ul>
 		</div>
 	);
 }

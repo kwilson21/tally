@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import { actor } from "../actor";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
@@ -47,7 +48,6 @@ import { tallyExport, transactionsCsv } from "../settings/export";
 import { parseTimeZone, zoneLabel } from "../settings/time-zones";
 import { tidyName } from "../transactions/tidy-name";
 import { AiTally } from "../views/ai-tally";
-import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
@@ -66,6 +66,11 @@ import {
 	MERCHANT_RULE_SEARCH_THRESHOLD,
 	MerchantRules,
 } from "../views/merchant-rules";
+import {
+	SettingsContents,
+	SubpageHead,
+	settingsPlaces,
+} from "../views/settings-pages";
 import { Switch } from "../views/switch";
 import { TimeZoneRow } from "../views/time-zone-row";
 
@@ -91,6 +96,9 @@ const ruleFocus = (
 	};
 };
 
+/** The Settings pages (decision 120): the contents page, then one page for each of its six sections. */
+type Page = "categories" | "rules" | "household" | "people" | "ai" | "data";
+
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
 	open?: number | "new";
@@ -108,17 +116,17 @@ type View = {
 		| number
 		| "archived"
 		| "zone"
-		| "bank-sign-in-email-save"
+		| "bank-sign-in-email-switch"
 		| "bank-sign-in-email-summary"
 		| "bank-sign-in-email-remove";
 	/** Keeps the "Who gets them" disclosure open after a swap. */
 	bankSignInEmailsOpen?: boolean;
 	/** The address whose Remove button takes focus after a swap. */
 	bankSignInEmailFocusEmail?: string;
-	/** Focus the remaining merchant rule at this list position, or the rules heading when empty. */
+	/** Focus the remaining merchant rule at this list position, or the Always heading when the list is empty. */
 	focusRuleIndex?: number;
 	focusMerchantHeading?: boolean;
-	/** Focus the "Never suggest" line at this position after a Remove, or its heading when none is left. */
+	/** Focus the "Never suggest" line at this position after a Remove, or the one line that says none. */
 	focusNever?: { index?: number; heading?: boolean };
 	merchantRuleError?: string;
 	/** What was typed, shown again with the errors. */
@@ -138,14 +146,6 @@ type View = {
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
-	/**
-	 * The household just moved into another month, so each active category row's amount and budget
-	 * line, which are the month's, go in the answer to be swapped out of band (htmx 4:
-	 * `hx-swap-oob="true"` swaps an element into the page by its id). Nothing else of Categories is
-	 * marked, so an open edit and what was typed in it stay. A save that keeps the month swaps only
-	 * its own group.
-	 */
-	budgetsOob?: boolean;
 	/** Why the posted time zone wasn't saved, shown under its select. */
 	zoneError?: string;
 	bankSignInEmailError?: string;
@@ -154,14 +154,15 @@ type View = {
 	peopleError?: string;
 	peopleErrorPersonId?: number;
 	peopleValue?: string;
+	/** Focus the People page's title: after an add or a removal, or when Cancel comes back to the page. */
 	peopleFocus?: boolean;
-	/** The AI suggestions were just saved, so Save, which the swap replaced, takes focus again. */
-	aiSaved?: boolean;
+	/** The AI switch that was flipped: focus stays on it after the save, the page drawn again (#606). */
+	aiFocus?: keyof AiSwitches;
 	rulesSearch?: string;
-	/** Where a plain browser lands after a save: a section's id, so it isn't sent back to the top. */
-	hash?: string;
 };
 
+/** A save's answer: the page it lives on (htmx gets that page; a plain browser goes to it), with the view it draws. */
+type Done = View & { page: Page };
 /**
  * The AI suggestions switches that have a feature behind them (spec §8.6, decision 73): the field
  * each posts, its words and its muted line, in the order the group shows them, and how each is read
@@ -222,345 +223,454 @@ const SORT_NEEDS =
 /** Sent when the page drew the sorting switch greyed, so Save leaves it as it was. */
 const SORT_GREYED = "sortOnArrivalGreyed";
 
-/** The switches above and one Save. Without JavaScript the form posts and Settings reloads at this group. */
-function AiSuggestions({
+/**
+ * The AI switches (#606): the form posts when one is flipped, and the page answers with itself, focus back on the
+ * switch that changed. Save shows only without the script. Nothing else in the form is posted.
+ */
+function AiSwitchForm({
 	switches,
-	saved,
-	tally,
+	focus,
 }: {
 	switches: AiSwitches;
-	saved: boolean;
-	tally: AiTallyCounts;
+	focus?: keyof AiSwitches;
 }) {
-	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
-	// A sync has useful Jev work when any of the three answer groups is enabled.
+	// Sorting is greyed out while Jev isn't asked at all (categories, income and details all off).
 	const nothingToSort =
 		!switches.categories && !switches.income && !switches.details;
+	return (
+		<form
+			method="post"
+			action="/settings/ai"
+			hx-post="/settings/ai"
+			hx-trigger="change, submit"
+			hx-sync="replace"
+			hx-target="#ai-suggestions"
+			hx-select="#ai-suggestions"
+			hx-swap="outerHTML"
+		>
+			<ul class="mt-3 divide-y divide-rule border-y border-rule">
+				{AI_FEATURES.map((f) => (
+					<li>
+						<Switch
+							id={f.id}
+							name={f.key}
+							label={f.label}
+							hint={f.line}
+							checked={switches[f.key]}
+							disabled={f.key === "sortOnArrival" && nothingToSort}
+							note={SORT_NEEDS}
+							autofocus={focus === f.key}
+						/>
+					</li>
+				))}
+			</ul>
+			{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
+			<noscript>
+				<div class="mt-4">
+					<Button id="ai-save" type="submit">
+						Save
+					</Button>
+				</div>
+			</noscript>
+		</form>
+	);
+}
+
+/** AI suggestions (P134 A, #606): its switches, and the In October tally under them. */
+function AiPage({
+	switches,
+	tally,
+	focus,
+}: {
+	switches: AiSwitches;
+	tally: AiTallyCounts;
+	focus?: keyof AiSwitches;
+}) {
+	const allOff = AI_FEATURES.every((f) => !switches[f.key]);
 	return (
 		<section
 			id="ai-suggestions"
 			aria-labelledby="ai-title"
-			class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
+			class="lg:max-w-3xl"
 		>
-			<h2 id="ai-title" class="font-serif text-3xl font-semibold">
-				AI suggestions
-			</h2>
+			<SubpageHead title="AI suggestions" titleId="ai-title" />
 			<p class="mt-1 text-muted">
 				{allOff
 					? "Tally sorts by your rules and choices only."
 					: "Off means your rules and choices only. Nothing already decided changes."}
 			</p>
-			<form
-				method="post"
-				action="/settings/ai"
-				hx-post="/settings/ai"
-				hx-disable="findAll button[type=submit]"
-				hx-indicator="#ai-save"
-				hx-target="#ai-suggestions"
-				hx-select="#ai-suggestions"
-				// The names Band above Categories follows the names switch, so it is drawn again with the group.
-				hx-select-oob="#names-band"
-				hx-swap="outerHTML"
-			>
-				<ul class="mt-3 divide-y divide-rule border-y border-rule">
-					{AI_FEATURES.map((f) => (
-						<li>
-							<Switch
-								id={f.id}
-								name={f.key}
-								label={f.label}
-								hint={f.line}
-								checked={switches[f.key]}
-								disabled={f.key === "sortOnArrival" && nothingToSort}
-								note={SORT_NEEDS}
-							/>
-						</li>
-					))}
-				</ul>
-				{nothingToSort && <input type="hidden" name={SORT_GREYED} value="1" />}
-				<div class="mt-4">
-					<Button
-						id="ai-save"
-						type="submit"
-						busyLabel="Saving…"
-						autofocus={saved}
-					>
-						Save
-					</Button>
-				</div>
-			</form>
+			<AiSwitchForm switches={switches} focus={focus} />
 			<AiTally tally={tally} switches={switches} />
 		</section>
 	);
 }
 
-/** The whole Settings page. Every swap selects #categories from this same page. */
-async function renderSettings(c: Context<App>, view: View = {}) {
-	const timeZone = view.timeZone ?? (await householdTimeZone(c.env.DB));
-	const today = view.today ?? todayIn(timeZone);
-	const thisMonth = today.slice(0, 7);
-	const { active, archived } = await settingsCategories(c.env.DB, thisMonth);
-	const aiSwitches = await readAiSwitches(c.env.DB);
-	const aiTally = await readAiTally(c.env.DB, today);
-	const bankEmailsOn = await readBankSignInEmails(c.env.DB);
-	const members = await reconnectRecipients(c.env.DB);
-	const people = await c.env.DB.prepare(
-		"SELECT id, name FROM household_people ORDER BY id",
-	).all<{ id: number; name: string }>();
-	const waiting = (await suggestionQueue(c.env.DB, aiSwitches)).length;
-	const neverRules = await neverSuggestRules(c.env.DB);
-	const categorySuggestions = await pendingSuggestions(c.env.DB);
-	const rulesSearch =
-		view.rulesSearch ??
-		new URL(c.req.url).searchParams.get("rules_search") ??
-		"";
-	const ruleData = await merchantRules(c.env.DB, aiSwitches.names, rulesSearch);
-	const visibleRules = ruleData.rules;
-	const adding = view.open === "new";
-
+/** One Settings page in the app's layout. Each page's title reads "… · Settings · Tally". */
+function settingsPage(
+	c: Context<App>,
+	title: string,
+	body: Child,
+	status: View["status"] = 200,
+) {
 	return c.html(
 		<Layout
-			title="Settings · Tally"
+			title={`${title} · Tally`}
 			active="settings"
 			currentPath={c.req.path + new URL(c.req.url).search}
 			demo={c.env.DEMO === "true"}
 		>
-			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>
-			{/* Every "Maybe …" waiting for a person (issue #195): a Band to the one review screen. It is always in
-			    the page, empty when nothing waits, so saving the AI switches can draw it again. */}
-			<div id="names-band">
-				{waiting > 0 && (
-					<div class="mt-4 lg:max-w-3xl">
-						<Band
-							href="/settings/suggestions"
-							detail="Tally's guesses; you decide"
-						>
-							{waiting} {waiting === 1 ? "suggestion" : "suggestions"} to check
-						</Band>
-					</div>
+			{body}
+		</Layout>,
+		status ?? 200,
+	);
+}
+
+/**
+ * The contents page (GET /settings, P134 A): one row for each section, with its live count from what the
+ * section holds. Only the counts are read here; each section's page reads its own data.
+ */
+async function renderContents(c: Context<App>) {
+	const db = c.env.DB;
+	const timeZone = await householdTimeZone(db);
+	const today = todayIn(timeZone);
+	const { active } = await settingsCategories(db, today.slice(0, 7));
+	const aiSwitches = await readAiSwitches(db);
+	const tally = await readAiTally(db, today);
+	const bankEmailsOn = await readBankSignInEmails(db);
+	const people = await db
+		.prepare("SELECT COUNT(*) AS n FROM household_people WHERE id > 1")
+		.first<{ n: number }>();
+	const waiting = (await suggestionQueue(db, aiSwitches)).length;
+	const rules = await merchantRules(db, aiSwitches.names, "");
+	const budgeted = active.filter((cat) => cat.budgetCents !== null);
+	const places = settingsPlaces({
+		categories: {
+			count: active.length,
+			budgetCents:
+				budgeted.length === 0
+					? null
+					: budgeted.reduce((sum, cat) => sum + (cat.budgetCents ?? 0), 0),
+		},
+		merchants: rules.total,
+		zone: timeZone,
+		bankEmailsOn,
+		people: people?.n ?? 0,
+		aiOff: AI_FEATURES.filter((f) => !aiSwitches[f.key]).length,
+		sorted: tally.sorted,
+		month: tally.month,
+	});
+	return settingsPage(
+		c,
+		"Settings",
+		<SettingsContents waiting={waiting} places={places} />,
+	);
+}
+
+/** Categories (#85, #195): the list with its rows, suggestions waiting, Add category and Archived. */
+async function renderCategories(c: Context<App>, view: View = {}) {
+	const db = c.env.DB;
+	const timeZone = view.timeZone ?? (await householdTimeZone(db));
+	const today = view.today ?? todayIn(timeZone);
+	const { active, archived } = await settingsCategories(db, today.slice(0, 7));
+	const categorySuggestions = await pendingSuggestions(db);
+	const adding = view.open === "new";
+	return settingsPage(
+		c,
+		"Categories · Settings",
+		<section
+			id="categories"
+			aria-labelledby="categories-title"
+			class="lg:max-w-3xl"
+		>
+			<SubpageHead title="Categories" titleId="categories-title" />
+			{view.listError && (
+				<p role="alert" class="mt-3 text-sm text-over">
+					{view.listError}
+				</p>
+			)}
+			<div class="mt-3 border-t border-rule">
+				{active.length === 0 && (
+					<EmptyState
+						kind="done"
+						sentence="No active categories."
+						hint={
+							archived.length > 0
+								? "Add one below, or restore an archived category."
+								: "Add one below."
+						}
+					/>
 				)}
-			</div>
-			<section
-				id="categories"
-				aria-labelledby="categories-title"
-				class="mt-8 lg:max-w-3xl"
-			>
-				<h2 id="categories-title" class="font-serif text-3xl font-semibold">
-					Categories
-				</h2>
-				{view.listError && (
-					<p role="alert" class="mt-3 text-sm text-over">
-						{view.listError}
-					</p>
-				)}
-				<div class="mt-3 border-t border-rule">
-					{active.length === 0 && (
-						<EmptyState
-							kind="done"
-							sentence="No active categories."
-							hint={
-								archived.length > 0
-									? "Add one below, or restore an archived category."
-									: "Add one below."
+				{active.map((category, i) => (
+					<CategoryRow
+						category={category}
+						first={i === 0}
+						last={i === active.length - 1}
+						open={view.open === category.id}
+						focus={view.focus === category.id && !view.errors}
+						values={view.values}
+						errors={view.errors}
+						saved={
+							view.saved?.kind === "category" && view.saved.id === category.id
+								? "toast"
+								: undefined
+						}
+					/>
+				))}
+				{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
+				{categorySuggestions.map((suggestion) => {
+					// Add to the active category with the suggested name, or Restore the archived one (decisions 101, 110).
+					const named = [...active, ...archived].find((cat) =>
+						sameName(cat.name, tidyName(suggestion.name)),
+					);
+					return (
+						<CategorySuggestionCard
+							suggestion={suggestion}
+							existing={named?.name}
+							archived={named !== undefined && archived.includes(named)}
+							error={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionError
+									: undefined
 							}
-						/>
-					)}
-					{active.map((category, i) => (
-						<CategoryRow
-							category={category}
-							first={i === 0}
-							last={i === active.length - 1}
-							open={view.open === category.id}
-							focus={view.focus === category.id && !view.errors}
-							values={view.values}
-							errors={view.errors}
-							budgetsOob={view.budgetsOob}
-							saved={
-								view.saved?.kind === "category" && view.saved.id === category.id
-									? "toast"
+							ticked={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.ticked
+									: undefined
+							}
+							notes={
+								view.suggestionValues?.id === suggestion.id
+									? view.suggestionValues.notes
 									: undefined
 							}
 						/>
-					))}
-					{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
-					{categorySuggestions.map((suggestion) => {
-						// Add to the active category with the suggested name, or Restore the archived one (decisions 101, 110).
-						const named = [...active, ...archived].find((cat) =>
-							sameName(cat.name, tidyName(suggestion.name)),
-						);
-						return (
-							<CategorySuggestionCard
-								suggestion={suggestion}
-								existing={named?.name}
-								archived={named !== undefined && archived.includes(named)}
-								error={
-									view.suggestionValues?.id === suggestion.id
-										? view.suggestionError
-										: undefined
-								}
-								ticked={
-									view.suggestionValues?.id === suggestion.id
-										? view.suggestionValues.ticked
-										: undefined
-								}
-								notes={
-									view.suggestionValues?.id === suggestion.id
-										? view.suggestionValues.notes
-										: undefined
-								}
-							/>
-						);
-					})}
-					{categorySuggestions.more > 0 && (
-						<p class="py-2 text-sm text-muted">
-							{categorySuggestions.more} more suggestions will show once you
-							decide these.
-						</p>
-					)}
-					<AddCategoryRow
-						open={adding}
-						values={view.values}
-						errors={view.errors}
-					/>
-					{archived.length > 0 && (
-						<details
-							class="group border-b border-rule"
-							open={Boolean(view.restoreError)}
-						>
-							<summary
-								class={summaryClass}
-								autofocus={view.focus === "archived"}
-							>
-								<span class="min-w-0 flex-1">Archived ({archived.length})</span>
-								{chevron}
-							</summary>
-							{view.restoreError && (
-								<p role="alert" class="pb-2 text-sm text-over">
-									{view.restoreError}
-								</p>
-							)}
-							<ul class="pb-3">
-								{archived.map((a) => (
-									<li class="flex min-h-11 items-center gap-4">
-										<CategoryIcon icon={a.icon} color={a.color} />
-										<span class="text-lg text-muted">{a.name}</span>
-										<form
-											id={`cat-${a.id}-restore-form`}
-											class="ml-auto"
-											{...swap(
-												`/settings/categories/${a.id}/restore`,
-												`cat-${a.id}-restore`,
-											)}
-										>
-											<Button
-												id={`cat-${a.id}-restore`}
-												type="submit"
-												kind="text"
-												busyLabel="Restoring…"
-											>
-												Restore
-											</Button>
-										</form>
-									</li>
-								))}
-							</ul>
-						</details>
-					)}
-				</div>
-			</section>
-			<MerchantRules
-				rules={visibleRules.map((rule) => ({
-					...rule,
-					archived: rule.archived === 1,
-				}))}
-				total={ruleData.total}
-				focusRuleIndex={view.focusRuleIndex}
-				focusHeading={view.focusMerchantHeading}
-				error={view.merchantRuleError}
-				neverRules={neverRules}
-				neverFocus={view.focusNever}
-				today={today}
-				search={
-					ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
-				}
-			/>
-			<section
-				id="household"
-				aria-labelledby="household-title"
-				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
-			>
-				<h2 id="household-title" class="font-serif text-3xl font-semibold">
-					Household
-				</h2>
-				<div class="mt-3 border-t border-rule">
-					<TimeZoneRow
-						zone={timeZone}
-						error={view.zoneError}
-						focus={view.focus === "zone"}
-						saved={view.saved?.kind === "zone" ? "toast" : undefined}
-					/>
-					<BankSignInEmails
-						on={bankEmailsOn}
-						recipients={members.results.map(({ email }) => email)}
-						error={view.bankSignInEmailError}
-						open={Boolean(view.bankSignInEmailsOpen)}
-						focus={bankSignInEmailFocus(view.focus)}
-						focusEmail={view.bankSignInEmailFocusEmail}
-					/>
-				</div>
-				<HouseholdPeople
-					people={people.results}
-					openId={view.peopleOpen}
-					addOpen={view.peopleAddOpen}
-					error={view.peopleError}
-					errorPersonId={view.peopleErrorPersonId}
-					value={view.peopleValue}
-					focus={
-						view.peopleFocus ||
-						new URL(c.req.url).searchParams.get("peopleFocus") === "1"
-					}
-					saved={
-						view.saved?.kind === "person"
-							? { id: view.saved.id, mark: "toast" }
-							: undefined
-					}
+					);
+				})}
+				{categorySuggestions.more > 0 && (
+					<p class="py-2 text-sm text-muted">
+						{categorySuggestions.more} more suggestions will show once you
+						decide these.
+					</p>
+				)}
+				<AddCategoryRow
+					open={adding}
+					values={view.values}
+					errors={view.errors}
 				/>
-			</section>
-			<AiSuggestions
-				switches={aiSwitches}
-				saved={Boolean(view.aiSaved)}
-				tally={aiTally}
-			/>
-			<section
-				aria-labelledby="your-data-title"
-				class="mt-8 border-t border-rule pt-6 lg:max-w-3xl"
-			>
-				<h2 id="your-data-title" class="font-serif text-3xl font-semibold">
-					Your data
-				</h2>
-				<p class="mt-1 text-muted">
-					Everything Tally has stored, to keep or open elsewhere. Bank logins
-					are never included.
-				</p>
-				<div class="mt-4 flex flex-col items-start gap-3">
-					<Button kind="secondary" href="/settings/export/transactions.csv">
-						Download transactions (CSV)
-					</Button>
-					<Button kind="secondary" href="/settings/export/tally.json">
-						Download everything (JSON)
-					</Button>
-				</div>
-			</section>
-		</Layout>,
-		view.status ?? 200,
+				{archived.length > 0 && (
+					<details
+						class="group border-b border-rule"
+						open={Boolean(view.restoreError)}
+					>
+						<summary class={summaryClass} autofocus={view.focus === "archived"}>
+							<span class="min-w-0 flex-1">Archived ({archived.length})</span>
+							{chevron}
+						</summary>
+						{view.restoreError && (
+							<p role="alert" class="pb-2 text-sm text-over">
+								{view.restoreError}
+							</p>
+						)}
+						<ul class="pb-3">
+							{archived.map((a) => (
+								<li class="flex min-h-11 items-center gap-4">
+									<CategoryIcon icon={a.icon} color={a.color} />
+									<span class="text-lg text-muted">{a.name}</span>
+									<form
+										id={`cat-${a.id}-restore-form`}
+										class="ml-auto"
+										{...swap(
+											`/settings/categories/${a.id}/restore`,
+											`cat-${a.id}-restore`,
+										)}
+									>
+										<Button
+											id={`cat-${a.id}-restore`}
+											type="submit"
+											kind="text"
+											busyLabel="Restoring…"
+										>
+											Restore
+										</Button>
+									</form>
+								</li>
+							))}
+						</ul>
+					</details>
+				)}
+			</div>
+		</section>,
+		view.status,
 	);
+}
+
+/** Tally's rules (#214, #195, decision 101): the Always list A to Z, and the Never suggest lines. */
+async function renderRules(c: Context<App>, view: View = {}) {
+	const db = c.env.DB;
+	const today = view.today ?? todayIn(await householdTimeZone(db));
+	const aiSwitches = await readAiSwitches(db);
+	const rulesSearch =
+		view.rulesSearch ??
+		new URL(c.req.url).searchParams.get("rules_search") ??
+		"";
+	const ruleData = await merchantRules(db, aiSwitches.names, rulesSearch);
+	const neverRules = await neverSuggestRules(db);
+	return settingsPage(
+		c,
+		"Tally's rules · Settings",
+		<MerchantRules
+			head={
+				<SubpageHead title="Tally's rules" titleId="merchant-rules-title" />
+			}
+			rules={ruleData.rules.map((rule) => ({
+				...rule,
+				archived: rule.archived === 1,
+			}))}
+			total={ruleData.total}
+			focusRuleIndex={view.focusRuleIndex}
+			focusHeading={view.focusMerchantHeading}
+			error={view.merchantRuleError}
+			neverRules={neverRules}
+			neverFocus={view.focusNever}
+			today={today}
+			search={
+				ruleData.total > MERCHANT_RULE_SEARCH_THRESHOLD ? rulesSearch : ""
+			}
+		/>,
+		view.status,
+	);
+}
+
+/** Household (decisions 67, 72, 82): the time zone and the bank sign-in emails switch with its recipients. */
+async function renderHousehold(c: Context<App>, view: View = {}) {
+	const db = c.env.DB;
+	const timeZone = view.timeZone ?? (await householdTimeZone(db));
+	const bankEmailsOn = await readBankSignInEmails(db);
+	const members = await reconnectRecipients(db);
+	return settingsPage(
+		c,
+		"Household · Settings",
+		<section
+			id="household"
+			aria-labelledby="household-title"
+			class="lg:max-w-3xl"
+		>
+			<SubpageHead title="Household" titleId="household-title" />
+			<div class="mt-3 border-t border-rule">
+				<TimeZoneRow
+					zone={timeZone}
+					error={view.zoneError}
+					focus={view.focus === "zone"}
+					saved={view.saved?.kind === "zone" ? "toast" : undefined}
+				/>
+				<BankSignInEmails
+					on={bankEmailsOn}
+					recipients={members.results.map(({ email }) => email)}
+					error={view.bankSignInEmailError}
+					open={Boolean(view.bankSignInEmailsOpen)}
+					focus={bankSignInEmailFocus(view.focus)}
+					focusEmail={view.bankSignInEmailFocusEmail}
+				/>
+			</div>
+		</section>,
+		view.status,
+	);
+}
+
+/** People (decision 81): the household's names, Everyone first. */
+async function renderPeople(c: Context<App>, view: View = {}) {
+	const people = await c.env.DB.prepare(
+		"SELECT id, name FROM household_people ORDER BY id",
+	).all<{ id: number; name: string }>();
+	return settingsPage(
+		c,
+		"People · Settings",
+		<HouseholdPeople
+			head={
+				<SubpageHead
+					title="People"
+					titleId="people-title"
+					focus={view.peopleFocus}
+				/>
+			}
+			people={people.results}
+			openId={view.peopleOpen}
+			addOpen={view.peopleAddOpen}
+			error={view.peopleError}
+			errorPersonId={view.peopleErrorPersonId}
+			value={view.peopleValue}
+			saved={
+				view.saved?.kind === "person"
+					? { id: view.saved.id, mark: "toast" }
+					: undefined
+			}
+		/>,
+		view.status,
+	);
+}
+
+/** AI suggestions (decision 73, P41 B): the switches and the month's tally. */
+async function renderAi(c: Context<App>, view: View = {}) {
+	const db = c.env.DB;
+	const today = view.today ?? todayIn(await householdTimeZone(db));
+	const switches = await readAiSwitches(db);
+	const tally = await readAiTally(db, today);
+	return settingsPage(
+		c,
+		"AI suggestions · Settings",
+		<AiPage switches={switches} tally={tally} focus={view.aiFocus} />,
+		view.status,
+	);
+}
+
+/** Your data (spec §8.1): the two downloads. Nothing on it posts. */
+function renderData(c: Context<App>) {
+	return settingsPage(
+		c,
+		"Your data · Settings",
+		<section
+			id="your-data"
+			aria-labelledby="your-data-title"
+			class="lg:max-w-3xl"
+		>
+			<SubpageHead title="Your data" titleId="your-data-title" />
+			<p class="mt-1 text-muted">
+				Everything Tally has stored, to keep or open elsewhere. Bank logins are
+				never included.
+			</p>
+			<div class="mt-4 flex flex-col items-start gap-3">
+				<Button kind="secondary" href="/settings/export/transactions.csv">
+					Download transactions (CSV)
+				</Button>
+				<Button kind="secondary" href="/settings/export/tally.json">
+					Download everything (JSON)
+				</Button>
+			</div>
+		</section>,
+	);
+}
+
+/** The page a section draws, with the view its request needs. Each save answers with the page it lives on. */
+function renderPage(c: Context<App>, page: Page, view: View = {}) {
+	switch (page) {
+		case "categories":
+			return renderCategories(c, view);
+		case "rules":
+			return renderRules(c, view);
+		case "household":
+			return renderHousehold(c, view);
+		case "people":
+			return renderPeople(c, view);
+		case "ai":
+			return renderAi(c, view);
+		case "data":
+			return renderData(c);
+	}
 }
 
 /** Settings' rules, with the Always search kept in the address (a Remove without script returns here). */
 function rulesAddress(search: string): string {
-	return `/settings${search ? `?rules_search=${encodeURIComponent(search)}` : ""}#merchant-rules`;
+	return `/settings/rules${search ? `?rules_search=${encodeURIComponent(search)}` : ""}`;
 }
-
 settings.post("/settings/merchant-rules/remove", async (c) => {
 	const form = await c.req.formData();
 	const merchantKey = String(form.get("merchant") ?? "");
@@ -569,7 +679,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 		const message = "Choose a merchant to remove.";
 		if (c.req.header("HX-Request"))
 			c.header("HX-Trigger", hxTrigger({ announce: message }));
-		return renderSettings(c, {
+		return renderPage(c, "rules", {
 			rulesSearch: search,
 			merchantRuleError: message,
 			status: 400,
@@ -586,7 +696,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 				"HX-Trigger",
 				hxTrigger({ announce: "Merchant rules list updated." }),
 			);
-		return renderSettings(c, view);
+		return renderPage(c, "rules", view);
 	}
 	const message = `Removed the Always rule for ${removed}`;
 	if (c.req.header("HX-Request")) {
@@ -597,7 +707,7 @@ settings.post("/settings/merchant-rules/remove", async (c) => {
 				announce: `Removed ${removed}. ${Math.max(0, before.total - 1)} merchant${before.total === 2 ? "" : "s"} left.`,
 			}),
 		);
-		return renderSettings(c, {
+		return renderPage(c, "rules", {
 			...view,
 			...ruleFocus(focusRules.rules, merchantKey),
 		});
@@ -627,7 +737,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 			"HX-Trigger",
 			hxTrigger({ announce: "Tally's rules list updated." }),
 		);
-		return renderSettings(c, {
+		return renderPage(c, "rules", {
 			rulesSearch: search,
 			focusNever: lines.length === 0 ? { heading: true } : { index: 0 },
 		});
@@ -647,7 +757,7 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 		const above = lines
 			.slice(0, Math.max(index, 0))
 			.filter((line) => keep.has(line.id)).length;
-		return renderSettings(c, {
+		return renderPage(c, "rules", {
 			rulesSearch: search,
 			focusNever:
 				after.length === 0
@@ -679,8 +789,9 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		actor(c as Context<App> & { env: Env & { DEMO: string } }),
 	);
 	if (!result.ok) {
-		const current = await renderSettings(
+		const current = await renderPage(
 			c,
+			"categories",
 			result.reason === "gone"
 				? {
 						listError:
@@ -709,14 +820,14 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 			: `Created ${result.name} with ${transactions}`;
 	const left = leftOutSentence(result.leftOut.length);
 	return done(c, message, `${message}.${left ? ` ${left}` : ""}`, {
-		hash: "categories",
+		page: "categories",
 	});
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const result = await dismissSuggestion(c.env.DB, Number(c.req.param("id")));
 	if (!result)
-		return renderSettings(c, {
+		return renderPage(c, "categories", {
 			listError:
 				"That suggestion was changed somewhere else. Here's the current list.",
 			status: 404,
@@ -725,24 +836,19 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 		c,
 		`Dismissed ${result.name}`,
 		`Dismissed ${result.name}. Tally won't suggest it again.`,
-		{ hash: "categories" },
+		{ page: "categories" },
 	);
 });
 
-/** After a change: htmx gets the updated section with a toast and announcement; plain browsers go back to Settings. */
-function done(
-	c: Context<App>,
-	toast: string,
-	announce: string,
-	view: View = {},
-) {
+/** After a change: htmx gets the page the change lives on, with a toast and announcement; a plain browser goes there. */
+function done(c: Context<App>, toast: string, announce: string, view: Done) {
 	if (!c.req.header("HX-Request"))
-		return c.redirect(`/settings${view.hash ? `#${view.hash}` : ""}`, 303);
+		return c.redirect(`/settings/${view.page}`, 303);
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ toast: { message: toast, type: "success" }, announce }),
 	);
-	return renderSettings(c, view);
+	return renderPage(c, view.page, view);
 }
 
 /** The form again, open, with what was typed and why it wasn't saved. */
@@ -752,7 +858,7 @@ function retry(
 	form: FormData,
 	errors: CategoryErrors,
 ) {
-	return renderSettings(c, {
+	return renderPage(c, "categories", {
 		open,
 		values: { name: String(form.get("name") ?? "") },
 		errors,
@@ -769,7 +875,7 @@ const nameTaken = (error: unknown) =>
  * current list comes back with a message, so the section is never swapped for a bare 404.
  */
 const gone = (c: Context<App>) =>
-	renderSettings(c, {
+	renderPage(c, "categories", {
 		listError:
 			"That category was changed somewhere else. Here's the current list.",
 		status: 404,
@@ -781,19 +887,32 @@ async function find(c: Context<App>) {
 	return { all, category: all.find((x) => x.id === idOf(c)) };
 }
 
-// More → Settings (spec §8): the household's categories. Budgets are set on Home (decision 38).
-// ?open=<id> opens that category's row, so a row can be linked to (and screenshotted).
-// ?focus=<id> puts focus on that row after Cancel; ?focus=zone does the same for the Time zone row.
-settings.get("/settings", (c) => {
-	const id = (key: string) => {
-		const n = Number(c.req.query(key));
-		return Number.isInteger(n) && n > 0 ? n : undefined;
-	};
-	return renderSettings(c, {
-		open: id("open"),
-		focus: c.req.query("focus") === "zone" ? "zone" : id("focus"),
-	});
-});
+// More → Settings (spec §8): the contents page, then one page for each section (decision 120). Budgets are set on
+// Home (decision 38). Categories: ?open=<id> opens that category's row, so a row can be linked to (and screenshotted);
+// ?focus=<id> puts focus on that row after Cancel. Household: ?focus=zone focuses the Time zone row. People:
+// ?peopleFocus=1 focuses the page's title after Cancel.
+const numberParam = (c: Context<App>, key: string) => {
+	const n = Number(c.req.query(key));
+	return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+settings.get("/settings", (c) => renderContents(c));
+settings.get("/settings/categories", (c) =>
+	renderCategories(c, {
+		open: numberParam(c, "open"),
+		focus: numberParam(c, "focus"),
+	}),
+);
+settings.get("/settings/rules", (c) => renderRules(c));
+settings.get("/settings/household", (c) =>
+	renderHousehold(c, {
+		focus: c.req.query("focus") === "zone" ? "zone" : undefined,
+	}),
+);
+settings.get("/settings/people", (c) =>
+	renderPeople(c, { peopleFocus: c.req.query("peopleFocus") === "1" }),
+);
+settings.get("/settings/ai", (c) => renderAi(c));
+settings.get("/settings/data", (c) => renderData(c));
 
 settings.get("/settings/export/transactions.csv", async (c) => {
 	c.header("Content-Type", "text/csv; charset=utf-8");
@@ -828,8 +947,11 @@ settings.post("/settings/ai", async (c) => {
 	) as Partial<AiSwitches>;
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
+	const before = await readAiSwitches(c.env.DB);
 	await saveAiSwitches(c.env.DB, next);
 	const now = await readAiSwitches(c.env.DB);
+	// The switch that was flipped keeps focus after the save (#606).
+	const flipped = AI_FEATURES.find((f) => before[f.key] !== now[f.key])?.key;
 	const waitingAfter = (await suggestionQueue(c.env.DB, now)).length;
 	const states = AI_FEATURES.map(
 		(f) => `${f.spoken} ${now[f.key] ? "on" : "off"}`,
@@ -846,7 +968,7 @@ settings.post("/settings/ai", async (c) => {
 		c,
 		"Saved AI suggestions",
 		`Saved AI suggestions. ${spoken}.${band}`,
-		{ aiSaved: true, hash: "ai-suggestions" },
+		{ page: "ai", aiFocus: flipped },
 	);
 });
 
@@ -862,8 +984,8 @@ settings.post("/settings/bank-sign-in-emails", async (c) => {
 		"Saved bank sign-in emails",
 		`Bank sign-in emails ${on ? "On" : "Off"}.`,
 		{
-			hash: "household",
-			focus: "bank-sign-in-email-save",
+			page: "household",
+			focus: "bank-sign-in-email-switch",
 			bankSignInEmailsOpen: true,
 		},
 	);
@@ -891,7 +1013,7 @@ async function removeBankSignInEmail(c: Context<App>, posted: string) {
 		"Removed address",
 		"Removed this sign-in address from bank sign-in emails.",
 		{
-			hash: "household",
+			page: "household",
 			focus: focusEmail
 				? "bank-sign-in-email-remove"
 				: "bank-sign-in-email-summary",
@@ -911,7 +1033,7 @@ function bankSignInEmailError(
 		hxTrigger({ toast: { message, type: "error" }, announce: message }),
 	);
 	// The Remove that was pressed is gone from the swap, so the addresses stay open and focus goes to their summary.
-	return renderSettings(c, {
+	return renderPage(c, "household", {
 		bankSignInEmailError: message,
 		status,
 		bankSignInEmailsOpen: true,
@@ -921,7 +1043,7 @@ function bankSignInEmailError(
 
 /** Which control of the bank sign-in emails block takes focus after a swap, from the page's focus. */
 function bankSignInEmailFocus(focus: View["focus"]) {
-	if (focus === "bank-sign-in-email-save") return "save";
+	if (focus === "bank-sign-in-email-switch") return "switch";
 	if (focus === "bank-sign-in-email-summary") return "summary";
 	if (focus === "bank-sign-in-email-remove") return "remove";
 	return undefined;
@@ -954,11 +1076,11 @@ settings.post("/settings/people", async (c) => {
 			c,
 			`Removed ${person.name}`,
 			`Removed ${person.name}. ${count} ${count === 1 ? "purchase" : "purchases"} for ${person.name} now say no one.`,
-			{ hash: "household", peopleAddOpen: true, peopleFocus: true },
+			{ page: "people", peopleAddOpen: true, peopleFocus: true },
 		);
 	}
 	if (!name || name.length > 40)
-		return renderSettings(c, {
+		return renderPage(c, "people", {
 			peopleOpen: action === "rename" ? id : undefined,
 			peopleErrorPersonId: action === "rename" ? id : undefined,
 			peopleAddOpen: action !== "rename",
@@ -977,7 +1099,7 @@ settings.post("/settings/people", async (c) => {
 			added = result.meta.last_row_id;
 		} catch (error) {
 			if (nameTaken(error))
-				return renderSettings(c, {
+				return renderPage(c, "people", {
 					peopleAddOpen: true,
 					peopleError: "That name is already in your household.",
 					peopleValue: nameValue,
@@ -986,7 +1108,7 @@ settings.post("/settings/people", async (c) => {
 			throw error;
 		}
 		return done(c, `Added ${name}`, `Added ${name} to your household.`, {
-			hash: "household",
+			page: "people",
 			peopleAddOpen: true,
 			peopleFocus: true,
 			saved: { kind: "person", id: added },
@@ -1002,7 +1124,7 @@ settings.post("/settings/people", async (c) => {
 			if (!result.meta.changes) return c.notFound();
 		} catch (error) {
 			if (nameTaken(error))
-				return renderSettings(c, {
+				return renderPage(c, "people", {
 					peopleOpen: id,
 					peopleErrorPersonId: id,
 					peopleError: "That name is already in your household.",
@@ -1012,7 +1134,7 @@ settings.post("/settings/people", async (c) => {
 			throw error;
 		}
 		return done(c, `Renamed to ${name}`, `Renamed this person to ${name}.`, {
-			hash: "household",
+			page: "people",
 			peopleOpen: id,
 			peopleFocus: true,
 			saved: { kind: "person", id },
@@ -1026,7 +1148,7 @@ settings.post("/settings/people", async (c) => {
 settings.post("/settings/time-zone", async (c) => {
 	const parsed = parseTimeZone(await c.req.formData());
 	if (!parsed.ok)
-		return renderSettings(c, { zoneError: parsed.error, status: 422 });
+		return renderPage(c, "household", { zoneError: parsed.error, status: 422 });
 	await saveTimeZone(c.env.DB, parsed.zone);
 	const today = todayIn(parsed.zone);
 	// The month is the one thing in Settings that follows the zone (each category's amount is the
@@ -1039,10 +1161,9 @@ settings.post("/settings/time-zone", async (c) => {
 		`Saved time zone. Months and bills now follow ${zoneLabel(parsed.zone)} time.`,
 		{
 			focus: "zone",
-			hash: "household",
+			page: "household",
 			today,
 			timeZone: parsed.zone,
-			budgetsOob: true,
 			saved: { kind: "zone" },
 		},
 	);
@@ -1066,7 +1187,7 @@ settings.post("/settings/categories", async (c) => {
 		c,
 		`Added ${parsed.value.name}`,
 		`Added ${parsed.value.name}. Set its budget on Home.`,
-		{ focus: id, saved: { kind: "category", id } },
+		{ page: "categories", focus: id, saved: { kind: "category", id } },
 	);
 });
 
@@ -1085,6 +1206,7 @@ settings.post("/settings/categories/:id{[0-9]+}", async (c) => {
 	}
 	// A rename marks its own row (P119 A, #71); Archive and Move take the row out of its place, so they mark nothing.
 	return done(c, `Saved ${parsed.value.name}`, `Saved ${parsed.value.name}.`, {
+		page: "categories",
 		focus: category.id,
 		saved: { kind: "category", id: category.id },
 	});
@@ -1104,7 +1226,7 @@ settings.post("/settings/categories/:id{[0-9]+}/archive", async (c) => {
 		`Archived ${category.name}`,
 		`Archived ${category.name}. Its transactions keep their category.`,
 		// Its row is gone, so focus goes to the Archived list it moved to.
-		{ focus: "archived" },
+		{ page: "categories", focus: "archived" },
 	);
 });
 
@@ -1112,7 +1234,8 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 	const { all, category } = await find(c);
 	if (!category?.archived) return gone(c);
 	const problem = restoreProblem(all);
-	if (problem) return renderSettings(c, { restoreError: problem, status: 422 });
+	if (problem)
+		return renderPage(c, "categories", { restoreError: problem, status: 422 });
 	if (
 		!(await setArchived(
 			c.env.DB,
@@ -1124,12 +1247,13 @@ settings.post("/settings/categories/:id{[0-9]+}/restore", async (c) => {
 		// Someone restored it a moment earlier, or the list filled up.
 		const now = (await find(c)).category;
 		if (!now?.archived) return gone(c);
-		return renderSettings(c, {
+		return renderPage(c, "categories", {
 			restoreError: fullMessage("restore"),
 			status: 422,
 		});
 	}
 	return done(c, `Restored ${category.name}`, `Restored ${category.name}.`, {
+		page: "categories",
 		focus: category.id,
 	});
 });
@@ -1151,7 +1275,13 @@ settings.post(
 			`Moved ${category.name}`,
 			`Moved ${category.name} ${direction}. It's now ${position} of ${active.length}.`,
 			// Stay open, so the same button can be pressed again.
-			{ open: category.id, focus: category.id, today, timeZone },
+			{
+				page: "categories",
+				open: category.id,
+				focus: category.id,
+				today,
+				timeZone,
+			},
 		);
 	},
 );
