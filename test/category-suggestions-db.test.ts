@@ -13,6 +13,7 @@ import {
 	saveSuggestion,
 } from "../src/db/category-suggestions";
 import { addNeverSuggest } from "../src/db/never-suggest";
+import { newCategoryItem } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -747,6 +748,115 @@ describe("pendingSuggestions: what Settings shows", () => {
 		expect(result).toHaveLength(10);
 		expect(result.more).toBe(40);
 		expect(statements).toBe(4);
+	});
+});
+
+/** The database, with every row a query returns recorded in `seen`, so a test can see what was loaded. */
+function recordingDb(seen: Record<string, unknown>[]): D1Database {
+	const wrap = (statement: D1PreparedStatement) => ({
+		raw: statement,
+		bind: (...values: unknown[]) => wrap(statement.bind(...values)),
+		all: async () => {
+			const result = await statement.all();
+			seen.push(...(result.results as Record<string, unknown>[]));
+			return result;
+		},
+	});
+	return {
+		prepare: (sql: string) => wrap(db.prepare(sql)),
+		batch: (statements: { raw: D1PreparedStatement }[]) =>
+			db.batch(statements.map((statement) => statement.raw)),
+	} as unknown as D1Database;
+}
+
+describe("newCategoryItem: the one suggestion Organize's card asks about", () => {
+	const PET_HOTEL = "Pet Hotel";
+	const hotelRow = (rawName: string): Over => ({
+		rawName,
+		merchantName: PET_HOTEL,
+	});
+	/** A pending suggestion with its own purchases, made directly: saveSuggestion needs three eligible charges. */
+	async function suggestionWith(name: string, purchases: Over[]) {
+		const id = (
+			await db
+				.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
+				)
+				.bind(name)
+				.first<{ id: number }>()
+		)?.id as number;
+		const purchaseIds: number[] = [];
+		for (const over of purchases)
+			purchaseIds.push(await add({ ...over, suggestionId: id }));
+		return { id, purchaseIds };
+	}
+	/** Fifty other waiting suggestions of three purchases each, so a load of every suggestion would read all of them. */
+	async function fiftyOthers() {
+		for (let i = 0; i < 50; i++)
+			await suggestionWith(
+				`Group ${i}`,
+				["A", "B", "C"].map((letter) => ({ rawName: `GROUP ${i} ${letter}` })),
+			);
+	}
+
+	it("returns the suggestion that holds a purchase from the merchant, with every purchase it holds", async () => {
+		await fiftyOthers();
+		const hotel = await suggestionWith("Hotel", [
+			hotelRow("PET HOTEL 1"),
+			hotelRow("PET HOTEL 2"),
+		]);
+		const item = await newCategoryItem(db, { merchantKeys: [PET_HOTEL] });
+		expect(item?.suggestionId).toBe(hotel.id);
+		expect(
+			item?.rows.map((row) => row.transactionId).sort((a, b) => a - b),
+		).toEqual(hotel.purchaseIds);
+	});
+
+	it("finds nothing for a merchant no waiting suggestion holds, and the suggestion by its id", async () => {
+		const hotel = await suggestionWith("Hotel", [
+			hotelRow("PET HOTEL 1"),
+			hotelRow("PET HOTEL 2"),
+		]);
+		expect(
+			await newCategoryItem(db, { merchantKeys: ["NOBODY"] }),
+		).toBeUndefined();
+		expect((await newCategoryItem(db, { id: hotel.id }))?.rows).toHaveLength(2);
+	});
+
+	it("loads only the suggestion's own purchases, never the other suggestions' rows", async () => {
+		await fiftyOthers();
+		const hotel = await suggestionWith("Hotel", [
+			hotelRow("PET HOTEL 1"),
+			hotelRow("PET HOTEL 2"),
+		]);
+		const seen: Record<string, unknown>[] = [];
+		await newCategoryItem(recordingDb(seen), { merchantKeys: [PET_HOTEL] });
+		// Purchase rows are the ones a query returns with a transaction id: transactionId, or merchantKey's id.
+		const read = seen.flatMap((row) =>
+			"transactionId" in row
+				? [row.transactionId as number]
+				: "merchantKey" in row
+					? [row.id as number]
+					: [],
+		);
+		expect(read.length).toBeGreaterThan(0);
+		for (const id of read) expect(hotel.purchaseIds).toContain(id);
+	});
+
+	it("picks the suggestion with more purchases when two hold one from the merchant, counting all of each one's purchases", async () => {
+		await suggestionWith("Hotel", [
+			hotelRow("PET HOTEL 1"),
+			hotelRow("PET HOTEL 2"),
+		]);
+		// One purchase from the merchant, two from another: three purchases in all, so it ranks first.
+		const lodging = await suggestionWith("Lodging", [
+			hotelRow("PET HOTEL 3"),
+			{ rawName: "VET ONE", merchantName: "Vet One" },
+			{ rawName: "VET TWO", merchantName: "Vet Two" },
+		]);
+		const item = await newCategoryItem(db, { merchantKeys: [PET_HOTEL] });
+		expect(item?.suggestionId).toBe(lodging.id);
+		expect(item?.rows).toHaveLength(3);
 	});
 });
 

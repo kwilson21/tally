@@ -3514,7 +3514,7 @@ function Rows() {
 					<div class="max-w-xl" inert>
 						<OrganizeNewCategoryCard
 							name={CATEGORY_SUGGESTION.name}
-							others={2}
+							others={3}
 							action="/transactions/organize/suggestion"
 							suggestionId={CATEGORY_SUGGESTION.id}
 							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
@@ -3525,7 +3525,7 @@ function Rows() {
 					<div class="max-w-xl" inert>
 						<OrganizeNewCategoryCard
 							name={CATEGORY_SUGGESTION.name}
-							others={2}
+							others={3}
 							action="/transactions/organize/suggestion"
 							suggestionId={CATEGORY_SUGGESTION.id}
 							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}

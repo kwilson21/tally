@@ -194,6 +194,12 @@ describe("OrganizeNewCategoryCard: the short form above Organize's chips", () =>
 		);
 	});
 
+	it("shares Organize's request queue, so every submit button on the page is disabled while one Create or Save runs", () => {
+		const html = String(<OrganizeNewCategoryCard {...ORGANIZE} />);
+		expect(html).toContain('hx-sync="#organize-page:drop"');
+		expect(html).toContain('hx-disable="#organize-page button[type=submit]"');
+	});
+
 	it("has no No and no Dismiss", () => {
 		const html = String(<OrganizeNewCategoryCard {...ORGANIZE} />);
 		expect(html).not.toContain(">No<");

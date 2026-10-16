@@ -464,6 +464,47 @@ describe("Organize: the card above the chips", () => {
 		expect(html).not.toContain("Tally suggested a new category");
 	});
 
+	it("queues the card's Create and Organize's Save on one request queue, so a second submit is dropped", async () => {
+		const { html } = await get("/transactions/organize");
+		const forms = [
+			...html.matchAll(/<form\b[^>]*hx-post="[^"]+"[^>]*>[\s\S]*?<\/form>/g),
+		].map((match) => match[0]);
+		expect(forms).toHaveLength(2);
+		for (const form of forms) {
+			expect(form).toContain('hx-sync="#organize-page:drop"');
+			expect(form).toContain('hx-disable="#organize-page button[type=submit]"');
+		}
+	});
+
+	it("draws the card for Chewy, the first on screen, with many other waiting suggestions behind it", async () => {
+		// Each other suggestion is one charge from a merchant whose name sorts after Chewy and Petsmart, so Chewy stays first.
+		for (let i = 1; i <= 50; i++) {
+			const id = (
+				await env.DB.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
+				)
+					.bind(`Zed ${i}`)
+					.first<{ id: number }>()
+			)?.id as number;
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
+			)
+				.bind(
+					`${THIS}-09`,
+					`ZED ${i}`,
+					`Zeta ${String(i).padStart(2, "0")}`,
+					id,
+				)
+				.run();
+		}
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain('name="group" value="Chewy"');
+		expect(html).toContain(
+			"Tally suggested a new category for this and 1 more: Pet Care",
+		);
+		expect(html).toContain(`name="suggestion" value="${suggestion}"`);
+	});
+
 	it("keeps Organize's Save form: the group, the category and the name", async () => {
 		const { html } = await get("/transactions/organize");
 		expect(html).toContain('action="/transactions/organize"');
@@ -553,6 +594,18 @@ const fields = (...shown: number[]): [string, string][] => [
 
 const CHANGED =
 	"That suggestion was changed somewhere else. Here's the current list.";
+/** The changed words under Organize's heading, as they are drawn without a card for the suggestion (decision 120). */
+const CHANGED_LINE = `<p role="alert" class="mt-3 text-sm text-over">${CHANGED.replace("'", "&#39;")}</p>`;
+
+/** Costco has two charges, so its group sorts first: the one on screen, with no card for it. */
+async function costcoFirst() {
+	for (const day of ["01", "03"])
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit) VALUES (1, ?, 9000, 'COSTCO WHSE', 'Costco', 1)",
+		)
+			.bind(`${THIS}-${day}`)
+			.run();
+}
 
 describe("Organize: Create files only the purchases the card showed", () => {
 	it("the card carries one hidden shown for each purchase it counts", async () => {
@@ -642,6 +695,8 @@ describe("Organize: Create files only the purchases the card showed", () => {
 		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
 			'<p role="alert" class="text-sm text-over">That suggestion was changed somewhere else. Here&#39;s the current list.</p>',
 		);
+		// The words sit in the card, once: not again under Organize's heading.
+		expect(html).not.toContain('class="mt-3 text-sm text-over"');
 		expect(
 			await count(
 				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
@@ -652,6 +707,74 @@ describe("Organize: Create files only the purchases the card showed", () => {
 				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
 			),
 		).toBe(2);
+	});
+});
+
+describe("Organize without JavaScript: a changed answer says so on the page", () => {
+	it("says it changed under Organize's heading when another tab filed its purchases during Create, and files nothing", async () => {
+		await env.DB.prepare(
+			"CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = NEW.id; END",
+		).run();
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy, petsmart),
+			false,
+		).finally(() => env.DB.prepare("DROP TRIGGER file_during_create").run());
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(html).toContain(CHANGED_LINE);
+		expect(html).not.toContain("Tally suggested a new category");
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
+	});
+
+	it("says it changed when Create comes for a suggestion already answered, and draws no card", async () => {
+		await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy, petsmart),
+			false,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(html).toContain(CHANGED_LINE);
+		expect(html).not.toContain("Tally suggested a new category");
+	});
+
+	it("says it changed under the heading when no card is drawn for the purchases it showed", async () => {
+		await costcoFirst();
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy),
+			false,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(html).toContain('name="group" value="Costco"');
+		expect(html).toContain(CHANGED_LINE);
+		expect(html).not.toContain("Tally suggested a new category");
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
+			),
+		).toBe(2);
+	});
+
+	it("says it changed when the suggestion is gone, without JavaScript", async () => {
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			[
+				["suggestion", "999999"],
+				["shown", String(chewy)],
+			],
+			false,
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		expect(html).toContain(CHANGED_LINE);
 	});
 });
 
@@ -697,6 +820,20 @@ describe("Organize: a refused Create shows its reason in the card", () => {
 				`SELECT COUNT(*) AS n FROM transactions WHERE id IN (${chewy}, ${petsmart}) AND category_id IS NULL`,
 			),
 		).toBe(2);
+	});
+
+	it("without JavaScript, shows the reason under Organize's heading when no card is drawn for it", async () => {
+		await costcoFirst();
+		const { res, html } = await post(
+			"/transactions/organize/suggestion",
+			fields(chewy, petsmart),
+			false,
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain(
+			`<p role="alert" class="mt-3 text-sm text-over">${FULL}</p>`,
+		);
+		expect(html).not.toContain("Tally suggested a new category");
 	});
 
 	it("with JavaScript, answers 422 with the same reason in the card, and no toast", async () => {

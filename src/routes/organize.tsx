@@ -6,7 +6,7 @@ import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { createFromSuggestion } from "../db/category-suggestions";
 import {
 	type NewCategorySuggestion,
-	newCategoryItems,
+	newCategoryItem,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
@@ -56,16 +56,6 @@ type Trigger = {
 
 export const organize = new Hono<App>();
 
-/** The waiting new-category suggestion that holds a purchase from this merchant, if there is one (decision 120). */
-function waitingSuggestion(
-	queue: NewCategorySuggestion[],
-	merchantKeys: string[],
-): NewCategorySuggestion | undefined {
-	return queue.find((item) =>
-		item.stores.some((store) => merchantKeys.includes(store.merchantKey)),
-	);
-}
-
 /** The suggestion's other merchants, each counted once: its stores outside this group, by the name each shows (decision 120). */
 function otherMerchants(
 	suggestion: NewCategorySuggestion,
@@ -90,14 +80,16 @@ async function renderOrganize(
 	 * joins the announcement when the list ends on it. Without it, the caller's own header stands.
 	 */
 	trigger?: Trigger,
-	/** The card's own reason, when its Create was refused or the suggestion changed (decision 120). */
-	cardError?: string,
+	/**
+	 * A refused Create's reason, or the words that the suggestion changed (decision 120), with the suggestion they answer. They
+	 * sit in its card when that card is drawn, and under Organize's heading when it isn't.
+	 */
+	cardError?: { suggestionId: number; message: string },
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
-	const [allGroups, queue, categories] = await Promise.all([
+	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
-		newCategoryItems(c.env.DB),
 		c.env.DB.prepare(
 			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		).all<Category>(),
@@ -110,7 +102,13 @@ async function renderOrganize(
 	const group =
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
-	const waiting = group && waitingSuggestion(queue, group.merchantKeys);
+	// The one waiting suggestion that holds a purchase from this merchant (decision 120), read only when its card is drawn.
+	const waiting =
+		!rule && group
+			? await newCategoryItem(c.env.DB, { merchantKeys: group.merchantKeys })
+			: undefined;
+	// The changed or refused words sit in the card when that suggestion's card is drawn, and under the heading when it isn't.
+	const inCard = !!waiting && cardError?.suggestionId === waiting.suggestionId;
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
 	const doneSentence =
 		allGroups.length > 0
@@ -155,6 +153,11 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
+				{cardError && !inCard && (
+					<p role="alert" class="mt-3 text-sm text-over">
+						{cardError.message}
+					</p>
+				)}
 				{rule ? (
 					<GroupRuleOffer value={rule} action={ruleAction} focus />
 				) : group ? (
@@ -189,7 +192,7 @@ async function renderOrganize(
 									action={`/transactions/organize/suggestion${query.size ? `?${query}` : ""}`}
 									suggestionId={waiting.suggestionId}
 									shown={waiting.rows.map((row) => row.transactionId)}
-									error={cardError}
+									error={inCard ? cardError?.message : undefined}
 								/>
 							</div>
 						)}
@@ -197,7 +200,8 @@ async function renderOrganize(
 							method="post"
 							action={action}
 							hx-post={action}
-							hx-disable="findAll button[type=submit]"
+							hx-disable="#organize-page button[type=submit]"
+							hx-sync="#organize-page:drop"
 							hx-target="#organize-page"
 							hx-select="#organize-page"
 							hx-swap="outerHTML"
@@ -324,28 +328,42 @@ organize.get("/transactions/organize", async (c) => {
  * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase the card showed
  * ticked and filed. Create files only what the card showed (`shown`): when the suggestion's purchases no longer match
  * them, it files nothing and says the suggestion changed. Organize stays where it is: its list is drawn again with the
- * next merchant, with a toast that says what was made, and a refused Create shows its reason in the card.
+ * next merchant. With JavaScript the words are a toast, and a refused Create's reason shows in the card; without it, the
+ * same words are drawn on the page, in the card or under Organize's heading when no card for the suggestion is drawn.
  */
 organize.post("/transactions/organize/suggestion", async (c) => {
 	const form = await c.req.formData();
 	const suggestionId = Number(form.get("suggestion"));
 	const url = new URL(c.req.url);
 	const next = `/transactions/organize${url.search}`;
-	const item = (await newCategoryItems(c.env.DB)).find(
-		(candidate) => candidate.suggestionId === suggestionId,
-	);
-	const answered = (message: string) => {
-		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
-		c.header(
-			"HX-Trigger",
-			hxTrigger({ toast: { message, type: "info" }, announce: message }),
-		);
-		return renderOrganize(c, undefined, 200, true);
+	const item =
+		Number.isInteger(suggestionId) && suggestionId > 0
+			? await newCategoryItem(c.env.DB, { id: suggestionId })
+			: undefined;
+	// The suggestion changed: a toast with JavaScript, or Organize drawn with the words without it.
+	const changed = () => {
+		if (c.req.header("HX-Request")) {
+			c.header(
+				"HX-Trigger",
+				hxTrigger({
+					toast: { message: CHANGED_SUGGESTION, type: "info" },
+					announce: CHANGED_SUGGESTION,
+				}),
+			);
+			return renderOrganize(c, undefined, 200, true);
+		}
+		return renderOrganize(c, undefined, 200, true, undefined, undefined, {
+			suggestionId,
+			message: CHANGED_SUGGESTION,
+		});
 	};
-	// The card's own reason, drawn on the page: a refused Create, or the changed words without JavaScript.
-	const onCard = (status: 200 | 422, message: string) =>
-		renderOrganize(c, undefined, status, true, undefined, undefined, message);
-	if (!item) return answered(CHANGED_SUGGESTION);
+	// A refused Create's reason, drawn on the page for either kind of request.
+	const refused = (message: string) =>
+		renderOrganize(c, undefined, 422, true, undefined, undefined, {
+			suggestionId,
+			message,
+		});
+	if (!item) return changed();
 	const ids = item.rows.map((row) => row.transactionId);
 	const shown = new Set(
 		form
@@ -353,10 +371,8 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 			.map(Number)
 			.filter((n) => Number.isInteger(n) && n > 0),
 	);
-	if (shown.size !== ids.length || !ids.every((id) => shown.has(id))) {
-		if (!c.req.header("HX-Request")) return onCard(200, CHANGED_SUGGESTION);
-		return answered(CHANGED_SUGGESTION);
-	}
+	if (shown.size !== ids.length || !ids.every((id) => shown.has(id)))
+		return changed();
 	const result = await createFromSuggestion(
 		c.env.DB,
 		suggestionId,
@@ -365,9 +381,8 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	);
 	// Organize ticks every purchase the card showed, so "empty" means another tab filed them: the same answer as "gone".
 	if (!result.ok) {
-		if (result.reason === "gone" || result.reason === "empty")
-			return answered(CHANGED_SUGGESTION);
-		return onCard(422, result.error ?? "That category couldn't be made.");
+		if (result.reason === "gone" || result.reason === "empty") return changed();
+		return refused(result.error ?? "That category couldn't be made.");
 	}
 	await askAgainLeftOut(
 		c.env as Env & { JEV_API_KEY?: string },

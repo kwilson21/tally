@@ -8,7 +8,11 @@ import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
-import { pendingSuggestions, suggestedRowSql } from "./category-suggestions";
+import {
+	pendingSuggestions,
+	type SuggestionFilter,
+	suggestedRowSql,
+} from "./category-suggestions";
 import { jevAsksAboutSql, paysBillOrPlanSql } from "./counted-month";
 import {
 	incomeGuessSql,
@@ -312,9 +316,15 @@ async function categorySuggestions(
  */
 async function newCategorySuggestions(
 	db: D1Database,
+	only?: SuggestionFilter,
 ): Promise<{ item: NewCategorySuggestion; order: number }[]> {
-	// Every pending suggestion, not only the ten Settings lists: the count covers every kind (decision 101).
-	const suggestions = await pendingSuggestions(db, Number.MAX_SAFE_INTEGER);
+	// Every pending suggestion, not only the ten Settings lists: the count covers every kind (decision 101). Organize's
+	// card asks for the one suggestion it shows, so that load reads one.
+	const suggestions = await pendingSuggestions(
+		db,
+		only ? 1 : Number.MAX_SAFE_INTEGER,
+		only,
+	);
 	if (suggestions.length === 0) return [];
 	// The same check Settings makes for its "Add to" or "Restore" button: a category with the name, as sameName reads it.
 	const categories = await categoryNames(db);
@@ -458,12 +468,14 @@ export async function suggestionQueue(
 }
 
 /**
- * The waiting new-category suggestions, each with its purchases, for a screen that shows one card of them (decision
- * 120): Organize's card, which follows Settings' rule. Like Settings' card, it is not gated by Guess categories, so a
- * suggestion waits until it is answered whatever that switch says; the Suggestions page's queue (suggestionQueue) is gated by it.
+ * The one waiting new-category suggestion Organize's card asks about, with its purchases (decision 120): the one holding
+ * a purchase from these merchant keys, or the one with this id. It follows Settings' rule. Like Settings' card, it is not
+ * gated by Guess categories, so a suggestion waits until it is answered whatever that switch says; the Suggestions page's
+ * queue (suggestionQueue) is gated by it.
  */
-export async function newCategoryItems(
+export async function newCategoryItem(
 	db: D1Database,
-): Promise<NewCategorySuggestion[]> {
-	return (await newCategorySuggestions(db)).map(({ item }) => item);
+	only: SuggestionFilter,
+): Promise<NewCategorySuggestion | undefined> {
+	return (await newCategorySuggestions(db, only))[0]?.item;
 }

@@ -178,7 +178,8 @@ export function OrganizeNewCategoryCard({
 			method="post"
 			action={action}
 			hx-post={action}
-			hx-disable="findAll button[type=submit]"
+			hx-disable="#organize-page button[type=submit]"
+			hx-sync="#organize-page:drop"
 			hx-target="#organize-page"
 			hx-select="#organize-page"
 			hx-swap="outerHTML"
