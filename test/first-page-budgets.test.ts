@@ -10,6 +10,7 @@ import {
 } from "../src/dates";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { type BudgetAsk, bankLine } from "../src/first-tally/budgets";
 import { readMonthSummary } from "../src/month-summary";
 import { firstPage } from "../src/routes/first-page";
 import { safeToSpendText } from "../src/views/home-top";
@@ -89,6 +90,14 @@ const textOf = (html: string) =>
 		.replaceAll("&quot;", '"')
 		.replaceAll("&amp;", "&")
 		.replace(/\s+/g, " ");
+
+/** Each form on the page as its markup. Forms don't nest, so each one's markup ends at its own closing tag. */
+const formsOf = (html: string) =>
+	[...html.matchAll(/<form\b[\s\S]*?<\/form>/g)].map(([form]) => form);
+
+/** A form's default button: the first submit button inside it, which Enter in one of its fields presses. */
+const defaultButtonOf = (form: string) =>
+	/<button\b(?=[^>]*\btype="submit")[^>]*>/.exec(form)?.[0] ?? "";
 
 /** The heading that takes focus (its autofocus), or null when none does. */
 const focusedHeading = (html: string) =>
@@ -371,6 +380,19 @@ describe("the budgets question, keep all or one at a time", () => {
 		expect((await readFirstTally(db))?.budgets[String(B)]).toBeUndefined();
 	});
 
+	it("keeps Enter in the amount field on Another amount: its form's default button is Save, and the Yes form holds no amount", async () => {
+		const { html } = await get("/first-page?budgets=one");
+		const forms = formsOf(html);
+		const amountForm = forms.find((form) => form.includes('name="budget"'));
+		expect(amountForm).toBeDefined();
+		expect(defaultButtonOf(amountForm ?? "")).toContain('value="another"');
+		const yesForm = forms.find((form) => form.includes('value="yes"'));
+		expect(yesForm).toBeDefined();
+		expect(yesForm).not.toContain('name="budget"');
+		expect(defaultButtonOf(yesForm ?? "")).toContain('value="yes"');
+		expect(forms.some((form) => form.includes('value="skip"'))).toBe(true);
+	});
+
 	it("keeps no change when the suggestion moved since the page drew, and asks it again", async () => {
 		const res = await post("/first-page/budgets", [
 			["category", String(A)],
@@ -439,6 +461,23 @@ describe("categories the step does not ask", () => {
 		expect(html).toMatch(/name="budget"[^>]*value=""/);
 		expect(textOf(html)).toContain("Save this budget");
 		expect(textOf(html)).not.toContain("Yes, $");
+	});
+
+	it("a category with no history: its blank amount's form has Save as its default button, and Skip is a form of its own", async () => {
+		await post("/first-page/budgets", [
+			["category", String(A)],
+			["answer", "skip"],
+		]);
+		await post("/first-page/budgets", [
+			["category", String(B)],
+			["answer", "skip"],
+		]);
+		const { html } = await get("/first-page?budgets=one");
+		const forms = formsOf(html);
+		const amountForm = forms.find((form) => form.includes('name="budget"'));
+		expect(defaultButtonOf(amountForm ?? "")).toContain('value="another"');
+		expect(amountForm).not.toContain('value="skip"');
+		expect(forms.find((form) => form.includes('value="skip"'))).toBeDefined();
 	});
 
 	it("asks, with a blank amount and no suggestion, a category whose rounded average is over the largest budget", async () => {
@@ -577,6 +616,24 @@ describe("the needs-a-category line", () => {
 	it("draws no line when nothing needs a category", async () => {
 		const { html } = await get("/first-page?budgets=one");
 		expect(textOf(html)).not.toContain("Needs a category ·");
+	});
+});
+
+describe("the bank line's months", () => {
+	it("joins three months with commas, and 'and' before the last, as the keep all line's list does", () => {
+		const ask: BudgetAsk = {
+			id: 1,
+			name: "Groceries",
+			months: [
+				{ month: "2026-08", spentCents: 61000 },
+				{ month: "2026-09", spentCents: 67400 },
+				{ month: "2026-10", spentCents: 70000 },
+			],
+			suggestion: null,
+		};
+		expect(bankLine(ask)).toBe(
+			"Your bank shows Groceries spent $610 in August, $674 in September and $700 in October.",
+		);
 	});
 });
 

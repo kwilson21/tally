@@ -202,15 +202,6 @@ export function keepBudgetStatement(
 		.bind(KEY, String(categoryId), JSON.stringify(answer));
 }
 
-/** Keeps the budgets step's answer for a category; keepBudgetStatement has the write. */
-export async function keepBudgetAnswer(
-	db: D1Database,
-	categoryId: number,
-	answer: BudgetAnswer,
-): Promise<void> {
-	await keepBudgetStatement(db, categoryId, answer).run();
-}
-
 /** Keeps the counts of the first night, once its sorting has all finished. */
 export async function keepNightCounts(
 	db: D1Database,

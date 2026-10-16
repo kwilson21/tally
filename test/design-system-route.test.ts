@@ -228,6 +228,19 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("shows the budgets question with Another amount opened and no error, its field holding the suggestion (#590)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the next state's (the page's "done" section closes before the question).
+		const section =
+			html
+				.split('id="first-page-budgets-amount"')[1]
+				?.split('id="first-page-budgets-error"')[0] ?? "";
+		expect(section).toMatch(/<details[^>]*\sopen\b/);
+		expect(section).toContain("Save this budget");
+		expect(section).toContain('value="650.00"');
+		expect(section).not.toContain('role="alert"');
+	});
+
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
 		const { html } = await get("/design-system");
 		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";

@@ -7486,6 +7486,26 @@ function FirstWeekGroup() {
 						focus={false}
 					/>
 				</State>
+				<State label="Another amount, opened: the field holds Tally's suggestion, and Save this budget keeps it as typed">
+					<FirstPageBody
+						id="first-page-budgets-amount"
+						model={page({
+							drawn: 3,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								month: "2026-10",
+								asks: [FIRST_WEEK_GROCERIES],
+								keepAllOpen: false,
+								needs: null,
+							},
+						})}
+						focus={false}
+						budgetAmountOpen
+					/>
+				</State>
 				<State label="Another amount, refused: the field keeps what was typed, with its error under it, and takes focus">
 					{/* The field takes focus when it's refused, so the sample is a picture here, inert like Picture's. */}
 					<div inert>

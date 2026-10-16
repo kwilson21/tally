@@ -41,11 +41,15 @@ export function keepShownBudgets(
 	return current.filter((ask) => shown.has(shownBudgetValue(ask)));
 }
 
+/** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
+function andList(items: string[]): string {
+	if (items.length <= 1) return items[0] ?? "";
+	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 /** The months as a sentence's list: "August and September", "July, August and September". */
 export function monthList(months: MonthSpent[]): string {
-	const names = months.map((month) => monthName(month.month.slice(0, 7)));
-	if (names.length <= 1) return names[0] ?? "";
-	return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+	return andList(months.map((month) => monthName(month.month.slice(0, 7))));
 }
 
 /**
@@ -56,13 +60,11 @@ export function bankLine(ask: BudgetAsk): string {
 	const spent = ask.months.some((month) => month.spentCents !== 0);
 	if (!spent)
 		return `${ask.name} has no spending yet. Set a monthly budget, or skip it.`;
-	const parts = ask.months
-		.map(
-			(month) =>
-				`${dollarsWords(month.spentCents)} in ${monthName(month.month.slice(0, 7))}`,
-		)
-		.join(" and ");
-	return `Your bank shows ${ask.name} spent ${parts}.`;
+	const parts = ask.months.map(
+		(month) =>
+			`${dollarsWords(month.spentCents)} in ${monthName(month.month.slice(0, 7))}`,
+	);
+	return `Your bank shows ${ask.name} spent ${andList(parts)}.`;
 }
 
 /** The question for one category: "Make $650 a month your Groceries budget?", or "Do you want a Groceries budget?" with no suggestion. */

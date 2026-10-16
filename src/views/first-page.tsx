@@ -345,6 +345,15 @@ function NeedsCategory({
 	);
 }
 
+/** The attributes of a budgets form: each posts an answer to the budgets step and swaps the page, as the other questions do. */
+const budgetForm = {
+	method: "post",
+	action: "/first-page/budgets",
+	"hx-post": "/first-page/budgets",
+	"hx-target": "#first-page",
+	"hx-swap": "outerHTML",
+} as const;
+
 /**
  * The keep all question (spec §8.8, #590): the suggestions as a list (the first five; the rest folded), the total in the
  * question, the one tap "Keep all N", and a quiet "One at a time" that asks each category in turn.
@@ -396,13 +405,7 @@ function KeepAllBudgets({
 			>
 				{keepAllHeading(asks.length, total)}
 			</h2>
-			<form
-				method="post"
-				action="/first-page/budgets"
-				hx-post="/first-page/budgets"
-				hx-target="#first-page"
-				hx-swap="outerHTML"
-			>
+			<form {...budgetForm}>
 				{asks.map((ask) => (
 					<input type="hidden" name="keep" value={shownBudgetValue(ask)} />
 				))}
@@ -429,6 +432,9 @@ function KeepAllBudgets({
  * One category's question, one at a time (spec §8.8, #590): what the bank shows it spent, its suggestion in a dashed tag
  * and the question, "Yes, $650" and Another amount (the real MoneyInput, opened in place), or, with no suggestion, the
  * blank MoneyInput; then a quiet Skip this one. A refused amount keeps the question with its error in the field.
+ * Each answer is a form of its own, so Enter in the amount field presses only its Save: a form's default button is its
+ * first submit button, and the Yes form has no amount in it (#590). `amountOpen` draws Another amount open, as a
+ * refused amount does, for the catalog's picture.
  */
 function OneBudget({
 	ask,
@@ -436,12 +442,14 @@ function OneBudget({
 	needs,
 	focus,
 	error,
+	amountOpen,
 }: {
 	ask: BudgetAsk;
 	month: string;
 	needs: { count: number; meanCents: number | null } | null;
 	focus: boolean;
 	error: BudgetError | null;
+	amountOpen: boolean;
 }) {
 	const suggestion = ask.suggestion;
 	const typed =
@@ -455,6 +463,9 @@ function OneBudget({
 			error={error?.text}
 			autofocus={error !== null}
 		/>
+	);
+	const category = (
+		<input type="hidden" name="category" value={String(ask.id)} />
 	);
 	return (
 		<section>
@@ -477,32 +488,27 @@ function OneBudget({
 			{suggestion && (
 				<p class="mt-2 text-sm text-muted">{suggestionNote(month)}</p>
 			)}
-			<form
-				method="post"
-				action="/first-page/budgets"
-				hx-post="/first-page/budgets"
-				hx-target="#first-page"
-				hx-swap="outerHTML"
-			>
-				<input type="hidden" name="category" value={String(ask.id)} />
-				{suggestion && (
-					<input
-						type="hidden"
-						name="shown"
-						value={String(suggestion.amountCents)}
-					/>
-				)}
-				{suggestion ? (
-					<>
+			{suggestion ? (
+				<>
+					<form {...budgetForm}>
+						{category}
+						<input
+							type="hidden"
+							name="shown"
+							value={String(suggestion.amountCents)}
+						/>
 						<div class="mt-4">
 							<Button type="submit" name="answer" value="yes" class="w-full">
 								{yesLabel(suggestion.amountCents)}
 							</Button>
 						</div>
-						<details class="mt-3" open={error !== null}>
-							<summary class="inline-flex min-h-11 cursor-pointer items-center text-ink">
-								Another amount
-							</summary>
+					</form>
+					<details class="mt-3" open={error !== null || amountOpen}>
+						<summary class="inline-flex min-h-11 cursor-pointer items-center text-ink">
+							Another amount
+						</summary>
+						<form {...budgetForm}>
+							{category}
 							<div class="mt-3">{amount}</div>
 							<div class="mt-3">
 								<Button
@@ -514,23 +520,22 @@ function OneBudget({
 									Save this budget
 								</Button>
 							</div>
-						</details>
-					</>
-				) : (
-					<>
-						<div class="mt-4">{amount}</div>
-						<div class="mt-3">
-							<Button
-								type="submit"
-								name="answer"
-								value="another"
-								class="w-full"
-							>
-								Save this budget
-							</Button>
-						</div>
-					</>
-				)}
+						</form>
+					</details>
+				</>
+			) : (
+				<form {...budgetForm}>
+					{category}
+					<div class="mt-4">{amount}</div>
+					<div class="mt-3">
+						<Button type="submit" name="answer" value="another" class="w-full">
+							Save this budget
+						</Button>
+					</div>
+				</form>
+			)}
+			<form {...budgetForm}>
+				{category}
 				<div class="mt-1">
 					<Button kind="text" type="submit" name="answer" value="skip">
 						Skip this one
@@ -550,10 +555,13 @@ export function BudgetsQuestion({
 	step,
 	focus,
 	error,
+	amountOpen = false,
 }: {
 	step: Extract<BudgetsStep, { done: false }>;
 	focus: boolean;
 	error: BudgetError | null;
+	/** Another amount drawn open with no error: the catalog's picture of it (a page opens it on a refused amount). */
+	amountOpen?: boolean;
 }) {
 	if (step.keepAllOpen)
 		return (
@@ -572,6 +580,7 @@ export function BudgetsQuestion({
 			needs={step.needs}
 			focus={focus}
 			error={error}
+			amountOpen={amountOpen}
 		/>
 	);
 }
@@ -616,6 +625,7 @@ export function FirstPageBody({
 	motion = NO_MOTION,
 	id = "first-page",
 	budgetError = null,
+	budgetAmountOpen = false,
 }: {
 	model: FirstPageModel;
 	focus: boolean;
@@ -625,6 +635,8 @@ export function FirstPageBody({
 	id?: string;
 	/** A refused "another amount" in the budgets question: its words and what was typed, so the field keeps it. */
 	budgetError?: BudgetError | null;
+	/** Another amount drawn open with no error, for the catalog's picture of it (the page never sends this). */
+	budgetAmountOpen?: boolean;
 }) {
 	const billsAnswered = model.ledger.some((line) => line.id === "bills");
 	const budgets = model.budgets;
@@ -668,6 +680,7 @@ export function FirstPageBody({
 									step={budgets}
 									focus={focus}
 									error={budgetError ?? null}
+									amountOpen={budgetAmountOpen}
 								/>
 							))}
 					</>
