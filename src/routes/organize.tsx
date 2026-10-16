@@ -1,7 +1,10 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { addressOf } from "../address";
+import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import { createFromSuggestion } from "../db/category-suggestions";
+import { type SuggestionItem, suggestionQueue } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -23,6 +26,7 @@ import {
 	NewCategoryName,
 } from "../views/new-category-choice";
 import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
+import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
 
 type App = { Bindings: Env };
@@ -47,6 +51,18 @@ type Trigger = {
 
 export const organize = new Hono<App>();
 
+/** The waiting new-category suggestion that holds a purchase from this merchant, if there is one (decision 120). */
+function waitingSuggestion(
+	queue: SuggestionItem[],
+	merchantKeys: string[],
+): Extract<SuggestionItem, { kind: "new_category" }> | undefined {
+	return queue.find(
+		(item): item is Extract<SuggestionItem, { kind: "new_category" }> =>
+			item.kind === "new_category" &&
+			item.stores.some((store) => merchantKeys.includes(store.merchantKey)),
+	);
+}
+
 async function renderOrganize(
 	c: Context<App>,
 	values?: Values,
@@ -62,8 +78,9 @@ async function renderOrganize(
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
-	const [allGroups, categories] = await Promise.all([
+	const [allGroups, queue, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
+		suggestionQueue(c.env.DB),
 		c.env.DB.prepare(
 			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		).all<Category>(),
@@ -76,6 +93,7 @@ async function renderOrganize(
 	const group =
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
+	const waiting = group && waitingSuggestion(queue, group.merchantKeys);
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
 	const doneSentence =
 		allGroups.length > 0
@@ -143,6 +161,23 @@ async function renderOrganize(
 							</p>
 							<p class="mt-1 text-sm text-muted">From {sources}</p>
 						</div>
+						{/* Tally's guess for this merchant sits above the chips (decision 120): its Create files the suggestion's purchases. */}
+						{waiting && (
+							<div class="mt-5">
+								<OrganizeNewCategoryCard
+									name={waiting.name}
+									existing={waiting.existing ?? undefined}
+									archived={waiting.archived}
+									others={
+										waiting.rows.filter(
+											(row) => !group.merchantKeys.includes(row.merchantKey),
+										).length
+									}
+									action={`/transactions/organize/suggestion${query.size ? `?${query}` : ""}`}
+									suggestionId={waiting.suggestionId}
+								/>
+							</div>
+						)}
 						<form
 							method="post"
 							action={action}
@@ -156,6 +191,8 @@ async function renderOrganize(
 						>
 							<input type="hidden" name="group" value={group.name} />
 							<fieldset
+								id="organize-category"
+								tabindex={-1}
 								class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
 								aria-describedby={
 									values?.categoryError ? "category-error" : undefined
@@ -266,6 +303,60 @@ organize.get("/transactions/organize", async (c) => {
 	return offer
 		? renderOrganize(c, undefined, 200, true, offer)
 		: renderOrganize(c);
+});
+
+/**
+ * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase of the suggestion
+ * ticked. Organize stays where it is: its list is drawn again with the next merchant, with a toast that says what was made.
+ */
+organize.post("/transactions/organize/suggestion", async (c) => {
+	const form = await c.req.formData();
+	const suggestionId = Number(form.get("suggestion"));
+	const url = new URL(c.req.url);
+	const next = `/transactions/organize${url.search}`;
+	const queue = await suggestionQueue(c.env.DB);
+	const item = queue.find(
+		(candidate) =>
+			candidate.kind === "new_category" &&
+			candidate.suggestionId === suggestionId,
+	);
+	const answered = (message: string) => {
+		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
+		);
+		return renderOrganize(c, undefined, 200, true);
+	};
+	if (item?.kind !== "new_category")
+		return answered("That one was already answered.");
+	const ids = item.rows.map((row) => row.transactionId);
+	const result = await createFromSuggestion(
+		c.env.DB,
+		suggestionId,
+		{ ticked: ids, shown: ids, notes: {} },
+		actor(c),
+	);
+	if (!result.ok)
+		return answered(result.error ?? "That category couldn't be made.");
+	await askAgainLeftOut(
+		c.env as Env & { JEV_API_KEY?: string },
+		result.leftOut,
+		(work) => c.executionCtx.waitUntil(work),
+	);
+	const count = result.moved;
+	const transactions = `${count} ${count === 1 ? "transaction" : "transactions"}`;
+	const message = result.restored
+		? `Restored ${result.name} with ${transactions}`
+		: result.attached
+			? `Added ${transactions} to ${result.name}`
+			: `Created ${result.name} with ${transactions}`;
+	const left = leftOutSentence(result.leftOut.length);
+	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	return renderOrganize(c, undefined, 200, true, undefined, {
+		toast: { message, type: "success" },
+		announce: `${message}.${left ? ` ${left}` : ""}`,
+	});
 });
 
 organize.post("/transactions/organize", async (c) => {

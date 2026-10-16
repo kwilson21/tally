@@ -61,6 +61,7 @@ type Values = {
 	picked?: string | null;
 	own?: string;
 	ticked?: number[];
+	notes?: Record<number, string>;
 };
 
 export const suggestions = new Hono<App>();
@@ -123,6 +124,47 @@ async function storeLabels(
 		.all<{ key: string; name: string }>();
 	for (const row of results) labels.set(row.key, row.name);
 	return labels;
+}
+
+/**
+ * Yes on a question (decision 101): writes one "Never suggest" line for each store the question asked about, and only
+ * while it is still that question, so a No that changed under it writes nothing (#440). Returns the stores' labels, or
+ * null when no line was written. Settings' categories asks the same question after its No (decision 120).
+ */
+export async function writeNeverSuggest(
+	db: D1Database,
+	input: {
+		kind: NeverSuggestKind;
+		/** The item's number: the suggestion's, for a new category. */
+		id: number;
+		stores: string[];
+		today: string;
+	},
+): Promise<string | null> {
+	const { results } = await db
+		.prepare(
+			`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
+			SELECT q.key, ?2, ?3 FROM (${neverSuggestAskedSql(input.kind)}) q
+			WHERE q.key IN (SELECT value FROM json_each(?4)) RETURNING merchant_key`,
+		)
+		.bind(input.id, input.kind, input.today, JSON.stringify(input.stores))
+		.all<{ merchant_key: string }>();
+	const written = new Set(results.map((row) => row.merchant_key));
+	const known = input.stores.filter((store) => written.has(store));
+	if (known.length === 0) return null;
+	return joinStores([...(await storeLabels(db, known)).values()]);
+}
+
+/** The toast's and announcement's words once a question's Yes has written its lines (decision 101). */
+export function neverSuggestedMessage(
+	kind: NeverSuggestKind,
+	labels: string,
+): string {
+	return kind === "income"
+		? `Got it. Tally won't suggest income for ${labels} again. Change it in Settings.`
+		: kind === "transfer"
+			? `Got it. Tally won't suggest a transfer for ${labels} again. Change it in Settings.`
+			: `Got it. Tally won't suggest a new category for ${labels} again. Change it in Settings.`;
 }
 
 /** The screen as it is now, with the item to show, and the Band count's words. */
@@ -378,27 +420,16 @@ suggestions.post(PATH, async (c) => {
 		const found = /^(income|transfer|new)-(\d+)$/.exec(id);
 		if (!found || (found[1] === "new" ? "new_category" : found[1]) !== kind)
 			return stale();
-		const { results } = await db
-			.prepare(
-				`INSERT OR IGNORE INTO never_suggest_rules (merchant_key, kind, decided_on)
-				SELECT q.key, ?2, ?3 FROM (${neverSuggestAskedSql(kind as NeverSuggestKind)}) q
-				WHERE q.key IN (SELECT value FROM json_each(?4)) RETURNING merchant_key`,
-			)
-			.bind(Number(found[2]), kind, today, JSON.stringify(stores))
-			.all<{ merchant_key: string }>();
-		const written = new Set(results.map((row) => row.merchant_key));
-		const known = stores.filter((store) => written.has(store));
-		if (known.length === 0) return stale();
+		const labels = await writeNeverSuggest(db, {
+			kind: kind as NeverSuggestKind,
+			id: Number(found[2]),
+			stores,
+			today,
+		});
+		if (labels === null) return stale();
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
-		const labels = joinStores([...(await storeLabels(db, known)).values()]);
-		const message =
-			kind === "income"
-				? `Got it. Tally won't suggest income for ${labels} again. Change it in Settings.`
-				: kind === "transfer"
-					? `Got it. Tally won't suggest a transfer for ${labels} again. Change it in Settings.`
-					: `Got it. Tally won't suggest a new category for ${labels} again. Change it in Settings.`;
-		return done(message, after);
+		return done(neverSuggestedMessage(kind as NeverSuggestKind, labels), after);
 	}
 
 	const item = queue.find((candidate) => candidate.id === id);
@@ -528,19 +559,23 @@ suggestions.post(PATH, async (c) => {
 					.getAll("ticked")
 					.map((value) => Number(value.toString()))
 					.filter((n) => Number.isInteger(n) && asked.has(n));
+				// The note under an unticked purchase is kept with the answer, as Settings keeps it (decision 120).
+				const notes = Object.fromEntries(
+					shown.map((tx) => [tx, String(form.get(`note_${tx}`) ?? "")]),
+				);
 				const result = await createFromSuggestion(
 					db,
 					item.suggestionId,
-					{ ticked, shown, notes: {} },
+					{ ticked, shown, notes },
 					who,
 				);
 				if (!result.ok) {
 					if (result.reason === "gone") return stale();
 					return renderScreen(c, {
-						values: { id, ticked },
+						values: { id, ticked, notes },
 						error:
 							result.error ??
-							"Tick at least one transaction, or dismiss this suggestion.",
+							"Tick at least one transaction, or say No to this suggestion.",
 						status: 422,
 						focus: true,
 					});

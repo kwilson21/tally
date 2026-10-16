@@ -895,7 +895,7 @@ describe("createFromSuggestion", () => {
 		).toEqual({
 			ok: false,
 			reason: "invalid",
-			error: "Tick at least one transaction, or dismiss this suggestion.",
+			error: "Tick at least one transaction, or say No to this suggestion.",
 		});
 		expect(await categories()).toHaveLength(had);
 		expect(await suggestion(id)).toMatchObject({ status: "pending" });
@@ -1172,7 +1172,7 @@ describe("createFromSuggestion", () => {
 			expect(result).toEqual({
 				ok: false,
 				reason: "invalid",
-				error: "Tick at least one transaction, or dismiss this suggestion.",
+				error: "Tick at least one transaction, or say No to this suggestion.",
 			});
 			expect(
 				(await categories()).find((c) => c.id === archived)?.archived,

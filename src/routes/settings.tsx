@@ -21,6 +21,7 @@ import {
 import {
 	createFromSuggestion,
 	dismissSuggestion,
+	type PendingSuggestion,
 	pendingSuggestions,
 } from "../db/category-suggestions";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
@@ -59,7 +60,6 @@ import {
 	summaryClass,
 	swap,
 } from "../views/category-row";
-import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { EmptyState } from "../views/empty-state";
 import { HouseholdPeople } from "../views/household-people";
 import { Layout } from "../views/layout";
@@ -72,8 +72,11 @@ import {
 	SubpageHead,
 	settingsPlaces,
 } from "../views/settings-pages";
+import { NewCategoryCard } from "../views/suggestion-card";
+import { AskFirst } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { TimeZoneRow } from "../views/time-zone-row";
+import { neverSuggestedMessage, writeNeverSuggest } from "./suggestions";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -142,6 +145,15 @@ type View = {
 		id: number;
 		ticked: number[];
 		notes: Record<number, string>;
+	};
+	/** The question after a No on a suggested category, drawn in its card's place (decisions 101, 120). */
+	ask?: {
+		/** The suggestion's number: the question's answer posts to its dismiss address. */
+		suggestionId: number;
+		/** The question's id: "new-" and the suggestion's number. */
+		id: string;
+		name: string;
+		stores: { merchantKey: string; label: string }[];
 	};
 	status?: 200 | 400 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
@@ -377,6 +389,71 @@ async function renderContents(c: Context<App>) {
 	);
 }
 
+/**
+ * A suggested new category on Settings' categories (decision 120): the one card the Suggestions page draws too. Create
+ * files the ticked purchases; No retires the suggestion and asks decision 101's question in the card's place.
+ */
+function CategorySuggestion({
+	suggestion,
+	today,
+	existing,
+	archived,
+	error,
+	ticked,
+	notes,
+}: {
+	suggestion: PendingSuggestion;
+	today: string;
+	/** The family's category with this name, when it has one: the Create button adds to it, or restores it. */
+	existing?: string;
+	archived?: boolean;
+	error?: string;
+	ticked?: number[];
+	notes?: Record<number, string>;
+}) {
+	const address = `/settings/suggestions/${suggestion.id}`;
+	return (
+		<div class="mt-3">
+			<NewCategoryCard
+				name={suggestion.name}
+				rows={suggestion.rows.map((row) => ({
+					id: row.id,
+					name: row.displayName,
+					amountCents: row.amountCents,
+					date: row.date,
+				}))}
+				today={today}
+				tickName="ids"
+				ticked={ticked}
+				notes={notes}
+				existing={existing}
+				archived={archived}
+				error={error}
+				form={{
+					method: "post",
+					action: `${address}/create`,
+					"data-suggestion": String(suggestion.id),
+					"hx-post": `${address}/create`,
+					"hx-target": "#categories",
+					"hx-select": "#categories",
+					"hx-swap": "outerHTML",
+				}}
+				answers={{
+					create: { type: "submit", name: "action", value: "create" },
+					no: {
+						type: "submit",
+						formaction: `${address}/dismiss`,
+						"hx-post": `${address}/dismiss`,
+						"hx-target": "#categories",
+						"hx-select": "#categories",
+						"hx-swap": "outerHTML",
+					},
+				}}
+			/>
+		</div>
+	);
+}
+
 /** Categories (#85, #195): the list with its rows, suggestions waiting, Add category and Archived. */
 async function renderCategories(c: Context<App>, view: View = {}) {
 	const db = c.env.DB;
@@ -434,7 +511,8 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 						sameName(cat.name, tidyName(suggestion.name)),
 					);
 					return (
-						<CategorySuggestionCard
+						<CategorySuggestion
+							today={today}
 							suggestion={suggestion}
 							existing={named?.name}
 							archived={named !== undefined && archived.includes(named)}
@@ -456,6 +534,20 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 						/>
 					);
 				})}
+				{/* The question after a No, in the card's place (decision 101): its Yes and Not now post to the same address. */}
+				{view.ask && (
+					<div class="mt-3">
+						<AskFirst
+							action={`/settings/suggestions/${view.ask.suggestionId}/dismiss`}
+							target="#categories"
+							kind="new_category"
+							id={view.ask.id}
+							name={view.ask.name}
+							stores={view.ask.stores}
+							focus
+						/>
+					</div>
+				)}
 				{categorySuggestions.more > 0 && (
 					<p class="py-2 text-sm text-muted">
 						{categorySuggestions.more} more suggestions will show once you
@@ -835,8 +927,73 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 	});
 });
 
+/**
+ * The question after a No, answered where it was asked (decision 101): Yes writes one "Never suggest" line for each
+ * store it asked about, and Not now writes none. The answer must still be this suggestion's question, or nothing is written.
+ */
+async function answerQuestion(c: Context<App>, id: number, form: FormData) {
+	const answer = form.get("answer")?.toString() ?? "";
+	// Each store once, however often the form repeats it (#440).
+	const stores = [
+		...new Set(
+			form
+				.getAll("store")
+				.map((store) => store.toString())
+				.filter((store) => store.length > 0 && store.length <= 500),
+		),
+	];
+	const stale = () =>
+		renderPage(c, "categories", {
+			listError:
+				"That suggestion was changed somewhere else. Here's the current list.",
+			status: 404,
+		});
+	if (
+		form.get("id")?.toString() !== `new-${id}` ||
+		form.get("kind")?.toString() !== "new_category" ||
+		stores.length === 0
+	)
+		return stale();
+	if (answer === "ask_not_now")
+		return done(c, "Kept it as it is.", "Kept it as it is.", {
+			page: "categories",
+		});
+	if (answer !== "ask_yes") return stale();
+	const labels = await writeNeverSuggest(c.env.DB, {
+		kind: "new_category",
+		id,
+		stores,
+		today: await householdToday(c.env.DB),
+	});
+	if (labels === null) return stale();
+	const message = neverSuggestedMessage("new_category", labels);
+	return done(c, message, message, { page: "categories" });
+}
+
 settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
-	const result = await dismissSuggestion(c.env.DB, Number(c.req.param("id")));
+	const db = c.env.DB;
+	const id = Number(c.req.param("id"));
+	const form = await c.req.formData();
+	// The question's own answer, posted from the question drawn in the card's place (decision 101).
+	if (form.get("answer")) return answerQuestion(c, id, form);
+	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
+	const item = (await suggestionQueue(db)).find(
+		(candidate) =>
+			candidate.kind === "new_category" && candidate.suggestionId === id,
+	);
+	const result = await dismissSuggestion(db, id);
+	if (result && item?.kind === "new_category")
+		return renderPage(c, "categories", {
+			ask: {
+				suggestionId: id,
+				id: item.id,
+				name: item.name,
+				stores: item.stores.map((store) => ({
+					merchantKey: store.merchantKey,
+					label: store.merchant,
+				})),
+			},
+		});
 	if (!result)
 		return renderPage(c, "categories", {
 			listError:

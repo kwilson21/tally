@@ -299,7 +299,7 @@ export async function createFromSuggestion(
 		return {
 			ok: false,
 			reason: "invalid",
-			error: "Tick at least one transaction, or dismiss this suggestion.",
+			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	if (Object.values(input.notes).some((note) => note.length > 500))
 		return {
@@ -470,7 +470,7 @@ export async function createFromSuggestion(
 		return {
 			ok: false,
 			reason: "invalid",
-			error: "Tick at least one transaction, or dismiss this suggestion.",
+			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	}
 	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
