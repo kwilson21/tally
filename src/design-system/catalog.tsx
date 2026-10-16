@@ -41,6 +41,7 @@ import { BudgetSheet } from "../views/budget-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { CategoryGrid } from "../views/category-grid";
 import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
@@ -1582,7 +1583,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
 			>
 				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
@@ -1600,11 +1601,18 @@ function Rows() {
 						sure={72}
 						transactionId={2}
 					/>
-					<div class="flex flex-col items-start gap-1">
-						<Chip type="checkbox" name="income" value="1" dashed>
-							Count as income
-						</Chip>
-						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+					<div class="flex w-full max-w-xl flex-col gap-1">
+						<Switch
+							id="ds-income-guess"
+							name="ds-income-guess"
+							value="1"
+							label="Count as income"
+							describedBy="ds-income-guess-line"
+						/>
+						<p
+							id="ds-income-guess-line"
+							class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
+						>
 							Tally's guess · 71% sure
 							<WhyLink section="categorization" topic="income" />
 						</p>
@@ -3538,6 +3546,26 @@ const DUE_ROW_SPEC: UseSpecText = {
 		"On a narrow phone the sentence wraps between pickers, never inside one. Hidden pickers still post, and the server reads only the chosen frequency's. It uses no JavaScript, so nothing changes without it.",
 	words:
 		"“Due on the”, ordinal days (1st, 22nd), weekdays as plurals (Fridays), “every month”, “every week”, “every two weeks”, “every quarter”, “every year”, “starting in”, “in”.",
+};
+
+// The category grid's use spec (P120 B, #498): every line answered before the owner signs it off.
+const CATEGORY_GRID_SPEC: UseSpecText = {
+	purpose:
+		"Let a person pick one category from all of them at once, in two even columns, so the choices scan in one pass. The edit panel and Organize's Set category sheet show the same grid.",
+	affordance:
+		"Each choice is a pill with its category's icon and name. The chosen one is ink-ringed and checked. The columns are equal, so the choices form two straight columns rather than a ragged row.",
+	states:
+		"Rest: every choice unchecked. Checked: one choice, ink with its check. Tally's guess: a dashed pill with “· Suggested” in muted words, the grid's first cell, unchecked until a person chooses it. New category: terracotta words with a plus, always last in the edit panel and never in Organize's sheet; choosing it opens the name field under the grid. Focus: the focus-visible ring on the focused pill. Disabled: inside a disabled fieldset (a linked refund's locked category) every pill fades to 40% with a not-allowed cursor. Loading, done and error: not applicable; the form's Save carries them.",
+	feedback:
+		"A chosen pill checks at once. New category opens its name field. Nothing is saved until the panel's or the sheet's Save, and that save's toast and announcement say what was set.",
+	input:
+		"Touch: every pill is 44px or more. Keyboard: Tab reaches the group, the arrow keys move between the choices and Space checks one, since the pills are one radio group. Screen reader: the group is named by its legend, Category; each pill reads its category's name, then checked or not checked.",
+	motion:
+		"None of its own. A check and the name field's opening take the confirmation and rising tokens, and reduced motion shows the end state at once.",
+	edges:
+		"Five, twelve or fifty categories (decision 37): the grid stays two columns and grows downward. A long name wraps inside its column and never widens it. With no JavaScript every choice works, since the grid is plain radios; the name field shows wherever the browser can't tell when New category is chosen.",
+	words:
+		"Each choice is the category's own name. The last choice is exactly “New category”. The group's legend is “Category”. A guess reads “{name} · Suggested”, and its line under the legend reads “Tally's guess · 72% sure”.",
 };
 
 const FOLDED_ROW_SPEC: UseSpecText = {
@@ -6022,6 +6050,21 @@ const LEDGER_CATEGORIES = LEDGER_CATEGORY_NAMES.map((name, i) => ({
 }));
 const LEDGER_EATING_OUT = LEDGER_CATEGORIES[1] ?? LEDGER_CATEGORIES[0];
 const LEDGER_GROCERIES = LEDGER_CATEGORIES[0];
+/** Six categories with ids, for the category grid and the edit panel's category row (P120 B). */
+const GRID_CATEGORIES = LEDGER_CATEGORIES.slice(0, 6).map((c, i) => ({
+	...c,
+	id: i + 1,
+}));
+/** Tally picked Groceries for Trader Joe's (92% sure): the folded category row shows that. */
+const PICKED_GROCERIES = (
+	<>
+		<CategoryIcon
+			icon={GRID_CATEGORIES[0]?.icon ?? "tag"}
+			color={GRID_CATEGORIES[0]?.color ?? "cat-blue"}
+		/>
+		<span class="truncate text-lg">{GRID_CATEGORIES[0]?.name}</span>
+	</>
+);
 const LEDGER_BANK_TEXT = "CITY WATER AUTOPAY 0093 REF";
 
 /** A category as a row shows it: its icon and name, so the row says what's chosen. */
@@ -6202,7 +6245,178 @@ function LedgerForm() {
 						/>
 					</FoldedRow>
 				</State>
+				<State label="Closed, a category Tally picked: its source under the name, and the choice at the right (P120 B's category row)">
+					<FoldedRow
+						label="Category"
+						sub="Picked by Tally · 92% sure"
+						value={PICKED_GROCERIES}
+					>
+						<CategoryGrid
+							name="ds-folded-picked"
+							categories={GRID_CATEGORIES}
+							checkedId={1}
+							tallyId={1}
+							newCategory
+						/>
+					</FoldedRow>
+				</State>
+				<State label="Open in place, with the grid and the rule row (tap Category to fold it again)">
+					<FoldedRow
+						label="Category"
+						sub="Picked by Tally · 92% sure"
+						value={PICKED_GROCERIES}
+						open
+					>
+						<CategoryGrid
+							name="ds-folded-open"
+							categories={GRID_CATEGORIES}
+							checkedId={1}
+							tallyId={1}
+							newCategory
+						/>
+					</FoldedRow>
+				</State>
 				<UseSpec spec={FOLDED_ROW_SPEC} />
+			</Specimen>
+			<Specimen
+				id="category-grid"
+				title="CategoryGrid"
+				tier="interactive"
+				components={["CategoryGrid"]}
+				sentence="The category choices in two equal columns, New category last, shared by the edit panel and Organize's Set category sheet (P120 B, #498)."
+			>
+				<State label="Open, for a transaction that needs a category: two columns, New category last">
+					<CategoryGrid
+						name="ds-grid-open"
+						categories={GRID_CATEGORIES}
+						newCategory
+					/>
+				</State>
+				<State label="With Tally's guess as the first cell, and Groceries chosen (tap one: it checks here)">
+					<CategoryGrid
+						name="ds-grid-guess"
+						categories={GRID_CATEGORIES}
+						checkedId={1}
+						newCategory
+						leading={
+							<SuggestedCategoryChip
+								name="Pet Care"
+								value="3"
+								sure={72}
+								transactionId={2}
+							/>
+						}
+					/>
+				</State>
+				<State label="Organize's Set category sheet: no New category, and the first choice is required">
+					<CategoryGrid
+						name="ds-grid-organize"
+						categories={GRID_CATEGORIES}
+						required
+					/>
+				</State>
+				<UseSpec spec={CATEGORY_GRID_SPEC} />
+			</Specimen>
+			<Specimen
+				id="edit-panel-category"
+				title="Edit panel: the category leads"
+				tier="visual"
+				components={["CategoryGrid", "FoldedRow", "MerchantRuleTick", "Switch"]}
+				sentence="The edit panel's head and category, both B states (P120 B, decision 111): the name is the one headline, the category leads, and a category Tally needs is open while one Tally picked folds to a row that opens in place. Exclude and Count as income are switches."
+			>
+				<State label="Local Bakery needs a category: open, New category last, the rule row after the choices">
+					<div class="flex max-w-xl flex-col gap-4">
+						<div class="flex flex-col gap-1">
+							<h3 class="font-serif text-3xl font-semibold tracking-tight">
+								Local Bakery
+							</h3>
+							<p class="text-muted">
+								<span class="text-lg font-semibold text-ink">
+									{formatCents(1200)}
+								</span>{" "}
+								· Today · Credit card ••9012
+							</p>
+							<p class="text-sm text-muted">SQ *LOCAL BAKERY 4432</p>
+						</div>
+						<fieldset class="group/category flex flex-col gap-2">
+							<legend class="text-base text-ink">Category</legend>
+							<p class="text-sm text-muted">Tally's guess · 62% sure</p>
+							<CategoryGrid
+								name="ds-panel-open"
+								categories={GRID_CATEGORIES}
+								newCategory
+							/>
+						</fieldset>
+						<MerchantRuleTick
+							id="ds-panel-open-rule"
+							merchant="Local Bakery"
+							checked={false}
+						/>
+						<Switch
+							id="ds-panel-open-exclude"
+							name="ds-panel-open-exclude"
+							value="1"
+							label="Exclude from budget"
+							hint="It won't count in Spent or any budget."
+						/>
+					</div>
+				</State>
+				<State label="Trader Joe's, picked by Tally: its category is one row, closed (tap it to open)">
+					<div class="flex max-w-xl flex-col gap-4">
+						<div class="flex flex-col gap-1">
+							<h3 class="font-serif text-3xl font-semibold tracking-tight">
+								Trader Joe's
+							</h3>
+							<p class="text-muted">
+								<span class="text-lg font-semibold text-ink">
+									{formatCents(6410)}
+								</span>{" "}
+								· Today · Credit card ••9012
+							</p>
+						</div>
+						<FoldedRow
+							label="Category"
+							sub="Picked by Tally · 92% sure"
+							value={PICKED_GROCERIES}
+						>
+							<CategoryGrid
+								name="ds-panel-folded"
+								categories={GRID_CATEGORIES}
+								checkedId={1}
+								tallyId={1}
+								newCategory
+							/>
+							<MerchantRuleTick
+								id="ds-panel-folded-rule"
+								merchant="Trader Joe's"
+								checked={false}
+							/>
+						</FoldedRow>
+					</div>
+				</State>
+				<State label="Trader Joe's, opened in place: the same grid and rule row, Groceries checked">
+					<div class="flex max-w-xl flex-col gap-4">
+						<FoldedRow
+							label="Category"
+							sub="Picked by Tally · 92% sure"
+							value={PICKED_GROCERIES}
+							open
+						>
+							<CategoryGrid
+								name="ds-panel-opened"
+								categories={GRID_CATEGORIES}
+								checkedId={1}
+								tallyId={1}
+								newCategory
+							/>
+							<MerchantRuleTick
+								id="ds-panel-opened-rule"
+								merchant="Trader Joe's"
+								checked={false}
+							/>
+						</FoldedRow>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="sheet-footer"

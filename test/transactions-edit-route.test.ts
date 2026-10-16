@@ -110,7 +110,7 @@ describe("GET /transactions/:id", () => {
 		);
 		expect(sheet).toMatch(
 			new RegExp(
-				`<input type="checkbox" name="income" value="1"[^>]*aria-describedby="income-suggestion-confidence-${bakery}"`,
+				`<input type="checkbox" role="switch" id="edit-income" name="income" value="1"[^>]*aria-describedby="income-suggestion-confidence-${bakery}"`,
 			),
 		);
 		expect(sheet).toContain(
@@ -129,7 +129,7 @@ describe("GET /transactions/:id", () => {
 			.run();
 		const { html } = await get(`/transactions/${bakery}`);
 		const describedBy = html.match(
-			/<input type="checkbox" name="income" value="1"[^>]*aria-describedby="([^"]+)"/,
+			/<input type="checkbox" role="switch" id="edit-income" name="income" value="1"[^>]*aria-describedby="([^"]+)"/,
 		)?.[1];
 		expect(describedBy).toBe(`income-suggestion-confidence-${bakery}`);
 		expect(html).toMatch(
@@ -175,11 +175,11 @@ describe("GET /transactions/:id", () => {
 		});
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(
-			/<input type="checkbox" name="income" value="1" checked/,
+			/<input type="checkbox" role="switch" id="edit-income" name="income" value="1" checked/,
 		);
 		expect(sheet).not.toContain("Tally&#39;s guess · 50% sure");
 		const incomeLabel = sheet.match(
-			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
 		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
@@ -226,9 +226,9 @@ describe("GET /transactions/:id", () => {
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
 		const incomeLabel = sheet.match(
-			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
-		expect(incomeLabel?.[1]).toContain("border-dashed");
+		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
 	it("renders a confident 0.8 income answer as applied, without Maybe income", async () => {
@@ -287,10 +287,13 @@ describe("GET /transactions/:id", () => {
 		const { html: panel } = await get(`/transactions/${id}`);
 		const sheet = panel.slice(panel.indexOf('role="dialog"'));
 		expect(sheet).toMatch(
-			/<fieldset class="flex flex-col gap-2 group\/category"[^>]*><legend class="[^"]*">Category<\/legend><div class="flex flex-wrap items-start gap-2">/,
+			/<fieldset class="flex flex-col gap-2 group\/category"[^>]*><legend class="[^"]*">Category<\/legend>(?:<p class="text-sm text-muted">[\s\S]*?<\/p>)?<div class="grid grid-cols-2 gap-2">/,
 		);
 		expect(sheet).toContain("Count as income");
-		expect(sheet).toContain("border-dashed");
+		// The income switch is described by Tally's guess line beneath it (P120 B: a switch, not a dashed chip).
+		expect(sheet).toMatch(
+			/id="edit-income"[^>]*aria-describedby="income-suggestion-confidence-/,
+		);
 		expect(sheet).toContain("Tally&#39;s guess · 71% sure");
 		expect(sheet).toContain('aria-label="Why? income"');
 		expect(sheet).toMatch(
@@ -342,9 +345,9 @@ describe("GET /transactions/:id", () => {
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toContain("Tally&#39;s guess · 50% sure");
 		const incomeLabel = sheet.match(
-			/<label class="([^"]+)"[^>]*><input type="checkbox" name="income"/,
+			/<label class="([^"]+)"[^>]*><input type="checkbox" role="switch" id="edit-income" name="income"/,
 		);
-		expect(incomeLabel?.[1]).toContain("border-dashed");
+		expect(incomeLabel?.[1]).not.toContain("border-dashed");
 	});
 
 	it.each([0.1999, 0.2, 0.2001, 0.7949, 0.795, 0.7999, 0.8, 0.8001])(
@@ -1808,8 +1811,9 @@ describe("who picked the category", () => {
 			.bind(bakery)
 			.run();
 		let sheet = (await get(`/transactions/${bakery}`)).html;
+		// The bill's Why? link sits in the category's own row (folded, P120 B), whose name comes first.
 		expect(sheet).toMatch(
-			/<legend[^>]*>Category[\s\S]*?<a[^>]*href="\/how-it-works#categorization"[^>]*aria-label="Why\? this category"/,
+			/id="edit-category"[\s\S]*?<a[^>]*href="\/how-it-works#categorization"[^>]*aria-label="Why\? this category"/,
 		);
 
 		await setSource("user", null);
@@ -1866,7 +1870,7 @@ describe("excluding a transaction (spec §6, #27)", () => {
 		)?.id as number;
 	// The edit form's box, not anything in the list's filters.
 	const checkbox =
-		/<form method="post"[\s\S]*<input type="checkbox" name="excluded" value="1"([^>]*)>/;
+		/<form method="post"[\s\S]*<input type="checkbox" role="switch" id="edit-exclude" name="excluded" value="1"([^>]*)>/;
 
 	it("shows a labeled exclude checkbox that reflects the transaction", async () => {
 		const bakerySheet = (await get(`/transactions/${bakery}`)).html;
@@ -2019,24 +2023,7 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 		).toMatchObject({ excluded: 1 });
 	});
 
-	it("has one How this works link", async () => {
-		const html = (await get(`/transactions/${bakery}`)).html;
-		const sheet = html.slice(html.indexOf('id="edit-title"'));
-		expect((sheet.match(/>How this works<\/a>/g) ?? []).length).toBe(1);
-		expect((sheet.match(/href="\/how-it-works#/g) ?? []).length).toBe(2);
-	});
-
-	// P124 A (decision 111): the sheet's How this works sits at its foot, under a short rule, after Save.
-	it("puts How this works at the foot of the edit sheet, after Save", async () => {
-		const html = (await get(`/transactions/${bakery}`)).html;
-		const foot = html.search(
-			/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#categorization" aria-label="How this works: categories" class="[^"]*">How this works<\/a><\/div><\/div>/,
-		);
-		expect(foot).toBeGreaterThan(html.indexOf('id="edit-save"'));
-		expect(html.slice(foot, html.indexOf("</section>", foot))).not.toMatch(
-			/<(form|button|input|ul|li|h[1-6]|p)\b/,
-		);
-	});
+	// P120 B (decision 111, audit E5): the panel has no How this works link; edit-panel.test.ts checks that.
 });
 
 describe("a For person removed while the panel is saving", () => {

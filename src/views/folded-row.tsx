@@ -24,17 +24,25 @@ export function FoldedRow({
 }) {
 	return (
 		<details class="group border-b border-rule" open={open}>
-			<summary class="flex min-h-12 cursor-pointer list-none items-center gap-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
-				<span class="flex min-w-0 flex-1 flex-col">
+			{/* A grid, so the name, then the choice, then the line read in that order (one phrase, #498) while
+			    the line still sits under the name and the choice still sits at the right. */}
+			<summary class="grid min-h-12 cursor-pointer list-none grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+				<span class="col-start-1 row-start-1 flex min-w-0 flex-col">
 					<span class="text-muted">{label}</span>
-					{sub && <span class="truncate text-sm text-muted">{sub}</span>}
 				</span>
 				{value && (
-					<span class="ml-auto flex min-w-0 items-center gap-2">{value}</span>
+					<span class="col-start-2 row-span-2 row-start-1 flex min-w-0 justify-self-end">
+						<span class="ml-auto flex min-w-0 items-center gap-2">{value}</span>
+					</span>
+				)}
+				{sub && (
+					<span class="col-start-1 row-start-2 flex min-w-0 flex-col">
+						<span class="truncate text-sm text-muted">{sub}</span>
+					</span>
 				)}
 				<Icon
 					name="chevron-right"
-					class="size-5 shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none"
+					class="col-start-3 row-span-2 row-start-1 size-5 shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none"
 				/>
 			</summary>
 			{children && <div class="pb-3">{children}</div>}

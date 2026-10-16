@@ -14,6 +14,21 @@ const html = (props: Partial<Parameters<typeof Switch>[0]> = {}) =>
 	);
 
 // P41 B (decision 73): a real checkbox drawn as a switch, with On or Off in words beside it.
+describe("Switch's posted value and extra description (P120 B)", () => {
+	it("posts the value it's given, so a form that reads 1 keeps reading it", () => {
+		expect(html({ value: "1" })).toContain('value="1"');
+		expect(html()).toContain('value="on"');
+	});
+
+	it("describes itself by its muted line and by any id it's given, such as an income guess's line", () => {
+		const out = html({ hint: "A line.", describedBy: "income-guess-7" });
+		expect(out).toMatch(/aria-describedby="ai-income-hint income-guess-7"/);
+		expect(html({ hint: undefined, describedBy: "income-guess-7" })).toMatch(
+			/aria-describedby="income-guess-7"/,
+		);
+	});
+});
+
 describe("Switch", () => {
 	it("is a real checkbox, so it posts with no script: on sends its value, off sends nothing", () => {
 		const on = html({ checked: true });

@@ -1,3 +1,4 @@
+import type { Child } from "hono/jsx";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { unpaidBillsNote } from "../bills/unpaid";
 import { dayLabel, shortDay } from "../dates";
@@ -16,11 +17,12 @@ import { jevAsksAbout } from "../transactions/rename";
 import { BottomSheet } from "./bottom-sheet";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
+import { CategoryGrid } from "./category-grid";
 import { Chip } from "./chip";
 import { DetailRow } from "./detail-row";
+import { FoldedRow } from "./folded-row";
 import { FormField } from "./form-field";
 import type { HouseholdPerson } from "./household-people";
-import { HowFoot } from "./how-link";
 import { Icon } from "./icons";
 import { maybeIncomeVisible, SuggestedCategoryChip } from "./maybe-category";
 import { MerchantRuleTick } from "./merchant-rule-tick";
@@ -31,14 +33,10 @@ import {
 	LINKED_PURCHASE_CLASS,
 	NameChoices,
 	SUGGESTED_NAME_CLASS,
-	TALLY_CATEGORY_CLASS,
 } from "./name-choices";
-import {
-	NEW_CATEGORY_GROUP,
-	NewCategoryChip,
-	NewCategoryName,
-} from "./new-category-choice";
+import { NEW_CATEGORY_GROUP, NewCategoryName } from "./new-category-choice";
 import { PendingNote } from "./pending-note";
+import { Switch } from "./switch";
 import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
 
@@ -162,11 +160,16 @@ export function countsWithPurchase(
 }
 
 /**
- * The panel's category choice (spec §8). A linked refund that counts with its purchase is locked: the choice is
- * disabled, drawn with the purchase's category and the "Counts in" line. The choice sits in its own wrapper, which
- * the category lock route draws again when Count as income or Reviewed changes. A locked choice's last pick sits in
- * hidden fields after the disabled fieldset, since a browser posts nothing from a disabled one. A trip that looks
- * mixed (#233) draws its split line in the open choice, so the lock route's redraw brings it back when the lock lifts.
+ * The panel's category (spec §8, P120 B), which leads the panel. While the transaction needs one (none yet, or
+ * Tally's guess waits as a chip), the choices are open: a two-column grid ending in New category (decision 101),
+ * with Tally's guess as its first cell, and the source line under the legend. Once it has one, the category folds
+ * to a ruled row that shows its name and its source and opens in place. It opens by itself when the post has a
+ * category error or New category is chosen, so an error is never hidden. A linked refund that counts with its
+ * purchase is locked: the choice is disabled and drawn open, with the purchase's category and the "Counts in" line.
+ * The choice sits in its own wrapper, which the category lock route draws again when Count as income or Reviewed
+ * changes (`#edit-category`). A locked choice's last pick sits in hidden fields after the disabled fieldset, since a
+ * browser posts nothing from a disabled one. A trip that looks mixed (#233) draws its split line in the choice. The
+ * merchant rule tick (#353, `rule`) follows the choices in both states.
  */
 export function CategoryChoice({
 	tx,
@@ -175,6 +178,7 @@ export function CategoryChoice({
 	errors = {},
 	purchase,
 	back,
+	rule,
 }: {
 	tx: TransactionDetail;
 	categories: Category[];
@@ -182,105 +186,138 @@ export function CategoryChoice({
 	errors?: EditErrors;
 	purchase?: RefundPurchase;
 	back: string;
+	/** The merchant rule tick, for a row that can have a rule: whether it's ticked and the rule's category name. */
+	rule?: { checked: boolean; ruleCategory?: string };
 }) {
 	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
 	const mixed = mixedCategories(tx);
+	// Tally's guess waits as a dashed chip, the grid's first cell, and its line sits under the legend.
+	const guessChip =
+		!purchase &&
+		tx.categorySource !== "jev" &&
+		tx.maybeCategoryName &&
+		!tx.maybeCategoryNew &&
+		tx.suggestedCategoryId !== null &&
+		tx.suggestedCategoryName &&
+		tx.categoryConfidence !== null &&
+		tx.categoryConfidence < JEV_THRESHOLD;
+	const guessLine =
+		!purchase &&
+		tx.categorySource !== "jev" &&
+		tx.maybeCategoryName &&
+		!tx.maybeCategoryNew &&
+		tx.suggestedCategoryName &&
+		tx.categoryConfidence !== null &&
+		tx.categoryConfidence < JEV_THRESHOLD;
+	const chosen = categories.find((cat) => cat.id === values.categoryId);
+	const needsCategory = tx.categoryId === null || Boolean(guessChip);
+	// Folded once it has one (or New category is chosen, which the row says); open by itself on an error or New category.
+	const folded =
+		!purchase && !needsCategory && (chosen !== undefined || values.newCategory);
+	const openFolded = Boolean(
+		errors.category || errors.newCategory || values.newCategory,
+	);
+	const source = categorySource(tx, Boolean(guessLine), purchase !== undefined);
+	const choices = (
+		<>
+			<CategoryGrid
+				categories={categories}
+				checkedId={purchase ? purchase.categoryId : values.categoryId}
+				tallyId={tx.categoryId}
+				leading={
+					guessChip &&
+					tx.suggestedCategoryId !== null &&
+					tx.suggestedCategoryName ? (
+						<SuggestedCategoryChip
+							name={tx.suggestedCategoryName}
+							value={String(tx.suggestedCategoryId)}
+							sure={Math.round((tx.categoryConfidence ?? 0) * 100)}
+							transactionId={tx.id}
+						/>
+					) : undefined
+				}
+				newCategory
+				newChecked={!purchase && values.newCategory === true}
+			/>
+			{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
+			{!purchase && mixed && (
+				<MixedTripLine
+					first={mixed.first.name}
+					second={mixed.second.name}
+					href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+				/>
+			)}
+			{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
+			<NewCategoryName
+				id="new-category-name"
+				value={values.newCategoryName ?? ""}
+				hint="Added to your categories and used for this transaction."
+				error={errors.newCategory}
+			/>
+			{purchase && (
+				<p class="text-sm text-muted">
+					{countsWithPurchase(purchase, categories, tx.date)}
+				</p>
+			)}
+			{errors.category && (
+				<p id="category-error" role="alert" class="text-sm text-over">
+					{errors.category}
+				</p>
+			)}
+		</>
+	);
+	const ruleTick = rule && (
+		<div class="pt-3">
+			<MerchantRuleTick
+				merchant={tx.storeName}
+				checked={rule.checked}
+				ruleCategory={rule.ruleCategory}
+			/>
+		</div>
+	);
 	return (
 		<div id="edit-category">
-			<fieldset
-				class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
-				disabled={purchase !== undefined}
-				aria-describedby={errors.category ? "category-error" : undefined}
-			>
-				<legend class="flex items-center gap-1 text-base text-ink">
-					Category
-					{tx.categorySource === "bill" && (
-						<>
-							<span aria-hidden="true">·</span>
-							<WhyLink section="categorization" topic="this category" />
-						</>
-					)}
-				</legend>
-				<div class="flex flex-wrap items-start gap-2">
-					{!purchase &&
-						tx.categorySource !== "jev" &&
-						tx.maybeCategoryName &&
-						!tx.maybeCategoryNew &&
-						tx.suggestedCategoryId !== null &&
-						tx.suggestedCategoryName &&
-						tx.categoryConfidence !== null &&
-						tx.categoryConfidence < JEV_THRESHOLD && (
-							<SuggestedCategoryChip
-								name={tx.suggestedCategoryName}
-								value={String(tx.suggestedCategoryId)}
-								sure={Math.round(tx.categoryConfidence * 100)}
-								transactionId={tx.id}
-							/>
-						)}
-					{categories.map((cat) => (
-						<Chip
-							type="radio"
-							name="category"
-							value={String(cat.id)}
-							checked={
-								purchase
-									? purchase.categoryId === cat.id
-									: values.categoryId === cat.id
-							}
-							inputClass={
-								cat.id === tx.categoryId ? TALLY_CATEGORY_CLASS : undefined
-							}
-							icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
-						>
-							{cat.name}
-						</Chip>
-					))}
-					<NewCategoryChip checked={!purchase && values.newCategory === true} />
-				</div>
-				{/* A trip Jev says looks mixed (#233, decision 113): one quiet line, and its link opens the split with Tally's guessed parts. */}
-				{!purchase && mixed && (
-					<MixedTripLine
-						first={mixed.first.name}
-						second={mixed.second.name}
-						href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
-					/>
-				)}
-				{/* Opens under the chips while New category is chosen (CSS, decision 101). */}
-				<NewCategoryName
-					id="new-category-name"
-					value={values.newCategoryName ?? ""}
-					hint="Added to your categories and used for this transaction."
-					error={errors.newCategory}
-				/>
-				{purchase && (
-					<p class="text-sm text-muted">
-						{countsWithPurchase(purchase, categories, tx.date)}
-					</p>
-				)}
-				{!purchase &&
-					tx.categorySource === "jev" &&
-					tx.categoryConfidence !== null && (
-						<p class="text-sm text-muted">
-							Picked by Tally · {Math.round(tx.categoryConfidence * 100)}% sure
-						</p>
-					)}
-				{!purchase &&
-					tx.categorySource !== "jev" &&
-					tx.maybeCategoryName &&
-					!tx.maybeCategoryNew &&
-					tx.suggestedCategoryName &&
-					tx.categoryConfidence !== null &&
-					tx.categoryConfidence < JEV_THRESHOLD && (
-						<p class="text-sm text-muted">
-							Tally's guess · {Math.round(tx.categoryConfidence * 100)}% sure
-						</p>
-					)}
-				{errors.category && (
-					<p id="category-error" role="alert" class="text-sm text-over">
-						{errors.category}
-					</p>
-				)}
-			</fieldset>
+			{folded ? (
+				<FoldedRow
+					label="Category"
+					open={openFolded}
+					sub={values.newCategory ? undefined : source}
+					value={
+						values.newCategory ? (
+							<span class="text-accent">New category</span>
+						) : (
+							chosen && (
+								<>
+									<CategoryIcon icon={chosen.icon} color={chosen.color} />
+									<span class="truncate text-lg">{chosen.name}</span>
+								</>
+							)
+						)
+					}
+				>
+					<fieldset
+						class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+						aria-describedby={errors.category ? "category-error" : undefined}
+					>
+						<legend class="sr-only">Category</legend>
+						{choices}
+					</fieldset>
+					{ruleTick}
+				</FoldedRow>
+			) : (
+				<>
+					<fieldset
+						class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
+						disabled={purchase !== undefined}
+						aria-describedby={errors.category ? "category-error" : undefined}
+					>
+						<legend class="text-base text-ink">Category</legend>
+						{source && <p class="text-sm text-muted">{source}</p>}
+						{choices}
+					</fieldset>
+					{ruleTick}
+				</>
+			)}
 			{/* Only while locked: an open choice's radios post category themselves, and a copy would post it twice. */}
 			{purchase && (values.newCategory || values.categoryId !== null) && (
 				<input
@@ -298,6 +335,26 @@ export function CategoryChoice({
 			)}
 		</div>
 	);
+}
+
+/**
+ * The line under the category: a bank bill's category keeps its Why? link; Tally's pick and its sureness, Tally's
+ * guess, or "Your choice" otherwise. A locked choice shows its "Counts in" line instead (`locked`).
+ */
+function categorySource(
+	tx: TransactionDetail,
+	guessLine: boolean,
+	locked: boolean,
+): Child | undefined {
+	if (tx.categorySource === "bill")
+		return <WhyLink section="categorization" topic="this category" />;
+	if (locked) return undefined;
+	if (tx.categorySource === "jev" && tx.categoryConfidence !== null)
+		return `Picked by Tally · ${Math.round(tx.categoryConfidence * 100)}% sure`;
+	if (guessLine && tx.categoryConfidence !== null)
+		return `Tally's guess · ${Math.round(tx.categoryConfidence * 100)}% sure`;
+	if (tx.categorySource === "user") return "Your choice";
+	return undefined;
 }
 
 /** The edit panel for one transaction (spec §8): category, merchant rule, name, note. */
@@ -368,18 +425,13 @@ export function EditSheet({
 			// A field's error and the delete question draw the open panel again.
 			still={still || deleteConfirm || Object.keys(errors).length > 0}
 		>
-			{tx.rawName !== tx.displayName && (
-				<p class="min-w-0 max-w-full wrap-anywhere text-sm text-muted">
-					{tx.rawName}
-				</p>
-			)}
 			<h2
 				id="edit-title"
 				tabindex={-1}
 				// Focused only so screen readers start here; it isn't a control, so no ring. While the sheet
 				// asks about a delete, the question takes the focus instead (one autofocus, or htmx picks the first).
 				autofocus={!deleteConfirm}
-				class={`min-w-0 max-w-full wrap-anywhere font-serif text-4xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
+				class={`min-w-0 max-w-full wrap-anywhere font-serif text-3xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
 				{tx.nameSuggested && <span class="sr-only">, suggested name</span>}
@@ -387,23 +439,19 @@ export function EditSheet({
 			{tx.accountType === "cash" && tx.parentId === null ? (
 				<p class="text-muted">Cash · you entered this</p>
 			) : (
-				<>
-					<p class="font-serif text-4xl font-semibold">
+				<p class="text-muted">
+					<span class="text-lg font-semibold text-ink">
 						{formatCents(tx.amountCents, { signed: true })}
-					</p>
-					<p class="text-muted">
-						{dayLabel(tx.date, today)} · {account}
-					</p>
-				</>
-			)}
-			{tx.pending && <PendingNote />}
-			{tx.accountType !== "cash" && tx.parentId === null && (
-				<p class="mt-2 text-sm text-muted">
-					From {tx.bankName ?? tx.accountName}. Its date and amount stay as the
-					bank sent them. If something's off, you can split it, exclude it, or
-					count it in another month.
+					</span>{" "}
+					· {dayLabel(tx.date, today)} · {account}
 				</p>
 			)}
+			{tx.rawName !== tx.displayName && (
+				<p class="min-w-0 max-w-full wrap-anywhere text-sm text-muted">
+					{tx.rawName}
+				</p>
+			)}
+			{tx.pending && <PendingNote />}
 			{tx.splitRemovedFromCents != null && (
 				<p role="status" class="text-sm text-over">
 					The bank changed this from{" "}
@@ -436,15 +484,6 @@ export function EditSheet({
 				<p class="text-muted">
 					It pays a planned expense, so it counts in the budget.
 				</p>
-			)}
-			{tx.parentId === null && !tx.isSplit && !tx.income && (
-				<Button
-					kind="secondary"
-					href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
-					class="mt-4 w-full"
-				>
-					Split
-				</Button>
 			)}
 			{tx.isSplit && (
 				<form
@@ -573,6 +612,93 @@ export function EditSheet({
 					type="hidden"
 					name="merchant_was"
 					value={nameWas ?? tx.merchantName ?? ""}
+				/>
+				<CategoryChoice
+					tx={tx}
+					categories={categories}
+					values={values}
+					errors={errors}
+					purchase={purchase}
+					back={back}
+					rule={
+						tx.refundOfId == null
+							? {
+									checked: values.alwaysForMerchant,
+									ruleCategory: values.alwaysWas
+										? (ruleCategoryName ??
+											tx.merchantRuleCategoryName ??
+											undefined)
+										: undefined,
+								}
+							: undefined
+					}
+				/>
+				{/* An error keeps the section, even when no purchase is offered any more. */}
+				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
+					<details
+						class="group border-t border-rule"
+						open={Boolean(errors.refund)}
+					>
+						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+							<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
+								<Icon name="chevron-right" class="size-5" />
+							</span>
+							This refunds…
+						</summary>
+						<div class="flex flex-col gap-3 pt-1">
+							<p class="text-sm text-muted">
+								{tx.displayName} purchases in the last 90 days
+							</p>
+							<fieldset
+								class="flex flex-col gap-3"
+								aria-describedby={errors.refund ? "refund-error" : undefined}
+							>
+								<legend class="sr-only">Purchase this refunds</legend>
+								<Chip
+									type="radio"
+									name="refund_of"
+									value=""
+									checked={values.refundOfId == null}
+								>
+									Not linked
+								</Chip>
+								{refunds.map((p) => (
+									<Chip
+										type="radio"
+										name="refund_of"
+										value={String(p.id)}
+										checked={values.refundOfId === p.id}
+										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
+									>
+										{refundPurchaseLabel(p, tx.date)}
+									</Chip>
+								))}
+							</fieldset>
+							{errors.refund && (
+								<p id="refund-error" role="alert" class="text-sm text-over">
+									{errors.refund}
+								</p>
+							)}
+						</div>
+					</details>
+				)}
+				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
+				{tx.merchantRuleCategoryName &&
+					values.alwaysForMerchant &&
+					tx.refundOfId != null && (
+						<p class="text-sm text-muted">
+							Remove it in Settings, under{" "}
+							<a href="/settings#merchant-rules">Tally's rules</a>.
+						</p>
+					)}
+				{/* A setting about this transaction, so a switch, not a category's pill (audit E2, decision 73). */}
+				<Switch
+					id="edit-exclude"
+					name="excluded"
+					value="1"
+					label="Exclude from budget"
+					hint="It won't count in Spent or any budget."
+					checked={values.excluded}
 				/>
 				<div class="border-t border-rule">
 					<DetailRow
@@ -794,100 +920,31 @@ export function EditSheet({
 						</p>
 					</div>
 				)}
-				<CategoryChoice
-					tx={tx}
-					categories={categories}
-					values={values}
-					errors={errors}
-					purchase={purchase}
-					back={back}
-				/>
-				{/* An error keeps the section, even when no purchase is offered any more. */}
-				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
-					<details
-						class="group border-t border-rule"
-						open={Boolean(errors.refund)}
+				{tx.parentId === null && !tx.isSplit && !tx.income && (
+					<a
+						href={`/transactions/${tx.id}/split?back=${encodeURIComponent(back)}`}
+						class="flex min-h-12 items-center justify-between gap-3 border-b border-rule focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 					>
-						<summary class="flex min-h-11 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-							<span class="transition-transform group-open:rotate-90 motion-reduce:transition-none">
-								<Icon name="chevron-right" class="size-5" />
-							</span>
-							This refunds…
-						</summary>
-						<div class="flex flex-col gap-3 pt-1">
-							<p class="text-sm text-muted">
-								{tx.displayName} purchases in the last 90 days
-							</p>
-							<fieldset
-								class="flex flex-col gap-3"
-								aria-describedby={errors.refund ? "refund-error" : undefined}
-							>
-								<legend class="sr-only">Purchase this refunds</legend>
-								<Chip
-									type="radio"
-									name="refund_of"
-									value=""
-									checked={values.refundOfId == null}
-								>
-									Not linked
-								</Chip>
-								{refunds.map((p) => (
-									<Chip
-										type="radio"
-										name="refund_of"
-										value={String(p.id)}
-										checked={values.refundOfId === p.id}
-										inputClass={p.excluded ? undefined : LINKED_PURCHASE_CLASS}
-									>
-										{refundPurchaseLabel(p, tx.date)}
-									</Chip>
-								))}
-							</fieldset>
-							{errors.refund && (
-								<p id="refund-error" role="alert" class="text-sm text-over">
-									{errors.refund}
-								</p>
-							)}
-						</div>
-					</details>
+						<span>Split</span>
+						<span class="text-muted">
+							<Icon name="chevron-right" class="size-5" />
+						</span>
+					</a>
 				)}
-				{/* Exclude is a pill; the merchant rule is the tick row above Save (#353). */}
-				<div class="flex flex-wrap gap-2">
-					<Chip
-						type="checkbox"
-						name="excluded"
-						value="1"
-						checked={values.excluded}
-					>
-						Exclude from budget
-					</Chip>
-				</div>
-				{/* A linked refund has no category of its own to make a rule from, so it has no rule tick either. */}
-				{tx.merchantRuleCategoryName &&
-					values.alwaysForMerchant &&
-					tx.refundOfId != null && (
-						<p class="text-sm text-muted">
-							Remove it in Settings, under{" "}
-							<a href="/settings#merchant-rules">Tally's rules</a>.
-						</p>
-					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
-					<p class="text-base text-ink">Income</p>
-					<div class="flex flex-wrap gap-2" {...lockRedraw}>
-						<Chip
-							type="checkbox"
+					<div {...lockRedraw}>
+						<Switch
+							id="edit-income"
 							name="income"
 							value="1"
+							label="Count as income"
 							checked={values.income}
-							dashed={showIncomeGuess}
 							describedBy={
 								showIncomeGuess
 									? `income-suggestion-confidence-${tx.id}`
 									: undefined
 							}
-						>
-							Count as income
-						</Chip>
+						/>
 					</div>
 					{showIncomeGuess && (
 						<p
@@ -928,20 +985,12 @@ export function EditSheet({
 						</Chip>
 					</div>
 				)}
-				{tx.refundOfId == null && (
-					<div class="border-t border-rule pt-3">
-						<MerchantRuleTick
-							merchant={tx.storeName}
-							checked={values.alwaysForMerchant}
-							ruleCategory={
-								values.alwaysWas
-									? (ruleCategoryName ??
-										tx.merchantRuleCategoryName ??
-										undefined)
-									: undefined
-							}
-						/>
-					</div>
+				{tx.accountType !== "cash" && tx.parentId === null && (
+					<p class="mt-2 text-sm text-muted">
+						From {tx.bankName ?? tx.accountName}. Its date and amount stay as
+						the bank sent them. If something's off, you can split it, exclude
+						it, or count it in another month.
+					</p>
 				)}
 				{/* Asking about a delete takes this row's place (below, in the delete form), so the sheet never
 				    has two ways to leave it side by side (decision 84). */}
@@ -1015,8 +1064,6 @@ export function EditSheet({
 					)}
 				</form>
 			)}
-			{/* Outside the forms, so following it never happens by accident mid-edit. */}
-			<HowFoot section="categorization" />
 		</BottomSheet>
 	);
 }

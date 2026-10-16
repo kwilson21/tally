@@ -830,7 +830,7 @@ describe("GET /design-system in the demo", () => {
 			html.split('id="maybe-category"')[1]?.split("</section>")[0] ?? "";
 		expect(specimen).toMatch(/<div class="flex flex-wrap items-start gap-3">/);
 		expect(specimen).toMatch(
-			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
+			/<p id="ds-income-guess-line" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
 		);
 	});
 
@@ -1279,8 +1279,9 @@ describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
 		}
 		const folded =
 			html.split('id="folded-row"')[1]?.split("</section>")[0] ?? "";
-		expect(folded.match(/<details/g)).toHaveLength(3);
-		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(1);
+		// Three ledger states, then the category row's closed and open states (P120 B).
+		expect(folded.match(/<details/g)).toHaveLength(5);
+		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(2);
 	});
 
 	it("links the ledger sheet page from its group, and the page is a catalog page", async () => {

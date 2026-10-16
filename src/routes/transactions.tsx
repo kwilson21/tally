@@ -105,7 +105,7 @@ import { Band } from "../views/band";
 import { BottomSheet } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
-import { CategoryIcon } from "../views/category";
+import { CategoryGrid } from "../views/category-grid";
 import { Chip } from "../views/chip";
 import {
 	type Category,
@@ -1373,19 +1373,7 @@ function SelectCategorySheet({
 						aria-describedby={error ? "select-category-error" : undefined}
 					>
 						<legend class="mb-2">Category</legend>
-						<div class="flex flex-wrap gap-2">
-							{categories.map((cat, index) => (
-								<Chip
-									type="radio"
-									name="category"
-									value={String(cat.id)}
-									required={index === 0}
-									icon={<CategoryIcon icon={cat.icon} color={cat.color} />}
-								>
-									{cat.name}
-								</Chip>
-							))}
-						</div>
+						<CategoryGrid categories={categories} required />
 						{alert && <div class="mt-2">{alert}</div>}
 					</fieldset>
 					<div class="grid grid-cols-2 gap-3">
@@ -2675,6 +2663,19 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 			}}
 			purchase={locked}
 			back={back}
+			rule={
+				tx.refundOfId == null
+					? {
+							checked: form.get("always") === "1",
+							ruleCategory:
+								form.get("always_was") === "1"
+									? form.get("rule_category_was")?.toString() ||
+										tx.merchantRuleCategoryName ||
+										undefined
+									: undefined,
+						}
+					: undefined
+			}
 		/>,
 	);
 });

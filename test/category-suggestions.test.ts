@@ -202,7 +202,8 @@ describe("shared Maybe parts", () => {
 		const confidenceIds = [
 			...html.matchAll(/<span class="sr-only" id="([^"]+)">Tally&#39;s guess/g),
 		].map((match) => match[1]);
-		expect(confidenceIds).toHaveLength(2);
+		// Two as before, and the category grid's Tally's guess cell (P120 B, #498).
+		expect(confidenceIds).toHaveLength(3);
 		expect(new Set(confidenceIds).size).toBe(2);
 		for (const id of confidenceIds) {
 			expect(html).toContain(`aria-describedby="${id}"`);
