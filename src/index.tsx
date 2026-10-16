@@ -22,6 +22,7 @@ import { bills } from "./routes/bills";
 import { designSystem } from "./routes/design-system";
 import { destinations } from "./routes/destinations";
 import { feedback, retryFeedback } from "./routes/feedback";
+import { firstPage } from "./routes/first-page";
 import { health } from "./routes/health";
 import { home } from "./routes/home";
 import { howItWorks } from "./routes/how-it-works";
@@ -344,6 +345,7 @@ app.route("/", bills);
 app.route("/", plans);
 app.route("/", destinations);
 app.route("/", feedback);
+app.route("/", firstPage);
 app.route("/", designSystem);
 app.route("/", webhooks);
 
