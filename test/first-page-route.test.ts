@@ -54,7 +54,7 @@ async function get(path: string) {
 
 async function post(
 	path: string,
-	fields: Record<string, string>,
+	fields: Record<string, string> | [string, string][],
 	htmx = false,
 ) {
 	const res = await family.fetch(path, {
@@ -67,6 +67,29 @@ async function post(
 		body: new URLSearchParams(fields).toString(),
 	});
 	return { res, html: await res.text() };
+}
+
+/**
+ * The `keep` fields a Keep form submits for the charges its page shows: one per hidden field, unescaped as the browser
+ * sends them (the `&amp;` last, as textOf does). A test that keeps the page's charges posts these.
+ */
+function keepFields(html: string): [string, string][] {
+	return [...html.matchAll(/name="keep" value="([^"]*)"/g)].map(([, value]) => [
+		"keep",
+		(value ?? "")
+			.replaceAll("&#39;", "'")
+			.replaceAll("&quot;", '"')
+			.replaceAll("&amp;", "&"),
+	]);
+}
+
+/** Keep, as the page's own form does it: the page is read, and the charges it shows are the ones posted. */
+async function keepAsShown(htmx = false) {
+	return post(
+		"/first-page/bills",
+		keepFields((await get("/first-page")).html),
+		htmx,
+	);
 }
 
 const trigger = (res: Response) =>
@@ -500,7 +523,7 @@ describe("bills: the exclusions and the one-tap keep", () => {
 
 	it("keeps the bills through the Add bill path, and draws the bills stroke", async () => {
 		await charge("NETFLIX", 1549);
-		const { res } = await post("/first-page/bills", {});
+		const { res } = await keepAsShown();
 		expect(res.status).toBe(303);
 		const bills = await db
 			.prepare(
@@ -519,6 +542,55 @@ describe("bills: the exclusions and the one-tap keep", () => {
 		expect(textOf(html)).toContain("Nothing here to keep in one tap.");
 		expect(textOf(html)).toContain("1 more waits in Possible bills.");
 		expect((await readFirstTally(db))?.strokes.bills).toBe(TODAY);
+	});
+});
+
+describe("Keep keeps what the page showed", () => {
+	it("keeps the charge the page showed, and asks a charge that is new since then again", async () => {
+		await charge("NETFLIX", 1549);
+		const shown = keepFields((await get("/first-page")).html);
+		await charge("SPOTIFY", 1199);
+		const { res, html } = await post("/first-page/bills", shown, true);
+		const bills = await db
+			.prepare("SELECT name FROM bills WHERE active = 1")
+			.all<{ name: string }>();
+		expect(bills.results.map((bill) => bill.name)).toEqual(["Netflix"]);
+		expect(trigger(res).announce).toBe(
+			"Kept 1 bill. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+		);
+		expect((await readFirstTally(db))?.strokes.bills).toBeUndefined();
+		expect(textOf(html)).toContain("Keep this one as a bill?");
+	});
+
+	it("keeps no charge whose amount changed since the page showed it, and asks it again", async () => {
+		await charge("NETFLIX", 1549);
+		const shown = keepFields((await get("/first-page")).html);
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = 1599 WHERE raw_name = 'NETFLIX' AND date = ?",
+			)
+			.bind(TODAY)
+			.run();
+		const { res, html } = await post("/first-page/bills", shown, true);
+		const bills = await db
+			.prepare("SELECT COUNT(*) AS count FROM bills")
+			.first<{ count: number }>();
+		expect(bills?.count).toBe(0);
+		expect(trigger(res).announce).toBe(
+			"Nothing kept. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+		);
+		expect(trigger(res).toast?.type).toBe("info");
+		expect(textOf(html)).toContain("Keep this one as a bill?");
+	});
+
+	it("keeps no bill when the form submits no charge, even with one on the page", async () => {
+		await charge("NETFLIX", 1549);
+		const { res } = await post("/first-page/bills", [], true);
+		const bills = await db
+			.prepare("SELECT COUNT(*) AS count FROM bills")
+			.first<{ count: number }>();
+		expect(bills?.count).toBe(0);
+		expect(trigger(res).announce).toMatch(/^Nothing kept\./);
 	});
 });
 
@@ -560,7 +632,7 @@ describe("announcements and focus", () => {
 	it("announces a kept bills step with its count", async () => {
 		await charge("NETFLIX", 1549);
 		await charge("SPOTIFY", 1199);
-		const { res } = await post("/first-page/bills", {}, true);
+		const { res } = await keepAsShown(true);
 		expect(trigger(res).announce).toBe("Kept 2 bills.");
 	});
 });
@@ -668,7 +740,7 @@ describe("the answer's motion", () => {
 	it("marks the bills stroke when the kept bills draw it", async () => {
 		await charge("NETFLIX", 1549);
 		await charge("SPOTIFY", 1199);
-		const { html } = await post("/first-page/bills", {}, true);
+		const { html } = await keepAsShown(true);
 		expect(html).toMatch(
 			/<line x1="60" y1="38" x2="60" y2="60" class="stroke-ink first-stroke-new"/,
 		);
@@ -751,9 +823,10 @@ describe("the answer's motion", () => {
 		].filter((match) => match[2]?.startsWith("Pay · Acme Corp"));
 		expect(lines).toHaveLength(2);
 		expect(lines[0]?.[2]).toBe(lines[1]?.[2]);
-		expect(lines.map((match) => match[1]?.includes("first-line-new"))).toEqual(
-			[false, true],
-		);
+		expect(lines.map((match) => match[1]?.includes("first-line-new"))).toEqual([
+			false,
+			true,
+		]);
 		expect(html.match(/first-line-new/g)).toHaveLength(1);
 	});
 
@@ -808,7 +881,7 @@ describe("the waiting line names Possible bills once", () => {
 	it("in the done step, after a keep leaves one charge waiting", async () => {
 		await charge("NETFLIX", 1549);
 		await charge("GYM", 4500, false);
-		await post("/first-page/bills", {});
+		await keepAsShown();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain("Pay and bills are done.");
 		expect(textOf(html)).toContain("1 more waits in Possible bills.");
@@ -920,7 +993,7 @@ const rentBill = async () =>
 describe("keeping bills links the charges they paid", () => {
 	it("links a charge already paid this period after Keep, so that occurrence isn't due", async () => {
 		await charge("NETFLIX", 1549);
-		await post("/first-page/bills", {});
+		await keepAsShown();
 		const links = await db
 			.prepare(
 				"SELECT bp.period, t.date FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id WHERE bp.status = 'linked' AND t.date = ?",
@@ -934,7 +1007,7 @@ describe("keeping bills links the charges they paid", () => {
 describe("the bills ledger line reads what the step recorded", () => {
 	it("doesn't count a bill added on the Bills page the same day", async () => {
 		await charge("NETFLIX", 1500);
-		await post("/first-page/bills", {});
+		await keepAsShown();
 		await rentBill();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain("Bills · 1 kept, about $15 a month");
@@ -951,9 +1024,9 @@ describe("the bills ledger line reads what the step recorded", () => {
 
 	it("adds a second Keep to the line, rather than replacing the first", async () => {
 		await charge("NETFLIX", 1500);
-		await post("/first-page/bills", {});
+		await keepAsShown();
 		await charge("SPOTIFY", 1200);
-		await post("/first-page/bills", {});
+		await keepAsShown();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain("Bills · 2 kept, about $27 a month");
 	});
@@ -963,6 +1036,7 @@ describe("a Keep that fails part-way", () => {
 	it("still counts the bill it kept, and a retry counts the rest", async () => {
 		await charge("NETFLIX", 1549);
 		await charge("SPOTIFY", 1199);
+		const shown = keepFields((await get("/first-page")).html);
 		// The first bill goes in; the second is refused by the database, so the Keep errors after one bill.
 		await db
 			.prepare(
@@ -970,7 +1044,7 @@ describe("a Keep that fails part-way", () => {
 			)
 			.run();
 		try {
-			const failed = await post("/first-page/bills", {});
+			const failed = await post("/first-page/bills", shown);
 			expect(failed.res.status).toBe(500);
 		} finally {
 			await db.prepare("DROP TRIGGER IF EXISTS fail_keep").run();
@@ -984,7 +1058,7 @@ describe("a Keep that fails part-way", () => {
 			cents: kept.results[0]?.amount_cents,
 		});
 
-		const { res, html } = await post("/first-page/bills", {}, true);
+		const { res, html } = await post("/first-page/bills", shown, true);
 		expect(trigger(res).toast?.message).toBe("Kept 1 bill.");
 		expect((await readFirstTally(db))?.bills).toEqual({
 			kept: 2,

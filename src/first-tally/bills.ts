@@ -10,6 +10,51 @@ import { dollarsWords } from "./pay";
 const wholeDollars = (cents: number) =>
 	formatCents(cents, { wholeDollars: true });
 
+/**
+ * The value a Keep form's hidden field carries for one found charge: what the page showed of it (merchant, amount, due
+ * day).
+ */
+export function shownBillValue(suggestion: BillSuggestion): string {
+	return JSON.stringify({
+		rawName: suggestion.rawName,
+		amountCents: suggestion.amountCents,
+		dueDay: suggestion.dueDay,
+	});
+}
+
+/**
+ * The found charges a Keep form submitted, of those the current reading finds: a charge is kept only when a submitted
+ * value shows its merchant, amount and due day exactly. So a charge the page never showed, or one whose amount or due
+ * day changed since, is not kept, and a value that isn't one of these (garbled, or with the wrong types) matches none.
+ */
+export function keepShown(
+	current: BillSuggestion[],
+	values: string[],
+): BillSuggestion[] {
+	const shown = new Set(values);
+	return current.filter((suggestion) => shown.has(shownBillValue(suggestion)));
+}
+
+/**
+ * The words a Keep says: what it kept, then, when charges waiting now are new or changed since the page showed them,
+ * how many and where they wait. With none waiting it is the plain count ("Kept 1 bill.", "Nothing to keep.").
+ */
+export function keepReply(kept: number, waiting: number): string {
+	if (waiting === 0 && kept === 0) return "Nothing to keep.";
+	const keptWords =
+		kept === 0
+			? "Nothing kept."
+			: kept === 1
+				? "Kept 1 bill."
+				: `Kept ${kept} bills.`;
+	if (waiting === 0) return keptWords;
+	const waitingPart =
+		waiting === 1
+			? "1 is new or changed since the page showed it, so it waits in Possible bills."
+			: `${waiting} are new or changed since the page showed them, so they wait in Possible bills.`;
+	return `${keptWords} ${waitingPart}`;
+}
+
 /** The found charges, split: `keep` is the one-tap answer, and `waiting` stays in Possible bills. */
 export function splitKeepable(
 	suggestions: BillSuggestion[],

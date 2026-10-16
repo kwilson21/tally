@@ -8,6 +8,7 @@ import { shortDay } from "../dates";
 import {
 	billsMutedLine,
 	keepHeading,
+	shownBillValue,
 	waitingWords,
 } from "../first-tally/bills";
 import type {
@@ -215,6 +216,9 @@ export function BillsQuestion({
 				hx-target="#first-page"
 				hx-swap="outerHTML"
 			>
+				{keep.map((suggestion) => (
+					<input type="hidden" name="keep" value={shownBillValue(suggestion)} />
+				))}
 				<div class="mt-4">
 					<Button type="submit" class="w-full">
 						{keep.length === 1 ? "Keep this one" : `Keep these ${keep.length}`}

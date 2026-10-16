@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { householdToday } from "../dates";
+import { keepReply, keepShown } from "../first-tally/bills";
 import {
 	answerPay,
 	type FirstPageModel,
@@ -133,19 +134,23 @@ firstPage.post("/first-page/bills", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	// Only the charges the form showed are kept: its `keep` fields, each one re-checked against the charges now. An
+	// empty form keeps none, and a charge that is new or changed since the page drew waits for the page to ask it again.
+	const values = (await c.req.formData())
+		.getAll("keep")
+		.filter((value): value is string => typeof value === "string");
 	const before = await settleAndLoad(c.env.DB, today);
-	const bills = await keepBills(c.env.DB, today, before.keep);
+	const bills = await keepBills(
+		c.env.DB,
+		today,
+		keepShown(before.keep, values),
+	);
 	const after = await settleAndLoad(c.env.DB, today);
-	const message =
-		bills.kept === 0
-			? "Nothing to keep."
-			: bills.kept === 1
-				? "Kept 1 bill."
-				: `Kept ${bills.kept} bills.`;
 	return answered(
 		c,
 		after,
-		message,
+		keepReply(bills.kept, after.keep.length),
 		motionOf(before, after, bills.kept > 0 ? "bills" : null),
+		bills.kept === 0 ? "info" : "success",
 	);
 });

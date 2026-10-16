@@ -5,6 +5,9 @@ import {
 	billsLedgerLine,
 	billsMutedLine,
 	keepHeading,
+	keepReply,
+	keepShown,
+	shownBillValue,
 	splitKeepable,
 	waitingWords,
 } from "../src/first-tally/bills";
@@ -113,6 +116,82 @@ describe("billsLedgerLine", () => {
 	it("says how many bills were kept and their monthly amount in whole dollars", () => {
 		expect(billsLedgerLine(8, 206200)).toBe(
 			"Bills · 8 kept, about $2,062 a month",
+		);
+	});
+});
+
+describe("keepShown", () => {
+	const netflix = found({ rawName: "NETFLIX", displayName: "Netflix" });
+	const spotify = found({
+		rawName: "SPOTIFY",
+		displayName: "Spotify",
+		amountCents: 1199,
+		dueDay: 9,
+	});
+
+	it("keeps a charge whose merchant, amount and due day the form showed", () => {
+		expect(keepShown([netflix], [shownBillValue(netflix)])).toEqual([netflix]);
+	});
+
+	it("does not keep a charge whose amount changed since the form showed it", () => {
+		const shown = shownBillValue({ ...netflix, amountCents: 1549 });
+		expect(keepShown([{ ...netflix, amountCents: 1599 }], [shown])).toEqual([]);
+	});
+
+	it("does not keep a charge whose due day changed since the form showed it", () => {
+		const shown = shownBillValue({ ...netflix, dueDay: 5 });
+		expect(keepShown([{ ...netflix, dueDay: 6 }], [shown])).toEqual([]);
+	});
+
+	it("does not keep a charge the form never showed", () => {
+		expect(keepShown([netflix, spotify], [shownBillValue(netflix)])).toEqual([
+			netflix,
+		]);
+	});
+
+	it("ignores a value that doesn't parse or has the wrong types", () => {
+		const garbage = [
+			"not json",
+			'{"rawName":5,"amountCents":1549,"dueDay":5}',
+			'{"rawName":"NETFLIX","amountCents":"1549","dueDay":5}',
+			'{"rawName":"NETFLIX","amountCents":1549.5,"dueDay":5}',
+		];
+		expect(keepShown([netflix], garbage)).toEqual([]);
+	});
+
+	it("keeps nothing when no value was submitted", () => {
+		expect(keepShown([netflix, spotify], [])).toEqual([]);
+	});
+});
+
+describe("keepReply", () => {
+	it("says nothing was kept when nothing waits, with the existing words", () => {
+		expect(keepReply(0, 0)).toBe("Nothing to keep.");
+		expect(keepReply(1, 0)).toBe("Kept 1 bill.");
+		expect(keepReply(8, 0)).toBe("Kept 8 bills.");
+	});
+
+	it("says nothing was kept, and one charge is new or changed and waits", () => {
+		expect(keepReply(0, 1)).toBe(
+			"Nothing kept. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+		);
+	});
+
+	it("says what was kept, and one charge is new or changed and waits", () => {
+		expect(keepReply(1, 1)).toBe(
+			"Kept 1 bill. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+		);
+	});
+
+	it("says what was kept, and several charges are new or changed and wait", () => {
+		expect(keepReply(2, 3)).toBe(
+			"Kept 2 bills. 3 are new or changed since the page showed them, so they wait in Possible bills.",
+		);
+	});
+
+	it("says nothing was kept, and several charges are new or changed and wait", () => {
+		expect(keepReply(0, 2)).toBe(
+			"Nothing kept. 2 are new or changed since the page showed them, so they wait in Possible bills.",
 		);
 	});
 });
