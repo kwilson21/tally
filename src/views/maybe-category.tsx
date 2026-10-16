@@ -45,12 +45,15 @@ export function MaybeIncome() {
 /** P32 A: first option in the category field, explicitly marked as a suggestion. */
 export function SuggestedCategoryChip({
 	name,
+	groupName = "category",
 	value,
 	sure,
 	transactionId,
 	checked = false,
 }: {
 	name: string;
+	/** The radio group the chip joins: the grid's name, so the chip and its choices check one at a time. */
+	groupName?: string;
 	value: string;
 	sure: number;
 	transactionId: number;
@@ -61,7 +64,7 @@ export function SuggestedCategoryChip({
 		<span class="relative inline-flex rounded-full border border-dashed border-ink">
 			<Chip
 				type="radio"
-				name="category"
+				name={groupName}
 				value={value}
 				checked={checked}
 				describedBy={confidenceId}

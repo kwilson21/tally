@@ -98,7 +98,7 @@ export function LedgerDisclosure({
 }: {
 	month: string;
 	words: Child;
-	/** A status mark before the name (a paid month's check). */
+	/** A status mark (a paid month's check), hung in the margin left of the name (decision 125). */
 	mark?: Child;
 	sr?: string;
 	open?: boolean;
@@ -110,8 +110,12 @@ export function LedgerDisclosure({
 				<summary
 					class={`flex min-h-11 cursor-pointer list-none items-center gap-3 py-2 text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden ${ROW_OPENS}`}
 				>
-					{mark}
-					<span class="min-w-0 flex-1 text-lg">
+					<span class="relative min-w-0 flex-1 text-lg">
+						{mark && (
+							<span class="absolute -left-5 top-1/2 flex -translate-y-1/2 [&_svg]:block">
+								{mark}
+							</span>
+						)}
 						{month}
 						{sr && <span class="sr-only">{`, ${sr}`}</span>}
 					</span>

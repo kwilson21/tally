@@ -1743,6 +1743,60 @@ assert(
 	`the Budget boxes are not on one line at 1280px (tops ${desktopTops.join(", ")})`,
 );
 step("at 1280px every Budget box sits on one line");
+// #682: a paid month's check hangs in the margin left of its name (decision 125), inside the page's 20px phone gutter, so a
+// bill's page doesn't scroll sideways at 320px or 390px, its check stays on screen and every month's name lines up. Bill 1
+// is Streaming, paid this month in the seed; the writes above touch only budgets and balances, not this page.
+for (const width of [320, 390]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/bills/1`, { waitUntil: "networkidle" });
+	const checkLefts = await page
+		.locator('#page span.text-ok[aria-hidden="true"]')
+		.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
+	assert(
+		checkLefts.length > 0,
+		`Streaming's paid check is not on the page at ${width}px`,
+	);
+	assert(
+		checkLefts.every((left) => left >= 0),
+		`a paid check is off the left of the screen at ${width}px: ${checkLefts.join(", ")}`,
+	);
+	// The check hangs at most the page's 20px gutter left of the page's edge. The e2e's simulated safe-area inset moves
+	// that edge, so the bound is taken from the page's own box rather than from 0.
+	const pageLeft = await page
+		.locator("#page")
+		.evaluate((el) => el.getBoundingClientRect().left);
+	assert(
+		checkLefts.every((left) => left >= pageLeft - 20),
+		`a paid check hangs past the page's 20px margin at ${width}px: ${checkLefts.join(", ")} (the page starts at ${pageLeft})`,
+	);
+	// The month names are the top-level rows of the Payments list; a closed fold's months are in the DOM but hidden.
+	const nameLefts = await page
+		.locator(
+			"#page > ul > li > a .text-lg, #page > ul > li > details > summary > .text-lg, #page > ul > li > p > .text-lg",
+		)
+		.evaluateAll((els) =>
+			els
+				.filter((el) => el.getClientRects().length > 0)
+				.map((el) => Math.round(el.getBoundingClientRect().left)),
+		);
+	assert(
+		nameLefts.length >= 2,
+		`a bill's page at ${width}px shows ${nameLefts.length} month names, not 2 or more`,
+	);
+	assert(
+		new Set(nameLefts).size === 1,
+		`a bill's month names start at different left edges at ${width}px: ${nameLefts.join(", ")}`,
+	);
+	const scrollWidth = await page.evaluate(() => document.body.scrollWidth);
+	assert.equal(
+		scrollWidth,
+		width,
+		`a bill's page scrolls sideways at ${width}px: ${scrollWidth}px`,
+	);
+}
+step(
+	"a bill's page with a paid month doesn't scroll sideways at 320px or 390px, its check stays on screen and every month's name lines up",
+);
 // #500: on a 320px phone the notebook drawing is left out below 390px (decision 116), so a seven-character amount has the
 // whole row and nothing scrolls sideways. Safe to spend moves one for one with this month's Groceries budget and savings
 // goal, so each write moves it to the target shown; the demo reset below restores the data.
