@@ -253,12 +253,12 @@ type DeskProps = {
 	extra?: Child;
 	/** A taller window, for a picture with more to draw than 560px holds (900px, or 1200px for a full sidebar). */
 	tall?: 900 | 1200;
+	/** The sidebar's current page, Home by default (P136 draws Bills). */
+	active?: NavKey;
 	/** Drawn over the window, as a sheet is drawn over the page behind it. */
 	overlay?: Child;
 	/** The pill at the window's corner, where it sits on desktop today. */
 	floating?: boolean;
-	/** The sidebar item that is current; Home unless a picture is of another page. */
-	active?: NavKey;
 	children?: Child;
 };
 
@@ -268,9 +268,9 @@ export function Desk({
 	group = false,
 	extra,
 	tall,
+	active = "home",
 	overlay,
 	floating = false,
-	active = "home",
 	children,
 }: DeskProps) {
 	return (
