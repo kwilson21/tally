@@ -73,6 +73,25 @@ describe("cadenceOf", () => {
 		).toBe("every month");
 	});
 
+	it("names a monthly deposit every month when a weekend moved one payday", () => {
+		// Feb 15 (a Sunday), then Mar 13 and Apr 16 (both moved for a weekend): the gaps are 26 and 34 days.
+		expect(cadenceOf(["2026-02-15", "2026-03-13", "2026-04-16"])).toBe(
+			"every month",
+		);
+	});
+
+	it("names a 1st-and-15th deposit twice a month when a weekend moved the 15th earlier", () => {
+		// Aug 14 (the 15th, moved back from a Saturday), then Sep 1, Sep 15 and Oct 1: the gaps are 18, 14 and 16 days.
+		expect(
+			cadenceOf(["2026-08-14", "2026-09-01", "2026-09-15", "2026-10-01"]),
+		).toBe("twice a month");
+	});
+
+	it("gives no cadence for a monthly deposit with one 36-day gap", () => {
+		// Gaps 30 and 36: the 36-day gap is past the monthly window, so no month words.
+		expect(cadenceOf(["2026-06-01", "2026-07-01", "2026-08-06"])).toBeNull();
+	});
+
 	it("gives no cadence for a single deposit", () => {
 		expect(cadenceOf(["2026-10-09"])).toBeNull();
 	});
