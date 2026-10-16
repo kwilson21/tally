@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { markStroke } from "../src/db/first-tally";
+import { markStroke, STROKES } from "../src/db/first-tally";
 import {
 	countWaitingForJev,
 	pendingForJev,
@@ -390,5 +390,13 @@ describe("readQuestionsGate", () => {
 		expect(await readQuestionsGate(db, TODAY)).toBe(false);
 		await saveAiSwitches(db, { categories: false, income: false });
 		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+	});
+
+	it("is open until the first week is set up, then shut for good, even with every other condition holding (#647)", async () => {
+		await markStroke(db, "bank", "2026-10-13");
+		await addBank("gate-bank-1");
+		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+		for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
+		expect(await readQuestionsGate(db, TODAY)).toBe(false);
 	});
 });
