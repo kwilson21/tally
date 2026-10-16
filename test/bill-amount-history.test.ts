@@ -529,6 +529,8 @@ describe("a price that moved after September went overdue", () => {
 		const overdueGroup =
 			page.split("<section").find((part) => part.includes(">Overdue</h2>")) ??
 			"";
-		expect(overdueGroup).toContain('<span class="ml-auto shrink-0">$100.00');
+		expect(overdueGroup).toContain(
+			'<span class="ml-auto shrink-0 tabular-nums">$100.00',
+		);
 	});
 });

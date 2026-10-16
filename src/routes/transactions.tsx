@@ -568,7 +568,9 @@ async function renderList(
 	// The ticks not on this page, under their day headings, in the disclosure (ticked).
 	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
 		<>
-			<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
+			<h2 class="mt-3 text-sm tabular-nums text-muted">
+				{dayLabel(date, today)}
+			</h2>
 			<ul class="divide-y divide-rule">
 				{dayRows.map((row) => (
 					<SelectableTransactionRow row={shown(row)} checked today={today} />
@@ -820,7 +822,7 @@ async function renderList(
 						aria-live="polite"
 						tabindex={focusCount ? -1 : undefined}
 						autofocus={focusCount}
-						class="mt-4 text-sm text-muted"
+						class="mt-4 text-sm tabular-nums text-muted"
 					>
 						{count}
 					</p>
@@ -909,7 +911,7 @@ async function renderList(
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
 									<>
-										<h2 class="mt-3 text-sm text-muted">
+										<h2 class="mt-3 text-sm tabular-nums text-muted">
 											{dayLabel(date, today)}
 										</h2>
 										<ul class="divide-y divide-rule">
@@ -989,7 +991,7 @@ async function renderList(
 						) : (
 							byDay(rows).map(([date, dayRows]) => (
 								<>
-									<h2 class="mt-3 text-sm text-muted">
+									<h2 class="mt-3 text-sm tabular-nums text-muted">
 										{dayLabel(date, today)}
 									</h2>
 									<ul class="divide-y divide-rule">
@@ -2024,7 +2026,7 @@ function SplitSheet({
 			>
 				{tx.displayName}
 			</h2>
-			<p class="font-serif text-4xl font-semibold">
+			<p class="font-serif text-4xl font-semibold tabular-nums">
 				{formatCents(correction?.totalCents ?? tx.amountCents, {
 					signed: true,
 				})}

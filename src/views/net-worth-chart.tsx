@@ -89,7 +89,7 @@ export function NetWorthChart({ view }: { view: NetWorthView }) {
 			</svg>
 			<p
 				aria-hidden="true"
-				class="mt-1 flex justify-between text-sm text-muted"
+				class="mt-1 flex justify-between text-sm tabular-nums text-muted"
 			>
 				<span>{view.startLabel}</span>
 				<span>{view.endLabel}</span>

@@ -39,7 +39,7 @@ export function TrendsTop({
 		<>
 			<p class="text-lg text-muted">Spent so far in {month}</p>
 			<p
-				class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${headlineAmountClass(spent)}`}
+				class={`font-serif text-6xl font-semibold tabular-nums tracking-tight lg:text-7xl ${headlineAmountClass(spent)}`}
 			>
 				{spent}
 			</p>
@@ -299,7 +299,7 @@ export function MonthBars({
 							y={b.y - 6}
 							text-anchor="middle"
 							font-size="11"
-							class="fill-muted"
+							class="fill-muted tabular-nums"
 						>
 							{b.amount}
 						</text>
@@ -308,7 +308,7 @@ export function MonthBars({
 							y={height - 6}
 							text-anchor="middle"
 							font-size="12"
-							class={b.dashed ? "fill-ink" : "fill-muted"}
+							class={`${b.dashed ? "fill-ink" : "fill-muted"} tabular-nums`}
 						>
 							{b.label}
 						</text>

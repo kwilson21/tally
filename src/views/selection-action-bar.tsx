@@ -518,7 +518,11 @@ export function SelectionActionBar({
 	return (
 		<div class="flex flex-col gap-1">
 			<div class="flex items-center justify-between gap-2">
-				<span id="selected-count" aria-live="polite" class="text-lg">
+				<span
+					id="selected-count"
+					aria-live="polite"
+					class="text-lg tabular-nums"
+				>
 					{label ?? <SelectedCount count={count} notOnPage={notOnPage} />}
 				</span>
 				<SelectAllOnPage

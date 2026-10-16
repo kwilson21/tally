@@ -88,7 +88,8 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 | Ledger sheet title | font-serif, 2xl, semibold, tight tracking (a ledger-form sheet's title, P72 A, so its amount, which keeps 4xl, is the one big serif) |
 | Status sentence | font-serif italic, lg |
 | Key chip | font-mono, sm: the `--font-mono` token (a system monospace stack, no web font), used only for a key's name in a Key chip (decision 118) |
-| Body / rows | font-sans (Inter), base–lg, tabular numerals |
+| Body / rows | font-sans (Inter), base–lg, normal figures |
+| Amounts, dates and counts | Inter, tabular figures (`tabular-nums`) where they line up or change in place; never inside a sentence (decision 128) |
 | Secondary | font-sans, text-muted |
 
 ## Components (src/views/)

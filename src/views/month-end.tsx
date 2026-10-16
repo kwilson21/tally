@@ -384,7 +384,7 @@ export function MonthEnd({
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<p
-					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
+					class={`whitespace-nowrap font-serif text-6xl font-semibold tabular-nums tracking-tight ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 				>
 					{amount}
 				</p>
