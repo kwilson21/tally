@@ -60,17 +60,19 @@ describe("buildSeed", () => {
 		});
 		expect(summary.uncategorized).toEqual({ spentCents: 12152, count: 12 });
 		expect(summary.incomeCents).toBe(490000);
-		// Childcare's $1,040 budget adds to what is budgeted; its paid Fridays are spent. Rent's $1,200 budget adds
-		// too, less its $600 spent. The $245 is the designed rest with Eating Out at $286 and the uncategorized rows at
-		// $228.01; they are $348 and $121.52 now (#322), and Safe to spend moves by what they moved.
+		// Childcare's $1,200 budget adds to what is budgeted; its paid Fridays are spent. Rent's $1,200 budget adds
+		// too, less its $600 spent. This month's Groceries budget is $950, $250 above the $700 it was (#631). The $245
+		// is the designed rest with Eating Out at $286 and the uncategorized rows at $228.01; they are $348 and $121.52
+		// now (#322), and Safe to spend moves by what they moved.
 		expect(summary.safeToSpendCents).toBe(
 			24500 +
 				(28600 - 34800) +
 				(22801 - 12152) +
-				104000 +
+				120000 +
 				120000 -
 				childcareCents -
-				60000,
+				60000 +
+				25000,
 		);
 	});
 
@@ -555,16 +557,18 @@ describe("resetDemo", () => {
 			...data,
 			unpaidDueBillsCents: 0,
 		});
-		// Childcare's $1,040 budget less the four Fridays paid in September ($960), and Rent's $1,200 budget less the
-		// $600 paid this month, on the last day when the month's spending is all in (#322). The $245 rest is as above.
+		// Childcare's $1,200 budget less the four Fridays paid in September ($960), and Rent's $1,200 budget less the
+		// $600 paid this month, on the last day when the month's spending is all in (#322). The $245 rest is as above,
+		// and this month's Groceries budget ($950) is $250 above the $700 it was (#631).
 		expect(summary.safeToSpendCents).toBe(
 			24500 +
 				(28600 - 34800) +
 				(22801 - 12152) +
-				104000 +
+				120000 +
 				120000 -
 				96000 -
-				60000,
+				60000 +
+				25000,
 		);
 		expect(summary.uncategorized.count).toBe(10);
 

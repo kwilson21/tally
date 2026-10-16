@@ -647,3 +647,151 @@ describe("bill totals", () => {
 		expect(totals.groups.paidCents).toBe(120000);
 	});
 });
+
+// Decision 123 (#631): Safe to spend sets aside only this month's bills that are due or overdue and not paid. A bill
+// due in a later month is not set aside until its month, though it still counts as due soon (soonCents, soonCount).
+describe("Safe to spend's set-aside is this month's bills only (decision 123)", () => {
+	it("keeps an unpaid part of this month's rent set aside once the next month's rent is the shown one", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-11-01",
+					status: "due",
+					amountCents: 120000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-01",
+					status: "overdue",
+					amountCents: 120000,
+					paidCents: 60000,
+				},
+			],
+		});
+		expect(totals.setAsideCents).toBe(60000);
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(120000);
+	});
+
+	it("does not set aside next month's rent, due on the 1st, from this month", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-11-01",
+					status: "due",
+					amountCents: 120000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.setAsideCents).toBe(0);
+		expect(totals.soonCount).toBe(1);
+		expect(totals.soonCents).toBe(120000);
+	});
+
+	it("does not set aside a weekly bill's Friday in the next month, but sets aside this month's unpaid Friday", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(24000, "weekly")],
+			displayedOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-30",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 24000,
+					dueDate: "2026-10-30",
+					status: "overdue",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+				{
+					billId: 24000,
+					dueDate: "2026-11-06",
+					status: "due",
+					amountCents: 24000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.setAsideCents).toBe(24000);
+		expect(totals.soonCents).toBe(48000);
+	});
+
+	it("does not set aside a paid bill", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-01",
+					status: "paid",
+					amountCents: 120000,
+					paidCents: 120000,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.setAsideCents).toBe(0);
+	});
+
+	it("sets aside this month's bill once when it is both the shown row and this month's list", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-01",
+					status: "overdue",
+					amountCents: 120000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-10-01",
+					status: "overdue",
+					amountCents: 120000,
+					paidCents: 0,
+				},
+			],
+		});
+		expect(totals.setAsideCents).toBe(120000);
+	});
+
+	it("sets aside a bill due on the first day of the month being totalled", () => {
+		const totals = calculateBillTotals({
+			month: "2026-11",
+			bills: [bill(120000)],
+			displayedOccurrences: [
+				{
+					billId: 120000,
+					dueDate: "2026-11-01",
+					status: "due",
+					amountCents: 120000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.setAsideCents).toBe(120000);
+	});
+});
