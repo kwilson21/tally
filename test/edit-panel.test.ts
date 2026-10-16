@@ -150,6 +150,25 @@ describe("the category leads the panel (P120 B)", () => {
 			"";
 		expect(details).toContain(" open");
 	});
+
+	it("never hides a category error inside a closed row", async () => {
+		await pickedByTally();
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: "99",
+			name_pick: "own",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		const block = categoryBlock(html);
+		expect(block).toContain('id="category-error" role="alert"');
+		for (const tag of block.match(/<details[^>]*>/g) ?? []) {
+			expect(tag).toContain(" open");
+		}
+	});
 });
 
 describe("Exclude and Count as income are switches (P120 B)", () => {

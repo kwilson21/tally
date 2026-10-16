@@ -204,12 +204,12 @@ export function CategoryChoice({
 	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
 	const chosen = categories.find((cat) => cat.id === values.categoryId);
 	const needsCategory = tx.categoryId === null || guessChip;
-	// Folded once it has one (or New category is chosen, which the row says); open by itself on an error or New category.
+	// Folded once it has one (or New category is chosen, which the row says).
 	const folded =
 		!purchase && !needsCategory && (chosen !== undefined || values.newCategory);
-	const openFolded = Boolean(
-		errors.category || errors.newCategory || values.newCategory,
-	);
+	// Open by itself only for New category. A category error doesn't need it: both category errors leave the choice
+	// unset or unknown, so `chosen` is undefined and the row isn't folded at all, and the error shows in the grid.
+	const openFolded = values.newCategory === true;
 	// The line says how the saved category was settled. A redraw after a refused save with another choice posted says
 	// nothing about the saved one, so the line goes unless the posted choice is the saved category or Tally's guess.
 	const savedChoice =
