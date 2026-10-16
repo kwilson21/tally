@@ -987,6 +987,12 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("says in DESIGN.md that a paid month's check hangs in the margin, so every month's name lines up (decision 125, #682)", () => {
+		expect(design).toMatch(
+			/\| LedgerMonth, LedgerDisclosure[^\n]*a paid month's check hangs in the margin left of its name[^\n]*decision 125/,
+		);
+	});
+
 	it("names the ledger, the found row and the fold in the bill page's specimen sentence (#604)", async () => {
 		const { html } = await get("/design-system");
 		const page =
