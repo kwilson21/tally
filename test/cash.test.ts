@@ -1803,7 +1803,7 @@ describe("cash lifecycle", () => {
 					income: false,
 				}),
 			);
-			expect((await request("/")).html).toMatch(/\$395\s+of\s+\$700/);
+			expect((await request("/")).html).toMatch(/\$395\s+of\s+\$950/);
 		} finally {
 			vi.useRealTimers();
 		}

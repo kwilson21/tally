@@ -426,7 +426,7 @@ describe("a save that moves the household into another month", () => {
 	/** The tag that opens the Categories section. */
 	const categoriesTag = (html: string) =>
 		html.match(/<section[^>]*id="categories"[^>]*>/)?.[0] ?? "";
-	/** What a row's closed summary says about its budget: "$700 a month" or "No budget". */
+	/** What a row's closed summary says about its budget: "$950 a month" or "No budget". */
 	const amountOf = (html: string, id: number) =>
 		textOf(
 			`<span ${html.split(`id="cat-${id}-amount"`)[1]?.split("</summary>")[0] ?? ""}`,
@@ -462,7 +462,7 @@ describe("a save that moves the household into another month", () => {
 
 	it("starts with October's budgets on Settings", async () => {
 		const { html } = await get("/settings");
-		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 1)).toBe("$950 a month");
 		expect(amountOf(html, 5)).toBe("No budget");
 		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
 		expect(html).not.toContain("hx-swap-oob");
@@ -520,7 +520,7 @@ describe("a save that moves the household into another month", () => {
 			time_zone: "America/New_York",
 		});
 		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 1)).toBe("$950 a month");
 		expect(amountOf(html, 5)).toBe("No budget");
 		expect(noteOf(html, 5)).toBe("No budget yet. Add one on Home");
 	});
@@ -532,7 +532,7 @@ describe("a save that moves the household into another month", () => {
 		});
 		expect(res.status).toBe(200);
 		expect(oob(html)).toHaveLength((await activeIds()).length * 2);
-		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 1)).toBe("$950 a month");
 		expect(amountOf(html, 5)).toBe("No budget");
 	});
 
