@@ -965,6 +965,44 @@ describe("GET /design-system in the demo", () => {
 		expect(page).not.toContain("rounded-control bg-band px-2");
 	});
 
+	it("shows a credit-corrected payment on the bill page's specimen as unpaid, with Link a payment and no part-paid words (#469)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		// The state runs from its label to the next state's label.
+		const state =
+			page
+				.split(
+					'text-sm font-medium text-muted">Credit-corrected payment (reads unpaid)</p>',
+				)[1]
+				?.split('text-sm font-medium text-muted">')[0] ?? "";
+		expect(state).toContain("-$100.00");
+		expect(state).toContain("Link a payment");
+		expect(state).toContain("Not this one: Harbor Property -$100.00 on Oct 1");
+		expect(state).not.toContain("Part paid");
+		expect(state).not.toContain("Link another payment");
+		// DESIGN.md names each Not this one by its payment, as #205 asks, and says a credit reads unpaid (#469).
+		expect(design).toMatch(
+			/\| LedgerMonth, LedgerDisclosure[^\n]*#469[^\n]*Not this one: Harbor Property \$600\.00 on Oct 1/,
+		);
+	});
+
+	it("names the ledger, the found row and the fold in the bill page's specimen sentence (#604)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		const sentence =
+			page.match(/<p class="mt-1 max-w-prose text-muted">([^<]*)<\/p>/)?.[1] ??
+			"";
+		for (const words of [
+			"ledger of months",
+			"looks like this",
+			"Link it",
+			"fold",
+		])
+			expect(sentence).toContain(words);
+	});
+
 	it("says in the price offer's use spec what Update checks, with no count of prices (#422)", async () => {
 		const { html } = await get("/design-system");
 		const page =

@@ -114,12 +114,60 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 
 	it("words each open month with today's status, in muted type, and uses no filled status pill", async () => {
 		const html = await page();
-		expect(monthRow(html, "November")).toMatch(
-			/(Due|Upcoming) Nov 15 · \$2\.99/,
-		);
+		expect(monthRow(html, "November")).toContain("Upcoming Nov 15 · $2.99");
 		expect(monthRow(html, "December")).toContain("Upcoming Dec 15 · $2.99");
 		expect(html).not.toContain("bg-band px-2");
 		expect(html).not.toContain("Not paid");
+	});
+
+	it("links a later month to its picker, worded Upcoming as Bills words it", async () => {
+		const december = monthRow(await page(), "December");
+		expect(december).toContain(
+			`href="/bills/${BILL}/occurrences/2026-12/link#payment-picker"`,
+		);
+		expect(december).toContain("Upcoming Dec 15 · $2.99");
+	});
+
+	it("words the current month Due within seven days, and links it to its picker", async () => {
+		await setUp(
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9605,'Water',4000,20,'monthly',5,'DUE FIXTURE')",
+			),
+		);
+		const october = monthRow(
+			await (
+				await exports.default.fetch("http://tally.test/bills/9605")
+			).text(),
+			"October",
+		);
+		expect(october).toContain("Due Oct 20 · $40.00");
+		expect(october).toContain(
+			'href="/bills/9605/occurrences/2026-10/link#payment-picker"',
+		);
+	});
+
+	it("links each month inside the fold to its picker", async () => {
+		const fold =
+			(await page())
+				.split("<details")
+				.find((part) => part.includes("April to August")) ?? "";
+		expect(fold).toContain(
+			`href="/bills/${BILL}/occurrences/2026-07/link#payment-picker"`,
+		);
+	});
+
+	it("marks each month link as a row a person opens, so j and k reach it, and leaves a fold's summary to Tab (#639)", async () => {
+		const html = await page();
+		expect(html).toMatch(
+			/<a\b(?=[^>]*href="\/bills\/9604\/occurrences\/2026-12\/link#payment-picker")(?=[^>]*data-row="")/,
+		);
+		expect(html).toMatch(
+			/<a\b(?=[^>]*href="\/bills\/9604\/occurrences\/2026-09\/link\?transaction_id=9602#payment-picker")(?=[^>]*data-row="")/,
+		);
+		expect(html).toMatch(
+			/<a\b(?=[^>]*href="\/bills\/9604\/occurrences\/2026-07\/link#payment-picker")(?=[^>]*data-row="")/,
+		);
+		expect(html).not.toMatch(/<summary[^>]*data-row/);
 	});
 
 	it("keeps Edit bill, Deactivate and the Not this one footnote", async () => {

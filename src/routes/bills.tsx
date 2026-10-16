@@ -1716,7 +1716,7 @@ async function billPage(
 		yearly: "years",
 		quarterly: "quarters",
 		weekly: "weeks",
-		biweekly: "occurrences",
+		biweekly: "two-week periods",
 	} as const;
 	const rowFor = (period: string) => {
 		const status = statusOf(period);

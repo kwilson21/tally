@@ -46,7 +46,8 @@ export function BillHead({
 /**
  * One month as a quiet ruled row that opens a link (P118 A, P131 A): its name, its status in muted words at the
  * right, and the row's arrow. `sub` is a second line under the name (a found charge's sentence) and `action` a word
- * in place of the words (a terracotta Link it). The whole row is one link, at least 44px tall.
+ * in place of the words (a terracotta Link it). The whole row is one link, at least 44px tall, that j and k move
+ * between (#639).
  */
 export function LedgerMonth({
 	href,
@@ -68,6 +69,7 @@ export function LedgerMonth({
 			<a
 				href={href}
 				class={`flex min-h-11 items-center gap-3 py-2 text-ink no-underline ${ROW_OPENS}`}
+				data-row=""
 			>
 				<span class="min-w-0 flex-1">
 					<span class="block text-lg">{month}</span>

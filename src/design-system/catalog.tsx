@@ -1643,7 +1643,7 @@ function Rows() {
 					"PriceChanged",
 					"BillPaymentPicker",
 				]}
-				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
 				<State label="Head: the name, its amount, the bank's text">
 					<div inert>
@@ -1770,6 +1770,38 @@ function Rows() {
 									href="/bills/1/occurrences/2026-08/link#payment-picker"
 								>
 									Link another payment
+								</Button>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Credit-corrected payment (reads unpaid)">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="October"
+								words="Due Oct 1 · $1,200.00"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Harbor Property",
+											dateLabel: "Oct 1",
+											amountCents: -10000,
+											matchedBy: "user",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-10/link#payment-picker"
+								>
+									Link a payment
 								</Button>
 							</LedgerDisclosure>
 						</ul>
