@@ -394,6 +394,8 @@ describe("Bills", () => {
 		])
 			expect(form).toContain(words);
 
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
 		const response = await exports.default.fetch("http://tally.test/bills", {
 			method: "POST",
 			headers: {
