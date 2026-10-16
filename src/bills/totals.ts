@@ -44,8 +44,6 @@ type BillTotalInput = {
 		status: BillStatus;
 		amountCents: number;
 		paidCents: number;
-		/** The month a paid occurrence's payment counts in (billPaymentMonth); its due date's month when unset. */
-		paidMonth?: string;
 	}[];
 	thisMonthOccurrences: {
 		billId: number;
@@ -53,7 +51,6 @@ type BillTotalInput = {
 		status: BillStatus;
 		amountCents: number;
 		paidCents: number;
-		paidMonth?: string;
 	}[];
 };
 
@@ -69,14 +66,11 @@ export type BillTotalsRow = {
 	dueDate: string;
 	status: BillStatus;
 	paidCents: number;
-	/** The month the shown occurrence's payment counts in, when it is paid (`paidMonth` in BillTotalInput). */
-	paidMonth?: string;
 	totalOccurrences: {
 		dueDate: string;
 		status: BillStatus;
 		amountCents: number;
 		paidCents: number;
-		paidMonth?: string;
 	}[];
 	/** A weekly or every-two-weeks bill's occurrence after the shown one, when it falls in a later month. */
 	nextOccurrence?: {
@@ -84,7 +78,6 @@ export type BillTotalsRow = {
 		status: BillStatus;
 		amountCents: number;
 		paidCents: number;
-		paidMonth?: string;
 	};
 };
 
@@ -109,7 +102,6 @@ export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 			status: row.status,
 			amountCents: row.amountCents,
 			paidCents: row.paidCents,
-			paidMonth: row.paidMonth,
 		})),
 		thisMonthOccurrences: active.flatMap((row) => [
 			...row.totalOccurrences
@@ -169,16 +161,14 @@ export function calculateBillTotals({
 		upcoming: [],
 		paid: [],
 	};
-	// Every heading counts each occurrence of its group in the month, listed as a row or not (decision 122, P136 A), and
-	// names the ones no row lists in `unlisted`. Paid this month counts each paid occurrence at its full amount, since a
-	// paid occurrence has nothing left to pay (issue #601), and only in the month its payment counts in: an early
-	// payment in its own month, a late one in its occurrence's month (src/db/counted-month.ts). Each unpaid heading
-	// counts what is left of an occurrence, and Upcoming only those due this month.
+	// Every heading counts each occurrence of its group in the month, listed as a row or not (decisions 122 and 127), and
+	// names the ones no row lists in `unlisted`. Paid this month counts every listed paid row at its full amount, since a
+	// paid occurrence has nothing left to pay (issue #601), plus each unlisted paid occurrence due this month, whenever it
+	// was paid. The unpaid headings count what is left of an occurrence, and Upcoming only those due this month.
 	for (const [key, occurrence] of counted) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		if (occurrence.status === "paid") {
-			if ((occurrence.paidMonth ?? occurrence.dueDate.slice(0, 7)) !== month)
-				continue;
+			if (!listed.has(key) && !occurrence.dueDate.startsWith(month)) continue;
 			groups.paidCents += occurrence.amountCents;
 		} else {
 			if (

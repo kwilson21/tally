@@ -10,20 +10,17 @@ const bill = (
 	frequency: "monthly" | "weekly" = "monthly",
 ) => ({ id, amountCents, frequency, active: true });
 
-/** `paidMonth` is the month the payment counts in (src/db/counted-month.ts); a paid occurrence defaults to its due date's. */
 const occurrence = (
 	billId: number,
 	dueDate: string,
 	status: "paid" | "due" | "overdue" | "upcoming",
 	amountCents: number,
-	paidMonth = status === "paid" ? dueDate.slice(0, 7) : undefined,
 ) => ({
 	billId,
 	dueDate,
 	status,
 	amountCents,
 	paidCents: status === "paid" ? amountCents : 0,
-	paidMonth,
 });
 
 describe("each heading counts every occurrence of its group, listed or not (decision 122)", () => {
@@ -79,59 +76,54 @@ describe("each heading counts every occurrence of its group, listed or not (deci
 		expect(totals.unlisted.paid).toEqual([]);
 	});
 
-	it("does not count a paid occurrence due next month in Paid this month when its payment counts next month", () => {
+	it("does not count an unlisted paid occurrence due next month in Paid this month (decision 127)", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(8, 24000, "weekly")],
 			displayedOccurrences: [occurrence(8, "2026-10-16", "due", 24000)],
-			thisMonthOccurrences: [
-				occurrence(8, "2026-11-06", "paid", 24000, "2026-11"),
-			],
+			thisMonthOccurrences: [occurrence(8, "2026-11-06", "paid", 24000)],
 		});
 		expect(totals.groups.paidCents).toBe(0);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
 
-	it("counts a November Friday paid in October in October's Paid this month, unlisted", () => {
+	it("counts every unlisted paid occurrence due this month, whenever it was paid (decision 127)", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(8, 24000, "weekly")],
 			displayedOccurrences: [occurrence(8, "2026-10-16", "due", 24000)],
 			thisMonthOccurrences: [
-				occurrence(8, "2026-11-06", "paid", 24000, "2026-10"),
+				occurrence(8, "2026-10-02", "paid", 24000),
+				occurrence(8, "2026-10-09", "paid", 24000),
 			],
 		});
-		expect(totals.groups.paidCents).toBe(24000);
+		expect(totals.groups.paidCents).toBe(48000);
 		expect(totals.unlisted.paid).toEqual([
-			{ billId: 8, dueDate: "2026-11-06" },
-		]);
-	});
-
-	it("counts a paid occurrence in the month its payment counts in, not the month it is due", () => {
-		const totals = calculateBillTotals({
-			month: "2026-10",
-			bills: [bill(8, 24000, "weekly")],
-			displayedOccurrences: [occurrence(8, "2026-10-16", "due", 24000)],
-			thisMonthOccurrences: [
-				occurrence(8, "2026-10-02", "paid", 24000, "2026-09"),
-				occurrence(8, "2026-10-09", "paid", 24000, "2026-10"),
-			],
-		});
-		expect(totals.groups.paidCents).toBe(24000);
-		expect(totals.unlisted.paid).toEqual([
+			{ billId: 8, dueDate: "2026-10-02" },
 			{ billId: 8, dueDate: "2026-10-09" },
 		]);
 	});
 
-	it("leaves a listed paid row out of Paid this month when its payment counts in an earlier month", () => {
-		const paid = occurrence(10, "2026-10-01", "paid", 10000, "2026-09");
+	it("counts a listed paid row at its full amount, so the row and the total agree (decision 127)", () => {
+		const paid = occurrence(10, "2026-10-01", "paid", 10000);
 		const totals = calculateBillTotals({
 			month: "2026-10",
 			bills: [bill(10, 10000)],
 			displayedOccurrences: [paid],
 			thisMonthOccurrences: [paid],
 		});
-		expect(totals.groups.paidCents).toBe(0);
+		expect(totals.groups.paidCents).toBe(10000);
+		expect(totals.unlisted.paid).toEqual([]);
+	});
+
+	it("counts a listed paid row due next month, as Bills lists it (decision 127)", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(10, 10000)],
+			displayedOccurrences: [occurrence(10, "2026-11-01", "paid", 10000)],
+			thisMonthOccurrences: [],
+		});
+		expect(totals.groups.paidCents).toBe(10000);
 		expect(totals.unlisted.paid).toEqual([]);
 	});
 

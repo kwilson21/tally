@@ -1,7 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
 
 /** One Bills group: its `<section>` block, found by its heading, cut before the next section. */
 const groupUnder = (html: string, heading: string) =>
@@ -92,9 +91,8 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 	});
 });
 
-// Decision 122 (#602): Paid this month counts a payment in the month it counts in (src/db/counted-month.ts), an early
-// payment in its own month and a late one in its occurrence's month.
-describe("Paid this month counts a bill payment in the month it counts in (#602)", () => {
+// Decision 127 (#602): Paid this month counts this month's bill occurrences that are paid, whenever the payment was made.
+describe("Paid this month counting this month's paid occurrences whenever paid (decision 127)", () => {
 	beforeEach(async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-15T15:00:00Z"));
@@ -102,41 +100,23 @@ describe("Paid this month counts a bill payment in the month it counts in (#602)
 	});
 	afterEach(() => vi.useRealTimers());
 
-	it("leaves out Daycare's Oct 2 Friday paid on Sep 29, and names only Oct 9 under the heading", async () => {
+	it("counts Daycare's Oct 2 Friday paid on Sep 29 in October's Paid this month, and names Oct 2 and 9 (decision 127)", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET date='2026-09-29' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10-02' AND bill_id=(SELECT id FROM bills WHERE name='Daycare'))",
 		).run();
 		const paid = groupUnder(await billsPage(), "Paid this month");
 		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
-		expect(totalOf(paid)).toBe("$256.98");
-		expect(paid).toContain("Includes Daycare&#39;s Friday on Oct 9</p>");
+		expect(totalOf(paid)).toBe("$496.98");
+		expect(paid).toContain("Includes Daycare&#39;s Fridays on Oct 2 and 9</p>");
 	});
-});
 
-describe("A late payment counts in its occurrence's month, and Paid this month does not move (#602)", () => {
-	beforeEach(async () => {
-		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-30T15:00:00Z"));
-		await resetDemo(env.DB, "2026-10-30");
-	});
-	afterEach(() => vi.useRealTimers());
-
-	it("gives Daycare's Oct 30 occurrence October when its payment is made on Nov 3, and keeps Paid this month's total", async () => {
-		const before = totalOf(groupUnder(await billsPage(), "Paid this month"));
+	it("keeps Streaming's October occurrence paid on Sep 25 as a Paid this month row, and counts it in the total (decision 127)", async () => {
 		await env.DB.prepare(
-			"UPDATE transactions SET date='2026-11-03' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10-30' AND bill_id=(SELECT id FROM bills WHERE name='Daycare'))",
+			"UPDATE transactions SET date='2026-09-25' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10' AND bill_id=(SELECT id FROM bills WHERE name='Streaming'))",
 		).run();
-		const { rows } = await loadBillRows(env.DB, "2026-10-30");
-		const daycare = rows.find((row) => row.name === "Daycare");
-		expect(
-			daycare?.totalOccurrences.find(
-				(occurrence) => occurrence.dueDate === "2026-10-30",
-			)?.paidMonth,
-		).toBe("2026-10");
-		expect(before).toBeDefined();
-		expect(totalOf(groupUnder(await billsPage(), "Paid this month"))).toBe(
-			before,
-		);
+		const paid = groupUnder(await billsPage(), "Paid this month");
+		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
+		expect(totalOf(paid)).toBe("$496.98");
 	});
 });
 
