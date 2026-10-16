@@ -483,15 +483,44 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			},
 		}) as unknown as D1Database;
 
-	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
-	const racingWith = (race: string, bind: (number | null)[]) =>
+	/** Runs `race`, as one batch, on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingBatch = (race: D1PreparedStatement[]) =>
 		batchAround(async (statements) => {
-			await db
-				.prepare(race)
-				.bind(...bind)
-				.run();
+			await db.batch(race);
 			return db.batch(statements);
 		});
+
+	/** Runs one statement, bound to `bind`, just before the save's batch, as a competing save would. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		racingBatch([db.prepare(race).bind(...bind)]);
+
+	/** The id of a bill's linked payment, which the races below delete or hand out again. */
+	const linkedPaymentId = async (billId: number) => {
+		const row = await db
+			.prepare(
+				"SELECT id FROM bill_payments WHERE bill_id = ? AND status = 'linked'",
+			)
+			.bind(billId)
+			.first<{ id: number }>();
+		if (!row) throw new Error(`No linked payment for bill ${billId}`);
+		return row.id;
+	};
+
+	/** Every bill payment row, oldest first, as the races below compare it. */
+	const paymentRows = async () =>
+		(
+			await db
+				.prepare(
+					"SELECT id, bill_id AS billId, period, transaction_id AS transactionId, status FROM bill_payments ORDER BY id",
+				)
+				.all<{
+					id: number;
+					billId: number;
+					period: string;
+					transactionId: number;
+					status: string;
+				}>()
+		).results;
 
 	it("refuses a re-split when a competing save moves a bill payment from one part to another, and writes nothing", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
@@ -642,6 +671,171 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 			failure,
 		);
 	});
+
+	it.each([
+		{
+			label: "the only bill payment in the table",
+			prepare: async () => {
+				await db
+					.prepare("DELETE FROM bill_payments WHERE transaction_id <> ?")
+					.bind(PART_MEMBERSHIP)
+					.run();
+				expect(
+					await db.prepare("SELECT COUNT(*) AS n FROM bill_payments").first(),
+				).toEqual({ n: 1 });
+			},
+		},
+		{
+			label: "a linked payment for another bill elsewhere",
+			prepare: async () => {
+				await db.batch([
+					db.prepare(
+						"INSERT INTO transactions (id, account_id, date, amount_cents, raw_name) VALUES (9820, 3, '2026-09-03', 600, 'CITY WATER')",
+					),
+					db
+						.prepare(
+							"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', 9820, 'auto', 'linked')",
+						)
+						.bind(WATER),
+				]);
+			},
+		},
+	])(
+		"refuses a part's payment deleted after the read, with $label, and writes nothing",
+		async ({ prepare }) => {
+			await seedSplit([membershipPart, groceriesPart]);
+			await prepare();
+			const before = await partIds(PURCHASE);
+			const rowsBefore = await paymentRows();
+			const racing = racingWith(
+				"DELETE FROM bill_payments WHERE bill_id = ? AND status = 'linked'",
+				[MEMBERSHIP],
+			);
+
+			const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+			expect(result).toEqual({
+				saved: false,
+				billLinked: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			});
+			expect(await partIds(PURCHASE)).toEqual(before);
+			// Only the race's delete changed the table: no sentinel row was written, and other rows are unchanged.
+			expect(await paymentRows()).toEqual(
+				rowsBefore.filter((row) => row.billId !== MEMBERSHIP),
+			);
+
+			const retry = await saveSplit(db, PURCHASE, KEEP_TWO, "test");
+			expect(retry).toEqual({
+				saved: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			});
+		},
+	);
+
+	it.each([
+		{ label: "a new row", reuseId: false },
+		{ label: "a new row given the deleted payment's id", reuseId: true },
+	])(
+		"refuses a re-split when a competing Not this one replaces a read payment ($label), and writes nothing",
+		async ({ reuseId }) => {
+			await seedSplit([membershipPart, groceriesPart]);
+			const before = await partIds(PURCHASE);
+			const paymentId = await linkedPaymentId(MEMBERSHIP);
+			const dismiss = reuseId
+				? db
+						.prepare(
+							"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, '2026', ?, 'user', 'dismissed')",
+						)
+						.bind(paymentId, MEMBERSHIP, PART_MEMBERSHIP)
+				: db
+						.prepare(
+							"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, 'user', 'dismissed')",
+						)
+						.bind(MEMBERSHIP, "2026", PART_MEMBERSHIP);
+			const racing = racingBatch([
+				db
+					.prepare(
+						"DELETE FROM bill_payments WHERE bill_id = ? AND period = ? AND transaction_id = ? AND status = 'linked'",
+					)
+					.bind(MEMBERSHIP, "2026", PART_MEMBERSHIP),
+				dismiss,
+			]);
+
+			const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+			expect(result).toEqual({
+				saved: false,
+				billLinked: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			});
+			expect(await partIds(PURCHASE)).toEqual(before);
+			expect(await linkedOn(MEMBERSHIP)).toEqual([]);
+			expect(
+				await db
+					.prepare(
+						"SELECT transaction_id AS transactionId, status FROM bill_payments WHERE bill_id = ?",
+					)
+					.bind(MEMBERSHIP)
+					.first(),
+			).toEqual({ transactionId: PART_MEMBERSHIP, status: "dismissed" });
+		},
+	);
+
+	it.each([
+		{ label: "another bill", billId: WATER, period: "2026-09" },
+		{
+			label: "another period of the same bill",
+			billId: MEMBERSHIP,
+			period: "2025",
+		},
+	])(
+		"refuses a re-split when a competing link takes a read payment's id ($label), and writes nothing",
+		async ({ billId, period }) => {
+			await seedSplit([membershipPart, groceriesPart]);
+			const before = await partIds(PURCHASE);
+			const paymentId = await linkedPaymentId(MEMBERSHIP);
+			const racing = racingBatch([
+				db.prepare("DELETE FROM bill_payments WHERE id = ?").bind(paymentId),
+				db
+					.prepare(
+						"INSERT INTO bill_payments (id, bill_id, period, transaction_id, matched_by, status) VALUES (?, ?, ?, ?, 'user', 'linked')",
+					)
+					.bind(paymentId, billId, period, PART_MEMBERSHIP),
+			]);
+
+			const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+			expect(result).toEqual({
+				saved: false,
+				billLinked: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			});
+			expect(await partIds(PURCHASE)).toEqual(before);
+			expect(
+				await db
+					.prepare(
+						"SELECT id, bill_id AS billId, period, transaction_id AS transactionId, status FROM bill_payments WHERE id = ?",
+					)
+					.bind(paymentId)
+					.first(),
+			).toEqual({
+				id: paymentId,
+				billId,
+				period,
+				transactionId: PART_MEMBERSHIP,
+				status: "linked",
+			});
+		},
+	);
 });
 
 describe("Link a payment lists a split change's dismissal, and linking it links it (decision 99)", () => {

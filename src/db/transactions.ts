@@ -1854,7 +1854,8 @@ async function partPlans(
 
 /**
  * A linked payment on a part, with the part's amount and category: what a replacement can keep it by. `transactionId` is
- * the part it was on when read, so a save can tell whether it has since moved (decision 99).
+ * the part it was on when read, so a save can tell whether it has since moved (decision 99). A save checks paymentId,
+ * transactionId, billId and period together, since a deleted payment's id can be handed out again (#638).
  */
 type PartPayment = UnpaidBill & {
 	billId: number;
@@ -1954,8 +1955,9 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * would unlink, move or pair it unseen. A plan read on a part and still on it is carried to the new part of its amount
  * and category, as a bill's payment is (decision 99).
  *
- * A bill payment on a part that a competing save moved, linked or unlinked since the read refuses the whole change the
- * same way, and `billLinked` says so: a write would pair it by the values the read saw (#638).
+ * A bill payment on a part that a competing save moved, linked, unlinked or deleted since the read, or replaced by a new
+ * link with its id, refuses the whole change the same way, and `billLinked` says so: a write would pair it by the values
+ * the read saw (#638).
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1967,7 +1969,7 @@ export async function saveSplit(
 	saved: boolean;
 	/** Set (true) only when a plan linked to a part, or moved between parts, after the read refused the change; absent otherwise. */
 	planLinked?: true;
-	/** Set (true) only when a bill payment on a part moved, was linked or was unlinked after the read refused the change; absent otherwise. */
+	/** Set (true) only when a bill payment on a part moved, was linked, unlinked or deleted after the read, or was replaced by a new link with its id, and so refused the change; absent otherwise. */
 	billLinked?: true;
 	unlinked: string[];
 	bills: UnpaidBill[];
@@ -2170,8 +2172,8 @@ export async function saveSplit(
 	// planned_expenses.amount_cents, so this text is refuseMovedPlan's alone.
 	const movedPlanRefusal =
 		/NOT NULL constraint failed: planned_expenses\.amount_cents/;
-	// The text of refuseMovedBill's failure, as D1 passes it on. No statement in the batch writes bill_payments.bill_id to
-	// NULL (the bill-copying inserts take it from a row), so this text is refuseMovedBill's alone.
+	// The text of refuseMovedBill's failure, as D1 passes it on. No other statement in the batch writes a NULL bill_id
+	// (the bill-copying inserts take it from a row), so this text is refuseMovedBill's alone.
 	const movedBillRefusal = /NOT NULL constraint failed: bill_payments\.bill_id/;
 	// Runs before any write. A plan the read didn't see on its part fails this statement (amount_cents is NOT NULL), and D1
 	// rolls the whole batch back, so nothing is written and the catch below says planLinked. RAISE(ABORT) works only inside
@@ -2181,25 +2183,23 @@ export async function saveSplit(
 	const refuseMovedPlan = db.prepare(
 		`UPDATE planned_expenses SET amount_cents = NULL WHERE ${plansMovedSinceRead}`,
 	);
-	// The same for a bill payment on a part (#638). A payment the read saw that is no longer linked on its part, or a linked
-	// payment on a part the read didn't see, fails refuseMovedBill, the batch's second statement, since bill_id is NOT NULL.
-	// The count catches a read payment that left its part; the extra check, one linked to a part after the read. The
-	// statement fails only while some bill_payments row exists, so if every row is gone (a bill deleted with its payments),
-	// the save goes on: no payment is left to pair by the values the read saw.
-	const paymentsReadOnTheirPart =
-		payments
-			.map(
-				(payment) =>
-					`(bp.id = ${Number(payment.paymentId)} AND bp.transaction_id = ${Number(payment.transactionId)})`,
-			)
-			.join(" OR ") || "0";
+	// The save goes on only while the parts' linked bill payments are exactly the ones the read saw, each on its part,
+	// bill and period (#638). A payment moved, linked, unlinked or deleted since the read (a Not this one deletes the link
+	// and adds a dismissal), or a new link that took a deleted payment's id (bill_payments ids can be handed out again),
+	// makes this statement add a bill payment with no bill. bill_id is NOT NULL, so the insert fails whatever other rows
+	// exist, and D1 rolls the whole batch back. It runs before any write.
 	const paymentsOnParts = `FROM bill_payments bp JOIN transactions part ON part.id = bp.transaction_id
-		WHERE part.parent_id = ${Number(parentId)} AND bp.status = 'linked'`;
-	const paymentsMovedSinceRead = `(EXISTS (SELECT 1 ${paymentsOnParts} AND NOT (${paymentsReadOnTheirPart}))
-		OR (SELECT COUNT(*) ${paymentsOnParts}) <> ${payments.length})`;
-	const refuseMovedBill = db.prepare(
-		`UPDATE bill_payments SET bill_id = NULL WHERE ${paymentsMovedSinceRead}`,
-	);
+		WHERE part.parent_id = ?1 AND bp.status = 'linked'`;
+	const refuseMovedBill = db
+		.prepare(
+			`INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status)
+			SELECT NULL, '2000', ?1, 'user', 'dismissed'
+			WHERE (SELECT COUNT(*) ${paymentsOnParts}) <> ?3
+				OR EXISTS (SELECT 1 ${paymentsOnParts} AND NOT EXISTS (SELECT 1 FROM json_each(?2) r
+					WHERE json_extract(r.value, '$.paymentId') = bp.id AND json_extract(r.value, '$.transactionId') = bp.transaction_id
+					AND json_extract(r.value, '$.billId') = bp.bill_id AND json_extract(r.value, '$.period') = bp.period))`,
+		)
+		.bind(parentId, JSON.stringify(payments), payments.length);
 	const statements = [
 		refuseMovedPlan,
 		refuseMovedBill,
