@@ -335,9 +335,10 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		{ ticked: ids, shown: ids, notes: {} },
 		actor(c),
 	);
+	// Organize ticks every purchase, so "empty" means another tab filed them: the same answer as "gone".
 	if (!result.ok)
 		return answered(
-			result.reason === "gone"
+			result.reason === "gone" || result.reason === "empty"
 				? CHANGED_SUGGESTION
 				: (result.error ?? "That category couldn't be made."),
 		);

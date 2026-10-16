@@ -159,6 +159,8 @@ type View = {
 		id: string;
 		name: string;
 		stores: { merchantKey: string; label: string }[];
+		/** The No's card place in the list; left out, the question comes after every card. */
+		place?: number;
 	};
 	status?: 200 | 400 | 404 | 422;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
@@ -400,6 +402,7 @@ async function renderContents(c: Context<App>) {
  */
 function CategorySuggestion({
 	suggestion,
+	place,
 	today,
 	existing,
 	archived,
@@ -408,6 +411,8 @@ function CategorySuggestion({
 	notes,
 }: {
 	suggestion: PendingSuggestion;
+	/** The card's order in the list: its No sends it back, so the question is drawn where the card was. */
+	place: number;
 	today: string;
 	/** The family's category with this name, when it has one: the Create button adds to it, or restores it. */
 	existing?: string;
@@ -420,7 +425,8 @@ function CategorySuggestion({
 	return (
 		<div class="mt-3">
 			<NewCategoryCard
-				name={suggestion.name}
+				name={tidyName(suggestion.name)}
+				hidden={<input type="hidden" name="place" value={String(place)} />}
 				rows={suggestion.rows.map((row) => ({
 					id: row.id,
 					name: row.displayName,
@@ -467,6 +473,55 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 	const { active, archived } = await settingsCategories(db, today.slice(0, 7));
 	const categorySuggestions = await pendingSuggestions(db);
 	const adding = view.open === "new";
+	const cards = categorySuggestions.map((suggestion, place) => {
+		// A suggestion whose name a category already has is added to it, or restores it when archived, not made again
+		// (decisions 101, 110): Add to the active category with the suggested name, or Restore the archived one.
+		const named = [...active, ...archived].find((cat) =>
+			sameName(cat.name, tidyName(suggestion.name)),
+		);
+		return (
+			<CategorySuggestion
+				place={place}
+				today={today}
+				suggestion={suggestion}
+				existing={named?.name}
+				archived={named !== undefined && archived.includes(named)}
+				error={
+					view.suggestionValues?.id === suggestion.id
+						? view.suggestionError
+						: undefined
+				}
+				ticked={
+					view.suggestionValues?.id === suggestion.id
+						? view.suggestionValues.ticked
+						: undefined
+				}
+				notes={
+					view.suggestionValues?.id === suggestion.id
+						? view.suggestionValues.notes
+						: undefined
+				}
+			/>
+		);
+	});
+	// The question after a No (decision 101), in the card's place: its Yes and Not now post to the same address. The
+	// No sends its card's place, so the question is drawn where the card was; splice puts it last past the end.
+	if (view.ask)
+		cards.splice(
+			view.ask.place ?? cards.length,
+			0,
+			<div class="mt-3">
+				<AskFirst
+					action={`/settings/suggestions/${view.ask.suggestionId}/dismiss`}
+					target="#categories"
+					kind="new_category"
+					id={view.ask.id}
+					name={view.ask.name}
+					stores={view.ask.stores}
+					focus
+				/>
+			</div>,
+		);
 	return settingsPage(
 		c,
 		"Categories · Settings",
@@ -509,50 +564,7 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 						}
 					/>
 				))}
-				{/* A suggestion whose name a category already has is added to it, or restores it when archived, not made again (decisions 101, 110). */}
-				{categorySuggestions.map((suggestion) => {
-					// Add to the active category with the suggested name, or Restore the archived one (decisions 101, 110).
-					const named = [...active, ...archived].find((cat) =>
-						sameName(cat.name, tidyName(suggestion.name)),
-					);
-					return (
-						<CategorySuggestion
-							today={today}
-							suggestion={suggestion}
-							existing={named?.name}
-							archived={named !== undefined && archived.includes(named)}
-							error={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionError
-									: undefined
-							}
-							ticked={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionValues.ticked
-									: undefined
-							}
-							notes={
-								view.suggestionValues?.id === suggestion.id
-									? view.suggestionValues.notes
-									: undefined
-							}
-						/>
-					);
-				})}
-				{/* The question after a No, in the card's place (decision 101): its Yes and Not now post to the same address. */}
-				{view.ask && (
-					<div class="mt-3">
-						<AskFirst
-							action={`/settings/suggestions/${view.ask.suggestionId}/dismiss`}
-							target="#categories"
-							kind="new_category"
-							id={view.ask.id}
-							name={view.ask.name}
-							stores={view.ask.stores}
-							focus
-						/>
-					</div>
-				)}
+				{cards}
 				{categorySuggestions.more > 0 && (
 					<p class="py-2 text-sm text-muted">
 						{categorySuggestions.more} more suggestions will show once you
@@ -986,13 +998,21 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 			listError: CHANGED_SUGGESTION,
 			status: 404,
 		});
+	const name = tidyName(result.name);
 	const stores = await askedStores(db, id);
+	// The No sends its card's place, so the question is drawn where the card was. A missing or non-numeric place
+	// (Number(null) is 0, so the raw text is checked first) leaves the question after every card.
+	const posted = form.get("place");
+	const place =
+		typeof posted === "string" && /^\d+$/.test(posted)
+			? Number(posted)
+			: undefined;
 	if (stores.length > 0)
 		return renderPage(c, "categories", {
-			ask: { suggestionId: id, id: `new-${id}`, name: result.name, stores },
+			ask: { suggestionId: id, id: `new-${id}`, name, stores, place },
 		});
 	// Nothing is left to ask about, so the toast says only what the No did: the name is never suggested again.
-	const message = `Tally won't suggest ${result.name} again.`;
+	const message = `Tally won't suggest ${name} again.`;
 	return done(c, message, message, { page: "categories" });
 });
 

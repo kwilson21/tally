@@ -270,7 +270,8 @@ export type CreateResult =
 			attached: boolean;
 			restored: boolean;
 	  }
-	| { ok: false; reason: "gone" | "invalid"; error?: string };
+	// "empty": no ticked purchase could be filed; Organize, which ticks them all, reads it as changed elsewhere.
+	| { ok: false; reason: "gone" | "empty" | "invalid"; error?: string };
 export async function createFromSuggestion(
 	db: D1Database,
 	id: number,
@@ -298,7 +299,7 @@ export async function createFromSuggestion(
 	if (!ticked.length)
 		return {
 			ok: false,
-			reason: "invalid",
+			reason: "empty",
 			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	if (Object.values(input.notes).some((note) => note.length > 500))
@@ -469,7 +470,7 @@ export async function createFromSuggestion(
 			return { ok: false, reason: "invalid", error: "That name is taken." };
 		return {
 			ok: false,
-			reason: "invalid",
+			reason: "empty",
 			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	}

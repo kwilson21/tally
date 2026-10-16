@@ -454,7 +454,7 @@ describe("saveSuggestion", () => {
 			"person",
 		);
 		await db.prepare("DROP TRIGGER exclude_during_create").run();
-		expect(result).toMatchObject({ ok: false, reason: "invalid" });
+		expect(result).toMatchObject({ ok: false, reason: "empty" });
 		for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
 	});
 
@@ -894,7 +894,7 @@ describe("createFromSuggestion", () => {
 			),
 		).toEqual({
 			ok: false,
-			reason: "invalid",
+			reason: "empty",
 			error: "Tick at least one transaction, or say No to this suggestion.",
 		});
 		expect(await categories()).toHaveLength(had);
@@ -1171,7 +1171,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: false,
-				reason: "invalid",
+				reason: "empty",
 				error: "Tick at least one transaction, or say No to this suggestion.",
 			});
 			expect(

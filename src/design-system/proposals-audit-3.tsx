@@ -2,8 +2,9 @@
 // as the screens it changes, so the owner decides by seeing (decision 47). Proposal only: nothing in the app
 // changes. Every picture is inert and labelled, like the rest of the page. Where the app's own components draw
 // the same at a phone's size they are used as they are (Band, ContentsList, CategoryRow, CategoryIcon, Switch,
-// Chip, NewCategoryChip, Button, WhyLink, Icon). The two suggestion pictures draw today's cards, copied here as TodaySettingsCard and TodaySuggestionCard, since main's cards are now the one card (decision 120); the screens an option
-// changes are prototypes in tokens, and their captions say so. The sample data is the demo's (src/demo/reset.ts
+// Chip, NewCategoryChip, Button, WhyLink, Icon). The two suggestion pictures' Today is a hand-drawn baseline of today's cards, kept here as P135's "today" since
+// main's cards are now the one card (decision 120): TodaySettingsCard, TodaySuggestionCard and TodayGuess. The screens
+// an option changes are prototypes in tokens, and their captions say so. The sample data is the demo's (src/demo/reset.ts
 // and seed.ts): seven categories with $3,940 a month, one person (Everyone), Eastern time, and the Pet Care
 // suggestion for Chewy, Petsmart and Banfield Pet Hospital, in August.
 

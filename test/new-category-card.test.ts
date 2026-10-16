@@ -165,6 +165,150 @@ describe("Settings: one card, and No asks in its place", () => {
 	});
 });
 
+/** The markup of the card's whole form, hidden fields included, so a check reads only that card. */
+function formMarkup(html: string, sentence: string): string {
+	const at = html.indexOf(sentence);
+	expect(at).toBeGreaterThan(-1);
+	return html.slice(html.lastIndexOf("<form", at), html.indexOf("</form>", at));
+}
+
+describe("Settings: the question is drawn where the No's card was", () => {
+	let tutoring: number;
+
+	beforeEach(async () => {
+		// Pet Care has two purchases and Tutoring has one, so Pet Care is listed first.
+		tutoring = (
+			await env.DB.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Tutoring', 'pending') RETURNING id",
+			).first<{ id: number }>()
+		)?.id as number;
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 4500, 'TUTOR HUB 77', 'Tutor Hub', 1, ?)",
+		)
+			.bind(`${THIS}-08`, tutoring)
+			.run();
+	});
+
+	it("each card's form sends its place, by its order in the list", async () => {
+		const { html } = await get("/settings/categories");
+		expect(formMarkup(html, "A new category: Pet Care")).toContain(
+			'name="place" value="0"',
+		);
+		expect(formMarkup(html, "A new category: Tutoring")).toContain(
+			'name="place" value="1"',
+		);
+	});
+
+	it("No on the first card draws the question before the second card", async () => {
+		const { html } = await post(`/settings/suggestions/${suggestion}/dismiss`, [
+			["place", "0"],
+		]);
+		const question = html.indexOf("Don&#39;t suggest Pet Care again for");
+		expect(question).toBeGreaterThan(-1);
+		expect(question).toBeLessThan(html.indexOf("A new category: Tutoring"));
+	});
+
+	it("No on the second card draws the question after the first card", async () => {
+		const { html } = await post(`/settings/suggestions/${tutoring}/dismiss`, [
+			["place", "1"],
+		]);
+		const question = html.indexOf("Don&#39;t suggest Tutoring again for");
+		expect(question).toBeGreaterThan(html.indexOf("A new category: Pet Care"));
+	});
+
+	it("with no place, or a place past the end, draws the question after every card", async () => {
+		const none = await post(`/settings/suggestions/${suggestion}/dismiss`, []);
+		expect(none.res.status).toBe(200);
+		expect(
+			none.html.indexOf("Don&#39;t suggest Pet Care again for"),
+		).toBeGreaterThan(none.html.indexOf("A new category: Tutoring"));
+		const past = await post(`/settings/suggestions/${tutoring}/dismiss`, [
+			["place", "99"],
+		]);
+		expect(past.res.status).toBe(200);
+		expect(
+			past.html.indexOf("Don&#39;t suggest Tutoring again for"),
+		).toBeGreaterThan(past.html.indexOf("A new category: Pet Care"));
+	});
+
+	it("with more than ten waiting, the question still comes before a card that moved up into the list", async () => {
+		// Ten are listed, so Extra 9 waits behind the limit until Pet Care is answered and moves up.
+		for (let i = 1; i <= 9; i++) {
+			const id = (
+				await env.DB.prepare(
+					"INSERT INTO category_suggestions (name, status) VALUES (?, 'pending') RETURNING id",
+				)
+					.bind(`Extra ${i}`)
+					.first<{ id: number }>()
+			)?.id as number;
+			await env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, merchant_name, jev_none_fit, category_suggestion_id) VALUES (1, ?, 1000, ?, ?, 1, ?)",
+			)
+				.bind(`${THIS}-09`, `EXTRA ${i}`, `Extra ${i}`, id)
+				.run();
+		}
+		const { html } = await post(`/settings/suggestions/${suggestion}/dismiss`, [
+			["place", "0"],
+		]);
+		const question = html.indexOf("Don&#39;t suggest Pet Care again for");
+		expect(question).toBeLessThan(html.indexOf("A new category: Tutoring"));
+		expect(question).toBeLessThan(html.indexOf("A new category: Extra 9"));
+	});
+});
+
+describe("the suggested name is tidied the same on every surface", () => {
+	beforeEach(async () => {
+		// tidyName leaves "Pet Care" as it is, so only stored capitals show whether a surface tidies the name.
+		await env.DB.prepare(
+			"UPDATE category_suggestions SET name = 'PET CARE' WHERE id = ?",
+		)
+			.bind(suggestion)
+			.run();
+	});
+
+	it("Settings' card reads Pet care, as Organize and the Suggestions page do", async () => {
+		const { html } = await get("/settings/categories");
+		expect(html).toContain("A new category: Pet care");
+		expect(html).toContain(">Create Pet care<");
+		expect(html).not.toContain("PET CARE");
+	});
+
+	it("No asks about Pet care, not the stored capitals", async () => {
+		const { html } = await post(
+			`/settings/suggestions/${suggestion}/dismiss`,
+			[],
+		);
+		expect(html).toContain("Don&#39;t suggest Pet care again for");
+		expect(html).not.toContain("PET CARE");
+	});
+
+	it("the No's toast says Pet care when no purchase is left to ask about", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = ?",
+		)
+			.bind(suggestion)
+			.run();
+		const { res, html } = await post(
+			`/settings/suggestions/${suggestion}/dismiss`,
+			[],
+		);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Tally won't suggest Pet care again.",
+		);
+		expect(html).not.toContain("PET CARE");
+	});
+
+	it("Organize and the Suggestions page read Pet care too", async () => {
+		const organize = await get("/transactions/organize");
+		expect(organize.html).toContain(
+			"Tally suggested a new category for this and 1 more: Pet care",
+		);
+		const page = await get("/settings/suggestions");
+		expect(page.html).toContain("A new category: Pet care");
+		expect(page.html).not.toContain("PET CARE");
+	});
+});
+
 describe("the card follows its own rule, not the Suggestions queue's switch", () => {
 	it("No still asks with Guess categories off, since Settings' card is drawn whatever that switch says", async () => {
 		await saveAiSwitches(env.DB, { categories: false });
@@ -223,6 +367,16 @@ describe("Suggestions page: the card's unticked note is kept", () => {
 			.first<{ note: string | null; category_id: number | null }>();
 		expect(row?.note).toBe("Pet food");
 		expect(row?.category_id).toBeNull();
+	});
+});
+
+describe("Suggestions page: Skip stays on this page", () => {
+	it("draws Skip after the card's form, not inside the card", async () => {
+		const { html } = await get("/settings/suggestions");
+		const sentence = "A new category: Pet Care";
+		const close = html.indexOf("</form>", html.indexOf(sentence));
+		expect(html.indexOf(">Skip<", close)).toBeGreaterThan(close);
+		expect(cardMarkup(html, sentence)).not.toContain("Skip");
 	});
 });
 
@@ -305,6 +459,27 @@ describe("Organize: the card above the chips", () => {
 		expect(res.headers.get("HX-Trigger")).toContain(
 			"That suggestion was changed somewhere else. Here's the current list.",
 		);
+	});
+
+	it("Create answers that the suggestion changed when another tab filed its purchases", async () => {
+		await env.DB.prepare(
+			"CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = NEW.id; END",
+		).run();
+		const { res, html } = await post("/transactions/organize/suggestion", [
+			["suggestion", String(suggestion)],
+		]);
+		await env.DB.prepare("DROP TRIGGER file_during_create").run();
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"That suggestion was changed somewhere else. Here's the current list.",
+		);
+		expect(res.headers.get("HX-Trigger")).not.toContain("Tick at least one");
+		expect(html).toContain('id="organize-page"');
+		expect(
+			await count(
+				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
+			),
+		).toBe(0);
 	});
 
 	it("Create without JavaScript leaves Organize's address", async () => {
