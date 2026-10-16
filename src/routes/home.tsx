@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { addressOf } from "../address";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
@@ -295,7 +296,7 @@ async function renderHome(
 			active="home"
 			{...plaidScripts(linkBank !== undefined)}
 			demo={demo}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<div id="home">
 				<div id="page">

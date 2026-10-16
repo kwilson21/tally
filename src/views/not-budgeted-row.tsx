@@ -44,7 +44,13 @@ export function NotBudgetedRow({
 	return (
 		<li>
 			{href ? (
-				<a href={href} autofocus={autofocus} class={className} {...attrs}>
+				<a
+					href={href}
+					autofocus={autofocus}
+					class={className}
+					data-row=""
+					{...attrs}
+				>
 					{content}
 				</a>
 			) : (

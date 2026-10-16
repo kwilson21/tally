@@ -181,6 +181,8 @@
 			button.type = "submit";
 			button.className = "min-h-11 px-2 font-medium underline";
 			button.textContent = "Undo";
+			// keyboard.js presses this with u while the toast shows (decision 118, #516).
+			button.setAttribute("aria-keyshortcuts", "u");
 			form.addEventListener("submit", () => {
 				button.disabled = true;
 			});

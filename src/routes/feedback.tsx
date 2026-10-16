@@ -85,6 +85,8 @@ function view(
 		error?: string;
 		diagnosticsEnabled?: boolean;
 		reviewRequired?: boolean;
+		/** The address asked for ?keys, so the keys sheet opens over this page (decision 118). */
+		keys?: boolean;
 	} = {},
 ) {
 	return (
@@ -92,7 +94,7 @@ function view(
 			title="Send feedback · Tally"
 			active="feedback"
 			demo={demo}
-			currentPath={`/feedback?return_to=${encodeURIComponent(values.returnTo ?? values.from)}`}
+			currentPath={`/feedback?return_to=${encodeURIComponent(values.returnTo ?? values.from)}${options.keys ? "&keys" : ""}`}
 			modules={["/js/feedback-privacy.js"]}
 		>
 			<FeedbackForm
@@ -129,6 +131,7 @@ feedback.get("/feedback", async (c) => {
 			c.env.DEMO === "true",
 			{
 				diagnosticsEnabled: diagnosticsEnabled(c.env),
+				keys: new URL(c.req.url).searchParams.has("keys"),
 			},
 		),
 	);

@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
 import {
@@ -137,7 +138,16 @@ type ScreenInput = {
 	categories: { id: number; name: string }[];
 };
 
-function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
+function Screen({
+	input,
+	demo,
+	address,
+}: {
+	input: ScreenInput;
+	demo: boolean;
+	/** The address the screen was asked for, with its query, so the keys sheet can open over it. */
+	address: string;
+}) {
 	const {
 		skipped,
 		again,
@@ -167,7 +177,12 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 	// Every form posts to this screen's address, so the skips it was drawn with carry over.
 	const action = reviewAddress(skipped, again);
 	return (
-		<Layout title="Suggestions · Tally" active="settings" demo={demo}>
+		<Layout
+			title="Suggestions · Tally"
+			active="settings"
+			demo={demo}
+			currentPath={address}
+		>
 			<div id="suggestions-page" class="lg:max-w-3xl">
 				<a
 					href="/settings"
@@ -271,6 +286,7 @@ async function renderScreen(
 	return c.html(
 		<Screen
 			demo={c.env.DEMO === "true"}
+			address={addressOf(c)}
 			input={{
 				skipped,
 				again,
