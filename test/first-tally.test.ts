@@ -13,7 +13,11 @@ import {
 	STROKES,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { keepBills } from "../src/first-tally/first-page";
+import {
+	keepBills,
+	NO_PAY_LEFT_SQL,
+	payMerchants,
+} from "../src/first-tally/first-page";
 
 const db = env.DB;
 
@@ -256,6 +260,64 @@ describe("the pay answers' record (P125 E)", () => {
 			}),
 		]);
 		expect((await readFirstTally(db))?.pay).toBeUndefined();
+	});
+});
+
+describe("the pay stroke's guard (P125 E, #650)", () => {
+	beforeEach(async () => {
+		// The demo's own transactions include pay deposits, so the pay question starts with none.
+		await db.prepare("DELETE FROM transactions").run();
+	});
+
+	/** One money-in row the pay question asks about: marked income, and nobody has decided it. */
+	const payDeposit = () =>
+		db
+			.prepare(
+				`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, flag_income)
+				VALUES ((SELECT MIN(id) FROM accounts), 'stroke-guard-pay', '2026-10-10', -245000, 'ACME CORP PAYROLL', 1)`,
+			)
+			.run();
+
+	it("leaves the pay stroke undrawn when a deposit arrived after the pay read found none", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		expect(await payMerchants(db)).toEqual([]);
+		await payDeposit();
+		await markStroke(db, "pay", "2026-10-16", NO_PAY_LEFT_SQL);
+		expect((await readFirstTally(db))?.strokes).toEqual({
+			bank: "2026-10-10",
+		});
+	});
+
+	it("draws the pay stroke with its day when no pay question is left", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await markStroke(db, "pay", "2026-10-16", NO_PAY_LEFT_SQL);
+		expect((await readFirstTally(db))?.strokes).toEqual({
+			bank: "2026-10-10",
+			pay: "2026-10-16",
+		});
+	});
+
+	it("keeps a pay stroke's first day, a guarded write after it changes nothing", async () => {
+		await markStroke(db, "pay", "2026-10-10");
+		await markStroke(db, "pay", "2026-10-16", NO_PAY_LEFT_SQL);
+		expect((await readFirstTally(db))?.strokes.pay).toBe("2026-10-10");
+	});
+
+	it("still draws the stroke with no guard, a deposit or not, as before", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await payDeposit();
+		await markStroke(db, "pay", "2026-10-16");
+		expect((await readFirstTally(db))?.strokes.pay).toBe("2026-10-16");
+	});
+
+	it("is true exactly when the pay question has nothing to ask", async () => {
+		const check = async () =>
+			await db
+				.prepare(`SELECT ${NO_PAY_LEFT_SQL} AS none`)
+				.first<{ none: number }>();
+		expect(await check()).toEqual({ none: 1 });
+		await payDeposit();
+		expect(await check()).toEqual({ none: 0 });
 	});
 });
 

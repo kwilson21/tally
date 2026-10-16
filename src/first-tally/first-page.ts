@@ -68,6 +68,9 @@ const PAY_SQL = `SELECT t.id AS id, ${merchantKeySql("t")} AS key, m.display_nam
 	FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 	WHERE ${payAskedSql("t")}`;
 
+/** True when the pay question has nothing left to ask: PAY_SQL's own predicate, so the strokes' guard can't drift from the page's query. */
+export const NO_PAY_LEFT_SQL = `NOT EXISTS (SELECT 1 FROM transactions t WHERE ${payAskedSql("t")})`;
+
 type PayRow = {
 	id: number;
 	key: string;
@@ -221,7 +224,7 @@ export async function settleAndLoad(
 	today: string,
 ): Promise<FirstPageModel> {
 	const pay = await payMerchants(db);
-	if (pay.length === 0) await markStroke(db, "pay", today);
+	if (pay.length === 0) await markStroke(db, "pay", today, NO_PAY_LEFT_SQL);
 	const split =
 		pay.length === 0
 			? splitKeepable(
@@ -230,7 +233,7 @@ export async function settleAndLoad(
 				)
 			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
 	const done = pay.length === 0 && split.keep.length === 0;
-	if (done) await markStroke(db, "bills", today);
+	if (done) await markStroke(db, "bills", today, NO_PAY_LEFT_SQL);
 	const record = await readFirstTally(db);
 	const payLines = await payLedger(db, record?.pay);
 	const billLine = billsLedger(record?.bills);
