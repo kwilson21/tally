@@ -1660,6 +1660,26 @@ assert(
 	`the Budget boxes are not on one line at 1280px (tops ${desktopTops.join(", ")})`,
 );
 step("at 1280px every Budget box sits on one line");
+// #682: a paid month's check hangs in the margin left of its name (decision 125), inside the page's 20px phone gutter, so a
+// bill's page doesn't scroll sideways at 320px or 390px. Bill 1 is Streaming, paid this month in the seed; the writes above
+// touch only budgets and balances, not this page.
+for (const width of [320, 390]) {
+	await page.setViewportSize({ width, height: 844 });
+	await goto(`${BASE}/bills/1`, { waitUntil: "networkidle" });
+	assert(
+		(await page.locator('span.text-ok[aria-hidden="true"]').count()) > 0,
+		`Streaming's paid check is not on the page at ${width}px`,
+	);
+	const scrollWidth = await page.evaluate(() => document.body.scrollWidth);
+	assert.equal(
+		scrollWidth,
+		width,
+		`a bill's page scrolls sideways at ${width}px: ${scrollWidth}px`,
+	);
+}
+step(
+	"a bill's page with a paid month doesn't scroll sideways at 320px or 390px",
+);
 // #500: on a 320px phone the notebook drawing is left out below 390px (decision 116), so a seven-character amount has the
 // whole row and nothing scrolls sideways. Safe to spend moves one for one with this month's Groceries budget and savings
 // goal, so each write moves it to the target shown; the demo reset below restores the data.
