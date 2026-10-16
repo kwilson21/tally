@@ -165,9 +165,16 @@ function press(key: string, modifiers: Partial<Record<string, boolean>> = {}) {
 	};
 }
 
-/** htmx's htmx:after:request for a request whose ctx.target is the node given, as the browser sends it (cancelable). */
-function requestEvent(target: FakeNode | null) {
-	return { detail: { ctx: { target } }, preventDefault: vi.fn() };
+/**
+ * htmx's htmx:after:request for a request whose ctx.target is the node given, as the browser sends it (cancelable). `from`
+ * is the address the request was made from, which htmx sends as HX-Current-URL; left out, the header is missing.
+ */
+function requestEvent(target: FakeNode | null, from?: string) {
+	const headers = from === undefined ? {} : { "HX-Current-URL": from };
+	return {
+		detail: { ctx: { target, request: { headers } } },
+		preventDefault: vi.fn(),
+	};
 }
 
 /** htmx's htmx:after:settle for a swap, which fires on the swap's target: the region the swap put in. */
@@ -618,7 +625,99 @@ describe("a keys request that ends (htmx:finally:request)", () => {
 	});
 });
 
-describe("a keys response that comes after another sheet opened (htmx:after:request)", () => {
+describe("a keys response that comes after another sheet opened or the address moved (htmx:after:request)", () => {
+	it("is thrown away when the address moved while it loaded, as a filter pushing first does", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		// A Transactions filter that finished first pushed its own address; the keys response is for the one before it.
+		win.location.search = "?month=2026-10";
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09",
+		);
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+	});
+
+	it("gives focus back to Undo when the address moved while the keys loaded and the response was dropped", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded, ended, settled } = setup(page, win);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		// ? blurred Undo, so focus is on nothing while the keys load.
+		expect(page.activeElement).toBe(page.body);
+		win.location.search = "?month=2026-10";
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09",
+		);
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+		// The drop leaves the return to ended(), which gives focus back to Undo when the request finishes.
+		ended(finishEvent(region, "issuing"));
+		expect(page.activeElement).toBe(undo);
+		const focusesAfterDrop = undo.focusCount;
+		// No sheet ever opened in #keys, so this settle is not a close: it must not focus Undo a second time.
+		settled(settleEvent(region));
+		expect(undo.focusCount).toBe(focusesAfterDrop);
+	});
+
+	it("is kept when the address is the one the request was made from, and the sheet still closes to its opener", () => {
+		const page = new FakePage();
+		const [first] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded, settled } = setup(page, win);
+		page.activeElement = first;
+		keydown(press("?", { shiftKey: true }));
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09",
+		);
+		responded(event);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+		// The sheet arrives, and its close swaps it away: focus goes back to the row that opened it.
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		settled(settleEvent(region));
+		expect(first.focusCount).toBe(1);
+	});
+
+	it("is kept when only the #fragment changed, since the page is still the same", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09", "#row-1");
+		const { keydown, responded } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.hash = "#budget";
+		const event = requestEvent(
+			region,
+			"http://localhost/transactions?month=2026-09#row-1",
+		);
+		responded(event);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("is kept when the request has no HX-Current-URL to compare the address with", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?month=2026-09");
+		const { keydown, responded } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		win.location.search = "?month=2026-10";
+		const event = requestEvent(region);
+		responded(event);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+	});
+
 	it("is thrown away when a sheet outside #keys opened while it loaded", () => {
 		const page = new FakePage();
 		const region = el(page, "div", { id: "keys" });
@@ -629,6 +728,36 @@ describe("a keys response that comes after another sheet opened (htmx:after:requ
 		responded(event);
 		expect(event.preventDefault).toHaveBeenCalled();
 	});
+
+	it.each([
+		["with the address unchanged", false],
+		["with the address moved as well", true],
+	])(
+		"forgets the opener at once when a sheet outside #keys opened while the keys loaded (%s)",
+		(_, moved) => {
+			const page = new FakePage();
+			const [first] = list(page);
+			const region = el(page, "div", { id: "keys" });
+			const sheetRegion = el(page, "div", { id: "sheet" });
+			const win = windowFor("?month=2026-09");
+			const { keydown, responded, ended } = setup(page, win);
+			page.activeElement = first;
+			keydown(press("?", { shiftKey: true }));
+			const otherSheet = el(page, "section", { "data-sheet": "" }, sheetRegion);
+			if (moved) win.location.search = "?month=2026-10";
+			const event = requestEvent(
+				region,
+				moved ? "http://localhost/transactions?month=2026-09" : undefined,
+			);
+			responded(event);
+			expect(event.preventDefault).toHaveBeenCalled();
+			// The other sheet closes before the request ends, so ended() would give focus back to the row if the return survived.
+			remove(page, otherSheet);
+			page.activeElement = page.body;
+			ended(finishEvent(region, "issuing"));
+			expect(first.focusCount).toBe(0);
+		},
+	);
 
 	it("is kept when the keys sheet itself closes, since its sheet is inside #keys", () => {
 		const page = new FakePage();
