@@ -394,25 +394,31 @@ describe("Bills", () => {
 		])
 			expect(form).toContain(words);
 
-		const response = await exports.default.fetch("http://tally.test/bills", {
-			method: "POST",
-			headers: {
-				"content-type": "application/x-www-form-urlencoded",
-				Origin: "http://tally.test",
-			},
-			body: new URLSearchParams({
-				name: "Biweekly fixture",
-				amount: "bad",
-				due_day: "5",
-				frequency: "biweekly",
-				anchor_date: "2026-10-02",
-				category_id: "1",
-				merchant_raw_name: "BIWEEKLY FIXTURE",
-			}),
-		});
-		expect(await response.text()).toContain(
-			"Then every two weeks from that date. Next: Oct 16.",
-		);
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		try {
+			const response = await exports.default.fetch("http://tally.test/bills", {
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					Origin: "http://tally.test",
+				},
+				body: new URLSearchParams({
+					name: "Biweekly fixture",
+					amount: "bad",
+					due_day: "5",
+					frequency: "biweekly",
+					anchor_date: "2026-10-02",
+					category_id: "1",
+					merchant_raw_name: "BIWEEKLY FIXTURE",
+				}),
+			});
+			expect(await response.text()).toContain(
+				"Then every two weeks from that date. Next: Oct 16.",
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("says the next every-two-weeks date after today, however old the anchor is", async () => {
