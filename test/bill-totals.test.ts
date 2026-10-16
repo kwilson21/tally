@@ -177,7 +177,7 @@ describe("bill totals", () => {
 		expect(totals.soonCents).toBe(48000);
 	});
 
-	it("uses displayed occurrences for headings and all October occurrences for still to pay", () => {
+	it("counts every October occurrence in Upcoming and still to pay, and September's overdue one in Overdue (decision 122)", () => {
 		const upcomingBill = { ...bill(5000), id: 2 };
 		const bills = [bill(10000), upcomingBill];
 		const septemberDisplayed = {
@@ -210,7 +210,8 @@ describe("bill totals", () => {
 			thisMonthOccurrences: octoberOccurrences,
 		});
 		expect(withOverdueBill.groups.overdueCents).toBe(10000);
-		expect(withOverdueBill.groups.upcomingCents).toBe(5000);
+		// October 28 is not a row, but it is due this month, so Upcoming counts it with October 20's $50 (decision 122).
+		expect(withOverdueBill.groups.upcomingCents).toBe(15000);
 		// Issue #207: October still to pay is October's $100 + $50 = $150. September's $100 is the separate overdue row, not due this month.
 		expect(withOverdueBill.stillToPayCents).toBe(15000);
 
@@ -225,14 +226,15 @@ describe("bill totals", () => {
 		expect(withoutOverdueBill.stillToPayCents).toBe(5000);
 	});
 
+	// The last column is what the headings add up to: a September occurrence and October's are two occurrences (decision 122).
 	it.each([
-		["2026-10-08", "2026-09-28", "overdue", 10000, 10000],
-		["2026-10-08", "2026-10-28", "upcoming", 0, 10000],
-		["2026-10-05", "2026-09-20", "overdue", 10000, 10000],
-		["2026-10-25", "2026-10-20", "overdue", 10000, 10000],
+		["2026-10-08", "2026-09-28", "overdue", 10000, 10000, 20000],
+		["2026-10-08", "2026-10-28", "upcoming", 0, 10000, 10000],
+		["2026-10-05", "2026-09-20", "overdue", 10000, 10000, 20000],
+		["2026-10-25", "2026-10-20", "overdue", 10000, 10000, 10000],
 	] as const)(
 		"counts this month's occurrence with displayed %s when its date is %s",
-		(today, displayedDate, displayedStatus, overdueCents, stillToPayCents) => {
+		(today, displayedDate, displayedStatus, overdueCents, stillToPayCents, headingCents) => {
 			const totals = calculateBillTotals({
 				month: today.slice(0, 7),
 				bills: [bill(10000)],
@@ -270,7 +272,7 @@ describe("bill totals", () => {
 					totals.groups.dueCents +
 					totals.groups.upcomingCents +
 					totals.groups.paidCents,
-			).toBe(10000);
+			).toBe(headingCents);
 		},
 	);
 

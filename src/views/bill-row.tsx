@@ -113,7 +113,8 @@ export type UnlistedBill = {
 /**
  * The muted line under a status heading whose total counts occurrences no row lists (decision 122, P136 A): "Includes
  * Daycare's Fridays on Oct 2 and 9", naming up to two bills, then "and N more". A weekly or every-two-weeks bill's
- * dates are named by their weekday; any other bill's by its date. Undefined when no occurrence is unlisted.
+ * dates are named by their weekday, singular for one date ("Friday on Oct 9"); any other bill's by its date. Undefined
+ * when no occurrence is unlisted.
  */
 export function includesLine(bills: UnlistedBill[]) {
 	if (!bills.length) return undefined;
@@ -139,7 +140,7 @@ function unlistedBillWords({ name, frequency, dueDates }: UnlistedBill) {
 			weekday: "long",
 			timeZone: "UTC",
 		}).format(new Date(`${dates[0]}T00:00:00Z`));
-		return `${name}'s ${weekday}s on ${list}`;
+		return `${name}'s ${weekday}${dates.length > 1 ? "s" : ""} on ${list}`;
 	}
 	return `${name} on ${list}`;
 }

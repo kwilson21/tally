@@ -52,6 +52,7 @@ import {
 } from "../dates";
 import { amountRowsByBill } from "../db/bill-amounts";
 import {
+	billPaymentMonth,
 	billPeriodMonth,
 	type CountedBill,
 	paysPlanGroupSql,
@@ -178,17 +179,21 @@ export async function loadBillRows(db: D1Database, today: string) {
 		paidCents: number;
 		/** Whether any payment is linked to the shown occurrence, a credit-corrected one too (a price offer reads it). */
 		linked: boolean;
+		/** The month the shown occurrence's payment counts in, when it is paid (src/db/counted-month.ts). */
+		paidMonth?: string;
 		totalOccurrences: {
 			dueDate: string;
 			status: BillStatus;
 			amountCents: number;
 			paidCents: number;
+			paidMonth?: string;
 		}[];
 		nextOccurrence?: {
 			dueDate: string;
 			status: BillStatus;
 			amountCents: number;
 			paidCents: number;
+			paidMonth?: string;
 		};
 		/** The occurrence the row shows, as bill_payments keys it, and the merchant it's matched on. */
 		period: string;
@@ -232,6 +237,14 @@ export async function loadBillRows(db: D1Database, today: string) {
 			})),
 		);
 		const paidPeriods = paidPeriodsOf(b, amountHistory, paymentsByPeriod);
+		// The month a paid occurrence's payment counts in, from its latest payment's date (decision 122). Only a Paid
+		// occurrence has one; an unpaid one's status does not read it.
+		const paidMonthOf = (period: string) => {
+			const date = paidPeriods.has(period) ? payments.get(period) : undefined;
+			return date
+				? billPaymentMonth(countedBill(b), period, date.slice(0, 7))
+				: undefined;
+		};
 		const occurrence = billOccurrence(
 			{
 				frequency: b.frequency,
@@ -250,6 +263,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 				status: occurrence.status,
 				amountCents: amountOf(occurrence.dueDate),
 				paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+				paidMonth: paidMonthOf(occurrence.period),
 			},
 		];
 		const monthOccurrences = billOccurrencesForMonth(
@@ -279,6 +293,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 					),
 					amountCents: amountOf(current.dueDate),
 					paidCents: paymentsByPeriod.get(current.period) ?? 0,
+					paidMonth: paidMonthOf(current.period),
 				});
 			}
 		// A weekly or every-two-weeks bill's next occurrence is due soon once it falls due, even when it is in next
@@ -294,6 +309,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 						status: occurrenceStatus(nextDue, paidPeriods.has(nextDue)),
 						amountCents: amountOf(nextDue),
 						paidCents: paymentsByPeriod.get(nextDue) ?? 0,
+						paidMonth: paidMonthOf(nextDue),
 					}
 				: undefined;
 		result.push({
@@ -316,6 +332,7 @@ export async function loadBillRows(db: D1Database, today: string) {
 			dueDay: b.due_day,
 			anchorMonth: b.anchor_month,
 			paidCents: paymentsByPeriod.get(occurrence.period) ?? 0,
+			paidMonth: paidMonthOf(occurrence.period),
 			linked: paymentsByPeriod.has(occurrence.period),
 			totalOccurrences,
 			nextOccurrence,
@@ -403,12 +420,14 @@ export async function page(
 					}
 					includes={includes}
 				/>
-				<ul class="divide-y divide-rule">
-					{group.map((bill) => (
-						<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
-					))}
-					{extraRows}
-				</ul>
+				{(group.length > 0 || extraRows.length > 0) && (
+					<ul class="divide-y divide-rule">
+						{group.map((bill) => (
+							<BillRow bill={bill} today={today} href={`/bills/${bill.id}`} />
+						))}
+						{extraRows}
+					</ul>
+				)}
 			</section>
 		);
 	};

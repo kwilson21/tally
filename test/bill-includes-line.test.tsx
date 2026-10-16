@@ -16,12 +16,12 @@ describe("includesLine: the words under a heading whose total counts unlisted oc
 		).toBe("Includes Daycare's Fridays on Oct 2 and 9");
 	});
 
-	it("names one date alone", () => {
+	it("names one date alone in the singular weekday", () => {
 		expect(
 			includesLine([
 				{ name: "Daycare", frequency: "weekly", dueDates: ["2026-10-23"] },
 			]),
-		).toBe("Includes Daycare's Fridays on Oct 23");
+		).toBe("Includes Daycare's Friday on Oct 23");
 	});
 
 	it("separates three or more dates with commas and then and", () => {
@@ -53,7 +53,7 @@ describe("includesLine: the words under a heading whose total counts unlisted oc
 			includesLine([
 				{ name: "Gym", frequency: "biweekly", dueDates: ["2026-10-02"] },
 			]),
-		).toBe("Includes Gym's Fridays on Oct 2");
+		).toBe("Includes Gym's Friday on Oct 2");
 	});
 
 	it("names a monthly bill by its name and date, with no weekday", () => {

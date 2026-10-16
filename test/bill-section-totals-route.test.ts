@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDemo } from "../src/demo/reset";
+import { loadBillRows } from "../src/routes/bills";
 
 /** One Bills group: its `<section>` block, found by its heading, cut before the next section. */
 const groupUnder = (html: string, heading: string) =>
@@ -88,5 +89,82 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 		expect(groupUnder(html, "Due in the next 7 days")).not.toContain(
 			"Includes",
 		);
+	});
+});
+
+// Decision 122 (#602): Paid this month counts a payment in the month it counts in (src/db/counted-month.ts), an early
+// payment in its own month and a late one in its occurrence's month.
+describe("Paid this month counts a bill payment in the month it counts in (#602)", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-15T15:00:00Z"));
+		await resetDemo(env.DB, "2026-10-15");
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("leaves out Daycare's Oct 2 Friday paid on Sep 29, and names only Oct 9 under the heading", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET date='2026-09-29' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10-02' AND bill_id=(SELECT id FROM bills WHERE name='Daycare'))",
+		).run();
+		const paid = groupUnder(await billsPage(), "Paid this month");
+		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
+		expect(totalOf(paid)).toBe("$256.98");
+		expect(paid).toContain("Includes Daycare&#39;s Friday on Oct 9</p>");
+	});
+});
+
+describe("A late payment counts in its occurrence's month, and Paid this month does not move (#602)", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-30T15:00:00Z"));
+		await resetDemo(env.DB, "2026-10-30");
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("gives Daycare's Oct 30 occurrence October when its payment is made on Nov 3, and keeps Paid this month's total", async () => {
+		const before = totalOf(groupUnder(await billsPage(), "Paid this month"));
+		await env.DB.prepare(
+			"UPDATE transactions SET date='2026-11-03' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10-30' AND bill_id=(SELECT id FROM bills WHERE name='Daycare'))",
+		).run();
+		const { rows } = await loadBillRows(env.DB, "2026-10-30");
+		const daycare = rows.find((row) => row.name === "Daycare");
+		expect(
+			daycare?.totalOccurrences.find(
+				(occurrence) => occurrence.dueDate === "2026-10-30",
+			)?.paidMonth,
+		).toBe("2026-10");
+		expect(before).toBeDefined();
+		expect(totalOf(groupUnder(await billsPage(), "Paid this month"))).toBe(
+			before,
+		);
+	});
+});
+
+// Decision 122 (#602): a monthly bill's unpaid occurrence it has handed off stays in Overdue until the next one is due.
+describe("Overdue counts a monthly bill's handed-off unpaid occurrence, named under the heading (#602)", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-28T15:00:00Z"));
+		await resetDemo(env.DB, "2026-10-28");
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("names Rent's unpaid Oct 1 under Overdue and counts what is left of it, with Electric and Netflix as rows", async () => {
+		const overdue = groupUnder(await billsPage(), "Overdue");
+		expect(rowNamesOf(overdue)).toEqual(["Electric", "Netflix"]);
+		expect(totalOf(overdue)).toBe("$757.49");
+		expect(overdue).toContain("Includes Rent on Oct 1</p>");
+		expect(overdue).toContain("<ul");
+	});
+
+	it("draws no empty list under a heading whose rows are none, only its total and the line naming its occurrences", async () => {
+		await env.DB.prepare(
+			"UPDATE bills SET active=0 WHERE name IN ('Electric','Netflix')",
+		).run();
+		const overdue = groupUnder(await billsPage(), "Overdue");
+		expect(overdue).toContain(">Overdue</h2>");
+		expect(totalOf(overdue)).toBe("$600.00");
+		expect(overdue).toContain("Includes Rent on Oct 1</p>");
+		expect(overdue).not.toContain("<ul");
 	});
 });
