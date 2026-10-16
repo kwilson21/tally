@@ -723,12 +723,12 @@ describe("GET / with the demo seed", () => {
 	);
 
 	it("shows spent of budget per category, and marks over budget with a word", async () => {
-		// The 20th: Groceries has spent $234 of $700 and Eating Out is $86 over, the one category over (#322).
+		// The 20th: Groceries has spent $234 of $950 and Eating Out is $86 over, the one category over (#322).
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-20T12:00:00-04:00"));
 		await resetDemo(env.DB, "2026-10-20");
 		const { html } = await home();
-		expect(html).toMatch(/\$234\s+of\s+\$700/);
+		expect(html).toMatch(/\$234\s+of\s+\$950/);
 		expect(html).toMatch(/\$336\s+of\s+\$250/);
 		// Eating Out is $86 over; its words say by how much (decision 46).
 		expect(
@@ -761,7 +761,7 @@ describe("GET / with the demo seed", () => {
 			expect.objectContaining({ amountCents: parent?.amount_cents }),
 		);
 		const html = (await home()).html;
-		expect(html).toMatch(/\$234\s+of\s+\$700/);
+		expect(html).toMatch(/\$234\s+of\s+\$950/);
 		expect(html).toMatch(/\$336\s+of\s+\$250/);
 	});
 
@@ -784,7 +784,7 @@ describe("GET / with the demo seed", () => {
 		const data = await loadMonth(env.DB, month);
 		const billData = await loadBillRows(env.DB, today);
 		// The same bills total Home's Safe to spend subtracts, not a copy of its rule.
-		const dueBills = billTotalsForRows(month, billData.rows).soonCents;
+		const dueBills = billTotalsForRows(month, billData.rows).setAsideCents;
 		const safe = summarizeMonth({
 			month,
 			...data,

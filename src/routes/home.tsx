@@ -148,14 +148,15 @@ async function renderHome(
 	const data = await loadMonth(c.env.DB, month);
 	const billData = current ? await loadBillRows(c.env.DB, today) : null;
 	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
-	// The list is the bills Safe to spend sets aside, judged by the same totals, so the list and the figure agree.
+	// The list is the bills due soon, judged by the same totals Bills uses. Safe to spend sets aside only this month's
+	// of them (decision 123), which billTotals.setAsideCents gives.
 	const dueBills = current
 		? activeBills.filter(
 				(bill) => billTotalsForRows(month, [bill]).soonCount > 0,
 			)
 		: [];
 	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
-	const unpaidBillsCents = billTotals?.soonCents ?? 0;
+	const unpaidBillsCents = billTotals?.setAsideCents ?? 0;
 	// Planned expenses set aside this month (decision 74): only the current month's Safe to spend sets them aside.
 	const unpaidPlansCents = current
 		? await plansSetAsideCents(c.env.DB, month)
