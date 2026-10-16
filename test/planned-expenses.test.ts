@@ -1468,21 +1468,26 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(await paidBy(two)).toBe(newSecond);
 	});
 
-	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
-	const racingWith = (race: string, bind: (number | null)[]) =>
+	/** A database whose `batch` is `around` instead of the real one, so a test can race the save's batch. */
+	const batchAround = (
+		around: (statements: D1PreparedStatement[]) => Promise<D1Result[]>,
+	) =>
 		new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop === "batch")
-					return async (statements: D1PreparedStatement[]) => {
-						await env.DB.prepare(race)
-							.bind(...bind)
-							.run();
-						return env.DB.batch(statements);
-					};
+				if (prop === "batch") return around;
 				const value = Reflect.get(target, prop);
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as unknown as D1Database;
+
+	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		batchAround(async (statements) => {
+			await env.DB.prepare(race)
+				.bind(...bind)
+				.run();
+			return env.DB.batch(statements);
+		});
 
 	const KEEP_TWO = [
 		{ categoryId: 1, amountCents: 12000 },
@@ -1565,6 +1570,114 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(splitRefusedError(false)).toBe(
 			"The bank just changed this amount. Check the parts and save again.",
 		);
+	});
+
+	it("an ordinary re-split carries a plan on the first part to the new part of its amount (#573)", async () => {
+		const tx = await payment(9830, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+
+		const result = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(true);
+		expect(result.planLinked).toBeUndefined();
+		const [newFirst] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newFirst);
+	});
+
+	it("refuses a re-split when a competing save moves a plan from one old part to another after the read, and changes nothing (#573)", async () => {
+		const tx = await payment(9832, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[second ?? 0, planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		// The plan stays on the part it is linked to now, never on the new 12000 part that A's pairing names.
+		expect(await paidBy(planId)).toBe(second);
+		expect(await partIds(tx)).toEqual(before);
+
+		// The retry reads the plan on its part, so the plan takes the new part that follows it.
+		const retry = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(retry.saved).toBe(true);
+		const [, newSecond] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newSecond);
+	});
+
+	it("refuses a re-split when a competing save moves one plan onto the part another plan left after the read (#573)", async () => {
+		const tx = await payment(9834, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		// transaction_id is unique, so the race must free the second part before the other plan takes it: the plan created
+		// first is the one the race visits first.
+		const onSecond = await plan("Car registration", 18000, MONTH, second ?? 0);
+		const onFirst = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = CASE id WHEN ?1 THEN ?2 ELSE NULL END WHERE id IN (?1, ?3)",
+			[onFirst, second ?? 0, onSecond],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(onFirst)).toBe(second);
+		expect(await paidBy(onSecond)).toBeNull();
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("refuses a re-split when a plan moved after the read, even if it moves again right after the failed batch (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9836, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const movePlan = (part: number) =>
+			env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(part, planId)
+				.run();
+		// The plan moves after the read and the batch fails; the plan moves back before the save looks at the failure.
+		const racing = batchAround(async (statements) => {
+			await movePlan(second ?? 0);
+			try {
+				return await env.DB.batch(statements);
+			} catch (error) {
+				await movePlan(first ?? 0);
+				throw error;
+			}
+		});
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(planId)).toBe(first);
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("rethrows a batch failure for another reason while a plan also moved, not the planned-expense refusal (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9838, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const failure = new Error("D1_ERROR: network connection lost");
+		const racing = batchAround(async () => {
+			await env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(second ?? 0, planId)
+				.run();
+			throw failure;
+		});
+
+		await expect(saveSplit(racing, tx, KEEP_TWO, "demo")).rejects.toBe(failure);
 	});
 
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {
