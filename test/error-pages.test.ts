@@ -45,6 +45,15 @@ const failPost = (path: string, referer?: string) =>
 
 const text = async (res: Response) => res.text();
 
+// keyboard.js asks for #keys, and htmx names that target by its tag and id: the region is a div.
+const keysHeaders = { "HX-Request": "true", "HX-Target": "div#keys" };
+/** The keys region Layout draws, as keys-routes.test.ts reads it: from #keys to the toasts. */
+const keysRegion = (html: string) => {
+	const start = html.indexOf('<div id="keys"');
+	const end = html.indexOf('<div id="toasts"', start);
+	return start === -1 || end === -1 ? "" : html.slice(start, end);
+};
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("the 404 page (app.notFound)", () => {
@@ -102,6 +111,43 @@ describe("the 404 page (app.notFound)", () => {
 		expect(await res.text()).toBe("");
 		expect(res.headers.get("HX-Reswap")).toBe("none");
 		expect(res.headers.get("HX-Trigger")).toContain("This page isn't here.");
+	});
+
+	describe("the keys sheet's request on an unknown address (#667)", () => {
+		it("answers ? with the keys sheet in #keys, as a 200 htmx swaps, with no HX-Reswap or toast", async () => {
+			const res = await exports.default.fetch(`${BASE}/no-such-page?keys`, {
+				headers: keysHeaders,
+			});
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Reswap")).toBeNull();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			const region = keysRegion(await text(res));
+			expect(region).toContain('role="dialog"');
+			expect(region).toContain("Keyboard shortcuts");
+		});
+
+		it("answers the sheet's close with an empty #keys", async () => {
+			const res = await exports.default.fetch(`${BASE}/no-such-page`, {
+				headers: keysHeaders,
+			});
+			expect(await text(res)).toContain('<div id="keys"></div>');
+		});
+
+		it("still gives any other htmx request on an unknown address the empty 404 with its toast", async () => {
+			const res = await exports.default.fetch(`${BASE}/no-such-page?keys`, {
+				headers: { "HX-Request": "true", "HX-Target": "div#main" },
+			});
+			expect(res.status).toBe(404);
+			expect(await text(res)).toBe("");
+			expect(res.headers.get("HX-Reswap")).toBe("none");
+			expect(res.headers.get("HX-Trigger")).toContain("This page isn't here.");
+		});
+
+		it("keeps a full load of the keys address on an unknown address a 404 page", async () => {
+			const res = await exports.default.fetch(`${BASE}/no-such-page?keys`);
+			expect(res.status).toBe(404);
+			expect(await text(res)).toContain("This page isn&#39;t here.");
+		});
 	});
 });
 
@@ -206,14 +252,6 @@ describe("the 500 page (app.onError)", () => {
 
 	describe("the keys sheet's request on a failing page (#655)", () => {
 		const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
-		// keyboard.js asks for #keys, and htmx names that target by its tag and id: the region is a div.
-		const keysHeaders = { "HX-Request": "true", "HX-Target": "div#keys" };
-		/** The keys region Layout draws, as keys-routes.test.ts reads it: from #keys to the toasts. */
-		const keysRegion = (html: string) => {
-			const start = html.indexOf('<div id="keys"');
-			const end = html.indexOf('<div id="toasts"', start);
-			return start === -1 || end === -1 ? "" : html.slice(start, end);
-		};
 
 		it("answers ? with the keys sheet in #keys, as a 200 htmx swaps, with no HX-Reswap or toast", async () => {
 			quiet();

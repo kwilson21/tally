@@ -259,8 +259,9 @@ describe("payLedgerLine", () => {
 });
 
 describe("shownPayValues and payShown", () => {
-	// A merchant as payMerchants reads it: the deposits and their transaction ids, in the same order.
+	// A merchant as payMerchants reads it: its key, and the deposits and their transaction ids, in the same order.
 	const merchant = {
+		key: "ACME CORP PAYROLL",
 		ids: [11, 12, 13],
 		deposits: deposits(
 			["2026-07-17", "2026-07-31", "2026-08-14"],
@@ -271,9 +272,24 @@ describe("shownPayValues and payShown", () => {
 
 	it("gives one value per deposit, pairing each id with its deposit", () => {
 		expect(shown).toEqual([
-			JSON.stringify({ id: 11, date: "2026-07-17", cents: 245000 }),
-			JSON.stringify({ id: 12, date: "2026-07-31", cents: 245000 }),
-			JSON.stringify({ id: 13, date: "2026-08-14", cents: 260000 }),
+			JSON.stringify({
+				id: 11,
+				key: "ACME CORP PAYROLL",
+				date: "2026-07-17",
+				cents: 245000,
+			}),
+			JSON.stringify({
+				id: 12,
+				key: "ACME CORP PAYROLL",
+				date: "2026-07-31",
+				cents: 245000,
+			}),
+			JSON.stringify({
+				id: 13,
+				key: "ACME CORP PAYROLL",
+				date: "2026-08-14",
+				cents: 260000,
+			}),
 		]);
 	});
 
@@ -283,10 +299,15 @@ describe("shownPayValues and payShown", () => {
 
 	it("is false when a deposit arrived since the page drew", () => {
 		const later = {
+			...merchant,
 			ids: [...merchant.ids, 14],
 			deposits: [...merchant.deposits, { date: "2026-08-28", cents: 245000 }],
 		};
 		expect(payShown(later, shown)).toBe(false);
+	});
+
+	it("is false when a deposit's merchant key changed since the page drew", () => {
+		expect(payShown({ ...merchant, key: "ACME" }, shown)).toBe(false);
 	});
 
 	it("is false when a deposit's cents changed since the page drew", () => {
@@ -311,6 +332,7 @@ describe("shownPayValues and payShown", () => {
 
 	it("is false when a shown deposit is no longer current", () => {
 		const fewer = {
+			...merchant,
 			ids: merchant.ids.slice(1),
 			deposits: merchant.deposits.slice(1),
 		};

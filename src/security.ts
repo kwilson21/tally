@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
 
@@ -5,10 +6,12 @@ import { secureHeaders } from "hono/secure-headers";
 const inCatalog = (path: string) =>
 	path === "/design-system" || path.startsWith("/design-system/");
 
-// Plaid Link is the one third-party script, and its hosts are allowed only on Accounts
-// and its sub-pages (the disconnect page swaps Accounts in, Link a bank included).
 const onAccounts = (path: string) =>
 	path === "/accounts" || path.startsWith("/accounts/");
+
+// Plaid Link is the one third-party script, and its hosts are allowed on Accounts and its sub-pages, and on Home in the family app, where a new family links its bank (decision 114).
+const loadsPlaid = (c: Context) =>
+	onAccounts(c.req.path) || (c.req.path === "/" && c.env.DEMO !== "true");
 
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
@@ -17,24 +20,17 @@ export const security = secureHeaders({
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
 		scriptSrc: [
-			(c) =>
-				onAccounts(c.req.path) ? "'self' https://cdn.plaid.com" : "'self'",
+			(c) => (loadsPlaid(c) ? "'self' https://cdn.plaid.com" : "'self'"),
 		],
 		// Plaid Link styles its full-screen overlay inline; without this it renders in the page flow.
-		styleSrc: [
-			(c) => (onAccounts(c.req.path) ? "'self' 'unsafe-inline'" : "'self'"),
-		],
+		styleSrc: [(c) => (loadsPlaid(c) ? "'self' 'unsafe-inline'" : "'self'")],
 		fontSrc: ["'self'"],
 		imgSrc: ["'self'", "data:"],
 		connectSrc: [
-			(c) =>
-				onAccounts(c.req.path)
-					? "'self' https://production.plaid.com"
-					: "'self'",
+			(c) => (loadsPlaid(c) ? "'self' https://production.plaid.com" : "'self'"),
 		],
 		frameSrc: [
-			(c) =>
-				onAccounts(c.req.path) ? "'self' https://cdn.plaid.com" : "'self'",
+			(c) => (loadsPlaid(c) ? "'self' https://cdn.plaid.com" : "'self'"),
 		],
 		objectSrc: ["'none'"],
 		frameAncestors: ["'none'"],

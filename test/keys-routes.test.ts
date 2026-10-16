@@ -181,6 +181,12 @@ describe("the rows keyboard.js moves between", () => {
 	it("marks a planned expense row on Bills as a row a person opens", async () => {
 		expect(await page("/bills")).toMatch(openRow("/plans/\\d+/edit"));
 	});
+
+	it("marks a bill page's month row as a row a person opens", async () => {
+		expect(await page("/bills/1")).toMatch(
+			openRow("/bills/\\d+/occurrences/\\d{4}-\\d{2}/link#payment-picker"),
+		);
+	});
 });
 
 describe("the keys' targets name their keys (aria-keyshortcuts)", () => {

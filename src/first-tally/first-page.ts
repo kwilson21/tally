@@ -23,7 +23,7 @@ import { merchantKeySql } from "../db/merchant-key";
 import { payAskedSql } from "../db/suggestions-queue";
 import { tidyName } from "../transactions/tidy-name";
 import { billsLedgerLine, splitKeepable } from "./bills";
-import { type PayDeposit, payLedgerLine } from "./pay";
+import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
 
 /** A merchant whose money in Tally marked as income, and the deposits behind the question. */
 export type PayMerchant = {
@@ -102,10 +102,13 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 /**
  * Yes and No on a merchant's money in: each row the question showed is marked income or not, as the person's choice
  * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). The answer covers only the
- * deposits the page showed, which the route has checked against `merchant` (payShown): only those rows change
- * (`merchant.ids`), and the answer is recorded in the same batch, each deposit by its transaction id under the answer.
- * So a deposit that arrives between the question and the answer stays unanswered and is asked next. Returns the rows
- * changed (0 when the merchant has nothing left to ask).
+ * deposits the page showed: the UPDATE is bound to each shown deposit's id, merchant key, day and cents (shownPayValues,
+ * the same values the form carries). It is all or nothing. If a sync corrected a shown deposit's day, cents or merchant
+ * since the read, or nothing asks about one any more, the UPDATE changes 0 rows, so the record below writes nothing and
+ * the route asks the question again. A per-row check would not be enough: the record would still store the skipped row's
+ * old day, cents or merchant key. A deposit that arrives between the question and the answer is not in the snapshot, so
+ * it stays unanswered and is asked next. The answer is recorded in the same batch, each deposit by its transaction id
+ * under the answer. Returns the rows changed (0 when the merchant has nothing left to ask, or the shown deposits changed).
  */
 export async function answerPay(
 	db: D1Database,
@@ -116,12 +119,18 @@ export async function answerPay(
 	const deposits = Object.fromEntries(
 		merchant.ids.map((id, i) => [id, merchant.deposits[i] as PayDeposit]),
 	);
+	const shown = `[${shownPayValues(merchant).join(",")}]`;
 	const [changed] = await db.batch([
 		db
 			.prepare(
-				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")} AND transactions.id IN (SELECT value FROM json_each(?))`,
+				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")}
+				AND transactions.id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
+				AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM transactions s
+					WHERE s.id = json_extract(j.value, '$.id') AND s.date = json_extract(j.value, '$.date')
+					AND -s.amount_cents = json_extract(j.value, '$.cents')
+					AND ${merchantKeySql("s")} = json_extract(j.value, '$.key') AND ${payAskedSql("s")}))`,
 			)
-			.bind(answer === "yes" ? 1 : 0, who, JSON.stringify(merchant.ids)),
+			.bind(answer === "yes" ? 1 : 0, who, shown, shown),
 		payAnswerStatement(db, merchant.key, { [answer]: deposits }),
 	]);
 	return changed?.meta.changes ?? 0;
