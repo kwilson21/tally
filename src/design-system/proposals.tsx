@@ -6,6 +6,7 @@
 import { AiProposals } from "./proposals-ai";
 import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
+import { AuditFollowupProposals } from "./proposals-audit-followups";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
@@ -564,6 +565,16 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="open-followups-title" class="mt-12">
+				<h2 id="open-followups-title" class="font-serif text-3xl font-semibold">
+					Open: from the second design audit, the rules and the payment list
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 16 for #644 and #645.
+				</p>
+				<AuditFollowupProposals />
+			</section>
 
 			<section aria-labelledby="p136-title" class="mt-12">
 				<h2 id="p136-title" class="font-serif text-3xl font-semibold">
