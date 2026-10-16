@@ -241,7 +241,7 @@ const MONTHS: Record<
 	"2026-07": { budgetCents: 165000, spentCents: 133500 },
 	"2026-08": { budgetCents: 170000, spentCents: 183359 },
 	"2026-09": { budgetCents: 170000, spentCents: 383447 },
-	"2026-10": { budgetCents: 394000, spentCents: 253500 },
+	"2026-10": { budgetCents: 394000, spentCents: 166531 },
 };
 const FIRST_MONTH = "2026-05";
 const STRIP_MONTHS = [
@@ -260,7 +260,7 @@ const GROCERIES_MONTHS: MonthPoint[] = [
 	{ month: "2026-07", cents: 61000, partial: false },
 	{ month: "2026-08", cents: 69000, partial: false },
 	{ month: "2026-09", cents: 67200, partial: false },
-	{ month: "2026-10", cents: 39500, partial: true },
+	{ month: "2026-10", cents: 8410, partial: true },
 ];
 const EATING_MONTHS: MonthPoint[] = [
 	{ month: "2026-05", cents: 17000, partial: false },
@@ -268,7 +268,7 @@ const EATING_MONTHS: MonthPoint[] = [
 	{ month: "2026-07", cents: 21500, partial: false },
 	{ month: "2026-08", cents: 24000, partial: false },
 	{ month: "2026-09", cents: 26200, partial: false },
-	{ month: "2026-10", cents: 28600, partial: true },
+	{ month: "2026-10", cents: 26400, partial: true },
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -581,12 +581,12 @@ function TrendsPicture({
 	idPrefix: string;
 	mode: TrendsMode;
 }) {
-	const sentence = "$341 less than by this time in September.";
+	const sentence = "$339 less than by this time in September.";
 	return (
 		<>
 			{mode === "b" ? (
 				<>
-					<TrendsTop month="October" spent="$2,535" />
+					<TrendsTop month="October" spent="$1,665" />
 					<p class="mt-1 flex flex-wrap items-center gap-x-2 font-serif text-lg italic">
 						{sentence}
 						<span class="font-sans not-italic">
@@ -595,7 +595,7 @@ function TrendsPicture({
 					</p>
 				</>
 			) : (
-				<TrendsTop month="October" spent="$2,535" sentence={sentence} />
+				<TrendsTop month="October" spent="$1,665" sentence={sentence} />
 			)}
 			<TrendsGroup
 				mode={mode}
@@ -612,7 +612,7 @@ function TrendsPicture({
 					color="cat-blue"
 					line="5 months under budget"
 					months={GROCERIES_MONTHS}
-					label="Spending by month: May $640, June $655, July $610, August $690, September $672, October so far $395."
+					label="Spending by month: May $640, June $655, July $610, August $690, September $672, October so far $84."
 				/>
 			</TrendsGroup>
 			<TrendsGroup
@@ -630,7 +630,7 @@ function TrendsPicture({
 					color="cat-plum"
 					line="Up 4 months running"
 					months={EATING_MONTHS}
-					label="Spending by month: May $170, June $195, July $215, August $240, September $262, October so far $286."
+					label="Spending by month: May $170, June $195, July $215, August $240, September $262, October so far $264."
 				/>
 			</TrendsGroup>
 		</>
@@ -763,11 +763,14 @@ function LedgerRow({
 	period,
 	month,
 	detail,
+	mark,
 }: {
 	id?: string;
 	period: string;
 	month: string;
 	detail: string;
+	/** A status mark before the month's name (October's check). */
+	mark?: Child;
 }) {
 	return (
 		<li id={id}>
@@ -775,6 +778,7 @@ function LedgerRow({
 				href={`/bills/1/occurrences/${period}/link#payment-picker`}
 				class={`flex min-h-11 items-center gap-3 py-2 text-ink no-underline ${ROW_OPENS}`}
 			>
+				{mark}
 				<span class="min-w-0 flex-1 text-lg">{month}</span>
 				<span class="text-sm text-muted">{detail}</span>
 				<RowArrow />
@@ -799,13 +803,16 @@ function LedgerMonths({ opened }: { opened: boolean }) {
 					detail={`Due ${m.due} · $2.99`}
 				/>
 			))}
-			<li class="flex min-h-11 items-center gap-3 py-2">
-				<span class="text-ok">
-					<Icon name="check" class="size-4" />
-				</span>
-				<span class="min-w-0 flex-1 text-lg">October</span>
-				<span class="text-sm text-muted">Paid Oct 15 · $2.99</span>
-			</li>
+			<LedgerRow
+				period="2026-10"
+				month="October"
+				detail="Paid Oct 15 · $2.99"
+				mark={
+					<span class="text-ok">
+						<Icon name="check" class="size-4" />
+					</span>
+				}
+			/>
 			{charge && (
 				<li>
 					<a
@@ -1027,7 +1034,7 @@ function CauseMonth({
 				{linked ? (
 					<a
 						href={`#${idPrefix}-not-budgeted`}
-						class="inline-flex min-h-11 items-center text-ink underline underline-offset-4"
+						class="inline-flex min-h-11 items-center text-muted underline underline-offset-4"
 					>
 						{sentence}
 					</a>
@@ -1381,10 +1388,9 @@ function barsCell(item: string, shown: boolean) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The sections (proposals.tsx draws each under its own heading): P130 to P132, picked on Oct 15, and
-// P133, open again.
+// The section (proposals.tsx draws it under its own heading): P130 to P133, picked on Oct 15 (decision 121).
 
-/** P130 to P132, picked on Oct 15 (decision 121): the Picked section's proposals. */
+/** P130 to P133, picked on Oct 15 (decision 121): the Picked section's proposals. */
 export function AuditRoundTwoPicks() {
 	return (
 		<>
@@ -1699,143 +1705,148 @@ export function AuditRoundTwoPicks() {
 					</Choice>
 				</Choices>
 			</Specimen>
+			<Specimen
+				id="p133-month-dots"
+				title="P133 · The month dots"
+				tier="visual"
+				sentence="The strip under the month title marks each finished month. Five looks are drawn, from today's grey disc to marks that say how each month ended. Pick what the marks say. Each picture is the strip at 390 px on October and on September, and at 1280 px."
+			>
+				<Fixed>
+					Each month's link keeps its name for a screen reader, with its result
+					in words, never only its mark.
+				</Fixed>
+				<Choices>
+					<Choice
+						name="Today (current)"
+						note="A grey disc for each finished month, ink for the month shown, and a ring for the current month."
+						width="w-[722px]"
+					>
+						<Shot caption="October at 390 px: the strip under the title">
+							<Phone label="Today, the month dots, October" tab="home">
+								<MonthNavigation
+									month={CURRENT}
+									firstMonth="2026-05"
+									currentMonth={CURRENT}
+								/>
+							</Phone>
+						</Shot>
+						<Shot caption="September at 390 px">
+							<Phone label="Today, the month dots, September" tab="home">
+								<MonthNavigation
+									month="2026-09"
+									firstMonth="2026-05"
+									currentMonth={CURRENT}
+								/>
+							</Phone>
+						</Shot>
+						<Shot caption="October at 1280 px">
+							<Desk label="Today, the month dots, October" active="home">
+								<MonthNavigation
+									month={CURRENT}
+									firstMonth="2026-05"
+									currentMonth={CURRENT}
+								/>
+							</Desk>
+						</Shot>
+					</Choice>
+					<Choice
+						name="Option A · Marks in outline, as first drawn"
+						picked
+						note="A finished month's dot holds a small mark: a check for under budget, a minus for over, or an empty ring for a month with no budgets. The month's initial stays under it, and the link's name says the result."
+						cost="MonthNavigation takes each month's result, which Home already works out for the shown month."
+						why="it says something the page knows, and it stays words-first for screen readers."
+						width="w-[722px]"
+					>
+						<Shot caption="October at 390 px: April is the sample month with no budgets, an empty ring">
+							<Phone label="Option A, the month dots, October" tab="home">
+								<MonthStrip month={CURRENT} cell={markedCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="September at 390 px: the shown month keeps its ink ring">
+							<Phone label="Option A, the month dots, September" tab="home">
+								<MonthStrip month="2026-09" cell={markedCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="October at 1280 px">
+							<Desk label="Option A, the month dots, October" active="home">
+								<MonthStrip month={CURRENT} cell={markedCell} />
+							</Desk>
+						</Shot>
+					</Choice>
+					<Choice
+						name="Option C · Tally strokes"
+						note="The strip becomes Tally's own tally: a stroke per month, struck through when it went over."
+						cost="MonthNavigation draws strokes from each month's result; no new token"
+						why="it ties the month strip to Tally's mark and reads by shape, not colour"
+						recommended={false}
+						width="w-[722px]"
+					>
+						<Shot caption="October at 390 px: April is the sample month with no budgets">
+							<Phone label="Option C, the month dots, October" tab="home">
+								<MonthStrip month={CURRENT} cell={strokesCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="September at 390 px">
+							<Phone label="Option C, the month dots, September" tab="home">
+								<MonthStrip month="2026-09" cell={strokesCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="October at 1280 px: April is the sample month with no budgets">
+							<Desk label="Option C, the month dots, October" active="home">
+								<MonthStrip month={CURRENT} cell={strokesCell} />
+							</Desk>
+						</Shot>
+					</Choice>
+					<Choice
+						name="Option D · Filled tokens"
+						note="Each month reads at a glance, colour and mark together."
+						cost="MonthNavigation draws tokens from each month's result"
+						why="the clearest at a glance, like a habit tracker"
+						recommended={false}
+						width="w-[722px]"
+					>
+						<Shot caption="October at 390 px: April is the sample month with no budgets">
+							<Phone label="Option D, the month dots, October" tab="home">
+								<MonthStrip month={CURRENT} cell={tokensCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="September at 390 px">
+							<Phone label="Option D, the month dots, September" tab="home">
+								<MonthStrip month="2026-09" cell={tokensCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="October at 1280 px: April is the sample month with no budgets">
+							<Desk label="Option D, the month dots, October" active="home">
+								<MonthStrip month={CURRENT} cell={tokensCell} />
+							</Desk>
+						</Shot>
+					</Choice>
+					<Choice
+						name="Option E · Mini bars"
+						note="Each month shows how far under or over, not just which."
+						cost="MonthNavigation draws bars from each month's spent and budget"
+						why="it shows size, not only direction"
+						recommended={false}
+						width="w-[722px]"
+					>
+						<Shot caption="October at 390 px: April is the sample month with no budgets">
+							<Phone label="Option E, the month dots, October" tab="home">
+								<MonthStrip month={CURRENT} cell={barsCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="September at 390 px">
+							<Phone label="Option E, the month dots, September" tab="home">
+								<MonthStrip month="2026-09" cell={barsCell} />
+							</Phone>
+						</Shot>
+						<Shot caption="October at 1280 px: April is the sample month with no budgets">
+							<Desk label="Option E, the month dots, October" active="home">
+								<MonthStrip month={CURRENT} cell={barsCell} />
+							</Desk>
+						</Shot>
+					</Choice>
+				</Choices>
+			</Specimen>
 		</>
-	);
-}
-
-/** P133, the Open section's proposal: the month dots, Today beside four looks (decision 121's redraw). */
-export function MonthDotsProposal() {
-	return (
-		<Specimen
-			id="p133-month-dots"
-			title="P133 · The month dots"
-			tier="visual"
-			sentence="The strip under the month title marks each finished month. Five looks are drawn, from today's grey disc to marks that say how each month ended. Pick what the marks say. Each picture is the strip at 390 px on October and on September, and at 1280 px."
-		>
-			<Fixed>
-				Each month's link keeps its name for a screen reader, with its result in
-				words, never only its mark.
-			</Fixed>
-			<Choices>
-				<Choice
-					name="Today (current)"
-					note="A grey disc for each finished month, ink for the month shown, and a ring for the current month."
-				>
-					<Shot caption="October at 390 px: the strip under the title">
-						<Phone label="Today, the month dots, October" tab="home">
-							<MonthNavigation
-								month={CURRENT}
-								firstMonth="2026-05"
-								currentMonth={CURRENT}
-							/>
-						</Phone>
-					</Shot>
-					<Shot caption="September at 390 px">
-						<Phone label="Today, the month dots, September" tab="home">
-							<MonthNavigation
-								month="2026-09"
-								firstMonth="2026-05"
-								currentMonth={CURRENT}
-							/>
-						</Phone>
-					</Shot>
-				</Choice>
-				<Choice
-					name="Option A · Marks in outline, as first drawn"
-					note="A finished month's dot holds a small mark: a check for under budget, a minus for over, or an empty ring for a month with no budgets. The month's initial stays under it, and the link's name says the result."
-					cost="MonthNavigation takes each month's result, which Home already works out for the shown month."
-					why="it says something the page knows, and it stays words-first for screen readers."
-					recommended={false}
-					width="w-[722px]"
-				>
-					<Shot caption="October at 390 px: April is the sample month with no budgets, an empty ring">
-						<Phone label="Option A, the month dots, October" tab="home">
-							<MonthStrip month={CURRENT} cell={markedCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="September at 390 px: the shown month keeps its ink ring">
-						<Phone label="Option A, the month dots, September" tab="home">
-							<MonthStrip month="2026-09" cell={markedCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="October at 1280 px">
-						<Desk label="Option A, the month dots, October" active="home">
-							<MonthStrip month={CURRENT} cell={markedCell} />
-						</Desk>
-					</Shot>
-				</Choice>
-				<Choice
-					name="Option C · Tally strokes"
-					note="The strip becomes Tally's own tally: a stroke per month, struck through when it went over."
-					cost="MonthNavigation draws strokes from each month's result; no new token"
-					why="it ties the month strip to Tally's mark and reads by shape, not colour"
-					width="w-[722px]"
-				>
-					<Shot caption="October at 390 px: April is the sample month with no budgets">
-						<Phone label="Option C, the month dots, October" tab="home">
-							<MonthStrip month={CURRENT} cell={strokesCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="September at 390 px">
-						<Phone label="Option C, the month dots, September" tab="home">
-							<MonthStrip month="2026-09" cell={strokesCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="October at 1280 px: April is the sample month with no budgets">
-						<Desk label="Option C, the month dots, October" active="home">
-							<MonthStrip month={CURRENT} cell={strokesCell} />
-						</Desk>
-					</Shot>
-				</Choice>
-				<Choice
-					name="Option D · Filled tokens"
-					note="Each month reads at a glance, colour and mark together."
-					cost="MonthNavigation draws tokens from each month's result"
-					why="the clearest at a glance, like a habit tracker"
-					recommended={false}
-					width="w-[722px]"
-				>
-					<Shot caption="October at 390 px: April is the sample month with no budgets">
-						<Phone label="Option D, the month dots, October" tab="home">
-							<MonthStrip month={CURRENT} cell={tokensCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="September at 390 px">
-						<Phone label="Option D, the month dots, September" tab="home">
-							<MonthStrip month="2026-09" cell={tokensCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="October at 1280 px: April is the sample month with no budgets">
-						<Desk label="Option D, the month dots, October" active="home">
-							<MonthStrip month={CURRENT} cell={tokensCell} />
-						</Desk>
-					</Shot>
-				</Choice>
-				<Choice
-					name="Option E · Mini bars"
-					note="Each month shows how far under or over, not just which."
-					cost="MonthNavigation draws bars from each month's spent and budget"
-					why="it shows size, not only direction"
-					recommended={false}
-					width="w-[722px]"
-				>
-					<Shot caption="October at 390 px: April is the sample month with no budgets">
-						<Phone label="Option E, the month dots, October" tab="home">
-							<MonthStrip month={CURRENT} cell={barsCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="September at 390 px">
-						<Phone label="Option E, the month dots, September" tab="home">
-							<MonthStrip month="2026-09" cell={barsCell} />
-						</Phone>
-					</Shot>
-					<Shot caption="October at 1280 px: April is the sample month with no budgets">
-						<Desk label="Option E, the month dots, October" active="home">
-							<MonthStrip month={CURRENT} cell={barsCell} />
-						</Desk>
-					</Shot>
-				</Choice>
-			</Choices>
-		</Specimen>
 	);
 }

@@ -403,8 +403,8 @@ describe("GET /design-system/proposals", () => {
 				"p120-panel",
 				"p121-header",
 			];
-			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P132 decision 121, and P136 option A decision 122. P133 is open again, so it carries none.
-			const expected = n < 34 || n === 133 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P133 decision 121, and P136 option A decision 122.
+			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -441,7 +441,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(88);
+		expect(DECIDED.length).toBe(89);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -485,7 +485,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-9)).toBe(entry);
+		expect(DECIDED.at(-10)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -494,7 +494,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-8)).toBe(entry);
+		expect(DECIDED.at(-9)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -510,7 +510,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-7)).toBe(entry);
+		expect(DECIDED.at(-8)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -519,7 +519,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-6)).toBe(entry);
+		expect(DECIDED.at(-7)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -532,7 +532,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-5)).toBe(entry);
+		expect(DECIDED.at(-6)).toBe(entry);
 	});
 
 	it("lists P136 as decided with issue 602, decision 122 and option A, last in the list", () => {
@@ -4488,17 +4488,7 @@ describe("GET /design-system/proposals, P129 (the money input, state by state, #
 
 describe("GET /design-system/proposals, the second design audit (#603, #604, #605)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
-	// The Open section (P133), from its heading to the next section with a heading of its own (P127's).
-	const openSection = (html: string) => {
-		const start = html.indexOf(
-			'<section aria-labelledby="audit2-title" class="mt-10">',
-		);
-		expect(start).toBeGreaterThan(-1);
-		const end = html.indexOf('<section aria-labelledby="', start + 1);
-		expect(end).toBeGreaterThan(start);
-		return html.slice(start, end);
-	};
-	// The Picked section (P130 to P132), from its heading to P128's section.
+	// The Picked section (P130 to P133), from its heading to P128's section.
 	const pickedSection = (html: string) => {
 		const start = html.indexOf('<section aria-labelledby="audit2-picks-title"');
 		const end = html.indexOf('<section aria-labelledby="p128-title"');
@@ -4508,8 +4498,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	};
 	// One proposal's block, in the section it is drawn in, from its specimen to the next one in that section.
 	const specimen = (html: string, id: string) => {
-		const body =
-			id === "p133-month-dots" ? openSection(html) : pickedSection(html);
+		const body = pickedSection(html);
 		const start = body.indexOf(`<section id="${id}"`);
 		expect(start, id).toBeGreaterThan(-1);
 		// A proposal's pictures may hold real components that draw a section (PlanBand, TrendGroup), so the next proposal is the cut.
@@ -4536,32 +4525,15 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	const PHONE = ", on a phone";
 	const DESK = ", on desktop";
 
-	it("opens the page with its Open section first, titled and dated as the brief asks", async () => {
+	it("draws the Picked section after P136 and before P128's, with P130 to P133 in it and no Open section", async () => {
 		const html = await drawn();
-		const top = html.indexOf(">Proposals</h1>");
-		const start = html.indexOf(
-			'<section aria-labelledby="audit2-title" class="mt-10">',
-		);
-		expect(start).toBeGreaterThan(top);
-		expect(html.slice(top, start)).not.toContain("<section");
-		expect(start).toBeLessThan(
-			html.indexOf('<section aria-labelledby="p127-title"'),
-		);
-		expect(html).toContain(
-			'<h2 id="audit2-title" class="font-serif text-3xl font-semibold">Open: the month dots, from the second design audit</h2>',
-		);
-		expect(html).toContain(
-			"Drawn again Oct 15 for #605: the owner chose A&#39;s idea, each month&#39;s dot marking how it ended, and asked for a better look.",
-		);
-	});
-
-	it("draws the Picked section after the Open sections and before P128's, with P130 to P132 in it", async () => {
-		const html = await drawn();
+		expect(html).not.toContain('aria-labelledby="audit2-title"');
+		expect(html).not.toContain("Open: the month dots");
 		const picked = html.indexOf(
-			'<section aria-labelledby="audit2-picks-title" class="mt-12">',
+			'<section aria-labelledby="audit2-picks-title"',
 		);
 		expect(picked).toBeGreaterThan(
-			html.indexOf('<section aria-labelledby="audit2-title"'),
+			html.indexOf('<section aria-labelledby="p136-title"'),
 		);
 		expect(picked).toBeLessThan(
 			html.indexOf('<section aria-labelledby="p128-title"'),
@@ -4570,18 +4542,19 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			'<h2 id="audit2-picks-title" class="font-serif text-3xl font-semibold">Picked: from the second design audit</h2>',
 		);
 		expect(html).toContain(
-			"Drawn Oct 15. The owner&#39;s picks, marked Picked, are decision 121: P130 A, one Why per page; P131 A, a quiet ledger of months; P132 A, one line names the cause.",
+			'<p class="mt-2 max-w-prose text-muted">Drawn Oct 15. The owner&#39;s picks, marked Picked, are decision 121: P130 A, one Why per page; P131 A, a quiet ledger of months; P132 A, one line names the cause; P133 A, marks in outline.</p>',
 		);
-		// Each specimen is found in the section it is drawn in, and only there.
-		expect(pickedSection(html)).toContain('<section id="p130-why"');
-		expect(pickedSection(html)).toContain('<section id="p131-bill-page"');
-		expect(pickedSection(html)).toContain('<section id="p132-month-result"');
-		expect(pickedSection(html)).not.toContain('<section id="p133-month-dots"');
-		expect(openSection(html)).toContain('<section id="p133-month-dots"');
-		expect(openSection(html)).not.toContain('<section id="p130-why"');
+		for (const id of [
+			"p130-why",
+			"p131-bill-page",
+			"p132-month-result",
+			"p133-month-dots",
+		])
+			expect(pickedSection(html)).toContain(`<section id="${id}"`);
+		expect(pickedSection(html)).not.toContain("<script");
 	});
 
-	it("draws P133 in the Open section and P130 to P132 in the Picked section, each with its title", async () => {
+	it("titles P130 to P133 in the Picked section, each with its title", async () => {
 		const html = await drawn();
 		expect(specimen(html, "p130-why")).toContain("P130 · One Why per page");
 		expect(specimen(html, "p131-bill-page")).toContain(
@@ -4681,7 +4654,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	it("draws P130 B's Trends with its three Why? links muted, the headline's sentence among them", async () => {
 		const chunk = specimen(await drawn(), "p130-why");
 		const trends = picture(chunk, `Option B, Trends&#39; top${PHONE}`);
-		expect(trends).toContain("$341 less than by this time in September.");
+		expect(trends).toContain("$339 less than by this time in September.");
 		expect(trends).toContain("Going well");
 		expect(trends).toContain("Worth a look");
 		const links = trends.match(/<a href="\/how-it-works#trends"[^>]*>/g) ?? [];
@@ -4693,6 +4666,24 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(trends).toContain('aria-label="Why? this month against last"');
 		expect(trends).toContain('aria-label="Why? going well"');
 		expect(trends).toContain('aria-label="Why? worth a look"');
+	});
+
+	it("writes P130's three Trends pictures from the demo's October: $1,665 spent, both October so far amounts, and no $2,535", async () => {
+		const chunk = specimen(await drawn(), "p130-why");
+		for (const label of [
+			`Today, Trends&#39; top${PHONE}`,
+			`Option A, Trends&#39; top${PHONE}`,
+			`Option B, Trends&#39; top${PHONE}`,
+		]) {
+			const trends = picture(chunk, label);
+			expect(trends, label).toContain("$1,665");
+			expect(trends, label).toContain(
+				"$339 less than by this time in September.",
+			);
+			expect(trends, label).toContain("October so far $84.");
+			expect(trends, label).toContain("October so far $264.");
+			expect(trends, label).not.toContain("$2,535");
+		}
 	});
 
 	it("writes P130's group headings in cents, $757.49 and $305.00, on every Bills picture", async () => {
@@ -4748,6 +4739,25 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(opened).not.toContain("rounded-control bg-band px-2");
 	});
 
+	it("draws P131 A's October as a paid row that opens its payment, with the check and the row arrow, in all three Option A pictures", async () => {
+		const chunk = specimen(await drawn(), "p131-bill-page");
+		for (const label of [
+			`Option A, a bill&#39;s page${PHONE}`,
+			`Option A, a bill&#39;s page, with April to August opened${PHONE}`,
+			`Option A, a bill&#39;s page${DESK}`,
+		]) {
+			const row =
+				picture(chunk, label).match(
+					/<a href="\/bills\/1\/occurrences\/2026-10\/link#payment-picker"[\s\S]*?<\/a>/,
+				)?.[0] ?? "";
+			expect(row, label).toContain("October");
+			expect(row, label).toContain("Paid Oct 15 · $2.99");
+			expect(row, label).toContain('class="text-ok"');
+			expect(row, label).toContain('data-icon="check"');
+			expect(row, label).toContain('data-icon="chevron-right"');
+		}
+	});
+
 	it("draws P131 today's bill page with its filled status pills and Link a payment", async () => {
 		const chunk = specimen(await drawn(), "p131-bill-page");
 		const today = picture(chunk, `Today, a bill&#39;s page${PHONE}`);
@@ -4788,6 +4798,35 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		);
 		const sep = picture(chunk, `Option A, September${PHONE}`);
 		expect(sep).toContain('href="#p132-a-sep-not-budgeted"');
+	});
+
+	it("puts P132 A's cause sentence under the number and stamp, above the bars, in September and in the decided list", async () => {
+		const chunk = specimen(await drawn(), "p132-month-result");
+		const sep = picture(chunk, `Option A, September${PHONE}`);
+		const sentence = sep.indexOf(
+			"Most of it had no budget: Childcare $960 and Rent $1,200.",
+		);
+		const bars = sep.indexOf('aria-label="Spent against each budget:');
+		expect(sentence).toBeGreaterThan(-1);
+		expect(bars).toBeGreaterThan(sentence);
+		const entry = DECIDED.find((d) => d.title.startsWith("P132 ·"));
+		expect(entry?.outcome).toContain(
+			"under the number and stamp, above the bars",
+		);
+		const row = decisions
+			.split("\n")
+			.find((line) => line.startsWith("| 121 | 2026-10-15 |"));
+		expect(row).toContain("under the number and stamp, above the bars");
+	});
+
+	it("keeps P132 A's link to Not budgeted muted, not ink", async () => {
+		const chunk = specimen(await drawn(), "p132-month-result");
+		const link =
+			picture(chunk, `Option A, September${PHONE}`).match(
+				/<a href="#p132-a-sep-not-budgeted"[^>]*>/,
+			)?.[0] ?? "";
+		expect(link).toContain("text-muted");
+		expect(link).not.toContain("text-ink");
 	});
 
 	it("works each month's result from every budget row: September $2,134 over, the sample month $168 over", async () => {
@@ -4930,35 +4969,81 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		);
 	});
 
+	it("draws P133's Today with its October desk shot beside the two phone shots", async () => {
+		const chunk = specimen(await drawn(), "p133-month-dots");
+		expect(
+			labelsOf(chunk).filter((label) =>
+				label.startsWith("Today, the month dots"),
+			),
+		).toEqual([
+			"Today, the month dots, October, on a phone",
+			"Today, the month dots, September, on a phone",
+			"Today, the month dots, October, on desktop",
+		]);
+	});
+
+	it("marks P133 A Picked and Recommended, C not recommended, and C, D and E not picked", async () => {
+		const chunk = specimen(await drawn(), "p133-month-dots");
+		const headings = [...chunk.matchAll(/<h4 [^>]*>([\s\S]*?)<\/h4>/g)].map(
+			(m) => m[1] ?? "",
+		);
+		const option = (letter: string) =>
+			headings.find((h) => h.includes(`Option ${letter} ·`)) ?? "";
+		expect(option("A")).toContain(">Picked<");
+		expect(option("A")).toContain(">Recommended<");
+		for (const letter of ["C", "D", "E"])
+			expect(option(letter), letter).not.toContain(">Picked<");
+		expect(option("C")).not.toContain(">Recommended<");
+		expect(chunk.split(">Recommended<").length - 1).toBe(1);
+		expect(chunk.split(">Picked<").length - 1).toBe(1);
+	});
+
 	it("adds no client JavaScript: the sections have no script", async () => {
 		const html = await drawn();
-		expect(openSection(html)).not.toContain("<script");
 		expect(pickedSection(html)).not.toContain("<script");
 	});
 
-	it("lists P130, P131 and P132 as the last three decided entries, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-3);
+	it("states P133 A's marks and P132 A's cause line's place in spec §8.4 (decision 121)", () => {
+		expect(spec).toContain(
+			"Each finished month's dot holds a small mark: a check on ok for under budget, a minus on over for over, or an empty ring for a month with no budgets; the shown month keeps its ink ring around the mark, and the current month its ring; each month's link names its result in words (\"September, ended $2,134 over\") (P133 A, decision 121).",
+		);
+		expect(spec).toContain(
+			"the word carrying the status. Under the number and stamp, above the bars, one muted line names the month's biggest causes",
+		);
+		expect(spec).not.toContain("Under the bars, one muted line");
+	});
+
+	it("lists P130 to P133 as the decided entries before P136, each with its issue and decision 121", () => {
+		const last = DECIDED.slice(-5, -1);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",
 			"P132",
+			"P133",
 		]);
-		expect(last.map((d) => d.issue)).toEqual([603, 604, 605]);
+		expect(last.map((d) => d.issue)).toEqual([603, 604, 605, 605]);
+		expect(last[3]?.title).toBe("P133 · The month dots");
 		for (const entry of last)
 			expect(entry.outcome, entry.title).toContain("(decision 121)");
+		expect(last[3]?.outcome).toContain("C, D and E stay drawn, not picked.");
 	});
 
-	it("records decision 121 as the decisions table's last row, with the picks and the P133 redraw", () => {
+	it("records decision 121 as the decisions table's row between 119 and 122, with the picks and P133's pick", () => {
 		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
-		const last = rows.at(-1) ?? "";
-		expect(last.startsWith("| 121 | 2026-10-15 |")).toBe(true);
+		const at = (prefix: string) => rows.findIndex((r) => r.startsWith(prefix));
+		const row = at("| 121 | 2026-10-15 |");
+		expect(row).toBeGreaterThan(at("| 119 |"));
+		expect(row).toBeLessThan(at("| 122 |"));
+		const last = rows[row] ?? "";
 		for (const text of [
 			"**P130 A (#603):**",
 			"**P131 A (#604):**",
 			"**P132 A (#605):**",
-			"**P133:**",
-			"Not picked: P130 B, P131 B, P132 B.",
+			`**P133 A (#605):** each finished month's dot in the month strip holds a small mark, a check on ok for under budget, a minus on over for over, or an empty ring for a month with no budgets; the shown month keeps its ink ring around the mark, the current month its ring; and each month's link names its result in words ("September, ended $2,134 over"). The owner saw three other looks (tally strokes, filled tokens, mini bars) and kept A.`,
+			"Not picked: P130 B, P131 B, P132 B, P133 C, D and E.",
 		])
 			expect(last, text).toContain(text);
+		expect(last).not.toContain("**P133:**");
+		expect(last).not.toContain("drawn again before it is decided");
 	});
 });

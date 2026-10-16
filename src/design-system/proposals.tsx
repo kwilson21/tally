@@ -4,7 +4,7 @@
 // for the Decided list.
 
 import { AiProposals } from "./proposals-ai";
-import { AuditRoundTwoPicks, MonthDotsProposal } from "./proposals-audit-2";
+import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
@@ -518,7 +518,13 @@ export const DECIDED: readonly {
 	{
 		title: "P132 · What a past month's result says",
 		outcome:
-			"Option A: the number, stamp and bars stay, and one muted line under them names the biggest causes, from the categories over budget and the positive spending with no budget, by amount, linking to them (decision 121).",
+			"Option A: the number, stamp and bars stay, and one muted line under the number and stamp, above the bars, names the biggest causes, from the categories over budget and the positive spending with no budget, by amount, linking to them (decision 121).",
+		issue: 605,
+	},
+	{
+		title: "P133 · The month dots",
+		outcome:
+			"Option A: each finished month's dot in the month strip holds a small mark, a check for under budget, a minus for over, or an empty ring for a month with no budgets; the shown month keeps its ink ring and the current month its ring; each month's link names its result in words (decision 121). C, D and E stay drawn, not picked.",
 		issue: 605,
 	},
 	{
@@ -558,17 +564,6 @@ export function Proposals() {
 				<BillsTotalsProposal />
 			</section>
 
-			<section aria-labelledby="audit2-title" class="mt-10">
-				<h2 id="audit2-title" class="font-serif text-3xl font-semibold">
-					Open: the month dots, from the second design audit
-				</h2>
-				<p class="mt-2 max-w-prose text-muted">
-					Drawn again Oct 15 for #605: the owner chose A's idea, each month's
-					dot marking how it ended, and asked for a better look.
-				</p>
-				<MonthDotsProposal />
-			</section>
-
 			<section aria-labelledby="audit2-picks-title" class="mt-12">
 				<h2 id="audit2-picks-title" class="font-serif text-3xl font-semibold">
 					Picked: from the second design audit
@@ -576,7 +571,7 @@ export function Proposals() {
 				<p class="mt-2 max-w-prose text-muted">
 					Drawn Oct 15. The owner's picks, marked Picked, are decision 121: P130
 					A, one Why per page; P131 A, a quiet ledger of months; P132 A, one
-					line names the cause.
+					line names the cause; P133 A, marks in outline.
 				</p>
 				<AuditRoundTwoPicks />
 			</section>
