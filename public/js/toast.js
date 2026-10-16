@@ -129,6 +129,21 @@
 	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
 	// event is synchronous.
 	let lastToast = null;
+	// A saved row's mark (P119 A, #71) belongs to the newest save alone (#597). htmx swaps a reply in before it fires the
+	// reply's toast, so the marks on the page when a swap begins are the earlier saves', and a row the reply marks itself
+	// is a new node, not one of them. Each toast clears the earlier marks, whether or not its own reply draws one: the
+	// toast replaces the earlier save's toast, and its tick goes with it.
+	let earlierMarks = [];
+	const savedRows = () =>
+		document.querySelectorAll(".row-saved, .row-saved-undo");
+	document.addEventListener("htmx:before:swap", () => {
+		earlierMarks = [...savedRows()];
+	});
+	const clearEarlierMarks = () => {
+		for (const row of earlierMarks)
+			row.classList.remove("row-saved", "row-saved-undo");
+		earlierMarks = [...savedRows()];
+	};
 	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
 	// document once that element has left the page: an Undo form whose toast ends during the restore's own
 	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
@@ -144,6 +159,7 @@
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
+		clearEarlierMarks();
 		const toast = document.createElement("div");
 		lastToast = toast;
 		// An Undo toast's button, focused once the toast is on the page (see the undo block below).

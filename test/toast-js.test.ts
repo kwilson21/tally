@@ -115,6 +115,15 @@ class FakeNode extends EventTarget {
 	};
 	/** A laid-out height, which the Select bar's measurement reads. */
 	offsetHeight = 0;
+	/** The class list, as far as toast.js takes a class off a row: remove. */
+	classList = {
+		remove: (...names: string[]) => {
+			this.className = this.className
+				.split(" ")
+				.filter((name) => name !== "" && !names.includes(name))
+				.join(" ");
+		},
+	};
 }
 
 /** Every ResizeObserver toast.js made on the current page, so a test can see what it asked of each. */
@@ -190,6 +199,8 @@ async function page({
 		sheetSection.setAttribute("aria-labelledby", "sheet-title");
 		sheetTitle.id = "sheet-title";
 	}
+	// The page's own nodes, where a test draws the rows a save's reply swaps in (and the marks they carry).
+	const pageRoot = new FakeNode("main");
 	const documentElement = new FakeNode("html");
 	const body = new EventTarget();
 	const documentTarget = new EventTarget();
@@ -210,7 +221,19 @@ async function page({
 		documentElement,
 		activeElement: body as unknown,
 		querySelectorAll: (selector: string) =>
-			selector === "section[data-sheet]" && sheetSection ? [sheetSection] : [],
+			selector === "section[data-sheet]" && sheetSection
+				? [sheetSection]
+				: selector === ".row-saved, .row-saved-undo"
+					? pageRoot
+							.all()
+							.filter((node) =>
+								node.className
+									.split(" ")
+									.some(
+										(name) => name === "row-saved" || name === "row-saved-undo",
+									),
+							)
+					: [],
 		getElementById: (id: string) =>
 			id === "toasts"
 				? toasts
@@ -279,6 +302,7 @@ async function page({
 		bar,
 		resizeObservers,
 		swapBody,
+		pageRoot,
 	};
 }
 
@@ -312,6 +336,50 @@ describe("cash entry confirmations", () => {
 		expect(toast.className).toMatch(/\bmin-w-0\b/);
 		expect(toast.className).toMatch(/\bmax-w-full\b/);
 		expect(toast.className).toMatch(/\bwrap-anywhere\b/);
+	});
+});
+
+describe("a saved row's mark", () => {
+	/** A row a save's reply swapped in, with the mark that save gave it. */
+	const swapIn = (pageRoot: FakeNode) => {
+		const row = new FakeNode("div");
+		row.className = "row-saved";
+		pageRoot.append(row);
+		return row;
+	};
+
+	it("ends the earlier save's mark when a later save's toast replaces its toast, even when the later save marks no row (#597)", async () => {
+		const { document, pageRoot } = await page();
+		// The time zone's save: its reply swaps its row in with the mark, then its toast comes.
+		fire(document, "htmx:before:swap", { ctx: {} });
+		const zone = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		// The bank sign-in emails switch: its reply swaps another region in, and draws no mark.
+		fire(document, "htmx:before:swap", { ctx: {} });
+		fire(document, "toast", { message: "Saved bank sign-in emails" });
+		expect(zone.className).toBe("");
+	});
+
+	it("keeps the newest save's mark and ends the earlier one: two saves never mark two rows", async () => {
+		const { document, pageRoot } = await page();
+		fire(document, "htmx:before:swap", { ctx: {} });
+		const first = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		// The second save's reply swaps its own row in with the mark, beside the first row the page still has.
+		fire(document, "htmx:before:swap", { ctx: {} });
+		const second = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved Groceries" });
+		expect(first.className).toBe("");
+		expect(second.className).toBe("row-saved");
+	});
+
+	it("ends the earlier save's mark when a later save fails, since that failure's toast replaces the earlier one", async () => {
+		const { document, pageRoot } = await page();
+		fire(document, "htmx:before:swap", { ctx: {} });
+		const zone = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		fire(document, "htmx:error", dropped("POST"));
+		expect(zone.className).toBe("");
 	});
 });
 
