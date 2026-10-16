@@ -73,7 +73,7 @@ export function Ledger() {
 		<div class="flex flex-col gap-3">
 			{LEDGER.map((section) => (
 				<div>
-					<p class="text-sm font-medium text-muted">{section.heading}</p>
+					<h3 class="text-sm font-medium text-muted">{section.heading}</h3>
 					<ul class="mt-1 divide-y divide-rule border-y border-rule">
 						{section.rows.map((row) => (
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">

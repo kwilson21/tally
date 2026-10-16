@@ -228,7 +228,7 @@ describe("HowFoot", () => {
 		);
 	});
 
-	it("puts the keys' details under the link on desktop only, and not in a sheet's foot (decision 118)", async () => {
+	it("puts the keys' details under the link on desktop only, unless keys is off (decision 118)", async () => {
 		const foot = String(await HowFoot({ section: "bills" }));
 		expect(foot).toContain(
 			'<div class="mt-2 hidden lg:block"><details class="group"><summary',

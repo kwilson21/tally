@@ -84,6 +84,18 @@ describe("the keys sheet (?keys, P128 C)", () => {
 		expect(region).toContain("Escape closes it.");
 	});
 
+	it("titles each group of keys with a heading under the sheet's title", async () => {
+		const region = keysRegion(await page("/?keys"));
+		const groups = ["Anywhere", "In a list", "On Home", "After a change"];
+		for (const group of groups)
+			expect(region).toContain(
+				`<h3 class="text-sm font-medium text-muted">${group}</h3>`,
+			);
+		expect(region.indexOf('id="keys-title"')).toBeLessThan(
+			region.indexOf("<h3"),
+		);
+	});
+
 	it("draws the same sheet over Transactions", async () => {
 		const region = keysRegion(await page("/transactions?keys"));
 		expect(region).toContain('id="keys-title"');

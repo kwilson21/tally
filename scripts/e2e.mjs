@@ -434,6 +434,95 @@ step(
 	"j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on the row",
 );
 
+// Each key (#72), in turn: / focuses the search, j and k move between rows, e and Enter open the row focus is on, ← and →
+// change Home's month, and u presses the Undo of a toast. Each step leaves what it changed as it found it.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("/");
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"q",
+	"/ focuses the search",
+);
+await page.evaluate(() => document.activeElement?.blur());
+step("/ focuses Transactions' search");
+
+const focusedHref = () =>
+	page.evaluate(() => document.activeElement?.getAttribute("href"));
+await page.keyboard.press("j");
+const firstRow = await focusedHref();
+await page.keyboard.press("j");
+assert.notEqual(await focusedHref(), firstRow, "j moves focus to the next row");
+await page.keyboard.press("k");
+assert.equal(
+	await focusedHref(),
+	firstRow,
+	"k moves focus back to the row before",
+);
+step("j and k move focus between the rows");
+
+await page.keyboard.press("e");
+await page.locator('[role="dialog"]').waitFor();
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"edit-title",
+	"e opens the focused row's sheet",
+);
+await page.keyboard.press("Escape");
+await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("j");
+await page.keyboard.press("Enter");
+await page.locator('[role="dialog"]').waitFor();
+await page.keyboard.press("Escape");
+await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+step("e and Enter open the focused row's sheet, and Escape closes it");
+
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+const monthBefore = await page
+	.locator('a[aria-keyshortcuts="ArrowLeft"]')
+	.getAttribute("href");
+await page.keyboard.press("ArrowLeft");
+await page.waitForURL(
+	(url) => url.search === new URL(monthBefore, BASE).search,
+);
+await htmxReady();
+const monthAfter = await page
+	.locator('a[aria-keyshortcuts="ArrowRight"]')
+	.getAttribute("href");
+await page.keyboard.press("ArrowRight");
+await page.waitForURL((url) => url.search === new URL(monthAfter, BASE).search);
+await htmxReady();
+step("on Home, ← and → go to the month before and the month after");
+
+// u presses the Undo of a cash delete's toast; Ctrl with u does nothing while that toast shows.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.getByRole("link", { name: /Corner stand/ }).click();
+await page.locator('[role="dialog"]').waitFor();
+await page.getByRole("button", { name: "Delete cash transaction" }).click();
+await page.locator("#delete-question").waitFor();
+await page.getByRole("button", { name: "Delete", exact: true }).click();
+await page
+	.getByRole("link", { name: /Corner stand/ })
+	.waitFor({ state: "detached" });
+const undo = page.locator('#toasts button[aria-keyshortcuts="u"]');
+await undo.waitFor();
+await page.keyboard.press("Control+u");
+assert.equal(await undo.count(), 1, "Ctrl with u leaves the Undo toast up");
+await page.keyboard.press("u");
+await page.getByRole("link", { name: /Corner stand/ }).waitFor();
+step("u presses the Undo of a delete's toast, and Ctrl with u does nothing");
+
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("Control+/");
+await page.keyboard.press("Meta+j");
+assert.equal(
+	await page.evaluate(() => document.activeElement === document.body),
+	true,
+	"Ctrl or Cmd with a key focuses nothing",
+);
+step("Ctrl or Cmd with a key does nothing");
+
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /8 transactions need a category/ })
