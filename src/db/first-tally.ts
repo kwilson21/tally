@@ -87,28 +87,101 @@ export function isSetUp(record: FirstTally | null): boolean {
 	return STROKES.every((stroke) => record?.strokes[stroke] !== undefined);
 }
 
+/** True once the three questions are answered (pay, bills and budgets drawn): only the night's count stroke is left. */
+export function questionsAnswered(record: FirstTally | null): boolean {
+	return (["pay", "bills", "budgets"] as const).every(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	);
+}
+
 // Each setter is one upsert, so the json_* change is applied to what is stored when the write happens. Two writes that
 // overlap then keep each other's fields, where a read-then-write of the whole record would lose one of them.
 
 /**
- * Draws a stroke on a household day (or with no day). json_insert never overwrites, so a stroke already drawn keeps its
- * first day. `guard` is an SQL condition checked in the same statement, so a stroke is drawn only while it holds: the
- * pay and bills strokes pass NO_PAY_LEFT_SQL, so a deposit that arrived after the step's own read leaves them undrawn.
- * It is code, never input (like EMPTY_RECORD). With no guard the write is the same as before.
+ * The statement that draws a stroke on a household day (or with no day), for a batch with other writes (one transaction).
+ * json_insert never overwrites, so a stroke already drawn keeps its first day. `guard` is an SQL condition checked in the
+ * same statement, so a stroke is drawn only while it holds: the pay and bills strokes pass NO_PAY_LEFT_SQL, so a deposit
+ * that arrived after the step's own read leaves them undrawn. It is code, never input (like EMPTY_RECORD). With no guard
+ * the write is the same as before.
  */
+export function strokeStatement(
+	db: D1Database,
+	stroke: Stroke,
+	day: string | null,
+	guard = "1",
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
+			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+		)
+		.bind(KEY, stroke, day);
+}
+
+/** Draws a stroke on a household day (or with no day); strokeStatement has the guard. */
 export async function markStroke(
 	db: D1Database,
 	stroke: Stroke,
 	day: string | null,
 	guard = "1",
 ): Promise<void> {
-	await db
+	await strokeStatement(db, stroke, day, guard).run();
+}
+
+/** The four strokes a disconnected bank takes back before setup is done: all but the night's count. */
+const BANK_STROKES = STROKES.slice(0, 4);
+
+/**
+ * The statement that takes strokes one to four back when the last connected bank goes before setup is done (spec §8.8,
+ * #578). `disconnectingId` is the bank being disconnected, which doesn't count as connected for this check, so the
+ * statement is right whether it runs before or after that disconnect in the same batch. The budget answers stay (§5).
+ */
+export function takeBackBankStrokes(
+	db: D1Database,
+	disconnectingId: number,
+): D1PreparedStatement {
+	const notSetUp = STROKES.map(
+		(stroke) => `json_type(value, '$.strokes.${stroke}') IS NOT NULL`,
+	).join(" AND ");
+	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
-			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")})
+			WHERE key = ?1 AND NOT (${notSetUp})
+				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
 		)
-		.bind(KEY, stroke, day)
-		.run();
+		.bind(KEY, disconnectingId);
+}
+
+/**
+ * The statement that takes a bank's deposits out of the pay record when its history is deleted: each Yes and No deposit
+ * whose transaction belongs to the bank goes, and a merchant left with neither loses its place. A merchant keeps only
+ * the keys it still has deposits under, so one the bank never paid comes out as it was. It runs while the bank
+ * is still connected (as takeBackBankStrokes checks), so a second submit changes nothing, and it is one UPDATE, so the
+ * read and the write of the record happen in one statement.
+ */
+export function forgetPayDeposits(
+	db: D1Database,
+	itemId: number,
+): D1PreparedStatement {
+	const kept = (answer: "yes" | "no") =>
+		`(SELECT json_group_object(d.key, json(d.value)) FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+	const hasKept = (answer: "yes" | "no") =>
+		`EXISTS (SELECT 1 FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+	return db
+		.prepare(
+			`WITH gone AS (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id = ?2)
+			UPDATE household_settings SET value = json_set(value, '$.pay', json((
+				SELECT json_group_object(m.key, json(json_patch(json_object('at', json_extract(m.value, '$.at')), json_patch(
+					CASE WHEN ${hasKept("yes")} THEN json_object('yes', json(${kept("yes")})) ELSE '{}' END,
+					CASE WHEN ${hasKept("no")} THEN json_object('no', json(${kept("no")})) ELSE '{}' END
+				))))
+				FROM json_each(household_settings.value, '$.pay') AS m
+				WHERE ${hasKept("yes")} OR ${hasKept("no")}
+			)))
+			WHERE key = ?1 AND json_type(value, '$.pay') IS NOT NULL
+				AND EXISTS (SELECT 1 FROM plaid_items WHERE id = ?2 AND disconnected_at IS NULL)`,
+		)
+		.bind(KEY, itemId);
 }
 
 /** Keeps the budgets step's answer for a category. The newest answer for a category replaces the one before it. */
@@ -147,8 +220,9 @@ export async function keepNightCounts(
  * keyed object, `{"yes": {…}}` or `{"no": {…}}`, and json_patch merges it key by key: a deposit answered before keeps its
  * entry, a new one adds to it, and a No adds to `no` without touching `yes`. The merchant's key is bound as a value and
  * merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch also
- * creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
- * answered, which are never removed) for a merchant new to the record, and the place it already has for one answered again.
+ * creates `pay` on a record that has none yet. `at` is the merchant's place: one past the highest place on the record for a
+ * merchant new to it (a bank's history can take merchants off the record, forgetPayDeposits, so a count could repeat a
+ * place), and the place it already has for one answered again.
  */
 export function payAnswerStatement(
 	db: D1Database,
@@ -160,7 +234,7 @@ export function payAnswerStatement(
 			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
 			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json_set(json(?3), '$.at', COALESCE(
 				(SELECT json_extract(p.value, '$.at') FROM json_each(household_settings.value, '$.pay') AS p WHERE p.key = ?2),
-				(SELECT COUNT(*) FROM json_each(household_settings.value, '$.pay')))))))`,
+				(SELECT COALESCE(MAX(json_extract(p.value, '$.at')) + 1, 0) FROM json_each(household_settings.value, '$.pay') AS p))))))`,
 		)
 		.bind(KEY, merchant, JSON.stringify(record));
 }

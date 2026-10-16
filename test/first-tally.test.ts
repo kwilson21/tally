@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { BillSuggestion } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
+	forgetPayDeposits,
 	isSetUp,
 	keepBudgetAnswer,
 	keepNightCounts,
@@ -14,10 +15,14 @@ import {
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import {
+	answerPay,
 	keepBills,
 	NO_PAY_LEFT_SQL,
+	type PayMerchant,
 	payMerchants,
+	settleAndLoad,
 } from "../src/first-tally/first-page";
+import { BANK_CONNECTED_SQL } from "../src/first-tally/gate";
 
 const db = env.DB;
 
@@ -321,6 +326,38 @@ describe("the pay stroke's guard (P125 E, #650)", () => {
 	});
 });
 
+describe("the legacy bank repair's write (#657)", () => {
+	const REPAIR_DAY = "2026-10-16";
+	const disconnectAll = () =>
+		db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
+	const repair = () => markStroke(db, "bank", REPAIR_DAY, BANK_CONNECTED_SQL);
+
+	it("draws nothing when every bank is disconnected", async () => {
+		await disconnectAll();
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBeUndefined();
+	});
+
+	it("draws stroke one on the day when a bank is connected", async () => {
+		await disconnectAll();
+		await db
+			.prepare(
+				"UPDATE plaid_items SET disconnected_at = NULL WHERE id = (SELECT MIN(id) FROM plaid_items)",
+			)
+			.run();
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBe(REPAIR_DAY);
+	});
+
+	it("keeps a bank day that is already drawn", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBe("2026-10-10");
+	});
+});
+
 describe("the bills step's record (P125 E)", () => {
 	it("adds each kept bill to the count and the total in the bill's own write, and a refused name adds nothing", async () => {
 		const categoryId = (
@@ -349,5 +386,181 @@ describe("the bills step's record (P125 E)", () => {
 		await markStroke(db, "bills", "2026-10-10");
 		await markStroke(db, "bills", "2026-10-12");
 		expect((await readFirstTally(db))?.strokes.bills).toBe("2026-10-10");
+	});
+});
+
+describe("a bank's history takes its pay deposits with it (P125 E, decision 114)", () => {
+	/** A linked bank with one checking account, as the disconnect route finds one. */
+	async function linkBank(name: string) {
+		const item = await db
+			.prepare(
+				"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by) VALUES (X'00', ?, 'person') RETURNING id",
+			)
+			.bind(name)
+			.first<{ id: number }>();
+		const account = await db
+			.prepare(
+				"INSERT INTO accounts (plaid_item_id, name, type) VALUES (?, 'Checking', 'depository') RETURNING id",
+			)
+			.bind(item?.id)
+			.first<{ id: number }>();
+		return { item: item?.id as number, account: account?.id as number };
+	}
+
+	/** One income deposit into a bank's account, in Plaid's sign (money in is negative); returns its transaction id. */
+	async function depositInto(
+		account: number,
+		rawName: string,
+		cents: number,
+		date: string,
+	) {
+		const row = await db
+			.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (?, ?, ?, ?, 1) RETURNING id",
+			)
+			.bind(account, date, -cents, rawName)
+			.first<{ id: number }>();
+		return row?.id as number;
+	}
+
+	const answerMerchant = async (key: string, answer: "yes" | "no") => {
+		const merchant = (await payMerchants(db)).find(
+			(m) => m.key === key,
+		) as PayMerchant;
+		return answerPay(db, merchant, answer, "person@example.com");
+	};
+
+	/** The batch the disconnect route runs for "delete its history": the pay purge first, then the bank's transactions. */
+	const deleteHistory = (bank: { item: number; account: number }) =>
+		db.batch([
+			forgetPayDeposits(db, bank.item),
+			db
+				.prepare("DELETE FROM transactions WHERE account_id = ?")
+				.bind(bank.account),
+		]);
+
+	/** Every transaction id the record still holds, under Yes or No, across all merchants. */
+	const depositIds = (record: Awaited<ReturnType<typeof readFirstTally>>) =>
+		Object.values(record?.pay ?? {}).flatMap((merchant) => [
+			...Object.keys(merchant.yes ?? {}),
+			...Object.keys(merchant.no ?? {}),
+		]);
+
+	it("drops the bank's Yes and No deposits from the record, and the merchants left with none", async () => {
+		const bankA = await linkBank("Bank A");
+		const bankB = await linkBank("Bank B");
+		const payA = await depositInto(
+			bankA.account,
+			"NORTHWIND PAYROLL",
+			245000,
+			"2026-10-01",
+		);
+		const refundA = await depositInto(
+			bankA.account,
+			"HARBOR REFUND",
+			4000,
+			"2026-10-02",
+		);
+		const payB = await depositInto(
+			bankB.account,
+			"SIDE GIG",
+			9000,
+			"2026-10-03",
+		);
+		await answerMerchant("HARBOR REFUND", "no");
+		await answerMerchant("NORTHWIND PAYROLL", "yes");
+		await answerMerchant("SIDE GIG", "yes");
+		const bBefore = (await readFirstTally(db))?.pay?.["SIDE GIG"];
+
+		await deleteHistory(bankA);
+
+		const after = await readFirstTally(db);
+		expect(depositIds(after)).toEqual([String(payB)]);
+		expect(depositIds(after)).not.toContain(String(payA));
+		expect(depositIds(after)).not.toContain(String(refundA));
+		expect(after?.pay?.["NORTHWIND PAYROLL"]).toBeUndefined();
+		expect(after?.pay?.["HARBOR REFUND"]).toBeUndefined();
+		expect(after?.pay?.["SIDE GIG"]).toEqual(bBefore);
+	});
+
+	it("keeps only the other bank's deposits of a merchant paid from both banks, and its place", async () => {
+		const bankA = await linkBank("Bank A");
+		const bankB = await linkBank("Bank B");
+		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+		const payB = await depositInto(
+			bankB.account,
+			"NORTHWIND PAYROLL",
+			245000,
+			"2026-10-15",
+		);
+		await answerMerchant("NORTHWIND PAYROLL", "yes");
+
+		await deleteHistory(bankA);
+
+		expect((await readFirstTally(db))?.pay?.["NORTHWIND PAYROLL"]).toEqual({
+			yes: { [payB]: { date: "2026-10-15", cents: 245000 } },
+			at: 0,
+		});
+	});
+
+	it("leaves a record with no pay key exactly as it is, and adds none", async () => {
+		const bankA = await linkBank("Bank A");
+		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+		await markStroke(db, "bank", "2026-10-10");
+		const before = await stored();
+
+		await deleteHistory(bankA);
+
+		expect(await stored()).toEqual(before);
+		expect((await readFirstTally(db))?.pay).toBeUndefined();
+	});
+
+	it("runs with no first_tally row and writes none", async () => {
+		const bankA = await linkBank("Bank A");
+		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+
+		await deleteHistory(bankA);
+
+		expect(await stored()).toBeNull();
+	});
+
+	it("takes the deposits off the ledger, and keeps the other bank's line", async () => {
+		const bankA = await linkBank("Bank A");
+		const bankB = await linkBank("Bank B");
+		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+		await depositInto(bankB.account, "SIDE GIG", 9000, "2026-10-03");
+		await answerMerchant("NORTHWIND PAYROLL", "yes");
+		await answerMerchant("SIDE GIG", "yes");
+
+		await deleteHistory(bankA);
+
+		const { ledger } = await settleAndLoad(db, todayIn(DEFAULT_TIME_ZONE));
+		expect(ledger.map((line) => line.id)).toEqual(["pay:SIDE GIG"]);
+		expect(ledger.map((line) => line.text).join(" ")).not.toContain(
+			"NORTHWIND",
+		);
+	});
+
+	it("gives a merchant answered after the purge the next place, past the merchants that are left", async () => {
+		const bankA = await linkBank("Bank A");
+		const bankB = await linkBank("Bank B");
+		await depositInto(bankA.account, "NORTHWIND PAYROLL", 245000, "2026-10-01");
+		await depositInto(bankB.account, "SIDE GIG", 9000, "2026-10-03");
+		await answerMerchant("NORTHWIND PAYROLL", "yes");
+		await answerMerchant("SIDE GIG", "yes");
+		await deleteHistory(bankA);
+		await depositInto(bankB.account, "HARBOR CAFE PAY", 6000, "2026-10-09");
+
+		await answerMerchant("HARBOR CAFE PAY", "yes");
+
+		const pay = (await readFirstTally(db))?.pay ?? {};
+		expect(pay["HARBOR CAFE PAY"]?.at).toBeGreaterThan(
+			pay["SIDE GIG"]?.at ?? Number.NaN,
+		);
+		const { ledger } = await settleAndLoad(db, todayIn(DEFAULT_TIME_ZONE));
+		expect(ledger.map((line) => line.id)).toEqual([
+			"pay:SIDE GIG",
+			"pay:HARBOR CAFE PAY",
+		]);
 	});
 });

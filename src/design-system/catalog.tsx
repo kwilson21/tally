@@ -4,10 +4,17 @@ import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { parseBudgetAmount } from "../budgets/amount";
 import type { Bank } from "../db/accounts";
+import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import type { BankHead, FirstPageModel } from "../first-tally/first-page";
+import {
+	type SetupPhase,
+	type SetupView,
+	setupSteps,
+	strokesDrawn,
+} from "../first-tally/setup";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -30,7 +37,15 @@ import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
-import { BillOccurrenceRow } from "../views/bill-occurrence-row";
+import {
+	BillHead,
+	LedgerDisclosure,
+	LedgerMonth,
+	LedgerPayments,
+	LedgerPriceRow,
+	PaidCheck,
+} from "../views/bill-ledger";
+import { PriceChanged } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
 import {
 	BillMonthlyTotal,
@@ -61,6 +76,7 @@ import {
 } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
+import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
 import {
@@ -101,6 +117,7 @@ import {
 	NewCategoryName,
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
+import { Notebook } from "../views/notebook";
 import { PendingNote } from "../views/pending-note";
 import {
 	PlanBand,
@@ -131,6 +148,7 @@ import {
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
+import { TallySteps } from "../views/tally-steps";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -474,9 +492,252 @@ function Brand() {
 			>
 				<LedgerIllustration />
 			</Specimen>
+			<Specimen
+				id="notebook"
+				title="Notebook"
+				tier="visual"
+				components={["Notebook"]}
+				sentence="The first week's notebook with its tally strokes drawn so far, in ink (P125 E, decision 114). The strokes are its five lines in order, four short ones and then the slash. LedgerIllustration is this notebook with all five drawn."
+			>
+				<State label="None drawn: the notebook before a bank">
+					<Notebook strokes={0} ink size="size-24" />
+				</State>
+				<State label="Two drawn, in ink">
+					<Notebook strokes={2} ink size="size-24" />
+				</State>
+				<State label="All five drawn, in ink">
+					<Notebook strokes={5} ink size="size-24" />
+				</State>
+			</Specimen>
+			<Specimen
+				id="tally-steps"
+				title="TallySteps"
+				tier="visual"
+				components={["TallySteps"]}
+				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; Next marks the line to act on once the questions are open, and the words carry the state."
+			>
+				<State label="Before a bank: none done, each line says how long it takes">
+					<TallySteps
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
+					/>
+				</State>
+				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="The catch-up evening: the rest come when the import is sorted">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="The evening, the history still coming in: no time promised">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="Questions ready: Your pay is next">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="Four drawn, the questions answered: the count line is later, and no line says Next">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="All five drawn, each with its day">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+									count: FIRST_WEEK_TODAY,
+								},
+								budgets: {},
+							},
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="home-setup"
+				title="HomeSetup"
+				tier="visual"
+				components={["HomeSetup"]}
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got. Once the questions are open, the Band says Three things to check."
+			>
+				<State label="Before a bank: Link a bank, with its line">
+					<HomeSetup
+						view={firstWeek(null, "before")}
+						linkBank={
+							<Button type="button" class="w-full">
+								Link a bank
+							</Button>
+						}
+					/>
+				</State>
+				<State label="Reading, the import fits one night: the evening line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							fitsOneNight: true,
+						})}
+					/>
+				</State>
+				<State label="Reading, the import takes more nights: the catch-up line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 1500,
+							sorted: 900,
+							fitsOneNight: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, the history still coming in: no time promised">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							historyIn: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, two banks: the line names neither">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
+						})}
+					/>
+				</State>
+				<State label="Reading, with a bank that stopped updating: its line under the status, in place of 'Nothing for you to do'">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+						})}
+						bankLine={["Chase stopped updating Oct 9"]}
+					/>
+				</State>
+				<State label="Questions ready: the three things to check">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "ready", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 362,
+							sorted: 362,
+						})}
+					/>
+				</State>
+				<State label="Questions answered: the ruled total, and no Band">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{ bankName: "Chase", drawn: 4, total: 362, sorted: 362 },
+						)}
+					/>
+				</State>
+			</Specimen>
 		</Group>
 	);
 }
+
+/** The first week's fake setup (P125 E): the household's day, and a setup view built from a fake record. */
+const FIRST_WEEK_TODAY = "2026-10-14";
+const firstWeek = (
+	record: FirstTally | null,
+	phase: SetupPhase,
+	extra: Partial<SetupView> = {},
+): SetupView => {
+	const view = {
+		phase,
+		drawn: strokesDrawn(record),
+		bankName: null,
+		bankCount: 1,
+		historyIn: true,
+		fitsOneNight: true,
+		sorted: 0,
+		total: 0,
+		...extra,
+	};
+	return {
+		...view,
+		steps: setupSteps(
+			record,
+			phase,
+			view.bankName,
+			FIRST_WEEK_TODAY,
+			view.historyIn && view.fitsOneNight,
+		),
+	};
+};
+const BANK_SYNCED: FirstTally = {
+	strokes: { bank: "2026-10-13" },
+	budgets: {},
+};
 
 /** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
 const MORE_TODAY = "2026-10-14";
@@ -1815,161 +2076,302 @@ function Rows() {
 			</Specimen>
 			<Specimen
 				id="bill-occurrence"
-				title="Bill occurrence and payment picker"
+				title="A bill's page: its head, its ledger of months, and the payment picker"
 				tier="visual"
-				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				components={[
+					"BillHead",
+					"LedgerMonth",
+					"LedgerDisclosure",
+					"LedgerPayments",
+					"LedgerPriceRow",
+					"PriceChanged",
+					"BillPaymentPicker",
+				]}
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
-				<State label="Paid occurrence">
+				<State label="Head: the name, its amount, the bank's text">
+					<div inert>
+						<BillHead
+							name="Streaming"
+							amount="$2.99 a month, due the 15th"
+							bankText="APPLE.COM/BILL"
+						/>
+					</div>
+				</State>
+				<State label="Paid, with its payment open">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 3,
-										displayName: "City Electric",
-										dateLabel: "Sep 24",
-										amountCents: 14200,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 15 · $2.99"
+								mark={<PaidCheck />}
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 77,
+											displayName: "Apple.com/bill",
+											dateLabel: "Oct 15",
+											amountCents: 299,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Paid in 2 payments">
+				<State label="Paid in 2 payments, closed">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-08"
-								label="August 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 4,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 1",
-										amountCents: 70000,
-										matchedBy: "user",
-									},
-									{
-										transactionId: 5,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 3",
-										amountCents: 50000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={120000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Paid in 2 payments · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Aug 2",
+											amountCents: 1299,
+											matchedBy: "auto",
+										},
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Aug 9",
+											amountCents: 500,
+											matchedBy: "user",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Part paid (this month's, still due)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 6,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="September"
+								words="Due · Part paid: $600 of $1,200"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Sep 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-09/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Part paid, an earlier month (Not paid)">
+				<State label="Part paid, an earlier month">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="not-paid"
-								payments={[
-									{
-										transactionId: 7,
-										displayName: "Harbor Property",
-										dateLabel: "Sep 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
-						</ul>
-					</div>
-				</State>
-				<State label="Unpaid occurrence">
-					<div inert>
-						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Part paid: $600 of $1,200"
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Aug 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-08/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Credit-corrected payment (reads unpaid)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: -10000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={0}
-								amountCents={120000}
+							<LedgerDisclosure
+								month="October"
+								words="Due Oct 1 · $1,200.00"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Harbor Property",
+											dateLabel: "Oct 1",
+											amountCents: -10000,
+											matchedBy: "user",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-10/link#payment-picker"
+								>
+									Link a payment
+								</Button>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Due, and nothing linked yet">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Due Nov 15 · $2.99"
 							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-12/link#payment-picker"
+								month="December"
+								words="Upcoming Dec 15 · $2.99"
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-07/link#payment-picker"
+								month="July"
+								words="Overdue Jul 15 · $2.99"
+								wordsClass="text-over"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="A charge Tally found, and a month with no payment">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-09/link?transaction_id=9#payment-picker"
+								month="September"
+								sub="A $2.99 charge on Sep 23 looks like this"
+								action={<span class="text-accent">Link it</span>}
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-08/link#payment-picker"
+								month="August"
+								words="No payment"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and closed">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-06/link#payment-picker"
+										month="June"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-05/link#payment-picker"
+										month="May"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-04/link#payment-picker"
+										month="April"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and open">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+								open
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Price changed? (the newest month asks)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October"
-								status="overdue"
-								priceOffer={{
-									transactionId: 7,
-									merchant: "Netflix",
-									amountCents: 1799,
-									dateLabel: "Oct 3",
-									billAmountCents: 1549,
-									currentCents: 1549,
-									frequency: "monthly",
-								}}
-							/>
+							<LedgerPriceRow month="October" words="Overdue Oct 14 · $15.49">
+								<PriceChanged
+									billId={1}
+									period="2026-10"
+									offer={{
+										transactionId: 7,
+										merchant: "Netflix",
+										amountCents: 1799,
+										dateLabel: "Oct 3",
+										billAmountCents: 1549,
+										currentCents: 1549,
+										frequency: "monthly",
+									}}
+								/>
+							</LedgerPriceRow>
 						</ul>
 					</div>
 				</State>
@@ -2089,42 +2491,49 @@ function Rows() {
 							month="October"
 						/>
 						<ul class="mt-4 divide-y divide-rule border-y border-rule">
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-11"
-								label="November · $17.99"
-								status="upcoming"
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Upcoming Nov 2 · $17.99"
 							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October · $17.99"
-								status="paid"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Netflix",
-										dateLabel: "Oct 2",
-										amountCents: 1799,
-										matchedBy: "auto",
-									},
-								]}
-							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September · $15.49"
-								status="paid"
-								payments={[
-									{
-										transactionId: 9,
-										displayName: "Netflix",
-										dateLabel: "Sep 2",
-										amountCents: 1549,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 2 · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Oct 2",
+											amountCents: 1799,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
+							<LedgerDisclosure
+								month="September"
+								words="Paid Sep 2 · $15.49"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Sep 2",
+											amountCents: 1549,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>

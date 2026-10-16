@@ -1,5 +1,7 @@
-import { exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { env, exports } from "cloudflare:workers";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import decisions from "../docs/decisions.md?raw";
+import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 
 describe("security headers", () => {
 	it("denies framing and restricts scripts to our origin", async () => {
@@ -25,7 +27,7 @@ const cspFor = async (path: string) => {
 };
 
 describe("Plaid Content Security Policy", () => {
-	it("allows Plaid's documented hosts on Accounts only", async () => {
+	it("allows Plaid's documented hosts on Accounts, and on Home in the family app; the demo's Home keeps 'self'", async () => {
 		const accounts = await cspFor("/accounts");
 		expect(accounts).toContain("script-src 'self' https://cdn.plaid.com");
 		expect(accounts).toContain("frame-src 'self' https://cdn.plaid.com");
@@ -43,7 +45,7 @@ describe("Plaid Content Security Policy", () => {
 		}
 	});
 
-	it("allows inline styles on Accounts only, so Link's overlay can cover the screen", async () => {
+	it("allows inline styles on Accounts, and on Home in the family app; the demo's Home keeps 'self'", async () => {
 		expect(await cspFor("/accounts")).toContain(
 			"style-src 'self' 'unsafe-inline'",
 		);
@@ -53,5 +55,58 @@ describe("Plaid Content Security Policy", () => {
 		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
 			expect(await cspFor(path)).not.toContain("unsafe-inline");
 		}
+	});
+});
+
+describe("Home in the family app", () => {
+	beforeEach(() => Object.assign(env, { DEMO: "false" }));
+	afterEach(() => Object.assign(env, { DEMO: "true" }));
+
+	it("allows Plaid Link's hosts and inline styles, as Accounts does", async () => {
+		// No Access JWT, so the page is refused; the headers are still set on that refusal.
+		const csp = await cspFor("/");
+		expect(csp).toContain("script-src 'self' https://cdn.plaid.com");
+		expect(csp).toContain("frame-src 'self' https://cdn.plaid.com");
+		expect(csp).toContain("connect-src 'self' https://production.plaid.com");
+		expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+	});
+
+	it("keeps Plaid off the family app's other pages", async () => {
+		for (const path of ["/transactions", "/settings"]) {
+			const csp = await cspFor(path);
+			expect(csp).not.toContain("plaid.com");
+			expect(csp).not.toContain("unsafe-inline");
+		}
+	});
+});
+
+describe("decision and spec records for the Home Plaid allowances", () => {
+	const decisionRows = () =>
+		decisions.split("\n").filter((line) => /^\| \d+ \|/.test(line));
+
+	it("numbers each decision row once, in ascending order", () => {
+		const numbers = decisionRows().map((line) => Number(line.split("|")[1]));
+		expect(numbers.length).toBeGreaterThan(100);
+		expect(new Set(numbers).size).toBe(numbers.length);
+		expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+	});
+
+	it("records the Home Plaid allowances as decision 124, the last row, with inline styles and decision 63", () => {
+		const last = decisionRows().at(-1) ?? "";
+		expect(last.startsWith("| 124 | 2026-10-16 | Home in the family app")).toBe(
+			true,
+		);
+		expect(last).toContain("'unsafe-inline'");
+		expect(last).toContain("decision 63");
+	});
+
+	it("cites decisions 63 and 124 in the spec's Security headers row for Plaid Link's inline styles", () => {
+		const row =
+			spec
+				.split("\n")
+				.find((line) => line.startsWith("| Security headers |")) ?? "";
+		expect(row).toContain("decisions 63 and 124");
+		expect(row).toContain("Plaid Link's inline styles");
+		expect(row).not.toContain("decisions 63 and 123");
 	});
 });

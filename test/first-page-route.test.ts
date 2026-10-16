@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON } from "../src/db/ai-switches";
-import { markStroke, readFirstTally } from "../src/db/first-tally";
+import { markStroke, readFirstTally, STROKES } from "../src/db/first-tally";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -59,8 +59,9 @@ async function post(
 	path: string,
 	fields: Record<string, string> | [string, string][],
 	htmx = false,
+	DB: D1Database = db,
 ) {
-	const res = await family.fetch(path, {
+	const res = await app(false, DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
 		headers: {
@@ -150,6 +151,27 @@ async function answerFor(key: string, answer: "yes" | "no", htmx = false) {
 		],
 		htmx,
 	);
+}
+
+/**
+ * The test database with `hook` run once, against the database itself, just before its first batch: the write a sync or
+ * a competing answer makes between a reply's check and its own batch. Every other call forwards to the database.
+ */
+function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
+	let raced = false;
+	return new Proxy(db, {
+		get(target, prop) {
+			if (prop === "batch" && !raced) {
+				return async (statements: D1PreparedStatement[]) => {
+					raced = true;
+					await hook(target);
+					return target.batch(statements);
+				};
+			}
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
 }
 
 const trigger = (res: Response) =>
@@ -280,6 +302,74 @@ describe("the gate", () => {
 	it("opens the page once the gate is open", async () => {
 		const { res } = await get("/first-page");
 		expect(res.status).toBe(200);
+	});
+
+	describe("once the first week is set up (#647)", () => {
+		/** Draws every stroke: the household is set up, and nothing is left to ask. */
+		const setUp = async () => {
+			for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
+		};
+
+		/** The ACME deposits' flags, as the ledger reads them: a Yes would change them, so they show whether an answer wrote. */
+		const flagsOf = async (raw: string) =>
+			(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source FROM transactions WHERE raw_name = ?",
+					)
+					.bind(raw)
+					.all()
+			).results;
+
+		it("sends the page Home with a 303, and a plain answer Home too", async () => {
+			await setUp();
+			const { res } = await get("/first-page");
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/");
+			const answer = await post("/first-page/pay", [["answer", "yes"]]);
+			expect(answer.res.status).toBe(303);
+			expect(answer.res.headers.get("Location")).toBe("/");
+		});
+
+		it("sends a pay answer Home with HX-Redirect, and writes nothing", async () => {
+			// Deposits the page asks about while it is still open; the answer posts the fields that page showed.
+			await deposits("ACME CORP PAYROLL", 245000, 2, 14, {
+				flag_income: 0,
+				income_confidence: 0.5,
+			});
+			const { html } = await get("/first-page");
+			const asked: [string, string][] = [
+				...hiddenFields(html, "merchant"),
+				...payFields(html),
+				["answer", "yes"],
+			];
+			expect(asked).toHaveLength(4);
+			await setUp();
+			const before = await readFirstTally(db);
+			const flags = await flagsOf("ACME CORP PAYROLL");
+			const { res } = await post("/first-page/pay", asked, true);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/");
+			expect(await readFirstTally(db)).toEqual(before);
+			expect(await flagsOf("ACME CORP PAYROLL")).toEqual(flags);
+		});
+
+		it("sends a bills keep Home with HX-Redirect, and keeps no bill", async () => {
+			await charge("NETFLIX", 1549);
+			const { html } = await get("/first-page");
+			const keep = keepFields(html);
+			expect(keep).toHaveLength(1);
+			await setUp();
+			const before = await readFirstTally(db);
+			const { res } = await post("/first-page/bills", keep, true);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/");
+			expect(await readFirstTally(db)).toEqual(before);
+			const bills = await db
+				.prepare("SELECT COUNT(*) AS n FROM bills")
+				.first<{ n: number }>();
+			expect(bills?.n).toBe(0);
+		});
 	});
 });
 
@@ -440,23 +530,68 @@ describe("Yes and No writes", () => {
 		).toBe(true);
 	});
 
+	it("answers every deposit of an unchanged merchant", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		expect(await answerPay(db, merchant, "yes", "person@example.com")).toBe(2);
+	});
+
+	describe("a sync correction after the question was read", () => {
+		const FLAGS =
+			"SELECT id, flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' ORDER BY id";
+
+		/**
+		 * Yes for a merchant whose shown deposit was corrected after its question was read: the answer changes nothing, the
+		 * deposits keep their flags, and the pay record gets no line for the merchant.
+		 */
+		async function expectNothingMarked(merchant: PayMerchant) {
+			const before = await db.prepare(FLAGS).all();
+			expect(await answerPay(db, merchant, "yes", "person@example.com")).toBe(
+				0,
+			);
+			expect((await db.prepare(FLAGS).all()).results).toEqual(before.results);
+			expect(
+				(await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"],
+			).toBeUndefined();
+		}
+
+		it("changes nothing when a shown deposit's cents changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
+
+		it("changes nothing when a shown deposit's date changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET date = ? WHERE id = ?")
+				.bind(daysBefore(TODAY, 1), merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
+
+		it("changes nothing when a shown deposit's merchant key changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
+	});
+
 	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
-		let raced = false;
 		// The competing Yes lands just before this reply's own batch, so the reply's No changes no row.
-		const racing = new Proxy(db, {
-			get(target, prop) {
-				if (prop === "batch" && !raced) {
-					return async (statements: D1PreparedStatement[]) => {
-						raced = true;
-						await answerPay(target, merchant, "yes", "person@example.com");
-						return target.batch(statements);
-					};
-				}
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
-			},
+		const racing = raceBeforeBatch(async (target) => {
+			await answerPay(target, merchant, "yes", "person@example.com");
 		});
 		const res = await app(false, racing).fetch("/first-page/pay", {
 			method: "POST",
@@ -491,27 +626,16 @@ describe("Yes and No writes", () => {
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
-		let raced = false;
 		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
-		const racing = new Proxy(db, {
-			get(target, prop) {
-				if (prop === "batch" && !raced) {
-					return async (statements: D1PreparedStatement[]) => {
-						raced = true;
-						await txn({
-							raw_name: "ACME CORP PAYROLL",
-							date: daysBefore(TODAY, 7),
-							amount_cents: -245000,
-							flag_income: 1,
-							plaid_category: "INCOME",
-						});
-						return target.batch(statements);
-					};
-				}
-				const value = Reflect.get(target, prop, target);
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
+		const racing = raceBeforeBatch(() =>
+			txn({
+				raw_name: "ACME CORP PAYROLL",
+				date: daysBefore(TODAY, 7),
+				amount_cents: -245000,
+				flag_income: 1,
+				plaid_category: "INCOME",
+			}),
+		);
 		const res = await app(false, racing).fetch("/first-page/pay", {
 			method: "POST",
 			redirect: "manual",
@@ -751,6 +875,51 @@ describe("A pay answer answers what the page showed", () => {
 			true,
 		);
 		await expectRefused(res, html, "2 times since");
+	});
+
+	it("says the deposits changed when a sync corrects a shown deposit between the check and the answer", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const racing = raceBeforeBatch(async (target) => {
+			await target
+				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+		});
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "yes"],
+			],
+			true,
+			racing,
+		);
+		await expectRefused(res, html, "$2,450 to $2,500");
+	});
+
+	it("says the deposits changed when a sync renames a shown deposit's merchant between the check and the answer", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		const racing = raceBeforeBatch(async (target) => {
+			await target
+				.prepare("UPDATE transactions SET merchant_name = 'ACME' WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+		});
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "yes"],
+			],
+			true,
+			racing,
+		);
+		// The renamed deposit is now its own merchant, 'ACME', which sorts first and is asked first.
+		await expectRefused(res, html, "once, on");
 	});
 
 	it("marks nothing when the form posts no deposit field", async () => {

@@ -14,7 +14,7 @@ import {
 	needsBigAmountConfirm,
 	sameBillName,
 } from "../bills/guards";
-import { matchBillPayments } from "../bills/match";
+import { dayNumber, matchBillPayments } from "../bills/match";
 import {
 	acceptPriceOffer,
 	dismissPriceOffer,
@@ -32,6 +32,7 @@ import {
 	handledBeforeAdded,
 	manualLinkWindowDays,
 	occurrencePaid,
+	partPaidSentence,
 } from "../bills/status";
 import { type BillTotalFrequency, billTotalsForRows } from "../bills/totals";
 import { linkPaymentSql, occurrenceUnpaidSql } from "../bills/unpaid";
@@ -68,7 +69,15 @@ import { centsToAmount, formatCents, toCents } from "../money";
 import { tidyName } from "../transactions/tidy-name";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
-import { BillOccurrenceRow } from "../views/bill-occurrence-row";
+import {
+	BillHead,
+	LedgerDisclosure,
+	LedgerMonth,
+	LedgerPayments,
+	LedgerPriceRow,
+	PaidCheck,
+} from "../views/bill-ledger";
+import { PriceChanged } from "../views/bill-occurrence-row";
 import {
 	BillMonthExplanation,
 	BillPaymentPicker,
@@ -1418,6 +1427,88 @@ async function billPeriods(db: D1Database, bill: DbBill, today: string) {
 	);
 }
 
+/** A charge Tally found for a month that has no payment (P131 A): the bill's own merchant's charge, nothing linked to it. */
+type FoundCharge = {
+	transactionId: number;
+	date: string;
+	amountCents: number;
+};
+
+/**
+ * The charge Tally found for each unpaid month, by period (P131 A, #604). A charge is one the matcher can't claim
+ * on its own (the picker's manual window is wider) but that is the bill's merchant and nothing is linked to it. It is
+ * found within the manual window of a month's due date, and not in a month the person said Not this one to. One query
+ * fetches every candidate, then each charge goes to its nearest due date and each month keeps the closest in amount.
+ */
+async function foundCharges(
+	db: D1Database,
+	bill: DbBill,
+	months: { period: string; due: string; cents: number }[],
+): Promise<Map<string, FoundCharge>> {
+	if (!months.length) return new Map<string, FoundCharge>();
+	const window = manualLinkWindowDays(bill.frequency);
+	const dues = months.map((month) => month.due).sort();
+	const charges = (
+		await db
+			.prepare(
+				`SELECT t.id AS transaction_id,t.date,t.amount_cents FROM transactions t WHERE t.date>=date(?,?) AND t.date<=date(?,?) AND t.is_split=0 AND t.flag_income=0 AND t.amount_cents>0 AND ${isMerchantTextSql("t")} AND NOT EXISTS(SELECT 1 FROM bill_payments bp WHERE bp.transaction_id=t.id AND bp.status='linked') AND NOT ${paysPlanGroupSql("t")} ORDER BY t.date,t.id`,
+			)
+			.bind(
+				dues[0],
+				`-${window} days`,
+				dues[dues.length - 1],
+				`+${window} days`,
+				...merchantTextArgs(bill),
+			)
+			.all<{ transaction_id: number; date: string; amount_cents: number }>()
+	).results;
+	if (!charges.length) return new Map<string, FoundCharge>();
+	const turnedAway = new Set(
+		(
+			await db
+				.prepare(
+					"SELECT period,transaction_id FROM bill_payments WHERE bill_id=? AND status='dismissed' AND matched_by='user'",
+				)
+				.bind(bill.id)
+				.all<{ period: string; transaction_id: number }>()
+		).results.map((row) => `${row.period}|${row.transaction_id}`),
+	);
+	// Each month's closest so far: by amount to the month's own amount, then by days from its due date.
+	const closest = new Map<
+		string,
+		FoundCharge & { amountGap: number; dayGap: number }
+	>();
+	for (const charge of charges) {
+		const day = dayNumber(charge.date);
+		let nearest: { month: (typeof months)[number]; dayGap: number } | undefined;
+		for (const month of months) {
+			const dayGap = Math.abs(day - dayNumber(month.due));
+			if (
+				dayGap <= window &&
+				!turnedAway.has(`${month.period}|${charge.transaction_id}`) &&
+				(!nearest || dayGap < nearest.dayGap)
+			)
+				nearest = { month, dayGap };
+		}
+		if (!nearest) continue;
+		const candidate = {
+			transactionId: charge.transaction_id,
+			date: charge.date,
+			amountCents: charge.amount_cents,
+			amountGap: Math.abs(charge.amount_cents - nearest.month.cents),
+			dayGap: nearest.dayGap,
+		};
+		const kept = closest.get(nearest.month.period);
+		if (
+			!kept ||
+			candidate.amountGap < kept.amountGap ||
+			(candidate.amountGap === kept.amountGap && candidate.dayGap < kept.dayGap)
+		)
+			closest.set(nearest.month.period, candidate);
+	}
+	return closest;
+}
+
 async function billPage(
 	c: Context<App>,
 	id: number,
@@ -1572,6 +1663,199 @@ async function billPage(
 		c.header("HX-Retarget", "body");
 		c.header("HX-Reswap", "outerHTML");
 	}
+	const cadence =
+		bill.frequency === "weekly"
+			? `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.due_day - 1]}`
+			: bill.frequency === "biweekly"
+				? "every two weeks"
+				: bill.frequency === "quarterly"
+					? "every 3 months"
+					: `${bill.frequency === "monthly" ? "a month" : "a year"}, due the ${ordinal(bill.due_day)}`;
+	// A month's status, as the ledger reads it (P131 A). A month with no payment and no charge found is "not-paid".
+	const statusOf = (period: string): BillStatus | "not-paid" => {
+		if (paidPeriods.has(period)) return "paid";
+		if (period === current.period) return current.status;
+		const due = occurrenceDate(bill, period);
+		if (due >= today) return "upcoming";
+		// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
+		// only one from an earlier month reads No payment, part paid or not.
+		const missedThisMonth =
+			["weekly", "biweekly"].includes(bill.frequency) &&
+			due.slice(0, 7) === today.slice(0, 7);
+		return missedThisMonth ? "overdue" : "not-paid";
+	};
+	const unpaid = listedPeriods
+		.filter((period) => !byPeriod.has(period) && statusOf(period) !== "paid")
+		.map((period) => {
+			const due = occurrenceDate(bill, period);
+			return { period, due, cents: amountOn(due) };
+		});
+	const found = await foundCharges(c.env.DB, bill, unpaid);
+	const labelOf = (period: string) =>
+		["monthly", "yearly"].includes(bill.frequency)
+			? monthName(billPeriodMonth(countedBill(bill), period), today)
+			: occurrenceLabel(occurrenceDate(bill, period));
+	const linkTo = (period: string, transactionId?: number) =>
+		`/bills/${id}/occurrences/${period}/link${transactionId ? `?transaction_id=${transactionId}` : ""}#payment-picker`;
+	// The words a month's row carries in muted type: today's page's own status words, with the amount after the date.
+	const wordOf = {
+		paid: "Paid",
+		due: "Due",
+		upcoming: "Upcoming",
+		overdue: "Overdue",
+	} as const;
+	const statusWords = (
+		status: BillStatus | "not-paid",
+		due: string,
+		amount: string,
+	) =>
+		status === "not-paid"
+			? "No payment"
+			: `${wordOf[status]} ${shortDate(due)} · ${amount}`;
+	const units = {
+		monthly: "months",
+		yearly: "years",
+		quarterly: "quarters",
+		weekly: "weeks",
+		biweekly: "two-week periods",
+	} as const;
+	const rowFor = (period: string) => {
+		const status = statusOf(period);
+		const due = occurrenceDate(bill, period);
+		const amount = formatCents(amountOn(due));
+		const month = labelOf(period);
+		const payments = byPeriod.get(period) ?? [];
+		if (payments.length) {
+			const partPaid = status !== "paid" && paidOf(period) > 0;
+			const partWords = partPaidSentence(paidOf(period), amountOn(due));
+			return (
+				<LedgerDisclosure
+					month={month}
+					mark={status === "paid" ? <PaidCheck /> : undefined}
+					words={
+						status === "paid"
+							? payments.length > 1
+								? `Paid in ${payments.length} payments · ${amount}`
+								: `Paid ${shortDate(payments[0]?.date ?? due)} · ${amount}`
+							: partPaid
+								? status === "not-paid"
+									? partWords
+									: `${wordOf[status]} · ${partWords}`
+								: statusWords(status, due, amount)
+					}
+					open={payments.some(
+						(payment) => payment.transaction_id === focusTransactionId,
+					)}
+				>
+					<LedgerPayments
+						billId={id}
+						period={period}
+						focusTransactionId={focusTransactionId}
+						payments={payments.map((payment) => ({
+							transactionId: payment.transaction_id,
+							displayName: payment.display_name ?? tidyName(payment.raw_name),
+							dateLabel: shortDate(payment.date),
+							amountCents: payment.amount_cents,
+							matchedBy: payment.matched_by,
+						}))}
+					/>
+					{status !== "paid" && (
+						<Button kind="text" class="-ml-2" href={linkTo(period)}>
+							{partPaid ? "Link another payment" : "Link a payment"}
+						</Button>
+					)}
+				</LedgerDisclosure>
+			);
+		}
+		if (offer && period === current.period)
+			return (
+				<LedgerPriceRow month={month} words={statusWords(status, due, amount)}>
+					<PriceChanged
+						billId={id}
+						period={period}
+						offer={{
+							transactionId: offer.transactionId,
+							merchant: offer.merchant,
+							amountCents: offer.amountCents,
+							dateLabel: shortDay(offer.date, today),
+							billAmountCents: currentCents,
+							currentCents: bill.amount_cents,
+							frequency: bill.frequency,
+							cadence: billCadenceLabel({
+								frequency: bill.frequency,
+								dueDay: bill.due_day,
+							}),
+						}}
+					/>
+				</LedgerPriceRow>
+			);
+		const charge = found.get(period);
+		if (charge)
+			return (
+				<LedgerMonth
+					href={linkTo(period, charge.transactionId)}
+					month={month}
+					sub={`A ${formatCents(charge.amountCents)} charge on ${shortDate(charge.date)} looks like this`}
+					action={<span class="text-accent">Link it</span>}
+				/>
+			);
+		return (
+			<LedgerMonth
+				href={linkTo(period)}
+				month={month}
+				words={statusWords(status, due, amount)}
+				wordsClass={status === "overdue" ? "text-over" : "text-muted"}
+			/>
+		);
+	};
+	// Consecutive months with no payment and no charge found fold into one row, newest first (P131 A); a single
+	// month keeps its own row.
+	const rows: Child[] = [];
+	let run: string[] = [];
+	const closeRun = () => {
+		const newest = run[0];
+		const oldest = run[run.length - 1];
+		if (newest !== undefined && oldest !== undefined && run.length === 1)
+			rows.push(
+				<LedgerMonth
+					href={linkTo(newest)}
+					month={labelOf(newest)}
+					words="No payment"
+				/>,
+			);
+		else if (newest !== undefined && oldest !== undefined)
+			rows.push(
+				<LedgerDisclosure
+					month={`${labelOf(oldest)} to ${labelOf(newest)}`}
+					words="No payment"
+					sr={`${run.length} ${units[bill.frequency]} with no payment`}
+				>
+					<ul class="divide-y divide-rule">
+						{run.map((period) => (
+							<LedgerMonth
+								href={linkTo(period)}
+								month={labelOf(period)}
+								words="Link a payment"
+							/>
+						))}
+					</ul>
+				</LedgerDisclosure>,
+			);
+		run = [];
+	};
+	for (const period of listedPeriods) {
+		if (
+			statusOf(period) === "not-paid" &&
+			!byPeriod.has(period) &&
+			!found.has(period)
+		)
+			run.push(period);
+		else {
+			closeRun();
+			rows.push(rowFor(period));
+		}
+	}
+	closeRun();
 	return c.html(
 		<Layout
 			title={`${bill.name} · Tally`}
@@ -1584,99 +1868,28 @@ async function billPage(
 				<a href="/bills" class="inline-flex min-h-11 items-center">
 					Bills
 				</a>
-				<p class="text-sm text-muted">{bill.merchant_raw_name}</p>
-				<h1
-					id="page-title"
-					class="font-serif text-5xl font-semibold tracking-tight"
-				>
-					{bill.name}
-				</h1>
-				<p class="text-lg">
-					{formatCents(bill.amount_cents)}{" "}
-					{bill.frequency === "weekly"
-						? `every ${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][bill.due_day - 1]}`
-						: bill.frequency === "biweekly"
-							? "every two weeks"
-							: bill.frequency === "quarterly"
-								? "every 3 months"
-								: `${bill.frequency === "monthly" ? "a month" : "a year"}, due the ${ordinal(bill.due_day)}`}
-				</p>
-				{change && (
-					<PriceChangeLine
-						direction={change.direction}
-						amountCents={change.amountCents}
-						month={monthLabel(change.effectiveMonth, today)}
-					/>
-				)}
+				<BillHead
+					titleId="page-title"
+					name={bill.name}
+					amount={`${formatCents(bill.amount_cents)} ${cadence}`}
+					note={
+						change && (
+							<PriceChangeLine
+								direction={change.direction}
+								amountCents={change.amountCents}
+								month={monthLabel(change.effectiveMonth, today)}
+							/>
+						)
+					}
+					bankText={bill.merchant_raw_name}
+				/>
 				{shownError && (
 					<p role="alert" class="mt-3 text-over">
 						{shownError}
 					</p>
 				)}
 				<h2 class="mt-6 text-sm text-muted">Payments</h2>
-				<ul class="divide-y divide-rule border-y border-rule">
-					{listedPeriods.map((period) => {
-						const linkedPayments = byPeriod.get(period) ?? [];
-						const due = occurrenceDate(bill, period);
-						// A missed weekly Friday from this month is overdue and set aside (Bills' totals count it so);
-						// only one from an earlier month reads Not paid, part paid or not.
-						const missedThisMonth =
-							["weekly", "biweekly"].includes(bill.frequency) &&
-							due.slice(0, 7) === today.slice(0, 7);
-						const status = paidPeriods.has(period)
-							? "paid"
-							: period === current.period
-								? current.status
-								: due < today
-									? missedThisMonth
-										? "overdue"
-										: "not-paid"
-									: "upcoming";
-						return (
-							<BillOccurrenceRow
-								billId={id}
-								period={period}
-								focusTransactionId={focusTransactionId}
-								label={`${
-									["monthly", "yearly"].includes(bill.frequency)
-										? monthName(
-												billPeriodMonth(countedBill(bill), period),
-												today,
-											)
-										: occurrenceLabel(due)
-								} · ${formatCents(amountOn(due))}`}
-								status={status}
-								paidCents={paidOf(period)}
-								amountCents={amountOn(due)}
-								payments={linkedPayments.map((payment) => ({
-									transactionId: payment.transaction_id,
-									displayName:
-										payment.display_name ?? tidyName(payment.raw_name),
-									dateLabel: shortDate(payment.date),
-									amountCents: payment.amount_cents,
-									matchedBy: payment.matched_by,
-								}))}
-								priceOffer={
-									offer && period === current.period
-										? {
-												transactionId: offer.transactionId,
-												merchant: offer.merchant,
-												amountCents: offer.amountCents,
-												dateLabel: shortDay(offer.date, today),
-												billAmountCents: currentCents,
-												currentCents: bill.amount_cents,
-												frequency: bill.frequency,
-												cadence: billCadenceLabel({
-													frequency: bill.frequency,
-													dueDay: bill.due_day,
-												}),
-											}
-										: undefined
-								}
-							/>
-						);
-					})}
-				</ul>
+				<ul class="divide-y divide-rule border-y border-rule">{rows}</ul>
 				<div class="mt-3">
 					<Button
 						id="edit-bill"
