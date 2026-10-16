@@ -48,6 +48,19 @@ export type Category = {
 	color: string;
 };
 
+// A payment that pays a bill or a planned expense counts whatever its exclusion (spec §8.5, decision 82). These
+// sentences are the panel's top lines and the Exclude switch's line, so their words can't drift apart.
+const PAYS_BILL_COUNTS = "It pays a bill, so it counts in the budget.";
+const PAYS_PLAN_COUNTS =
+	"It pays a planned expense, so it counts in the budget.";
+
+/** The Exclude switch's muted line: the sentence that says a bill or planned payment counts, else the plain one. */
+function excludeHint(tx: TransactionDetail) {
+	if (tx.paysBill) return PAYS_BILL_COUNTS;
+	if (tx.paysPlan) return PAYS_PLAN_COUNTS;
+	return "It won't count in Spent or any budget.";
+}
+
 type SheetProps = {
 	tx: TransactionDetail;
 	back: string;
@@ -203,7 +216,23 @@ export function CategoryChoice({
 		tx.categoryConfidence !== null &&
 		tx.categoryConfidence < JEV_THRESHOLD;
 	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
-	const chosen = categories.find((cat) => cat.id === values.categoryId);
+	// The saved category once it's archived: the active list doesn't hold it, so its row still folds and names it.
+	// Only while the posted choice is that saved category, so a category error's null never folds a row.
+	const archivedSaved =
+		values.categoryId !== null &&
+		values.categoryId === tx.categoryId &&
+		tx.categoryName !== null &&
+		tx.categoryIcon !== null &&
+		tx.categoryColor !== null
+			? {
+					id: values.categoryId,
+					name: tx.categoryName,
+					icon: tx.categoryIcon,
+					color: tx.categoryColor,
+				}
+			: undefined;
+	const chosen =
+		categories.find((cat) => cat.id === values.categoryId) ?? archivedSaved;
 	const needsCategory = tx.categoryId === null || guessChip;
 	// Folded once it has one (or New category is chosen, which the row says).
 	const folded =
@@ -484,12 +513,10 @@ export function EditSheet({
 			)}
 			{/* A payment linked to a bill counts whatever its exclusion (spec §8.5), so the panel says so. */}
 			{tx.excluded && tx.paysBill && (
-				<p class="text-muted">It pays a bill, so it counts in the budget.</p>
+				<p class="text-muted">{PAYS_BILL_COUNTS}</p>
 			)}
 			{tx.excluded && !tx.paysBill && tx.paysPlan && (
-				<p class="text-muted">
-					It pays a planned expense, so it counts in the budget.
-				</p>
+				<p class="text-muted">{PAYS_PLAN_COUNTS}</p>
 			)}
 			{tx.isSplit && (
 				<form
@@ -703,7 +730,7 @@ export function EditSheet({
 					name="excluded"
 					value="1"
 					label="Exclude from budget"
-					hint="It won't count in Spent or any budget."
+					hint={excludeHint(tx)}
 					checked={values.excluded}
 				/>
 				<div class="border-t border-rule">

@@ -38,6 +38,12 @@ function categoryBlock(html: string) {
 	return html.slice(start, end);
 }
 
+/** The Exclude switch's muted line: the text its span holds, from its id to the span's close. */
+function excludeHintOf(html: string) {
+	const start = html.indexOf(">", html.indexOf('id="edit-exclude-hint"')) + 1;
+	return html.slice(start, html.indexOf("</span>", start));
+}
+
 /** The whole `<input …>` tag that carries `name`. */
 function inputTag(html: string, name: string) {
 	const at = html.indexOf(`name="${name}"`);
@@ -62,6 +68,27 @@ async function pickedByTally() {
 		"UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = 'Groceries'), category_source = 'jev', category_confidence = 0.92 WHERE id = ?",
 	)
 		.bind(bakery)
+		.run();
+}
+
+/** Local Bakery pays a bill: a linked bill payment, which counts whatever its exclusion. */
+async function payBill() {
+	await env.DB.prepare(
+		"INSERT INTO bills(id,name,amount_cents,due_day,frequency,anchor_month,merchant_raw_name) VALUES(9501,'Power',1200,31,'monthly',NULL,'BAKERY BILL FIXTURE')",
+	).run();
+	await env.DB.prepare(
+		"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9501,?,?,'user','linked')",
+	)
+		.bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), bakery)
+		.run();
+}
+
+/** Local Bakery pays a planned expense: a plan linked to it, which counts whatever its exclusion. */
+async function payPlan() {
+	await env.DB.prepare(
+		"INSERT INTO planned_expenses(name,amount_cents,month,transaction_id,created_by) VALUES('Car registration',1200,?,?,'demo')",
+	)
+		.bind(todayIn(DEFAULT_TIME_ZONE).slice(0, 7), bakery)
 		.run();
 }
 
@@ -201,6 +228,53 @@ describe("the category leads the panel (P120 B)", () => {
 		);
 		expect(html).not.toContain(`is always ${groceries}.`);
 	});
+
+	it("keeps an archived saved category folded, named and sourced", async () => {
+		await pickedByTally();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",
+		).run();
+		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+		expect(block).toContain('<details class="group border-b border-rule"');
+		const details =
+			block.match(/<details class="group border-b border-rule"[^>]*>/)?.[0] ??
+			"";
+		expect(details).not.toContain(" open");
+		const summary = block.slice(
+			block.indexOf("<summary"),
+			block.indexOf("</summary>"),
+		);
+		const label = summary.indexOf("Category");
+		const choice = summary.indexOf("Groceries");
+		const source = summary.indexOf("Picked by Tally · 92% sure");
+		expect(label).toBeGreaterThan(-1);
+		expect(choice).toBeGreaterThan(label);
+		expect(source).toBeGreaterThan(choice);
+	});
+
+	it("saves a note on an archived category without changing its category", async () => {
+		await pickedByTally();
+		await env.DB.prepare(
+			"UPDATE categories SET archived = 1 WHERE name = 'Groceries'",
+		).run();
+		const groceries = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Groceries'",
+			).first<{ id: number }>()
+		)?.id;
+		// No category posts: the archived one isn't offered, so the save leaves the transaction's category as it is.
+		const { res } = await post(`/transactions/${bakery}`, {
+			note: "Kept as Groceries",
+			back: "/transactions",
+		});
+		expect(res.status).toBe(200);
+		const row = await env.DB.prepare(
+			"SELECT category_id AS categoryId FROM transactions WHERE id = ?",
+		)
+			.bind(bakery)
+			.first<{ categoryId: number | null }>();
+		expect(row?.categoryId).toBe(groceries);
+	});
 });
 
 describe("Exclude and Count as income are switches (P120 B)", () => {
@@ -215,6 +289,34 @@ describe("Exclude and Count as income are switches (P120 B)", () => {
 		expect(income).toContain('role="switch"');
 		expect(income).toContain('value="1"');
 		expect(panel).toContain("Count as income");
+	});
+
+	it("says on Exclude's line that a bill payment counts, excluded or not", async () => {
+		await payBill();
+		for (const excluded of [0, 1]) {
+			await env.DB.prepare("UPDATE transactions SET excluded = ? WHERE id = ?")
+				.bind(excluded, bakery)
+				.run();
+			const panel = panelOf((await get(`/transactions/${bakery}`)).html);
+			expect(excludeHintOf(panel)).toBe(
+				"It pays a bill, so it counts in the budget.",
+			);
+			expect(excludeHintOf(panel)).not.toContain("won&#39;t count");
+		}
+	});
+
+	it("says on Exclude's line that a planned expense's payment counts, excluded or not", async () => {
+		await payPlan();
+		for (const excluded of [0, 1]) {
+			await env.DB.prepare("UPDATE transactions SET excluded = ? WHERE id = ?")
+				.bind(excluded, bakery)
+				.run();
+			const panel = panelOf((await get(`/transactions/${bakery}`)).html);
+			expect(excludeHintOf(panel)).toBe(
+				"It pays a planned expense, so it counts in the budget.",
+			);
+			expect(excludeHintOf(panel)).not.toContain("won&#39;t count");
+		}
 	});
 
 	it("has no How this works link in the panel (audit E5)", async () => {
