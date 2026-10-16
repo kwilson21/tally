@@ -329,7 +329,10 @@ function SuggestionRow({ ask }: { ask: BudgetAsk }) {
 	);
 }
 
-/** The Needs a category line under the budgets question: a link to the Needs category filter, then the count and the mean. */
+/**
+ * The Needs a category line under the budgets question: a link to the Needs category filter across all months (the same
+ * count the line shows, needsCategoryCount "all"), then the count and the mean.
+ */
 function NeedsCategory({
 	needs,
 }: {
@@ -337,7 +340,7 @@ function NeedsCategory({
 }) {
 	return (
 		<p class="mt-3 text-sm text-muted">
-			<a href="/transactions?uncategorized=1" class="text-accent">
+			<a href="/transactions?uncategorized=1&month=all" class="text-accent">
 				Needs a category
 			</a>
 			{needsTail(needs.count, needs.meanCents)}
@@ -587,17 +590,25 @@ export function BudgetsQuestion({
 
 /**
  * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
- * and a way back to Home. It is drawn once the budgets stroke is.
+ * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says so above the rule.
  */
 export function RuledTotal({
 	safeCents,
 	focus,
+	nothingAsked,
 }: {
 	safeCents: number;
 	focus: boolean;
+	/** True when every category already has a budget (nothing was asked), so the step says so. */
+	nothingAsked: boolean;
 }) {
 	return (
 		<section>
+			{nothingAsked && (
+				<p class="mt-6 text-base text-muted">
+					Every category already has a budget.
+				</p>
+			)}
 			<div class="mt-6 border-b-[3px] border-double border-ink" />
 			<p tabindex={-1} autofocus={focus} class="mt-4 text-lg text-muted">
 				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
@@ -674,7 +685,11 @@ export function FirstPageBody({
 						)}
 						{budgets &&
 							(budgets.done ? (
-								<RuledTotal safeCents={budgets.safeCents} focus={focus} />
+								<RuledTotal
+									safeCents={budgets.safeCents}
+									focus={focus}
+									nothingAsked={budgets.nothingAsked}
+								/>
 							) : (
 								<BudgetsQuestion
 									step={budgets}

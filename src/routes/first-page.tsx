@@ -5,10 +5,12 @@ import { householdToday } from "../dates";
 import type { BudgetAnswer, PayAnswer } from "../db/first-tally";
 import { keepReply, keepShown } from "../first-tally/bills";
 import {
+	type BudgetAsk,
 	budgetChangedWords,
 	keepShownBudgets,
 	keptBudgetsWords,
 	savedBudgetWords,
+	shownBudgetIds,
 	skippedBudgetWords,
 } from "../first-tally/budgets";
 import {
@@ -22,7 +24,12 @@ import {
 import { readQuestionsGate } from "../first-tally/gate";
 import { payShown } from "../first-tally/pay";
 import { hxTrigger } from "../htmx";
-import { FirstPageBody, type Motion, NO_MOTION } from "../views/first-page";
+import {
+	type BudgetError,
+	FirstPageBody,
+	type Motion,
+	NO_MOTION,
+} from "../views/first-page";
 import { Layout } from "../views/layout";
 
 // The question page (P125 E, spec §8.8, decision 114): the family app only, opened once the gate is open. Each answer
@@ -95,6 +102,28 @@ function stale(c: Context<App>, model: FirstPageModel) {
 	return answered(c, model, "That one is already answered.", NO_MOTION, "info");
 }
 
+/**
+ * The question page as a whole document: the GET's page, and a refused amount's page when JavaScript is off (the page
+ * with its error, not a redirect, which would lose both). `focus` moves the focus to the question.
+ */
+function pageDocument(
+	model: FirstPageModel,
+	focus: boolean,
+	budgetError: BudgetError | null = null,
+) {
+	return (
+		<Layout
+			title="Your first page · Tally"
+			demo={false}
+			currentPath="/first-page"
+		>
+			<div class="max-w-2xl">
+				<FirstPageBody model={model} focus={focus} budgetError={budgetError} />
+			</div>
+		</Layout>
+	);
+}
+
 firstPage.get("/first-page", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
@@ -102,17 +131,7 @@ firstPage.get("/first-page", async (c) => {
 	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
 	const oneAtATime = c.req.query("budgets") === "one";
 	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
-	return c.html(
-		<Layout
-			title="Your first page · Tally"
-			demo={false}
-			currentPath={c.req.path}
-		>
-			<div class="max-w-2xl">
-				<FirstPageBody model={model} focus={oneAtATime} />
-			</div>
-		</Layout>,
-	);
+	return c.html(pageDocument(model, oneAtATime));
 });
 
 /**
@@ -235,12 +254,12 @@ firstPage.post("/first-page/budgets", async (c) => {
 		const values = form
 			.getAll("keep")
 			.filter((value): value is string => typeof value === "string");
-		const answers = keepShownBudgets(suggested, values).flatMap(
-			(ask): { categoryId: number; answer: BudgetAnswer }[] =>
+		const writes = keepShownBudgets(suggested, values).flatMap(
+			(ask): { ask: BudgetAsk; answer: BudgetAnswer }[] =>
 				ask.suggestion
 					? [
 							{
-								categoryId: ask.id,
+								ask,
 								answer: {
 									kind: "suggested",
 									cents: ask.suggestion.amountCents,
@@ -249,20 +268,30 @@ firstPage.post("/first-page/budgets", async (c) => {
 						]
 					: [],
 		);
-		if (answers.length === 0)
+		const landed =
+			writes.length === 0
+				? []
+				: await keepBudgetAnswers(c.env.DB, today, writes);
+		const after =
+			writes.length === 0 ? before : await settleAndLoad(c.env.DB, today);
+		// Changed counts what the page showed and is still asked, and that didn't land: a suggestion that moved, or one that
+		// has no suggestion now. A category a Home budget set since is no longer asked, so it is neither kept nor changed.
+		const asked = askedIds(after);
+		const changed = shownBudgetIds(values).filter(
+			(id) => !landed.includes(id) && asked.has(id),
+		).length;
+		if (landed.length === 0)
 			return answered(
 				c,
-				before,
-				keptBudgetsWords(0, suggested.length),
+				after,
+				keptBudgetsWords(0, changed),
 				NO_MOTION,
 				"info",
 			);
-		await keepBudgetAnswers(c.env.DB, today, answers);
-		const after = await settleAndLoad(c.env.DB, today);
 		return answered(
 			c,
 			after,
-			keptBudgetsWords(answers.length, suggested.length - answers.length),
+			keptBudgetsWords(landed.length, changed),
 			motionOf(before, after, "budgets"),
 		);
 	}
@@ -270,10 +299,11 @@ firstPage.post("/first-page/budgets", async (c) => {
 	const ask = step.asks.find((candidate) => candidate.id === id);
 	if (!ask) return stale(c, before);
 	if (answer === "skip") {
-		await keepBudgetAnswers(c.env.DB, today, [
-			{ categoryId: id, answer: { kind: "skipped", cents: null } },
+		const landed = await keepBudgetAnswers(c.env.DB, today, [
+			{ ask, answer: { kind: "skipped", cents: null } },
 		]);
-		const after = await settleAndLoad(c.env.DB, today);
+		const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });
+		if (landed.length === 0) return budgetNotSaved(c, after, ask);
 		return answered(
 			c,
 			after,
@@ -303,10 +333,11 @@ firstPage.post("/first-page/budgets", async (c) => {
 		kind = "another";
 		cents = parsed.cents;
 	}
-	await keepBudgetAnswers(c.env.DB, today, [
-		{ categoryId: id, answer: { kind, cents } },
+	const landed = await keepBudgetAnswers(c.env.DB, today, [
+		{ ask, answer: { kind, cents } },
 	]);
-	const after = await settleAndLoad(c.env.DB, today);
+	const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });
+	if (landed.length === 0) return budgetNotSaved(c, after, ask);
 	return answered(
 		c,
 		after,
@@ -315,9 +346,33 @@ firstPage.post("/first-page/budgets", async (c) => {
 	);
 });
 
+/** The categories the budgets step still asks, by id: none once the step is done. */
+function askedIds(model: FirstPageModel): Set<number> {
+	return new Set(
+		model.budgets && !model.budgets.done
+			? model.budgets.asks.map((ask) => ask.id)
+			: [],
+	);
+}
+
+/**
+ * The reply to a budget answer that saved nothing. Its category is still asked when its suggestion moved since the page
+ * drew, so it is asked again with that said. Otherwise a Home budget or a competing answer got there first (stale).
+ */
+function budgetNotSaved(
+	c: Context<App>,
+	model: FirstPageModel,
+	ask: BudgetAsk,
+) {
+	return askedIds(model).has(ask.id)
+		? answered(c, model, budgetChangedWords(ask.name), NO_MOTION, "info")
+		: stale(c, model);
+}
+
 /**
  * A typed amount that isn't a dollar amount: nothing is saved, and the question is drawn again with its error, its field
- * holding what was typed. Without JavaScript it redirects back to the page, as every answer does.
+ * holding what was typed. htmx swaps the question in with a toast; without JavaScript the whole page comes back at 422
+ * with the same error, as Home's refused amount does.
  */
 function budgetRefused(
 	c: Context<App>,
@@ -325,13 +380,15 @@ function budgetRefused(
 	error: string,
 	typed: string,
 ) {
-	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
+	const budgetError = { text: error, typed };
+	if (!c.req.header("HX-Request"))
+		return c.html(pageDocument(model, true, budgetError), 422);
 	return c.html(
 		<FirstPageBody
 			model={model}
 			focus
 			motion={NO_MOTION}
-			budgetError={{ text: error, typed }}
+			budgetError={budgetError}
 		/>,
 		422,
 		{

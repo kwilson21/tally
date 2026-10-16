@@ -29,8 +29,8 @@ export const THREE_MONTH_AVERAGE_SQL = `WITH monthly AS (
 			FROM monthly`;
 
 /**
- * The statement that sets a category's budget from `month` on, replacing one already set for that month, for a batch
- * with other writes (the first page's budgets step keeps its answer in the same batch, first-tally.ts).
+ * The statement that sets a category's budget from `month` on, replacing one already set for that month. The first
+ * page's budget answers write their own guarded statement (budgetWriteStatement, first-tally/first-page.ts).
  */
 export function setBudgetStatement(
 	db: D1Database,

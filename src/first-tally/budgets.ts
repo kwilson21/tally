@@ -41,6 +41,26 @@ export function keepShownBudgets(
 	return current.filter((ask) => shown.has(shownBudgetValue(ask)));
 }
 
+/**
+ * The category ids a keep-all form submitted, each once, read from the values shownBudgetValue wrote (the snapshot the
+ * page drew). A value that isn't one (malformed JSON, or no integer id) names no category the page showed, so it is dropped.
+ */
+export function shownBudgetIds(values: string[]): number[] {
+	const ids = new Set<number>();
+	for (const value of values) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(value);
+		} catch {
+			continue;
+		}
+		if (typeof parsed !== "object" || parsed === null) continue;
+		const { id } = parsed as { id?: unknown };
+		if (Number.isInteger(id)) ids.add(id as number);
+	}
+	return [...ids];
+}
+
 /** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
 function andList(items: string[]): string {
 	if (items.length <= 1) return items[0] ?? "";

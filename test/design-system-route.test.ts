@@ -241,6 +241,19 @@ describe("GET /design-system in the demo", () => {
 		expect(section).not.toContain('role="alert"');
 	});
 
+	it("shows the budgets step's nothing-to-ask state with its line above the ruled-off total (#590)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the answered state's (the line sits above the double rule).
+		const section =
+			html
+				.split('id="first-page-budgets-nothing-asked"')[1]
+				?.split('id="first-page-budgets-done"')[0] ?? "";
+		expect(section).toContain("Every category already has a budget.");
+		expect(
+			section.indexOf("Every category already has a budget."),
+		).toBeLessThan(section.indexOf("border-double"));
+	});
+
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
 		const { html } = await get("/design-system");
 		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";

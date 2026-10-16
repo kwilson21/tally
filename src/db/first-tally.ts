@@ -187,16 +187,21 @@ export function forgetPayDeposits(
 /**
  * The statement that keeps the budgets step's answer for a category, for a batch with the budget it sets (keep all, a
  * Yes, another amount, a skip). The newest answer for a category replaces the one before it. One upsert: the json_set
- * changes only that category's entry in the record as it is when the write happens.
+ * changes only that category's entry in the record as it is when the write happens. `guard` is an SQL condition checked
+ * in the same statement, as strokeStatement's is: a Yes, another amount or keep all records only when its budget landed
+ * (`changes() > 0`), and a skip checks that its category is still asked. It is code, never input. A guard may name the
+ * category as `?2`, which is bound as text (String(categoryId)): SQLite's numeric affinity compares it with the integer
+ * id. With no guard the write is the same as before.
  */
 export function keepBudgetStatement(
 	db: D1Database,
 	categoryId: number,
 	answer: BudgetAnswer,
+	guard = "1",
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)))
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)) WHERE ${guard}
 			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.budgets."' || ?2 || '"', json(?3))`,
 		)
 		.bind(KEY, String(categoryId), JSON.stringify(answer));

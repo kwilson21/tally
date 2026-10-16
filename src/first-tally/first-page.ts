@@ -13,7 +13,6 @@ import {
 	type MonthSpent,
 	monthlyMeanCents,
 } from "../budgets/first-suggestion";
-import { setBudgetStatement } from "../db/budgets";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -91,7 +90,12 @@ export type FirstPageModel = {
  * month's Safe to spend (`done`, the same number Home shows); until then it asks the categories still to answer.
  */
 export type BudgetsStep =
-	| { done: true; safeCents: number }
+	| {
+			done: true;
+			safeCents: number;
+			/** True when the step had nothing to ask: no answer is recorded, so every category already has a budget. */
+			nothingAsked: boolean;
+	  }
 	| {
 			done: false;
 			/** The month the answers take effect from (YYYY-MM), the current one. */
@@ -267,16 +271,24 @@ function budgetsLedger(
 }
 
 /**
- * The guard of the budgets stroke, as SQL: the bills stroke is drawn, and no category is left to ask. It is the same test
- * budgetsStep asks by (an active category with no budget that applies this month and no answer in first_tally), read in
- * the statement, so the stroke can't be drawn while a question is still asked. `month` is code (YYYY-MM), checked here.
+ * True when the category row `alias` names is still asked by the budgets step: active, with no budget that applies this
+ * month, and no answer in first_tally. The step's read, the budgets stroke's guard and every answer's write all check this
+ * one predicate, so they can't drift. `month` is code (YYYY-MM), checked here.
+ */
+export function budgetAskedSql(alias: string, month: string): string {
+	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+	return `${alias}.archived = 0
+		AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = ${alias}.id AND b.effective_month <= '${month}')
+		AND NOT EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.budgets."' || ${alias}.id || '"') IS NOT NULL)`;
+}
+
+/**
+ * The guard of the budgets stroke, as SQL: the bills stroke is drawn, and no category is left to ask (budgetAskedSql), so
+ * the stroke can't be drawn while a question is still asked.
  */
 export function budgetsStrokeGuard(month: string): string {
-	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
 	return `EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.strokes.bills') IS NOT NULL)
-		AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.archived = 0
-			AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = c.id AND b.effective_month <= '${month}')
-			AND NOT EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.budgets."' || c.id || '"') IS NOT NULL))`;
+		AND NOT EXISTS (SELECT 1 FROM categories c WHERE ${budgetAskedSql("c", month)})`;
 }
 
 /**
@@ -320,20 +332,19 @@ async function budgetsStep(
 	const month = today.slice(0, 7);
 	if (record?.strokes.budgets !== undefined) {
 		const { summary } = await readMonthSummary(db, today, month);
-		return { done: true, safeCents: summary.safeToSpendCents };
+		return {
+			done: true,
+			safeCents: summary.safeToSpendCents,
+			nothingAsked: Object.keys(record.budgets ?? {}).length === 0,
+		};
 	}
 	const { results: categories } = await db
 		.prepare(
-			`SELECT c.id AS id, c.name AS name FROM categories c WHERE c.archived = 0
-			AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = c.id AND b.effective_month <= ?1)
+			`SELECT c.id AS id, c.name AS name FROM categories c WHERE ${budgetAskedSql("c", month)}
 			ORDER BY c.sort_order, c.id`,
 		)
-		.bind(month)
 		.all<{ id: number; name: string }>();
-	const open = categories.filter(
-		(category) => record?.budgets?.[String(category.id)] === undefined,
-	);
-	if (open.length === 0)
+	if (categories.length === 0)
 		return { done: false, month, asks: [], keepAllOpen: false, needs: null };
 	const first = await db
 		.prepare("SELECT MIN(date) AS first FROM transactions")
@@ -347,7 +358,7 @@ async function budgetsStep(
 			month: m,
 			spentCents: spent.get(`${categoryId}|${m}`) ?? 0,
 		}));
-	const asks: BudgetAsk[] = open.map((category) => {
+	const asks: BudgetAsk[] = categories.map((category) => {
 		const monthsSpent = monthsOf(category.id);
 		return {
 			id: category.id,
@@ -367,28 +378,89 @@ async function budgetsStep(
 }
 
 /**
- * Writes budget answers in one batch (spec §8.8): each answer's budget (when it sets one, from this month on, through the
- * budget path Home's sheet uses) and the answer itself, then the budgets stroke under its guard. So the stroke is drawn
- * in the same write as the last answer, and never before it.
+ * A budget answer's write, for its batch: the budget from this month on, written only while its category is still asked
+ * (budgetAskedSql). A suggested amount (a Yes, or a keep all's) is written only while it is still the amount the page
+ * showed: the category's counted spending over the months the read used (`first` to `last`, bound from the read, not
+ * recomputed) must round up to it, ceil(total / (n * 1000)) * 1000 = shown. That is, with total > 0,
+ * (shown - 1000) * n < total <= shown * n, in integers, with n the month count as an integer literal (no division). The
+ * spending is the one monthlySpent counts. The write's own changes say whether it landed.
+ */
+function budgetWriteStatement(
+	db: D1Database,
+	ask: BudgetAsk,
+	answer: Extract<BudgetAnswer, { cents: number }>,
+	month: string,
+): D1PreparedStatement {
+	const asked = `EXISTS (SELECT 1 FROM categories c WHERE c.id = ?1 AND ${budgetAskedSql("c", month)})`;
+	const upsert =
+		"ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents";
+	if (answer.kind === "another")
+		return db
+			.prepare(
+				`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) SELECT ?1, ?2, ?3 WHERE ${asked}
+			${upsert}`,
+			)
+			.bind(ask.id, month, answer.cents);
+	const n = Math.trunc(ask.months.length);
+	const total = `SELECT COALESCE(SUM(t.amount_cents), 0) AS total FROM transactions t ${COUNTED_JOINS}
+		WHERE ${COUNTED_SPENDING} AND ${countedCategorySql()} = ?1 AND ${countedMonthSql()} BETWEEN ?4 AND ?5`;
+	return db
+		.prepare(
+			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) SELECT ?1, ?2, ?3 WHERE ${asked}
+			AND EXISTS (SELECT 1 FROM (${total}) s WHERE s.total > 0 AND (?3 - 1000) * ${n} < s.total AND s.total <= ?3 * ${n})
+			${upsert}`,
+		)
+		.bind(
+			ask.id,
+			month,
+			answer.cents,
+			ask.months[0]?.month ?? "",
+			ask.months[ask.months.length - 1]?.month ?? "",
+		);
+}
+
+/**
+ * Writes budget answers in one batch (spec §8.8). Each answer is checked where it is written, against what is still asked
+ * (budgetWriteStatement, keepBudgetStatement), so a Home budget, a sync or a competing answer since the page drew changes
+ * nothing it would overwrite. A set amount is its budget, then its record, which lands only when the budget did
+ * (`changes() > 0`); a skip is its record alone, guarded by the same predicate. Then the budgets stroke, under its guard,
+ * so the stroke is drawn in the same write as the last answer, and never before it. Returns the ids of the categories
+ * whose answer landed.
  */
 export async function keepBudgetAnswers(
 	db: D1Database,
 	today: string,
-	answers: { categoryId: number; answer: BudgetAnswer }[],
-): Promise<void> {
+	answers: { ask: BudgetAsk; answer: BudgetAnswer }[],
+): Promise<number[]> {
 	const month = today.slice(0, 7);
-	const statements = answers.flatMap(({ categoryId, answer }) =>
-		answer.cents === null
-			? [keepBudgetStatement(db, categoryId, answer)]
-			: [
-					setBudgetStatement(db, categoryId, answer.cents, month),
-					keepBudgetStatement(db, categoryId, answer),
-				],
-	);
-	await db.batch([
-		...statements,
+	const statements: D1PreparedStatement[] = [];
+	// Each answer's landing: the index of the statement whose changes say whether the answer landed.
+	const landings: { id: number; at: number }[] = [];
+	for (const { ask, answer } of answers) {
+		landings.push({ id: ask.id, at: statements.length });
+		if (answer.cents === null) {
+			statements.push(
+				keepBudgetStatement(
+					db,
+					ask.id,
+					answer,
+					`EXISTS (SELECT 1 FROM categories c WHERE c.id = ?2 AND ${budgetAskedSql("c", month)})`,
+				),
+			);
+		} else {
+			statements.push(
+				budgetWriteStatement(db, ask, answer, month),
+				keepBudgetStatement(db, ask.id, answer, "changes() > 0"),
+			);
+		}
+	}
+	statements.push(
 		strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
-	]);
+	);
+	const results = await db.batch(statements);
+	return landings
+		.filter(({ at }) => (results[at]?.meta.changes ?? 0) > 0)
+		.map(({ id }) => id);
 }
 
 /** The active bills' names, which a found charge can't share (spec §8.5). */

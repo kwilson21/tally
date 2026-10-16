@@ -29,8 +29,11 @@ const MONTH_2 = monthsBefore(CUR, 2);
 const MONTH_1 = monthsBefore(CUR, 1);
 const STROKE_ONE = daysBefore(TODAY, 2);
 
-/** The app with the page mounted, as the family app serves it, with a verified identity. */
-function app() {
+/**
+ * The app with the page mounted, as the family app serves it, with a verified identity. `DB` is the database the page
+ * reads and writes (the test's own unless a test wraps it).
+ */
+function app(DB: D1Database = db) {
 	const router = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 	router.use("*", async (c, next) => {
 		c.set("actor", "person@example.com");
@@ -41,7 +44,7 @@ function app() {
 		fetch(path: string, init?: RequestInit) {
 			return router.fetch(
 				new Request(BASE + path, init),
-				{ ...env, DB: db, DEMO: "false" } as unknown as Env,
+				{ ...env, DB, DEMO: "false" } as unknown as Env,
 				{ waitUntil() {}, passThroughOnException() {}, props: {} },
 			);
 		},
@@ -55,8 +58,13 @@ async function get(path: string) {
 	return { res, html: await res.text() };
 }
 
-async function post(path: string, fields: [string, string][], htmx = true) {
-	const res = await family.fetch(path, {
+async function post(
+	path: string,
+	fields: [string, string][],
+	htmx = true,
+	DB: D1Database = db,
+) {
+	const res = await app(DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
 		headers: {
@@ -213,6 +221,55 @@ beforeEach(async () => {
 
 /** The keep-all values the page shows: one per suggestion, as the page's own form posts them. */
 const keepFields = (html: string) => hiddenFields(html, "keep");
+
+/**
+ * The test database with `hook` run once, against the database itself, just before its first batch: the write a sync or
+ * a competing answer makes between a reply's read and its own batch. Every other call forwards to the database.
+ */
+function raceBeforeBatch(hook: (db: D1Database) => Promise<void>): D1Database {
+	let raced = false;
+	return new Proxy(db, {
+		get(target, prop) {
+			if (prop === "batch" && !raced) {
+				return async (statements: D1PreparedStatement[]) => {
+					raced = true;
+					await hook(target);
+					return target.batch(statements);
+				};
+			}
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+/** A Home budget set from `month` on, written as Home's sheet writes it (a race's write). */
+const homeBudget =
+	(categoryId: number, cents: number, month = CUR) =>
+	async (d: D1Database) => {
+		await d
+			.prepare(
+				"INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)",
+			)
+			.bind(categoryId, month, cents)
+			.run();
+	};
+
+/** A category's budget amounts in cents, the oldest month first. */
+async function budgetRows(categoryId: number): Promise<number[]> {
+	const { results } = await db
+		.prepare(
+			"SELECT amount_cents AS cents FROM budget_amounts WHERE category_id = ? ORDER BY effective_month",
+		)
+		.bind(categoryId)
+		.all<{ cents: number }>();
+	return results.map((row) => row.cents);
+}
+
+/** The record's budgets for a category, or undefined when the record has no answer for it. */
+async function recordedBudget(categoryId: number) {
+	return (await readFirstTally(db))?.budgets[String(categoryId)];
+}
 
 describe("the budgets question, keep all or one at a time", () => {
 	it("offers keep all for the suggestions, with their total, and a quiet One at a time", async () => {
@@ -586,6 +643,8 @@ describe("the step's end", () => {
 		);
 		expect(textOf(html)).not.toContain("Keep all");
 		expect(html).not.toContain("budget?");
+		// Every category was answered (skipped), so the line for a step with nothing to ask is not the one said.
+		expect(textOf(html)).not.toContain("Every category already has a budget.");
 	});
 
 	it("draws the budgets stroke at once when no category is left to ask", async () => {
@@ -610,7 +669,10 @@ describe("the needs-a-category line", () => {
 		expect(textOf(html)).toContain(
 			"Needs a category · 1 transaction · about $30 a month",
 		);
-		expect(html).toContain('href="/transactions?uncategorized=1"');
+		// The link opens the same all-time count the line shows, so the list and the number agree.
+		expect(html).toContain(
+			'href="/transactions?uncategorized=1&amp;month=all"',
+		);
 	});
 
 	it("draws no line when nothing needs a category", async () => {
@@ -645,5 +707,265 @@ describe("the budgets step's motion", () => {
 			["answer", "yes"],
 		]);
 		expect(res.html).toContain("first-line-new");
+	});
+});
+
+describe("an answer's write checks what is still asked, in its own batch (#590 review)", () => {
+	it("a Yes does not overwrite a Home budget set after the page drew, and says it is already answered", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(homeBudget(A, 40000)),
+		);
+		expect(await budgetRows(A)).toEqual([40000]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+		expect(textOf(res.html)).not.toContain("Budgets ·");
+	});
+
+	it("a Yes whose suggestion moved after the page drew saves nothing, and asks the new suggestion again", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(async () => {
+				await spend(A, 90000, `${MONTH_1}-02`);
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast).toEqual({
+			message: `Nothing saved. ${nameA}'s suggestion changed since the page drew, so it's asked again below.`,
+			type: "info",
+		});
+		expect(focusedHeading(res.html)).toBe(
+			`Make $1,100 a month your ${nameA} budget?`,
+		);
+	});
+
+	it("a Yes still lands when a race leaves the suggestion at the same amount, the total at the top of its step", async () => {
+		// A's total goes from $1,284 to $1,300 over the two months: still $650 a month, the largest total that rounds to it.
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(async () => {
+				await spend(A, 1600, `${MONTH_1}-02`);
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([65000]);
+		expect(await recordedBudget(A)).toEqual({
+			kind: "suggested",
+			cents: 65000,
+		});
+		expect(trigger(res.res).announce).toBe(`${nameA}: $650 a month.`);
+	});
+
+	it("Another amount keeps the Home budget set after the page drew, not the typed amount", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["budget", "120"],
+				["answer", "another"],
+			],
+			true,
+			raceBeforeBatch(homeBudget(A, 40000)),
+		);
+		expect(await budgetRows(A)).toEqual([40000]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+	});
+
+	it("a Skip raced by a Yes for the same category keeps that Yes and its budget, and says it is already answered", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["answer", "skip"],
+			],
+			true,
+			raceBeforeBatch(async () => {
+				await post("/first-page/budgets", [
+					["category", String(A)],
+					["shown", "65000"],
+					["answer", "yes"],
+				]);
+			}),
+		);
+		expect(await recordedBudget(A)).toEqual({
+			kind: "suggested",
+			cents: 65000,
+		});
+		expect(await budgetRows(A)).toEqual([65000]);
+		expect(trigger(res.res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+	});
+
+	it("a category archived after the page drew is not written", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(async (d) => {
+				await d
+					.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+					.bind(A)
+					.run();
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast?.message).toBe(
+			"That one is already answered.",
+		);
+	});
+
+	it("keep all keeps a Home budget set after the page drew, and keeps the other suggestion", async () => {
+		const { html } = await get("/first-page");
+		const res = await post(
+			"/first-page/budgets",
+			[...keepFields(html), ["answer", "all"]],
+			true,
+			raceBeforeBatch(homeBudget(A, 40000)),
+		);
+		expect(await budgetRows(A)).toEqual([40000]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(await budgetRows(B)).toEqual([15000]);
+		expect(await recordedBudget(B)).toEqual({
+			kind: "suggested",
+			cents: 15000,
+		});
+		expect(trigger(res.res).announce).toBe("Kept 1 budget.");
+	});
+
+	it("keep all does not write a suggestion whose amount moved after the page drew, and asks it again", async () => {
+		const { html } = await get("/first-page");
+		const res = await post(
+			"/first-page/budgets",
+			[...keepFields(html), ["answer", "all"]],
+			true,
+			raceBeforeBatch(async () => {
+				await spend(B, 90000, `${MONTH_1}-02`);
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([65000]);
+		expect(await budgetRows(B)).toEqual([]);
+		expect(trigger(res.res).announce).toBe(
+			"Kept 1 budget. 1 changed since the page drew, so it's asked again below.",
+		);
+		expect(focusedHeading(res.html)).toBe(
+			`Make $600 a month your ${nameB} budget?`,
+		);
+	});
+});
+
+describe("keep all's count of what changed (#590 review)", () => {
+	it("counts a shown suggestion that is still asked, but has no suggestion now, as changed", async () => {
+		const { html } = await get("/first-page");
+		await db
+			.prepare("DELETE FROM transactions WHERE category_id = ?")
+			.bind(B)
+			.run();
+		const res = await post("/first-page/budgets", [
+			...keepFields(html),
+			["answer", "all"],
+		]);
+		expect(trigger(res.res).announce).toBe(
+			"Kept 1 budget. 1 changed since the page drew, so it's asked again below.",
+		);
+		expect(await budgetRows(B)).toEqual([]);
+		expect(focusedHeading(res.html)).toBe(`Do you want a ${nameB} budget?`);
+		expect(res.html).toMatch(/name="budget"[^>]*value=""/);
+	});
+
+	it("does not count a shown suggestion that a Home budget has since set", async () => {
+		const { html } = await get("/first-page");
+		await homeBudget(B, 40000)(db);
+		const res = await post("/first-page/budgets", [
+			...keepFields(html),
+			["answer", "all"],
+		]);
+		expect(trigger(res.res).announce).toBe("Kept 1 budget.");
+		expect(await budgetRows(B)).toEqual([40000]);
+		expect(await recordedBudget(B)).toBeUndefined();
+	});
+
+	it("keeps each shown id once, and neither keeps nor counts a value the page never asked", async () => {
+		const { html } = await get("/first-page");
+		const shown = keepFields(html);
+		const res = await post("/first-page/budgets", [
+			...shown,
+			...shown,
+			["keep", "not json"],
+			["keep", JSON.stringify({ id: 999, cents: 1000 })],
+			["keep", JSON.stringify({ id: A, cents: 1 })],
+			["answer", "all"],
+		]);
+		expect(trigger(res.res).announce).toBe("Kept 2 budgets.");
+		expect(await budgetRows(A)).toEqual([65000]);
+		expect(await budgetRows(B)).toEqual([15000]);
+	});
+});
+
+describe("a refused amount without JavaScript (#590 review)", () => {
+	it("draws the page at 422 with its error, the typed amount, and Another amount open", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(B)],
+				["budget", "lots"],
+				["answer", "another"],
+			],
+			false,
+		);
+		expect(res.res.status).toBe(422);
+		expect(res.html).toContain("<title>Your first page · Tally</title>");
+		expect(res.html).toContain('role="alert"');
+		expect(res.html).toContain("Enter a dollar amount, like 250 or 250.50.");
+		expect(res.html).toContain('value="lots"');
+		expect(res.html).toMatch(/<details[^>]*\sopen\b/);
+		expect(await budgetRows(B)).toEqual([]);
+		expect(await recordedBudget(B)).toBeUndefined();
+	});
+});
+
+describe("the budgets step with nothing to ask (#590 review)", () => {
+	it("says every category already has a budget, above the ruled-off Safe to spend, when Home budgeted them all", async () => {
+		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
+		const { html } = await get("/first-page");
+		const text = textOf(html);
+		expect(text).toContain("Every category already has a budget.");
+		expect(text.indexOf("Every category already has a budget.")).toBeLessThan(
+			text.indexOf("Safe to spend"),
+		);
+		expect(text).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
 	});
 });
