@@ -2,12 +2,50 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import type { FirstTally } from "../src/db/first-tally";
-import { takeBackBankStrokes } from "../src/db/first-tally";
+import { readFirstTally, takeBackBankStrokes } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { readSetup, setupView } from "../src/first-tally/setup";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
+
+/**
+ * The test database with `hook` awaited just before readSetup's repair writes stroke one (its only INSERT into the record):
+ * the disconnect a last bank's removal makes between readSetup's read and that write. prepare is synchronous, so the
+ * hook runs inside the statement's run. Every other call forwards to the database.
+ */
+function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
+	const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+		new Proxy(statement, {
+			get(target, prop) {
+				if (prop === "bind") {
+					return (...values: unknown[]) => racing(target.bind(...values));
+				}
+				if (prop === "run") {
+					return async () => {
+						await hook();
+						return target.run();
+					};
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "prepare") {
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					return sql.startsWith("INSERT INTO household_settings")
+						? racing(statement)
+						: statement;
+				};
+			}
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
 const BANK = {
 	name: "Chase",
 	lastSyncedAt: "2026-10-13",
@@ -290,6 +328,18 @@ describe("readSetup", () => {
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
 		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(TODAY);
+	});
+
+	it("leaves stroke one undrawn when the last bank goes between the read and the repair's write", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		// The banks are read as connected; then every bank goes before the repair writes.
+		const racing = raceBeforeBankStroke(() =>
+			env.DB.prepare(
+				"UPDATE plaid_items SET disconnected_at = datetime('now')",
+			).run(),
+		);
+		await readSetup(racing, { today: TODAY, cap: 500 });
+		expect((await readFirstTally(env.DB))?.strokes.bank).toBeUndefined();
 	});
 
 	it("reads before-bank setup for a household with no record and no connected bank", async () => {

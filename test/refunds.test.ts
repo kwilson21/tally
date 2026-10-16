@@ -3553,6 +3553,20 @@ describe("the category lock redraws when Count as income or Reviewed changes", (
 		expect(unlinked).not.toContain("/category/lock");
 	});
 
+	it("morphs the redrawn choice, so a folded row keeps the open state the person set (#661)", async () => {
+		await link(REFUND, PURCHASE);
+		const linked = (await get(`/transactions/${REFUND}`)).html;
+		const route = `hx-post="/transactions/${REFUND}/category/lock"`;
+		// Each toggle's attributes run from its route to hx-include; the swap sits between them.
+		const toggles = linked
+			.split(route)
+			.slice(1)
+			.map((rest) => rest.slice(0, rest.indexOf("hx-include")));
+		expect(toggles).toHaveLength(2);
+		for (const toggle of toggles)
+			expect(toggle).toContain('hx-swap="innerMorph"');
+	});
+
 	it("is not found for a transaction that does not exist", async () => {
 		const { res } = await redraw(999999, []);
 		expect(res.status).toBe(404);

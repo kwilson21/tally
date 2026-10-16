@@ -35,10 +35,11 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 	});
 	afterEach(() => vi.useRealTimers());
 
-	it("Paid this month totals the paid rows it lists: Streaming $2.99 and Water $13.99", async () => {
+	it("Paid this month totals every bill paid this month, listed or not: the rows Streaming $2.99 and Water $13.99, and Daycare's Oct 2 and 9 Fridays (decision 122)", async () => {
 		const paid = groupUnder(await billsPage(), "Paid this month");
 		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
-		expect(totalOf(paid)).toBe("$16.98");
+		expect(totalOf(paid)).toBe("$496.98");
+		expect(paid).toContain("Includes Daycare&#39;s Fridays on Oct 2 and 9</p>");
 	});
 
 	it("Paid this month adds a planned expense paid this month to the bills it lists", async () => {
@@ -56,7 +57,7 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 			"Water",
 			"Car registration",
 		]);
-		expect(totalOf(paid)).toBe("$196.98");
+		expect(totalOf(paid)).toBe("$676.98");
 	});
 
 	it("Due in the next 7 days totals each row it lists once: Internet $65.00 and Daycare's Friday $240.00", async () => {
@@ -78,8 +79,72 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 		// The spec's rule (§8.4): Upcoming includes only occurrences due this month, and says so with "this month".
 		expect(rowNamesOf(upcoming)).toEqual(["Soccer league"]);
 		expect(totalOf(upcoming)).toBe("$480.00 this month");
+		// The total counts Daycare's Oct 23 and 30 Fridays, which no row lists, and says so under the heading (decision 122).
+		expect(upcoming).toContain(
+			"Includes Daycare&#39;s Fridays on Oct 23 and 30</p>",
+		);
 		// Daycare's Oct 16 Friday is set aside under Due; the Upcoming total does not count it a second time.
 		expect(groupUnder(html, "Due in the next 7 days")).toContain("Daycare");
-		expect(upcoming).not.toContain("Daycare");
+		expect(groupUnder(html, "Due in the next 7 days")).not.toContain(
+			"Includes",
+		);
+	});
+});
+
+// Decision 127 (#602): Paid this month counts this month's bill occurrences that are paid, whenever the payment was made.
+describe("Paid this month counting this month's paid occurrences whenever paid (decision 127)", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-15T15:00:00Z"));
+		await resetDemo(env.DB, "2026-10-15");
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("counts Daycare's Oct 2 Friday paid on Sep 29 in October's Paid this month, and names Oct 2 and 9 (decision 127)", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET date='2026-09-29' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10-02' AND bill_id=(SELECT id FROM bills WHERE name='Daycare'))",
+		).run();
+		const paid = groupUnder(await billsPage(), "Paid this month");
+		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
+		expect(totalOf(paid)).toBe("$496.98");
+		expect(paid).toContain("Includes Daycare&#39;s Fridays on Oct 2 and 9</p>");
+	});
+
+	it("keeps Streaming's October occurrence paid on Sep 25 as a Paid this month row, and counts it in the total (decision 127)", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET date='2026-09-25' WHERE id=(SELECT transaction_id FROM bill_payments WHERE status='linked' AND period='2026-10' AND bill_id=(SELECT id FROM bills WHERE name='Streaming'))",
+		).run();
+		const paid = groupUnder(await billsPage(), "Paid this month");
+		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
+		expect(totalOf(paid)).toBe("$496.98");
+	});
+});
+
+// Decision 122 (#602): a monthly bill's unpaid occurrence it has handed off stays in Overdue until the next one is due.
+describe("Overdue counts a monthly bill's handed-off unpaid occurrence, named under the heading (#602)", () => {
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-28T15:00:00Z"));
+		await resetDemo(env.DB, "2026-10-28");
+	});
+	afterEach(() => vi.useRealTimers());
+
+	it("names Rent's unpaid Oct 1 under Overdue and counts what is left of it, with Electric and Netflix as rows", async () => {
+		const overdue = groupUnder(await billsPage(), "Overdue");
+		expect(rowNamesOf(overdue)).toEqual(["Electric", "Netflix"]);
+		expect(totalOf(overdue)).toBe("$757.49");
+		expect(overdue).toContain("Includes Rent on Oct 1</p>");
+		expect(overdue).toContain("<ul");
+	});
+
+	it("draws no empty list under a heading whose rows are none, only its total and the line naming its occurrences", async () => {
+		await env.DB.prepare(
+			"UPDATE bills SET active=0 WHERE name IN ('Electric','Netflix')",
+		).run();
+		const overdue = groupUnder(await billsPage(), "Overdue");
+		expect(overdue).toContain(">Overdue</h2>");
+		expect(totalOf(overdue)).toBe("$600.00");
+		expect(overdue).toContain("Includes Rent on Oct 1</p>");
+		expect(overdue).not.toContain("<ul");
 	});
 });

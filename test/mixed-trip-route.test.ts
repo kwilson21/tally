@@ -141,6 +141,45 @@ describe("the edit panel's line (#233)", () => {
 		expect(html).not.toContain("This trip looks like");
 		expect(html).not.toContain("Split this one?");
 	});
+
+	it("draws the line after a folded category row, outside it, so it shows with the row closed", async () => {
+		// Jev picked Groceries (no person has), so the category is set and folds to its row.
+		const groceries = await categoryId("Groceries");
+		const id = await mixedTrip({
+			category_id: groceries,
+			category_source: "jev",
+			category_confidence: 0.9,
+		});
+		const { html } = await get(`/transactions/${id}`);
+		const panel = html.slice(
+			html.indexOf('id="edit-title"'),
+			html.indexOf('id="edit-save"'),
+		);
+		const row = panel.indexOf('<details class="group border-b border-rule"');
+		const rowEnd = panel.indexOf("</details>", row);
+		expect(row).toBeGreaterThan(-1);
+		expect(panel.slice(row, panel.indexOf(">", row))).not.toContain(" open");
+		expect(panel.slice(row, rowEnd)).not.toContain("This trip looks like");
+		expect(panel.indexOf("This trip looks like")).toBeGreaterThan(rowEnd);
+		expect(panel.slice(rowEnd)).toContain("Split this one?");
+	});
+
+	it("keeps the line inside the open category, before the New category name, while none is chosen", async () => {
+		const id = await mixedTrip();
+		const { html } = await get(`/transactions/${id}`);
+		const panel = html.slice(
+			html.indexOf('id="edit-title"'),
+			html.indexOf('id="edit-save"'),
+		);
+		// Only the category's own span is checked: the detail rows below it are ruled rows too.
+		const category = panel.slice(
+			panel.indexOf('id="edit-category"'),
+			panel.indexOf('id="new-category-name"'),
+		);
+		expect(category).not.toContain("<details");
+		expect(category).toContain("This trip looks like Groceries and Household.");
+		expect(category).toContain("Split this one?");
+	});
 });
 
 describe("the split form with Tally's guessed parts (#233)", () => {

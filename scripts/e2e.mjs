@@ -813,6 +813,52 @@ step(
 	"the demo refund shows its linked purchase, checked, and Refund for on its row",
 );
 
+// An unlocked linked credit folds its category, and Count as income draws that row closed (decision 99). Opened, it must
+// stay open through the next redraw, with focus still on the toggle (#661). Unticking Reviewed doesn't unlock this demo
+// credit (Jev holds its review), so Count as income is ticked first; then Reviewed redraws the open row, and the credit
+// stays unlocked.
+const category = page.locator("#edit-category details");
+const incomeToggle = page.locator("label", {
+	has: page.locator("#edit-income"),
+});
+const reviewedToggle = page.locator("label", {
+	has: page.locator("#edit-credit-reviewed"),
+});
+await page.evaluate(() => {
+	window.__lockEnded = 0;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (event.detail.ctx.request.action.includes("/category/lock"))
+			window.__lockEnded += 1;
+	});
+});
+const toggleAndWaitForRedraw = async (toggle) => {
+	const ended = await page.evaluate(() => window.__lockEnded);
+	await toggle.click();
+	await page.waitForFunction((count) => window.__lockEnded > count, ended);
+};
+await toggleAndWaitForRedraw(incomeToggle);
+assert.equal(await category.evaluate((row) => row.open), false);
+await page.locator("#edit-category summary").click();
+assert.equal(await category.evaluate((row) => row.open), true);
+await toggleAndWaitForRedraw(reviewedToggle);
+assert.equal(
+	await category.evaluate((row) => row.open),
+	true,
+	"the folded row must stay open through the Reviewed redraw",
+);
+assert.equal(
+	await page
+		.locator("#edit-credit-reviewed")
+		.evaluate((toggle) => document.activeElement === toggle),
+	true,
+	"focus must stay on the Reviewed toggle through the redraw",
+);
+await page.getByRole("link", { name: "Cancel" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "hidden" });
+step(
+	"a folded category row stays open through a Reviewed redraw, with focus kept",
+);
+
 // A search runs in every month; "Only October" narrows it and moves focus to the count; one more letter keeps
 // that month in the Month choice and the count (#211, decision 101).
 await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
@@ -864,6 +910,43 @@ assert.deepEqual(
 	["Groceries", "Gas", "Eating Out"],
 );
 step("Move up in Settings moves Gas up one place");
+
+// Two quick saves on one page (#597): the time zone's save marks its row, and the bank sign-in emails switch's save
+// replaces that toast a moment later. The first row's tick ends with its toast, so no row keeps a mark beside the second.
+await goto(`${BASE}/settings/household`, { waitUntil: "networkidle" });
+await page.locator("#time-zone-disclosure > summary").click();
+await page.locator("#time-zone-save").click();
+await page.locator("#toasts").getByText("Saved time zone").waitFor();
+assert.equal(await page.locator("#time-zone-disclosure.row-saved").count(), 1);
+const bankEmailsOn = await page.locator("#bank-sign-in-emails").isChecked();
+await page.locator("#bank-sign-in-emails-label").click();
+await page.locator("#toasts").getByText("Saved bank sign-in emails").waitFor();
+assert.equal(
+	await page.locator(".row-saved, .row-saved-undo").count(),
+	0,
+	"the time zone's tick must end when its toast is replaced",
+);
+assert.equal(
+	await page
+		.locator("#time-zone-disclosure .saved-tick")
+		.evaluate((tick) => getComputedStyle(tick).opacity),
+	"0",
+	"the time zone's tick must not draw once its toast is replaced",
+);
+// Back to the switch's state the demo started with, so later steps see the same household. The restore's own reply is
+// awaited, so the next step never races the server.
+const bankEmailsRestored = page.waitForResponse(
+	(response) =>
+		response.request().method() === "POST" &&
+		response.url().includes("/settings/bank-sign-in-emails"),
+);
+await page.locator("#bank-sign-in-emails-label").click();
+assert.equal((await bankEmailsRestored).status(), 200);
+await page.waitForFunction(
+	(on) => document.getElementById("bank-sign-in-emails")?.checked === on,
+	bankEmailsOn,
+);
+step("a second quick save ends the first row's tick with its toast");
 
 const slowCount = (route) => holdReply(route, 1500);
 

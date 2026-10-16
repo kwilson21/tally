@@ -536,12 +536,9 @@ describe("links in the demo", () => {
 		);
 		const sheet = (await get("/transactions/110")).html;
 		expect(sheet).toContain('href="/how-it-works#categorization"');
-		// At the foot of the sheet, after Save and outside every form, so a tap there never leaves unsaved edits (decision 111).
+		// The panel has no How this works link of its own (P120 B, decision 111, audit E5); its Why? links stay.
 		const panel = sheet.slice(sheet.indexOf('id="edit-title"'));
-		// Its own name, not the Why? links above Save that point to the same section.
-		const link = panel.indexOf('aria-label="How this works: categories"');
-		expect(link).toBeGreaterThan(panel.indexOf('id="edit-save"'));
-		expect(panel.slice(link)).not.toContain("<form");
+		expect(panel).not.toContain('aria-label="How this works: categories"');
 	});
 
 	it("More lists How Tally works", async () => {
