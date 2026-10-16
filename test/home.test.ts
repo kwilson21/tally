@@ -1075,6 +1075,12 @@ describe("GET /?month= before a linked refund's date", () => {
 describe("How this works at the foot of Home", () => {
 	const FOOT =
 		/<div class="mt-8"><div class="w-12 border-t border-muted"><\/div><div class="mt-2"><a href="\/how-it-works#budget" aria-label="How this works: the budget" class="[^"]*">How this works<\/a><\/div><\/div>/;
+	// The keys' details on desktop (decision 118) is the one block that may follow the foot: it is not a section.
+	const withoutKeys = (text: string) =>
+		text.replace(
+			/<div class="mt-2 hidden lg:block">[\s\S]*?<\/details><\/div>/g,
+			"",
+		);
 
 	beforeEach(async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -1087,7 +1093,9 @@ describe("How this works at the foot of Home", () => {
 		const sheet = html.indexOf('id="sheet"');
 		// The last section of the page comes before the foot; no section, list or heading follows it.
 		expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
-		expect(html.slice(foot, sheet)).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
+		expect(withoutKeys(html.slice(foot, sheet))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p)\b/,
+		);
 	});
 
 	it("comes at the foot of a finished month's Home too, after its Budget and Not budgeted lists", async () => {
@@ -1100,7 +1108,9 @@ describe("How this works at the foot of Home", () => {
 		expect(foot).toBeGreaterThan(-1);
 		const sheet = html.indexOf('id="sheet"');
 		expect(html.lastIndexOf("</section>", sheet)).toBeLessThan(foot);
-		expect(html.slice(foot, sheet)).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
+		expect(withoutKeys(html.slice(foot, sheet))).not.toMatch(
+			/<(section|ul|li|h[1-6]|p)\b/,
+		);
 		expect(html.match(/aria-label="How this works: the budget"/g)).toHaveLength(
 			1,
 		);

@@ -1,11 +1,13 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
+import { PERSON_INCOME_SET_SQL } from "../db/income";
 import {
 	type NameChoice,
 	type NameReview,
@@ -136,7 +138,16 @@ type ScreenInput = {
 	categories: { id: number; name: string }[];
 };
 
-function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
+function Screen({
+	input,
+	demo,
+	address,
+}: {
+	input: ScreenInput;
+	demo: boolean;
+	/** The address the screen was asked for, with its query, so the keys sheet can open over it. */
+	address: string;
+}) {
 	const {
 		skipped,
 		again,
@@ -166,7 +177,12 @@ function Screen({ input, demo }: { input: ScreenInput; demo: boolean }) {
 	// Every form posts to this screen's address, so the skips it was drawn with carry over.
 	const action = reviewAddress(skipped, again);
 	return (
-		<Layout title="Suggestions · Tally" active="settings" demo={demo}>
+		<Layout
+			title="Suggestions · Tally"
+			active="settings"
+			demo={demo}
+			currentPath={address}
+		>
 			<div id="suggestions-page" class="lg:max-w-3xl">
 				<a
 					href="/settings"
@@ -270,6 +286,7 @@ async function renderScreen(
 	return c.html(
 		<Screen
 			demo={c.env.DEMO === "true"}
+			address={addressOf(c)}
 			input={{
 				skipped,
 				again,
@@ -392,11 +409,10 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "yes") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET flag_income = 1, income_source = 'user', income_confidence = NULL,
-							updated_by = ?, updated_at = datetime('now')
+						`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
 						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
 					)
-					.bind(who, item.transactionId)
+					.bind(1, who, item.transactionId)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);

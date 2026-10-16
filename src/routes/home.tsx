@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { addressOf } from "../address";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence, summarizeMonth } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
@@ -281,11 +282,7 @@ async function renderHome(
 	);
 
 	return c.html(
-		<Layout
-			active="home"
-			demo={demo}
-			currentPath={c.req.path + new URL(c.req.url).search}
-		>
+		<Layout active="home" demo={demo} currentPath={addressOf(c)}>
 			<div id="home">
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}

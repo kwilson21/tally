@@ -244,6 +244,8 @@ function EndBars({
 						? "max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent lg:hidden"
 						: "max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 				}
+				// The arrow keys scroll this region, so keyboard.js leaves ← and → to it (decision 118).
+				data-sideways=""
 			>
 				<div class="flex w-max">
 					{chart(scrolls)}

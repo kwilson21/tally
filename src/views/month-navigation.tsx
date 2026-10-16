@@ -23,6 +23,8 @@ function Arrow({
 		<a
 			href={`/?month=${target}`}
 			aria-label={label}
+			// keyboard.js presses this with the arrow key (decision 118).
+			aria-keyshortcuts={direction === "previous" ? "ArrowLeft" : "ArrowRight"}
 			class="inline-flex size-11 shrink-0 items-center justify-center rounded-full border border-muted text-ink no-underline"
 		>
 			{icon}

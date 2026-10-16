@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { addressOf } from "../address";
 import { JEV_THRESHOLD } from "../ai/categorize";
 import {
 	BILL_FIND_AMOUNT_PERCENT,
@@ -250,7 +251,7 @@ howItWorks.get("/how-it-works", async (c) => {
 			title="How Tally works · Tally"
 			active="how"
 			demo={demo}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<div class="lg:max-w-3xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">

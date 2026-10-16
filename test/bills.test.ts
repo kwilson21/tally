@@ -11,6 +11,13 @@ import { loadBillRows } from "../src/routes/bills";
 import appCss from "../src/styles/app.css?raw";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
+/** The keys' details under How this works, on desktop (decision 118): the one block that may follow a page's foot. */
+const withoutKeysDetails = (html: string) =>
+	html.replace(
+		/<div class="mt-2 hidden lg:block">[\s\S]*?<\/details><\/div>/g,
+		"",
+	);
+
 const cssRules = [
 	...appCss.replace(/\s+/g, " ").matchAll(/([^{}]+)\{([^{}]*)\}/g),
 ].flatMap(([, selectors = "", body = ""]) =>
@@ -283,9 +290,10 @@ describe("Bills", () => {
 		expect(
 			html.lastIndexOf("</section>", html.indexOf('id="sheet"')),
 		).toBeLessThan(foot);
-		expect(html.slice(foot, html.indexOf('id="sheet"'))).not.toMatch(
-			/<(section|ul|li|h[1-6]|p|details)\b/,
-		);
+		// The keys' details on desktop (decision 118) is the one thing that may follow the foot: it is not a section.
+		expect(
+			withoutKeysDetails(html.slice(foot, html.indexOf('id="sheet"'))),
+		).not.toMatch(/<(section|ul|li|h[1-6]|p|details)\b/);
 		// The section it points to is on How Tally works.
 		const how = await (
 			await exports.default.fetch("http://tally.test/how-it-works")
@@ -310,9 +318,9 @@ describe("Bills", () => {
 		expect(html).toMatch(link);
 		const foot = html.search(link);
 		expect(foot).toBeGreaterThan(html.indexOf('id="bill-finding-list"'));
-		expect(html.slice(foot, html.indexOf("</main>"))).not.toMatch(
-			/<(section|ul|li|h[1-6]|p)\b/,
-		);
+		expect(
+			withoutKeysDetails(html.slice(foot, html.indexOf("</main>"))),
+		).not.toMatch(/<(section|ul|li|h[1-6]|p)\b/);
 	});
 
 	// DESIGN.md Type roles: a page title is 5xl, so the title does not shrink on the Bills tab.
@@ -396,29 +404,25 @@ describe("Bills", () => {
 
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
-		try {
-			const response = await exports.default.fetch("http://tally.test/bills", {
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					Origin: "http://tally.test",
-				},
-				body: new URLSearchParams({
-					name: "Biweekly fixture",
-					amount: "bad",
-					due_day: "5",
-					frequency: "biweekly",
-					anchor_date: "2026-10-02",
-					category_id: "1",
-					merchant_raw_name: "BIWEEKLY FIXTURE",
-				}),
-			});
-			expect(await response.text()).toContain(
-				"Then every two weeks from that date. Next: Oct 16.",
-			);
-		} finally {
-			vi.useRealTimers();
-		}
+		const response = await exports.default.fetch("http://tally.test/bills", {
+			method: "POST",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				Origin: "http://tally.test",
+			},
+			body: new URLSearchParams({
+				name: "Biweekly fixture",
+				amount: "bad",
+				due_day: "5",
+				frequency: "biweekly",
+				anchor_date: "2026-10-02",
+				category_id: "1",
+				merchant_raw_name: "BIWEEKLY FIXTURE",
+			}),
+		});
+		expect(await response.text()).toContain(
+			"Then every two weeks from that date. Next: Oct 16.",
+		);
 	});
 
 	it("says the next every-two-weeks date after today, however old the anchor is", async () => {

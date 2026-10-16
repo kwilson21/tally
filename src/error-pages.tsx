@@ -1,14 +1,12 @@
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
+import { addressOf } from "./address";
 import { hxTrigger } from "./htmx";
 import { ErrorPage } from "./views/error-page";
 import { Layout } from "./views/layout";
 
 type App = { Bindings: Env; Variables: { actor: string } };
-
-/** The address that was asked for, which a person can load again. */
-const addressOf = (c: Context<App>) => c.req.path + new URL(c.req.url).search;
 
 /**
  * Where the 500 page's Try again goes, or nothing when no safe place is known. A GET tries its own

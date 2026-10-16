@@ -129,6 +129,13 @@ const PATHS = {
 		</>
 	),
 	"chevron-right": <path d="m9 18 6-6-6-6" />,
+	// The keys' icon (decision 118, P128): a keyboard's outline with its key row (keys.tsx's More row draws it).
+	keyboard: (
+		<>
+			<rect x="2" y="5" width="20" height="14" rx="2" />
+			<path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 15h10" />
+		</>
+	),
 	check: <path d="M20 6 9 17l-5-5" />,
 	message: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
 	// Default categories (spec §7, decision 32).

@@ -917,7 +917,7 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 			kind: "income",
 			answer: "yes",
 			amount: -250000,
-			write: "UPDATE transactions SET flag_income = 1",
+			write: "UPDATE transactions SET flag_income = ?",
 			column: "flag_income",
 		},
 		{

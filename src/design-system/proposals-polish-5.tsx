@@ -11,10 +11,12 @@ import { Band } from "../views/band";
 import { barGeometry } from "../views/bar";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { FirstPage, type LedgerLine, SmallNotebook } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
+import { Notebook as NotebookDrawing } from "../views/notebook";
 import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
 import { WhyLink } from "../views/why-link";
@@ -463,20 +465,11 @@ function Tick() {
 }
 
 /**
- * The notebook of LedgerIllustration, with its tally strokes drawn one at a time: `strokes` of the five,
- * in pencil (muted) until `ink`. `replay` draws the fifth across the four and turns all five to ink, with
- * proposal-only classes in app.css. The strokes are the illustration's own, in the same places: they copy the
- * five `<line>`s at src/views/illustration.tsx lines 18 to 22. LedgerIllustration takes no props, so if that
- * drawing changes, these lines change with it by hand.
+ * The notebook with its tally strokes drawn one at a time: `strokes` of the five, in pencil (muted) until `ink`.
+ * `replay` draws the fifth across the four and turns all five to ink, and `drawLast` draws the last one, with
+ * proposal-only classes in app.css. The drawing itself is views/notebook.tsx's; only the stroke classes are the
+ * proposal's, through its `lineClass`, so the proposal can't drift from the app's notebook.
  */
-const STROKE_LINES = [
-	[46, 38, 46, 60],
-	[53, 38, 53, 60],
-	[60, 38, 60, 60],
-	[67, 38, 67, 60],
-	[41, 56, 72, 42],
-];
-
 function Notebook({
 	strokes,
 	ink = false,
@@ -505,35 +498,12 @@ function Notebook({
 		return ink ? "stroke-ink" : "stroke-muted";
 	};
 	return (
-		<svg
-			class={`${size} shrink-0`}
-			viewBox="0 0 120 120"
-			fill="none"
-			stroke-width="1.75"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<g class="stroke-ink" transform="rotate(-6 56 58)">
-				<rect x="26" y="16" width="58" height="80" rx="4" />
-				{[26, 36, 46, 56, 66, 76, 86].map((y) => (
-					<circle cx="26" cy={y} r="3.5" />
-				))}
-				{STROKE_LINES.slice(0, replay ? 5 : strokes).map(
-					([x1, y1, x2, y2], i) => (
-						<line x1={x1} y1={y1} x2={x2} y2={y2} class={lineClass(i)} />
-					),
-				)}
-			</g>
-			{/* The pencil the illustration draws beside the notebook, as LedgerIllustration does. */}
-			<g class="stroke-accent fill-paper">
-				<path d="M96 26 L106 30 L88 96 L78 92 Z" />
-				<path d="M78 92 L88 96 L80 106 Z" />
-				<line x1="94" y1="33" x2="104" y2="37" />
-				<line x1="104" y1="16" x2="110" y2="8" />
-				<line x1="96" y1="12" x2="98" y2="4" />
-			</g>
-		</svg>
+		<NotebookDrawing
+			strokes={replay ? 5 : strokes}
+			ink={ink}
+			size={size}
+			lineClass={lineClass}
+		/>
 	);
 }
 
@@ -1359,45 +1329,6 @@ const DLEDGER_LINES = [
 	"Moves between your accounts · 6 left out",
 	"Paychecks · $4,900 in September",
 ];
-
-/** A line of a question page's ledger: an answer (ink) or what the bank says (muted). */
-type LedgerLine = { text: string; ink?: boolean };
-
-/** A question page's top: "Your first page", the count at the right, and the ledger so far. */
-function FirstPage({
-	right,
-	lines,
-	children,
-}: {
-	right?: Child;
-	lines: LedgerLine[];
-	children?: Child;
-}) {
-	return (
-		<>
-			<div class="flex items-center justify-between gap-3">
-				<h1 class="text-lg font-semibold">Your first page</h1>
-				{right}
-			</div>
-			<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-				{lines.map((l) => (
-					<li class={`py-2 ${l.ink ? "text-ink" : "text-muted"}`}>{l.text}</li>
-				))}
-			</ul>
-			{children}
-		</>
-	);
-}
-
-/** The small notebook beside a question page's headline, with what it counts. */
-function SmallNotebook({ strokes, text }: { strokes: number; text: string }) {
-	return (
-		<div class="flex items-center gap-2">
-			<Notebook strokes={strokes} ink size="size-12" />
-			<p class="text-sm text-muted">{text}</p>
-		</div>
-	);
-}
 
 const D_LEDGER: LedgerLine[] = [
 	...DLEDGER_LINES.map((text) => ({ text })),
