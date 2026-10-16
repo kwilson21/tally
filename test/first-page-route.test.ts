@@ -858,6 +858,27 @@ describe("Keep keeps what the page showed", () => {
 		expect(textOf(html)).toContain("Keep this one as a bill?");
 	});
 
+	it("keeps no charge whose name was changed in another tab since the page showed it, and asks it again", async () => {
+		await charge("NETFLIX", 1549);
+		const shown = keepFields((await get("/first-page")).html);
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('NETFLIX', 'Netflix Plus')",
+			)
+			.run();
+		const { res, html } = await post("/first-page/bills", shown, true);
+		const bills = await db
+			.prepare("SELECT COUNT(*) AS count FROM bills")
+			.first<{ count: number }>();
+		expect(bills?.count).toBe(0);
+		expect(trigger(res).announce).toBe(
+			"Nothing kept. 1 charge changed since the page drew, so it's asked again below.",
+		);
+		expect(trigger(res).toast?.type).toBe("info");
+		expect(textOf(html)).toContain("Netflix Plus");
+		expect(textOf(html)).toContain("Keep this one as a bill?");
+	});
+
 	it("keeps no bill when the form submits no charge, even with one on the page", async () => {
 		await charge("NETFLIX", 1549);
 		const { res } = await post("/first-page/bills", [], true);
