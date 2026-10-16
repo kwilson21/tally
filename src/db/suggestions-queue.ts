@@ -10,7 +10,11 @@ import { type AiSwitches, readAiSwitches } from "./ai-switches";
 import { categoryNames } from "./categories";
 import { pendingSuggestions, suggestedRowSql } from "./category-suggestions";
 import { jevAsksAboutSql, paysBillOrPlanSql } from "./counted-month";
-import { incomeGuessSql, maybeIncomeConfidenceSql } from "./income";
+import {
+	incomeGuessSql,
+	maybeIncomeConfidenceSql,
+	storedIncomeGuessSql,
+} from "./income";
 import { merchantKeySql } from "./merchant-key";
 import { type NameReview, namesToReview } from "./merchant-names";
 import { type NeverSuggestKind, neverSuggestedSql } from "./never-suggest";
@@ -145,12 +149,13 @@ export const incomeAskedSql = (alias: string, afterNo = false) =>
  * review treats as reviewed but Tally flagged as income is still asked; and it asks every income guess a person hasn't
  * decided, even the ones the review wouldn't ask. Refunds, split parts and transfers are left out, and so is every excluded
  * row: that is the real difference from the review, which keeps the excluded rows that pay a bill or a plan
- * (paysBillOrPlanSql). The page's query and its Yes and No write both use it, so they can't disagree.
+ * (paysBillOrPlanSql). A "Never suggest" income line doesn't hide a guess here either (storedIncomeGuessSql, #651), so the
+ * page can't finish with a deposit nobody answered. The page's query and its Yes and No write both use it, so they can't disagree.
  */
 export const payAskedSql = (alias: string) =>
 	`(${alias}.amount_cents < 0 AND ${alias}.excluded = 0 AND ${alias}.parent_id IS NULL AND ${alias}.is_split = 0
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_transfer = 0 AND ${alias}.income_source IS NOT 'user'
-		AND (${alias}.flag_income = 1 OR ${unsureSql(maybeIncomeConfidenceSql(alias))}))`;
+		AND (${alias}.flag_income = 1 OR ${unsureSql(storedIncomeGuessSql(alias))}))`;
 
 /**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
