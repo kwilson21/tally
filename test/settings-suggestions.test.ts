@@ -261,7 +261,7 @@ describe("GET /settings with a suggestion", () => {
 				/<input class="peer sr-only" type="checkbox" name="ids"/,
 			);
 			expect(item).toMatch(
-				/<label[^>]*class="group relative flex min-h-16 min-w-11/,
+				/<label[^>]*class="group\/select relative flex min-h-16 min-w-11/,
 			);
 			expect(item).toMatch(/selection-mark[^"]*size-7[^"]*rounded-full/);
 			expect(item).toMatch(/peer-checked:border-ink peer-checked:bg-band/);

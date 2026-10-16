@@ -1637,6 +1637,51 @@ step(
 	"unticking the last tick off the page from the keyboard takes its line away and keeps focus in the bar",
 );
 
+// Two ticks off the page: unticking one hides only its own check (#701). The off-page disclosure is a `details.group`,
+// so a bare `group` on the tick's label would show the check of the tick still ticked beside it.
+await goto(`${BASE}/transactions?month=all&select=1`, {
+	waitUntil: "networkidle",
+});
+const pageTicks = page.locator("#selection-form label:has(input[name=ids])");
+await pageTicks.nth(0).click();
+await pageTicks.nth(1).click();
+await page.getByText("2 selected", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Older", exact: true }).click();
+await page.waitForFunction(
+	() =>
+		document.querySelector("#selected-count")?.textContent?.trim() ===
+		"2 selected, 2 not on this page",
+);
+await page.locator("#not-on-page summary").click();
+const offPageTicks = page.locator("#not-on-page label:has(input[name=ids])");
+const offPageMarkDisplay = (i) =>
+	offPageTicks
+		.nth(i)
+		.locator(".selection-mark > span")
+		.evaluate((check) => getComputedStyle(check).display);
+await offPageTicks.nth(0).click();
+await page.waitForFunction(
+	() =>
+		document.querySelector("#selected-count")?.textContent?.trim() ===
+		"1 selected, 1 not on this page",
+);
+assert.equal(
+	await page.locator("#not-on-page input[name=ids]").nth(0).isChecked(),
+	false,
+	"the first off-page tick must be unticked",
+);
+assert.equal(
+	await offPageMarkDisplay(0),
+	"none",
+	"an unticked off-page row must not show its check while another off-page tick is ticked",
+);
+assert.equal(
+	await offPageMarkDisplay(1),
+	"flex",
+	"the off-page tick still ticked keeps its check",
+);
+step("unticking one of two ticks off the page hides only its own check (#701)");
+
 // Select several uncategorized rows, then set their category in one action (P20 A).
 assert.equal((await fetch(`${BASE}/cdn-cgi/handler/scheduled`)).status, 200);
 await goto(`${BASE}/transactions?uncategorized=1`, {
