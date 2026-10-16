@@ -46,6 +46,10 @@ type App = { Bindings: Env };
 const PATH = "/settings/suggestions";
 const MAX_STORE_KEY = 500;
 
+/** The words when a suggestion was answered somewhere else first (decision 120): Settings and Organize say the same. */
+export const CHANGED_SUGGESTION =
+	"That suggestion was changed somewhere else. Here's the current list.";
+
 /** A question the No just raised: its store(s) and what the check says (decision 101). */
 type Ask = {
 	kind: "income" | "transfer" | "new_category";

@@ -78,6 +78,7 @@ import { Switch } from "../views/switch";
 import { TimeZoneRow } from "../views/time-zone-row";
 import {
 	askedStores,
+	CHANGED_SUGGESTION,
 	neverSuggestedMessage,
 	writeNeverSuggest,
 } from "./suggestions";
@@ -901,8 +902,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 			"categories",
 			result.reason === "gone"
 				? {
-						listError:
-							"That suggestion was changed somewhere else. Here's the current list.",
+						listError: CHANGED_SUGGESTION,
 						status: 404,
 					}
 				: {
@@ -948,8 +948,7 @@ async function answerQuestion(c: Context<App>, id: number, form: FormData) {
 	];
 	const stale = () =>
 		renderPage(c, "categories", {
-			listError:
-				"That suggestion was changed somewhere else. Here's the current list.",
+			listError: CHANGED_SUGGESTION,
 			status: 404,
 		});
 	if (
@@ -984,8 +983,7 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	const result = await dismissSuggestion(db, id);
 	if (!result)
 		return renderPage(c, "categories", {
-			listError:
-				"That suggestion was changed somewhere else. Here's the current list.",
+			listError: CHANGED_SUGGESTION,
 			status: 404,
 		});
 	const stores = await askedStores(db, id);

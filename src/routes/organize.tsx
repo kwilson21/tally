@@ -31,6 +31,7 @@ import {
 import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
 import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
+import { CHANGED_SUGGESTION } from "./suggestions";
 
 type App = { Bindings: Env };
 type Category = { id: number; name: string; icon: string; color: string };
@@ -306,10 +307,6 @@ organize.get("/transactions/organize", async (c) => {
 		: renderOrganize(c);
 });
 
-/** Settings' words when a suggestion was answered somewhere else first (decision 120): the same case, the same words. */
-const CHANGED =
-	"That suggestion was changed somewhere else. Here's the current list.";
-
 /**
  * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase of the suggestion
  * ticked. Organize stays where it is: its list is drawn again with the next merchant, with a toast that says what was made.
@@ -330,7 +327,7 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		);
 		return renderOrganize(c, undefined, 200, true);
 	};
-	if (!item) return answered(CHANGED);
+	if (!item) return answered(CHANGED_SUGGESTION);
 	const ids = item.rows.map((row) => row.transactionId);
 	const result = await createFromSuggestion(
 		c.env.DB,
@@ -341,7 +338,7 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	if (!result.ok)
 		return answered(
 			result.reason === "gone"
-				? CHANGED
+				? CHANGED_SUGGESTION
 				: (result.error ?? "That category couldn't be made."),
 		);
 	await askAgainLeftOut(
