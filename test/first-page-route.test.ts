@@ -440,6 +440,52 @@ describe("Yes and No writes", () => {
 		).toBe(true);
 	});
 
+	it("answers every deposit of an unchanged merchant", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
+		expect(await answerPay(db, merchant, "yes", "person@example.com")).toBe(2);
+	});
+
+	describe("a sync correction after the question was read", () => {
+		const FLAGS =
+			"SELECT id, flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' ORDER BY id";
+
+		/**
+		 * Yes for a merchant whose shown deposit was corrected after its question was read: the answer changes nothing, the
+		 * deposits keep their flags, and the pay record gets no line for the merchant.
+		 */
+		async function expectNothingMarked(merchant: PayMerchant) {
+			const before = await db.prepare(FLAGS).all();
+			expect(await answerPay(db, merchant, "yes", "person@example.com")).toBe(
+				0,
+			);
+			expect((await db.prepare(FLAGS).all()).results).toEqual(before.results);
+			expect(
+				(await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"],
+			).toBeUndefined();
+		}
+
+		it("changes nothing when a shown deposit's cents changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET amount_cents = -250000 WHERE id = ?")
+				.bind(merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
+
+		it("changes nothing when a shown deposit's date changed", async () => {
+			await deposits("ACME CORP PAYROLL", 245000, 2);
+			const merchant = (await payMerchants(db))[0] as PayMerchant;
+			await db
+				.prepare("UPDATE transactions SET date = ? WHERE id = ?")
+				.bind(daysBefore(TODAY, 1), merchant.ids[0])
+				.run();
+			await expectNothingMarked(merchant);
+		});
+	});
+
 	it("answers a No that a competing Yes beat with the page as it is, as info, and keeps the Yes", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const merchant = (await payMerchants(db))[0] as PayMerchant;
