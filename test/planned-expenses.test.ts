@@ -1468,21 +1468,26 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(await paidBy(two)).toBe(newSecond);
 	});
 
-	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
-	const racingWith = (race: string, bind: (number | null)[]) =>
+	/** A database whose `batch` is `around` instead of the real one, so a test can race the save's batch. */
+	const batchAround = (
+		around: (statements: D1PreparedStatement[]) => Promise<D1Result[]>,
+	) =>
 		new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop === "batch")
-					return async (statements: D1PreparedStatement[]) => {
-						await env.DB.prepare(race)
-							.bind(...bind)
-							.run();
-						return env.DB.batch(statements);
-					};
+				if (prop === "batch") return around;
 				const value = Reflect.get(target, prop);
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as unknown as D1Database;
+
+	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		batchAround(async (statements) => {
+			await env.DB.prepare(race)
+				.bind(...bind)
+				.run();
+			return env.DB.batch(statements);
+		});
 
 	const KEEP_TWO = [
 		{ categoryId: 1, amountCents: 12000 },
@@ -1625,6 +1630,54 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(await paidBy(onFirst)).toBe(second);
 		expect(await paidBy(onSecond)).toBeNull();
 		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("refuses a re-split when a plan moved after the read, even if it moves again right after the failed batch (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9836, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const movePlan = (part: number) =>
+			env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(part, planId)
+				.run();
+		// The plan moves after the read and the batch fails; the plan moves back before the save looks at the failure.
+		const racing = batchAround(async (statements) => {
+			await movePlan(second ?? 0);
+			try {
+				return await env.DB.batch(statements);
+			} catch (error) {
+				await movePlan(first ?? 0);
+				throw error;
+			}
+		});
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(planId)).toBe(first);
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("rethrows a batch failure for another reason while a plan also moved, not the planned-expense refusal (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9838, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const failure = new Error("D1_ERROR: network connection lost");
+		const racing = batchAround(async () => {
+			await env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(second ?? 0, planId)
+				.run();
+			throw failure;
+		});
+
+		await expect(saveSplit(racing, tx, KEEP_TWO, "demo")).rejects.toBe(failure);
 	});
 
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {

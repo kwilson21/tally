@@ -2157,9 +2157,14 @@ export async function saveSplit(
 			RETURNING id, date, parent_id AS parentId`,
 		)
 		.bind(parentId, total, movedIds);
+	// The text of refuseMovedPlan's failure, as D1 passes SQLite's message on. No other statement in the batch writes
+	// planned_expenses.amount_cents, so this text is refuseMovedPlan's alone.
+	const movedPlanRefusal =
+		/NOT NULL constraint failed: planned_expenses\.amount_cents/;
 	// Runs before any write. A plan the read didn't see on its part fails this statement (amount_cents is NOT NULL), and D1
-	// rolls the whole batch back, so nothing is written and the save says planLinked (the catch below). With no such plan
-	// it changes no row. The statements after it keep their own gate, plansLinkedElsewhere, which the batch's own moves
+	// rolls the whole batch back, so nothing is written and the catch below says planLinked. RAISE(ABORT) works only inside
+	// a trigger, and no trigger covers this, so the batch is stopped by a NOT NULL failure the catch recognises by its
+	// message. With no such plan it changes no row. The statements after it keep their own gate, plansLinkedElsewhere, which the batch's own moves
 	// of read plans never trip, since those plans keep their ids.
 	const refuseMovedPlan = db.prepare(
 		`UPDATE planned_expenses SET amount_cents = NULL WHERE ${plansMovedSinceRead}`,
@@ -2224,11 +2229,10 @@ export async function saveSplit(
 	try {
 		results = await db.batch(statements);
 	} catch (error) {
-		// refuseMovedPlan failed and D1 rolled the batch back. It fails only for a plan that moved since the read, which is refused.
-		const moved = await db
-			.prepare(`SELECT ${plansMovedSinceRead} AS linked`)
-			.first<{ linked: number }>();
-		if (moved?.linked !== 1) throw error;
+		// A NOT NULL failure on planned_expenses.amount_cents (movedPlanRefusal) is refuseMovedPlan's, for a plan that moved
+		// since the read, so it is refused. Any other error is rethrown unchanged.
+		if (!(error instanceof Error && movedPlanRefusal.test(error.message)))
+			throw error;
 		return {
 			saved: false,
 			planLinked: true,
