@@ -5539,6 +5539,18 @@ function SettingsGroup() {
 						/>
 					</div>
 				</State>
+				<State label="Categories">
+					<SubpageHead title="Categories" titleId="catalog-categories-title" />
+				</State>
+				<State label="AI suggestions">
+					<SubpageHead
+						title="AI suggestions"
+						titleId="catalog-ai-suggestions-title"
+					/>
+				</State>
+				<State label="Your data">
+					<SubpageHead title="Your data" titleId="catalog-your-data-title" />
+				</State>
 			</Specimen>
 			<Specimen
 				id="reconnect-reminders"

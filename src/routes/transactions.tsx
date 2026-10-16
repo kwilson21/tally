@@ -640,7 +640,7 @@ async function renderList(
 			</div>
 			{firstVisit === null && peoplePrompt && (
 				<Band
-					href="/settings/household"
+					href="/settings/people"
 					detail="Add names Tally can suggest for who a purchase was for."
 				>
 					Add the people in your household

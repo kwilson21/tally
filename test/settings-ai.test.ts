@@ -499,5 +499,3 @@ describe("the sorting switch with categories, income and details all off", () =>
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
 	});
 });
-
-// (`hx-select-oob="#names-band"`). It must work on the greyed-sorting save path too.

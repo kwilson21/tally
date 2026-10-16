@@ -86,7 +86,10 @@ describe("GET each Settings page", () => {
 			expect(res.status).toBe(200);
 			expect(h1Of(html)).toBe(title);
 			expect(textOf(html)).toContain(marker);
-			const back = html.indexOf('<a href="/settings"');
+			// The back link is SubpageHead's own link (its classes are unique to it), drawn before the h1.
+			const back = html.indexOf(
+				'<a href="/settings" class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline"',
+			);
 			expect(back).toBeGreaterThan(-1);
 			expect(back).toBeLessThan(html.indexOf("<h1"));
 			expect(textOf(html.slice(back, html.indexOf("</a>", back)))).toContain(
@@ -140,6 +143,18 @@ describe("Switches save when flipped", () => {
 	});
 });
 
+describe("Plain forms go back to their page", () => {
+	it("a plain People add goes back to People", async () => {
+		const { res } = await post(
+			"/settings/people",
+			{ action: "add", name: "Grandma" },
+			false,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/settings/people");
+	});
+});
+
 describe("Tally's rules page", () => {
 	beforeEach(async () => {
 		await env.DB.prepare(
@@ -166,6 +181,13 @@ describe("Tally's rules page", () => {
 		const { html } = await get("/settings/rules");
 		expect(textOf(html)).toContain(
 			"Never suggest: Tally hasn't been told No yet.",
+		);
+	});
+
+	it("starts its section at the top of the page, as the other Settings pages do", async () => {
+		const { html } = await get("/settings/rules");
+		expect(html).toMatch(
+			/<section id="merchant-rules" aria-labelledby="merchant-rules-title" class="lg:max-w-3xl">/,
 		);
 	});
 });

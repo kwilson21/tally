@@ -1150,11 +1150,8 @@ settings.post("/settings/time-zone", async (c) => {
 	if (!parsed.ok)
 		return renderPage(c, "household", { zoneError: parsed.error, status: 422 });
 	await saveTimeZone(c.env.DB, parsed.zone);
-	const today = todayIn(parsed.zone);
-	// The month is the one thing in Settings that follows the zone (each category's amount is the
-	// month's), and the swap below replaces only the time zone row, so every save sends those
-	// amounts along. Always, not only when the two zones' months differ: a page left open past
-	// midnight can show last month whichever zone is saved.
+	// The month follows the zone, but the Household page draws only the time zone and the bank sign-in emails, so the
+	// answer carries nothing else. Categories draws the new month when it is next opened.
 	return done(
 		c,
 		"Saved time zone",
@@ -1162,7 +1159,6 @@ settings.post("/settings/time-zone", async (c) => {
 		{
 			focus: "zone",
 			page: "household",
-			today,
 			timeZone: parsed.zone,
 			saved: { kind: "zone" },
 		},

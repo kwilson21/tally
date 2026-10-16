@@ -704,7 +704,7 @@ describe("transaction detail guesses", () => {
 			.run();
 		const { html } = await get("/transactions?month=all");
 		expect(textOf(html)).toContain("Add the people in your household");
-		expect(html).toContain('href="/settings/household"');
+		expect(html).toContain('href="/settings/people"');
 	});
 
 	it("clearing a guessed note records the person's decision against future guesses", async () => {
@@ -1206,7 +1206,7 @@ describe("household people and details switch", () => {
 		expect(add.html).toMatch(/<h1 id="people-title"[^>]*autofocus/);
 	});
 
-	it("shows household people on the People page and allows adding one without JavaScript", async () => {
+	it("shows household people on the People page and allows adding, renaming and removing one", async () => {
 		const tx = await charge();
 		const { html } = await get("/settings/people");
 		expect(textOf(html)).toContain("People");

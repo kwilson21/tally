@@ -58,7 +58,7 @@ export function MerchantRules({
 		? `${rules.length} merchants matching “${search}”`
 		: `${total} merchants, A to Z`;
 	return (
-		<section id={id} aria-labelledby={`${id}-title`} class="mt-6 lg:max-w-3xl">
+		<section id={id} aria-labelledby={`${id}-title`} class="lg:max-w-3xl">
 			{head}
 			{error && (
 				<p role="alert" class="mt-3 text-sm text-over">
