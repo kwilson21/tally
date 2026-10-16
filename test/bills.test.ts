@@ -378,6 +378,9 @@ describe("Bills", () => {
 	});
 
 	it("offers all five frequencies and their cadence fields", async () => {
+		// Pinned, so "Next" is the same date whatever day the suite runs on (the afterEach restores the clock).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
 		const form = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
