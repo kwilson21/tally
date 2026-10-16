@@ -9,7 +9,8 @@
 // takes ? again at once, and a keys response is dropped when #keys was redrawn while it loaded.
 // A swap of #keys moves the sheet's return, and so does a history restore (Back) that redraws the page without the
 // sheet: that counts as the close, and when the opener is gone, focus goes to the page's heading. A keys request that
-// ends without a swap gives focus back (to Undo) and forgets it. Without this script every page works as a plain
+// ends without a swap gives focus back (to Undo) and forgets it. While the sheet is open, a push that drops ?keys (an
+// Undo's, say) gets ?keys back in place. Without this script every page works as a plain
 // page: the keys are a details at the foot, and More lists them. Pages say what they can do with data attributes and
 // aria-keyshortcuts; this script only reads them.
 
@@ -207,7 +208,20 @@ export function keyboard(doc, win) {
 			// A settle of #keys, or of a region that holds it (a history restore swaps the body, which holds #keys), is the
 			// keys sheet's swap. Another request's settle (Sync now, a row's sheet) leaves the return alone.
 			const region = doc.getElementById("keys");
-			if (!region || !event?.target?.contains?.(region)) return;
+			if (!region || !event?.target?.contains?.(region)) {
+				// An Undo's push drops ?keys from the address (its swap draws #page, which does not hold #keys), and so can any
+				// other push. While the keys sheet is open, the address gets ?keys back in place, as keepFragment puts the fragment back.
+				if (
+					region?.contains(openSheet(doc)) &&
+					!new URLSearchParams(win.location.search).has("keys")
+				)
+					win.history.replaceState(
+						win.history.state,
+						"",
+						keysHref(win.location) + (win.location.hash || keptHash),
+					);
+				return;
+			}
 			// A settle of #keys itself is the keys request's own swap, so its wait is over; a body swap that redraws #keys is not.
 			if (event.target === region) loading = false;
 			const sheet = openSheet(doc);
