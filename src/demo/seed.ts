@@ -665,8 +665,8 @@ export function buildSeed(today: string): Seed {
 			effectiveMonth: monthOffset(today, 0),
 			amountCents: 120000,
 		},
-		// This month's Groceries budget is $950, not $700, so the last week's bills and Childcare's fifth Friday leave
-		// Safe to spend at $0 or more (#631). Earlier months keep $700, as they were.
+		// From this month on, Groceries' budget is $950, not $700, so the last week's bills and Childcare's fifth Friday
+		// leave Safe to spend at $0 or more (#631). Earlier months keep $700, as they were.
 		{
 			categoryId: GROCERIES,
 			effectiveMonth: monthOffset(today, 0),
