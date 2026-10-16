@@ -52,6 +52,7 @@ import {
 	BillMonthlyTotal,
 	BillRow,
 	BillStatusHeading,
+	includesLine,
 } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
@@ -2563,7 +2564,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total. Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total; a heading whose total counts occurrences no row lists has a muted line under it that names them (decision 122). Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -2575,6 +2576,44 @@ function Rows() {
 						<div class="mt-4">
 							<BillStatusHeading status="overdue" totalCents={60000} />
 							<BillStatusHeading status="upcoming" totalCents={18800} />
+						</div>
+					</div>
+				</State>
+				<State label="A heading whose total counts occurrences no row lists: a muted line under it names them, up to two bills, then and N more (decision 122)">
+					<div class="max-w-xl">
+						<BillStatusHeading
+							status="upcoming"
+							totalCents={48000}
+							includes={includesLine([
+								{
+									name: "Daycare",
+									frequency: "weekly",
+									dueDates: ["2026-10-23", "2026-10-30"],
+								},
+							])}
+						/>
+						<div class="mt-4">
+							<BillStatusHeading
+								status="paid"
+								totalCents={49698}
+								includes={includesLine([
+									{
+										name: "Daycare",
+										frequency: "weekly",
+										dueDates: ["2026-10-02", "2026-10-09"],
+									},
+									{
+										name: "Gym",
+										frequency: "monthly",
+										dueDates: ["2026-10-04"],
+									},
+									{
+										name: "Netflix",
+										frequency: "monthly",
+										dueDates: ["2026-10-05"],
+									},
+								])}
+							/>
 						</div>
 					</div>
 				</State>
@@ -2879,6 +2918,8 @@ function Rows() {
 								}}
 								month="2026-10"
 								today="2026-10-04"
+								href="#planned-expense"
+								attrs={{}}
 							/>
 						</ul>
 					</div>
@@ -2896,6 +2937,8 @@ function Rows() {
 								}}
 								month="2026-10"
 								today="2026-10-04"
+								href="#planned-expense"
+								attrs={{}}
 							/>
 						</ul>
 					</div>
@@ -2914,11 +2957,13 @@ function Rows() {
 								}}
 								month="2026-10"
 								today="2026-10-04"
+								href="#planned-expense"
+								attrs={{}}
 							/>
 						</ul>
 					</div>
 				</State>
-				<State label="The Band: one plan waiting, then two">
+				<State label="The Band: one plan waiting, with no dot, then two, with a dot each">
 					<div class="max-w-xl">
 						<PlanBand
 							planId={1}

@@ -433,7 +433,8 @@ export function EditSheet({
 				"hx-trigger": "change",
 				"hx-target": "#edit-category",
 				"hx-select": "#edit-category > *",
-				"hx-swap": "innerHTML",
+				// Morphs, so a folded row keeps the open state the person set (#661; layout.tsx's morphIgnore).
+				"hx-swap": "innerMorph",
 				"hx-sync": "#edit-category:queue last",
 				"hx-include": "closest form",
 			}

@@ -138,11 +138,12 @@ describe("Bills", () => {
 		},
 	);
 	it.each([
+		// An unpaid September occurrence is Overdue, and October's, due later this month, is Upcoming, unlisted (decision 122).
 		{
 			instant: "2026-10-08T16:00:00Z",
 			dueDay: 28,
 			paidPeriod: null,
-			groups: ["Overdue"],
+			groups: ["Overdue", "Upcoming"],
 		},
 		{
 			instant: "2026-10-08T16:00:00Z",
@@ -154,7 +155,7 @@ describe("Bills", () => {
 			instant: "2026-10-05T16:00:00Z",
 			dueDay: 20,
 			paidPeriod: null,
-			groups: ["Overdue"],
+			groups: ["Overdue", "Upcoming"],
 		},
 		{
 			instant: "2026-10-25T16:00:00Z",
@@ -262,11 +263,19 @@ describe("Bills", () => {
 				});
 			}
 			expect(groups.size).toBe(includeOverdueBill ? 2 : 1);
-			for (const group of groups.values())
-				expect(group.total).toBe(group.rowTotal);
+			// Upcoming also counts October 28, which no row lists, and names it under the heading (decision 122).
+			const unlistedUpcomingCents = includeOverdueBill ? 10000 : 0;
+			for (const [title, group] of groups)
+				expect(group.total).toBe(
+					group.rowTotal + (title === "Upcoming" ? unlistedUpcomingCents : 0),
+				);
 			if (includeOverdueBill) expect(groups.get("Overdue")?.total).toBe(10000);
 			else expect(groups.has("Overdue")).toBe(false);
-			expect(groups.get("Upcoming")?.total).toBe(5000);
+			expect(groups.get("Upcoming")?.total).toBe(5000 + unlistedUpcomingCents);
+			if (includeOverdueBill)
+				expect(html).toContain(
+					"Includes Monthly occurrence fixture on Oct 28</p>",
+				);
 			// October still to pay is October's $100 + $50 = $150; September's $100 is overdue but wasn't due this month.
 			expect(html).toContain(
 				includeOverdueBill

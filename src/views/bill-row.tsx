@@ -5,7 +5,7 @@ import {
 	billScheduleLabel,
 	partPaidSentence,
 } from "../bills/status";
-import { dayLabel, shortDay } from "../dates";
+import { dayLabel, monthDay, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon, ROW_OPENS, RowArrow } from "./icons";
@@ -67,12 +67,15 @@ const STATUS_HEADING = {
 export function BillStatusHeading({
 	status,
 	totalCents,
+	includes,
 }: {
 	status: BillStatus;
 	totalCents?: number;
+	/** The muted line naming the occurrences the total counts that no row lists (`includesLine`, decision 122). */
+	includes?: string;
 }) {
 	const look = STATUS_HEADING[status];
-	return (
+	const heading = (
 		<div class="flex items-center gap-2 text-sm text-muted">
 			<h2 class="flex min-w-0 items-center gap-2">
 				<span class={look.tone}>
@@ -90,6 +93,56 @@ export function BillStatusHeading({
 			)}
 		</div>
 	);
+	if (!includes) return heading;
+	return (
+		<>
+			{heading}
+			<p class="text-sm text-muted">{includes}</p>
+		</>
+	);
+}
+
+/** A bill whose occurrences a status heading counts that no row lists (decision 122): its name, frequency and those dates. */
+export type UnlistedBill = {
+	name: string;
+	frequency: BillFrequency;
+	/** The dates a heading counts for this bill, YYYY-MM-DD. */
+	dueDates: string[];
+};
+
+/**
+ * The muted line under a status heading whose total counts occurrences no row lists (decision 122, P136 A): "Includes
+ * Daycare's Fridays on Oct 2 and 9", naming up to two bills, then "and N more". A weekly or every-two-weeks bill's
+ * dates are named by their weekday, singular for one date ("Friday on Oct 9"); any other bill's by its date. Undefined
+ * when no occurrence is unlisted.
+ */
+export function includesLine(bills: UnlistedBill[]) {
+	if (!bills.length) return undefined;
+	const named = bills.slice(0, 2).map(unlistedBillWords);
+	const more = bills.length - named.length;
+	return `Includes ${named.join(", ")}${more ? `, and ${more} more` : ""}`;
+}
+
+function unlistedBillWords({ name, frequency, dueDates }: UnlistedBill) {
+	const dates = [...dueDates].sort();
+	// A date in the month before the one named is written with its month again: "Oct 30 and Nov 6".
+	const days = dates.map((date, i) =>
+		i > 0 && date.slice(0, 7) === dates[i - 1]?.slice(0, 7)
+			? String(Number(date.slice(8, 10)))
+			: monthDay(Number(date.slice(5, 7)), Number(date.slice(8, 10))),
+	);
+	const list =
+		days.length > 1
+			? `${days.slice(0, -1).join(", ")} and ${days[days.length - 1]}`
+			: days[0];
+	if (frequency === "weekly" || frequency === "biweekly") {
+		const weekday = new Intl.DateTimeFormat("en-US", {
+			weekday: "long",
+			timeZone: "UTC",
+		}).format(new Date(`${dates[0]}T00:00:00Z`));
+		return `${name}'s ${weekday}${dates.length > 1 ? "s" : ""} on ${list}`;
+	}
+	return `${name} on ${list}`;
 }
 
 export function BillMonthlyTotal({
