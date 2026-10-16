@@ -1354,7 +1354,7 @@ function HomeTopGroup() {
 					</Picture>
 				</State>
 				<State label="The month strip on a finished month: its mark in a bordered dot, its ink ring on the shown month, and its words name the result">
-					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with August over and May under beside it">
+					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with May and August under beside it">
 						<div class="max-w-2xl">
 							<MonthNavigation
 								month="2026-09"

@@ -4,6 +4,7 @@ import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, monthsBefore, todayIn } from "../src/dates";
 import { firstCountedMonth, loadMonth, monthResults } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { DEMO_MONTH_RESULTS } from "../src/design-system/demo-month-results";
 
 /** A finished month's result as Home's MonthEnd shows it: budgets minus all counted spending, null with no budgets. */
 async function resultFromSummary(month: string) {
@@ -58,5 +59,11 @@ describe("monthResults", () => {
 		expect(results["2026-04"]).toBeNull();
 		expect(typeof results["2026-09"]).toBe("number");
 		expect("2026-05" in results).toBe(false);
+	});
+
+	it("gives the demo's results that the catalog and proposal pictures draw, as the demo shows them on 2026-10-16", async () => {
+		await resetDemo(env.DB, "2026-10-16");
+		const results = await monthResults(env.DB, Object.keys(DEMO_MONTH_RESULTS));
+		expect(results).toEqual(DEMO_MONTH_RESULTS);
 	});
 });
