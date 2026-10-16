@@ -61,6 +61,15 @@ export function rowsOf(doc) {
 export function keyboard(doc, win) {
 	let returnTo = null;
 	let armed = false;
+	// The #fragment the page had when the keys sheet opened. The sheet's address has none, so its close puts it back.
+	let keptHash = "";
+
+	// A page loaded with the keys sheet already open (a reload) keeps its fragment on close, as a sheet opened with ? does.
+	const loaded = openSheet(doc);
+	if (loaded && doc.getElementById("keys")?.contains(loaded)) {
+		keptHash = win.location.hash;
+		armed = true;
+	}
 
 	/** Moves focus to the row j or k goes to: from the row focus is on, one down or up, stopping at the ends. */
 	function moveRow(key, active) {
@@ -99,13 +108,15 @@ export function keyboard(doc, win) {
 				case "?": {
 					event.preventDefault();
 					returnTo = active === doc.body ? null : active;
+					keptHash = win.location.hash;
 					const url = keysHref(win.location);
 					// The address is pushed as given: htmx reads a boolean push as a path, so `true` would push "/true".
+					// The fragment is pushed but not requested: htmx would scroll to an anchor the request carries.
 					win.htmx.ajax("GET", url, {
 						target: "#keys",
 						select: "#keys",
 						swap: "outerHTML",
-						push: url,
+						push: url + keptHash,
 					});
 					return;
 				}
@@ -139,8 +150,18 @@ export function keyboard(doc, win) {
 			}
 			// A settle with no sheet open ends the keys' return: it was the close, or nothing ever opened (a failed request).
 			const back = armed ? returnTo : null;
+			const fragment = armed ? keptHash : "";
 			armed = false;
 			returnTo = null;
+			keptHash = "";
+			// The close's address has no fragment, so the page's own goes back on. replaceState keeps htmx's state and
+			// neither scrolls nor adds a history entry.
+			if (fragment && !win.location.hash)
+				win.history.replaceState(
+					win.history.state,
+					"",
+					win.location.pathname + win.location.search + fragment,
+				);
 			if (back?.isConnected) back.focus();
 		},
 	};

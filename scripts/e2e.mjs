@@ -434,6 +434,35 @@ step(
 	"j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on the row",
 );
 
+// The keys sheet keeps the page's #fragment (#72): opened from How this works' Budget section, its address has the fragment
+// while the sheet is open, and the address has it again once the sheet closes.
+await goto(`${BASE}/how-it-works#budget`, { waitUntil: "networkidle" });
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+assert.match(
+	await page.evaluate(() => location.search),
+	/keys/,
+	"? puts keys in the address",
+);
+assert.equal(
+	await page.evaluate(() => location.hash),
+	"#budget",
+	"? keeps the page's fragment in the address",
+);
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(() => location.hash === "#budget");
+assert.equal(
+	await page.evaluate(
+		() => location.pathname + location.search + location.hash,
+	),
+	"/how-it-works#budget",
+	"Escape puts the fragment back on the address",
+);
+step(
+	"? keeps the page's #fragment, and Escape puts it back once the sheet closes",
+);
+
 // Each key (#72), in turn: / focuses the search, j and k move between rows, e and Enter open the row focus is on, ← and →
 // change Home's month, and u presses the Undo of a toast. Each step leaves what it changed as it found it.
 await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });

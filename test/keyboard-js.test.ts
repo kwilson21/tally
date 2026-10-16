@@ -30,6 +30,9 @@ class FakeNode {
 	scrolls: unknown[] = [];
 	doc: FakePage | null = null;
 	constructor(readonly tag: string) {}
+	get id() {
+		return this.attrs.get("id") ?? "";
+	}
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, value);
 	}
@@ -95,6 +98,9 @@ class FakePage {
 	querySelectorAll(selector: string) {
 		return this.nodes.filter((node) => matches(node, selector));
 	}
+	getElementById(id: string) {
+		return this.nodes.find((node) => node.id === id) ?? null;
+	}
 	add(node: FakeNode, parent: FakeNode = this.body) {
 		parent.append(node);
 		return node;
@@ -114,16 +120,25 @@ function el(
 	return node;
 }
 
-/** The window: the address, a stand-in for location.assign, and htmx's ajax. */
-function windowFor(search = "") {
+/** The window: the address, a stand-in for location.assign, htmx's ajax, and the history htmx keeps. */
+function windowFor(search = "", hash = "") {
 	return {
 		location: {
 			pathname: "/transactions",
 			search,
+			hash,
 			assign: vi.fn(),
 		},
 		htmx: { ajax: vi.fn(() => Promise.resolve()) },
+		history: { state: { htmx: true }, replaceState: vi.fn() },
 	};
+}
+
+/** Takes a node out of the page, as a swap does when it replaces the sheet. */
+function remove(page: FakePage, node: FakeNode) {
+	const parent = node.parentElement;
+	if (parent) parent.children.splice(parent.children.indexOf(node), 1);
+	page.nodes.splice(page.nodes.indexOf(node), 1);
 }
 
 /** A key press, as a keydown event: no modifiers unless the test sets them. */
@@ -293,6 +308,77 @@ describe("? (the keys sheet)", () => {
 		keydown(press("?", { shiftKey: true }));
 		settled();
 		expect(page.activeElement).toBe(page.body);
+	});
+
+	it("asks the server without the page's #fragment, and pushes the address with it", () => {
+		const page = new FakePage();
+		const win = windowFor("", "#budget");
+		setup(page, win).keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledWith("GET", "/transactions?keys", {
+			target: "#keys",
+			select: "#keys",
+			swap: "outerHTML",
+			push: "/transactions?keys#budget",
+		});
+	});
+
+	it("puts the fragment back on the address once the sheet closes, in place", () => {
+		const page = new FakePage();
+		const win = windowFor("", "#budget");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		const region = el(page, "div", { id: "keys" });
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled();
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+		// Its close swaps the sheet away and pushes the address without a fragment.
+		remove(page, sheet);
+		win.location.hash = "";
+		settled();
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions#budget",
+		);
+	});
+
+	it("leaves the address alone when the page had no fragment, or when the address still has it", () => {
+		const plain = new FakePage();
+		const plainWin = windowFor();
+		const plainKeys = setup(plain, plainWin);
+		plainKeys.keydown(press("?", { shiftKey: true }));
+		const plainSheet = el(plain, "section", { "data-sheet": "" });
+		plainKeys.settled();
+		remove(plain, plainSheet);
+		plainKeys.settled();
+		expect(plainWin.history.replaceState).not.toHaveBeenCalled();
+
+		const kept = new FakePage();
+		const keptWin = windowFor("", "#budget");
+		const keptKeys = setup(kept, keptWin);
+		keptKeys.keydown(press("?", { shiftKey: true }));
+		const keptSheet = el(kept, "section", { "data-sheet": "" });
+		keptKeys.settled();
+		remove(kept, keptSheet);
+		keptWin.location.hash = "#budget";
+		keptKeys.settled();
+		expect(keptWin.history.replaceState).not.toHaveBeenCalled();
+	});
+
+	it("restores the fragment when a sheet that was open on load closes", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		const win = windowFor("", "#budget");
+		const { settled } = setup(page, win);
+		remove(page, sheet);
+		win.location.hash = "";
+		settled();
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions#budget",
+		);
 	});
 });
 
