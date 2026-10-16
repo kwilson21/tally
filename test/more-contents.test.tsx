@@ -183,6 +183,8 @@ describe("ContentsList", () => {
 		);
 	});
 
+	// Guard (decision 128): folios keep tabular figures. Issue #676's "sign - in" example is a Settings folio;
+	// whether folios change is an open owner question, so this test stays as it is.
 	it("lets a plain folio wider than a line wrap at its spaces, rather than overflow the phone", () => {
 		const out = html(places({ toCheck: 3 }));
 		expect(out).toContain(

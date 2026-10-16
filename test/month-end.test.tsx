@@ -656,6 +656,43 @@ describe("MonthEnd budget bars", () => {
 	});
 });
 
+// Decision 128: an over-budget label is a chart label with an amount, so its figures are tabular.
+describe("MonthEnd over-budget labels (decision 128)", () => {
+	it("sets each over-budget bar's amount label in tabular figures", () => {
+		const html = renderToString(
+			<MonthEnd
+				needsCategoryCents={0}
+				chartId="over"
+				monthName="September"
+				amountCents={0}
+				unbudgeted={[]}
+				rows={[
+					{
+						id: 1,
+						name: "Dining",
+						budgetCents: 10000,
+						spentCents: 11500,
+						leftCents: -1500,
+						over: true,
+					},
+					{
+						id: 2,
+						name: "Groceries",
+						budgetCents: 20000,
+						spentCents: 10000,
+						leftCents: 10000,
+						over: false,
+					},
+				]}
+			/>,
+		);
+		const label =
+			html.match(/<text\b[^>]*\bclass="([^"]*\bfill-over\b[^"]*)"/)?.[1] ?? "";
+		expect(html).toContain("+$15");
+		expect(label.split(" ")).toContain("tabular-nums");
+	});
+});
+
 // #310: a finished month's uncategorized spending is named once, at the end of Not budgeted.
 describe("PastNotBudgeted's Needs a category row", () => {
 	// The Needs a category row is the list's last item.

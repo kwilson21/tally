@@ -1,7 +1,7 @@
 /** @jsxImportSource hono/jsx */
 import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
-import { MoneyInput } from "../src/views/money-input";
+import { MoneyInput, moneyChip } from "../src/views/money-input";
 
 const inputTag = (error?: string) =>
 	String(
@@ -48,6 +48,12 @@ describe("MoneyInput", () => {
 		const input = inputTag();
 		expect(input).toMatch(/class="[^"]*\bself-stretch\b/);
 		expect(input).toMatch(/class="(?:[^"]* )?-my-3[ "]/);
+	});
+
+	// Guard (decision 128): the amount and its chips are already tabular; this keeps them so.
+	it("keeps the typed amount and its chips in tabular figures", () => {
+		expect(inputTag()).toMatch(/class="[^"]*\btabular-nums\b/);
+		expect(moneyChip.split(" ")).toContain("tabular-nums");
 	});
 
 	it("keeps the field-shake class on the same input when there is an error", () => {

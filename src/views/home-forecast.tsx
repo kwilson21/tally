@@ -65,7 +65,11 @@ export function HomeForecast({
 					stroke-width="1"
 					stroke-dasharray="4 4"
 				/>
-				<text x={left} y={y(budgetCents) - 7} class="fill-muted text-sm">
+				<text
+					x={left}
+					y={y(budgetCents) - 7}
+					class="fill-muted text-sm tabular-nums"
+				>
 					budget {whole(budgetCents)}
 				</text>
 				<polyline
@@ -93,16 +97,21 @@ export function HomeForecast({
 					r="5.5"
 					class={under ? "fill-ok" : "fill-over"}
 				/>
-				<text x={left} y="166" class="fill-muted text-sm">
+				<text x={left} y="166" class="fill-muted text-sm tabular-nums">
 					{monthLabel} 1
 				</text>
-				<text x={right} y="166" text-anchor="end" class="fill-muted text-sm">
+				<text
+					x={right}
+					y="166"
+					text-anchor="end"
+					class="fill-muted text-sm tabular-nums"
+				>
 					{monthLabel} {daysInMonth}
 				</text>
 			</svg>
 			<figcaption class="mt-2 flex flex-wrap items-baseline gap-x-2">
 				<span
-					class={`inline-flex items-center gap-1.5 font-serif text-4xl font-semibold ${under ? "text-ok" : "text-over"}`}
+					class={`inline-flex items-center gap-1.5 font-serif text-4xl font-semibold tabular-nums ${under ? "text-ok" : "text-over"}`}
 				>
 					{!under && <Icon name="alert" class="size-6" />}
 					{whole(shownCents)} {under ? "under" : "over"}

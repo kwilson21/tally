@@ -67,6 +67,18 @@ describe("BillRow with a price change", () => {
 	});
 });
 
+// Decision 128: a bill row's own amount is a column of figures, so it is tabular; its name and status are prose.
+describe("BillRow amount (decision 128)", () => {
+	it("sets the bill's own amount in tabular figures", () => {
+		const row = String(
+			BillRow({ bill: NETFLIX, today: "2026-10-05", href: "/bills/1" }),
+		);
+		expect(row).toContain(
+			'<span class="shrink-0 text-lg tabular-nums">$15.49</span>',
+		);
+	});
+});
+
 describe("BillOccurrenceRow with a price change", () => {
 	const offer = {
 		transactionId: 7,

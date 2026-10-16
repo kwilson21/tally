@@ -183,6 +183,44 @@ describe("HomeForecast chart scale", () => {
 	});
 });
 
+// Decision 128: tabular figures on the forecast's own amounts, dates and headline, not in its prose.
+describe("HomeForecast figures (decision 128)", () => {
+	const html = String(
+		HomeForecast({
+			month: "2026-10",
+			day: 10,
+			daysInMonth: 31,
+			spentByDay: Array.from({ length: 10 }, () => 10000),
+			budgetCents: 435000,
+			endCents: 400000,
+			differenceCents: 35000,
+		}),
+	);
+	const quoteForRegExp = (text: string) =>
+		text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	/** The class attribute of the chart text whose content is exactly `text`, or undefined. */
+	const textClass = (text: string) =>
+		html.match(
+			new RegExp(`class="([^"]*)"[^>]*>${quoteForRegExp(text)}</text>`),
+		)?.[1];
+
+	it("sets the headline amount in tabular figures", () => {
+		expect(html).toContain("$350 under");
+		const headline =
+			html.match(/class="([^"]*font-serif text-4xl[^"]*)"/)?.[1] ?? "";
+		expect(headline.split(" ")).toContain("tabular-nums");
+	});
+
+	it("sets the budget label in tabular figures", () => {
+		expect(textClass("budget $4,350")?.split(" ")).toContain("tabular-nums");
+	});
+
+	it("sets both of the chart's date labels in tabular figures", () => {
+		expect(textClass("Oct 1")?.split(" ")).toContain("tabular-nums");
+		expect(textClass("Oct 31")?.split(" ")).toContain("tabular-nums");
+	});
+});
+
 describe("homeForecastDays query budget", () => {
 	it("assigns linked credits, refunds, bill payments, and spending once", async () => {
 		const month = "2099-10";
