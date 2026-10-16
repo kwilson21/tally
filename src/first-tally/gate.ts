@@ -17,38 +17,59 @@ export type QuestionsFacts = {
 };
 
 /**
- * True when the questions may open. Each condition is checked on its own: the day after stroke one, a connected bank
- * (zero banks is never open, since "every bank is synced" would be true of none), every bank done, and nothing waiting.
+ * True when every connected bank's 90-day history is in: each has finished its first sync and Plaid's history mark.
+ * Zero banks is never in, since "every bank is done" would be true of none. Home's setup promises no time until this holds.
+ */
+export function banksHistoryIn(banks: QuestionsFacts["banks"]): boolean {
+	return (
+		banks.length > 0 &&
+		banks.every(
+			(bank) => bank.lastSyncedAt !== null && bank.historyCompleteAt !== null,
+		)
+	);
+}
+
+/**
+ * True when the questions may open. Each condition is checked on its own: the day after stroke one, every connected bank
+ * with its history in (banksHistoryIn), and nothing waiting.
  */
 export function questionsOpen(facts: QuestionsFacts): boolean {
 	if (facts.strokeOneDay === null || facts.today <= facts.strokeOneDay)
 		return false;
-	if (facts.banks.length === 0) return false;
-	if (
-		!facts.banks.every(
-			(bank) => bank.lastSyncedAt !== null && bank.historyCompleteAt !== null,
-		)
-	)
-		return false;
+	if (!banksHistoryIn(facts.banks)) return false;
 	return facts.waiting === 0;
 }
 
-/** The gate read from the household's database, with the AI switches that decide what Jev is still owed. */
-export async function readQuestionsGate(
+/** A connected bank as the gate and Home's setup read it: its name, and the two sync marks the gate needs. */
+export type GateBank = QuestionsFacts["banks"][number] & { name: string };
+
+/**
+ * What the gate reads besides the record: each connected bank, and what Jev is still owed, counted with the AI switches
+ * that decide it. One place, so Home's setup and the gate count the same things.
+ */
+export async function readGateInputs(
 	db: D1Database,
-	today: string,
-): Promise<boolean> {
-	const record = await readFirstTally(db);
+): Promise<{ banks: GateBank[]; waiting: number }> {
 	const { results: banks } = await db
 		.prepare(
-			"SELECT last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL",
+			"SELECT institution_name AS name, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
 		)
-		.all<{ lastSyncedAt: string | null; historyCompleteAt: string | null }>();
+		.all<GateBank>();
 	const switches = await readAiSwitches(db);
 	const waiting = await countWaitingForJev(db, {
 		categories: switches.categories,
 		income: switches.income,
 	});
+	return { banks, waiting };
+}
+
+/** The gate read from the household's database. */
+export async function readQuestionsGate(
+	db: D1Database,
+	today: string,
+): Promise<boolean> {
+	const record = await readFirstTally(db);
+	const { banks, waiting } = await readGateInputs(db);
 	return questionsOpen({
 		today,
 		strokeOneDay: record?.strokes.bank ?? null,

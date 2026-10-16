@@ -4,10 +4,17 @@ import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { parseBudgetAmount } from "../budgets/amount";
 import type { Bank } from "../db/accounts";
+import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import type { BankHead, FirstPageModel } from "../first-tally/first-page";
+import {
+	type SetupPhase,
+	type SetupView,
+	setupSteps,
+	strokesDrawn,
+} from "../first-tally/setup";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -30,7 +37,15 @@ import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
-import { BillOccurrenceRow } from "../views/bill-occurrence-row";
+import {
+	BillHead,
+	LedgerDisclosure,
+	LedgerMonth,
+	LedgerPayments,
+	LedgerPriceRow,
+	PaidCheck,
+} from "../views/bill-ledger";
+import { PriceChanged } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
 import {
 	BillMonthlyTotal,
@@ -63,6 +78,7 @@ import {
 } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
+import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
 import {
@@ -103,6 +119,7 @@ import {
 	NewCategoryName,
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
+import { Notebook } from "../views/notebook";
 import { PendingNote } from "../views/pending-note";
 import {
 	PlanBand,
@@ -118,12 +135,18 @@ import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
+import {
+	SettingsContents,
+	SubpageHead,
+	settingsPlaces,
+} from "../views/settings-pages";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { StartHere } from "../views/start-here";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
+import { TallySteps } from "../views/tally-steps";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -139,6 +162,7 @@ import {
 } from "../views/trends";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
+import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -457,9 +481,252 @@ function Brand() {
 			>
 				<LedgerIllustration />
 			</Specimen>
+			<Specimen
+				id="notebook"
+				title="Notebook"
+				tier="visual"
+				components={["Notebook"]}
+				sentence="The first week's notebook with its tally strokes drawn so far, in ink (P125 E, decision 114). The strokes are its five lines in order, four short ones and then the slash. LedgerIllustration is this notebook with all five drawn."
+			>
+				<State label="None drawn: the notebook before a bank">
+					<Notebook strokes={0} ink size="size-24" />
+				</State>
+				<State label="Two drawn, in ink">
+					<Notebook strokes={2} ink size="size-24" />
+				</State>
+				<State label="All five drawn, in ink">
+					<Notebook strokes={5} ink size="size-24" />
+				</State>
+			</Specimen>
+			<Specimen
+				id="tally-steps"
+				title="TallySteps"
+				tier="visual"
+				components={["TallySteps"]}
+				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; Next marks the line to act on once the questions are open, and the words carry the state."
+			>
+				<State label="Before a bank: none done, each line says how long it takes">
+					<TallySteps
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
+					/>
+				</State>
+				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="The catch-up evening: the rest come when the import is sorted">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="The evening, the history still coming in: no time promised">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="Questions ready: Your pay is next">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="Four drawn, the questions answered: the count line is later, and no line says Next">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="All five drawn, each with its day">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+									count: FIRST_WEEK_TODAY,
+								},
+								budgets: {},
+							},
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="home-setup"
+				title="HomeSetup"
+				tier="visual"
+				components={["HomeSetup"]}
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got. Once the questions are open, the Band says Three things to check."
+			>
+				<State label="Before a bank: Link a bank, with its line">
+					<HomeSetup
+						view={firstWeek(null, "before")}
+						linkBank={
+							<Button type="button" class="w-full">
+								Link a bank
+							</Button>
+						}
+					/>
+				</State>
+				<State label="Reading, the import fits one night: the evening line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							fitsOneNight: true,
+						})}
+					/>
+				</State>
+				<State label="Reading, the import takes more nights: the catch-up line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 1500,
+							sorted: 900,
+							fitsOneNight: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, the history still coming in: no time promised">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							historyIn: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, two banks: the line names neither">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
+						})}
+					/>
+				</State>
+				<State label="Reading, with a bank that stopped updating: its line under the status, in place of 'Nothing for you to do'">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+						})}
+						bankLine={["Chase stopped updating Oct 9"]}
+					/>
+				</State>
+				<State label="Questions ready: the three things to check">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "ready", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 362,
+							sorted: 362,
+						})}
+					/>
+				</State>
+				<State label="Questions answered: the ruled total, and no Band">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{ bankName: "Chase", drawn: 4, total: 362, sorted: 362 },
+						)}
+					/>
+				</State>
+			</Specimen>
 		</Group>
 	);
 }
+
+/** The first week's fake setup (P125 E): the household's day, and a setup view built from a fake record. */
+const FIRST_WEEK_TODAY = "2026-10-14";
+const firstWeek = (
+	record: FirstTally | null,
+	phase: SetupPhase,
+	extra: Partial<SetupView> = {},
+): SetupView => {
+	const view = {
+		phase,
+		drawn: strokesDrawn(record),
+		bankName: null,
+		bankCount: 1,
+		historyIn: true,
+		fitsOneNight: true,
+		sorted: 0,
+		total: 0,
+		...extra,
+	};
+	return {
+		...view,
+		steps: setupSteps(
+			record,
+			phase,
+			view.bankName,
+			FIRST_WEEK_TODAY,
+			view.historyIn && view.fitsOneNight,
+		),
+	};
+};
+const BANK_SYNCED: FirstTally = {
+	strokes: { bank: "2026-10-13" },
+	budgets: {},
+};
 
 /** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
 const MORE_TODAY = "2026-10-14";
@@ -943,6 +1210,7 @@ const HOME_MONTH_HEADING = (
 		month="2026-10"
 		firstMonth="2026-05"
 		currentMonth="2026-10"
+		results={DEMO_MONTH_RESULTS}
 	/>
 );
 
@@ -1186,7 +1454,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311). Each finished month's dot holds its mark (a check for under, a minus for over, an empty ring for no budgets), its link names the result in words, and an Over month names its biggest causes in one muted line under its stamp, linked to what it names (P132 A and P133 A, decision 121)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
@@ -1195,11 +1463,14 @@ function HomeTopGroup() {
 								month="2026-09"
 								firstMonth="2026-05"
 								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": 8600 }}
 							/>
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september"
 								monthName="September"
 								amountCents={8600}
+								unbudgeted={[{ name: "Kids", spentCents: 3000 }]}
 								rows={[
 									{
 										id: 1,
@@ -1263,13 +1534,169 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
+				<State label="An Over month with spending that had no budget: its cause line names the two largest and links to Not budgeted">
+					<Picture label="September 2026 ended $2,312 over; Rent $1,200 and Childcare $960 had no budget, so the line says Most of it had no budget and links down to them">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -231200 }}
+							/>
+							<MonthEnd
+								needsCategoryCents={0}
+								chartId="catalog-cause-no-budget"
+								monthName="September"
+								amountCents={-231200}
+								unbudgeted={[
+									{ name: "Childcare", spentCents: 96000 },
+									{ name: "Rent", spentCents: 120000 },
+								]}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 67200,
+										leftCents: 2800,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-no-budget"
+								items={[
+									{
+										name: "Childcare",
+										icon: "kids",
+										color: "cat-blue",
+										spentCents: 96000,
+									},
+									{
+										name: "Rent",
+										icon: "rent",
+										color: "cat-slate",
+										spentCents: 120000,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="An Over month with budgets over: its cause line names both and links to the bars">
+					<Picture label="September 2026 ended $220 over; Eating Out $180 and Kids $40 over their budgets, so the line says Most of it was over budget">
+						<div class="max-w-2xl">
+							<MonthEnd
+								needsCategoryCents={0}
+								chartId="catalog-cause-over-budget"
+								monthName="September"
+								amountCents={-22000}
+								unbudgeted={[]}
+								rows={[
+									{
+										id: 1,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+									{
+										id: 2,
+										name: "Kids",
+										budgetCents: 30000,
+										spentCents: 34000,
+										leftCents: -4000,
+										over: true,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="An Over month whose causes sit in two places: its over-budget category links to the bars and Needs a category to its row">
+					<Picture label="September 2026 ended $429 over; Eating Out finished $180 over its budget and $277 is Needs a category, so the line says Most of it and links each cause to where it's listed">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -42900 }}
+							/>
+							<MonthEnd
+								chartId="catalog-cause-two-places"
+								monthName="September"
+								amountCents={-42900}
+								unbudgeted={[]}
+								needsCategoryCents={27700}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 67200,
+										leftCents: 2800,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-two-places"
+								items={[]}
+								needsCategory={{ spentCents: 27700, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="The month strip on this month: its dot is a plain dot in an accent ring, and its link says so far">
+					<Picture label="October, so far, in the month strip: a plain dot in an accent ring, with the finished months' marks beside it">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-10"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="The month strip on a finished month: its mark in a bordered dot, its ink ring on the shown month, and its words name the result">
+					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with August over and May under beside it">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
+							/>
+						</div>
+					</Picture>
+				</State>
 				<State label="Uncategorized spending: the result takes it out, and Needs a category names it once">
 					<Picture label="$100 budget, $20 categorized and $50 uncategorized: $30 under, with Needs a category at the end of Not budgeted">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={5000}
 								chartId="catalog-needs-category"
 								monthName="September"
 								amountCents={3000}
+								unbudgeted={[]}
 								rows={[
 									{
 										id: 1,
@@ -1309,9 +1736,11 @@ function HomeTopGroup() {
 					<Picture label="A seven-figure finished amount in the 280px column of a 320px phone, one size smaller, with its Under stamp dropping beneath it">
 						<div class="w-[320px] max-w-full px-5">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-large-result"
 								monthName="September"
 								amountCents={100_000_000}
+								unbudgeted={[]}
 								rows={[
 									{
 										id: 1,
@@ -1330,9 +1759,11 @@ function HomeTopGroup() {
 					<Picture label="September 2026 ended with no budgets set: −$57 in ink as the result, with no Over or Under stamp">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september-no-budgets"
 								monthName="September"
 								amountCents={-5700}
+								unbudgeted={[]}
 								rows={[]}
 							/>
 						</div>
@@ -1345,6 +1776,7 @@ function HomeTopGroup() {
 								month="2026-10"
 								firstMonth="2025-11"
 								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
 							/>
 						</div>
 					</Picture>
@@ -1353,9 +1785,11 @@ function HomeTopGroup() {
 					<Picture label="Five categories in one row with no scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-five"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 5 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
@@ -1372,9 +1806,11 @@ function HomeTopGroup() {
 					<Picture label="Ten categories at lg, the last one over budget, with the budget word clear of its bar">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-ten-wide"
 								monthName="September"
 								amountCents={16000}
+								unbudgeted={[]}
 								rows={[
 									"Groceries",
 									"Eating Out",
@@ -1402,9 +1838,11 @@ function HomeTopGroup() {
 					<Picture label="Twelve categories in one row with a fade, arrow and sideways scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 12 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
@@ -1421,9 +1859,11 @@ function HomeTopGroup() {
 					<Picture label="The twelve-category chart cue stays still under reduced motion">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve-reduced-motion"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 12 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
@@ -1625,161 +2065,302 @@ function Rows() {
 			</Specimen>
 			<Specimen
 				id="bill-occurrence"
-				title="Bill occurrence and payment picker"
+				title="A bill's page: its head, its ledger of months, and the payment picker"
 				tier="visual"
-				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				components={[
+					"BillHead",
+					"LedgerMonth",
+					"LedgerDisclosure",
+					"LedgerPayments",
+					"LedgerPriceRow",
+					"PriceChanged",
+					"BillPaymentPicker",
+				]}
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
-				<State label="Paid occurrence">
+				<State label="Head: the name, its amount, the bank's text">
+					<div inert>
+						<BillHead
+							name="Streaming"
+							amount="$2.99 a month, due the 15th"
+							bankText="APPLE.COM/BILL"
+						/>
+					</div>
+				</State>
+				<State label="Paid, with its payment open">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 3,
-										displayName: "City Electric",
-										dateLabel: "Sep 24",
-										amountCents: 14200,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 15 · $2.99"
+								mark={<PaidCheck />}
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 77,
+											displayName: "Apple.com/bill",
+											dateLabel: "Oct 15",
+											amountCents: 299,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Paid in 2 payments">
+				<State label="Paid in 2 payments, closed">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-08"
-								label="August 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 4,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 1",
-										amountCents: 70000,
-										matchedBy: "user",
-									},
-									{
-										transactionId: 5,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 3",
-										amountCents: 50000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={120000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Paid in 2 payments · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Aug 2",
+											amountCents: 1299,
+											matchedBy: "auto",
+										},
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Aug 9",
+											amountCents: 500,
+											matchedBy: "user",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Part paid (this month's, still due)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 6,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="September"
+								words="Due · Part paid: $600 of $1,200"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Sep 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-09/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Part paid, an earlier month (Not paid)">
+				<State label="Part paid, an earlier month">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="not-paid"
-								payments={[
-									{
-										transactionId: 7,
-										displayName: "Harbor Property",
-										dateLabel: "Sep 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
-						</ul>
-					</div>
-				</State>
-				<State label="Unpaid occurrence">
-					<div inert>
-						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Part paid: $600 of $1,200"
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Aug 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-08/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Credit-corrected payment (reads unpaid)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: -10000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={0}
-								amountCents={120000}
+							<LedgerDisclosure
+								month="October"
+								words="Due Oct 1 · $1,200.00"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Harbor Property",
+											dateLabel: "Oct 1",
+											amountCents: -10000,
+											matchedBy: "user",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-10/link#payment-picker"
+								>
+									Link a payment
+								</Button>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Due, and nothing linked yet">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Due Nov 15 · $2.99"
 							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-12/link#payment-picker"
+								month="December"
+								words="Upcoming Dec 15 · $2.99"
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-07/link#payment-picker"
+								month="July"
+								words="Overdue Jul 15 · $2.99"
+								wordsClass="text-over"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="A charge Tally found, and a month with no payment">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-09/link?transaction_id=9#payment-picker"
+								month="September"
+								sub="A $2.99 charge on Sep 23 looks like this"
+								action={<span class="text-accent">Link it</span>}
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-08/link#payment-picker"
+								month="August"
+								words="No payment"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and closed">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-06/link#payment-picker"
+										month="June"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-05/link#payment-picker"
+										month="May"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-04/link#payment-picker"
+										month="April"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and open">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+								open
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Price changed? (the newest month asks)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October"
-								status="overdue"
-								priceOffer={{
-									transactionId: 7,
-									merchant: "Netflix",
-									amountCents: 1799,
-									dateLabel: "Oct 3",
-									billAmountCents: 1549,
-									currentCents: 1549,
-									frequency: "monthly",
-								}}
-							/>
+							<LedgerPriceRow month="October" words="Overdue Oct 14 · $15.49">
+								<PriceChanged
+									billId={1}
+									period="2026-10"
+									offer={{
+										transactionId: 7,
+										merchant: "Netflix",
+										amountCents: 1799,
+										dateLabel: "Oct 3",
+										billAmountCents: 1549,
+										currentCents: 1549,
+										frequency: "monthly",
+									}}
+								/>
+							</LedgerPriceRow>
 						</ul>
 					</div>
 				</State>
@@ -1899,42 +2480,49 @@ function Rows() {
 							month="October"
 						/>
 						<ul class="mt-4 divide-y divide-rule border-y border-rule">
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-11"
-								label="November · $17.99"
-								status="upcoming"
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Upcoming Nov 2 · $17.99"
 							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October · $17.99"
-								status="paid"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Netflix",
-										dateLabel: "Oct 2",
-										amountCents: 1799,
-										matchedBy: "auto",
-									},
-								]}
-							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September · $15.49"
-								status="paid"
-								payments={[
-									{
-										transactionId: 9,
-										displayName: "Netflix",
-										dateLabel: "Sep 2",
-										amountCents: 1549,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 2 · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Oct 2",
+											amountCents: 1799,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
+							<LedgerDisclosure
+								month="September"
+								words="Paid Sep 2 · $15.49"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Sep 2",
+											amountCents: 1549,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
@@ -3666,7 +4254,7 @@ function Controls() {
 				sentence="A primary, secondary, or quiet text action, rendered as a button or link."
 			>
 				<div class="flex flex-wrap gap-3">
-					{(["primary", "secondary", "text"] as const).map((kind) => (
+					{(["primary", "secondary", "text", "quiet"] as const).map((kind) => (
 						<>
 							<State label={`${kind}, rest`}>
 								<Button kind={kind} type="button">
@@ -3674,7 +4262,9 @@ function Controls() {
 										? "Save"
 										: kind === "secondary"
 											? "Cancel"
-											: "Archive"}
+											: kind === "quiet"
+												? "Remove"
+												: "Archive"}
 								</Button>
 							</State>
 							<State label={`${kind}, disabled`}>
@@ -3683,7 +4273,9 @@ function Controls() {
 										? "Save"
 										: kind === "secondary"
 											? "Cancel"
-											: "Archive"}
+											: kind === "quiet"
+												? "Remove"
+												: "Archive"}
 								</Button>
 							</State>
 						</>
@@ -4505,6 +5097,7 @@ function Controls() {
 				<State label="Saved, held still: Morgan's chevron gives way to the pencil tick, with Kids open (P119 A, #71)">
 					<div inert class="max-w-3xl border-t border-rule">
 						<HouseholdPeople
+							head={<SubpageHead title="People" titleId="people-title" />}
 							people={[
 								{ id: 1, name: "Everyone" },
 								{ id: 2, name: "Kids" },
@@ -5615,6 +6208,76 @@ function SettingsGroup() {
 	return (
 		<Group id="settings" title="Settings">
 			<Specimen
+				id="settings-contents"
+				title="Settings contents page"
+				tier="visual"
+				components={["SettingsContents", "ContentsList", "Band"]}
+				sentence="Settings is a short contents page drawn like More (P122 A, decision 120): each section's icon, its name, what it holds and a live count on a dotted leader, with the suggestions Band above the list. Each row opens its own page."
+			>
+				<State label="The demo's counts, with five suggestions to check">
+					<SettingsContents
+						waiting={5}
+						places={settingsPlaces({
+							categories: { count: 7, budgetCents: 394000 },
+							merchants: 3,
+							zone: "America/New_York",
+							bankEmailsOn: true,
+							people: 0,
+							aiOff: 0,
+							sorted: 23,
+							month: "2026-10",
+						})}
+					/>
+				</State>
+				<State label="Some switches off, two people, and no suggestions waiting">
+					<SettingsContents
+						waiting={0}
+						places={settingsPlaces({
+							categories: { count: 1, budgetCents: null },
+							merchants: 1,
+							zone: "America/Chicago",
+							bankEmailsOn: false,
+							people: 2,
+							aiOff: 2,
+							sorted: 1,
+							month: "2026-10",
+						})}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="settings-subpage"
+				title="Settings subpage head"
+				tier="visual"
+				components={["SubpageHead", "Switch"]}
+				sentence="Each Settings section is its own page: Settings is the first link, in reading order, then the section's name as the one h1 and its content. A switch in it saves when flipped (decision 120)."
+			>
+				<State label="Household, with the bank sign-in emails switch just flipped on">
+					<SubpageHead title="Household" titleId="catalog-household-title" />
+					<div inert class="mt-4">
+						<Switch
+							id="catalog-emails-switch"
+							name="enabled"
+							label="Bank sign-in emails"
+							checked
+							autofocus
+						/>
+					</div>
+				</State>
+				<State label="Categories">
+					<SubpageHead title="Categories" titleId="catalog-categories-title" />
+				</State>
+				<State label="AI suggestions">
+					<SubpageHead
+						title="AI suggestions"
+						titleId="catalog-ai-suggestions-title"
+					/>
+				</State>
+				<State label="Your data">
+					<SubpageHead title="Your data" titleId="catalog-your-data-title" />
+				</State>
+			</Specimen>
+			<Specimen
 				id="reconnect-reminders"
 				title="Bank sign-in emails"
 				tier="visual"
@@ -5654,6 +6317,12 @@ function SettingsGroup() {
 				<State label="More than 20 merchants · search and count">
 					<MerchantRules
 						id="catalog-merchant-rules"
+						head={
+							<SubpageHead
+								title="Tally's rules"
+								titleId="catalog-merchant-rules-title"
+							/>
+						}
 						today="2026-10-10"
 						total={34}
 						rules={[

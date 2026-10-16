@@ -650,7 +650,7 @@ async function renderList(
 			</div>
 			{firstVisit === null && peoplePrompt && (
 				<Band
-					href="/settings#household"
+					href="/settings/people"
 					detail="Add names Tally can suggest for who a purchase was for."
 				>
 					Add the people in your household
@@ -2506,7 +2506,7 @@ function EditSheet({
 					tx.refundOfId != null && (
 						<p class="text-sm text-muted">
 							Remove it in Settings, under{" "}
-							<a href="/settings#merchant-rules">Tally's rules</a>.
+							<a href="/settings/rules">Tally's rules</a>.
 						</p>
 					)}
 				<div class="flex flex-col gap-2 border-t border-rule pt-3">
@@ -3536,7 +3536,10 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 				back={back}
 				categories={categories}
 				values={values}
-				error={splitRefusedError(result.planLinked === true)}
+				error={splitRefusedError(
+					result.planLinked === true,
+					result.billLinked === true,
+				)}
 				today={today}
 				refunds={refunds}
 				choices={choices}
@@ -3548,12 +3551,17 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 
 /**
  * The words a refused split save says (saveSplit): a planned expense linked to a part, or moved between parts, after the
- * sheet was read, or the bank's amount changed. Only the amount change says the bank's amount moved.
+ * sheet was read, a bill payment on a part that changed since then, or the bank's amount changed. Only the amount change
+ * says the bank's amount moved.
+ *
+ * The bill-payment sentence is the owner's pick for #638 (Oct 16).
  */
-export const splitRefusedError = (planLinked: boolean) =>
+export const splitRefusedError = (planLinked: boolean, billLinked = false) =>
 	planLinked
 		? "A planned expense was just linked to one of these parts. Check the parts and save again."
-		: "The bank just changed this amount. Check the parts and save again.";
+		: billLinked
+			? "A bill payment on one of these parts just changed. Check the parts and save again."
+			: "The bank just changed this amount. Check the parts and save again.";
 
 /** What a split change unlinked: refunds by the date of their purchase, and bill payments by bill (decision 99). */
 type SplitChange = {

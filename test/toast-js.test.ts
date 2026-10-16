@@ -1434,6 +1434,123 @@ describe("focus on an Undo button that a failed request turned back on", () => {
 	});
 });
 
+// A switch whose auto-save fails goes back to how the page drew it (#606). Its form opts in with
+// data-switches-revert, and toast.js resets it: a browser's reset() puts each control back to its drawn
+// (default) state. The stand-in below does the same for checked. Other forms keep what was typed (decision 72).
+describe("a switch whose auto-save fails goes back to how the page drew it", () => {
+	/** A form holding one switch, drawn On or Off. `revert` is whether the form opts in. */
+	const switchForm = ({ revert = true, drawn = true } = {}) => {
+		const input = Object.assign(new FakeNode("input"), {
+			type: "checkbox",
+			name: "enabled",
+			checked: drawn,
+			defaultChecked: drawn,
+		});
+		const form = Object.assign(new FakeNode("form"), {
+			reset() {
+				input.checked = input.defaultChecked;
+			},
+		});
+		if (revert) form.setAttribute("data-switches-revert", "");
+		form.append(input);
+		return { form, input };
+	};
+	/** htmx 4's ctx for a switch that was flipped and posted; #handleTriggerEvent sets request.form. */
+	const flipped = (input: FakeNode, form: FakeNode, method = "POST") => ({
+		sourceElement: input,
+		request: { method, form },
+	});
+
+	it("puts a switch back to how the page drew it after a 500, and says it couldn't save", async () => {
+		const { document, toasts } = await page();
+		const { form, input } = switchForm({ drawn: true });
+		input.checked = false;
+		fire(document, "htmx:response:error", {
+			ctx: { ...flipped(input, form), response: { status: 500 } },
+		});
+		expect(input.checked).toBe(true);
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_SAVE);
+	});
+
+	it("puts a switch back to how the page drew it after a dropped connection", async () => {
+		const { document } = await page();
+		const { form, input } = switchForm({ drawn: false });
+		input.checked = true;
+		fire(document, "htmx:error", {
+			ctx: flipped(input, form),
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(input.checked).toBe(false);
+	});
+
+	it("puts a switch back to how the page drew it after a request times out", async () => {
+		const { document } = await page();
+		const { form, input } = switchForm({ drawn: true });
+		const ctx: {
+			sourceElement: FakeNode;
+			request: { method: string; form: FakeNode; abort: () => void };
+		} = {
+			sourceElement: input,
+			request: {
+				method: "POST",
+				form,
+				abort: vi.fn(() =>
+					fire(document, "htmx:error", {
+						ctx,
+						error: new DOMException("The operation was aborted.", "AbortError"),
+					}),
+				),
+			},
+		};
+		input.checked = false;
+		fire(document, "htmx:before:request", { ctx });
+		vi.advanceTimersByTime(60000);
+		expect(ctx.request.abort).toHaveBeenCalledTimes(1);
+		expect(input.checked).toBe(true);
+	});
+
+	it("does not reset a switch whose request was replaced by a newer one, since that flip is the one answered", async () => {
+		const { document, toasts } = await page();
+		const { form, input } = switchForm({ drawn: true });
+		input.checked = false;
+		fire(document, "htmx:error", {
+			ctx: flipped(input, form),
+			error: new DOMException("The operation was aborted.", "AbortError"),
+		});
+		expect(input.checked).toBe(false);
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("finds the switch's form from the switch when the request carries none", async () => {
+		const { document } = await page();
+		const { form, input } = switchForm({ drawn: true });
+		Object.assign(input, {
+			closest: (selector: string) => (selector === "form" ? form : null),
+		});
+		input.checked = false;
+		fire(document, "htmx:response:error", {
+			ctx: {
+				sourceElement: input,
+				request: { method: "POST" },
+				response: { status: 500 },
+			},
+		});
+		expect(input.checked).toBe(true);
+	});
+
+	it("leaves a form without data-switches-revert alone, so what was typed stays", async () => {
+		const { document } = await page();
+		const { form, input } = switchForm({ revert: false, drawn: true });
+		const reset = vi.spyOn(form, "reset");
+		input.checked = false;
+		fire(document, "htmx:response:error", {
+			ctx: { ...flipped(input, form), response: { status: 500 } },
+		});
+		expect(reset).not.toHaveBeenCalled();
+		expect(input.checked).toBe(false);
+	});
+});
+
 // #460: a form with an hx-disable guard turns its buttons off while its request runs, and htmx turns them
 // back on only after the request's finally event. So a failed request gives focus back to the button that
 // was pressed, once it is on again, unless the person has moved focus or the button has left the page.

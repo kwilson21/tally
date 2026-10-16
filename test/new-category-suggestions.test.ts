@@ -8,7 +8,7 @@ const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
 
-async function get(path = "/settings") {
+async function get(path = "/settings/categories") {
 	const res = await exports.default.fetch(BASE + path);
 	return { res, html: await res.text() };
 }

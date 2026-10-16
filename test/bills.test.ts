@@ -386,6 +386,9 @@ describe("Bills", () => {
 	});
 
 	it("offers all five frequencies and their cadence fields", async () => {
+		// Pinned, so "Next" is the same date whatever day the suite runs on (the afterEach restores the clock).
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
 		const form = await (
 			await exports.default.fetch("http://tally.test/bills/new")
 		).text();
@@ -1473,7 +1476,7 @@ describe("Bills", () => {
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
 		expect(html).toContain(`occurrences/${period}/link`);
-		expect(html).toContain("Not paid");
+		expect(html).toContain("No payment");
 	});
 
 	describe("a linked payment older than six months", () => {
@@ -1528,23 +1531,32 @@ describe("Bills", () => {
 	});
 
 	describe("a weekly bill's missed occurrences on its page", () => {
-		/** A Friday bill with no payments, as the page sees it on `today` (a household date). */
-		async function fridayPage(today: string) {
+		/**
+		 * A Friday bill with no payments, as the page sees it on `today` (a household date). Biweekly keeps the same
+		 * Friday, every two weeks from its anchor date.
+		 */
+		async function fridayPage(
+			today: string,
+			frequency: "weekly" | "biweekly" = "weekly",
+		) {
 			vi.useFakeTimers({ toFake: ["Date"] });
 			vi.setSystemTime(new Date(`${today}T16:00:00Z`));
 			await resetDemo(env.DB, today);
 			await env.DB.prepare("DELETE FROM bills").run();
 			await env.DB.prepare(
-				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name) VALUES(9501,'Friday fixture',24000,5,'weekly',5,'FRIDAY FIXTURE')",
-			).run();
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,category_id,merchant_raw_name,anchor_date) VALUES(9501,'Friday fixture',24000,5,?,5,'FRIDAY FIXTURE',?)",
+			)
+				.bind(frequency, frequency === "biweekly" ? "2026-10-02" : null)
+				.run();
 			return (
 				await exports.default.fetch("http://tally.test/bills/9501")
 			).text();
 		}
 
-		it("says Not paid for an unpaid Friday from an earlier month, and Bills shows the next one", async () => {
+		it("folds an unpaid Friday from an earlier month into No payment, and Bills shows the next one", async () => {
 			const html = await fridayPage("2026-11-02");
-			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Not paid");
+			expect(html).toContain("No payment");
+			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Link a payment");
 			expect(occurrenceRow(html, "Fri, Nov 6")).toContain("Due");
 			const bills = await (
 				await exports.default.fetch("http://tally.test/bills")
@@ -1552,12 +1564,23 @@ describe("Bills", () => {
 			expect(bills).toContain("Due Nov 6 · every Friday");
 		});
 
-		it("keeps each unpaid Friday this month overdue, and says Not paid only from an earlier month", async () => {
+		it("keeps each unpaid Friday this month overdue, and folds the earlier ones with no payment", async () => {
 			const html = await fridayPage("2026-10-16");
 			expect(occurrenceRow(html, "Fri, Oct 2")).toContain("Overdue");
 			expect(occurrenceRow(html, "Fri, Oct 9")).toContain("Overdue");
 			expect(occurrenceRow(html, "Fri, Oct 16")).toContain("Due");
-			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Not paid");
+			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Link a payment");
+		});
+
+		it("counts a folded weekly run in weeks", async () => {
+			const html = await fridayPage("2026-11-02");
+			expect(html).toMatch(/\b\d+ weeks with no payment\b/);
+		});
+
+		it("counts a folded biweekly run in two-week periods, not occurrences", async () => {
+			const html = await fridayPage("2026-11-02", "biweekly");
+			expect(html).toMatch(/\b\d+ two-week periods with no payment\b/);
+			expect(html).not.toContain("occurrences with no payment");
 		});
 	});
 
@@ -1963,11 +1986,11 @@ describe("Bills", () => {
 		expect(html).toContain("an early one stays in the month it was paid");
 	});
 
-	it("bill rows use drawn statuses, compact month labels, actions, and guidance", async () => {
+	it("bill rows use muted status words, compact month labels, actions, and guidance (#604)", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
-		expect(html).toContain("rounded-control bg-band");
+		expect(html).not.toContain("rounded-control bg-band");
 		expect(html).toContain('class="size-4"');
 		expect(html).toContain("-ml-2");
 		expect(html).toContain("Deactivate");

@@ -479,7 +479,7 @@ describe("GET /transactions/:id", () => {
 		const linked = (await get(`/transactions/${refund?.id}`)).html;
 		const sheet = linked.slice(linked.indexOf('role="dialog"'));
 		expect(sheet).toContain("Remove it in Settings, under");
-		expect(sheet).toContain('href="/settings#merchant-rules"');
+		expect(sheet).toContain('href="/settings/rules"');
 		expect(sheet).not.toContain("Untick it and save to remove the rule.");
 		expect(sheet).not.toContain("Use this category for");
 		const ordinary = (await get(`/transactions/${purchase?.id}`)).html;

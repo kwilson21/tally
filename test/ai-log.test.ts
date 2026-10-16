@@ -812,7 +812,9 @@ describe("the tally's lines", () => {
 	});
 
 	it("draws the tally inside the AI suggestions group, under its switches", async () => {
-		const html = await (await exports.default.fetch(`${BASE}/settings`)).text();
+		const html = await (
+			await exports.default.fetch(`${BASE}/settings/ai`)
+		).text();
 		const group =
 			html.split('id="ai-suggestions"')[1]?.split("</section>")[0] ?? "";
 		expect(group).toContain("Why? what Tally did");

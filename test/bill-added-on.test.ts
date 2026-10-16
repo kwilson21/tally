@@ -217,9 +217,15 @@ describe("the bill's own page leaves out a due date before the day the bill was 
 	afterAll(clean);
 
 	/** The Payments row whose label reads `${label} · ${amount}`, or "" when the page lists none. */
+	// A month's row names the month in its own span, and its status and amount follow it in muted words (#604).
 	const paymentRow = (html: string, label: string) =>
 		(
-			html.split("<li").find((item) => item.includes(`>${label} · `)) ?? ""
+			html
+				.split("<li")
+				.find(
+					(item) =>
+						item.includes(`>${label}<`) || item.includes(`>${label} · `),
+				) ?? ""
 		).split("</li>")[0] ?? "";
 
 	/** The bill's page as the household sees it at `now` (an ISO instant). */
