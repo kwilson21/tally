@@ -71,7 +71,7 @@ export type NothingAsked = "every-category-budgeted" | "no-categories";
 export function nothingAskedLine(reason: NothingAsked): string {
 	return reason === "every-category-budgeted"
 		? "Every category already has a budget."
-		: "There are no categories to budget yet.";
+		: "No categories to budget yet.";
 }
 
 /** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
@@ -169,7 +169,8 @@ export function budgetChangedWords(name: string): string {
 
 /**
  * The reply to an answer for a category that isn't the first one asked: the page moved on, so nothing is saved and the
- * first question is asked again. It is not budgetChangedWords, since no suggestion changed.
+ * first question is asked again. It is not budgetChangedWords, since no suggestion changed. It is also the reply to a form
+ * drawn in another household month, which writes nothing.
  */
 export function budgetsMovedOnWords(): string {
 	return "Nothing saved. The categories changed since the page drew, so the next one is asked below.";

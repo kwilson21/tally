@@ -249,7 +249,7 @@ describe("GET /design-system in the demo", () => {
 				.split('id="first-page-budgets-nothing-asked"')[1]
 				?.split('id="first-page-budgets-no-categories"')[0] ?? "";
 		expect(section).toContain("Every category already has a budget.");
-		expect(section).not.toContain("There are no categories to budget yet.");
+		expect(section).not.toContain("No categories to budget yet.");
 		expect(
 			section.indexOf("Every category already has a budget."),
 		).toBeLessThan(section.indexOf("border-double"));
@@ -262,11 +262,11 @@ describe("GET /design-system in the demo", () => {
 			html
 				.split('id="first-page-budgets-no-categories"')[1]
 				?.split('id="first-page-budgets-done"')[0] ?? "";
-		expect(section).toContain("There are no categories to budget yet.");
+		expect(section).toContain("No categories to budget yet.");
 		expect(section).not.toContain("Every category already has a budget.");
-		expect(
-			section.indexOf("There are no categories to budget yet."),
-		).toBeLessThan(section.indexOf("border-double"));
+		expect(section.indexOf("No categories to budget yet.")).toBeLessThan(
+			section.indexOf("border-double"),
+		);
 	});
 
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {

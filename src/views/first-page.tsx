@@ -361,14 +361,17 @@ const budgetForm = {
 
 /**
  * The keep all question (spec §8.8, #590): the suggestions as a list (the first five; the rest folded), the total in the
- * question, the one tap "Keep all N", and a quiet "One at a time" that asks each category in turn.
+ * question, the one tap "Keep all N", and a quiet "One at a time" that asks each category in turn. Each budgets form carries
+ * the month it showed.
  */
 function KeepAllBudgets({
 	asks,
+	month,
 	needs,
 	focus,
 }: {
 	asks: BudgetAsk[];
+	month: string;
 	needs: { count: number; meanCents: number | null } | null;
 	focus: boolean;
 }) {
@@ -414,6 +417,7 @@ function KeepAllBudgets({
 				{asks.map((ask) => (
 					<input type="hidden" name="keep" value={shownBudgetValue(ask)} />
 				))}
+				<input type="hidden" name="month" value={month} />
 				<div class="mt-3">
 					<Button type="submit" name="answer" value="all" class="w-full">
 						Keep all {asks.length}
@@ -439,7 +443,7 @@ function KeepAllBudgets({
  * blank MoneyInput; then a quiet Skip this one. A refused amount keeps the question with its error in the field.
  * Each answer is a form of its own, so Enter in the amount field presses only its Save: a form's default button is its
  * first submit button, and the Yes form has no amount in it (#590). `amountOpen` draws Another amount open, as a
- * refused amount does, for the catalog's picture.
+ * refused amount does, for the catalog's picture. Each budgets form carries the month it showed.
  */
 function OneBudget({
 	ask,
@@ -472,6 +476,7 @@ function OneBudget({
 	const category = (
 		<input type="hidden" name="category" value={String(ask.id)} />
 	);
+	const shownMonth = <input type="hidden" name="month" value={month} />;
 	return (
 		<section>
 			<p class="mt-6 text-base text-muted">{bankLine(ask)}</p>
@@ -497,6 +502,7 @@ function OneBudget({
 				<>
 					<form {...budgetForm}>
 						{category}
+						{shownMonth}
 						<input
 							type="hidden"
 							name="shown"
@@ -514,6 +520,7 @@ function OneBudget({
 						</summary>
 						<form {...budgetForm}>
 							{category}
+							{shownMonth}
 							<div class="mt-3">{amount}</div>
 							<div class="mt-3">
 								<Button
@@ -531,6 +538,7 @@ function OneBudget({
 			) : (
 				<form {...budgetForm}>
 					{category}
+					{shownMonth}
 					<div class="mt-4">{amount}</div>
 					<div class="mt-3">
 						<Button type="submit" name="answer" value="another" class="w-full">
@@ -541,6 +549,7 @@ function OneBudget({
 			)}
 			<form {...budgetForm}>
 				{category}
+				{shownMonth}
 				<div class="mt-1">
 					<Button kind="text" type="submit" name="answer" value="skip">
 						Skip this one
@@ -572,6 +581,7 @@ export function BudgetsQuestion({
 		return (
 			<KeepAllBudgets
 				asks={step.asks.filter((ask) => ask.suggestion !== null)}
+				month={step.month}
 				needs={step.needs}
 				focus={focus}
 			/>

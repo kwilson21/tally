@@ -235,7 +235,8 @@ firstPage.post("/first-page/bills", async (c) => {
  * Keep does. One category's Yes keeps its suggestion when the amount is the one the page showed; another amount is read
  * by the budget sheet's own rule (parseBudgetAmount); a skip keeps the skip. An answer for a category that isn't the first
  * one asked writes nothing, and the first question is asked again (#697). A change since the page drew is asked again,
- * and a refused amount draws the question again with its error. Each answer is one batch with its budget and the stroke.
+ * and a refused amount draws the question again with its error. A form drawn in another household month writes nothing
+ * and gets the current month's question. Each answer is one batch with its budget and the stroke.
  */
 firstPage.post("/first-page/budgets", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
@@ -251,6 +252,9 @@ firstPage.post("/first-page/budgets", async (c) => {
 	});
 	const step = before.budgets;
 	if (!step || step.done) return stale(c, before);
+	// A form drawn in another household month writes nothing, since its amounts and 'From <month> on' were for that month.
+	if (form.get("month") !== step.month)
+		return answered(c, before, budgetsMovedOnWords(), NO_MOTION, "info");
 	if (answer === "all") {
 		const suggested = step.asks.filter((ask) => ask.suggestion !== null);
 		const values = form

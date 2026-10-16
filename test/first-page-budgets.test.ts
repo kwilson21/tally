@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_TIME_ZONE,
 	daysBefore,
+	daysInMonth,
 	monthName,
 	monthsBefore,
 	todayIn,
@@ -68,6 +69,10 @@ async function post(
 	htmx = true,
 	DB: D1Database = db,
 ) {
+	// A budgets form carries the household month it showed; a test posts the current one unless it names another.
+	const withMonth = fields.some(([name]) => name === "month")
+		? fields
+		: [...fields, ["month", CUR]];
 	const res = await app(DB).fetch(path, {
 		method: "POST",
 		redirect: "manual",
@@ -75,7 +80,7 @@ async function post(
 			"content-type": "application/x-www-form-urlencoded",
 			...(htmx ? { "HX-Request": "true" } : {}),
 		},
-		body: new URLSearchParams(fields).toString(),
+		body: new URLSearchParams(withMonth).toString(),
 	});
 	return { res, html: await res.text() };
 }
@@ -114,6 +119,13 @@ const defaultButtonOf = (form: string) =>
 /** The heading that takes focus (its autofocus), or null when none does. */
 const focusedHeading = (html: string) =>
 	/<h2[^>]*autofocus[^>]*>([^<]*)<\/h2>/.exec(html)?.[1] ?? null;
+
+/** The budgets forms on a page, as their markup. */
+const budgetFormsOf = (html: string) =>
+	formsOf(html).filter((form) => form.includes('action="/first-page/budgets"'));
+
+/** How many times `needle` appears in `text`. */
+const countOf = (text: string, needle: string) => text.split(needle).length - 1;
 
 const trigger = (res: Response) =>
 	JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as {
@@ -673,9 +685,7 @@ describe("the step's end", () => {
 		expect(html).not.toContain("budget?");
 		// Every category was answered (skipped), so the line for a step with nothing to ask is not the one said.
 		expect(textOf(html)).not.toContain("Every category already has a budget.");
-		expect(textOf(html)).not.toContain(
-			"There are no categories to budget yet.",
-		);
+		expect(textOf(html)).not.toContain("No categories to budget yet.");
 	});
 
 	it("says neither line once every category is answered with an amount, since those budgets are the family's own (#692 review)", async () => {
@@ -691,7 +701,7 @@ describe("the step's end", () => {
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
 		expect(text).not.toContain("Every category already has a budget.");
-		expect(text).not.toContain("There are no categories to budget yet.");
+		expect(text).not.toContain("No categories to budget yet.");
 	});
 
 	it("draws the budgets stroke at once when no category is left to ask", async () => {
@@ -1186,14 +1196,14 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 		expect(text).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
-		expect(text).not.toContain("There are no categories to budget yet.");
+		expect(text).not.toContain("No categories to budget yet.");
 	});
 
 	it("says there are no categories to budget, not that they are budgeted, when every category is archived (#692 review)", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
 		const text = textOf((await get("/first-page")).html);
-		expect(text).toContain("There are no categories to budget yet.");
-		expect(text.indexOf("There are no categories to budget yet.")).toBeLessThan(
+		expect(text).toContain("No categories to budget yet.");
+		expect(text.indexOf("No categories to budget yet.")).toBeLessThan(
 			text.indexOf("Safe to spend"),
 		);
 		expect(text).not.toContain("Every category already has a budget.");
@@ -1217,6 +1227,174 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
 		expect(text).not.toContain("Every category already has a budget.");
-		expect(text).not.toContain("There are no categories to budget yet.");
+		expect(text).not.toContain("No categories to budget yet.");
+	});
+});
+
+describe("the budgets forms carry the month they showed (#692 review)", () => {
+	it("every budgets form on keep all, on one at a time, and on a category with no suggestion carries the month once", async () => {
+		const keepAll = await get("/first-page");
+		const oneAtATime = await get("/first-page?budgets=one");
+		// Skip A and B, so C, the category with no suggestion, is the one asked: its blank Another amount and Skip.
+		for (const id of [A, B]) {
+			await post("/first-page/budgets", [
+				["category", String(id)],
+				["answer", "skip"],
+			]);
+		}
+		const noSuggestion = await get("/first-page?budgets=one");
+		expect(focusedHeading(noSuggestion.html)).toBe(
+			`Do you want a ${nameC} budget?`,
+		);
+		for (const { html } of [keepAll, oneAtATime, noSuggestion]) {
+			const forms = budgetFormsOf(html);
+			expect(forms.length).toBeGreaterThan(0);
+			for (const form of forms)
+				expect(countOf(form, `name="month" value="${CUR}"`)).toBe(1);
+		}
+	});
+});
+
+describe("a form drawn in one month and posted in the next (#692 review)", () => {
+	const DRAWN = `${CUR}-${daysInMonth(CUR)}T16:00:00Z`;
+	const NEXT = monthsBefore(CUR, -1);
+	const POSTED = `${NEXT}-01T16:00:00Z`;
+	const MOVED_ON = {
+		message:
+			"Nothing saved. The categories changed since the page drew, so the next one is asked below.",
+		type: "info",
+	};
+
+	beforeEach(async () => {
+		// This month's spending: on the 1st the window takes it in, so each amount stays the same across the rollover.
+		await spend(A, 66600, `${CUR}-01`);
+		await spend(B, 15000, `${CUR}-01`);
+		await spend(D, 100000100, `${CUR}-01`);
+		vi.useFakeTimers({ toFake: ["Date"] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** Nothing was written: no budget for any category, no answer recorded, and no budgets stroke. */
+	async function nothingWritten() {
+		for (const id of [A, B, C, D]) {
+			expect(await budgetRows(id)).toEqual([]);
+			expect(await recordedBudget(id)).toBeUndefined();
+		}
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+	}
+
+	/** The fields one budgets form posts as it drew them: its hidden inputs, and the answer its button sends. */
+	function postedBy(html: string, answer: string): [string, string][] {
+		const form =
+			budgetFormsOf(html).find((candidate) =>
+				candidate.includes(`name="answer" value="${answer}"`),
+			) ?? "";
+		return [
+			...["category", "shown", "keep", "month"].flatMap((name) =>
+				hiddenFields(form, name),
+			),
+			["answer", answer],
+		];
+	}
+
+	it.each([
+		{ label: "keep all", path: "/first-page", answer: "all", extra: [] },
+		{
+			label: "Yes",
+			path: "/first-page?budgets=one",
+			answer: "yes",
+			extra: [],
+		},
+		{
+			label: "Another amount",
+			path: "/first-page?budgets=one",
+			answer: "another",
+			extra: [["budget", "100"]] as [string, string][],
+		},
+		{
+			label: "Skip",
+			path: "/first-page?budgets=one",
+			answer: "skip",
+			extra: [],
+		},
+	])(
+		"$label, drawn in one month and posted in the next, writes nothing and draws the next month's question",
+		async ({ path, answer, extra }) => {
+			vi.setSystemTime(new Date(DRAWN));
+			const drawn = await get(path);
+			vi.setSystemTime(new Date(POSTED));
+			const fields = [...postedBy(drawn.html, answer), ...extra];
+			const res = await post("/first-page/budgets", fields);
+			expect(res.res.status).toBe(200);
+			expect(trigger(res.res).toast).toEqual(MOVED_ON);
+			expect(trigger(res.res).announce).toBe(MOVED_ON.message);
+			await nothingWritten();
+			for (const form of budgetFormsOf(res.html))
+				expect(countOf(form, `name="month" value="${NEXT}"`)).toBe(1);
+			if (answer === "all") {
+				expect(focusedHeading(res.html)).toBe(
+					"Keep all 2 budgets, $800 a month?",
+				);
+			} else {
+				expect(focusedHeading(res.html)).toBe(
+					`Make $650 a month your ${nameA} budget?`,
+				);
+				expect(textOf(res.html)).toContain(`From ${monthName(NEXT)} on.`);
+			}
+			// Without JavaScript the same answer is a redirect back to the page, and it writes nothing.
+			const plain = await post("/first-page/budgets", fields, false);
+			expect(plain.res.status).toBe(303);
+			expect(plain.res.headers.get("location")).toBe("/first-page");
+			await nothingWritten();
+		},
+	);
+
+	it("a last-month Another amount with a refused amount gets the moved-on reply at 200, with no error and nothing typed", async () => {
+		vi.setSystemTime(new Date(DRAWN));
+		const drawn = await get("/first-page?budgets=one");
+		vi.setSystemTime(new Date(POSTED));
+		const res = await post("/first-page/budgets", [
+			...postedBy(drawn.html, "another"),
+			["budget", "lots"],
+		]);
+		expect(res.res.status).toBe(200);
+		expect(trigger(res.res).toast).toEqual(MOVED_ON);
+		expect(res.html).not.toContain('role="alert"');
+		expect(res.html).not.toContain('value="lots"');
+		await nothingWritten();
+	});
+
+	it("a post with an empty month, from a tab drawn before the month was on its forms, writes nothing and gets the moved-on reply", async () => {
+		vi.setSystemTime(new Date(POSTED));
+		const res = await post("/first-page/budgets", [
+			["category", String(A)],
+			["shown", "65000"],
+			["month", ""],
+			["answer", "yes"],
+		]);
+		expect(trigger(res.res).toast).toEqual(MOVED_ON);
+		await nothingWritten();
+	});
+
+	it("a post with no month at all, from a tab drawn before the month was on its forms, writes nothing and gets the moved-on reply", async () => {
+		vi.setSystemTime(new Date(POSTED));
+		const res = await app(db).fetch("/first-page/budgets", {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				"HX-Request": "true",
+			},
+			body: new URLSearchParams([
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			]).toString(),
+		});
+		expect(trigger(res).toast).toEqual(MOVED_ON);
+		await nothingWritten();
 	});
 });
