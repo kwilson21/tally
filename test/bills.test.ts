@@ -1473,7 +1473,7 @@ describe("Bills", () => {
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
 		expect(html).toContain(`occurrences/${period}/link`);
-		expect(html).toContain("Not paid");
+		expect(html).toContain("No payment");
 	});
 
 	describe("a linked payment older than six months", () => {
@@ -1542,9 +1542,10 @@ describe("Bills", () => {
 			).text();
 		}
 
-		it("says Not paid for an unpaid Friday from an earlier month, and Bills shows the next one", async () => {
+		it("folds an unpaid Friday from an earlier month into No payment, and Bills shows the next one", async () => {
 			const html = await fridayPage("2026-11-02");
-			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Not paid");
+			expect(html).toContain("No payment");
+			expect(occurrenceRow(html, "Fri, Oct 30")).toContain("Link a payment");
 			expect(occurrenceRow(html, "Fri, Nov 6")).toContain("Due");
 			const bills = await (
 				await exports.default.fetch("http://tally.test/bills")
@@ -1552,12 +1553,12 @@ describe("Bills", () => {
 			expect(bills).toContain("Due Nov 6 · every Friday");
 		});
 
-		it("keeps each unpaid Friday this month overdue, and says Not paid only from an earlier month", async () => {
+		it("keeps each unpaid Friday this month overdue, and folds the earlier ones with no payment", async () => {
 			const html = await fridayPage("2026-10-16");
 			expect(occurrenceRow(html, "Fri, Oct 2")).toContain("Overdue");
 			expect(occurrenceRow(html, "Fri, Oct 9")).toContain("Overdue");
 			expect(occurrenceRow(html, "Fri, Oct 16")).toContain("Due");
-			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Not paid");
+			expect(occurrenceRow(html, "Fri, Sep 25")).toContain("Link a payment");
 		});
 	});
 
@@ -1963,11 +1964,11 @@ describe("Bills", () => {
 		expect(html).toContain("an early one stays in the month it was paid");
 	});
 
-	it("bill rows use drawn statuses, compact month labels, actions, and guidance", async () => {
+	it("bill rows use muted status words, compact month labels, actions, and guidance (#604)", async () => {
 		const html = await (
 			await exports.default.fetch("http://tally.test/bills/1")
 		).text();
-		expect(html).toContain("rounded-control bg-band");
+		expect(html).not.toContain("rounded-control bg-band");
 		expect(html).toContain('class="size-4"');
 		expect(html).toContain("-ml-2");
 		expect(html).toContain("Deactivate");

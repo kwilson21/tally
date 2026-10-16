@@ -945,9 +945,24 @@ describe("GET /design-system in the demo", () => {
 		// DESIGN.md says what each component does with it.
 		expect(design).toMatch(/\| BillRow \|[^\n]*Price changed\?[^\n]*in ink/);
 		expect(design).toMatch(
-			/\| BillOccurrenceRow \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
+			/\| PriceChanged \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
 		);
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
+	});
+
+	it("shows the ledger's states in the bill page's specimen: paid, found, folded closed and open, and no filled pill (#604)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		for (const words of [
+			"Paid Oct 15 · $2.99",
+			"A $2.99 charge on Sep 23 looks like this",
+			"April to August",
+			"5 months with no payment",
+			"Due · Part paid: $600 of $1,200",
+		])
+			expect(page).toContain(words);
+		expect(page).not.toContain("rounded-control bg-band px-2");
 	});
 
 	it("says in the price offer's use spec what Update checks, with no count of prices (#422)", async () => {
@@ -1001,8 +1016,7 @@ describe("GET /design-system in the demo", () => {
 		const start = html.search(/Part paid \(this month(&#39;|')s, still due\)/);
 		const end = html.indexOf("Part paid, an earlier month", start);
 		const state = start > -1 && end > start ? html.slice(start, end) : "";
-		expect(state).toMatch(/>Due<\/span>/);
-		expect(state).toContain("Part paid: $600 of $1,200");
+		expect(state).toContain("Due · Part paid: $600 of $1,200");
 		expect(state).not.toContain("Overdue");
 	});
 

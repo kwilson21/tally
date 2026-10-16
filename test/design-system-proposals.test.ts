@@ -4792,9 +4792,10 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			`Option A, a bill&#39;s page, with April to August opened${PHONE}`,
 			`Option A, a bill&#39;s page${DESK}`,
 		]) {
+			// A paid month is a disclosure (#604): its summary is the row, and its payment and Not this one open under it.
 			const row =
 				picture(chunk, label).match(
-					/<a href="\/bills\/1\/occurrences\/2026-10\/link#payment-picker"[\s\S]*?<\/a>/,
+					/<li><details class="group"[\s\S]*?<\/summary>/,
 				)?.[0] ?? "";
 			expect(row, label).toContain("October");
 			expect(row, label).toContain("Paid Oct 15 · $2.99");
