@@ -4,6 +4,8 @@ import { formatCents } from "../money";
 import { Button } from "./button";
 import { Chip } from "./chip";
 import { EmptyState } from "./empty-state";
+import { FoldedRow } from "./folded-row";
+import { CLOSEST_PAYMENTS, PaymentRow } from "./payment-row";
 
 export type PaymentPickerCandidate = {
 	id: number;
@@ -54,33 +56,31 @@ export function BillMonthExplanation({
 	);
 }
 
-/** One payment as a radio chip. The first chip in the list is required, so the group needs a choice. */
-function PaymentChip({
+/** The payment rows, each a PaymentRow whose month explanation is fetched when it is chosen. The first is required, so the group needs a choice. */
+function BillPaymentRows({
 	billId,
-	candidate,
-	index,
+	listed,
 	selectedTransactionId,
 }: {
 	billId: number;
-	candidate: PaymentPickerCandidate;
-	index: number;
+	listed: { candidate: PaymentPickerCandidate; index: number }[];
 	selectedTransactionId?: number;
 }) {
 	return (
-		<Chip
-			type="radio"
-			name="transaction_id"
-			value={String(candidate.id)}
-			// Nothing is chosen for the person; one required radio makes the group required.
-			required={index === 0}
-			checked={candidate.id === selectedTransactionId}
-			hx-get={`/bills/${billId}/month-explanation`}
-			hx-include="[name='transaction_id'],[name='period']"
-			hx-target="#bill-month-explanation"
-			hx-swap="innerHTML"
-		>
-			{`${candidate.displayName} · ${candidate.dateLabel} · ${formatCents(candidate.amountCents)}${candidate.excluded ? " · Excluded" : ""}`}
-		</Chip>
+		<>
+			{listed.map(({ candidate, index }) => (
+				<PaymentRow
+					candidate={candidate}
+					// Nothing is chosen for the person; one required radio makes the group required.
+					required={index === 0}
+					checked={candidate.id === selectedTransactionId}
+					hx-get={`/bills/${billId}/month-explanation`}
+					hx-include="[name='transaction_id'],[name='period']"
+					hx-target="#bill-month-explanation"
+					hx-swap="innerHTML"
+				/>
+			))}
+		</>
 	);
 }
 
@@ -138,6 +138,26 @@ export function BillPaymentPicker({
 	const listed = ordered.map((candidate, index) => ({ candidate, index }));
 	const regular = listed.filter(({ candidate }) => !candidate.turnedAway);
 	const turnedAway = listed.filter(({ candidate }) => candidate.turnedAway);
+	// Past five payments, the rest fold under "Show all N charges", and the turned-away ones come last inside it (#645, P138 A).
+	const folds = candidates.length > CLOSEST_PAYMENTS;
+	const drawn = regular.slice(0, CLOSEST_PAYMENTS);
+	const folded = regular.slice(CLOSEST_PAYMENTS);
+	// The fold opens when the checked payment is inside it, or when no payment is drawn outside it.
+	const foldOpen =
+		drawn.length === 0 ||
+		[...folded, ...turnedAway].some(
+			({ candidate }) => candidate.id === selectedTransactionId,
+		);
+	const turnedAwayGroup = turnedAway.length ? (
+		<fieldset class="mt-2">
+			<legend class="text-sm text-muted">You said not this one</legend>
+			<BillPaymentRows
+				billId={billId}
+				listed={turnedAway}
+				selectedTransactionId={selectedTransactionId}
+			/>
+		</fieldset>
+	) : null;
 	return (
 		<section
 			id="payment-picker"
@@ -167,30 +187,27 @@ export function BillPaymentPicker({
 					{candidates.length ? (
 						<fieldset>
 							<legend>Payment</legend>
-							<div class="mt-1 flex flex-col gap-2">
-								{regular.map(({ candidate, index }) => (
-									<PaymentChip
-										billId={billId}
-										candidate={candidate}
-										index={index}
-										selectedTransactionId={selectedTransactionId}
-									/>
-								))}
-								{turnedAway.length ? (
-									<fieldset class="flex flex-col gap-2">
-										<legend class="text-sm text-muted">
-											You said not this one
-										</legend>
-										{turnedAway.map(({ candidate, index }) => (
-											<PaymentChip
-												billId={billId}
-												candidate={candidate}
-												index={index}
-												selectedTransactionId={selectedTransactionId}
-											/>
-										))}
-									</fieldset>
-								) : null}
+							<div class="mt-1">
+								<BillPaymentRows
+									billId={billId}
+									listed={drawn}
+									selectedTransactionId={selectedTransactionId}
+								/>
+								{folds ? (
+									<FoldedRow
+										label={`Show all ${candidates.length} charges`}
+										open={foldOpen}
+									>
+										<BillPaymentRows
+											billId={billId}
+											listed={folded}
+											selectedTransactionId={selectedTransactionId}
+										/>
+										{turnedAwayGroup}
+									</FoldedRow>
+								) : (
+									turnedAwayGroup
+								)}
 							</div>
 						</fieldset>
 					) : (

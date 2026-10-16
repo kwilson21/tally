@@ -2105,7 +2105,8 @@ describe("a payer with no name of its own shows the bank's text, tidied, as bill
 		const picker = await (
 			await exports.default.fetch(`${BASE}/plans/${planId}`)
 		).text();
-		expect(picker).toContain(`${tidied} · `);
+		// The picker's row names the payment with its tidied bank text, then its date and amount.
+		expect(picker).toContain(`>${tidied}</span>`);
 		expect(picker).not.toContain("null");
 
 		await post(`/plans/${planId}/link`, { transaction_id: String(tx) });
