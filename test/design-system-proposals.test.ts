@@ -4894,6 +4894,49 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(rules.match(/City Gym · Always Household/g)?.length).toBe(1);
 	});
 
+	it("draws each rule's visible line hidden from speech, with its spoken sentence beside it, and reads each rule row as the spec says", async () => {
+		const settings = block(await drawn(), "p134-settings");
+		const rules = picture(
+			optionOf(
+				settings,
+				"Option A · A contents page, each section its own page",
+			),
+			"Option A, rules, on a phone",
+		);
+		const NAMES = ["City Gym", "Procreate Dreams", "YouTube Premium"];
+		for (const name of NAMES) {
+			// The visible line is aria-hidden, and its spoken sentence is the sr-only span right after it.
+			expect(rules, name).toContain(
+				`<span aria-hidden="true">${name} · Always Household · 2 transactions</span><span class="sr-only">${name} is always Household, 2 transactions</span>`,
+			);
+		}
+		inOrder(
+			rules,
+			NAMES.map((name) => `${name} is always Household, 2 transactions`),
+		);
+		// What a screen reader reads of each row: its hidden line and icon left out, its tags stripped.
+		const list = rules.slice(rules.indexOf("<ul"), rules.indexOf("</ul>"));
+		const items = [...list.matchAll(/<li [^>]*>[\s\S]*?<\/li>/g)].map(
+			(m) => m[0],
+		);
+		expect(items).toHaveLength(3);
+		for (const [i, item] of items.entries()) {
+			const name = NAMES[i] ?? "";
+			const spoken = item
+				.replace(/<span aria-hidden="true">[\s\S]*?<\/span>/g, "")
+				.replace(/<svg[\s\S]*?<\/svg>/g, "")
+				.replace(/<[^>]+>/g, "")
+				.replace(/\s+/g, " ")
+				.trim();
+			expect(
+				spoken.startsWith(`${name} is always Household, 2 transactions`),
+				name,
+			).toBe(true);
+			expect(spoken, name).not.toContain("·");
+			expect(spoken.endsWith(`Remove ${name}`), name).toBe(true);
+		}
+	});
+
 	it("draws Household's category icon in cat-brown before each rule's line, in the rules' order", async () => {
 		const settings = block(await drawn(), "p134-settings");
 		const rules = picture(
@@ -4952,7 +4995,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		]);
 	});
 
-	it("draws P135's pictures: Today three at 390, A three at 390 and the Suggestions page at 1280, B three at 390", async () => {
+	it("draws P135's pictures: Today three at 390, A four at 390 and the Suggestions page at 1280, B three at 390", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
 		expect(labels(optionOf(suggestions, "Reference · Today on main"))).toEqual([
 			"Reference, Settings card, on a phone",
@@ -4967,6 +5010,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 				),
 			),
 		).toEqual([
+			"Option A, Categories page, on a phone",
 			"Option A, Settings card, on a phone",
 			"Option A, Suggestions page, on a phone",
 			"Option A, Organize, on a phone",
@@ -4979,6 +5023,56 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			"Option B, Suggestions page, on a phone",
 			"Option B, Organize, on a phone",
 		]);
+	});
+
+	it("draws A's Categories page at 390 as its own page: the back link, its title, the seven categories, then the card under the list", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const option = optionOf(
+			suggestions,
+			"Option A · One card, one set of words, everywhere",
+		);
+		const page = picture(option, "Option A, Categories page, on a phone");
+		// Unscrolled, so the demo banner shows; the card's lower part falls below the fold, as on a real phone.
+		expect(page).toContain("Demo data. Nothing here is real.");
+		inOrder(page, [
+			'<a href="/settings" class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline">',
+			'<h1 class="mt-2 font-serif text-4xl font-semibold tracking-tight">Categories</h1>',
+			">Groceries</span>",
+			">Eating Out</span>",
+			">Gas</span>",
+			">Kids</span>",
+			">Household</span>",
+			">Childcare</span>",
+			">Rent</span>",
+			"A new category: Pet Care",
+		]);
+		expect(page).not.toMatch(/<h2[^>]*>Categories<\/h2>/);
+	});
+
+	it("draws A's Settings card further down Categories, with no heading of its own, Childcare and Rent before the card", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const option = optionOf(
+			suggestions,
+			"Option A · One card, one set of words, everywhere",
+		);
+		const card = picture(option, "Option A, Settings card, on a phone");
+		// Scrolled: no banner, and the first five categories are above it.
+		expect(card).not.toContain("Demo data. Nothing here is real.");
+		expect(card).not.toMatch(/<h2[^>]*>Categories<\/h2>/);
+		expect(card).not.toContain(">Groceries</span>");
+		inOrder(card, [
+			">Childcare</span>",
+			">Rent</span>",
+			"A new category: Pet Care",
+		]);
+	});
+
+	it("gives every category row on P134 and P135 its own ids, so no cat-NNNN id is drawn twice", async () => {
+		const ids = [
+			...audit(await drawn()).matchAll(/ id="(cat-\d+-[^"]+)"/g),
+		].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(new Set(ids).size).toBe(ids.length);
 	});
 
 	it("draws today's three places with their own words: the dashed card, two headlines, and Organize with no suggestion", async () => {
@@ -5046,6 +5140,85 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			expect(pic).not.toContain("Dismiss");
 			expect(pic).not.toContain("Suggested: ");
 		}
+	});
+
+	it("draws one unticked row on A's Suggestions page at 390, Chewy's, with its optional note under the label in the same row, and no other picture has one", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const option = optionOf(
+			suggestions,
+			"Option A · One card, one set of words, everywhere",
+		);
+		const page = picture(option, "Option A, Suggestions page, on a phone");
+		// Three checkboxes, and only Chewy's (transaction 7101, the last row) is unticked.
+		const boxes = [...page.matchAll(/<input type="checkbox"[^>]*>/g)].map(
+			(m) => m[0],
+		);
+		expect(boxes).toHaveLength(3);
+		const unticked = boxes.filter((box) => !box.includes(" checked"));
+		expect(unticked).toHaveLength(1);
+		const chewy = page.indexOf(">Chewy</span>");
+		const row = page.slice(
+			page.lastIndexOf("<li>", chewy),
+			page.indexOf("</li>", chewy),
+		);
+		expect(row).toContain(unticked[0]);
+		// The note's wrapper follows Chewy's label, inside the same row, and the field names the transaction.
+		const labelEnd = row.indexOf("</label>") + "</label>".length;
+		const field = row.indexOf('<input id="p135-a-note-7101"');
+		expect(field).toBeGreaterThan(labelEnd);
+		expect(row.slice(labelEnd, field)).toContain('<div class="pb-2">');
+		expect(row).toContain('for="p135-a-note-7101"');
+		expect(row).toContain(">A note for Chewy (optional)</label>");
+		const input = row.match(/<input id="p135-a-note-7101"[^>]*>/)?.[0] ?? "";
+		expect(input).toContain('name="note_7101"');
+		expect(input).toContain('maxlength="500"');
+		expect(input).toContain('placeholder="Only used if you untick it"');
+		expect(input).toContain('aria-describedby="p135-a-note-7101-hint"');
+		expect(row).toContain(
+			'<p id="p135-a-note-7101-hint" class="text-sm text-muted">Tally sorts it again right away, with your note.</p>',
+		);
+		// The field comes before the hint under the list.
+		expect(page.indexOf('id="p135-a-note-7101"')).toBeLessThan(
+			page.indexOf(esc("Untick any that don't belong.")),
+		);
+		// No other option's picture has the field: not A's Categories page, the Settings card, Organize, the 1280 picture, or B.
+		// Today's reference keeps the hidden note fields its card has always drawn, so it is left out of this check.
+		for (const label of labels(suggestions)) {
+			if (label.startsWith("Reference,")) continue;
+			if (label === "Option A, Suggestions page, on a phone") continue;
+			expect(picture(suggestions, label), label).not.toContain(
+				"A note for Chewy",
+			);
+		}
+	});
+
+	it("keeps today's reference card's own note fields, note-7101 to note-7103, and gives A's unticked note a new id", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const reference = picture(
+			optionOf(suggestions, "Reference · Today on main"),
+			"Reference, Settings card, on a phone",
+		);
+		for (const id of [7101, 7102, 7103]) {
+			expect(reference, `note-${id}`).toContain(`id="note-${id}"`);
+		}
+	});
+
+	it("says in A's note that an unticked row keeps its optional note, and that the Settings card sits on A's Categories page", async () => {
+		const suggestions = block(await drawn(), "p135-suggestions");
+		const note = optionOf(
+			suggestions,
+			"Option A · One card, one set of words, everywhere",
+		);
+		expect(note).toContain(
+			esc(
+				"An unticked row keeps its optional note, as today's card does, and Tally sorts it again with it.",
+			),
+		);
+		expect(note).toContain(
+			esc(
+				"The Settings card sits on A's Categories page, under the list (P134 A, decision 120).",
+			),
+		);
 	});
 
 	it("lists Pet Care's rows newest first in every card and on the Suggestions pages, as the demo does", async () => {
@@ -5161,6 +5334,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			"Skip, on the Suggestions page only, leaves it waiting (decision 120)",
 		);
 		expect(paragraph).not.toContain("Not now");
+	});
+
+	it("says in spec §7 that a rule row is read aloud with its count, as the drawing reads it", () => {
+		expect(spec).toContain(
+			'read aloud as "Costco is always Groceries, 23 transactions"',
+		);
 	});
 
 	it("says the More → Settings suggestions Band leads to the one review for every waiting suggestion", () => {

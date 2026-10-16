@@ -25,6 +25,7 @@ import { Icon } from "../views/icons";
 import { NewCategoryChip } from "../views/new-category-choice";
 import { SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
+import { TextInput } from "../views/text-input";
 import { WhyLink } from "../views/why-link";
 import { Fixed } from "./proposal-parts";
 import { tx } from "./proposals-phase5-transactions";
@@ -150,19 +151,22 @@ const PLACES: Place[] = [
 const RULES = [
 	{
 		name: "City Gym",
-		line: "Always Household · 2 transactions",
+		category: "Household",
+		count: "2 transactions",
 		icon: "household",
 		color: "cat-brown",
 	},
 	{
 		name: "Procreate Dreams",
-		line: "Always Household · 2 transactions",
+		category: "Household",
+		count: "2 transactions",
 		icon: "household",
 		color: "cat-brown",
 	},
 	{
 		name: "YouTube Premium",
-		line: "Always Household · 2 transactions",
+		category: "Household",
+		count: "2 transactions",
 		icon: "household",
 		color: "cat-brown",
 	},
@@ -282,6 +286,24 @@ function SettingsHead() {
 	);
 }
 
+/** A subpage's back link to Settings and its title, as Settings' own pages draw them (Household, Rules, Categories). */
+function SubpageHead({ title }: { title: string }) {
+	return (
+		<>
+			<a
+				href="/settings"
+				class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline"
+			>
+				<Icon name="chevron" class="size-5 rotate-180" />
+				Settings
+			</a>
+			<h1 class="mt-2 font-serif text-4xl font-semibold tracking-tight">
+				{title}
+			</h1>
+		</>
+	);
+}
+
 /** The Suggestions page as src/routes/suggestions.tsx draws it: Settings' link, the count, then the card in a 3xl column. */
 function SuggestionsPage({ children }: { children?: Child }) {
 	return (
@@ -295,14 +317,22 @@ function SuggestionsPage({ children }: { children?: Child }) {
 	);
 }
 
-/** Categories as main draws them: each row a real CategoryRow, its ids numbered from `base` so no two pictures share one. */
-function CategoryRows({ base, count }: { base: number; count: number }) {
+/** Categories as main draws them: each row a real CategoryRow, its ids numbered from `base` so no two pictures share one. `from` starts the list further down. */
+function CategoryRows({
+	base,
+	count,
+	from = 0,
+}: {
+	base: number;
+	count: number;
+	from?: number;
+}) {
 	return (
 		<div class="mt-3 border-t border-rule">
-			{CATEGORIES.slice(0, count).map((c, i) => (
+			{CATEGORIES.slice(from, from + count).map((c, i) => (
 				<CategoryRow
 					category={{ ...c, id: base + i }}
-					first={i === 0}
+					first={from + i === 0}
 					last={i === count - 1}
 					open={false}
 					focus={false}
@@ -476,16 +506,7 @@ function RecipientsCopy() {
 function HouseholdPage() {
 	return (
 		<>
-			<a
-				href="/settings"
-				class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline"
-			>
-				<Icon name="chevron" class="size-5 rotate-180" />
-				Settings
-			</a>
-			<h1 class="mt-2 font-serif text-4xl font-semibold tracking-tight">
-				Household
-			</h1>
+			<SubpageHead title="Household" />
 			<div class="mt-4 border-t border-rule">
 				<TimeRow />
 				<Switch
@@ -504,16 +525,7 @@ function HouseholdPage() {
 function RulesPage() {
 	return (
 		<>
-			<a
-				href="/settings"
-				class="flex min-h-11 items-center gap-1 text-lg text-ink no-underline"
-			>
-				<Icon name="chevron" class="size-5 rotate-180" />
-				Settings
-			</a>
-			<h1 class="mt-2 font-serif text-4xl font-semibold tracking-tight">
-				Tally's rules
-			</h1>
+			<SubpageHead title="Tally's rules" />
 			<h2 class="mt-6 font-serif text-2xl font-semibold">
 				Always for these merchants
 			</h2>
@@ -522,7 +534,12 @@ function RulesPage() {
 					<li class="flex min-h-11 items-center justify-between gap-4 py-3">
 						<CategoryIcon icon={rule.icon} color={rule.color} />
 						<span class="min-w-0 flex-1 text-lg wrap-anywhere">
-							{rule.name} · {rule.line}
+							<span aria-hidden="true">
+								{`${rule.name} · Always ${rule.category} · ${rule.count}`}
+							</span>
+							<span class="sr-only">
+								{`${rule.name} is always ${rule.category}, ${rule.count}`}
+							</span>
 						</span>
 						<a
 							href="/settings"
@@ -572,9 +589,16 @@ function TidyTop() {
 /**
  * P135 A's one card: the same words and rows wherever Tally asks a person about Pet Care, with decision 89's Why? after
  * No. The quiet answer is No, which retires the suggestion (decision 120). `skip` adds the Suggestions page's Skip link under it,
- * as the route draws it; the Settings card has none.
+ * as the route draws it; the Settings card has none. `unticked` is a transaction whose row is unticked, with its optional
+ * note under it, as today's card draws it (decision 120); only the picture that shows one passes it.
  */
-function OneCard({ skip = false }: { skip?: boolean }) {
+function OneCard({
+	skip = false,
+	unticked,
+}: {
+	skip?: boolean;
+	unticked?: number;
+}) {
 	return (
 		<>
 			<div class={CARD}>
@@ -589,13 +613,32 @@ function OneCard({ skip = false }: { skip?: boolean }) {
 					{PET_ROWS.map((row) => (
 						<li>
 							<label class="flex min-h-11 flex-wrap items-center gap-x-3 py-2">
-								<input type="checkbox" checked class="size-5 accent-ink" />
+								<input
+									type="checkbox"
+									checked={row.id !== unticked}
+									class="size-5 accent-ink"
+								/>
 								<span class="min-w-0 flex-1 wrap-anywhere">
 									{row.displayName}
 								</span>
 								<span class="tabular-nums">{exact(row.amountCents)}</span>
 								<span class="text-muted">{day(row.date)}</span>
 							</label>
+							{row.id === unticked && (
+								<div class="pb-2">
+									<TextInput
+										id={`p135-a-note-${row.id}`}
+										name={`note_${row.id}`}
+										label={`A note for ${row.displayName} (optional)`}
+										value=""
+										maxlength={500}
+										placeholder="Only used if you untick it"
+										hint="Tally sorts it again right away, with your note."
+										surface="paper"
+										class="w-full"
+									/>
+								</div>
+							)}
 						</li>
 					))}
 				</ul>
@@ -886,19 +929,30 @@ function P135() {
 					name="Option A · One card, one set of words, everywhere"
 					picked
 					width="w-full"
-					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and No, with Why? after No. No retires the suggestion, as Dismiss does today. Skip is a link under the card on the Suggestions page only. Organize shows a short form of the card above its chips, with its two answers."
+					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and No, with Why? after No. No retires the suggestion, as Dismiss does today. An unticked row keeps its optional note, as today's card does, and Tally sorts it again with it. Skip is a link under the card on the Suggestions page only. The Settings card sits on A's Categories page, under the list (P134 A, decision 120). Organize shows a short form of the card above its chips, with its two answers."
 					cost="SuggestionReview and the Settings card become one view; Organize reads the waiting suggestions."
 					why="a person learns the card once, and Organize stops asking about a merchant Tally already has an answer for."
 				>
-					<Shot caption="Settings' card, at 390">
+					<Shot caption="Settings › Categories at 390: its own page, the card under the list">
+						<Phone label="Option A, Categories page" tab="more" masthead={PILL}>
+							<SubpageHead title="Categories" />
+							<CategoryRows base={9300} count={7} />
+							<div class="mt-4">
+								<OneCard />
+							</div>
+						</Phone>
+					</Shot>
+					<Shot caption="Further down Categories: the card in full">
 						<Phone
 							label="Option A, Settings card"
 							scrolled
 							tab="more"
 							masthead={PILL}
 						>
-							<h2 class="font-serif text-3xl font-semibold">Categories</h2>
-							<OneCard />
+							<CategoryRows base={9400} from={5} count={2} />
+							<div class="mt-4">
+								<OneCard />
+							</div>
 						</Phone>
 					</Shot>
 					<Shot caption="The Suggestions page, at 390">
@@ -908,7 +962,7 @@ function P135() {
 							masthead={PILL}
 						>
 							<SuggestionsPage>
-								<OneCard skip />
+								<OneCard skip unticked={7101} />
 							</SuggestionsPage>
 						</Phone>
 					</Shot>
