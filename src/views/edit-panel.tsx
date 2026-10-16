@@ -981,14 +981,13 @@ export function EditSheet({
 								This bank credit is held out of spending until you identify it.
 							</p>
 						)}
-						<Chip
-							type="checkbox"
+						<Switch
+							id="edit-credit-reviewed"
 							name="creditReviewed"
 							value="1"
+							label="Reviewed as a refund or other non-income credit"
 							checked={values.creditReviewed}
-						>
-							Reviewed as a refund or other non-income credit
-						</Chip>
+						/>
 					</div>
 				)}
 				{tx.accountType !== "cash" && tx.parentId === null && (

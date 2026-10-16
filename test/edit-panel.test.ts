@@ -223,6 +223,64 @@ describe("Exclude and Count as income are switches (P120 B)", () => {
 	});
 });
 
+describe("Reviewed as a refund is a switch (decision 111)", () => {
+	it("draws the credit's review as a switch with its label, posting 1 and on when reviewed", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, flag_income = 0, income_source = NULL, credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const panel = panelOf((await get(`/transactions/${bakery}`)).html);
+		const review = inputTag(panel, "creditReviewed");
+		expect(review).toContain('role="switch"');
+		expect(review).toContain('id="edit-credit-reviewed"');
+		expect(review).toContain('value="1"');
+		expect(review).toContain("checked");
+		expect(panel).toContain('id="edit-credit-reviewed-label"');
+		expect(panel).toContain(
+			">Reviewed as a refund or other non-income credit</span>",
+		);
+	});
+
+	it("draws no review switch for a purchase, which is not a credit", async () => {
+		const panel = panelOf((await get(`/transactions/${bakery}`)).html);
+		expect(panel).not.toContain('name="creditReviewed"');
+	});
+
+	it("saves the ticked switch as the review it records", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET amount_cents = -500, flag_income = 0, income_source = NULL, credit_reviewed = 0, credit_reviewed_by = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const groceries = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Groceries'",
+			).first<{ id: number }>()
+		)?.id;
+		const { res } = await post(`/transactions/${bakery}`, {
+			category: String(groceries),
+			name_pick: "own",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			income_was: "0",
+			creditReviewed: "1",
+			creditReviewedVisible: "1",
+			creditReviewed_was: "0",
+		});
+		expect(res.status).toBeLessThan(400);
+		expect(
+			await env.DB.prepare(
+				"SELECT credit_reviewed, credit_reviewed_by FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first(),
+		).toMatchObject({ credit_reviewed: 1, credit_reviewed_by: "user" });
+	});
+});
+
 describe("Organize's category sheet uses the same grid (#498)", () => {
 	it("draws its choices as the two-column grid, not a wrapping row", async () => {
 		const { html } = await post("/transactions/select/category", {

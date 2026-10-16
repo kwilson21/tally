@@ -1065,6 +1065,15 @@ describe("GET /design-system in the demo", () => {
 		expect(title).toContain("autofocus");
 		expect(html).toContain("Count as income");
 		expect(html).toContain("Reviewed as a refund or other non-income credit");
+		// The sheet draws both as the edit panel does: switches, not chips (P120 B, decision 111).
+		for (const name of ["ds-income", "ds-credit-reviewed"]) {
+			const at = html.indexOf(`name="${name}"`);
+			const tag = html.slice(
+				html.lastIndexOf("<input", at),
+				html.indexOf(">", at),
+			);
+			expect(tag).toContain('role="switch"');
+		}
 		expect(design).toMatch(
 			/Edit panel layout[^\n]*Count as income[^\n]*Reviewed as a refund or other non-income credit/,
 		);

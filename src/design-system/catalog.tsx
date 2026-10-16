@@ -6793,16 +6793,21 @@ export function SheetSpecimen() {
 					</p>
 					<div class="mt-4 flex flex-col gap-3 border-t border-rule pt-3">
 						<p class="text-base text-ink">Income</p>
-						<div class="flex flex-wrap gap-2">
-							<Chip type="checkbox" name="ds-income" value="1">
-								Count as income
-							</Chip>
-						</div>
+						<Switch
+							id="ds-income"
+							name="ds-income"
+							value="1"
+							label="Count as income"
+						/>
 					</div>
-					<div class="mt-3 flex flex-wrap gap-2 border-t border-rule pt-3">
-						<Chip type="checkbox" name="ds-credit-reviewed" value="1" checked>
-							Reviewed as a refund or other non-income credit
-						</Chip>
+					<div class="mt-3 flex flex-col gap-2 border-t border-rule pt-3">
+						<Switch
+							id="ds-credit-reviewed"
+							name="ds-credit-reviewed"
+							value="1"
+							label="Reviewed as a refund or other non-income credit"
+							checked
+						/>
 					</div>
 					<Button
 						href="/design-system#bottom-sheet"
