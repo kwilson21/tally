@@ -4,10 +4,17 @@ import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { parseBudgetAmount } from "../budgets/amount";
 import type { Bank } from "../db/accounts";
+import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import type { BankHead, FirstPageModel } from "../first-tally/first-page";
+import {
+	type SetupPhase,
+	type SetupView,
+	setupSteps,
+	strokesDrawn,
+} from "../first-tally/setup";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -62,6 +69,7 @@ import {
 } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
+import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
 import {
@@ -102,6 +110,7 @@ import {
 	NewCategoryName,
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
+import { Notebook } from "../views/notebook";
 import { PendingNote } from "../views/pending-note";
 import {
 	PlanBand,
@@ -128,6 +137,7 @@ import { StartHere } from "../views/start-here";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
+import { TallySteps } from "../views/tally-steps";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -462,9 +472,252 @@ function Brand() {
 			>
 				<LedgerIllustration />
 			</Specimen>
+			<Specimen
+				id="notebook"
+				title="Notebook"
+				tier="visual"
+				components={["Notebook"]}
+				sentence="The first week's notebook with its tally strokes drawn so far, in ink (P125 E, decision 114). The strokes are its five lines in order, four short ones and then the slash. LedgerIllustration is this notebook with all five drawn."
+			>
+				<State label="None drawn: the notebook before a bank">
+					<Notebook strokes={0} ink size="size-24" />
+				</State>
+				<State label="Two drawn, in ink">
+					<Notebook strokes={2} ink size="size-24" />
+				</State>
+				<State label="All five drawn, in ink">
+					<Notebook strokes={5} ink size="size-24" />
+				</State>
+			</Specimen>
+			<Specimen
+				id="tally-steps"
+				title="TallySteps"
+				tier="visual"
+				components={["TallySteps"]}
+				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; Next marks the line to act on once the questions are open, and the words carry the state."
+			>
+				<State label="Before a bank: none done, each line says how long it takes">
+					<TallySteps
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
+					/>
+				</State>
+				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="The catch-up evening: the rest come when the import is sorted">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="The evening, the history still coming in: no time promised">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
+				<State label="Questions ready: Your pay is next">
+					<TallySteps
+						steps={setupSteps(
+							BANK_SYNCED,
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="Four drawn, the questions answered: the count line is later, and no line says Next">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+				<State label="All five drawn, each with its day">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+									count: FIRST_WEEK_TODAY,
+								},
+								budgets: {},
+							},
+							"ready",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							true,
+						)}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="home-setup"
+				title="HomeSetup"
+				tier="visual"
+				components={["HomeSetup"]}
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got. Once the questions are open, the Band says Three things to check."
+			>
+				<State label="Before a bank: Link a bank, with its line">
+					<HomeSetup
+						view={firstWeek(null, "before")}
+						linkBank={
+							<Button type="button" class="w-full">
+								Link a bank
+							</Button>
+						}
+					/>
+				</State>
+				<State label="Reading, the import fits one night: the evening line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							fitsOneNight: true,
+						})}
+					/>
+				</State>
+				<State label="Reading, the import takes more nights: the catch-up line">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 1500,
+							sorted: 900,
+							fitsOneNight: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, the history still coming in: no time promised">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+							historyIn: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, two banks: the line names neither">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
+						})}
+					/>
+				</State>
+				<State label="Reading, with a bank that stopped updating: its line under the status, in place of 'Nothing for you to do'">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 40,
+						})}
+						bankLine={["Chase stopped updating Oct 9"]}
+					/>
+				</State>
+				<State label="Questions ready: the three things to check">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "ready", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 362,
+							sorted: 362,
+						})}
+					/>
+				</State>
+				<State label="Questions answered: the ruled total, and no Band">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{ bankName: "Chase", drawn: 4, total: 362, sorted: 362 },
+						)}
+					/>
+				</State>
+			</Specimen>
 		</Group>
 	);
 }
+
+/** The first week's fake setup (P125 E): the household's day, and a setup view built from a fake record. */
+const FIRST_WEEK_TODAY = "2026-10-14";
+const firstWeek = (
+	record: FirstTally | null,
+	phase: SetupPhase,
+	extra: Partial<SetupView> = {},
+): SetupView => {
+	const view = {
+		phase,
+		drawn: strokesDrawn(record),
+		bankName: null,
+		bankCount: 1,
+		historyIn: true,
+		fitsOneNight: true,
+		sorted: 0,
+		total: 0,
+		...extra,
+	};
+	return {
+		...view,
+		steps: setupSteps(
+			record,
+			phase,
+			view.bankName,
+			FIRST_WEEK_TODAY,
+			view.historyIn && view.fitsOneNight,
+		),
+	};
+};
+const BANK_SYNCED: FirstTally = {
+	strokes: { bank: "2026-10-13" },
+	budgets: {},
+};
 
 /** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
 const MORE_TODAY = "2026-10-14";

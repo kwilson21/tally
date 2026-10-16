@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 import { plaid } from "../src/routes/plaid";
@@ -501,8 +502,11 @@ describe("Plaid routes", () => {
 		expect(JSON.stringify([...response.headers])).not.toContain("item-1");
 		expect(JSON.stringify(errors.mock.calls)).not.toContain("item-1");
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			toast: { message: "Linked First Bank.", type: "success" },
-			announce: "Linked First Bank.",
+			toast: {
+				message: "First Bank is linked. Tally's reading your last 90 days.",
+				type: "success",
+			},
+			announce: "First Bank is linked. Tally's reading your last 90 days.",
 		});
 		const row = await env.DB.prepare(
 			"SELECT access_token_encrypted, institution_name, linked_by, plaid_item_id FROM plaid_items",
@@ -515,6 +519,13 @@ describe("Plaid routes", () => {
 		expect(row?.institution_name).toBe("First Bank");
 		expect(row?.linked_by).toBe("family.member@example.com");
 		expect(row?.plaid_item_id).toBe("item-1");
+		// Linking draws stroke one on the household's day, in the same batch (spec §8.8).
+		const record = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(record?.value ?? "null")?.strokes.bank).toBe(
+			todayIn(DEFAULT_TIME_ZONE),
+		);
 		expect(
 			await decryptToken(row?.access_token_encrypted as ArrayBuffer, KEY),
 		).toBe("access-private");
@@ -549,8 +560,11 @@ describe("Plaid routes", () => {
 
 		expect(response.status).toBe(204);
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
-			toast: { message: "Linked Your bank.", type: "success" },
-			announce: "Linked Your bank.",
+			toast: {
+				message: "Your bank is linked. Tally's reading your last 90 days.",
+				type: "success",
+			},
+			announce: "Your bank is linked. Tally's reading your last 90 days.",
 		});
 		const row = await env.DB.prepare(
 			"SELECT access_token_encrypted, institution_name FROM plaid_items",
@@ -681,6 +695,53 @@ describe("Plaid routes", () => {
 			)?.n,
 		).toBe(0);
 		expect(JSON.stringify(errors.mock.calls)).not.toContain("access-private");
+	});
+
+	it("removes the Plaid item when reading the first week fails after the exchange", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const plaidRequests: string[] = [];
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', 'not json') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		).run();
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			if (String(input).includes("cloudflareaccess.com")) {
+				return Response.json({ keys: [jwk] });
+			}
+			plaidRequests.push(String(input));
+			if (String(input).endsWith("/item/public_token/exchange")) {
+				return Response.json({
+					access_token: "access-private",
+					item_id: "item-first-week",
+				});
+			}
+			if (String(input).endsWith("/item/get")) {
+				return Response.json({ item: {} });
+			}
+			return Response.json({ request_id: "req-remove" });
+		});
+		try {
+			const response = await post(
+				"/plaid/exchange",
+				jwt,
+				"public_token=single-use",
+			);
+			expect(response.status).toBe(502);
+			expect(plaidRequests.at(-1)).toBe(
+				"https://sandbox.plaid.com/item/remove",
+			);
+			expect(
+				(
+					await env.DB.prepare("SELECT COUNT(*) n FROM plaid_items").first<{
+						n: number;
+					}>()
+				)?.n,
+			).toBe(0);
+		} finally {
+			await env.DB.prepare(
+				"DELETE FROM household_settings WHERE key = 'first_tally'",
+			).run();
+		}
 	});
 
 	it("rejects a duplicate Plaid item id and removes the second Item", async () => {
