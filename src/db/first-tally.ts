@@ -147,6 +147,38 @@ export function takeBackBankStrokes(
 		.bind(KEY, disconnectingId);
 }
 
+/**
+ * The statement that takes a bank's deposits out of the pay record when its history is deleted: each Yes and No deposit
+ * whose transaction belongs to the bank goes, and a merchant left with neither loses its place. A merchant keeps only
+ * the keys it still has deposits under, so one the bank never paid comes out as it was. It runs while the bank
+ * is still connected (as takeBackBankStrokes checks), so a second submit changes nothing, and it is one UPDATE, so the
+ * read and the write of the record happen in one statement.
+ */
+export function forgetPayDeposits(
+	db: D1Database,
+	itemId: number,
+): D1PreparedStatement {
+	const kept = (answer: "yes" | "no") =>
+		`(SELECT json_group_object(d.key, json(d.value)) FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+	const hasKept = (answer: "yes" | "no") =>
+		`EXISTS (SELECT 1 FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
+	return db
+		.prepare(
+			`WITH gone AS (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id = ?2)
+			UPDATE household_settings SET value = json_set(value, '$.pay', json((
+				SELECT json_group_object(m.key, json(json_patch(json_object('at', json_extract(m.value, '$.at')), json_patch(
+					CASE WHEN ${hasKept("yes")} THEN json_object('yes', json(${kept("yes")})) ELSE '{}' END,
+					CASE WHEN ${hasKept("no")} THEN json_object('no', json(${kept("no")})) ELSE '{}' END
+				))))
+				FROM json_each(household_settings.value, '$.pay') AS m
+				WHERE ${hasKept("yes")} OR ${hasKept("no")}
+			)))
+			WHERE key = ?1 AND json_type(value, '$.pay') IS NOT NULL
+				AND EXISTS (SELECT 1 FROM plaid_items WHERE id = ?2 AND disconnected_at IS NULL)`,
+		)
+		.bind(KEY, itemId);
+}
+
 /** Keeps the budgets step's answer for a category. The newest answer for a category replaces the one before it. */
 export async function keepBudgetAnswer(
 	db: D1Database,
@@ -183,8 +215,9 @@ export async function keepNightCounts(
  * keyed object, `{"yes": {…}}` or `{"no": {…}}`, and json_patch merges it key by key: a deposit answered before keeps its
  * entry, a new one adds to it, and a No adds to `no` without touching `yes`. The merchant's key is bound as a value and
  * merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch also
- * creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
- * answered, which are never removed) for a merchant new to the record, and the place it already has for one answered again.
+ * creates `pay` on a record that has none yet. `at` is the merchant's place: one past the highest place on the record for a
+ * merchant new to it (a bank's history can take merchants off the record, forgetPayDeposits, so a count could repeat a
+ * place), and the place it already has for one answered again.
  */
 export function payAnswerStatement(
 	db: D1Database,
@@ -196,7 +229,7 @@ export function payAnswerStatement(
 			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
 			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json_set(json(?3), '$.at', COALESCE(
 				(SELECT json_extract(p.value, '$.at') FROM json_each(household_settings.value, '$.pay') AS p WHERE p.key = ?2),
-				(SELECT COUNT(*) FROM json_each(household_settings.value, '$.pay')))))))`,
+				(SELECT COALESCE(MAX(json_extract(p.value, '$.at')) + 1, 0) FROM json_each(household_settings.value, '$.pay') AS p))))))`,
 		)
 		.bind(KEY, merchant, JSON.stringify(record));
 }

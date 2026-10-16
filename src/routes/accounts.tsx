@@ -3,7 +3,7 @@ import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
-import { takeBackBankStrokes } from "../db/first-tally";
+import { forgetPayDeposits, takeBackBankStrokes } from "../db/first-tally";
 import { hxTrigger } from "../htmx";
 import { netWorthView } from "../net-worth";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
@@ -333,8 +333,10 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 	// disconnect comes last, so a second submit (another tab kept the history) deletes nothing.
 	const stillConnected =
 		"EXISTS (SELECT 1 FROM plaid_items WHERE id = ? AND disconnected_at IS NULL)";
+	// The pay record's copies of the deposits go first, since they are found through the bank's transactions.
 	const statements = deleteHistory
 		? [
+				forgetPayDeposits(c.env.DB, item.id),
 				c.env.DB.prepare(
 					`DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id = ?) AND ${stillConnected}`,
 				).bind(item.id, item.id),
