@@ -17,7 +17,9 @@ import {
 	bankLine,
 	keepAllHeading,
 	keepAllLine,
+	type NothingAsked,
 	needsTail,
+	nothingAskedLine,
 	RULED_STATUS,
 	shownBudgetValue,
 	suggestionNote,
@@ -590,7 +592,7 @@ export function BudgetsQuestion({
 
 /**
  * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
- * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says so above the rule.
+ * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says why above the rule.
  */
 export function RuledTotal({
 	safeCents,
@@ -599,14 +601,14 @@ export function RuledTotal({
 }: {
 	safeCents: number;
 	focus: boolean;
-	/** True when every category already has a budget (nothing was asked), so the step says so. */
-	nothingAsked: boolean;
+	/** Why the step asked nothing, which the muted line above the rule says; null when it says nothing. */
+	nothingAsked: NothingAsked | null;
 }) {
 	return (
 		<section>
-			{nothingAsked && (
+			{nothingAsked !== null && (
 				<p class="mt-6 text-base text-muted">
-					Every category already has a budget.
+					{nothingAskedLine(nothingAsked)}
 				</p>
 			)}
 			<div class="mt-6 border-b-[3px] border-double border-ink" />

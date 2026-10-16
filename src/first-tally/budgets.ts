@@ -61,6 +61,19 @@ export function shownBudgetIds(values: string[]): number[] {
 	return [...ids];
 }
 
+/**
+ * Why a drawn budgets step asked nothing: every active category already has a budget, or there is no active category to
+ * budget. The step's muted line says which (nothingAskedLine).
+ */
+export type NothingAsked = "every-category-budgeted" | "no-categories";
+
+/** The muted line above the ruled-off total when the budgets step asked nothing, for the reason given. */
+export function nothingAskedLine(reason: NothingAsked): string {
+	return reason === "every-category-budgeted"
+		? "Every category already has a budget."
+		: "There are no categories to budget yet.";
+}
+
 /** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
 function andList(items: string[]): string {
 	if (items.length <= 1) return items[0] ?? "";
@@ -152,6 +165,14 @@ export function skippedBudgetWords(name: string): string {
 /** The reply when a suggestion moved since the page drew: nothing saved, and the question is asked again. */
 export function budgetChangedWords(name: string): string {
 	return `Nothing saved. ${name}'s suggestion changed since the page drew, so it's asked again below.`;
+}
+
+/**
+ * The reply to an answer for a category that isn't the first one asked: the page moved on, so nothing is saved and the
+ * first question is asked again. It is not budgetChangedWords, since no suggestion changed.
+ */
+export function budgetsMovedOnWords(): string {
+	return "Nothing saved. The categories changed since the page drew, so the next one is asked below.";
 }
 
 /**

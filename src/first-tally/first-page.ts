@@ -42,7 +42,11 @@ import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
 import { tidyName } from "../transactions/tidy-name";
 import { billsLedgerLine, splitKeepable } from "./bills";
-import { type BudgetAsk, budgetsLedgerLine } from "./budgets";
+import {
+	type BudgetAsk,
+	budgetsLedgerLine,
+	type NothingAsked,
+} from "./budgets";
 import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
 
 /** A merchant whose money in Tally marked as income, and the deposits behind the question. */
@@ -93,8 +97,11 @@ export type BudgetsStep =
 	| {
 			done: true;
 			safeCents: number;
-			/** True when the step had nothing to ask: no answer is recorded, so every category already has a budget. */
-			nothingAsked: boolean;
+			/**
+			 * Why the step asked nothing, for the line above the ruled-off total (nothingAskedReason), or null when it says
+			 * nothing: a family's answer is recorded, or a category with no budget was added after the stroke.
+			 */
+			nothingAsked: NothingAsked | null;
 	  }
 	| {
 			done: false;
@@ -109,7 +116,18 @@ export type BudgetsStep =
 			keepAllOpen: boolean;
 			/** The Needs a category line: the transactions that need a category, and the monthly mean of their spending when known. */
 			needs: { count: number; meanCents: number | null } | null;
+			/**
+			 * The history's first date the read used for its months (HISTORY_FIRST_SQL), or null when nothing is asked and no
+			 * months were read. A suggested answer's write checks it is unchanged, so the window it was read from still holds.
+			 */
+			firstDate: string | null;
 	  };
+
+/**
+ * The history's first date (MIN(date) over every transaction). The suggestions' months come from it (fullMonths), so the
+ * budgets step's read and a suggested answer's write both use this one query, and they can't drift apart.
+ */
+const HISTORY_FIRST_SQL = "SELECT MIN(date) AS first FROM transactions";
 
 /** The money in Tally marked as income that nobody has decided, one row per deposit the pay questions cover (payAskedSql). */
 const PAY_SQL = `SELECT t.id AS id, ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date, -t.amount_cents AS cents
@@ -271,14 +289,22 @@ function budgetsLedger(
 }
 
 /**
+ * True when a budget applies to the category row `alias` names in `month`: one set from that month or an earlier one, since
+ * a budget takes effect from its month on. `month` is code (YYYY-MM), checked here.
+ */
+export function budgetAppliesSql(alias: string, month: string): string {
+	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+	return `EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = ${alias}.id AND b.effective_month <= '${month}')`;
+}
+
+/**
  * True when the category row `alias` names is still asked by the budgets step: active, with no budget that applies this
  * month, and no answer in first_tally. The step's read, the budgets stroke's guard and every answer's write all check this
  * one predicate, so they can't drift. `month` is code (YYYY-MM), checked here.
  */
 export function budgetAskedSql(alias: string, month: string): string {
-	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
 	return `${alias}.archived = 0
-		AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = ${alias}.id AND b.effective_month <= '${month}')
+		AND NOT ${budgetAppliesSql(alias, month)}
 		AND NOT EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.budgets."' || ${alias}.id || '"') IS NOT NULL)`;
 }
 
@@ -316,6 +342,29 @@ async function monthlySpent(
 }
 
 /**
+ * Why a drawn budgets step asked nothing, or null when its line says nothing. A recorded answer means the family set the
+ * step's budgets itself, so none is "already" there. Otherwise the active categories are counted against the budgets that
+ * apply this month: none active is "no-categories", and all of them budgeted is "every-category-budgeted". Any other count
+ * (a category added since the stroke) says nothing.
+ */
+async function nothingAskedReason(
+	db: D1Database,
+	month: string,
+	record: FirstTally | null,
+): Promise<NothingAsked | null> {
+	if (Object.keys(record?.budgets ?? {}).length > 0) return null;
+	const counts = await db
+		.prepare(
+			`SELECT COUNT(*) AS active, COALESCE(SUM(CASE WHEN ${budgetAppliesSql("c", month)} THEN 1 ELSE 0 END), 0) AS budgeted
+			FROM categories c WHERE c.archived = 0`,
+		)
+		.first<{ active: number; budgeted: number }>();
+	if (!counts) return null;
+	if (counts.active === 0) return "no-categories";
+	return counts.budgeted === counts.active ? "every-category-budgeted" : null;
+}
+
+/**
  * The budgets step, read from the household. The categories it may ask are the active ones with no budget that applies
  * this month and no answer in first_tally, in the household's order. Each is given its full months of Spent (fullMonths
  * from the history's first date, a month with no spending is $0) and Tally's suggestion (firstBudgetSuggestion). The
@@ -335,7 +384,7 @@ async function budgetsStep(
 		return {
 			done: true,
 			safeCents: summary.safeToSpendCents,
-			nothingAsked: Object.keys(record.budgets ?? {}).length === 0,
+			nothingAsked: await nothingAskedReason(db, month, record),
 		};
 	}
 	const { results: categories } = await db
@@ -345,11 +394,19 @@ async function budgetsStep(
 		)
 		.all<{ id: number; name: string }>();
 	if (categories.length === 0)
-		return { done: false, month, asks: [], keepAllOpen: false, needs: null };
+		return {
+			done: false,
+			month,
+			asks: [],
+			keepAllOpen: false,
+			needs: null,
+			firstDate: null,
+		};
 	const first = await db
-		.prepare("SELECT MIN(date) AS first FROM transactions")
+		.prepare(HISTORY_FIRST_SQL)
 		.first<{ first: string | null }>();
-	const months = fullMonths(first?.first ?? null, today);
+	const firstDate = first?.first ?? null;
+	const months = fullMonths(firstDate, today);
 	const spent = new Map<string, number>();
 	for (const row of await monthlySpent(db, months))
 		spent.set(`${row.categoryId}|${row.month}`, row.cents);
@@ -374,14 +431,15 @@ async function budgetsStep(
 	const count = await needsCategoryCount(db, "all");
 	const needs =
 		count > 0 ? { count, meanCents: monthlyMeanCents(monthsOf(null)) } : null;
-	return { done: false, month, asks, keepAllOpen, needs };
+	return { done: false, month, asks, keepAllOpen, needs, firstDate };
 }
 
 /**
  * A budget answer's write, for its batch: the budget from this month on, written only while its category is still asked
  * (budgetAskedSql). A suggested amount (a Yes, or a keep all's) is written only while it is still the amount the page
- * showed: the category's counted spending over the months the read used (`first` to `last`, bound from the read, not
- * recomputed) must round up to it, ceil(total / (n * 1000)) * 1000 = shown. That is, with total > 0,
+ * showed, and the window it was read from is unchanged: the history's first date is still `firstDate` (HISTORY_FIRST_SQL,
+ * bound from the read), and the category's counted spending over the months the read used (`first` to `last`, bound from
+ * the read, not recomputed) must round up to it, ceil(total / (n * 1000)) * 1000 = shown. That is, with total > 0,
  * (shown - 1000) * n < total <= shown * n, in integers, with n the month count as an integer literal (no division). The
  * spending is the one monthlySpent counts. The write's own changes say whether it landed.
  */
@@ -390,6 +448,7 @@ function budgetWriteStatement(
 	ask: BudgetAsk,
 	answer: Extract<BudgetAnswer, { cents: number }>,
 	month: string,
+	firstDate: string | null,
 ): D1PreparedStatement {
 	const asked = `EXISTS (SELECT 1 FROM categories c WHERE c.id = ?1 AND ${budgetAskedSql("c", month)})`;
 	const upsert =
@@ -407,6 +466,7 @@ function budgetWriteStatement(
 	return db
 		.prepare(
 			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) SELECT ?1, ?2, ?3 WHERE ${asked}
+			AND (${HISTORY_FIRST_SQL}) IS ?6
 			AND EXISTS (SELECT 1 FROM (${total}) s WHERE s.total > 0 AND (?3 - 1000) * ${n} < s.total AND s.total <= ?3 * ${n})
 			${upsert}`,
 		)
@@ -416,6 +476,7 @@ function budgetWriteStatement(
 			answer.cents,
 			ask.months[0]?.month ?? "",
 			ask.months[ask.months.length - 1]?.month ?? "",
+			firstDate,
 		);
 }
 
@@ -424,12 +485,14 @@ function budgetWriteStatement(
  * (budgetWriteStatement, keepBudgetStatement), so a Home budget, a sync or a competing answer since the page drew changes
  * nothing it would overwrite. A set amount is its budget, then its record, which lands only when the budget did
  * (`changes() > 0`); a skip is its record alone, guarded by the same predicate. Then the budgets stroke, under its guard,
- * so the stroke is drawn in the same write as the last answer, and never before it. Returns the ids of the categories
+ * so the stroke is drawn in the same write as the last answer, and never before it. `firstDate` is the history's first date
+ * the step's read used (BudgetsStep.firstDate), which a suggested answer's write checks. Returns the ids of the categories
  * whose answer landed.
  */
 export async function keepBudgetAnswers(
 	db: D1Database,
 	today: string,
+	firstDate: string | null,
 	answers: { ask: BudgetAsk; answer: BudgetAnswer }[],
 ): Promise<number[]> {
 	const month = today.slice(0, 7);
@@ -449,7 +512,7 @@ export async function keepBudgetAnswers(
 			);
 		} else {
 			statements.push(
-				budgetWriteStatement(db, ask, answer, month),
+				budgetWriteStatement(db, ask, answer, month, firstDate),
 				keepBudgetStatement(db, ask.id, answer, "changes() > 0"),
 			);
 		}

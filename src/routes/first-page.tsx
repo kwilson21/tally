@@ -7,6 +7,7 @@ import { keepReply, keepShown } from "../first-tally/bills";
 import {
 	type BudgetAsk,
 	budgetChangedWords,
+	budgetsMovedOnWords,
 	keepShownBudgets,
 	keptBudgetsWords,
 	savedBudgetWords,
@@ -232,7 +233,8 @@ firstPage.post("/first-page/bills", async (c) => {
 /**
  * The budgets question's answers (spec §8.8, #590). Keep all keeps the suggestions the page showed, each re-checked as
  * Keep does. One category's Yes keeps its suggestion when the amount is the one the page showed; another amount is read
- * by the budget sheet's own rule (parseBudgetAmount); a skip keeps the skip. A change since the page drew is asked again,
+ * by the budget sheet's own rule (parseBudgetAmount); a skip keeps the skip. An answer for a category that isn't the first
+ * one asked writes nothing, and the first question is asked again (#697). A change since the page drew is asked again,
  * and a refused amount draws the question again with its error. Each answer is one batch with its budget and the stroke.
  */
 firstPage.post("/first-page/budgets", async (c) => {
@@ -271,7 +273,7 @@ firstPage.post("/first-page/budgets", async (c) => {
 		const landed =
 			writes.length === 0
 				? []
-				: await keepBudgetAnswers(c.env.DB, today, writes);
+				: await keepBudgetAnswers(c.env.DB, today, step.firstDate, writes);
 		const after =
 			writes.length === 0 ? before : await settleAndLoad(c.env.DB, today);
 		// Changed counts what the page showed and is still asked, and that didn't land: a suggestion that moved, or one that
@@ -298,8 +300,12 @@ firstPage.post("/first-page/budgets", async (c) => {
 	const id = Number(form.get("category"));
 	const ask = step.asks.find((candidate) => candidate.id === id);
 	if (!ask) return stale(c, before);
+	// Only the question on the page is answered. A stale tab's answer for another category writes nothing, and the page
+	// draws that first question again, so a refused amount's error is always the first question's own.
+	if (step.asks[0]?.id !== ask.id)
+		return answered(c, before, budgetsMovedOnWords(), NO_MOTION, "info");
 	if (answer === "skip") {
-		const landed = await keepBudgetAnswers(c.env.DB, today, [
+		const landed = await keepBudgetAnswers(c.env.DB, today, step.firstDate, [
 			{ ask, answer: { kind: "skipped", cents: null } },
 		]);
 		const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });
@@ -333,7 +339,7 @@ firstPage.post("/first-page/budgets", async (c) => {
 		kind = "another";
 		cents = parsed.cents;
 	}
-	const landed = await keepBudgetAnswers(c.env.DB, today, [
+	const landed = await keepBudgetAnswers(c.env.DB, today, step.firstDate, [
 		{ ask, answer: { kind, cents } },
 	]);
 	const after = await settleAndLoad(c.env.DB, today, { oneAtATime: true });

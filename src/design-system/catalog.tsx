@@ -7487,7 +7487,7 @@ function FirstWeekGroup() {
 				title="BudgetsQuestion, RuledTotal"
 				tier="interactive"
 				components={["BudgetsQuestion", "RuledTotal"]}
-				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask (every category already budgeted on Home) says so above that rule."
+				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask says why above that rule: every category already budgeted on Home, or no categories to budget yet."
 			>
 				<State label="Keep all: the suggestions as a list, the total in the question, and One at a time">
 					<FirstPageBody
@@ -7499,6 +7499,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_EATING_OUT],
 								keepAllOpen: true,
@@ -7522,6 +7523,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_GAS],
 								keepAllOpen: false,
@@ -7541,6 +7543,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES],
 								keepAllOpen: false,
@@ -7563,6 +7566,7 @@ function FirstWeekGroup() {
 								pay: [],
 								budgets: {
 									done: false,
+									firstDate: "2026-08-01",
 									month: "2026-10",
 									asks: [FIRST_WEEK_GROCERIES],
 									keepAllOpen: false,
@@ -7587,6 +7591,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GAS],
 								keepAllOpen: false,
@@ -7604,7 +7609,28 @@ function FirstWeekGroup() {
 							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
 							payAnswered: true,
 							pay: [],
-							budgets: { done: true, safeCents: 70000, nothingAsked: true },
+							budgets: {
+								done: true,
+								safeCents: 70000,
+								nothingAsked: "every-category-budgeted",
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Nothing to ask: no categories to budget, so the step says so above the ruled-off Safe to spend">
+					<FirstPageBody
+						id="first-page-budgets-no-categories"
+						model={page({
+							drawn: 4,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: true,
+								safeCents: 70000,
+								nothingAsked: "no-categories",
+							},
 						})}
 						focus={false}
 					/>
@@ -7621,7 +7647,7 @@ function FirstWeekGroup() {
 							],
 							payAnswered: true,
 							pay: [],
-							budgets: { done: true, safeCents: 70000, nothingAsked: false },
+							budgets: { done: true, safeCents: 70000, nothingAsked: null },
 						})}
 						focus={false}
 					/>

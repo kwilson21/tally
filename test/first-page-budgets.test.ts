@@ -11,6 +11,10 @@ import {
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { type BudgetAsk, bankLine } from "../src/first-tally/budgets";
+import {
+	keepBudgetAnswers,
+	settleAndLoad,
+} from "../src/first-tally/first-page";
 import { readMonthSummary } from "../src/month-summary";
 import { firstPage } from "../src/routes/first-page";
 import { safeToSpendText } from "../src/views/home-top";
@@ -406,19 +410,19 @@ describe("the budgets question, keep all or one at a time", () => {
 
 	it("saves another amount typed through the MoneyInput, and says what it saved", async () => {
 		const res = await post("/first-page/budgets", [
-			["category", String(B)],
+			["category", String(A)],
 			["budget", "120"],
 			["answer", "another"],
 		]);
-		expect(trigger(res.res).announce).toBe(`${nameB}: $120 a month.`);
+		expect(trigger(res.res).announce).toBe(`${nameA}: $120 a month.`);
 		const row = await db
 			.prepare(
 				"SELECT amount_cents AS cents FROM budget_amounts WHERE category_id = ?",
 			)
-			.bind(B)
+			.bind(A)
 			.first<{ cents: number }>();
 		expect(row?.cents).toBe(12000);
-		expect((await readFirstTally(db))?.budgets[String(B)]).toEqual({
+		expect((await readFirstTally(db))?.budgets[String(A)]).toEqual({
 			kind: "another",
 			cents: 12000,
 		});
@@ -426,7 +430,7 @@ describe("the budgets question, keep all or one at a time", () => {
 
 	it("refuses an amount that is not dollars, with its error in the field, and keeps nothing", async () => {
 		const res = await post("/first-page/budgets", [
-			["category", String(B)],
+			["category", String(A)],
 			["budget", "lots"],
 			["answer", "another"],
 		]);
@@ -434,7 +438,24 @@ describe("the budgets question, keep all or one at a time", () => {
 		expect(res.html).toContain('role="alert"');
 		expect(res.html).toContain("Enter a dollar amount, like 250 or 250.50.");
 		expect(trigger(res.res).toast?.type).toBe("error");
-		expect((await readFirstTally(db))?.budgets[String(B)]).toBeUndefined();
+		expect((await readFirstTally(db))?.budgets[String(A)]).toBeUndefined();
+		// The refused question is the first one asked (A), so its form and its field are A's, not the category posted (#697).
+		expect(textOf(res.html)).toContain(
+			`Make $650 a month your ${nameA} budget?`,
+		);
+		expect([
+			...new Set(hiddenFields(res.html, "category").map(([, value]) => value)),
+		]).toEqual([String(A)]);
+		expect(res.html).toMatch(new RegExp(`id="budget-${A}"[^>]*value="lots"`));
+		expect(res.html).not.toContain(`name="category" value="${B}"`);
+		// A corrected Save posts the category the form carries.
+		await post("/first-page/budgets", [
+			["category", String(A)],
+			["budget", "120"],
+			["answer", "another"],
+		]);
+		expect(await budgetRows(A)).toEqual([12000]);
+		expect(await budgetRows(B)).toEqual([]);
 	});
 
 	it("keeps Enter in the amount field on Another amount: its form's default button is Save, and the Yes form holds no amount", async () => {
@@ -566,18 +587,24 @@ describe("the step's end", () => {
 			["shown", "65000"],
 			["answer", "yes"],
 		]);
+		// Only the first category asked takes a route's answer (#697), so two answers at once go through the write itself.
+		const pending = (await settleAndLoad(db, TODAY, { oneAtATime: true }))
+			.budgets;
+		if (!pending || pending.done)
+			throw new Error("the budgets question is open");
+		const askB = pending.asks.find((ask) => ask.id === B);
+		const askC = pending.asks.find((ask) => ask.id === C);
+		if (!askB || !askC) throw new Error("B and C are still asked");
 		const [first, second] = await Promise.all([
-			post("/first-page/budgets", [
-				["category", String(B)],
-				["answer", "skip"],
+			keepBudgetAnswers(db, TODAY, pending.firstDate, [
+				{ ask: askB, answer: { kind: "skipped", cents: null } },
 			]),
-			post("/first-page/budgets", [
-				["category", String(C)],
-				["answer", "skip"],
+			keepBudgetAnswers(db, TODAY, pending.firstDate, [
+				{ ask: askC, answer: { kind: "skipped", cents: null } },
 			]),
 		]);
-		expect(first.res.status).toBe(200);
-		expect(second.res.status).toBe(200);
+		expect(first).toEqual([B]);
+		expect(second).toEqual([C]);
 		let record = await readFirstTally(db);
 		expect(record?.budgets[String(B)]).toEqual({
 			kind: "skipped",
@@ -589,10 +616,11 @@ describe("the step's end", () => {
 		});
 		// D is still to answer, so the stroke waits for it.
 		expect(record?.strokes.budgets).toBeUndefined();
-		await post("/first-page/budgets", [
+		const last = await post("/first-page/budgets", [
 			["category", String(D)],
 			["answer", "skip"],
 		]);
+		expect(last.res.status).toBe(200);
 		record = await readFirstTally(db);
 		expect(record?.strokes.budgets).toBe(TODAY);
 	});
@@ -645,6 +673,25 @@ describe("the step's end", () => {
 		expect(html).not.toContain("budget?");
 		// Every category was answered (skipped), so the line for a step with nothing to ask is not the one said.
 		expect(textOf(html)).not.toContain("Every category already has a budget.");
+		expect(textOf(html)).not.toContain(
+			"There are no categories to budget yet.",
+		);
+	});
+
+	it("says neither line once every category is answered with an amount, since those budgets are the family's own (#692 review)", async () => {
+		for (const id of [A, B, C, D]) {
+			await post("/first-page/budgets", [
+				["category", String(id)],
+				["budget", "100"],
+				["answer", "another"],
+			]);
+		}
+		const text = textOf((await get("/first-page")).html);
+		expect(text).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(text).not.toContain("Every category already has a budget.");
+		expect(text).not.toContain("There are no categories to budget yet.");
 	});
 
 	it("draws the budgets stroke at once when no category is left to ask", async () => {
@@ -883,6 +930,77 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 			`Make $600 a month your ${nameB} budget?`,
 		);
 	});
+
+	it("a Yes saves nothing when older history moves the window's first month, and asks the new suggestion (#692)", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(async () => {
+				await spend(null, 5000, `${monthsBefore(CUR, 3)}-01`);
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast).toEqual({
+			message: `Nothing saved. ${nameA}'s suggestion changed since the page drew, so it's asked again below.`,
+			type: "info",
+		});
+		// Three full months now: $1,284 over them, rounded up to $430.
+		expect(focusedHeading(res.html)).toBe(
+			`Make $430 a month your ${nameA} budget?`,
+		);
+	});
+
+	it("a Yes saves nothing when the first charge moves so a month drops out of the window (#692)", async () => {
+		const res = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["shown", "65000"],
+				["answer", "yes"],
+			],
+			true,
+			raceBeforeBatch(async (d) => {
+				await d
+					.prepare(
+						`UPDATE transactions SET date = '${MONTH_2}-02' WHERE date = '${MONTH_2}-01'`,
+					)
+					.run();
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		expect(trigger(res.res).toast).toEqual({
+			message: `Nothing saved. ${nameA}'s suggestion changed since the page drew, so it's asked again below.`,
+			type: "info",
+		});
+		// The first month is now part-month, so the window is the last full month alone: $674 rounds up to $680.
+		expect(focusedHeading(res.html)).toBe(
+			`Make $680 a month your ${nameA} budget?`,
+		);
+	});
+
+	it("keep all saves nothing when older history moves the window, and says both suggestions changed (#692)", async () => {
+		const { html } = await get("/first-page");
+		const res = await post(
+			"/first-page/budgets",
+			[...keepFields(html), ["answer", "all"]],
+			true,
+			raceBeforeBatch(async () => {
+				await spend(null, 5000, `${monthsBefore(CUR, 3)}-01`);
+			}),
+		);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await budgetRows(B)).toEqual([]);
+		expect(trigger(res.res).announce).toBe(
+			"Nothing saved. 2 suggestions changed since the page drew, so they're asked again below.",
+		);
+	});
 });
 
 describe("keep all's count of what changed (#590 review)", () => {
@@ -938,7 +1056,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 		const res = await post(
 			"/first-page/budgets",
 			[
-				["category", String(B)],
+				["category", String(A)],
 				["budget", "lots"],
 				["answer", "another"],
 			],
@@ -950,8 +1068,109 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 		expect(res.html).toContain("Enter a dollar amount, like 250 or 250.50.");
 		expect(res.html).toContain('value="lots"');
 		expect(res.html).toMatch(/<details[^>]*\sopen\b/);
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await recordedBudget(A)).toBeUndefined();
+		// The page at 422 is A's question, with A's form, so its Save posts A (#697).
+		expect(textOf(res.html)).toContain(
+			`Make $650 a month your ${nameA} budget?`,
+		);
+		expect([
+			...new Set(hiddenFields(res.html, "category").map(([, value]) => value)),
+		]).toEqual([String(A)]);
+		expect(res.html).toMatch(new RegExp(`id="budget-${A}"[^>]*value="lots"`));
+		expect(res.html).not.toContain(`name="category" value="${B}"`);
+		const saved = await post(
+			"/first-page/budgets",
+			[
+				["category", String(A)],
+				["budget", "120"],
+				["answer", "another"],
+			],
+			false,
+		);
+		expect(saved.res.status).toBe(303);
+		expect(await budgetRows(A)).toEqual([12000]);
 		expect(await budgetRows(B)).toEqual([]);
-		expect(await recordedBudget(B)).toBeUndefined();
+	});
+});
+
+describe("an answer for a category that isn't asked first (#697)", () => {
+	it("a stale tab's answer for a category that isn't asked first saves nothing, and asks the first (#697)", async () => {
+		// A moves to the end of the order, so the tab drawn now asks B first.
+		await db
+			.prepare("UPDATE categories SET sort_order = 9 WHERE id = ?")
+			.bind(A)
+			.run();
+		const { html } = await get("/first-page?budgets=one");
+		expect(focusedHeading(html)).toBe(
+			`Make $150 a month your ${nameB} budget?`,
+		);
+		await db
+			.prepare("UPDATE categories SET sort_order = 1 WHERE id = ?")
+			.bind(A)
+			.run();
+		const movedOn = {
+			message:
+				"Nothing saved. The categories changed since the page drew, so the next one is asked below.",
+			type: "info",
+		};
+		const stale: [string, string][][] = [
+			[
+				["category", String(B)],
+				["shown", "15000"],
+				["answer", "yes"],
+			],
+			[
+				["category", String(B)],
+				["answer", "skip"],
+			],
+			[
+				["category", String(B)],
+				["budget", "100"],
+				["answer", "another"],
+			],
+		];
+		for (const fields of stale) {
+			const res = await post("/first-page/budgets", fields);
+			expect(trigger(res.res).toast).toEqual(movedOn);
+			expect(focusedHeading(res.html)).toBe(
+				`Make $650 a month your ${nameA} budget?`,
+			);
+			expect(await budgetRows(A)).toEqual([]);
+			expect(await budgetRows(B)).toEqual([]);
+			expect(await recordedBudget(A)).toBeUndefined();
+			expect(await recordedBudget(B)).toBeUndefined();
+		}
+		// A refused amount for B is not drawn in B's place: the reply is A's question, with no error and nothing typed.
+		const lots = await post("/first-page/budgets", [
+			["category", String(B)],
+			["budget", "lots"],
+			["answer", "another"],
+		]);
+		expect(lots.res.status).toBe(200);
+		expect(trigger(lots.res).toast).toEqual(movedOn);
+		expect(lots.html).not.toContain('role="alert"');
+		expect(lots.html).not.toContain('value="lots"');
+		expect([
+			...new Set(hiddenFields(lots.html, "category").map(([, value]) => value)),
+		]).toEqual([String(A)]);
+		expect(focusedHeading(lots.html)).toBe(
+			`Make $650 a month your ${nameA} budget?`,
+		);
+		// Without JavaScript the same reply is the page again, as a redirect.
+		const plain = await post(
+			"/first-page/budgets",
+			[
+				["category", String(B)],
+				["budget", "lots"],
+				["answer", "another"],
+			],
+			false,
+		);
+		expect(plain.res.status).toBe(303);
+		expect(plain.res.headers.get("location")).toBe("/first-page");
+		expect(await budgetRows(A)).toEqual([]);
+		expect(await budgetRows(B)).toEqual([]);
 	});
 });
 
@@ -967,5 +1186,37 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 		expect(text).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
+		expect(text).not.toContain("There are no categories to budget yet.");
+	});
+
+	it("says there are no categories to budget, not that they are budgeted, when every category is archived (#692 review)", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		const text = textOf((await get("/first-page")).html);
+		expect(text).toContain("There are no categories to budget yet.");
+		expect(text.indexOf("There are no categories to budget yet.")).toBeLessThan(
+			text.indexOf("Safe to spend"),
+		);
+		expect(text).not.toContain("Every category already has a budget.");
+	});
+
+	it("says neither line once the stroke is drawn and a category with no budget is added after it (#692 review)", async () => {
+		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
+		await get("/first-page");
+		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
+		const added = await db
+			.prepare(
+				"SELECT id FROM categories WHERE archived = 1 ORDER BY id LIMIT 1",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare("UPDATE categories SET archived = 0 WHERE id = ?")
+			.bind(added?.id ?? 0)
+			.run();
+		const text = textOf((await get("/first-page")).html);
+		expect(text).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(text).not.toContain("Every category already has a budget.");
+		expect(text).not.toContain("There are no categories to budget yet.");
 	});
 });
