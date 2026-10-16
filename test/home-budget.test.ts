@@ -259,7 +259,7 @@ describe("GET /budget/:id", () => {
 		expect(textOf(list)).toContain("3 spending transactions in Groceries");
 
 		const { html: home } = await get("/");
-		expect(textOf(home)).toContain("Groceries $65 of $700");
+		expect(textOf(home)).toContain("Groceries $65 of $950");
 	});
 
 	it("does not show a transactions button when none count", async () => {
@@ -309,7 +309,7 @@ describe("GET /budget/:id", () => {
 		expect(html).toMatch(
 			/<h2 id="budget-title" class="font-serif text-3xl font-semibold"/,
 		);
-		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="700.00"/);
+		expect(html).toMatch(/<input[^>]*name="budget"[^>]*value="950.00"/);
 		expect(html).toMatch(/<input[^>]*inputmode="decimal"/);
 		for (const [delta, label] of <[string, string][]>[
 			["-100", `Decrease Budget from ${THIS_MONTH()} on by $1`],
@@ -330,7 +330,7 @@ describe("GET /budget/:id", () => {
 		);
 		expect(html).toMatch(new RegExp(`data-set="${last}"`));
 		expect(textOf(html)).toContain(`Last month: ${formatCents(last)}`);
-		// $700 has no cents, so there's nothing to round up yet.
+		// $950 has no cents, so there's nothing to round up yet.
 		expect(html).toMatch(/<button[^>]*data-roundup[^>]*hidden/);
 		expect(html).toContain('src="/js/money.js"');
 	});

@@ -68,8 +68,8 @@ describe("GET /?adjust=1", () => {
 			/<form method="post" action="\/budget\/1\/nudge\/down" hx-post="\/budget\/1\/nudge\/down"[^>]*hx-target="#home"[^>]*hx-select="#page"[^>]*hx-swap="innerHTML"[^>]*hx-sync="body:queue all"/,
 		);
 		expect(html).toMatch(/<div id="home"><div id="page">/);
-		expect(html).toContain('aria-label="Lower Groceries to $690"');
-		expect(html).toContain('aria-label="Raise Groceries to $710"');
+		expect(html).toContain('aria-label="Lower Groceries to $940"');
+		expect(html).toContain('aria-label="Raise Groceries to $960"');
 		expect(html).toContain('id="nudge-1-up"');
 	});
 
@@ -92,22 +92,22 @@ describe("POST /budget/:id/nudge/:direction", () => {
 		const { res, html } = await post("/budget/1/nudge/up");
 		expect(res.status).toBe(200);
 		expect(await groceriesBudget()).toEqual({
-			amount_cents: 71000,
+			amount_cents: 96000,
 			effective_month: THIS_MONTH(),
 		});
 		expect(trigger(res)).toEqual({
-			toast: { message: "Groceries is $710 a month", type: "success" },
-			announce: `Groceries is $710 a month from ${monthName(THIS_MONTH())} on.`,
+			toast: { message: "Groceries is $960 a month", type: "success" },
+			announce: `Groceries is $960 a month from ${monthName(THIS_MONTH())} on.`,
 		});
 		// Home comes back still in Adjust mode, with the new amount.
 		expect(res.headers.get("HX-Push-Url")).toBe("/?adjust=1");
-		expect(html).toMatch(/\$\d+\s+of\s+\$710/);
-		expect(html).toContain('aria-label="Raise Groceries to $720"');
+		expect(html).toMatch(/\$\d+\s+of\s+\$960/);
+		expect(html).toContain('aria-label="Raise Groceries to $970"');
 	});
 
 	it("counts every tap, even two at once from different phones", async () => {
 		await Promise.all([post("/budget/1/nudge/up"), post("/budget/1/nudge/up")]);
-		expect((await groceriesBudget()).amount_cents).toBe(72000);
+		expect((await groceriesBudget()).amount_cents).toBe(97000);
 	});
 
 	it("goes down to the next round $10 too", async () => {
@@ -137,7 +137,7 @@ describe("POST /budget/:id/nudge/:direction", () => {
 		const { res } = await post("/budget/1/nudge/up", false);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("Location")).toBe("/?adjust=1");
-		expect((await groceriesBudget()).amount_cents).toBe(71000);
+		expect((await groceriesBudget()).amount_cents).toBe(96000);
 	});
 
 	it("is a 404 for a category that is unknown, archived, or not budgeted", async () => {

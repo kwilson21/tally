@@ -1,5 +1,6 @@
 // The pay step's words (P125 E, decision 114, spec §8.8): one merchant whose money in Tally marked as income. Every
 // number comes from the deposits the bank sent, so nothing here is typed in.
+import { BILL_FIND_MAX_DAYS, BILL_FIND_MIN_DAYS } from "../bills/find";
 import { shortDay } from "../dates";
 import { formatCents } from "../money";
 
@@ -30,8 +31,9 @@ export const dollarsWords = (cents: number) =>
  * How often the deposits came, from the gaps between their distinct days (two on one day count once). Each cadence
  * needs every gap in its own window: every week, or every weekday when all the deposits share one weekday, when every
  * gap is 6 to 8 days; every other week, or every other weekday when they share one (what a fortnightly paycheck does, a
- * holiday shift aside), when every gap is 13 to 15; twice a month, every gap 13 to 17; or every month, every gap 28 to
- * 33. Null when no cadence fits every gap (a skipped week, or one long gap among short ones, is none of them).
+ * holiday shift aside), when every gap is 13 to 15; twice a month, every gap 12 to 19 (a 1st-and-15th payday moved for
+ * weekends); or every month, every gap 25 to 35, the same "about a month" window the bill finder uses. Null when no
+ * cadence fits every gap (a skipped week, or one long gap among short ones, is none of them).
  */
 export function cadenceOf(dates: string[]): string | null {
 	const sorted = [...new Set(dates)].sort();
@@ -49,8 +51,8 @@ export function cadenceOf(dates: string[]): string | null {
 		return oneWeekday ? `every ${weekdayOf(latest)}` : "every week";
 	if (every(13, 15))
 		return oneWeekday ? `every other ${weekdayOf(latest)}` : "every other week";
-	if (every(13, 17)) return "twice a month";
-	if (every(28, 33)) return "every month";
+	if (every(12, 19)) return "twice a month";
+	if (every(BILL_FIND_MIN_DAYS, BILL_FIND_MAX_DAYS)) return "every month";
 	return null;
 }
 
