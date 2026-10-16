@@ -527,7 +527,11 @@ async function renderHome(
 								</div>
 								<ul class="divide-y divide-rule">
 									{dueBills.slice(0, 3).map((bill) => (
-										<BillRow bill={bill} today={billData?.today ?? today} />
+										<BillRow
+											bill={bill}
+											today={billData?.today ?? today}
+											href={`/bills/${bill.id}`}
+										/>
 									))}
 								</ul>
 							</section>

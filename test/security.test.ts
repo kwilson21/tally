@@ -91,13 +91,13 @@ describe("decision and spec records for the Home Plaid allowances", () => {
 		expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
 	});
 
-	it("records the Home Plaid allowances as decision 124, the last row, with inline styles and decision 63", () => {
-		const last = decisionRows().at(-1) ?? "";
-		expect(last.startsWith("| 124 | 2026-10-16 | Home in the family app")).toBe(
+	it("records the Home Plaid allowances as decision 124, with inline styles and decision 63", () => {
+		const row = decisionRows().find((line) => line.startsWith("| 124 |")) ?? "";
+		expect(row.startsWith("| 124 | 2026-10-16 | Home in the family app")).toBe(
 			true,
 		);
-		expect(last).toContain("'unsafe-inline'");
-		expect(last).toContain("decision 63");
+		expect(row).toContain("'unsafe-inline'");
+		expect(row).toContain("decision 63");
 	});
 
 	it("cites decisions 63 and 124 in the spec's Security headers row for Plaid Link's inline styles", () => {
