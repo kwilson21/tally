@@ -445,6 +445,21 @@ export function EditSheet({
 			? null
 			: (people.find((person) => person.id === values.forPersonId)?.name ??
 				null);
+	// A detail draws as Tally's guess only while it holds the value Tally filled in. A refused save draws what the person
+	// posted, and the posted `*_was` field holds the value as it was first drawn, so a changed or emptied value is the
+	// person's: no dashes, and no source line when it is empty.
+	const noteGuessed =
+		Boolean(values.note) &&
+		tx.noteGuessed &&
+		values.note === (values.noteWas ?? values.note);
+	const kindGuessed =
+		Boolean(values.kind) &&
+		tx.kindGuessed &&
+		values.kind === (values.kindWas ?? values.kind);
+	const forPersonGuessed =
+		forName !== null &&
+		tx.forPersonGuessed &&
+		values.forPersonId === (values.forPersonIdWas ?? values.forPersonId);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
 	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
 	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
@@ -805,9 +820,9 @@ export function EditSheet({
 						value={values.note}
 						// Keyed off what is drawn, so a refused save's emptied note has no source line.
 						source={
-							values.note ? (tx.noteGuessed ? "guess" : "person") : undefined
+							values.note ? (noteGuessed ? "guess" : "person") : undefined
 						}
-						guessed={tx.noteGuessed}
+						guessed={noteGuessed}
 						open={Boolean(errors.note)}
 					>
 						<FormField id="note" label="What it was" error={errors.note}>
@@ -847,9 +862,9 @@ export function EditSheet({
 								: null
 						}
 						source={
-							values.kind ? (tx.kindGuessed ? "guess" : "person") : undefined
+							values.kind ? (kindGuessed ? "guess" : "person") : undefined
 						}
-						guessed={tx.kindGuessed}
+						guessed={kindGuessed}
 						open={Boolean(errors.kind)}
 					>
 						<fieldset
@@ -904,11 +919,11 @@ export function EditSheet({
 						source={
 							forName === null
 								? undefined
-								: tx.forPersonGuessed
+								: forPersonGuessed
 									? "guess"
 									: "person"
 						}
-						guessed={tx.forPersonGuessed}
+						guessed={forPersonGuessed}
 						open={Boolean(errors.forPerson)}
 					>
 						<fieldset

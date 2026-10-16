@@ -518,6 +518,18 @@ describe("an empty detail has no source line (#688)", () => {
 		expect(summary).not.toContain("text-sm text-muted");
 	});
 
+	it("draws For's placeholder with no source line while there are no household people", async () => {
+		await setDetails("for_person_id = NULL, for_person_guessed = 0");
+		await env.DB.prepare("DELETE FROM household_people").run();
+		const summary = summaryOf(
+			(await get(`/transactions/${bakery}`)).html,
+			"detail-for",
+		);
+		expect(summary).toContain("Add the people in your household");
+		expect(summary).not.toMatch(SOURCE_WORDS);
+		expect(summary).not.toContain("text-sm text-muted");
+	});
+
 	it("keeps Your choice under a note and a kind a person chose", async () => {
 		await setDetails(
 			"note = 'Coffee with a friend', note_guessed = 0, kind = 'one_off', kind_guessed = 0",
@@ -587,6 +599,84 @@ describe("an empty detail has no source line (#688)", () => {
 		const summary = summaryOf(html, "detail-note");
 		expect(summary).toContain(">Add</span>");
 		expect(summary).not.toMatch(SOURCE_WORDS);
+	});
+
+	describe("a refused save redraws each guess by what it shows (#688)", () => {
+		/** Tally's guesses in all three details, with Fill in details on, and a second household person to pick. */
+		const guessedDetails = async () => {
+			await saveAiSwitches(env.DB, { details: true });
+			await env.DB.prepare(
+				"INSERT INTO household_people (id, name) VALUES (2, 'Kids')",
+			).run();
+			await setDetails(
+				"note = 'Coffee', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
+			);
+		};
+		/** A save the category refuses, so the panel is drawn again with what was posted. */
+		const refused = (fields: Record<string, string>) =>
+			post(`/transactions/${bakery}`, {
+				category: "99",
+				name_pick: "own",
+				merchant: "Local Bakery",
+				back: "/transactions",
+				income: "0",
+				creditReviewed: "0",
+				...fields,
+			});
+
+		it("draws a guess the person changed as Your choice with no dashes", async () => {
+			await guessedDetails();
+			const { res, html } = await refused({
+				note: "Coffee with Sam",
+				note_was: "Coffee",
+				kind: "bill",
+				kind_was: "one_off",
+				for_person_id: "2",
+				for_person_id_was: "1",
+			});
+			expect(res.status).toBe(422);
+			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
+				const summary = summaryOf(html, id);
+				expect(summary).toContain("Your choice");
+				expect(summary).not.toContain("Tally&#39;s guess");
+				expect(summary).not.toContain("decoration-dashed");
+			}
+		});
+
+		it("keeps Tally's guess and its dashes when the refused save left each guess as it was", async () => {
+			await guessedDetails();
+			const { html } = await refused({
+				note: "Coffee",
+				note_was: "Coffee",
+				kind: "one_off",
+				kind_was: "one_off",
+				for_person_id: "1",
+				for_person_id_was: "1",
+			});
+			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
+				const summary = summaryOf(html, id);
+				expect(summary).toContain("Tally&#39;s guess");
+				expect(summary).toContain("decoration-dashed");
+			}
+		});
+
+		it("draws a guess the person emptied (Not known, No one, no note) as Add with no dashes", async () => {
+			await guessedDetails();
+			const { html } = await refused({
+				note: "",
+				note_was: "Coffee",
+				kind: "",
+				kind_was: "one_off",
+				for_person_id: "",
+				for_person_id_was: "1",
+			});
+			for (const id of ["detail-note", "detail-kind", "detail-for"]) {
+				const summary = summaryOf(html, id);
+				expect(summary).toContain(">Add</span>");
+				expect(summary).not.toMatch(SOURCE_WORDS);
+				expect(summary).not.toContain("decoration-dashed");
+			}
+		});
 	});
 });
 
