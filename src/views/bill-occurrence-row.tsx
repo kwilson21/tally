@@ -61,7 +61,7 @@ export function StatusTag({ status }: { status: BillStatus | "not-paid" }) {
  * form, so both work without JavaScript, and the payment's id travels with them so a stale page can't
  * answer for another payment.
  */
-function PriceChanged({
+export function PriceChanged({
 	billId,
 	period,
 	offer,
