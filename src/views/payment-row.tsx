@@ -27,7 +27,8 @@ export function PaymentRow({
 	"hx-swap"?: string;
 }) {
 	return (
-		<label class="group relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+		<label class="group/payment relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+			{/* The label is the named group `payment`, so Show all's `<details class="group">` never shows every row's check. */}
 			<input
 				type="radio"
 				name="transaction_id"
@@ -42,7 +43,7 @@ export function PaymentRow({
 				aria-hidden="true"
 				class="selection-mark flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band"
 			>
-				<span class="hidden group-has-[:checked]:flex">
+				<span class="hidden group-has-[:checked]/payment:flex">
 					<Icon name="check" class="size-4" />
 				</span>
 			</span>

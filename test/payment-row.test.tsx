@@ -229,3 +229,56 @@ describe("BillPaymentPicker's payments as rows (#645)", () => {
 		);
 	});
 });
+
+/** A row's label class tokens, read from its opening tag. */
+const classTokensOf = (row: string) =>
+	(row.slice(0, row.indexOf(">")).match(/ class="([^"]*)"/)?.[1] ?? "").split(
+		/\s+/,
+	);
+
+/** A row's check mark answers to its own radio (the named group `payment`), and its fill and focus ring stay on the row. */
+function expectRowOwnsItsCheck(row: string) {
+	const tokens = classTokensOf(row);
+	expect(tokens).toContain("group/payment");
+	expect(tokens).not.toContain("group");
+	expect(row).toContain("group-has-[:checked]/payment:flex");
+	expect(row).toContain("peer-checked:border-ink peer-checked:bg-band");
+	expect(row).toContain(
+		"has-[:focus-visible]:[&amp;_.selection-mark]:outline-2",
+	);
+}
+
+describe("a picker's check mark in Show all N charges (#645, Codex 4299994834)", () => {
+	it("scopes each row's check mark to its own radio with the named group payment, so a checked row in Show all marks only itself (Codex 4299994834)", () => {
+		const html = bill(
+			[1, 2, 3, 4, 5, 6]
+				.map((id) => payment(id))
+				.concat(payment(7, { turnedAway: true })),
+			7,
+		);
+		const fold = html.slice(
+			html.indexOf("<details"),
+			html.indexOf("</details>"),
+		);
+		expect(html).toMatch(/<details[^>]* open=""/);
+		expect(radioInputs(fold)).toHaveLength(2);
+		const checked = radioInputs(fold).filter((input) =>
+			/\bchecked\b/.test(input),
+		);
+		expect(checked).toHaveLength(1);
+		expect(checked[0]).toContain('value="7"');
+		const rows = rowsOf(html);
+		expect(rows).toHaveLength(7);
+		for (const row of rows) expectRowOwnsItsCheck(row);
+		expect(html).not.toContain("group-has-[:checked]:flex");
+		expect(html).toContain('<details class="group border-b border-rule"');
+		expect(html).toContain("group-open:rotate-90");
+
+		const planHtml = plan([1, 2, 3, 4, 5, 6, 7].map((id) => planPayment(id)));
+		const planRows = rowsOf(planHtml);
+		expect(planRows).toHaveLength(7);
+		for (const row of planRows) expectRowOwnsItsCheck(row);
+		expect(planHtml).not.toContain("group-has-[:checked]:flex");
+		expect(planHtml).toContain('<details class="group border-b border-rule"');
+	});
+});
