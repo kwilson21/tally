@@ -11,6 +11,7 @@ import type { Child } from "hono/jsx";
 import type { PendingSuggestion } from "../db/category-suggestions";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
+import { AiTally } from "../views/ai-tally";
 import { Band } from "../views/band";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { Button } from "../views/button";
@@ -147,9 +148,24 @@ const PLACES: Place[] = [
 
 /** Tally's rules as Settings lists them, A to Z: the demo's three subscriptions, each with its two charges (seed.ts). */
 const RULES = [
-	{ name: "City Gym", line: "Always Household · 2 transactions" },
-	{ name: "Procreate Dreams", line: "Always Household · 2 transactions" },
-	{ name: "YouTube Premium", line: "Always Household · 2 transactions" },
+	{
+		name: "City Gym",
+		line: "Always Household · 2 transactions",
+		icon: "household",
+		color: "cat-brown",
+	},
+	{
+		name: "Procreate Dreams",
+		line: "Always Household · 2 transactions",
+		icon: "household",
+		color: "cat-brown",
+	},
+	{
+		name: "YouTube Premium",
+		line: "Always Household · 2 transactions",
+		icon: "household",
+		color: "cat-brown",
+	},
 ];
 
 /** Settings' own links under the title, in the order B's line gives them. */
@@ -360,11 +376,14 @@ function PeopleSection() {
 	);
 }
 
-/** The five AI switches, all on, with the October count and a Why? link; Save only where `save` says. */
+/** The five AI switches, all on, with the app's own October tally; Save only where `save` says. */
 function AiSection({ prefix, save }: { prefix: string; save: boolean }) {
 	return (
 		<>
 			<h2 class="font-serif text-3xl font-semibold">AI suggestions</h2>
+			<p class="mt-1 text-muted">
+				Off means your rules and choices only. Nothing already decided changes.
+			</p>
 			<ul class="mt-3 divide-y divide-rule border-y border-rule">
 				{AI_SWITCHES.map(({ label, hint }, i) => (
 					<li>
@@ -378,15 +397,21 @@ function AiSection({ prefix, save }: { prefix: string; save: boolean }) {
 					</li>
 				))}
 			</ul>
-			<p class="mt-3 flex flex-wrap items-center gap-x-3 text-muted">
-				23 sorted in October
-				<WhyLink section="categorization" topic="AI suggestions" />
-			</p>
 			{save && (
 				<div class="mt-4">
 					<Button type="submit">Save</Button>
 				</div>
 			)}
+			<AiTally
+				tally={{
+					month: "2026-10",
+					sorted: 23,
+					changed: 2,
+					named: 6,
+					paychecks: 2,
+				}}
+				switches={{ names: true, categories: true, income: true }}
+			/>
 		</>
 	);
 }
@@ -475,7 +500,7 @@ function HouseholdPage() {
 	);
 }
 
-/** P134 A's rules page: each rule's name and rule on one line, Remove a quiet muted link, Never suggest one line. */
+/** P134 A's rules page: each rule's category icon, then its name and rule on one line, Remove a quiet muted link, Never suggest one line. */
 function RulesPage() {
 	return (
 		<>
@@ -494,8 +519,9 @@ function RulesPage() {
 			</h2>
 			<ul class="mt-2 divide-y divide-rule border-y border-rule">
 				{RULES.map((rule) => (
-					<li class="flex min-h-11 items-center justify-between gap-3 py-3">
-						<span class="min-w-0 text-lg wrap-anywhere">
+					<li class="flex min-h-11 items-center justify-between gap-4 py-3">
+						<CategoryIcon icon={rule.icon} color={rule.color} />
+						<span class="min-w-0 flex-1 text-lg wrap-anywhere">
 							{rule.name} · {rule.line}
 						</span>
 						<a
@@ -545,7 +571,8 @@ function TidyTop() {
 
 /**
  * P135 A's one card: the same words and rows wherever Tally asks a person about Pet Care, with decision 89's Why? after
- * Not now (the owner's picked word). `skip` adds the Suggestions page's Skip link under it, as the route draws it; the Settings card has none.
+ * No. The quiet answer is No, which retires the suggestion (decision 120). `skip` adds the Suggestions page's Skip link under it,
+ * as the route draws it; the Settings card has none.
  */
 function OneCard({ skip = false }: { skip?: boolean }) {
 	return (
@@ -576,7 +603,7 @@ function OneCard({ skip = false }: { skip?: boolean }) {
 				<div class="flex flex-wrap items-center gap-3">
 					<Button type="button">Create Pet Care</Button>
 					<Button kind="text" type="button">
-						Not now
+						No
 					</Button>
 					<WhyLink section="categorization" topic="suggested categories" />
 				</div>
@@ -716,7 +743,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="1280: the page's first screen">
-						<Desk label="Reference, Settings" active="settings">
+						<Desk label="Reference, Settings" active="settings" group>
 							<TodayTop base={9200} />
 						</Desk>
 					</Shot>
@@ -735,7 +762,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="The contents page at 1280, with the sidebar">
-						<Desk label="Option A, contents" active="settings" tall={900}>
+						<Desk label="Option A, contents" active="settings" group tall={900}>
 							<ContentsPage />
 						</Desk>
 					</Shot>
@@ -783,7 +810,7 @@ function P134() {
 						</Phone>
 					</Shot>
 					<Shot caption="1280, with the sidebar">
-						<Desk label="Option B, Settings" active="settings">
+						<Desk label="Option B, Settings" active="settings" group>
 							<TidyTop />
 						</Desk>
 					</Shot>
@@ -859,7 +886,7 @@ function P135() {
 					name="Option A · One card, one set of words, everywhere"
 					picked
 					width="w-full"
-					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and Not now, with Why? after Not now. Skip is a link under the card on the Suggestions page only. Organize shows the same card above its chips, with its two answers."
+					note="One decision, drawn and worded the same wherever Tally asks it. The card: a muted line with the sparkles icon, the headline, ruled rows with one checkbox each, then Create and No, with Why? after No. No retires the suggestion, as Dismiss does today. Skip is a link under the card on the Suggestions page only. Organize shows a short form of the card above its chips, with its two answers."
 					cost="SuggestionReview and the Settings card become one view; Organize reads the waiting suggestions."
 					why="a person learns the card once, and Organize stops asking about a merchant Tally already has an answer for."
 				>
@@ -897,7 +924,7 @@ function P135() {
 						</Phone>
 					</Shot>
 					<Shot caption="The Suggestions page, at 1280">
-						<Desk label="Option A, Suggestions page" active="settings">
+						<Desk label="Option A, Suggestions page" active="settings" group>
 							<SuggestionsPage>
 								<OneCard skip />
 							</SuggestionsPage>

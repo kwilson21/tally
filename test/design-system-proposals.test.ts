@@ -564,7 +564,9 @@ describe("GET /design-system/proposals", () => {
 			(d) => d.title === "P135 · Category suggestions",
 		);
 		expect(suggestions?.issue).toBe(607);
-		expect(suggestions?.outcome).toContain("Create Pet Care or Not now;");
+		expect(suggestions?.outcome).toContain(
+			"Create Pet Care or No, where No retires the suggestion and asks “Don't suggest Pet Care again?”;",
+		);
 		expect(suggestions?.outcome).toContain("(decision 120).");
 	});
 
@@ -4792,6 +4794,33 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		}
 	});
 
+	it("draws the app's own AI tally in today's and Option B's AI pictures: In October, its three lines and Why? what Tally did, and today's after Save", async () => {
+		const settings = block(await drawn(), "p134-settings");
+		const today = picture(
+			optionOf(settings, "Reference · Today on main"),
+			"Reference, Settings AI suggestions, on a phone",
+		);
+		const b = picture(
+			optionOf(settings, "Option B · One page, tidied"),
+			"Option B, AI suggestions, on a phone",
+		);
+		for (const pic of [today, b]) {
+			expect(pic).toContain("In October");
+			expect(pic).toContain("Sorted 23 transactions · you changed 2");
+			expect(pic).toContain("Cleaned 6 merchant names");
+			expect(pic).toContain("Found 2 paychecks");
+			expect(pic).toContain('aria-label="Why? what Tally did"');
+			expect(pic).not.toContain('aria-label="Why? AI suggestions"');
+			expect(pic).not.toContain("23 sorted in October");
+			expect(pic).toContain(
+				"Off means your rules and choices only. Nothing already decided changes.",
+			);
+		}
+		expect(today.indexOf(">Save<")).toBeGreaterThan(-1);
+		expect(today.indexOf(">Save<")).toBeLessThan(today.indexOf("In October"));
+		expect(b).not.toContain(">Save<");
+	});
+
 	it("draws the Suggestions page with its real chrome in each of its four pictures, with no h1 of its own", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
 		const reference = optionOf(suggestions, "Reference · Today on main");
@@ -4863,6 +4892,33 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(rules).not.toContain("none yet");
 		// The rule's name and category sit on one line, once; the Remove's sr-only name is checked above.
 		expect(rules.match(/City Gym · Always Household/g)?.length).toBe(1);
+	});
+
+	it("draws Household's category icon in cat-brown before each rule's line, in the rules' order", async () => {
+		const settings = block(await drawn(), "p134-settings");
+		const rules = picture(
+			optionOf(
+				settings,
+				"Option A · A contents page, each section its own page",
+			),
+			"Option A, rules, on a phone",
+		);
+		const names = ["City Gym", "Procreate Dreams", "YouTube Premium"];
+		// CategoryIcon's span in Household's colour, as the app draws a category's icon.
+		const icons = [
+			...rules.matchAll(/<span class="shrink-0 text-cat-brown">/g),
+		].map((m) => m.index ?? -1);
+		expect(icons).toHaveLength(3);
+		for (const [i, name] of names.entries()) {
+			const line = rules.indexOf(`${name} · Always`);
+			expect(line, name).toBeGreaterThan(-1);
+			expect(icons[i], name).toBeLessThan(line);
+			if (i > 0) {
+				expect(icons[i], name).toBeGreaterThan(
+					rules.indexOf(`${names[i - 1]} · Always`),
+				);
+			}
+		}
 	});
 
 	it("draws B's top with the in-page links under the title, in the brief's order, and B's AI picture with five switches and no Save button", async () => {
@@ -4953,11 +5009,11 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			expect(pic).toContain("A new category: Pet Care");
 			expect(pic).toContain("Create Pet Care");
 			expect(pic).toContain(esc("Tally's guess"));
-			// The card's answers are Create and Not now, the word the owner picked, with decision 89's Why? after
-			// Not now (decision 120). The design track's "No" is an open question for the owner, not drawn here.
-			expect(pic).toContain(">Not now</button>");
-			expect(pic).not.toContain(">No</button>");
-			expect(pic.indexOf(">Not now</button>")).toBeLessThan(
+			// The card's answers are Create and No, with decision 89's Why? after No. No is the quiet answer: it
+			// retires the suggestion and asks decision 101's question (decision 120).
+			expect(pic).toContain(">No</button>");
+			expect(pic).not.toContain(">Not now</button>");
+			expect(pic.indexOf(">No</button>")).toBeLessThan(
 				pic.indexOf('aria-label="Why? suggested categories"'),
 			);
 			expect(pic).toContain('aria-label="Why? suggested categories"');
@@ -4979,6 +5035,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		// Organize's card has no Why? (decision 120 names its two answers only); Skip is a link under the card on the
 		// Suggestions pages alone, as the route draws it.
 		expect(organize).not.toContain("Why?");
+		expect(organize).not.toContain(">No</button>");
 		for (const pic of [page, desk]) expect(pic).toContain(">Skip</a>");
 		for (const pic of [settingsCard, organize]) {
 			expect(pic).not.toContain(">Skip</a>");
@@ -5017,18 +5074,104 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		);
 	});
 
-	it("draws B's Settings top with only the Band for suggestions, and B's Organize with one link above the chips", async () => {
+	it("draws B's Settings top with only the Band for suggestions, B's Suggestions page with A's card and No, and B's Organize with one link above the chips", async () => {
 		const suggestions = block(await drawn(), "p135-suggestions");
 		const option = optionOf(suggestions, "Option B · One place to answer");
 		const top = picture(option, "Option B, Settings top, on a phone");
 		expect(top).toContain("5 suggestions to check");
 		expect(top).not.toContain("Pet Care");
+		const page = picture(option, "Option B, Suggestions page, on a phone");
+		expect(page).toContain(">No</button>");
+		expect(page).not.toContain(">Not now</button>");
 		const organize = picture(option, "Option B, Organize, on a phone");
 		expect(organize).toContain("Tally has a suggestion for this merchant");
 		expect(organize).not.toContain("Create Pet Care");
 		expect(organize.indexOf("Tally has a suggestion")).toBeLessThan(
 			organize.indexOf("Groceries"),
 		);
+	});
+
+	it("records P135's answer as No in decision 120's row, the word the owner picked", () => {
+		const row =
+			decisions.split("\n").find((line) => line.startsWith("| 120 |")) ?? "";
+		expect(row).toContain(
+			"then Create {name} or No, with decision 89's Why? after No",
+		);
+		expect(row).toContain("No retires the suggestion");
+		expect(row).toContain("Skip stays on the Suggestions page only");
+		expect(row).not.toContain("Open for the owner");
+	});
+
+	it("gives each desktop picture of Settings and the Suggestions page the full sidebar, with How Tally works and Feedback in its second group", async () => {
+		const html = await drawn();
+		const settings = block(html, "p134-settings");
+		const suggestions = block(html, "p135-suggestions");
+		// The sidebar's second group, under its rule, from its class to the list's end.
+		const secondGroup = (desk: string) => {
+			const start = desk.indexOf(
+				"mt-3 flex flex-col gap-1 border-t border-rule pt-3",
+			);
+			expect(start).toBeGreaterThan(-1);
+			return desk.slice(start, desk.indexOf("</ul>", start));
+		};
+		const desks = [
+			picture(
+				optionOf(settings, "Reference · Today on main"),
+				"Reference, Settings, on desktop",
+			),
+			picture(
+				optionOf(
+					settings,
+					"Option A · A contents page, each section its own page",
+				),
+				"Option A, contents, on desktop",
+			),
+			picture(
+				optionOf(settings, "Option B · One page, tidied"),
+				"Option B, Settings, on desktop",
+			),
+			picture(
+				optionOf(
+					suggestions,
+					"Option A · One card, one set of words, everywhere",
+				),
+				"Option A, Suggestions page, on desktop",
+			),
+		];
+		for (const desk of desks) {
+			expect(secondGroup(desk)).toContain('href="/how-it-works"');
+			expect(secondGroup(desk)).toContain("How Tally works");
+			expect(secondGroup(desk)).toContain('href="/feedback"');
+			expect(secondGroup(desk)).toContain("Feedback");
+		}
+	});
+
+	it("says in spec §8.6 that the card's answer is Create Pet Care or No, with the Why? link after No, as decision 120 records", () => {
+		const paragraph =
+			spec
+				.split("\n")
+				.find((line) => line.startsWith("**New category suggestions")) ?? "";
+		expect(paragraph).toContain("Create Pet Care or No (decision 120)");
+		expect(paragraph).toContain('"Why?" link after No');
+		expect(paragraph).toContain("can still Create it or answer No");
+		expect(paragraph).toContain(
+			"answers No, which retires the suggestion as the Suggestions page's No does and then asks decision 101's “Don't suggest Pet Care again?”",
+		);
+		expect(paragraph).toContain(
+			"Skip, on the Suggestions page only, leaves it waiting (decision 120)",
+		);
+		expect(paragraph).not.toContain("Not now");
+	});
+
+	it("says the More → Settings suggestions Band leads to the one review for every waiting suggestion", () => {
+		const row =
+			spec
+				.split("\n")
+				.find((line) => line.startsWith("| **More → Settings** |")) ?? "";
+		expect(row).toContain(
+			"the one review screen for every waiting suggestion: names, categories, new categories, income and transfers (§8.6, decision 120)",
+		);
+		expect(row).not.toContain("merchant name review");
 	});
 
 	it("adds no client JavaScript: neither specimen nor the audit's section has a script", async () => {
