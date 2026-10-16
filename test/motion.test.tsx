@@ -1036,6 +1036,14 @@ describe("the saved row's tick", () => {
 		);
 	});
 
+	it("hides the tick on a row with no mark, so a cleared mark leaves the arrow alone (#597)", () => {
+		expect(decl(".saved-tick", "opacity")).toBe("0");
+	});
+
+	it("draws the tick on the catalog's held picture, where no animation runs", () => {
+		expect(decl(".row-saved-held .saved-tick", "opacity")).toBe("1");
+	});
+
 	it("brings the arrow back as the tick goes, on the same stays", () => {
 		expect(animationOf(".row-saved .saved-arrow")).toContain(
 			"var(--duration-toast)",

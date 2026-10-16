@@ -92,11 +92,10 @@ describe("decision and spec records for the Home Plaid allowances", () => {
 	});
 
 	it("records the Home Plaid allowances as decision 124, with inline styles and decision 63", () => {
-		const row =
-			decisionRows().find((line) =>
-				line.startsWith("| 124 | 2026-10-16 | Home in the family app"),
-			) ?? "";
-		expect(row).not.toBe("");
+		const row = decisionRows().find((line) => line.startsWith("| 124 |")) ?? "";
+		expect(row.startsWith("| 124 | 2026-10-16 | Home in the family app")).toBe(
+			true,
+		);
 		expect(row).toContain("'unsafe-inline'");
 		expect(row).toContain("decision 63");
 	});
