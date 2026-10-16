@@ -1179,11 +1179,13 @@ function markedCell(item: string, shown: boolean) {
 		) : (
 			<span data-mark="current" class="size-2 rounded-full bg-muted/45" />
 		);
+	// One ring at most: the current month's accent, as MonthNavigation draws it, else the shown month's ink.
+	const ring = state === "current" ? "ring-accent" : shown ? "ring-ink" : "";
 	return (
 		<>
 			<span
 				aria-hidden="true"
-				class={`flex size-8 items-center justify-center rounded-full border border-rule ${shown ? "border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper" : ""} ${state === "current" ? "ring-2 ring-accent ring-offset-2 ring-offset-paper" : ""}`}
+				class={`flex size-8 items-center justify-center rounded-full border border-rule ${ring ? `ring-2 ${ring} ring-offset-2 ring-offset-paper` : ""}`}
 			>
 				{mark}
 			</span>

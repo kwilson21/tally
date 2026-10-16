@@ -4941,6 +4941,42 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		}
 	});
 
+	it("draws one ring per disc: October's accent when it is shown and current, September's ink when shown", async () => {
+		const chunk = specimen(await drawn(), "p133-month-dots");
+		// One month's own link, from its href to its closing tag, so the other six months' rings are not counted.
+		const linkTo = (shot: string, month: string) => {
+			const at = shot.indexOf(`<a href="/?month=${month}"`);
+			expect(at, month).toBeGreaterThan(-1);
+			return shot.slice(at, shot.indexOf("</a>", at));
+		};
+		const october = linkTo(
+			picture(chunk, `Option A, the month dots, October${PHONE}`),
+			"2026-10",
+		);
+		expect(october).toContain("ring-accent");
+		expect(october).not.toContain("ring-ink");
+		expect(october).not.toContain("border-ink");
+		expect(count(october, "ring-2")).toBe(1);
+		expect(count(october, "ring-offset-2 ring-offset-paper")).toBe(1);
+
+		const september = picture(
+			chunk,
+			`Option A, the month dots, September${PHONE}`,
+		);
+		const shownSeptember = linkTo(september, "2026-09");
+		expect(shownSeptember).toContain("ring-ink");
+		expect(shownSeptember).not.toContain("ring-accent");
+		expect(shownSeptember).not.toContain("border-ink");
+		expect(count(shownSeptember, "ring-2")).toBe(1);
+		expect(count(shownSeptember, "ring-offset-2 ring-offset-paper")).toBe(1);
+		// October is current but not shown here, so it keeps its accent ring alone.
+		const currentOctober = linkTo(september, "2026-10");
+		expect(currentOctober).toContain("ring-accent");
+		expect(currentOctober).not.toContain("ring-ink");
+		expect(count(currentOctober, "ring-2")).toBe(1);
+		expect(count(currentOctober, "ring-offset-2 ring-offset-paper")).toBe(1);
+	});
+
 	it("draws C's over month as a brick stroke through the ink one", async () => {
 		const chunk = specimen(await drawn(), "p133-month-dots");
 		const october = picture(chunk, `Option C, the month dots, October${PHONE}`);
@@ -5011,6 +5047,13 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			"the word carrying the status. Under the number and stamp, above the bars, one muted line names the month's biggest causes",
 		);
 		expect(spec).not.toContain("Under the bars, one muted line");
+		// The bars sit under the cause line, not under the whole sentence's "it".
+		expect(spec).toContain(
+			"Under the cause line is one small bar per budgeted category, scaled against its own budget: ",
+		);
+		expect(spec).not.toContain(
+			"Under it is one small bar per budgeted category",
+		);
 	});
 
 	it("lists P130 to P133 as the decided entries before P136, each with its issue and decision 121", () => {
