@@ -3,12 +3,12 @@
 // opens the row focus is on (Enter already does, on a link), ← and → go to the previous and next month on Home, and u
 // presses the Undo of the toast on screen. Shift is part of ? and of / and nothing else. No key acts while focus is in
 // a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys then). The sheet keeps the
-// page's #fragment, and a keys response that arrives after another sheet opened is dropped. A swap of #keys moves the
-// sheet's return, and so does a history restore (Back) that redraws the page without the sheet: that counts as the
-// close, and when the opener is gone, focus goes to the page's heading. A keys request that ends without a swap gives
-// focus back (to Undo) and forgets it. Without this script every page works as a plain page: the keys are a details at
-// the foot, and More lists them. Pages say what they can do with data attributes and aria-keyshortcuts; this script
-// only reads them.
+// page's #fragment, and a keys response is dropped when another sheet opened or the address moved while it loaded.
+// A swap of #keys moves the sheet's return, and so does a history restore (Back) that redraws the page without the
+// sheet: that counts as the close, and when the opener is gone, focus goes to the page's heading. A keys request that
+// ends without a swap gives focus back (to Undo) and forgets it. Without this script every page works as a plain
+// page: the keys are a details at the foot, and More lists them. Pages say what they can do with data attributes and
+// aria-keyshortcuts; this script only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
 // The row a person opens, marked on transaction, Home's savings goal and category rows, and Bills' bill and planned
@@ -28,6 +28,9 @@ export function keysHref({ pathname, search }) {
 		: pathname.replace(/^\/+/, "/");
 	return `${path}${search ? `${search}&` : "?"}keys`;
 }
+
+/** A page's address without its #fragment: the path and the query, which is what a push (a filter's, say) changes. */
+const pathAndQuery = ({ pathname, search }) => pathname + search;
 
 /**
  * Shown, and live: not drawn inside an inert ancestor (the page behind an open sheet) or an hx-ignore one (a catalog
@@ -67,7 +70,8 @@ export function rowsOf(doc) {
  * after-settle, and it acts on a swap of #keys or of a region that holds it, after the sheet has been seen open. A
  * history restore (Back) that redraws the page without the sheet counts as the close, and when the opener is gone,
  * focus goes to the page's heading. `ended` is htmx's finally-request, and clears the return when a keys request ends
- * without a swap.
+ * without a swap. `responded` is htmx's after-request, and drops a keys response when another sheet opened or the
+ * address moved while it loaded.
  */
 export function keyboard(doc, win) {
 	let returnTo = null;
@@ -224,14 +228,20 @@ export function keyboard(doc, win) {
 		},
 		/**
 		 * A keys response is thrown away when a sheet outside #keys opened while it loaded: its swap would put the keys
-		 * sheet over that one. htmx returns before the swap when htmx:after:request is cancelled, so no address is pushed
-		 * either. The keys sheet's own close is kept, since its sheet is inside #keys.
+		 * sheet over that one. It is also thrown away when the address moved since the request was made (HX-Current-URL,
+		 * which htmx sends with every request), so a filter's push is not followed by this older address. htmx returns
+		 * before the swap when htmx:after:request is cancelled, so no address is pushed either. The keys sheet's own
+		 * close is kept, since its sheet is inside #keys.
 		 */
 		responded(event) {
 			const target = event.detail?.ctx?.target;
 			if (target?.id !== "keys") return;
 			const sheet = openSheet(doc);
-			if (!sheet || target.contains(sheet)) return;
+			const otherSheet = !!sheet && !target.contains(sheet);
+			const from = event.detail?.ctx?.request?.headers?.["HX-Current-URL"];
+			const moved =
+				!!from && pathAndQuery(new URL(from)) !== pathAndQuery(win.location);
+			if (!otherSheet && !moved) return;
 			event.preventDefault();
 			forget();
 		},
