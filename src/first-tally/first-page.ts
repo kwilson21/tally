@@ -7,9 +7,26 @@
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
 import { insertBillStatements } from "../bills/write";
-import { includedSql, markedTransferSql } from "../db/counted-month";
+import {
+	firstBudgetSuggestion,
+	fullMonths,
+	type MonthSpent,
+	monthlyMeanCents,
+} from "../budgets/first-suggestion";
+import { setBudgetStatement } from "../db/budgets";
+import {
+	COUNTED_JOINS,
+	COUNTED_SPENDING,
+	countedCategorySql,
+	countedMonthSql,
+	includedSql,
+	markedTransferSql,
+} from "../db/counted-month";
 import {
 	type BillsKept,
+	type BudgetAnswer,
+	type FirstTally,
+	keepBudgetStatement,
 	keptBillStatement,
 	markStroke,
 	type PayAnswer,
@@ -17,12 +34,16 @@ import {
 	payAnswerStatement,
 	readFirstTally,
 	STROKES,
+	strokeStatement,
 } from "../db/first-tally";
 import { PERSON_INCOME_SET_SQL } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { payAskedSql } from "../db/suggestions-queue";
+import { needsCategoryCount } from "../db/transactions";
+import { readMonthSummary } from "../month-summary";
 import { tidyName } from "../transactions/tidy-name";
 import { billsLedgerLine, splitKeepable } from "./bills";
+import { type BudgetAsk, budgetsLedgerLine } from "./budgets";
 import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
 
 /** A merchant whose money in Tally marked as income, and the deposits behind the question. */
@@ -61,7 +82,30 @@ export type FirstPageModel = {
 	/** The found charges that can be kept in one tap, and the ones that wait in Possible bills. */
 	keep: BillSuggestion[];
 	waiting: BillSuggestion[];
+	/** The budgets step (spec §8.8): null until pay and bills are done, since the page asks them first. */
+	budgets: BudgetsStep | null;
 };
+
+/**
+ * The budgets step as the page reads it (spec §6, §8.8, #590). Once the budgets stroke is drawn the page rules off the
+ * month's Safe to spend (`done`, the same number Home shows); until then it asks the categories still to answer.
+ */
+export type BudgetsStep =
+	| { done: true; safeCents: number }
+	| {
+			done: false;
+			/** The month the answers take effect from (YYYY-MM), the current one. */
+			month: string;
+			/** The categories still to answer, in the household's order. */
+			asks: BudgetAsk[];
+			/**
+			 * True when the keep all question is the one asked: some category has a suggestion, and nothing is answered yet.
+			 * Otherwise one at a time asks asks[0].
+			 */
+			keepAllOpen: boolean;
+			/** The Needs a category line: the transactions that need a category, and the monthly mean of their spending when known. */
+			needs: { count: number; meanCents: number | null } | null;
+	  };
 
 /** The money in Tally marked as income that nobody has decided, one row per deposit the pay questions cover (payAskedSql). */
 const PAY_SQL = `SELECT t.id AS id, ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date, -t.amount_cents AS cents
@@ -207,6 +251,146 @@ function billsLedger(
 		: null;
 }
 
+/**
+ * The ledger line of the budgets the step kept, from its record (first_tally's `budgets`): every answer that set an
+ * amount, a suggestion or another, counted and totalled. Null when none is set (a skip writes no line).
+ */
+function budgetsLedger(
+	budgets: Record<string, BudgetAnswer> | undefined,
+): { id: string; text: string } | null {
+	const kept = Object.values(budgets ?? {}).filter(
+		(answer) => answer.cents !== null,
+	);
+	if (kept.length === 0) return null;
+	const cents = kept.reduce((sum, answer) => sum + (answer.cents ?? 0), 0);
+	return { id: "budgets", text: budgetsLedgerLine(kept.length, cents) };
+}
+
+/**
+ * The guard of the budgets stroke, as SQL: the bills stroke is drawn, and no category is left to ask. It is the same test
+ * budgetsStep asks by (an active category with no budget that applies this month and no answer in first_tally), read in
+ * the statement, so the stroke can't be drawn while a question is still asked. `month` is code (YYYY-MM), checked here.
+ */
+export function budgetsStrokeGuard(month: string): string {
+	if (!/^\d{4}-\d{2}$/.test(month)) throw new Error(`not a month: ${month}`);
+	return `EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.strokes.bills') IS NOT NULL)
+		AND NOT EXISTS (SELECT 1 FROM categories c WHERE c.archived = 0
+			AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = c.id AND b.effective_month <= '${month}')
+			AND NOT EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.budgets."' || c.id || '"') IS NOT NULL))`;
+}
+
+/**
+ * Spent per category per month over the given months, in one read: each row is a category (null for spending with no
+ * category), a month, and its counted cents. Counted spending is what Home's budget rows count (spec §6), so a refund
+ * counts in its purchase's month, as Home does.
+ */
+async function monthlySpent(
+	db: D1Database,
+	months: string[],
+): Promise<{ categoryId: number | null; month: string; cents: number }[]> {
+	const first = months[0];
+	const last = months[months.length - 1];
+	if (first === undefined || last === undefined) return [];
+	const { results } = await db
+		.prepare(
+			`SELECT ${countedCategorySql()} AS categoryId, ${countedMonthSql()} AS month, SUM(t.amount_cents) AS cents
+			FROM transactions t ${COUNTED_JOINS}
+			WHERE ${COUNTED_SPENDING} AND ${countedMonthSql()} BETWEEN ?1 AND ?2
+			GROUP BY categoryId, month`,
+		)
+		.bind(first, last)
+		.all<{ categoryId: number | null; month: string; cents: number }>();
+	return results;
+}
+
+/**
+ * The budgets step, read from the household. The categories it may ask are the active ones with no budget that applies
+ * this month and no answer in first_tally, in the household's order. Each is given its full months of Spent (fullMonths
+ * from the history's first date, a month with no spending is $0) and Tally's suggestion (firstBudgetSuggestion). The
+ * keep all question is offered while nothing is answered and some category has a suggestion; otherwise one at a time
+ * asks the first category not yet answered. The Needs a category line counts the transactions with no category, and
+ * takes the monthly mean of their spending over the same months.
+ */
+async function budgetsStep(
+	db: D1Database,
+	today: string,
+	record: FirstTally | null,
+	oneAtATime: boolean,
+): Promise<BudgetsStep> {
+	const month = today.slice(0, 7);
+	if (record?.strokes.budgets !== undefined) {
+		const { summary } = await readMonthSummary(db, today, month);
+		return { done: true, safeCents: summary.safeToSpendCents };
+	}
+	const { results: categories } = await db
+		.prepare(
+			`SELECT c.id AS id, c.name AS name FROM categories c WHERE c.archived = 0
+			AND NOT EXISTS (SELECT 1 FROM budget_amounts b WHERE b.category_id = c.id AND b.effective_month <= ?1)
+			ORDER BY c.sort_order, c.id`,
+		)
+		.bind(month)
+		.all<{ id: number; name: string }>();
+	const open = categories.filter(
+		(category) => record?.budgets?.[String(category.id)] === undefined,
+	);
+	if (open.length === 0)
+		return { done: false, month, asks: [], keepAllOpen: false, needs: null };
+	const first = await db
+		.prepare("SELECT MIN(date) AS first FROM transactions")
+		.first<{ first: string | null }>();
+	const months = fullMonths(first?.first ?? null, today);
+	const spent = new Map<string, number>();
+	for (const row of await monthlySpent(db, months))
+		spent.set(`${row.categoryId}|${row.month}`, row.cents);
+	const monthsOf = (categoryId: number | null): MonthSpent[] =>
+		months.map((m) => ({
+			month: m,
+			spentCents: spent.get(`${categoryId}|${m}`) ?? 0,
+		}));
+	const asks: BudgetAsk[] = open.map((category) => {
+		const monthsSpent = monthsOf(category.id);
+		return {
+			id: category.id,
+			name: category.name,
+			months: monthsSpent,
+			suggestion: firstBudgetSuggestion(monthsSpent),
+		};
+	});
+	const keepAllOpen =
+		!oneAtATime &&
+		Object.keys(record?.budgets ?? {}).length === 0 &&
+		asks.some((ask) => ask.suggestion !== null);
+	const count = await needsCategoryCount(db, "all");
+	const needs =
+		count > 0 ? { count, meanCents: monthlyMeanCents(monthsOf(null)) } : null;
+	return { done: false, month, asks, keepAllOpen, needs };
+}
+
+/**
+ * Writes budget answers in one batch (spec §8.8): each answer's budget (when it sets one, from this month on, through the
+ * budget path Home's sheet uses) and the answer itself, then the budgets stroke under its guard. So the stroke is drawn
+ * in the same write as the last answer, and never before it.
+ */
+export async function keepBudgetAnswers(
+	db: D1Database,
+	today: string,
+	answers: { categoryId: number; answer: BudgetAnswer }[],
+): Promise<void> {
+	const month = today.slice(0, 7);
+	const statements = answers.flatMap(({ categoryId, answer }) =>
+		answer.cents === null
+			? [keepBudgetStatement(db, categoryId, answer)]
+			: [
+					setBudgetStatement(db, categoryId, answer.cents, month),
+					keepBudgetStatement(db, categoryId, answer),
+				],
+	);
+	await db.batch([
+		...statements,
+		strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
+	]);
+}
+
 /** The active bills' names, which a found charge can't share (spec §8.5). */
 async function activeBillNames(db: D1Database): Promise<string[]> {
 	const { results } = await db
@@ -223,6 +407,7 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
 export async function settleAndLoad(
 	db: D1Database,
 	today: string,
+	{ oneAtATime = false }: { oneAtATime?: boolean } = {},
 ): Promise<FirstPageModel> {
 	const pay = await payMerchants(db);
 	if (pay.length === 0) await markStroke(db, "pay", today, NO_PAY_LEFT_SQL);
@@ -235,10 +420,23 @@ export async function settleAndLoad(
 			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
 	const done = pay.length === 0 && split.keep.length === 0;
 	if (done) await markStroke(db, "bills", today, NO_PAY_LEFT_SQL);
+	// The budgets stroke waits for the bills stroke (budgetsStrokeGuard), and is drawn when no budget question is left.
+	if (done)
+		await markStroke(
+			db,
+			"budgets",
+			today,
+			budgetsStrokeGuard(today.slice(0, 7)),
+		);
 	const record = await readFirstTally(db);
 	const payLines = await payLedger(db, record?.pay);
 	const billLine = billsLedger(record?.bills);
-	const ledger = billLine ? [...payLines, billLine] : payLines;
+	const budgetLine = budgetsLedger(record?.budgets);
+	const ledger = [
+		...payLines,
+		...(billLine ? [billLine] : []),
+		...(budgetLine ? [budgetLine] : []),
+	];
 	const head = ledger.length === 0 ? await bankHead(db) : null;
 	return {
 		drawn: STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
@@ -249,6 +447,7 @@ export async function settleAndLoad(
 		pay,
 		keep: split.keep,
 		waiting: split.waiting,
+		budgets: done ? await budgetsStep(db, today, record, oneAtATime) : null,
 	};
 }
 

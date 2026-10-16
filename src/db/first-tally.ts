@@ -184,19 +184,31 @@ export function forgetPayDeposits(
 		.bind(KEY, itemId);
 }
 
-/** Keeps the budgets step's answer for a category. The newest answer for a category replaces the one before it. */
+/**
+ * The statement that keeps the budgets step's answer for a category, for a batch with the budget it sets (keep all, a
+ * Yes, another amount, a skip). The newest answer for a category replaces the one before it. One upsert: the json_set
+ * changes only that category's entry in the record as it is when the write happens.
+ */
+export function keepBudgetStatement(
+	db: D1Database,
+	categoryId: number,
+	answer: BudgetAnswer,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)))
+			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.budgets."' || ?2 || '"', json(?3))`,
+		)
+		.bind(KEY, String(categoryId), JSON.stringify(answer));
+}
+
+/** Keeps the budgets step's answer for a category; keepBudgetStatement has the write. */
 export async function keepBudgetAnswer(
 	db: D1Database,
 	categoryId: number,
 	answer: BudgetAnswer,
 ): Promise<void> {
-	await db
-		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.budgets."' || ?2 || '"', json(?3)))
-			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.budgets."' || ?2 || '"', json(?3))`,
-		)
-		.bind(KEY, String(categoryId), JSON.stringify(answer))
-		.run();
+	await keepBudgetStatement(db, categoryId, answer).run();
 }
 
 /** Keeps the counts of the first night, once its sorting has all finished. */

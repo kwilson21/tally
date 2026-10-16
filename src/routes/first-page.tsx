@@ -1,12 +1,21 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
-import type { PayAnswer } from "../db/first-tally";
+import type { BudgetAnswer, PayAnswer } from "../db/first-tally";
 import { keepReply, keepShown } from "../first-tally/bills";
+import {
+	budgetChangedWords,
+	keepShownBudgets,
+	keptBudgetsWords,
+	savedBudgetWords,
+	skippedBudgetWords,
+} from "../first-tally/budgets";
 import {
 	answerPay,
 	type FirstPageModel,
 	keepBills,
+	keepBudgetAnswers,
 	type PayMerchant,
 	settleAndLoad,
 } from "../first-tally/first-page";
@@ -90,7 +99,9 @@ firstPage.get("/first-page", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
-	const model = await settleAndLoad(c.env.DB, today);
+	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
+	const oneAtATime = c.req.query("budgets") === "one";
+	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
 	return c.html(
 		<Layout
 			title="Your first page · Tally"
@@ -98,7 +109,7 @@ firstPage.get("/first-page", async (c) => {
 			currentPath={c.req.path}
 		>
 			<div class="max-w-2xl">
-				<FirstPageBody model={model} focus={false} />
+				<FirstPageBody model={model} focus={oneAtATime} />
 			</div>
 		</Layout>,
 	);
@@ -198,3 +209,136 @@ firstPage.post("/first-page/bills", async (c) => {
 		bills.kept === 0 ? "info" : "success",
 	);
 });
+
+/**
+ * The budgets question's answers (spec §8.8, #590). Keep all keeps the suggestions the page showed, each re-checked as
+ * Keep does. One category's Yes keeps its suggestion when the amount is the one the page showed; another amount is read
+ * by the budget sheet's own rule (parseBudgetAmount); a skip keeps the skip. A change since the page drew is asked again,
+ * and a refused amount draws the question again with its error. Each answer is one batch with its budget and the stroke.
+ */
+firstPage.post("/first-page/budgets", async (c) => {
+	if (c.env.DEMO === "true") return c.notFound();
+	const today = await householdToday(c.env.DB);
+	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	const form = await c.req.formData();
+	const answer = String(form.get("answer") ?? "");
+	if (!["all", "yes", "another", "skip"].includes(answer))
+		return c.text("Choose an answer.", 400);
+	// Keep all is the only answer to its own question; every other answer is one at a time, so its page is drawn that way.
+	const before = await settleAndLoad(c.env.DB, today, {
+		oneAtATime: answer !== "all",
+	});
+	const step = before.budgets;
+	if (!step || step.done) return stale(c, before);
+	if (answer === "all") {
+		const suggested = step.asks.filter((ask) => ask.suggestion !== null);
+		const values = form
+			.getAll("keep")
+			.filter((value): value is string => typeof value === "string");
+		const answers = keepShownBudgets(suggested, values).flatMap(
+			(ask): { categoryId: number; answer: BudgetAnswer }[] =>
+				ask.suggestion
+					? [
+							{
+								categoryId: ask.id,
+								answer: {
+									kind: "suggested",
+									cents: ask.suggestion.amountCents,
+								},
+							},
+						]
+					: [],
+		);
+		if (answers.length === 0)
+			return answered(
+				c,
+				before,
+				keptBudgetsWords(0, suggested.length),
+				NO_MOTION,
+				"info",
+			);
+		await keepBudgetAnswers(c.env.DB, today, answers);
+		const after = await settleAndLoad(c.env.DB, today);
+		return answered(
+			c,
+			after,
+			keptBudgetsWords(answers.length, suggested.length - answers.length),
+			motionOf(before, after, "budgets"),
+		);
+	}
+	const id = Number(form.get("category"));
+	const ask = step.asks.find((candidate) => candidate.id === id);
+	if (!ask) return stale(c, before);
+	if (answer === "skip") {
+		await keepBudgetAnswers(c.env.DB, today, [
+			{ categoryId: id, answer: { kind: "skipped", cents: null } },
+		]);
+		const after = await settleAndLoad(c.env.DB, today);
+		return answered(
+			c,
+			after,
+			skippedBudgetWords(ask.name),
+			motionOf(before, after, null),
+		);
+	}
+	let kind: "suggested" | "another";
+	let cents: number;
+	if (answer === "yes") {
+		const suggestion = ask.suggestion;
+		// The amount the page showed is the one kept; a suggestion that moved since is asked again.
+		if (!suggestion || Number(form.get("shown")) !== suggestion.amountCents)
+			return answered(
+				c,
+				before,
+				budgetChangedWords(ask.name),
+				NO_MOTION,
+				"info",
+			);
+		kind = "suggested";
+		cents = suggestion.amountCents;
+	} else {
+		const typed = String(form.get("budget") ?? "");
+		const parsed = parseBudgetAmount(typed);
+		if (!parsed.ok) return budgetRefused(c, before, parsed.error, typed);
+		kind = "another";
+		cents = parsed.cents;
+	}
+	await keepBudgetAnswers(c.env.DB, today, [
+		{ categoryId: id, answer: { kind, cents } },
+	]);
+	const after = await settleAndLoad(c.env.DB, today);
+	return answered(
+		c,
+		after,
+		savedBudgetWords(ask.name, cents),
+		motionOf(before, after, "budgets"),
+	);
+});
+
+/**
+ * A typed amount that isn't a dollar amount: nothing is saved, and the question is drawn again with its error, its field
+ * holding what was typed. Without JavaScript it redirects back to the page, as every answer does.
+ */
+function budgetRefused(
+	c: Context<App>,
+	model: FirstPageModel,
+	error: string,
+	typed: string,
+) {
+	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
+	return c.html(
+		<FirstPageBody
+			model={model}
+			focus
+			motion={NO_MOTION}
+			budgetError={{ text: error, typed }}
+		/>,
+		422,
+		{
+			"HX-Trigger": hxTrigger({
+				toast: { message: error, type: "error" },
+				announce: error,
+			}),
+		},
+	);
+}

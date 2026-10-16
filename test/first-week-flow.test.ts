@@ -90,6 +90,8 @@ beforeEach(async () => {
 	await db.prepare("DELETE FROM merchants").run();
 	await db.prepare("DELETE FROM accounts").run();
 	await db.prepare("DELETE FROM plaid_items").run();
+	// A new family has no budgets yet, so the budgets step has categories to ask (#590).
+	await db.prepare("DELETE FROM budget_amounts").run();
 	await db
 		.prepare("DELETE FROM household_settings WHERE key = 'first_tally'")
 		.run();
