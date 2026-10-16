@@ -813,6 +813,52 @@ step(
 	"the demo refund shows its linked purchase, checked, and Refund for on its row",
 );
 
+// An unlocked linked credit folds its category, and Count as income draws that row closed (decision 99). Opened, it must
+// stay open through the next redraw, with focus still on the toggle (#661). Unticking Reviewed doesn't unlock this demo
+// credit (Jev holds its review), so Count as income is ticked first; then Reviewed redraws the open row, and the credit
+// stays unlocked.
+const category = page.locator("#edit-category details");
+const incomeToggle = page.locator("label", {
+	has: page.locator("#edit-income"),
+});
+const reviewedToggle = page.locator("label", {
+	has: page.locator("#edit-credit-reviewed"),
+});
+await page.evaluate(() => {
+	window.__lockEnded = 0;
+	document.addEventListener("htmx:finally:request", (event) => {
+		if (event.detail.ctx.request.action.includes("/category/lock"))
+			window.__lockEnded += 1;
+	});
+});
+const toggleAndWaitForRedraw = async (toggle) => {
+	const ended = await page.evaluate(() => window.__lockEnded);
+	await toggle.click();
+	await page.waitForFunction((count) => window.__lockEnded > count, ended);
+};
+await toggleAndWaitForRedraw(incomeToggle);
+assert.equal(await category.evaluate((row) => row.open), false);
+await page.locator("#edit-category summary").click();
+assert.equal(await category.evaluate((row) => row.open), true);
+await toggleAndWaitForRedraw(reviewedToggle);
+assert.equal(
+	await category.evaluate((row) => row.open),
+	true,
+	"the folded row must stay open through the Reviewed redraw",
+);
+assert.equal(
+	await page
+		.locator("#edit-credit-reviewed")
+		.evaluate((toggle) => document.activeElement === toggle),
+	true,
+	"focus must stay on the Reviewed toggle through the redraw",
+);
+await page.getByRole("link", { name: "Cancel" }).click();
+await page.locator('[role="dialog"]').waitFor({ state: "hidden" });
+step(
+	"a folded category row stays open through a Reviewed redraw, with focus kept",
+);
+
 // A search runs in every month; "Only October" narrows it and moves focus to the count; one more letter keeps
 // that month in the Month choice and the count (#211, decision 101).
 await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
