@@ -1,8 +1,9 @@
 // When the first week's questions open (spec §8.8, decision 114): the household day after stroke one, every connected
 // bank's first sync and its 90-day history done, and no imported transaction still waiting for Jev's category or income
-// answer. Nothing polls; the page reads this when it's drawn.
+// answer. Nothing polls; the page reads this when it's drawn. Once the first week is set up they stay shut
+// (readQuestionsGate).
 import { readAiSwitches } from "../db/ai-switches";
-import { readFirstTally } from "../db/first-tally";
+import { isSetUp, readFirstTally } from "../db/first-tally";
 import { countWaitingForJev } from "../db/transactions";
 
 export type QuestionsFacts = {
@@ -71,12 +72,17 @@ export async function readGateInputs(
 	return { banks, waiting };
 }
 
-/** The gate read from the household's database. */
+/**
+ * The gate read from the household's database, which the question page's routes read. Closed again once the first week is
+ * set up (isSetUp: all five strokes drawn), so a set-up household is sent Home and its questions are not asked again (#647).
+ * Home's setup doesn't come through here: it checks isSetUp itself and reads questionsOpen and the inputs directly.
+ */
 export async function readQuestionsGate(
 	db: D1Database,
 	today: string,
 ): Promise<boolean> {
 	const record = await readFirstTally(db);
+	if (isSetUp(record)) return false;
 	const { banks, waiting } = await readGateInputs(db);
 	return questionsOpen({
 		today,

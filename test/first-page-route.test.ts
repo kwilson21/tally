@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON } from "../src/db/ai-switches";
-import { markStroke, readFirstTally } from "../src/db/first-tally";
+import { markStroke, readFirstTally, STROKES } from "../src/db/first-tally";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -302,6 +302,74 @@ describe("the gate", () => {
 	it("opens the page once the gate is open", async () => {
 		const { res } = await get("/first-page");
 		expect(res.status).toBe(200);
+	});
+
+	describe("once the first week is set up (#647)", () => {
+		/** Draws every stroke: the household is set up, and nothing is left to ask. */
+		const setUp = async () => {
+			for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
+		};
+
+		/** The ACME deposits' flags, as the ledger reads them: a Yes would change them, so they show whether an answer wrote. */
+		const flagsOf = async (raw: string) =>
+			(
+				await db
+					.prepare(
+						"SELECT flag_income, income_source FROM transactions WHERE raw_name = ?",
+					)
+					.bind(raw)
+					.all()
+			).results;
+
+		it("sends the page Home with a 303, and a plain answer Home too", async () => {
+			await setUp();
+			const { res } = await get("/first-page");
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/");
+			const answer = await post("/first-page/pay", [["answer", "yes"]]);
+			expect(answer.res.status).toBe(303);
+			expect(answer.res.headers.get("Location")).toBe("/");
+		});
+
+		it("sends a pay answer Home with HX-Redirect, and writes nothing", async () => {
+			// Deposits the page asks about while it is still open; the answer posts the fields that page showed.
+			await deposits("ACME CORP PAYROLL", 245000, 2, 14, {
+				flag_income: 0,
+				income_confidence: 0.5,
+			});
+			const { html } = await get("/first-page");
+			const asked: [string, string][] = [
+				...hiddenFields(html, "merchant"),
+				...payFields(html),
+				["answer", "yes"],
+			];
+			expect(asked).toHaveLength(4);
+			await setUp();
+			const before = await readFirstTally(db);
+			const flags = await flagsOf("ACME CORP PAYROLL");
+			const { res } = await post("/first-page/pay", asked, true);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/");
+			expect(await readFirstTally(db)).toEqual(before);
+			expect(await flagsOf("ACME CORP PAYROLL")).toEqual(flags);
+		});
+
+		it("sends a bills keep Home with HX-Redirect, and keeps no bill", async () => {
+			await charge("NETFLIX", 1549);
+			const { html } = await get("/first-page");
+			const keep = keepFields(html);
+			expect(keep).toHaveLength(1);
+			await setUp();
+			const before = await readFirstTally(db);
+			const { res } = await post("/first-page/bills", keep, true);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/");
+			expect(await readFirstTally(db)).toEqual(before);
+			const bills = await db
+				.prepare("SELECT COUNT(*) AS n FROM bills")
+				.first<{ n: number }>();
+			expect(bills?.n).toBe(0);
+		});
 	});
 });
 

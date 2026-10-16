@@ -410,6 +410,59 @@ describe("? (the keys sheet)", () => {
 		);
 	});
 
+	it("keeps the fragment on the address while the sheet is open, when the reply's push dropped it (Select mode)", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		// Select mode's reply pushes the address the server builds, which cannot know the #fragment, so the sheet opens
+		// on an address without one.
+		const win = windowFor("?select=1", "#main");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledWith(
+			"GET",
+			"/transactions?select=1&keys",
+			{
+				target: "#keys",
+				select: "#keys",
+				swap: "outerHTML",
+				push: "/transactions?select=1&keys#main",
+			},
+		);
+		win.location.search = "?select=1&keys";
+		win.location.hash = "";
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		expect(win.history.replaceState).toHaveBeenCalledTimes(1);
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions?select=1&keys#main",
+		);
+		// The close pushes the Select address without keys, and the fragment comes back on it as before.
+		remove(page, sheet);
+		win.location.search = "?select=1";
+		win.location.hash = "";
+		settled(settleEvent(region));
+		expect(win.history.replaceState).toHaveBeenLastCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions?select=1#main",
+		);
+	});
+
+	it("does not rewrite an address that still has its #fragment when the sheet opens", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("?select=1", "#main");
+		const { keydown, settled } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		// The reply's push kept the fragment as well, so the address already has it.
+		win.location.search = "?select=1&keys";
+		el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+	});
+
 	it("leaves the address alone when the page had no fragment, or when the address still has it", () => {
 		const plain = new FakePage();
 		const plainWin = windowFor();
