@@ -577,6 +577,35 @@ describe("a re-split refuses the save when a bill payment moved after the read, 
 		]);
 	});
 
+	it("refuses a re-split when a competing save unlinks a bill payment from its part after the read, and writes nothing", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		const before = await partIds(PURCHASE);
+		const racing = racingWith(
+			"UPDATE bill_payments SET status = 'dismissed' WHERE bill_id = ? AND status = 'linked'",
+			[MEMBERSHIP],
+		);
+
+		const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+		expect(result).toEqual({
+			saved: false,
+			billLinked: true,
+			unlinked: [],
+			bills: [],
+			moved: [],
+		});
+		expect(await partIds(PURCHASE)).toEqual(before);
+		expect(await linkedOn(MEMBERSHIP)).toEqual([]);
+		expect(
+			await db
+				.prepare(
+					"SELECT transaction_id AS transactionId, status FROM bill_payments WHERE bill_id = ?",
+				)
+				.bind(MEMBERSHIP)
+				.first(),
+		).toEqual({ transactionId: PART_MEMBERSHIP, status: "dismissed" });
+	});
+
 	it("keeps an ordinary re-split carrying a bill payment, even with a person's Not this one on a part", async () => {
 		await seedSplit([membershipPart, groceriesPart]);
 		await db

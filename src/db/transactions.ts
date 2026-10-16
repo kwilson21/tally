@@ -2183,7 +2183,9 @@ export async function saveSplit(
 	);
 	// The same for a bill payment on a part (#638). A payment the read saw that is no longer linked on its part, or a linked
 	// payment on a part the read didn't see, fails refuseMovedBill, the batch's second statement, since bill_id is NOT NULL.
-	// The count catches a read payment that left its part; the extra check, one linked to a part after the read.
+	// The count catches a read payment that left its part; the extra check, one linked to a part after the read. The
+	// statement fails only while some bill_payments row exists, so if every row is gone (a bill deleted with its payments),
+	// the save goes on: no payment is left to pair by the values the read saw.
 	const paymentsReadOnTheirPart =
 		payments
 			.map(
