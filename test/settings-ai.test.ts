@@ -229,7 +229,7 @@ describe("GET /settings: the AI suggestions group", () => {
 });
 
 describe("POST /settings/ai", () => {
-	it("saves the group, takes a switch left out as off, and says what it did", async () => {
+	it("saves the group compared with what was saved, takes a switch left out as off, and says what it did", async () => {
 		const { res, html } = await post("/settings/ai", { income: "on" });
 		expect(res.status).toBe(200);
 		expect(await readAiSwitches(env.DB)).toMatchObject({
@@ -453,6 +453,95 @@ describe("POST /settings/ai", () => {
 		});
 		expect(res.status).toBe(403);
 		expect(await readAiSwitches(env.DB)).toEqual(AI_SWITCHES_ALL_ON);
+	});
+});
+
+// A save writes only the switches that differ from what the page drew (drawnOn), plus the one just flipped, so a
+// switch another tab changed is never undone by a page that still shows it the old way.
+describe("POST /settings/ai: a save writes only what this page changed", () => {
+	const DRAWN_ALL = "names details categories income sortOnArrival";
+	const AI_KEYS = `('ai_names', 'ai_details', 'ai_categories', 'ai_income', 'ai_sort_on_arrival')`;
+
+	it("keeps another tab's change to a switch this page didn't flip, and writes the one it did", async () => {
+		await saveAiSwitches(env.DB, AI_SWITCHES_ALL_ON);
+		// Another tab turned names off; this page still draws it On and posts it On again.
+		await saveAiSwitches(env.DB, { names: false });
+		const { res, html } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			sortOnArrival: "on",
+			drawnOn: DRAWN_ALL,
+			flipped: "income",
+		});
+		expect(res.status).toBe(200);
+		expect(await readAiSwitches(env.DB)).toEqual({
+			names: false,
+			details: true,
+			categories: true,
+			income: false,
+			sortOnArrival: true,
+		});
+		expect(html).toMatch(/<input[^>]*name="income"[^>]*autofocus/);
+	});
+
+	it("writes off every switch this tab flipped off, when one replacing request carries them all", async () => {
+		// Names and income were both flipped off here; the browser sent only the last request, which carries both.
+		const { res } = await post("/settings/ai", {
+			details: "on",
+			categories: "on",
+			sortOnArrival: "on",
+			drawnOn: DRAWN_ALL,
+			flipped: "income",
+		});
+		expect(res.status).toBe(200);
+		expect(await readAiSwitches(env.DB)).toEqual({
+			names: false,
+			details: true,
+			categories: true,
+			income: false,
+			sortOnArrival: true,
+		});
+	});
+
+	it("writes nothing when a plain Save changes no switch, and still answers with the toast", async () => {
+		await env.DB.prepare(
+			`DELETE FROM household_settings WHERE key IN ${AI_KEYS}`,
+		).run();
+		const { res, html } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			income: "on",
+			sortOnArrival: "on",
+			drawnOn: DRAWN_ALL,
+		});
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({
+			message: "Saved AI suggestions",
+			type: "success",
+		});
+		expect(html).toContain('id="ai-suggestions"');
+		const { results } = await env.DB.prepare(
+			`SELECT key FROM household_settings WHERE key IN ${AI_KEYS}`,
+		).all();
+		expect(results).toEqual([]);
+	});
+
+	it("writes a flipped switch on again, even when an aborted request had already written it off", async () => {
+		// The first flip (names off) reached the server, though the browser aborted it when the flip back replaced it.
+		await saveAiSwitches(env.DB, { names: false });
+		const { res } = await post("/settings/ai", {
+			names: "on",
+			details: "on",
+			categories: "on",
+			income: "on",
+			sortOnArrival: "on",
+			drawnOn: DRAWN_ALL,
+			flipped: "names",
+		});
+		expect(res.status).toBe(200);
+		expect((await readAiSwitches(env.DB)).names).toBe(true);
 	});
 });
 

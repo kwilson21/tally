@@ -944,13 +944,13 @@ settings.get("/settings/export/tally.json", async (c) => {
 	return c.json(await tallyExport(c.env.DB));
 });
 
-// A switch that's on posts "on" and one that's off posts nothing, so a field left out is off; the
-// form always carries the whole group, so a save is always every switch it shows, and only those.
-// The sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and
-// a greyed switch posts nothing, so Save doesn't write it at all and it stays as it was saved (spec
-// §8.6, decision 79). Whether it was greyed comes from the form the person saw (a hidden field), not
-// from what's saved now, since another tab may have changed the switches since the page was drawn; and
-// as nothing is read and written back, a save from another tab in between is never undone.
+// A switch that's on posts "on" and one that's off posts nothing, so a field left out is off. The form still
+// posts the whole group, but a save writes only the switches that differ from what the page drew On (DRAWN_ON),
+// plus the one just flipped (FLIPPED), so another tab's change to a different switch is never undone. The
+// sorting switch is greyed out while Jev isn't asked at all (categories and income both off), and a greyed
+// switch posts nothing, so Save doesn't write it at all and it stays as it was saved (spec §8.6, decision 79).
+// Whether it was greyed comes from the form the person saw (a hidden field), not from what's saved now, since
+// another tab may have changed the switches since the page was drawn.
 settings.post("/settings/ai", async (c) => {
 	const form = await c.req.formData();
 	const next = Object.fromEntries(
@@ -959,14 +959,24 @@ settings.post("/settings/ai", async (c) => {
 	if (form.get(SORT_GREYED) === "1") delete next.sortOnArrival;
 	const waitingBefore = (await suggestionQueue(c.env.DB)).length;
 	const before = await readAiSwitches(c.env.DB);
-	await saveAiSwitches(c.env.DB, next);
+	// The page's baseline, shared by the save and the focus below. A page drawn before DRAWN_ON existed is compared
+	// with what was saved before this save.
+	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
+	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
+	// A flip that replaced an earlier one in the browser can still reach the server after that one was aborted, so
+	// the switch just flipped is always written, even when its value matches what the page drew.
+	const changed = Object.fromEntries(
+		AI_FEATURES.filter(
+			(f) =>
+				f.key in next &&
+				(next[f.key] !== drawn.includes(f.key) || f.key === posted),
+		).map((f) => [f.key, next[f.key]]),
+	) as Partial<AiSwitches>;
+	await saveAiSwitches(c.env.DB, changed);
 	const now = await readAiSwitches(c.env.DB);
 	// The switch that was flipped keeps focus after the save (#606). A flip posts its own key (FLIPPED, from its own
 	// request). A plain Save, with no script, posts none, so it's the one that differs from what the page drew On
-	// (DRAWN_ON): another tab that saved the same value doesn't move it. A page drawn before DRAWN_ON existed is
-	// compared with what was saved before this save.
-	const posted = AI_FEATURES.find((f) => f.key === form.get(FLIPPED))?.key;
-	const drawn = String(form.get(DRAWN_ON) ?? drawnOnOf(before)).split(" ");
+	// (DRAWN_ON): another tab that saved the same value doesn't move it.
 	const flipped =
 		posted ??
 		AI_FEATURES.find(
