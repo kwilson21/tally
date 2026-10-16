@@ -830,7 +830,7 @@ describe("GET /design-system in the demo", () => {
 			html.split('id="maybe-category"')[1]?.split("</section>")[0] ?? "";
 		expect(specimen).toMatch(/<div class="flex flex-wrap items-start gap-3">/);
 		expect(specimen).toMatch(
-			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
+			/<p id="ds-income-guess-line" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
 		);
 	});
 
@@ -1117,6 +1117,15 @@ describe("GET /design-system in the demo", () => {
 		expect(title).toContain("autofocus");
 		expect(html).toContain("Count as income");
 		expect(html).toContain("Reviewed as a refund or other non-income credit");
+		// The sheet draws both as the edit panel does: switches, not chips (P120 B, decision 111).
+		for (const name of ["ds-income", "ds-credit-reviewed"]) {
+			const at = html.indexOf(`name="${name}"`);
+			const tag = html.slice(
+				html.lastIndexOf("<input", at),
+				html.indexOf(">", at),
+			);
+			expect(tag).toContain('role="switch"');
+		}
 		expect(design).toMatch(
 			/Edit panel layout[^\n]*Count as income[^\n]*Reviewed as a refund or other non-income credit/,
 		);
@@ -1331,8 +1340,9 @@ describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
 		}
 		const folded =
 			html.split('id="folded-row"')[1]?.split("</section>")[0] ?? "";
-		expect(folded.match(/<details/g)).toHaveLength(3);
-		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(1);
+		// Three ledger states, then the category row's closed and open states (P120 B).
+		expect(folded.match(/<details/g)).toHaveLength(5);
+		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(2);
 	});
 
 	it("links the ledger sheet page from its group, and the page is a catalog page", async () => {

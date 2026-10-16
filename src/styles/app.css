@@ -676,6 +676,10 @@ html:not(.js) [data-money-js] {
 		opacity: 1;
 	}
 }
+/* The tick is hidden unless a save's mark runs it: a row whose mark is cleared (an earlier toast's end) shows the arrow. */
+.saved-tick {
+	opacity: 0;
+}
 .row-saved .saved-tick {
 	animation:
 		saved-draw var(--duration-confirm) ease-out both,
@@ -694,6 +698,7 @@ html:not(.js) [data-money-js] {
 }
 .row-saved-held .saved-tick {
 	animation: none;
+	opacity: 1;
 }
 .row-saved-held .saved-arrow {
 	animation: none;
