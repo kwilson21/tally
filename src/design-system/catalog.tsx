@@ -38,7 +38,15 @@ import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
 import { AppliesNote, PriceChangeLine } from "../views/bill-amount-history";
 import { BillFindingBand, BillFindingRow } from "../views/bill-finding";
-import { BillOccurrenceRow } from "../views/bill-occurrence-row";
+import {
+	BillHead,
+	LedgerDisclosure,
+	LedgerMonth,
+	LedgerPayments,
+	LedgerPriceRow,
+	PaidCheck,
+} from "../views/bill-ledger";
+import { PriceChanged } from "../views/bill-occurrence-row";
 import { BillPaymentPicker } from "../views/bill-payment-picker";
 import {
 	BillMonthlyTotal,
@@ -51,6 +59,7 @@ import { BudgetSheet } from "../views/budget-sheet";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
+import { CategoryGrid } from "../views/category-grid";
 import { AddCategoryRow, CategoryRow } from "../views/category-row";
 import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
@@ -2026,7 +2035,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its checkbox, and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
 			>
 				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
@@ -2044,11 +2053,18 @@ function Rows() {
 						sure={72}
 						transactionId={2}
 					/>
-					<div class="flex flex-col items-start gap-1">
-						<Chip type="checkbox" name="income" value="1" dashed>
-							Count as income
-						</Chip>
-						<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">
+					<div class="flex w-full max-w-xl flex-col gap-1">
+						<Switch
+							id="ds-income-guess"
+							name="ds-income-guess"
+							value="1"
+							label="Count as income"
+							describedBy="ds-income-guess-line"
+						/>
+						<p
+							id="ds-income-guess-line"
+							class="flex flex-wrap items-center gap-x-2 text-sm text-muted"
+						>
 							Tally's guess · 71% sure
 							<WhyLink section="categorization" topic="income" />
 						</p>
@@ -2057,161 +2073,302 @@ function Rows() {
 			</Specimen>
 			<Specimen
 				id="bill-occurrence"
-				title="Bill occurrence and payment picker"
+				title="A bill's page: its head, its ledger of months, and the payment picker"
 				tier="visual"
-				components={["BillOccurrenceRow", "BillPaymentPicker"]}
-				sentence="A bill page shows paid, part-paid, due, upcoming and not-paid occurrences, asks whether to update the bill when a payment came at another price, and offers eligible payments in an inert picker, keeping its month choices when a chosen month has none. A month paid in parts lists each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid. A payment the person said Not this one to is still offered, last, under “You said not this one”."
+				components={[
+					"BillHead",
+					"LedgerMonth",
+					"LedgerDisclosure",
+					"LedgerPayments",
+					"LedgerPriceRow",
+					"PriceChanged",
+					"BillPaymentPicker",
+				]}
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
 			>
-				<State label="Paid occurrence">
+				<State label="Head: the name, its amount, the bank's text">
+					<div inert>
+						<BillHead
+							name="Streaming"
+							amount="$2.99 a month, due the 15th"
+							bankText="APPLE.COM/BILL"
+						/>
+					</div>
+				</State>
+				<State label="Paid, with its payment open">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 3,
-										displayName: "City Electric",
-										dateLabel: "Sep 24",
-										amountCents: 14200,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 15 · $2.99"
+								mark={<PaidCheck />}
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 77,
+											displayName: "Apple.com/bill",
+											dateLabel: "Oct 15",
+											amountCents: 299,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Paid in 2 payments">
+				<State label="Paid in 2 payments, closed">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-08"
-								label="August 2026"
-								status="paid"
-								payments={[
-									{
-										transactionId: 4,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 1",
-										amountCents: 70000,
-										matchedBy: "user",
-									},
-									{
-										transactionId: 5,
-										displayName: "Harbor Property",
-										dateLabel: "Aug 3",
-										amountCents: 50000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={120000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Paid in 2 payments · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Aug 2",
+											amountCents: 1299,
+											matchedBy: "auto",
+										},
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Aug 9",
+											amountCents: 500,
+											matchedBy: "user",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Part paid (this month's, still due)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 6,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
+							<LedgerDisclosure
+								month="September"
+								words="Due · Part paid: $600 of $1,200"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Sep 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-09/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
-				<State label="Part paid, an earlier month (Not paid)">
+				<State label="Part paid, an earlier month">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September 2026"
-								status="not-paid"
-								payments={[
-									{
-										transactionId: 7,
-										displayName: "Harbor Property",
-										dateLabel: "Sep 1",
-										amountCents: 60000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={60000}
-								amountCents={120000}
-							/>
-						</ul>
-					</div>
-				</State>
-				<State label="Unpaid occurrence">
-					<div inert>
-						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-							/>
+							<LedgerDisclosure
+								month="August"
+								words="Part paid: $600 of $1,200"
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-08"
+									payments={[
+										{
+											transactionId: 3,
+											displayName: "City Electric",
+											dateLabel: "Aug 24",
+											amountCents: 60000,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-08/link#payment-picker"
+								>
+									Link another payment
+								</Button>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Credit-corrected payment (reads unpaid)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October 2026"
-								status="due"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Harbor Property",
-										dateLabel: "Oct 1",
-										amountCents: -10000,
-										matchedBy: "user",
-									},
-								]}
-								paidCents={0}
-								amountCents={120000}
+							<LedgerDisclosure
+								month="October"
+								words="Due Oct 1 · $1,200.00"
+								open
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Harbor Property",
+											dateLabel: "Oct 1",
+											amountCents: -10000,
+											matchedBy: "user",
+										},
+									]}
+								/>
+								<Button
+									kind="text"
+									class="-ml-2"
+									href="/bills/1/occurrences/2026-10/link#payment-picker"
+								>
+									Link a payment
+								</Button>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Due, and nothing linked yet">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Due Nov 15 · $2.99"
 							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-12/link#payment-picker"
+								month="December"
+								words="Upcoming Dec 15 · $2.99"
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-07/link#payment-picker"
+								month="July"
+								words="Overdue Jul 15 · $2.99"
+								wordsClass="text-over"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="A charge Tally found, and a month with no payment">
+					<div inert>
+						<ul>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-09/link?transaction_id=9#payment-picker"
+								month="September"
+								sub="A $2.99 charge on Sep 23 looks like this"
+								action={<span class="text-accent">Link it</span>}
+							/>
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-08/link#payment-picker"
+								month="August"
+								words="No payment"
+							/>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and closed">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-06/link#payment-picker"
+										month="June"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-05/link#payment-picker"
+										month="May"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-04/link#payment-picker"
+										month="April"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
+						</ul>
+					</div>
+				</State>
+				<State label="Months with no payment, folded and open">
+					<div inert>
+						<ul>
+							<LedgerDisclosure
+								month="April to August"
+								words="No payment"
+								sr="5 months with no payment"
+								open
+							>
+								<ul class="divide-y divide-rule">
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-08/link#payment-picker"
+										month="August"
+										words="Link a payment"
+									/>
+									<LedgerMonth
+										href="/bills/1/occurrences/2026-07/link#payment-picker"
+										month="July"
+										words="Link a payment"
+									/>
+								</ul>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
 				<State label="Price changed? (the newest month asks)">
 					<div inert>
 						<ul>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October"
-								status="overdue"
-								priceOffer={{
-									transactionId: 7,
-									merchant: "Netflix",
-									amountCents: 1799,
-									dateLabel: "Oct 3",
-									billAmountCents: 1549,
-									currentCents: 1549,
-									frequency: "monthly",
-								}}
-							/>
+							<LedgerPriceRow month="October" words="Overdue Oct 14 · $15.49">
+								<PriceChanged
+									billId={1}
+									period="2026-10"
+									offer={{
+										transactionId: 7,
+										merchant: "Netflix",
+										amountCents: 1799,
+										dateLabel: "Oct 3",
+										billAmountCents: 1549,
+										currentCents: 1549,
+										frequency: "monthly",
+									}}
+								/>
+							</LedgerPriceRow>
 						</ul>
 					</div>
 				</State>
@@ -2331,42 +2488,49 @@ function Rows() {
 							month="October"
 						/>
 						<ul class="mt-4 divide-y divide-rule border-y border-rule">
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-11"
-								label="November · $17.99"
-								status="upcoming"
+							<LedgerMonth
+								href="/bills/1/occurrences/2026-11/link#payment-picker"
+								month="November"
+								words="Upcoming Nov 2 · $17.99"
 							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-10"
-								label="October · $17.99"
-								status="paid"
-								payments={[
-									{
-										transactionId: 8,
-										displayName: "Netflix",
-										dateLabel: "Oct 2",
-										amountCents: 1799,
-										matchedBy: "auto",
-									},
-								]}
-							/>
-							<BillOccurrenceRow
-								billId={1}
-								period="2026-09"
-								label="September · $15.49"
-								status="paid"
-								payments={[
-									{
-										transactionId: 9,
-										displayName: "Netflix",
-										dateLabel: "Sep 2",
-										amountCents: 1549,
-										matchedBy: "auto",
-									},
-								]}
-							/>
+							<LedgerDisclosure
+								month="October"
+								words="Paid Oct 2 · $17.99"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-10"
+									payments={[
+										{
+											transactionId: 8,
+											displayName: "Netflix",
+											dateLabel: "Oct 2",
+											amountCents: 1799,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
+							<LedgerDisclosure
+								month="September"
+								words="Paid Sep 2 · $15.49"
+								mark={<PaidCheck />}
+							>
+								<LedgerPayments
+									billId={1}
+									period="2026-09"
+									payments={[
+										{
+											transactionId: 9,
+											displayName: "Netflix",
+											dateLabel: "Sep 2",
+											amountCents: 1549,
+											matchedBy: "auto",
+										},
+									]}
+								/>
+							</LedgerDisclosure>
 						</ul>
 					</div>
 				</State>
@@ -3984,6 +4148,26 @@ const DUE_ROW_SPEC: UseSpecText = {
 		"“Due on the”, ordinal days (1st, 22nd), weekdays as plurals (Fridays), “every month”, “every week”, “every two weeks”, “every quarter”, “every year”, “starting in”, “in”.",
 };
 
+// The category grid's use spec (P120 B, #498): every line answered before the owner signs it off.
+const CATEGORY_GRID_SPEC: UseSpecText = {
+	purpose:
+		"Let a person pick one category from all of them at once, in two even columns, so the choices scan in one pass. The edit panel and Organize's Set category sheet show the same grid.",
+	affordance:
+		"Each choice is a pill with its category's icon and name. The chosen one is ink-ringed and checked. The columns are equal, so the choices form two straight columns rather than a ragged row.",
+	states:
+		"Rest: every choice unchecked. Checked: one choice, ink with its check. Tally's guess: a dashed pill with “· Suggested” in muted words, the grid's first cell, unchecked until a person chooses it. New category: terracotta words with a plus, always last in the edit panel and never in Organize's sheet; choosing it opens the name field under the grid. Focus: the focus-visible ring on the focused pill. Disabled: inside a disabled fieldset (a linked refund's locked category) every pill fades to 40% with a not-allowed cursor. Loading, done and error: not applicable; the form's Save carries them.",
+	feedback:
+		"A chosen pill checks at once. New category opens its name field. Nothing is saved until the panel's or the sheet's Save, and that save's toast and announcement say what was set.",
+	input:
+		"Touch: every pill is 44px or more. Keyboard: Tab reaches the group, the arrow keys move between the choices and Space checks one, since the pills are one radio group. Screen reader: the group is named by its legend, Category; each pill reads its category's name, then checked or not checked.",
+	motion:
+		"None of its own. A check and the name field's opening take the confirmation and rising tokens, and reduced motion shows the end state at once.",
+	edges:
+		"Five, twelve or fifty categories (decision 37): the grid stays two columns and grows downward. A long name wraps inside its column and never widens it. With no JavaScript every choice works, since the grid is plain radios; the name field shows wherever the browser can't tell when New category is chosen.",
+	words:
+		"Each choice is the category's own name. The last choice is exactly “New category”. The group's legend is “Category”. A guess reads “{name} · Suggested”, and its line under the legend reads “Tally's guess · 72% sure”.",
+};
+
 const FOLDED_ROW_SPEC: UseSpecText = {
 	purpose:
 		"Keep a choice that's usually settled, like a bill's category or the bank's text it matches, out of the way until someone wants to change it.",
@@ -4708,11 +4892,14 @@ function Controls() {
 				</State>
 				<State label="Exclude ticked on a row Tally could guess again: the Rename list shows, This one only ticked, and the re-guess note stays hidden until Exclude is unticked">
 					<div class="group/edit flex max-w-xl flex-col gap-3">
-						<div class="flex flex-wrap gap-2">
-							<Chip type="checkbox" name="excluded" value="1" checked>
-								Exclude from budget
-							</Chip>
-						</div>
+						<Switch
+							id="ds-rename-excluded-switch"
+							name="excluded"
+							value="1"
+							label="Exclude from budget"
+							hint="It won't count in Spent or any budget."
+							checked
+						/>
 						<NameChoices
 							id="ds-rename-excluded"
 							radioName="ds-rename-excluded"
@@ -6633,6 +6820,21 @@ const LEDGER_CATEGORIES = LEDGER_CATEGORY_NAMES.map((name, i) => ({
 }));
 const LEDGER_EATING_OUT = LEDGER_CATEGORIES[1] ?? LEDGER_CATEGORIES[0];
 const LEDGER_GROCERIES = LEDGER_CATEGORIES[0];
+/** Six categories with ids, for the category grid and the edit panel's category row (P120 B). */
+const GRID_CATEGORIES = LEDGER_CATEGORIES.slice(0, 6).map((c, i) => ({
+	...c,
+	id: i + 1,
+}));
+/** Tally picked Groceries for Trader Joe's (92% sure): the folded category row shows that. */
+const PICKED_GROCERIES = (
+	<>
+		<CategoryIcon
+			icon={GRID_CATEGORIES[0]?.icon ?? "tag"}
+			color={GRID_CATEGORIES[0]?.color ?? "cat-blue"}
+		/>
+		<span class="truncate text-lg">{GRID_CATEGORIES[0]?.name}</span>
+	</>
+);
 const LEDGER_BANK_TEXT = "CITY WATER AUTOPAY 0093 REF";
 
 /** A category as a row shows it: its icon and name, so the row says what's chosen. */
@@ -6813,7 +7015,178 @@ function LedgerForm() {
 						/>
 					</FoldedRow>
 				</State>
+				<State label="Closed, a category Tally picked: its source under the name, and the choice at the right (P120 B's category row)">
+					<FoldedRow
+						label="Category"
+						sub="Picked by Tally · 92% sure"
+						value={PICKED_GROCERIES}
+					>
+						<CategoryGrid
+							name="ds-folded-picked"
+							categories={GRID_CATEGORIES}
+							checkedId={1}
+							tallyId={1}
+							newCategory
+						/>
+					</FoldedRow>
+				</State>
+				<State label="Open in place, with the grid and the rule row (tap Category to fold it again)">
+					<FoldedRow
+						label="Category"
+						sub="Picked by Tally · 92% sure"
+						value={PICKED_GROCERIES}
+						open
+					>
+						<CategoryGrid
+							name="ds-folded-open"
+							categories={GRID_CATEGORIES}
+							checkedId={1}
+							tallyId={1}
+							newCategory
+						/>
+					</FoldedRow>
+				</State>
 				<UseSpec spec={FOLDED_ROW_SPEC} />
+			</Specimen>
+			<Specimen
+				id="category-grid"
+				title="CategoryGrid"
+				tier="interactive"
+				components={["CategoryGrid"]}
+				sentence="The category choices in two equal columns, New category last, shared by the edit panel and Organize's Set category sheet (P120 B, #498)."
+			>
+				<State label="Open, for a transaction that needs a category: two columns, New category last">
+					<CategoryGrid
+						name="ds-grid-open"
+						categories={GRID_CATEGORIES}
+						newCategory
+					/>
+				</State>
+				<State label="With Tally's guess as the first cell, and Groceries chosen (tap one: it checks here)">
+					<CategoryGrid
+						name="ds-grid-guess"
+						categories={GRID_CATEGORIES}
+						checkedId={1}
+						newCategory
+						leading={
+							<SuggestedCategoryChip
+								name="Pet Care"
+								value="3"
+								sure={72}
+								transactionId={3}
+							/>
+						}
+					/>
+				</State>
+				<State label="Organize's Set category sheet: no New category, and the first choice is required">
+					<CategoryGrid
+						name="ds-grid-organize"
+						categories={GRID_CATEGORIES}
+						required
+					/>
+				</State>
+				<UseSpec spec={CATEGORY_GRID_SPEC} />
+			</Specimen>
+			<Specimen
+				id="edit-panel-category"
+				title="Edit panel: the category leads"
+				tier="visual"
+				components={["CategoryGrid", "FoldedRow", "MerchantRuleTick", "Switch"]}
+				sentence="The edit panel's head and category, both B states (P120 B, decision 111): the name is the one headline, the category leads, and a category Tally needs is open while one Tally picked folds to a row that opens in place. Exclude and Count as income are switches."
+			>
+				<State label="Local Bakery needs a category: open, New category last, the rule row after the choices">
+					<div class="flex max-w-xl flex-col gap-4">
+						<div class="flex flex-col gap-1">
+							<h3 class="font-serif text-3xl font-semibold tracking-tight">
+								Local Bakery
+							</h3>
+							<p class="text-muted">
+								<span class="text-lg font-semibold text-ink">
+									{formatCents(1200)}
+								</span>{" "}
+								· Today · Credit card ••9012
+							</p>
+							<p class="text-sm text-muted">SQ *LOCAL BAKERY 4432</p>
+						</div>
+						<fieldset class="group/category flex flex-col gap-2">
+							<legend class="text-base text-ink">Category</legend>
+							<p class="text-sm text-muted">Tally's guess · 62% sure</p>
+							<CategoryGrid
+								name="ds-panel-open"
+								categories={GRID_CATEGORIES}
+								newCategory
+							/>
+						</fieldset>
+						<MerchantRuleTick
+							id="ds-panel-open-rule"
+							merchant="Local Bakery"
+							checked={false}
+						/>
+						<Switch
+							id="ds-panel-open-exclude"
+							name="ds-panel-open-exclude"
+							value="1"
+							label="Exclude from budget"
+							hint="It won't count in Spent or any budget."
+						/>
+					</div>
+				</State>
+				<State label="Trader Joe's, picked by Tally: its category is one row, closed (tap it to open)">
+					<div class="flex max-w-xl flex-col gap-4">
+						<div class="flex flex-col gap-1">
+							<h3 class="font-serif text-3xl font-semibold tracking-tight">
+								Trader Joe's
+							</h3>
+							<p class="text-muted">
+								<span class="text-lg font-semibold text-ink">
+									{formatCents(6410)}
+								</span>{" "}
+								· Today · Credit card ••9012
+							</p>
+						</div>
+						<FoldedRow
+							label="Category"
+							sub="Picked by Tally · 92% sure"
+							value={PICKED_GROCERIES}
+						>
+							<CategoryGrid
+								name="ds-panel-folded"
+								categories={GRID_CATEGORIES}
+								checkedId={1}
+								tallyId={1}
+								newCategory
+							/>
+							<MerchantRuleTick
+								id="ds-panel-folded-rule"
+								merchant="Trader Joe's"
+								checked={false}
+							/>
+						</FoldedRow>
+					</div>
+				</State>
+				<State label="Trader Joe's, opened in place: the same grid and rule row, Groceries checked">
+					<div class="flex max-w-xl flex-col gap-4">
+						<FoldedRow
+							label="Category"
+							sub="Picked by Tally · 92% sure"
+							value={PICKED_GROCERIES}
+							open
+						>
+							<CategoryGrid
+								name="ds-panel-opened"
+								categories={GRID_CATEGORIES}
+								checkedId={1}
+								tallyId={1}
+								newCategory
+							/>
+							<MerchantRuleTick
+								id="ds-panel-opened-rule"
+								merchant="Trader Joe's"
+								checked={false}
+							/>
+						</FoldedRow>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="sheet-footer"
@@ -7243,16 +7616,21 @@ export function SheetSpecimen() {
 					</p>
 					<div class="mt-4 flex flex-col gap-3 border-t border-rule pt-3">
 						<p class="text-base text-ink">Income</p>
-						<div class="flex flex-wrap gap-2">
-							<Chip type="checkbox" name="ds-income" value="1">
-								Count as income
-							</Chip>
-						</div>
+						<Switch
+							id="ds-income"
+							name="ds-income"
+							value="1"
+							label="Count as income"
+						/>
 					</div>
-					<div class="mt-3 flex flex-wrap gap-2 border-t border-rule pt-3">
-						<Chip type="checkbox" name="ds-credit-reviewed" value="1" checked>
-							Reviewed as a refund or other non-income credit
-						</Chip>
+					<div class="mt-3 flex flex-col gap-2 border-t border-rule pt-3">
+						<Switch
+							id="ds-credit-reviewed"
+							name="ds-credit-reviewed"
+							value="1"
+							label="Reviewed as a refund or other non-income credit"
+							checked
+						/>
 					</div>
 					<Button
 						href="/design-system#bottom-sheet"

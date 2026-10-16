@@ -830,7 +830,7 @@ describe("GET /design-system in the demo", () => {
 			html.split('id="maybe-category"')[1]?.split("</section>")[0] ?? "";
 		expect(specimen).toMatch(/<div class="flex flex-wrap items-start gap-3">/);
 		expect(specimen).toMatch(
-			/<p class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
+			/<p id="ds-income-guess-line" class="flex flex-wrap items-center gap-x-2 text-sm text-muted">Tally&#39;s guess · 71% sure<a href="\/how-it-works#categorization"[^>]*>Why\?<\/a><\/p>/,
 		);
 	});
 
@@ -945,9 +945,62 @@ describe("GET /design-system in the demo", () => {
 		// DESIGN.md says what each component does with it.
 		expect(design).toMatch(/\| BillRow \|[^\n]*Price changed\?[^\n]*in ink/);
 		expect(design).toMatch(
-			/\| BillOccurrenceRow \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
+			/\| PriceChanged \|[^\n]*Update the bill to \$17\.99[^\n]*Not this bill/,
 		);
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
+	});
+
+	it("shows the ledger's states in the bill page's specimen: paid, found, folded closed and open, and no filled pill (#604)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		for (const words of [
+			"Paid Oct 15 · $2.99",
+			"A $2.99 charge on Sep 23 looks like this",
+			"April to August",
+			"5 months with no payment",
+			"Due · Part paid: $600 of $1,200",
+		])
+			expect(page).toContain(words);
+		expect(page).not.toContain("rounded-control bg-band px-2");
+	});
+
+	it("shows a credit-corrected payment on the bill page's specimen as unpaid, with Link a payment and no part-paid words (#469)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		// The state runs from its label to the next state's label.
+		const state =
+			page
+				.split(
+					'text-sm font-medium text-muted">Credit-corrected payment (reads unpaid)</p>',
+				)[1]
+				?.split('text-sm font-medium text-muted">')[0] ?? "";
+		expect(state).toContain("-$100.00");
+		expect(state).toContain("Link a payment");
+		expect(state).toContain("Not this one: Harbor Property -$100.00 on Oct 1");
+		expect(state).not.toContain("Part paid");
+		expect(state).not.toContain("Link another payment");
+		// DESIGN.md names each Not this one by its payment, as #205 asks, and says a credit reads unpaid (#469).
+		expect(design).toMatch(
+			/\| LedgerMonth, LedgerDisclosure[^\n]*#469[^\n]*Not this one: Harbor Property \$600\.00 on Oct 1/,
+		);
+	});
+
+	it("names the ledger, the found row and the fold in the bill page's specimen sentence (#604)", async () => {
+		const { html } = await get("/design-system");
+		const page =
+			html.split('id="bill-occurrence"')[1]?.split('id="bill-row"')[0] ?? "";
+		const sentence =
+			page.match(/<p class="mt-1 max-w-prose text-muted">([^<]*)<\/p>/)?.[1] ??
+			"";
+		for (const words of [
+			"ledger of months",
+			"looks like this",
+			"Link it",
+			"fold",
+		])
+			expect(sentence).toContain(words);
 	});
 
 	it("says in the price offer's use spec what Update checks, with no count of prices (#422)", async () => {
@@ -1001,8 +1054,7 @@ describe("GET /design-system in the demo", () => {
 		const start = html.search(/Part paid \(this month(&#39;|')s, still due\)/);
 		const end = html.indexOf("Part paid, an earlier month", start);
 		const state = start > -1 && end > start ? html.slice(start, end) : "";
-		expect(state).toMatch(/>Due<\/span>/);
-		expect(state).toContain("Part paid: $600 of $1,200");
+		expect(state).toContain("Due · Part paid: $600 of $1,200");
 		expect(state).not.toContain("Overdue");
 	});
 
@@ -1065,6 +1117,15 @@ describe("GET /design-system in the demo", () => {
 		expect(title).toContain("autofocus");
 		expect(html).toContain("Count as income");
 		expect(html).toContain("Reviewed as a refund or other non-income credit");
+		// The sheet draws both as the edit panel does: switches, not chips (P120 B, decision 111).
+		for (const name of ["ds-income", "ds-credit-reviewed"]) {
+			const at = html.indexOf(`name="${name}"`);
+			const tag = html.slice(
+				html.lastIndexOf("<input", at),
+				html.indexOf(">", at),
+			);
+			expect(tag).toContain('role="switch"');
+		}
 		expect(design).toMatch(
 			/Edit panel layout[^\n]*Count as income[^\n]*Reviewed as a refund or other non-income credit/,
 		);
@@ -1279,8 +1340,9 @@ describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
 		}
 		const folded =
 			html.split('id="folded-row"')[1]?.split("</section>")[0] ?? "";
-		expect(folded.match(/<details/g)).toHaveLength(3);
-		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(1);
+		// Three ledger states, then the category row's closed and open states (P120 B).
+		expect(folded.match(/<details/g)).toHaveLength(5);
+		expect(folded.match(/<details[^>]* open=""/g)).toHaveLength(2);
 	});
 
 	it("links the ledger sheet page from its group, and the page is a catalog page", async () => {

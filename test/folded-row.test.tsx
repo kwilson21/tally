@@ -37,6 +37,25 @@ describe("FoldedRow", () => {
 		expect(html).not.toContain("truncate text-sm text-muted");
 	});
 
+	it("reads as one phrase in order: its name, its choice, then its line (#498)", () => {
+		const html = renderToString(
+			<FoldedRow
+				label="Category"
+				value={<span>Groceries</span>}
+				sub="Picked by Tally · 92% sure"
+			/>,
+		);
+		const summary = html.slice(
+			html.indexOf("<summary"),
+			html.indexOf("</summary>"),
+		);
+		const label = summary.indexOf("Category");
+		const choice = summary.indexOf("Groceries");
+		const line = summary.indexOf("Picked by Tally · 92% sure");
+		expect(label).toBeLessThan(choice);
+		expect(choice).toBeLessThan(line);
+	});
+
 	it("shows a long choice under the name, cut to one line", () => {
 		const html = renderToString(
 			<FoldedRow

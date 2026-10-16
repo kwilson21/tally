@@ -126,8 +126,16 @@ export function BillPaymentPicker({
 	// A page that opens on a month with nothing to link shows the empty state alone. Once a payment is listed, or a
 	// month choice has swapped the picker in (rerender), the month choices stay, so another month can still be picked.
 	const monthChoices = candidates.length > 0 || rerender;
+	// Link it's found charge, or any payment named in the address, leads the list so it opens checked and first (#604).
+	const ordered =
+		selectedPayment && !selectedPayment.turnedAway
+			? [
+					selectedPayment,
+					...candidates.filter((candidate) => candidate !== selectedPayment),
+				]
+			: candidates;
 	// A turned-away payment comes last, under its own muted line; each keeps its place in the list, so the first is required.
-	const listed = candidates.map((candidate, index) => ({ candidate, index }));
+	const listed = ordered.map((candidate, index) => ({ candidate, index }));
 	const regular = listed.filter(({ candidate }) => !candidate.turnedAway);
 	const turnedAway = listed.filter(({ candidate }) => candidate.turnedAway);
 	return (
