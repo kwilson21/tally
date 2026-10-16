@@ -6,6 +6,7 @@
 import { AiProposals } from "./proposals-ai";
 import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
+import { AuditFollowupProposals } from "./proposals-audit-followups";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
@@ -32,7 +33,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 122), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 126), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -546,6 +547,18 @@ export const DECIDED: readonly {
 			"Option A: each status heading's total counts every occurrence of its group in the month, listed or not, so Paid this month counts every bill payment made this month as Upcoming counts every occurrence still due; a muted line under a heading names the occurrences it counts that aren't listed (“Includes Daycare's Fridays on Oct 2 and 9”, up to two bills by name, then “and N more”) (decision 122).",
 		issue: 602,
 	},
+	{
+		title: "P137 · How Tally works' exact rules",
+		outcome:
+			"Option A: each section's exact rules fold under its diagram and worked example, in a closed “The exact rules” details with its rule count (“8 rules”); the words stay the spec's (decision 126).",
+		issue: 644,
+	},
+	{
+		title: "P138 · Link a payment's list",
+		outcome:
+			"Option A: Link a payment on a plan's and a bill's page shows the five closest charges as rows with the transaction row's look, each a 44px radio, then “Show all N charges” opening the rest in the same order (decision 126).",
+		issue: 645,
+	},
 ];
 
 /** The proposals page body. */
@@ -564,6 +577,20 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="followups-picks-title" class="mt-12">
+				<h2
+					id="followups-picks-title"
+					class="font-serif text-3xl font-semibold"
+				>
+					Picked: from the second design audit, the rules and the payment list
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 16. The owner's picks, marked Picked, are decision 126: P137
+					A, P138 A.
+				</p>
+				<AuditFollowupProposals />
+			</section>
 
 			<section aria-labelledby="p136-title" class="mt-12">
 				<h2 id="p136-title" class="font-serif text-3xl font-semibold">
