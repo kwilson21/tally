@@ -36,8 +36,10 @@ function statusOf(view: SetupView): string {
 
 /**
  * The setup top. `linkBank` is Home's Link a bank (before a bank, and only when Plaid is on): the one button, with its
- * error region. `bankLine` is a connected bank that stopped syncing (src/stale-bank.ts), said as Home's top says it. The
- * status takes focus after Plaid redraws Home (`data-link-bank-focus`, plaid-link.js).
+ * error region. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), said as
+ * Home's top says it, with its Fix. Its words lead, so while one is drawn the reading's "Nothing for you to do until
+ * then." is left out, since a bank that needs a fix is something to do. The status takes focus after Plaid redraws
+ * Home (`data-link-bank-focus`, plaid-link.js).
  */
 export function HomeSetup({
 	view,
@@ -78,7 +80,7 @@ export function HomeSetup({
 					>
 						{statusOf(view)}
 					</p>
-					{phase === "reading" && (
+					{phase === "reading" && !bankLine && (
 						<p class="mt-2 text-muted">Nothing for you to do until then.</p>
 					)}
 				</>

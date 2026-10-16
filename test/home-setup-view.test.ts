@@ -184,6 +184,18 @@ describe("HomeSetup", () => {
 		);
 		expect(html).toContain("Chase stopped updating Oct 9");
 		expect(html).toContain('href="/accounts"');
+		expect(html).not.toContain("Nothing for you to do");
+	});
+
+	it("shows a bank that needs signing in in place of 'Nothing for you to do', above its Fix", async () => {
+		const html = await top(
+			{ phase: "reading", drawn: 1, bankName: "Chase", total: 40 },
+			undefined,
+			["Chase needs signing in"],
+		);
+		expect(html).toContain("Chase needs signing in");
+		expect(html).toContain('href="/accounts"');
+		expect(html).not.toContain("Nothing for you to do");
 	});
 
 	it("reading: the notebook sits at the right under a heading only screen readers hear (the picked drawing has no visible title)", async () => {

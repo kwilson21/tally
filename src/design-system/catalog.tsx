@@ -637,7 +637,7 @@ function Brand() {
 						})}
 					/>
 				</State>
-				<State label="Reading, with a bank that stopped updating: its line under the status">
+				<State label="Reading, with a bank that stopped updating: its line under the status, in place of 'Nothing for you to do'">
 					<HomeSetup
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",

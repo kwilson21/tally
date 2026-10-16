@@ -188,6 +188,25 @@ describe("Home during setup", () => {
 		expect(html).toContain("stopped updating");
 	});
 
+	it("a bank that needs signing in during the reading shows its line and Fix, not 'Nothing for you to do'", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention'",
+		).run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = NULL",
+		).run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const html = await page(family);
+		expect(html).toContain("Your first week");
+		expect(html).toContain("needs signing in");
+		expect(html).toContain('href="/accounts"');
+		expect(html).not.toContain("Nothing for you to do");
+	});
+
 	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and Home offers Link a bank again", async () => {
 		const bank = await env.DB.prepare(
 			"SELECT MIN(id) AS id FROM plaid_items",
