@@ -1,12 +1,14 @@
 // The catalog's content (decisions 42–44): every component from src/views/, imported and given
 // typed fake data, so what's shown here is exactly what the app renders.
 import type { Child } from "hono/jsx";
+import type { BillSuggestion } from "../bills/find";
 import { parseBudgetAmount } from "../budgets/amount";
 import type { Bank } from "../db/accounts";
 import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
+import type { BankHead, FirstPageModel } from "../first-tally/first-page";
 import {
 	type SetupPhase,
 	type SetupView,
@@ -59,6 +61,12 @@ import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FilterSelect } from "../views/filter-select";
+import {
+	BillsEmpty,
+	BillsQuestion,
+	FirstPageBody,
+	PayQuestion,
+} from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeSetup } from "../views/home-setup";
@@ -168,6 +176,7 @@ import {
 import {
 	MotionSpec,
 	PhoneFrame,
+	SheetFrame,
 	Specimen,
 	State,
 	TierPill,
@@ -188,6 +197,7 @@ const SECTIONS = [
 	["brand", "Brand and icons"],
 	["shell", "Page shell"],
 	["home", "Home's top"],
+	["first-week", "A new family's first week"],
 	["accounts", "Accounts"],
 	["settings", "Settings"],
 	["trends", "Trends"],
@@ -2579,10 +2589,7 @@ function Rows() {
 					</div>
 				</State>
 				<State label="Plan an expense, with the Month select">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							values={{
 								name: "Car registration",
@@ -2595,13 +2602,10 @@ function Rows() {
 								{ value: "2026-12", label: "December 2026" },
 							]}
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="A plan's sheet once it's paid, with Unlink">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							plan={{
 								id: 3,
@@ -2616,15 +2620,12 @@ function Rows() {
 								month: "2026-10",
 							}}
 							months={[{ value: "2026-10", label: "October 2026" }]}
-							paidBy={{ name: "DMV", date: "2026-10-03", amountCents: 18000 }}
+							paidBy={{ name: "DMV", date: "Oct 3", amountCents: 18000 }}
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="Delete asks first, with the amount">
-					<div
-						inert
-						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
-					>
+					<SheetFrame>
 						<PlanSheet
 							plan={{
 								id: 1,
@@ -2640,7 +2641,7 @@ function Rows() {
 							months={[{ value: "2026-10", label: "October 2026" }]}
 							deleteConfirm
 						/>
-					</div>
+					</SheetFrame>
 				</State>
 				<State label="A payment's picker on the plan's page">
 					<PlanPaymentPicker
@@ -3664,7 +3665,7 @@ function Categorization() {
 						<GroupRuleOffer
 							id="group-rule-offer-sample-title"
 							value={{
-								savedIds: [1, 2],
+								store: 1,
 								merchant: "Costco",
 								categoryId: 1,
 								category: "Groceries",
@@ -5354,12 +5355,12 @@ function Diagrams() {
 					"ExclusionsDiagram",
 					"CategoriesDiagram",
 				]}
-				sentence="Drawn from the same numbers as each worked example. A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
+				sentence="Drawn from the same numbers as each worked example. Budget’s boxes keep their size and wrap where they don’t fit, with or without a Planned box or a savings goal (decision 115, extended by #600). A dashed outline means “not counted” or “not decided yet.” These use sample numbers."
 			>
-				<State label="BudgetDiagram">
+				<State label="BudgetDiagram, four boxes">
 					<BudgetDiagram {...BUDGET_EXAMPLE} id="budget-diagram-plain" />
 				</State>
-				<State label="BudgetDiagram with a savings goal">
+				<State label="BudgetDiagram with a savings goal, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings"
 						totalBudgetCents={140000}
@@ -5368,7 +5369,7 @@ function Diagrams() {
 						safeToSpendCents={29800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a planned expense">
+				<State label="BudgetDiagram with a planned expense, five boxes">
 					<BudgetDiagram
 						id="budget-diagram-planned"
 						totalBudgetCents={140000}
@@ -5377,7 +5378,7 @@ function Diagrams() {
 						safeToSpendCents={61800}
 					/>
 				</State>
-				<State label="BudgetDiagram with a savings goal and a planned expense">
+				<State label="BudgetDiagram with a savings goal and a planned expense, six boxes">
 					<BudgetDiagram
 						id="budget-diagram-savings-planned"
 						totalBudgetCents={140000}
@@ -6491,6 +6492,192 @@ function LedgerForm() {
 	);
 }
 
+/** A new family's first week's question page (P125 E, decision 114): the states the app draws, with fixed sample data. */
+const FIRST_WEEK_PAY_DEPOSITS = [
+	"2026-07-17",
+	"2026-07-31",
+	"2026-08-14",
+	"2026-08-28",
+	"2026-09-11",
+	"2026-09-25",
+	"2026-10-09",
+].map((date) => ({ date, cents: 245000 }));
+const FIRST_WEEK_HEAD: BankHead = {
+	banks: "Chase",
+	lines: 412,
+	first: "2026-07-16",
+	last: "2026-10-13",
+	left: 6,
+};
+const FIRST_WEEK_PAY = {
+	key: "ACME CORP PAYROLL",
+	name: "Acme Corp",
+	deposits: FIRST_WEEK_PAY_DEPOSITS,
+	ids: FIRST_WEEK_PAY_DEPOSITS.map((_, i) => i + 1),
+};
+const FIRST_WEEK_PAY_LINE = "Pay · Acme Corp, $2,450 every other Friday";
+const FIRST_WEEK_PAY_ENTRY = {
+	id: "pay:ACME CORP PAYROLL",
+	text: FIRST_WEEK_PAY_LINE,
+};
+const FIRST_WEEK_CHARGES: BillSuggestion[] = [
+	{
+		rawName: "NETFLIX.COM",
+		bankText: "NETFLIX.COM",
+		displayName: "Netflix",
+		amountCents: 1549,
+		dueDay: 5,
+		categoryId: 1,
+		chargeCount: 2,
+	},
+	{
+		rawName: "SPOTIFY",
+		bankText: "SPOTIFY",
+		displayName: "Spotify",
+		amountCents: 1199,
+		dueDay: 9,
+		categoryId: 1,
+		chargeCount: 2,
+	},
+];
+const FIRST_WEEK_GYM: BillSuggestion = {
+	rawName: "GYM",
+	bankText: "GYM",
+	displayName: "Gym",
+	amountCents: 4500,
+	dueDay: 12,
+	categoryId: null,
+	chargeCount: 2,
+};
+
+function FirstWeekGroup() {
+	const page = (over: Partial<FirstPageModel>): FirstPageModel => ({
+		drawn: 1,
+		head: FIRST_WEEK_HEAD,
+		ledger: [],
+		payAnswered: false,
+		pay: [FIRST_WEEK_PAY],
+		keep: [],
+		waiting: [],
+		...over,
+	});
+	return (
+		<Group id="first-week" title="A new family's first week">
+			<Specimen
+				id="first-page"
+				title="FirstPage"
+				tier="visual"
+				components={[
+					"FirstPage",
+					"SmallNotebook",
+					"FirstPageBody",
+					"PayEmpty",
+					"FirstPageDone",
+				]}
+				sentence="The question page at /first-page: Your first page, the notebook with its count, the ledger of answers in ink (or the bank's head lines in muted words before any answer), and one question at a time. Only the family app has it; the demo has no bank to ask about."
+			>
+				<State label="Before any answer: the bank's head lines and the pay question">
+					<FirstPageBody
+						id="first-page-before"
+						model={page({})}
+						focus={false}
+					/>
+				</State>
+				<State label="Pay with nothing spotted: the step says so and counts as done, and the bills question follows">
+					<FirstPageBody
+						id="first-page-no-pay"
+						model={page({
+							drawn: 2,
+							pay: [],
+							keep: FIRST_WEEK_CHARGES,
+							waiting: [FIRST_WEEK_GYM],
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Pay answered: the bills question, with one charge that waits in Possible bills">
+					<FirstPageBody
+						id="first-page-bills"
+						model={page({
+							drawn: 2,
+							ledger: [FIRST_WEEK_PAY_ENTRY],
+							payAnswered: true,
+							pay: [],
+							keep: FIRST_WEEK_CHARGES,
+							waiting: [FIRST_WEEK_GYM],
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="An answer just landed: its ledger line rises in, and its notebook stroke draws in pencil, then inks">
+					<FirstPageBody
+						id="first-page-answered"
+						model={page({
+							drawn: 2,
+							ledger: [FIRST_WEEK_PAY_ENTRY],
+							payAnswered: true,
+							pay: [],
+							keep: FIRST_WEEK_CHARGES,
+							waiting: [FIRST_WEEK_GYM],
+						})}
+						focus={false}
+						motion={{ line: 0, strokes: [1] }}
+					/>
+				</State>
+				<State label="Nothing to keep in one tap: the step says so and names what waits">
+					<FirstPageBody
+						id="first-page-empty"
+						model={page({
+							drawn: 2,
+							ledger: [FIRST_WEEK_PAY_ENTRY],
+							payAnswered: true,
+							pay: [],
+							waiting: [FIRST_WEEK_GYM],
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Both steps done: the page says so">
+					<FirstPageBody
+						id="first-page-done"
+						model={page({
+							drawn: 3,
+							ledger: [
+								FIRST_WEEK_PAY_ENTRY,
+								{ id: "bills", text: "Bills · 2 kept, about $27 a month" },
+							],
+							payAnswered: true,
+							pay: [],
+						})}
+						focus={false}
+					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="first-page-questions"
+				title="PayQuestion, BillsQuestion, BillsEmpty"
+				tier="interactive"
+				components={["PayQuestion", "BillsQuestion", "BillsEmpty"]}
+				sentence="The one question a step asks: pay as Yes or No, the bills step as one tap that keeps the found charges, or Choose which for Possible bills. Each answer is a form that swaps the page and announces what it saved; a step with nothing to ask says so and counts as done."
+			>
+				<State label="Pay: is this your pay, with Yes and No">
+					<PayQuestion merchant={FIRST_WEEK_PAY} focus={false} />
+				</State>
+				<State label="Bills: keep the two found charges in one tap; the third waits">
+					<BillsQuestion
+						keep={FIRST_WEEK_CHARGES}
+						waiting={[FIRST_WEEK_GYM]}
+						focus={false}
+					/>
+				</State>
+				<State label="Bills with nothing to keep in one tap">
+					<BillsEmpty waiting={1} focus={false} />
+				</State>
+			</Specimen>
+		</Group>
+	);
+}
+
 /** The whole catalog page body. */
 export function Catalog() {
 	return (
@@ -6500,6 +6687,7 @@ export function Catalog() {
 			<Brand />
 			<Shell />
 			<HomeTopGroup />
+			<FirstWeekGroup />
 			<AccountsGroup />
 			<SettingsGroup />
 			<TrendsGroup />

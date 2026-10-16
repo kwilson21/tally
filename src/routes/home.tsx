@@ -27,6 +27,7 @@ import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { readSetup } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
+import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -577,7 +578,7 @@ home.get("/", async (c) => {
 		const message = "Savings goal editing cancelled.";
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({ toast: { message, type: "info" }, announce: message }),
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
 	return renderHome(c, today, {
@@ -661,7 +662,7 @@ home.post("/savings-goal", async (c) => {
 		if (c.req.header("HX-Request")) {
 			c.header(
 				"HX-Trigger",
-				JSON.stringify({
+				hxTrigger({
 					toast: { message: parsed.error, type: "error" },
 					announce: parsed.error,
 				}),
@@ -691,7 +692,7 @@ home.post("/savings-goal", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: { message: "Saved the savings goal", type: "success" },
 			announce: `Savings is ${amount(parsed.cents)} a month from ${monthName(month)} on.`,
 		}),
@@ -748,7 +749,7 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect("/", 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: { message: `Saved the ${category.name} budget`, type: "success" },
 			announce: `${category.name} is ${amount(parsed.cents)} a month from ${monthName(month)} on.`,
 		}),
@@ -776,7 +777,7 @@ home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
 		direction === "down" ? "already $0" : "already the largest budget";
 	c.header(
 		"HX-Trigger",
-		JSON.stringify(
+		hxTrigger(
 			cents !== null
 				? {
 						toast: {

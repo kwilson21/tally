@@ -3,6 +3,8 @@
 // and the counts of the first night after stroke four. A household set up before the feature shipped has all five
 // strokes drawn with no day (migration 0057), so it reads as set up.
 
+import type { PayDeposit } from "../first-tally/pay";
+
 /** The five strokes of the first week (P125 E): link a bank, your pay, your bills, your budgets, and the night's count. */
 export const STROKES = ["bank", "pay", "bills", "budgets", "count"] as const;
 export type Stroke = (typeof STROKES)[number];
@@ -22,6 +24,26 @@ export type NightCounts = {
 	needYou: number;
 };
 
+/** The pay step's answer for one merchant: Yes, it's the family's pay, or No, it isn't (spec §8.8). */
+export type PayAnswer = "yes" | "no";
+
+/** The deposits one answer covered, each by its transaction id (a string key, since the record is JSON). */
+export type PayDeposits = Record<string, PayDeposit>;
+
+/**
+ * One merchant's pay answers as recorded: the deposits answered Yes (`yes`) and the deposits answered No (`no`), each by
+ * its transaction id, and `at`, the merchant's place in the order the merchants were first answered (0 for the first; a
+ * merchant answered again keeps its place). The ledger reads the Yes deposits, so a change made later elsewhere adds
+ * nothing to the line, and it sorts the lines by `at`.
+ */
+export type PayRecord = { yes?: PayDeposits; no?: PayDeposits; at: number };
+
+/** What one answer writes into a merchant's record: its Yes deposits, or its No deposits (the other key is left as it is). */
+export type PayAnswerRecord = Pick<PayRecord, "yes"> | Pick<PayRecord, "no">;
+
+/** What the bills step kept: how many bills, and their monthly total in cents, added to as each bill is kept. */
+export type BillsKept = { kept: number; cents: number };
+
 export type FirstTally = {
 	/**
 	 * A stroke is drawn when it has a key here: its household day (YYYY-MM-DD), or null when drawn with no day known
@@ -32,6 +54,13 @@ export type FirstTally = {
 	budgets: Record<string, BudgetAnswer>;
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
+	/**
+	 * The pay step's answers so far, by merchant key (the store's raw name): the deposits each merchant answered Yes or No,
+	 * and its place (`at`). A merchant asked again adds its new deposits to them (payAnswerStatement).
+	 */
+	pay?: Record<string, PayRecord>;
+	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
+	bills?: BillsKept;
 };
 
 const KEY = "first_tally";
@@ -145,4 +174,48 @@ export async function keepNightCounts(
 		)
 		.bind(KEY, JSON.stringify(counts))
 		.run();
+}
+
+/**
+ * The record's write of one pay answer. It goes in the same batch, right after the answer's own UPDATE (answerPay), and
+ * lands only when that UPDATE changed rows (`WHERE changes() > 0`), so a stale answer that changes nothing leaves the
+ * record as the first answer set it, and the record and the flags always agree. The answer's deposits are bound as one
+ * keyed object, `{"yes": {…}}` or `{"no": {…}}`, and json_patch merges it key by key: a deposit answered before keeps its
+ * entry, a new one adds to it, and a No adds to `no` without touching `yes`. The merchant's key is bound as a value and
+ * merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch also
+ * creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
+ * answered, which are never removed) for a merchant new to the record, and the place it already has for one answered again.
+ */
+export function payAnswerStatement(
+	db: D1Database,
+	merchant: string,
+	record: PayAnswerRecord,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
+			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json_set(json(?3), '$.at', COALESCE(
+				(SELECT json_extract(p.value, '$.at') FROM json_each(household_settings.value, '$.pay') AS p WHERE p.key = ?2),
+				(SELECT COUNT(*) FROM json_each(household_settings.value, '$.pay')))))))`,
+		)
+		.bind(KEY, merchant, JSON.stringify(record));
+}
+
+/**
+ * The record's write of one kept bill, for keepBills' batch right after the bill's own INSERT: it adds one to the count
+ * and the bill's amount to the total, and lands only when that INSERT added the bill (`WHERE changes() > 0`), so a
+ * refused name adds nothing. Each kept bill lands with its bill, so a Keep that fails part-way still counts the bills
+ * it kept. The sum reads what is stored when the write happens, so two Keeps add up; a first bill on a record without
+ * `bills` starts from zero (json_extract is NULL there).
+ */
+export function keptBillStatement(
+	db: D1Database,
+	cents: number,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_set('${EMPTY_RECORD}', '$.bills', json_object('kept', 1, 'cents', ?2)) WHERE changes() > 0
+			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.bills', json_object('kept', COALESCE(json_extract(value, '$.bills.kept'), 0) + 1, 'cents', COALESCE(json_extract(value, '$.bills.cents'), 0) + ?2))`,
+		)
+		.bind(KEY, cents);
 }

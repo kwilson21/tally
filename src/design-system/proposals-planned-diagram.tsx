@@ -1,14 +1,13 @@
-// P126 (#202, decision 101): where Planned joins the Budget diagram. The owner picked it in words on
-// Oct 14: the boxes keep the size main draws four and never scale down, and on a narrow screen the row
-// wraps after Bills due. These pictures are to confirm that before #545 builds it. Each picture is the
-// Budget section as How Tally works draws it, from the same numbers as its worked example. Today's
-// reference is the real BudgetDiagram; the other drawings are local copies that use main's box size
-// (93 by 60), gap (22) and type sizes, so they are true to the diagram rather than to a new one.
+// P126 (#202, decisions 101, 115 and 116): where Planned joins the Budget diagram. The owner picked option A
+// (decision 115): the boxes keep the size main draws four and never scale down, and where the row doesn't fit
+// it wraps after Bills due; decision 116 extends the wrap to every width, with or without Planned. Each picture
+// is the Budget section as How Tally works draws it, from the same numbers as its worked example. Every
+// reference is a local copy of what main or PR #545 drew at the time, so this board stays true after #600
+// changes main; the drawings use main's box size (93 by 60), gap (22) and type sizes.
 
 import type { Child } from "hono/jsx";
 import { formatCents } from "../money";
-import { BudgetDiagram } from "../views/how-diagrams";
-import { Fixed } from "./proposal-parts";
+import { Fixed, PickedPill } from "./proposal-parts";
 import { Specimen } from "./specimen";
 
 // The demo's October numbers (the delivery session's). Bills due is what the other four leave: $1,062.49.
@@ -129,19 +128,19 @@ function Column({ caption, children }: { caption: string; children?: Child }) {
 function Choice({
 	name,
 	note,
-	aside,
 	tradeoff,
 	why,
 	recommended = false,
+	picked = false,
 	children,
 }: {
 	name: string;
 	note: string;
-	/** A note on the option's status, under what it is. */
-	aside?: string;
 	tradeoff?: string;
 	why?: string;
 	recommended?: boolean;
+	/** The owner's pick (decision 115 for option A). */
+	picked?: boolean;
 	children?: Child;
 }) {
 	return (
@@ -154,9 +153,9 @@ function Choice({
 							Recommended
 						</span>
 					)}
+					{picked && <PickedPill />}
 				</h4>
 				<p class="text-sm">{note}</p>
-				{aside && <p class="text-sm text-muted">{aside}</p>}
 				{tradeoff && <p class="text-sm text-muted">Trade-off: {tradeoff}</p>}
 				{why && <p class="text-sm text-muted">Why: {why}</p>}
 			</div>
@@ -167,7 +166,7 @@ function Choice({
 	);
 }
 
-// Main's four-box geometry, as BudgetDiagram draws it at width 440: a box 93 wide and 60 tall, and a
+// Main's four-box geometry, as main drew it at width 440: a box 93 wide and 60 tall, and a
 // 22 px gap that holds an operator.
 const BOX = 93;
 const SLOT = 22;
@@ -329,20 +328,35 @@ const SAFE_DESC = `${SUM} leaves ${money(SAFE)} safe to spend.`;
 const SIX_DESC = `${SUM} minus ${money(SAVINGS)} for the savings goal leaves ${money(SIX_SAFE)} safe to spend.`;
 const TODAY_DESC = `The ${money(BUDGET)} budget minus ${money(SPENT)} spent minus ${money(BILLS)} for bills due leaves ${money(TODAY_SAFE)} safe to spend.`;
 
+const FOUR_BOXES: [string, number][] = [
+	["Budget", BUDGET],
+	["Spent", SPENT],
+	["Bills due", BILLS],
+	["Safe to spend", TODAY_SAFE],
+];
+const FIVE_BOXES: [string, number][] = [
+	["Budget", BUDGET],
+	["Spent", SPENT],
+	["Bills due", BILLS],
+	["Planned", PLANNED],
+	["Safe to spend", SAFE],
+];
+
 /**
- * PR #545's BudgetDiagram for five boxes, copied from its branch: one row 550 wide, so the five boxes
- * shrink to fit the figure's max-w-md width, as they do on that branch. Safe to spend is positive here,
- * so it is drawn green.
+ * A row of boxes drawn as one SVG `width` wide, so the boxes shrink to fit the figure's max-w-md width: as main drew
+ * four boxes until #600, and as PR #545's branch draws five. Safe to spend is positive here, so it is drawn green.
  */
-function BranchFiveBoxes({ id }: { id: string }) {
-	const boxes: [string, number][] = [
-		["Budget", BUDGET],
-		["Spent", SPENT],
-		["Bills due", BILLS],
-		["Planned", PLANNED],
-		["Safe to spend", SAFE],
-	];
-	const width = 550;
+function ScaledRow({
+	id,
+	width,
+	boxes,
+	sum,
+}: {
+	id: string;
+	width: number;
+	boxes: [string, number][];
+	sum: string;
+}) {
 	const gap = 22;
 	const boxW = (width - 2 - gap * (boxes.length - 1)) / boxes.length;
 	return (
@@ -357,7 +371,7 @@ function BranchFiveBoxes({ id }: { id: string }) {
 			aria-labelledby={`${id}-title ${id}-desc`}
 		>
 			<title id={`${id}-title`}>How safe to spend is worked out</title>
-			<desc id={`${id}-desc`}>{SAFE_DESC}</desc>
+			<desc id={`${id}-desc`}>{sum}</desc>
 			{boxes.map(([label, cents], i) => {
 				const x = 1 + i * (boxW + gap);
 				const last = i === boxes.length - 1;
@@ -410,14 +424,14 @@ function BranchFiveBoxes({ id }: { id: string }) {
 	);
 }
 
-/** P126 on the proposals page, drawn first: the Budget diagram with Planned, at 1280 and at 390. */
+/** P126 on the proposals page: the Budget diagram with Planned, at 1280 and at 390. */
 export function PlannedDiagramProposal() {
 	return (
 		<Specimen
 			id="p126-planned-diagram"
 			title="P126 · The Budget diagram with Planned"
 			tier="visual"
-			sentence="Planned joins the Budget diagram as a fifth box. Pick how the row lays out at 1280 and at 390. Each picture is the Budget section of How Tally works, as the page draws it."
+			sentence="Planned joins the Budget diagram as a fifth box. Each picture is the Budget section of How Tally works, as the page draws it, at 1280 and at 390."
 		>
 			<Fixed>
 				the diagram is drawn by code from the same numbers as the section's
@@ -426,22 +440,21 @@ export function PlannedDiagramProposal() {
 				when it's over.
 			</Fixed>
 			<Choice
-				name="Reference · Today on main: four boxes"
-				note="The diagram as main draws it now: four boxes with the demo's numbers and no Planned box."
+				name="Reference · Main until #600: four boxes"
+				note="The diagram as main drew it until #600: four boxes with the demo's numbers and no Planned box, all in one SVG that shrinks."
 			>
 				<Column caption="At 1280: one row">
 					<WideFrame
 						id="p126-today-1280-frame"
-						name="Reference · Today on main: four boxes"
+						name="Reference · Main until #600: four boxes"
 						sum={TODAY_DESC}
 					>
 						<BudgetPicture>
-							<BudgetDiagram
+							<ScaledRow
 								id="p126-today-1280"
-								totalBudgetCents={BUDGET}
-								totalSpentCents={SPENT}
-								safeToSpendCents={TODAY_SAFE}
-								savingsGoalCents={0}
+								width={440}
+								boxes={FOUR_BOXES}
+								sum={TODAY_DESC}
 							/>
 						</BudgetPicture>
 					</WideFrame>
@@ -449,16 +462,15 @@ export function PlannedDiagramProposal() {
 				<Column caption="At 390: one row, scaled down">
 					<PhonePicture
 						id="p126-today-390-frame"
-						name="Reference · Today on main: four boxes"
+						name="Reference · Main until #600: four boxes"
 						sum={TODAY_DESC}
 					>
 						<BudgetPicture>
-							<BudgetDiagram
+							<ScaledRow
 								id="p126-today-390"
-								totalBudgetCents={BUDGET}
-								totalSpentCents={SPENT}
-								safeToSpendCents={TODAY_SAFE}
-								savingsGoalCents={0}
+								width={440}
+								boxes={FOUR_BOXES}
+								sum={TODAY_DESC}
 							/>
 						</BudgetPicture>
 					</PhonePicture>
@@ -475,7 +487,12 @@ export function PlannedDiagramProposal() {
 						sum={SAFE_DESC}
 					>
 						<BudgetPicture>
-							<BranchFiveBoxes id="p126-545-1280" />
+							<ScaledRow
+								id="p126-545-1280"
+								width={550}
+								boxes={FIVE_BOXES}
+								sum={SAFE_DESC}
+							/>
 						</BudgetPicture>
 					</WideFrame>
 				</Column>
@@ -486,18 +503,23 @@ export function PlannedDiagramProposal() {
 						sum={SAFE_DESC}
 					>
 						<BudgetPicture>
-							<BranchFiveBoxes id="p126-545-390" />
+							<ScaledRow
+								id="p126-545-390"
+								width={550}
+								boxes={FIVE_BOXES}
+								sum={SAFE_DESC}
+							/>
 						</BudgetPicture>
 					</PhonePicture>
 				</Column>
 			</Choice>
 			<Choice
 				name="Option A · Today's box size, wrapping after Bills due"
-				note="Planned is a fifth box at today's size; where the row doesn't fit, it wraps after Bills due."
-				aside="The owner's pick in words, Oct 14; this drawing is to confirm it."
+				note="Planned is a fifth box at today's size. Where the row doesn't fit, it wraps after Bills due, and decision 116 extends the wrap to the four-box diagram too, with or without Planned."
 				tradeoff="a two-part diagram: the boxes split into two groups that wrap, instead of one SVG that scales; no new token, no JavaScript."
 				why="the labels stay the size they are today on every screen, and the sum still reads left to right."
 				recommended
+				picked
 			>
 				<Column caption="At 1280: one row">
 					<WideFrame

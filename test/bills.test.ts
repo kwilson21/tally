@@ -394,6 +394,8 @@ describe("Bills", () => {
 		])
 			expect(form).toContain(words);
 
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
 		const response = await exports.default.fetch("http://tally.test/bills", {
 			method: "POST",
 			headers: {
@@ -948,10 +950,11 @@ describe("Bills", () => {
 	});
 
 	it("keeps the demo's Safe to spend positive on a fixed day, with Eating Out the one category over", async () => {
+		// The 20th: Eating Out has been over since the 13th, and Gas is near its limit but not over (#322).
 		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date("2026-10-10T15:00:00Z"));
+		vi.setSystemTime(new Date("2026-10-20T15:00:00Z"));
 		try {
-			await resetDemo(env.DB, "2026-10-10");
+			await resetDemo(env.DB, "2026-10-20");
 			const html = await (
 				await exports.default.fetch("http://tally.test/")
 			).text();
@@ -961,7 +964,7 @@ describe("Bills", () => {
 				)?.[1] ?? "";
 			expect(headline).toMatch(/^\$\d/);
 			expect(html).toContain(
-				"Eating Out is $36 over. Everything else is on track.",
+				"Eating Out is $86 over. Everything else is on track.",
 			);
 		} finally {
 			vi.useRealTimers();

@@ -7,7 +7,7 @@
 
 import { daysBefore, householdMonth } from "../dates";
 import { occurrenceAmountSql } from "../db/bill-amounts";
-import { paysPlanSql } from "../db/counted-month";
+import { paysPlanGroupSql, paysPlanSql } from "../db/counted-month";
 import {
 	isMerchantTextSql,
 	merchantColumnSql,
@@ -180,8 +180,9 @@ export async function loadPriceOffers(
 /**
  * What must still be true for an accept to go through, as one condition every statement of it shares:
  * linking the payment to the occurrence would be new (nothing is linked to the payment, and nothing to
- * the occurrence), the payment is still the charge the person saw, the occurrence is still at the amount
- * they saw, and the bill is still at its current amount, which `seenCurrent` (?7) holds. The bill may also
+ * the occurrence, and no plan pays the payment or one of its parts), the payment is still the charge the
+ * person saw, the occurrence is still at the amount they saw, and the bill is still at its current amount,
+ * which `seenCurrent` (?7) holds. The bill may also
  * be at the charge already: the amount update runs before the link and moves it there, and the link is then
  * checked against the same condition. Numbered parameters: ?1 payment, ?2 bill, ?3 period, ?6 the
  * occurrence's month, ?7 the bill's current amount on the page, and the charge and the occurrence's amount
@@ -190,7 +191,7 @@ export async function loadPriceOffers(
 const stillOffered = (charge: string, seen: string) =>
 	`NOT EXISTS (SELECT 1 FROM bill_payments linked WHERE linked.status = 'linked'
 	   AND (linked.transaction_id = ?1 OR (linked.bill_id = ?2 AND linked.period = ?3)))
-	 AND NOT EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = ?1 AND ${paysPlanSql("pt")})
+	 AND NOT EXISTS (SELECT 1 FROM transactions pt WHERE pt.id = ?1 AND ${paysPlanGroupSql("pt")})
 	 AND EXISTS (SELECT 1 FROM transactions WHERE id = ?1 AND amount_cents = ${charge})
 	 AND ${occurrenceAmountSql("?2", "?6")} IN (${charge}, ${seen})
 	 AND EXISTS (SELECT 1 FROM bills WHERE id = ?2 AND amount_cents IN (${charge}, ?7))`;

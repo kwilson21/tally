@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { actor } from "../actor";
 import { householdToday } from "../dates";
 import { isSetUp, readFirstTally, strokeStatement } from "../db/first-tally";
+import { hxTrigger } from "../htmx";
 import {
 	createLinkToken,
 	exchangePublicToken,
@@ -143,7 +144,7 @@ plaid.post("/plaid/items/:id/repaired", async (c) => {
 		const message = `Fixed ${item.institution_name}.`;
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success" },
 				announce: message,
 			}),
@@ -217,7 +218,7 @@ plaid.post("/plaid/exchange", async (c) => {
 			: `Linked ${institution}.`;
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message, type: "success" },
 				announce: message,
 			}),

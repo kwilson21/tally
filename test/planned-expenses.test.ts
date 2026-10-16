@@ -26,12 +26,13 @@ import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 
 const BASE = "http://tally.test";
-const post = (path: string, form: Record<string, string>) =>
+const post = (path: string, form: Record<string, string>, htmx = true) =>
 	exports.default.fetch(BASE + path, {
 		method: "POST",
+		redirect: "manual",
 		headers: {
 			Origin: BASE,
-			"HX-Request": "true",
+			...(htmx ? { "HX-Request": "true" } : {}),
 			"content-type": "application/x-www-form-urlencoded",
 		},
 		body: new URLSearchParams(form),
@@ -683,6 +684,106 @@ describe("Bills' Planned group, Band and sheet", () => {
 			transaction_id: "9707",
 		});
 		expect(await billed.text()).toContain("That payment already pays a bill.");
+	});
+
+	it("without JavaScript, a payment that already pays a planned expense gets the refusal page with its reason in a role=alert, and no link", async () => {
+		const other = await plan("Lawn service", 9000, MONTH);
+		await payment(9720, 9000);
+		await plan("Car registration", 9000, MONTH, 9720);
+		const refused = await post(
+			`/plans/${other}/link`,
+			{ transaction_id: "9720" },
+			false,
+		);
+		expect(refused.status).toBe(200);
+		expect(refused.headers.get("Location")).toBeNull();
+		expect(await refused.text()).toMatch(
+			/role="alert"[^>]*>That payment already pays a planned expense\./,
+		);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(other)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBeNull();
+	});
+
+	it("without JavaScript, a payment that already pays a bill gets the refusal page with its reason in a role=alert, and no link", async () => {
+		await env.DB.prepare(
+			"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name) VALUES(9721,'Gym',9000,3,'monthly','GYM FIXTURE')",
+		).run();
+		await payment(9722, 9000);
+		await env.DB.prepare(
+			"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(9721,?,9722,'user','linked')",
+		)
+			.bind(MONTH)
+			.run();
+		const other = await plan("Lawn service", 9000, MONTH);
+		const refused = await post(
+			`/plans/${other}/link`,
+			{ transaction_id: "9722" },
+			false,
+		);
+		expect(refused.status).toBe(200);
+		expect(refused.headers.get("Location")).toBeNull();
+		expect(await refused.text()).toMatch(
+			/role="alert"[^>]*>That payment already pays a bill\./,
+		);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(other)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBeNull();
+	});
+
+	it("a link sent after the plan is paid says why on its paid page, with and without JavaScript, and links nothing", async () => {
+		const paidBy = await payment(9724, 18000);
+		const id = await plan("Car registration", 18000, MONTH, paidBy);
+		await payment(9725, 18000);
+		// 9724 is the plan's own payment, a resubmitted form: it pays the plan, so the plan's sentence must come before the payment's.
+		for (const transaction of [paidBy, 9725]) {
+			for (const htmx of [true, false]) {
+				const refused = await post(
+					`/plans/${id}/link`,
+					{ transaction_id: String(transaction) },
+					htmx,
+				);
+				expect(refused.status).toBe(200);
+				expect(refused.headers.get("Location")).toBeNull();
+				const html = await refused.text();
+				expect(html).toContain("Paid by");
+				expect(html).toMatch(
+					/role="alert"[^>]*>Car registration is already paid\./,
+				);
+				expect(html).not.toContain("be linked. It may already pay");
+				expect(html).not.toContain("already pays a planned expense");
+			}
+		}
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBe(paidBy);
+	});
+
+	it("without JavaScript, a link that is made redirects back to the plan's page and writes the link", async () => {
+		const id = await plan("Car registration", 18000, MONTH);
+		await payment(9723, 18000);
+		const linked = await post(
+			`/plans/${id}/link`,
+			{ transaction_id: "9723" },
+			false,
+		);
+		expect(linked.status).toBe(303);
+		expect(linked.headers.get("Location")).toBe(`/plans/${id}`);
+		const row = await env.DB.prepare(
+			"SELECT transaction_id FROM planned_expenses WHERE id=?",
+		)
+			.bind(id)
+			.first<{ transaction_id: number | null }>();
+		expect(row?.transaction_id).toBe(9723);
 	});
 
 	it("unlinks from the plan's own page, which answers with that page, unpaid, and says Payment unlinked", async () => {
@@ -1367,21 +1468,26 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(await paidBy(two)).toBe(newSecond);
 	});
 
-	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
-	const racingWith = (race: string, bind: (number | null)[]) =>
+	/** A database whose `batch` is `around` instead of the real one, so a test can race the save's batch. */
+	const batchAround = (
+		around: (statements: D1PreparedStatement[]) => Promise<D1Result[]>,
+	) =>
 		new Proxy(env.DB, {
 			get(target, prop) {
-				if (prop === "batch")
-					return async (statements: D1PreparedStatement[]) => {
-						await env.DB.prepare(race)
-							.bind(...bind)
-							.run();
-						return env.DB.batch(statements);
-					};
+				if (prop === "batch") return around;
 				const value = Reflect.get(target, prop);
 				return typeof value === "function" ? value.bind(target) : value;
 			},
 		}) as unknown as D1Database;
+
+	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		batchAround(async (statements) => {
+			await env.DB.prepare(race)
+				.bind(...bind)
+				.run();
+			return env.DB.batch(statements);
+		});
 
 	const KEEP_TWO = [
 		{ categoryId: 1, amountCents: 12000 },
@@ -1464,6 +1570,114 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		expect(splitRefusedError(false)).toBe(
 			"The bank just changed this amount. Check the parts and save again.",
 		);
+	});
+
+	it("an ordinary re-split carries a plan on the first part to the new part of its amount (#573)", async () => {
+		const tx = await payment(9830, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+
+		const result = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(true);
+		expect(result.planLinked).toBeUndefined();
+		const [newFirst] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newFirst);
+	});
+
+	it("refuses a re-split when a competing save moves a plan from one old part to another after the read, and changes nothing (#573)", async () => {
+		const tx = await payment(9832, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			[second ?? 0, planId],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		// The plan stays on the part it is linked to now, never on the new 12000 part that A's pairing names.
+		expect(await paidBy(planId)).toBe(second);
+		expect(await partIds(tx)).toEqual(before);
+
+		// The retry reads the plan on its part, so the plan takes the new part that follows it.
+		const retry = await saveSplit(env.DB, tx, KEEP_TWO, "demo");
+		expect(retry.saved).toBe(true);
+		const [, newSecond] = await partIds(tx);
+		expect(await paidBy(planId)).toBe(newSecond);
+	});
+
+	it("refuses a re-split when a competing save moves one plan onto the part another plan left after the read (#573)", async () => {
+		const tx = await payment(9834, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		// transaction_id is unique, so the race must free the second part before the other plan takes it: the plan created
+		// first is the one the race visits first.
+		const onSecond = await plan("Car registration", 18000, MONTH, second ?? 0);
+		const onFirst = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const racing = racingWith(
+			"UPDATE planned_expenses SET transaction_id = CASE id WHEN ?1 THEN ?2 ELSE NULL END WHERE id IN (?1, ?3)",
+			[onFirst, second ?? 0, onSecond],
+		);
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(onFirst)).toBe(second);
+		expect(await paidBy(onSecond)).toBeNull();
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("refuses a re-split when a plan moved after the read, even if it moves again right after the failed batch (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9836, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const before = await partIds(tx);
+		const movePlan = (part: number) =>
+			env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(part, planId)
+				.run();
+		// The plan moves after the read and the batch fails; the plan moves back before the save looks at the failure.
+		const racing = batchAround(async (statements) => {
+			await movePlan(second ?? 0);
+			try {
+				return await env.DB.batch(statements);
+			} catch (error) {
+				await movePlan(first ?? 0);
+				throw error;
+			}
+		});
+
+		const result = await saveSplit(racing, tx, KEEP_TWO, "demo");
+		expect(result.saved).toBe(false);
+		expect(result.planLinked).toBe(true);
+		expect(await paidBy(planId)).toBe(first);
+		expect(await partIds(tx)).toEqual(before);
+	});
+
+	it("rethrows a batch failure for another reason while a plan also moved, not the planned-expense refusal (#573, Codex 4289357375)", async () => {
+		const tx = await payment(9838, 30000);
+		await splitInTwo(tx, 12000, 18000);
+		const [first, second] = await partIds(tx);
+		const planId = await plan("Lawn service", 12000, MONTH, first ?? 0);
+		const failure = new Error("D1_ERROR: network connection lost");
+		const racing = batchAround(async () => {
+			await env.DB.prepare(
+				"UPDATE planned_expenses SET transaction_id = ? WHERE id = ?",
+			)
+				.bind(second ?? 0, planId)
+				.run();
+			throw failure;
+		});
+
+		await expect(saveSplit(racing, tx, KEEP_TWO, "demo")).rejects.toBe(failure);
 	});
 
 	it("Remove split unlinks a plan on a part and sets it aside, as it does a bill on a part", async () => {

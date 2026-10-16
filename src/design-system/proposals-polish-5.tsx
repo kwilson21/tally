@@ -11,11 +11,12 @@ import { Band } from "../views/band";
 import { barGeometry } from "../views/bar";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
+import { FirstPage, type LedgerLine, SmallNotebook } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { MoneyInput } from "../views/money-input";
-import { Notebook as SharedNotebook } from "../views/notebook";
+import { Notebook as NotebookDrawing } from "../views/notebook";
 import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
 import { type StepLine, stepsOf, TallySteps } from "../views/tally-steps";
@@ -465,9 +466,10 @@ function Tick() {
 }
 
 /**
- * The notebook of the app (src/views/notebook.tsx), with the pencil states the proposals draw: `replay` draws the
- * fifth stroke across the four and inks all five, `drawLast` draws the last stroke in pencil and inks it late in the loop
- * (both with proposal-only classes in app.css), and otherwise its strokes are in pencil until `ink`.
+ * The notebook with its tally strokes drawn one at a time: `strokes` of the five, in pencil (muted) until `ink`.
+ * `replay` draws the fifth across the four and turns all five to ink, and `drawLast` draws the last one, with
+ * proposal-only classes in app.css. The drawing itself is views/notebook.tsx's; only the stroke classes are the
+ * proposal's, through its `lineClass`, so the proposal can't drift from the app's notebook.
  */
 function Notebook({
 	strokes,
@@ -478,8 +480,11 @@ function Notebook({
 }: {
 	strokes: number;
 	ink?: boolean;
+	/** C's replay: all five strokes ink in from pencil, and the fifth draws across the four. */
 	replay?: boolean;
+	/** E's replay: the last stroke is drawn in pencil and inks late in the loop; the strokes before it are already ink. */
 	drawLast?: boolean;
+	/** The notebook's box: size-32 by default, size-12 beside a question, size-20 at the top of E's replay. */
 	size?: string;
 }) {
 	const lineClass = (i: number) => {
@@ -494,7 +499,7 @@ function Notebook({
 		return ink ? "stroke-ink" : "stroke-muted";
 	};
 	return (
-		<SharedNotebook
+		<NotebookDrawing
 			strokes={replay ? 5 : strokes}
 			ink={ink}
 			size={size}
@@ -1254,45 +1259,6 @@ const DLEDGER_LINES = [
 	"Moves between your accounts · 6 left out",
 	"Paychecks · $4,900 in September",
 ];
-
-/** A line of a question page's ledger: an answer (ink) or what the bank says (muted). */
-type LedgerLine = { text: string; ink?: boolean };
-
-/** A question page's top: "Your first page", the count at the right, and the ledger so far. */
-function FirstPage({
-	right,
-	lines,
-	children,
-}: {
-	right?: Child;
-	lines: LedgerLine[];
-	children?: Child;
-}) {
-	return (
-		<>
-			<div class="flex items-center justify-between gap-3">
-				<h1 class="text-lg font-semibold">Your first page</h1>
-				{right}
-			</div>
-			<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
-				{lines.map((l) => (
-					<li class={`py-2 ${l.ink ? "text-ink" : "text-muted"}`}>{l.text}</li>
-				))}
-			</ul>
-			{children}
-		</>
-	);
-}
-
-/** The small notebook beside a question page's headline, with what it counts. */
-function SmallNotebook({ strokes, text }: { strokes: number; text: string }) {
-	return (
-		<div class="flex items-center gap-2">
-			<Notebook strokes={strokes} ink size="size-12" />
-			<p class="text-sm text-muted">{text}</p>
-		</div>
-	);
-}
 
 const D_LEDGER: LedgerLine[] = [
 	...DLEDGER_LINES.map((text) => ({ text })),

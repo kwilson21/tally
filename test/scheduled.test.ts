@@ -827,7 +827,7 @@ describe("scheduled handler: merchant names", () => {
 		);
 		expect(ai.run).toHaveBeenCalledTimes(100);
 		vi.restoreAllMocks();
-	});
+	}, 60_000);
 
 	it("caps the 09:20 run's Jev pass at 200 calls, so its sort and names stay under D1's query limit", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});

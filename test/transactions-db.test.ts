@@ -78,25 +78,28 @@ describe("listTransactions", () => {
 		);
 		expect((await getTransaction(env.DB, 901))?.countsInMonth).toBe("2026-08");
 	});
-	// September has 43: 39 others, the demo's three Daycare Fridays (Sept 4, 11 and 18), and Rent's $600 on the 1st.
+	// September has 35 on the 22nd (#322, the demo's spending is paced): this month's purchases so far, Costco's parent and
+	// its two parts among them; its twelve uncategorized rows; Netflix; the Farmers market; the income, transfer and
+	// reimbursement; the Daycare Fridays of the 4th, 11th and 18th; and Rent's $600 on the 1st. The Target refund and the
+	// late $500 Rent part count in August, their purchase's and bill's month.
 	it("lists this month newest first, one page at a time", async () => {
 		const first = await list("");
-		expect(first).toMatchObject({ total: 43, page: 1, pages: 2 });
+		expect(first).toMatchObject({ total: 35, page: 1, pages: 2 });
 		expect(first.rows).toHaveLength(PAGE_SIZE);
 		const second = await list("page=2");
-		expect(second).toMatchObject({ total: 43, page: 2, pages: 2 });
-		expect(second.rows).toHaveLength(43 - PAGE_SIZE);
+		expect(second).toMatchObject({ total: 35, page: 2, pages: 2 });
+		expect(second.rows).toHaveLength(35 - PAGE_SIZE);
 		const dates = [...first.rows, ...second.rows].map((r) => r.date);
 		expect(dates).toEqual([...dates].sort().reverse());
 		expect(new Set([...first.rows, ...second.rows].map((r) => r.id)).size).toBe(
-			43,
+			35,
 		);
 	});
 
 	it("shows the last page when asked for one past the end", async () => {
 		const { page, rows } = await list("page=99");
 		expect(page).toBe(2);
-		expect(rows).toHaveLength(43 - PAGE_SIZE);
+		expect(rows).toHaveLength(35 - PAGE_SIZE);
 	});
 
 	it("has one empty page when nothing matches", async () => {
@@ -131,8 +134,10 @@ describe("listTransactions", () => {
 	});
 
 	it("filters by category", async () => {
+		// Groceries so far on the 22nd: Trader Joe's of the 1st, Costco's Groceries part of the 18th and the Farmers market
+		// of the 20th (#322).
 		const { rows } = await list("category=1");
-		expect(rows).toHaveLength(5);
+		expect(rows).toHaveLength(3);
 		expect(rows.every((r) => !r.isSplit)).toBe(true);
 		expect(rows.every((r) => r.categoryName === "Groceries")).toBe(true);
 	});

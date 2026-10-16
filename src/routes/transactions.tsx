@@ -46,6 +46,7 @@ import {
 	setMerchantRule,
 	type TransactionDetail,
 } from "../db/transactions";
+import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import { BANK_VIEW_NOTE, bankRow } from "../transactions/bank-view";
@@ -1499,7 +1500,7 @@ async function finishSelection(
 	if (!c.req.header("HX-Request")) return c.redirect(address, 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	// The list is out of select mode, so the address bar is too.
 	c.header("HX-Push-Url", address);
@@ -1567,7 +1568,7 @@ transactions.post("/transactions/select/category/save", async (c) => {
 	const announce = ruleOfferAnnouncement(value, message);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce }),
+		hxTrigger({ toast: { message, type: "success" }, announce }),
 	);
 	c.header("HX-Push-Url", address);
 	return renderRuleOffer(c, today, address, value);
@@ -2826,7 +2827,7 @@ transactions.post("/transactions/cash", async (c) => {
 	if (offer) {
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				toast: { message: `Added ${saved.merchant}`, type: "success" },
 				announce: ruleOfferAnnouncement(offer, savedWords),
 			}),
@@ -2836,7 +2837,7 @@ transactions.post("/transactions/cash", async (c) => {
 	}
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: { message: `Added ${saved.merchant}`, type: "success" },
 			announce: savedWords,
 		}),
@@ -3529,8 +3530,8 @@ transactions.post("/transactions/:id{[0-9]+}/split", async (c) => {
 });
 
 /**
- * The words a refused split save says (saveSplit): a planned expense linked to a part after the sheet was read, or the
- * bank's amount changed. Only the amount change says the bank's amount moved.
+ * The words a refused split save says (saveSplit): a planned expense linked to a part, or moved between parts, after the
+ * sheet was read, or the bank's amount changed. Only the amount change says the bank's amount moved.
  */
 export const splitRefusedError = (planLinked: boolean) =>
 	planLinked
@@ -3557,7 +3558,7 @@ function splitSaved(
 	const sentence = unlinkedSentence(change, today);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: {
 				message: `Split ${tx.displayName}${sentence ? `.${sentence}` : ""}`,
 				type: "success",
@@ -3612,7 +3613,7 @@ transactions.post("/transactions/:id{[0-9]+}/split/remove", async (c) => {
 	if (!c.req.header("HX-Request")) return c.redirect(back, 303);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: {
 				message: `Removed split from ${tx.displayName}${unlinked ? `.${unlinked}` : ""}`,
 				type: "success",
@@ -3645,7 +3646,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 	if (linked)
 		c.header(
 			"HX-Trigger",
-			JSON.stringify({
+			hxTrigger({
 				announce: locked
 					? countsWithPurchase(locked, categories, tx.date)
 					: "Pick a category.",
@@ -4162,7 +4163,7 @@ async function savePanel(
 		: toastWords;
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: {
 				message: toastMessage,
 				type: "success",
@@ -4234,7 +4235,7 @@ transactions.post("/transactions/:id{[0-9]+}/likely", async (c) => {
 			: `Set ${filed.moved} ${filed.moved === 1 ? "transaction" : "transactions"} to ${filed.name}.`;
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: { message, type: filed.name === null ? "info" : "success" },
 			announce: message,
 		}),
@@ -4309,7 +4310,7 @@ async function respondToRuleOffer(c: Context<App>, yes: boolean) {
 		);
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({ toast: { message, type: "success" }, announce: message }),
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	c.header("HX-Push-Url", back);
 	return renderList(c, today, filtersFrom(c, today, back), {
@@ -4447,7 +4448,7 @@ transactions.post("/transactions/:id{[0-9]+}/delete", async (c) => {
 	const deleted = `Deleted ${tx.displayName}, ${formatCents(tx.amountCents)}.`;
 	c.header(
 		"HX-Trigger",
-		JSON.stringify({
+		hxTrigger({
 			toast: {
 				message: deleted,
 				type: "success",
@@ -4484,7 +4485,7 @@ transactions.post("/transactions/undo-cash-delete", async (c) => {
 	const undoDone = typeof token === "string" ? token : undefined;
 	c.header(
 		"HX-Trigger",
-		JSON.stringify(
+		hxTrigger(
 			restoredNow
 				? {
 						toast: {
