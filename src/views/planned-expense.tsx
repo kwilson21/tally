@@ -2,9 +2,10 @@ import { monthName, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { BottomSheet, sheetAttrs } from "./bottom-sheet";
 import { Button } from "./button";
-import { Chip } from "./chip";
+import { FoldedRow } from "./folded-row";
 import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import { LedgerField } from "./ledger-field";
+import { CLOSEST_PAYMENTS, PaymentRow } from "./payment-row";
 import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
 
@@ -456,17 +457,17 @@ export function PlanPaymentPicker({
 				>
 					<fieldset>
 						<legend>Payment</legend>
-						<div class="mt-1 flex flex-col gap-2">
-							{candidates.map((candidate, index) => (
-								<Chip
-									type="radio"
-									name="transaction_id"
-									value={String(candidate.id)}
-									required={index === 0}
-								>
-									{`${candidate.displayName} · ${candidate.dateLabel} · ${formatCents(candidate.amountCents)}${candidate.excluded ? " · Excluded" : ""}`}
-								</Chip>
+						<div class="mt-1">
+							{candidates.slice(0, CLOSEST_PAYMENTS).map((candidate, index) => (
+								<PaymentRow candidate={candidate} required={index === 0} />
 							))}
+							{candidates.length > CLOSEST_PAYMENTS && (
+								<FoldedRow label={`Show all ${candidates.length} charges`}>
+									{candidates.slice(CLOSEST_PAYMENTS).map((candidate) => (
+										<PaymentRow candidate={candidate} />
+									))}
+								</FoldedRow>
+							)}
 						</div>
 					</fieldset>
 					<div>

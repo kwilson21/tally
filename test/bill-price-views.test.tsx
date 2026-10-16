@@ -212,7 +212,7 @@ describe("BillPaymentPicker with an excluded payment", () => {
 		);
 
 	it("says Excluded in words beside it, so a person knows linking brings it back", () => {
-		expect(picker(true)).toContain("Zelle · Oct 1 · $1,850.00 · Excluded");
+		expect(picker(true)).toContain("Oct 1 · Excluded");
 		expect(picker(false)).not.toContain("Excluded");
 	});
 });
