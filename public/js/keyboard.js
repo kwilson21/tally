@@ -19,8 +19,11 @@ const SEARCH_PAGE = "/transactions?focus=search";
 
 /** The keys sheet's address: this page's own, with keys after its query. */
 export function keysHref({ pathname, search }) {
-	// A path that starts with more than one "/" would lead to another host, so it is kept to one.
-	const path = pathname.replace(/^\/+/, "/");
+	// A path that starts with more than one "/", or has a backslash, tab or newline, would lead to another host. The browser
+	// has already normalised location.pathname, so this only mirrors the server's sitePath, which is the real guard.
+	const path = /[\\\t\n\r]/.test(pathname)
+		? "/"
+		: pathname.replace(/^\/+/, "/");
 	return `${path}${search ? `${search}&` : "?"}keys`;
 }
 

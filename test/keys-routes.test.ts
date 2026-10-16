@@ -243,6 +243,50 @@ describe("an address the layout cannot parse as a URL", () => {
 		expect(keysRegion(html)).toContain('hx-get="/evil.example/x"');
 		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="\/\//);
 	});
+
+	// A path's %5C and %09, %0A, %0D decode to a backslash, tab, LF and CR, which a browser reads as another host.
+	it("draws its keys sheet closed to Home when a backslash is decoded from the path", async () => {
+		const res = await exports.default.fetch(
+			"http://tally.test/%5Cevil.example/x?keys",
+		);
+		const html = decodeAttributes(await res.text());
+		expect(res.status).toBe(404);
+		expect(keysRegion(html)).toContain('hx-get="/"');
+		expect(keysRegion(html)).toContain('href="/"');
+		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="[^"]*[\\\t\n\r]/);
+		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="\/\//);
+	});
+
+	it("draws its keys sheet closed to Home when a tab is decoded from the path", async () => {
+		const res = await exports.default.fetch(
+			"http://tally.test/%09/evil.example/x?keys",
+		);
+		const html = decodeAttributes(await res.text());
+		expect(res.status).toBe(404);
+		expect(keysRegion(html)).toContain('hx-get="/"');
+		expect(keysRegion(html)).toContain('href="/"');
+		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="[^"]*[\\\t\n\r]/);
+		expect(keysRegion(html)).not.toMatch(/(href|hx-get)="\/\//);
+	});
+
+	it("draws every link in its keys sheet as a link to this site", async () => {
+		for (const path of [
+			"//evil.example/x?keys",
+			"/%5Cevil.example/x?keys",
+			"/%09/evil.example/x?keys",
+		]) {
+			const res = await exports.default.fetch(`http://tally.test${path}`);
+			const region = keysRegion(decodeAttributes(await res.text()));
+			const links = [...region.matchAll(/(?:href|hx-get)="([^"]*)"/g)].map(
+				([, link = ""]) => link,
+			);
+			expect(links.length).toBeGreaterThan(0);
+			for (const link of links)
+				expect(new URL(link, "http://tally.test").origin).toBe(
+					"http://tally.test",
+				);
+		}
+	});
 });
 
 describe("the address a Select-mode reply pushes", () => {

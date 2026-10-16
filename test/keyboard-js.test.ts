@@ -214,6 +214,18 @@ describe("keysHref (the address of the keys sheet)", () => {
 			"/evil.example/x?keys",
 		);
 	});
+
+	it("closes to Home when the path has a backslash or a tab, which a browser reads as another host", () => {
+		expect(keysHref({ pathname: "/\\evil.example/x", search: "" })).toBe(
+			"/?keys",
+		);
+		expect(keysHref({ pathname: "/\t/evil.example", search: "" })).toBe(
+			"/?keys",
+		);
+		expect(
+			keysHref({ pathname: "/\\evil.example/x", search: "?month=2026-09" }),
+		).toBe("/?month=2026-09&keys");
+	});
 });
 
 describe("/ (search)", () => {

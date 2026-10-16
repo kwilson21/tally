@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import { sitePath } from "../address";
 import { Wordmark } from "./brand";
 import { FeedbackButton } from "./feedback-button";
 import { KeysSheet } from "./keys";
@@ -45,12 +46,10 @@ export function Layout({
 }: LayoutProps) {
 	// The keys sheet is open when the address has keys in it (decision 118); its close is the same address without them.
 	// The address is split, not parsed: a path such as //%zz is not a URL, so parsing it would throw (a 404 would become a
-	// 500). A path that starts with more than one "/" is drawn from one, so its close link stays on this site.
+	// 500). sitePath keeps the close link on this site: a path that starts with more than one "/" is drawn from one, and
+	// a backslash, tab or newline closes to "/", since a browser reads those as another host.
 	const at = currentPath.indexOf("?");
-	const path = (at === -1 ? currentPath : currentPath.slice(0, at)).replace(
-		/^\/+/,
-		"/",
-	);
+	const path = sitePath(at === -1 ? currentPath : currentPath.slice(0, at));
 	const query = new URLSearchParams(at === -1 ? "" : currentPath.slice(at + 1));
 	const keysOpen = query.has("keys");
 	query.delete("keys");
