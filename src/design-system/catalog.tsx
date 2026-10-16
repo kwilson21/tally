@@ -7125,6 +7125,7 @@ function LedgerForm() {
 						leading={
 							<SuggestedCategoryChip
 								name="Pet Care"
+								groupName="ds-grid-guess"
 								value="3"
 								sure={72}
 								transactionId={3}

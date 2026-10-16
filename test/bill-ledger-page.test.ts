@@ -191,6 +191,8 @@ describe("a part-paid month on the ledger (#205, #604)", () => {
 		expect(row).toContain("Not this one");
 		expect(row).toContain("Link another payment");
 		expect(row).not.toContain("looks like this");
+		// A part-paid month has no check: its words say what it has (#682).
+		expect(row).not.toContain('data-icon="check"');
 	});
 });
 
@@ -298,5 +300,54 @@ describe("which charges a month offers as found (#604)", () => {
 		);
 		expect(section.indexOf('value="9603"')).toBeGreaterThan(turnedAwayLine);
 		expect(section.indexOf(`value="${FOUND}"`)).toBeLessThan(turnedAwayLine);
+	});
+});
+
+describe("a paid month's check hangs in the margin (decision 125, #682)", () => {
+	beforeEach(() => setUp());
+	afterEach(() => vi.useRealTimers());
+
+	/** The classes of the box that holds a paid month's check: the box the margin hangs it from. */
+	const checkBox = (row: string) =>
+		row
+			.match(
+				/<span class="([^"]*)"><span class="text-ok" aria-hidden="true">/,
+			)?.[1]
+			?.split(" ") ?? [];
+
+	it("draws the paid check absolutely in the gutter, centred on the name's line, and hides it from a screen reader", async () => {
+		const row = monthRow(await page(), "October");
+		expect(checkBox(row)).toEqual(
+			expect.arrayContaining([
+				"absolute",
+				"-left-5",
+				"top-1/2",
+				"-translate-y-1/2",
+			]),
+		);
+		expect(row).toContain('<span class="text-ok" aria-hidden="true">');
+		expect(row).toContain('data-icon="check"');
+	});
+
+	it("hangs the check inside the name's own box, so every month's name starts at one left edge", async () => {
+		const html = await page();
+		// A paid month: the summary's first box is the name's, and the check hangs inside it, not in front of it.
+		expect(monthRow(html, "October")).toMatch(
+			/<summary class="[^"]*"><span class="[^"]*\brelative\b[^"]*\bmin-w-0 flex-1 text-lg">(?=<span class="absolute)/,
+		);
+		// An unpaid month: its row's first box is the name's, with nothing in front of it.
+		expect(monthRow(html, "November")).toMatch(
+			/<a [^>]*>\s*<span class="min-w-0 flex-1">/,
+		);
+	});
+
+	it("keeps each month's row a 44px target with its focus ring", async () => {
+		const html = await page();
+		expect(monthRow(html, "October")).toMatch(
+			/<summary class="flex min-h-11 cursor-pointer list-none items-center gap-3 py-2 text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent /,
+		);
+		expect(monthRow(html, "November")).toContain(
+			'class="flex min-h-11 items-center gap-3 py-2 text-ink no-underline ',
+		);
 	});
 });
