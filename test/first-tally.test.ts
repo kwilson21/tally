@@ -22,6 +22,7 @@ import {
 	payMerchants,
 	settleAndLoad,
 } from "../src/first-tally/first-page";
+import { BANK_CONNECTED_SQL } from "../src/first-tally/gate";
 
 const db = env.DB;
 
@@ -322,6 +323,38 @@ describe("the pay stroke's guard (P125 E, #650)", () => {
 		expect(await check()).toEqual({ none: 1 });
 		await payDeposit();
 		expect(await check()).toEqual({ none: 0 });
+	});
+});
+
+describe("the legacy bank repair's write (#657)", () => {
+	const REPAIR_DAY = "2026-10-16";
+	const disconnectAll = () =>
+		db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
+	const repair = () => markStroke(db, "bank", REPAIR_DAY, BANK_CONNECTED_SQL);
+
+	it("draws nothing when every bank is disconnected", async () => {
+		await disconnectAll();
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBeUndefined();
+	});
+
+	it("draws stroke one on the day when a bank is connected", async () => {
+		await disconnectAll();
+		await db
+			.prepare(
+				"UPDATE plaid_items SET disconnected_at = NULL WHERE id = (SELECT MIN(id) FROM plaid_items)",
+			)
+			.run();
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBe(REPAIR_DAY);
+	});
+
+	it("keeps a bank day that is already drawn", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await repair();
+		expect((await readFirstTally(db))?.strokes.bank).toBe("2026-10-10");
 	});
 });
 

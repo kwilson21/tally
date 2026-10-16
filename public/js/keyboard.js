@@ -4,6 +4,9 @@
 // presses the Undo of the toast on screen. Shift is part of ? and of / and nothing else. No key acts while focus is in
 // a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys then). The sheet keeps the
 // page's #fragment, and a keys response is dropped when another sheet opened or the address moved while it loaded.
+// A second ? while the keys sheet loads sends nothing until that keys request ends (htmx's finally-request) or #keys
+// itself settles, so a key repeat sends one request. A history restore (Back) aborts a keys request still loading and
+// takes ? again at once, and a keys response is dropped when #keys was redrawn while it loaded.
 // A swap of #keys moves the sheet's return, and so does a history restore (Back) that redraws the page without the
 // sheet: that counts as the close, and when the opener is gone, focus goes to the page's heading. A keys request that
 // ends without a swap gives focus back (to Undo) and forgets it. Without this script every page works as a plain
@@ -71,14 +74,19 @@ export function rowsOf(doc) {
  * after-settle, and it acts on a swap of #keys or of a region that holds it, after the sheet has been seen open. A
  * history restore (Back) that redraws the page without the sheet counts as the close, and when the opener is gone,
  * focus goes to the page's heading. `ended` is htmx's finally-request, and clears the return when a keys request ends
- * without a swap. `responded` is htmx's after-request, and drops a keys response when another sheet opened or the
- * address moved while it loaded.
+ * without a swap. `responded` is htmx's after-request, and drops a keys response when another sheet opened, the address
+ * moved, or #keys was redrawn while it loaded. `requested` is htmx's before-request, and keeps the keys request's ctx.
+ * `restoring` is htmx's before-history-restore: it aborts a keys request still loading, and never cancels the restore.
  */
 export function keyboard(doc, win) {
 	let returnTo = null;
 	let armed = false;
 	// The #fragment the page had when the keys sheet opened. The sheet's address has none, so its close puts it back.
 	let keptHash = "";
+	// A second ? sends nothing until that keys request ends (its finish) or #keys itself settles. A Back aborts it.
+	let loading = false;
+	// The keys request's ctx while it is in flight, so a history restore can abort its request.
+	let pending = null;
 
 	// A page loaded with the keys sheet already open (a reload) keeps its fragment on close, as a sheet opened with ? does.
 	const loaded = openSheet(doc);
@@ -141,11 +149,13 @@ export function keyboard(doc, win) {
 				}
 				case "?": {
 					event.preventDefault();
+					if (loading) return;
 					returnTo = active === doc.body ? null : active;
 					// Focus on an Undo toast is blurred so the sheet can take focus (sheet.js moves it only from nothing).
 					if (doc.getElementById("toasts")?.contains(active)) active.blur();
 					keptHash = win.location.hash;
 					const url = keysHref(win.location);
+					loading = true;
 					// The address is pushed as given: htmx reads a boolean push as a path, so `true` would push "/true".
 					// The fragment is pushed but not requested: htmx would scroll to an anchor the request carries.
 					win.htmx.ajax("GET", url, {
@@ -184,6 +194,8 @@ export function keyboard(doc, win) {
 			// keys sheet's swap. Another request's settle (Sync now, a row's sheet) leaves the return alone.
 			const region = doc.getElementById("keys");
 			if (!region || !event?.target?.contains?.(region)) return;
+			// A settle of #keys itself is the keys request's own swap, so its wait is over; a body swap that redraws #keys is not.
+			if (event.target === region) loading = false;
 			const sheet = openSheet(doc);
 			if (sheet) {
 				// Only the keys sheet's own open arms the return; a different sheet's settle changes nothing.
@@ -212,6 +224,9 @@ export function keyboard(doc, win) {
 		ended(event) {
 			const ctx = event.detail?.ctx;
 			if (ctx?.target?.id !== "keys") return;
+			// Every keys request ends here, cancelled, dropped or failed, so a ? after this one sends a new request.
+			loading = false;
+			pending = null;
 			// A swap's settle ends the return, so a finish that comes first leaves it for that settle.
 			if (ctx.status === "swapped" && ctx.swap !== "none") return;
 			const sheet = openSheet(doc);
@@ -233,7 +248,8 @@ export function keyboard(doc, win) {
 		 * the request was made (HX-Current-URL, which htmx sends with every request), so a filter's push is not followed
 		 * by this older address; that drop keeps the return, and ended() gives focus back to it (Undo, say) when the request
 		 * finishes. htmx returns before the swap when htmx:after:request is cancelled, so no address is pushed either. The
-		 * keys sheet's own close is kept, since its sheet is inside #keys.
+		 * keys sheet's own close is kept, since its sheet is inside #keys. It is also thrown away when #keys was redrawn
+		 * while it loaded (a body-targeted POST or a Back): its swap would land nowhere, yet would still push the address.
 		 */
 		responded(event) {
 			const target = event.detail?.ctx?.target;
@@ -243,9 +259,26 @@ export function keyboard(doc, win) {
 			const from = event.detail?.ctx?.request?.headers?.["HX-Current-URL"];
 			const moved =
 				!!from && pathAndQuery(new URL(from)) !== pathAndQuery(win.location);
-			if (!otherSheet && !moved) return;
+			const redrawn = !target.isConnected;
+			if (!otherSheet && !moved && !redrawn) return;
 			event.preventDefault();
 			if (otherSheet) forget();
+		},
+		/** A keys request's ctx as htmx's before-request gives it, so a history restore can abort the request while it loads. */
+		requested(event) {
+			const ctx = event.detail?.ctx;
+			if (ctx?.target?.id === "keys") pending = ctx;
+		},
+		/**
+		 * A history restore (Back) aborts a keys request still loading, so a ? works again at once. The aborted request's
+		 * finish still reaches ended(), which forgets the return as it does for any keys request that ends without a swap.
+		 * It never cancels the restore.
+		 */
+		restoring() {
+			if (!loading) return;
+			pending?.request?.abort?.();
+			loading = false;
+			pending = null;
 		},
 	};
 }
@@ -262,5 +295,11 @@ if (typeof document !== "undefined") {
 	);
 	document.addEventListener("htmx:after:request", (event) =>
 		keys.responded(event),
+	);
+	document.addEventListener("htmx:before:request", (event) =>
+		keys.requested(event),
+	);
+	document.addEventListener("htmx:before:history:restore", () =>
+		keys.restoring(),
 	);
 }
