@@ -415,6 +415,156 @@ await page.locator('[role="dialog"]').waitFor({ state: "detached" });
 assert.equal(await rows(), 8);
 step("excluding a transaction takes it out of the list, leaving 8");
 
+// The keys (#72): j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on that row.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.keyboard.press("j");
+const onRow = () =>
+	page.evaluate(
+		() => document.activeElement?.hasAttribute("data-row") ?? false,
+	);
+assert.equal(await onRow(), true, "j focuses a transaction row");
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(() =>
+	document.activeElement?.hasAttribute("data-row"),
+);
+step(
+	"j focuses a row, ? opens the keys sheet, and Escape closes it with focus back on the row",
+);
+
+// The keys sheet keeps the page's #fragment (#72): opened from How this works' Budget section, its address has the fragment
+// while the sheet is open, and the address has it again once the sheet closes.
+await goto(`${BASE}/how-it-works#budget`, { waitUntil: "networkidle" });
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+assert.match(
+	await page.evaluate(() => location.search),
+	/keys/,
+	"? puts keys in the address",
+);
+assert.equal(
+	await page.evaluate(() => location.hash),
+	"#budget",
+	"? keeps the page's fragment in the address",
+);
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(() => location.hash === "#budget");
+assert.equal(
+	await page.evaluate(
+		() => location.pathname + location.search + location.hash,
+	),
+	"/how-it-works#budget",
+	"Escape puts the fragment back on the address",
+);
+step(
+	"? keeps the page's #fragment, and Escape puts it back once the sheet closes",
+);
+
+// Each key (#72), in turn: / focuses the search, j and k move between rows, e and Enter open the row focus is on, ← and →
+// change Home's month, and u presses the Undo of a toast. Each step leaves what it changed as it found it.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("/");
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"q",
+	"/ focuses the search",
+);
+await page.evaluate(() => document.activeElement?.blur());
+step("/ focuses Transactions' search");
+
+const focusedHref = () =>
+	page.evaluate(() => document.activeElement?.getAttribute("href"));
+await page.keyboard.press("j");
+const firstRow = await focusedHref();
+await page.keyboard.press("j");
+assert.notEqual(await focusedHref(), firstRow, "j moves focus to the next row");
+await page.keyboard.press("k");
+assert.equal(
+	await focusedHref(),
+	firstRow,
+	"k moves focus back to the row before",
+);
+step("j and k move focus between the rows");
+
+await page.keyboard.press("e");
+await page.locator('[role="dialog"]').waitFor();
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"edit-title",
+	"e opens the focused row's sheet",
+);
+await page.keyboard.press("Escape");
+await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("j");
+await page.keyboard.press("Enter");
+await page.locator('[role="dialog"]').waitFor();
+await page.keyboard.press("Escape");
+await page.locator('[role="dialog"]').waitFor({ state: "detached" });
+step("e and Enter open the focused row's sheet, and Escape closes it");
+
+await goto(`${BASE}/`, { waitUntil: "networkidle" });
+const monthBefore = await page
+	.locator('a[aria-keyshortcuts="ArrowLeft"]')
+	.getAttribute("href");
+await page.keyboard.press("ArrowLeft");
+await page.waitForURL(
+	(url) => url.search === new URL(monthBefore, BASE).search,
+);
+await htmxReady();
+const monthAfter = await page
+	.locator('a[aria-keyshortcuts="ArrowRight"]')
+	.getAttribute("href");
+await page.keyboard.press("ArrowRight");
+await page.waitForURL((url) => url.search === new URL(monthAfter, BASE).search);
+await htmxReady();
+step("on Home, ← and → go to the month before and the month after");
+
+// u presses the Undo of a cash delete's toast; Ctrl with u does nothing while that toast shows.
+await goto(`${BASE}/transactions`, { waitUntil: "networkidle" });
+await page.getByRole("link", { name: /Corner stand/ }).click();
+await page.locator('[role="dialog"]').waitFor();
+await page.getByRole("button", { name: "Delete cash transaction" }).click();
+await page.locator("#delete-question").waitFor();
+await page.getByRole("button", { name: "Delete", exact: true }).click();
+await page
+	.getByRole("link", { name: /Corner stand/ })
+	.waitFor({ state: "detached" });
+const undo = page.locator('#toasts button[aria-keyshortcuts="u"]');
+await undo.waitFor();
+// ? from the Undo toast moves focus into the keys sheet, and Escape gives it back to Undo while the toast still shows (#72).
+await page.keyboard.press("?");
+await page.locator("#keys [data-sheet]").waitFor();
+assert.equal(
+	await page.evaluate(() => document.activeElement?.id),
+	"keys-title",
+	"? from the Undo toast moves focus into the keys sheet",
+);
+await page.keyboard.press("Escape");
+await page.locator("#keys [data-sheet]").waitFor({ state: "detached" });
+await page.waitForFunction(
+	() => document.activeElement?.getAttribute("aria-keyshortcuts") === "u",
+);
+await page.keyboard.press("Control+u");
+assert.equal(await undo.count(), 1, "Ctrl with u leaves the Undo toast up");
+await page.keyboard.press("u");
+await page.getByRole("link", { name: /Corner stand/ }).waitFor();
+step("u presses the Undo of a delete's toast, and Ctrl with u does nothing");
+
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press("Control+/");
+await page.keyboard.press("Meta+j");
+assert.equal(
+	await page.evaluate(() => document.activeElement === document.body),
+	true,
+	"Ctrl or Cmd with a key focuses nothing",
+);
+step("Ctrl or Cmd with a key does nothing");
+
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page
 	.getByRole("link", { name: /8 transactions need a category/ })

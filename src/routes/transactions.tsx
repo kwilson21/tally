@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { type UnpaidBill, unpaidBillsSentence } from "../bills/unpaid";
 import { askAgain } from "../categorize-pending";
 import { dayLabel, householdToday, monthLabel, shortDay } from "../dates";
@@ -242,6 +243,8 @@ type ListOptions = {
 	focusFirstTick?: boolean;
 	/** The Add cash sheet closed: focus Add cash, the button it was opened from (FOCUS_ADD_CASH). */
 	focusAddCash?: boolean;
+	/** `/` from another page: focus the search field (FOCUS_SEARCH, decision 118). */
+	focusSearch?: boolean;
 };
 
 /** The list URL for these filters (the edit sheet's "back"). */
@@ -320,6 +323,7 @@ async function renderList(
 		focusSetCategory = false,
 		focusFirstTick = false,
 		focusAddCash = false,
+		focusSearch = false,
 	}: ListOptions = {},
 ) {
 	const [
@@ -580,8 +584,14 @@ async function renderList(
 	const cashPath = `/transactions/cash/new?back=${encodeURIComponent(selecting ? selectionBack : back)}`;
 	const cashGet = selecting ? selectModeHref(cashPath, NO_SELECTION) : cashPath;
 	// A list reply in Select mode pushes the address with the settled selection in it, so a reload keeps it (#350, #321).
-	if (selecting && htmx && selectPushBase !== undefined)
-		c.header("HX-Push-Url", selectModeHref(selectPushBase, current));
+	// A reply to ?keys keeps keys too, since htmx takes this header over the push the keys sheet asked for (#72).
+	if (selecting && htmx && selectPushBase !== undefined) {
+		const pushed = selectModeHref(selectPushBase, current);
+		c.header(
+			"HX-Push-Url",
+			new URL(c.req.url).searchParams.has("keys") ? `${pushed}&keys` : pushed,
+		);
+	}
 
 	return c.html(
 		<Layout
@@ -590,7 +600,7 @@ async function renderList(
 				(sheet ? "Edit transaction · Tally" : "Transactions · Tally")
 			}
 			active="transactions"
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 			demo={isDemo(c)}
 		>
 			<div class="flex items-center justify-between gap-3 lg:max-w-3xl">
@@ -711,6 +721,9 @@ async function renderList(
 									value={filters.q}
 									placeholder="Search transactions"
 									autocomplete="off"
+									// / moves focus here (keyboard.js, decision 118); from another page it arrives with focus.
+									aria-keyshortcuts="/"
+									autofocus={focusSearch}
 									class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
 									{...a11y}
 								/>
@@ -1089,6 +1102,7 @@ transactions.get("/transactions", async (c) => {
 			selecting &&
 			(selectAll || params.get("focus") === FOCUS_SET_CATEGORY_BACK),
 		focusAddCash: params.get("focus") === FOCUS_ADD_CASH,
+		focusSearch: params.get("focus") === FOCUS_SEARCH,
 		focusFirstTick: selecting && params.get("focus") === FOCUS_FIRST_TICK,
 		selection,
 		selectPushBase,
@@ -1618,6 +1632,9 @@ transactions.post("/transactions/select/exclude", async (c) => {
 
 /** The `focus` value the Add cash sheet's close asks for: the list puts focus on its Add cash button (#87). */
 const FOCUS_ADD_CASH = "add-cash";
+
+/** The `focus` value `/` asks for from another page: the list puts focus in its search field (decision 118). */
+const FOCUS_SEARCH = "search";
 
 /** The Likely sheet's close keeps the saved row's element and names it, so its tick runs on to the toast's end. */
 function savedCloseAttrs(

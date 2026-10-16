@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import { type AiTallyCounts, readAiTally } from "../db/ai-log";
@@ -322,7 +323,7 @@ async function renderSettings(c: Context<App>, view: View = {}) {
 		<Layout
 			title="Settings · Tally"
 			active="settings"
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 			demo={c.env.DEMO === "true"}
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">Settings</h1>

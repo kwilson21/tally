@@ -2024,6 +2024,15 @@ describe("the edit panel's layout (owner's pick C, #27)", () => {
 	});
 
 	// P120 B (decision 111, audit E5): the panel has no How this works link; edit-panel.test.ts checks that.
+	// Decision 118: a sheet's foot has no keys' details, so the keys are only ever drawn on the page behind it.
+	it("draws no Keyboard shortcuts disclosure in the edit sheet's foot", async () => {
+		const html = (await get(`/transactions/${bakery}`)).html;
+		const sheet = html.slice(
+			html.indexOf('id="edit-title"'),
+			html.indexOf("</section>", html.indexOf('id="edit-title"')),
+		);
+		expect(sheet).not.toContain("Keyboard shortcuts");
+	});
 });
 
 describe("a For person removed while the panel is saving", () => {
