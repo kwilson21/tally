@@ -1069,10 +1069,15 @@ describe("How this works at the foot of Transactions", () => {
 			const { html } = await get(path);
 			const foot = html.search(FOOT);
 			expect(foot).toBeGreaterThan(html.indexOf('aria-label="Results"'));
-			// Nothing opens after it before the sheet: the rows, the pager and the bar all come before it.
-			expect(html.slice(foot, html.indexOf('id="sheet"'))).not.toMatch(
-				/<(section|ul|li|h[1-6]|p|form)\b/,
-			);
+			// Nothing opens after it before the sheet, but the keys' details on desktop (decision 118, not a section).
+			expect(
+				html
+					.slice(foot, html.indexOf('id="sheet"'))
+					.replace(
+						/<div class="mt-2 hidden lg:block">[\s\S]*?<\/details><\/div>/,
+						"",
+					),
+			).not.toMatch(/<(section|ul|li|h[1-6]|p|form)\b/);
 		},
 	);
 

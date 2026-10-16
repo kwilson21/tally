@@ -36,6 +36,8 @@
 @theme {
 	--font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 	--font-serif: "Newsreader", Georgia, serif;
+	/* The key chips only (decision 118): a system monospace stack, no web font. */
+	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
 	--color-paper: #fbf8f2;
 	--color-band: #efebe3;

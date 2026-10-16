@@ -1,6 +1,8 @@
 import type { Child } from "hono/jsx";
+import { sitePath } from "../address";
 import { Wordmark } from "./brand";
 import { FeedbackButton } from "./feedback-button";
+import { KeysSheet } from "./keys";
 import { BottomTabs, type NavKey, Sidebar } from "./nav";
 
 type LayoutProps = {
@@ -42,6 +44,16 @@ export function Layout({
 	currentPath = "/",
 	children,
 }: LayoutProps) {
+	// The keys sheet is open when the address has keys in it (decision 118); its close is the same address without them.
+	// The address is split, not parsed: a path such as //%zz is not a URL, so parsing it would throw (a 404 would become a
+	// 500). sitePath keeps the close link on this site: a path that starts with more than one "/" is drawn from one, and
+	// a backslash, tab or newline closes to "/", since a browser reads those as another host.
+	const at = currentPath.indexOf("?");
+	const path = sitePath(at === -1 ? currentPath : currentPath.slice(0, at));
+	const query = new URLSearchParams(at === -1 ? "" : currentPath.slice(at + 1));
+	const keysOpen = query.has("keys");
+	query.delete("keys");
+	const keysCloseHref = query.size ? `${path}?${query}` : path;
 	return (
 		<html lang="en">
 			<head>
@@ -67,6 +79,8 @@ export function Layout({
 				<script src="/js/sheet.js" defer></script>
 				{/* The money input's nudges and chips (decision 39); module scripts are deferred. */}
 				<script src="/js/money.js" type="module"></script>
+				{/* The keys (#72, decision 109): / ? j k e, ← → and u. Without it the keys are a details (HowFoot, More). */}
+				<script src="/js/keyboard.js" type="module"></script>
 				{scripts.map((src) => (
 					<script src={src} defer></script>
 				))}
@@ -104,6 +118,11 @@ export function Layout({
 					</main>
 				</div>
 				<BottomTabs active={active} />
+				{/* The keys sheet (decision 118) is drawn outside #main, when the address has ?keys. A close or open swaps only
+				    this region, so the page keeps its place and focus. */}
+				<div id="keys">
+					{keysOpen && <KeysSheet closeHref={keysCloseHref} />}
+				</div>
 				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. Toasts sit in the frame, never over the page (decision 101): on a phone 12 px above the tab bar and its safe area, at the top edge while a sheet is open (a sheet drawn inside an inert frame, as the catalog's are, doesn't count), and 12 px above the Select bar's real height in Select mode; on desktop 24 px from the bottom, beside the sidebar and no wider than it. */}
 				<div
 					id="toasts"

@@ -5,11 +5,11 @@
 // Keyboard shortcuts row that opens the same ledger, and one shared picture draws that open row for all of
 // them. Proposal only: nothing in the app changes. Pictures are inert and labelled, like the rest of the page.
 
-import type { Child } from "hono/jsx";
 import { Colophon } from "../views/contents-list";
 import { FeedbackButton } from "../views/feedback-button";
 import { HowFoot } from "../views/how-link";
 import { Icon } from "../views/icons";
+import { Key, KeysDetails, Ledger } from "../views/keys";
 import { SheetCancel } from "../views/sheet-footer";
 import { Fixed } from "./proposal-parts";
 import { TITLE } from "./proposals-phase5-transactions";
@@ -26,157 +26,23 @@ import {
 } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
-/** One key, as a chip: its name centred in a small box with a rule. */
-function Key({ children }: { children?: Child }) {
-	return (
-		<kbd class="inline-flex min-h-6 min-w-6 items-center justify-center rounded-control border border-rule px-1.5 font-mono text-sm">
-			{children}
-		</kbd>
-	);
-}
-
-type Row = {
-	keys: string[];
-	/** How several keys join: "/" for "j / k", "or" for "e or Enter". */
-	joined?: "/" | "or";
-	words: string;
-};
-
-// The ledger: the same in every option. Decision 118 adds Enter, the arrows and u to decision 109's
-// sentence (#72's list, and #516's u); the rest is decision 109's sentence.
-const LEDGER: { heading: string; rows: Row[] }[] = [
-	{
-		heading: "Anywhere",
-		rows: [
-			{ keys: ["/"], words: "Search transactions" },
-			{ keys: ["?"], words: "Show these keys" },
-		],
-	},
-	{
-		heading: "In a list",
-		rows: [
-			{ keys: ["j", "k"], joined: "/", words: "Next row / previous row" },
-			{ keys: ["e", "Enter"], joined: "or", words: "Open the row" },
-		],
-	},
-	{
-		heading: "On Home",
-		rows: [
-			{ keys: ["←", "→"], joined: "/", words: "Previous month / next month" },
-		],
-	},
-	{
-		heading: "After a change",
-		rows: [{ keys: ["u"], words: "Undo it, while its toast shows" }],
-	},
-];
-
-function RowKeys({ row }: { row: Row }) {
-	return (
-		<span class="flex shrink-0 items-center gap-1">
-			{row.keys.map((k, i) => (
-				<>
-					{i > 0 && (
-						<span class="text-sm text-muted">
-							{row.joined === "or" ? "or" : "/"}
-						</span>
-					)}
-					<Key>{k}</Key>
-				</>
-			))}
-		</span>
-	);
-}
-
-/** The ledger of keys, as the `?` list shows it in every option. */
-function Ledger() {
-	return (
-		<div class="flex flex-col gap-3">
-			{LEDGER.map((section) => (
-				<div>
-					<p class="text-sm font-medium text-muted">{section.heading}</p>
-					<ul class="mt-1 divide-y divide-rule border-y border-rule">
-						{section.rows.map((row) => (
-							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
-								<RowKeys row={row} />
-								<span class="text-sm">{row.words}</span>
-							</li>
-						))}
-					</ul>
-				</div>
-			))}
-			<p class="text-sm text-muted">
-				Keys don't work while you're typing in a field. In a sheet, Escape
-				closes it.
-			</p>
-		</div>
-	);
-}
-
 /**
- * A keyboard outline for the keys' icon. Tally's icons.tsx has no keyboard icon yet, so this one is
- * drawn here, and a new icon is needed whichever option is picked, since More's row draws it too.
+ * Option A's sidebar line, drawn as the sidebar draws it: the keys' details with the keyboard icon first and the
+ * chevron at the far right. The foot and More's row are the real KeysDetails (src/views/keys.tsx); this one is A's alone.
  */
-function KeyboardIcon() {
-	return (
-		<svg
-			class="size-6"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.75"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true"
-		>
-			<rect x="2" y="5" width="20" height="14" rx="2" />
-			<path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 15h10" />
-		</svg>
-	);
-}
-
-/**
- * The keys' one disclosure, in every place it sits, drawn as Bills' Inactive draws its own: a chevron that
- * turns when open. `icon` leads with the keyboard icon and puts the chevron at the far right (the sidebar's
- * line); without it the chevron comes first (the foot). `row` is More's row, in the rows' grid. Open, the
- * ledger sits under the summary.
- */
-function KeysDetails({
-	open = false,
-	icon = false,
-	row = false,
-}: {
-	open?: boolean;
-	icon?: boolean;
-	row?: boolean;
-}) {
-	const turn = (
-		<span
-			class={`shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none${icon ? " ml-auto" : ""}`}
-		>
-			<Icon name="chevron-right" class="size-5" />
-		</span>
-	);
-	const layout = row
-		? "grid min-h-16 grid-cols-[1.5rem_1fr_auto] items-center gap-x-4 py-3"
-		: icon
-			? "flex min-h-11 items-center gap-3 rounded-control px-2"
-			: "flex min-h-11 items-center gap-2";
-	const ledgerClass = row ? "pb-3" : icon ? "px-2 pb-2 pt-1" : "mt-3";
+function SidebarKeysDetails({ open = false }: { open?: boolean }) {
 	return (
 		<details class="group" open={open}>
-			<summary
-				class={`${layout} cursor-pointer list-none text-lg text-ink [&::-webkit-details-marker]:hidden`}
-			>
-				{icon ? <KeyboardIcon /> : turn}
+			<summary class="flex min-h-11 cursor-pointer list-none items-center gap-3 rounded-control px-2 text-lg text-ink [&::-webkit-details-marker]:hidden">
+				<Icon name="keyboard" class="size-6" />
 				Keyboard shortcuts
-				{icon && turn}
+				<span class="ml-auto shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none">
+					<Icon name="chevron-right" class="size-5" />
+				</span>
 			</summary>
-			{open && (
-				<div class={ledgerClass}>
-					<Ledger />
-				</div>
-			)}
+			<div class="px-2 pt-1 pb-2">
+				<Ledger />
+			</div>
 		</details>
 	);
 }
@@ -185,7 +51,7 @@ function KeysDetails({
 function SidebarKeys({ open = false }: { open?: boolean }) {
 	return (
 		<li>
-			<KeysDetails open={open} icon />
+			<SidebarKeysDetails open={open} />
 		</li>
 	);
 }
@@ -215,7 +81,7 @@ const pageEnd = (
 function Foot({ open = false }: { open?: boolean }) {
 	return (
 		<>
-			<HowFoot section="budget" />
+			<HowFoot section="budget" keys={false} />
 			<div class="mt-2">
 				<KeysDetails open={open} />
 			</div>
@@ -283,7 +149,7 @@ function KeysMore({ label, open = false }: { label: string; open?: boolean }) {
 					</li>
 				))}
 				<li>
-					<KeysDetails open={open} icon row />
+					<KeysDetails open={open} row />
 				</li>
 			</ul>
 			<Colophon demo />

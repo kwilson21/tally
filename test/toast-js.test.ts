@@ -3,6 +3,10 @@ import toastSource from "../public/js/toast.js?raw";
 import appStyles from "../src/styles/app.css?raw";
 import { Icon } from "../src/views/icons";
 
+it("names u on the Undo button, the key keyboard.js presses while the toast shows (decision 118)", () => {
+	expect(toastSource).toContain('setAttribute("aria-keyshortcuts", "u")');
+});
+
 it("only maps the trusted feedback confirmation and clears it", () => {
 	expect(toastSource).toContain('query.get("sent")');
 	expect(toastSource).toContain('"Thanks. Sent."');
