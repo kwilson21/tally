@@ -79,6 +79,7 @@ import {
 	BillRow,
 	type BillRowData,
 	BillStatusHeading,
+	includesLine,
 } from "../views/bill-row";
 import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
@@ -362,14 +363,27 @@ export async function page(
 	const plannedThisMonthCents = unpaidPlans
 		.filter((plan) => plan.month === month)
 		.reduce((sum, plan) => sum + plan.amountCents, 0);
-	// Paid this month's total sums every row it lists, the bills and the plans paid this month.
+	// Paid this month's total adds the plans paid this month to the bills paid this month (decision 122).
 	const plansPaidCents = plansPaidThisMonth.reduce(
 		(sum, plan) => sum + plan.amountCents,
 		0,
 	);
+	// The line under a heading names the occurrences its total counts that no row lists, by bill (decision 122).
+	const unlistedLine = (status: BillStatus) =>
+		includesLine(
+			active.flatMap((bill) => {
+				const dueDates = totals.unlisted[status]
+					.filter((occurrence) => occurrence.billId === bill.id)
+					.map((occurrence) => occurrence.dueDate);
+				return dueDates.length
+					? [{ name: bill.name, frequency: bill.frequency, dueDates }]
+					: [];
+			}),
+		);
 	const statusGroup = (status: BillStatus, extraRows: Child[] = []) => {
 		const group = active.filter((b) => b.status === status);
-		if (!group.length && !extraRows.length) return null;
+		const includes = unlistedLine(status);
+		if (!group.length && !extraRows.length && !includes) return null;
 		return (
 			<section class="mt-4">
 				<BillStatusHeading
@@ -378,6 +392,7 @@ export async function page(
 						totals.groups[`${status === "paid" ? "paid" : status}Cents`] +
 						(status === "paid" ? plansPaidCents : 0)
 					}
+					includes={includes}
 				/>
 				<ul class="divide-y divide-rule">
 					{group.map((bill) => (

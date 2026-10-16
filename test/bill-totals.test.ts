@@ -588,7 +588,7 @@ describe("bill totals", () => {
 		expect(totals.groups.overdueCents).toBe(60000);
 	});
 
-	it("totals Paid this month at each shown paid row's amount, and leaves out a paid Friday no row shows", () => {
+	it("totals Paid this month at each shown paid row's amount, and counts a paid Friday no row shows (decision 122)", () => {
 		const friday = (dueDate: string, status: "paid" | "due" | "upcoming") => ({
 			billId: 24000,
 			dueDate,
@@ -624,7 +624,8 @@ describe("bill totals", () => {
 				friday("2026-10-30", "upcoming"),
 			],
 		});
-		expect(totals.groups.paidCents).toBe(1698);
+		// Paid this month is the two paid rows ($16.98) and Daycare's two paid Fridays, listed or not ($480).
+		expect(totals.groups.paidCents).toBe(49698);
 		expect(totals.groups.dueCents).toBe(24000);
 		expect(totals.groups.upcomingCents).toBe(48000);
 	});

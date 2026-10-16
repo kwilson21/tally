@@ -3,7 +3,7 @@ import { formatCents } from "../money";
 import { BottomSheet, sheetAttrs } from "./bottom-sheet";
 import { Button } from "./button";
 import { Chip } from "./chip";
-import { Icon } from "./icons";
+import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import { LedgerField } from "./ledger-field";
 import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
@@ -40,6 +40,7 @@ export function PlannedRow({
 	today,
 	href,
 	autofocus = false,
+	attrs,
 }: {
 	plan: PlannedRowData;
 	/** The household's current month, `YYYY-MM`. */
@@ -47,6 +48,8 @@ export function PlannedRow({
 	today: string;
 	href?: string;
 	autofocus?: boolean;
+	/** The link's attributes, in place of opening its sheet (`sheetAttrs`); the catalog passes none, so it links in place. */
+	attrs?: Record<string, string>;
 }) {
 	const content = (
 		<>
@@ -71,12 +74,13 @@ export function PlannedRow({
 				<a
 					id={`plan-${plan.id}`}
 					href={href}
-					class={`${look} text-ink no-underline`}
+					class={`${look} text-ink no-underline ${ROW_OPENS}`}
 					autofocus={autofocus}
 					data-row=""
-					{...sheetAttrs(href)}
+					{...(attrs ?? sheetAttrs(href))}
 				>
 					{content}
+					<RowArrow />
 				</a>
 			) : (
 				<span class={look}>{content}</span>
@@ -111,7 +115,7 @@ export function PlannedHeading({ totalCents }: { totalCents?: number }) {
 
 /**
  * The Band for a plan unpaid when its month ended: "Car registration wasn't paid", with Move to this month's short name and Drop,
- * and a dot for each plan waiting. The first dot is the one being asked; the rest are the other plans (P105).
+ * and, when two or more plans wait, a dot for each. The first dot is the one being asked; the rest are the other plans (P105).
  */
 export function PlanBand({
 	planId,
@@ -156,17 +160,20 @@ export function PlanBand({
 						Drop
 					</Button>
 				</form>
-				<span class="ml-auto flex items-center gap-1.5">
-					{Array.from({ length: waiting }, (_, i) => (
-						<span
-							aria-hidden="true"
-							class={`size-2.5 rounded-full ${i === 0 ? "bg-ink" : "bg-muted/40"}`}
-						/>
-					))}
-					<span class="sr-only">
-						1 of {waiting} planned expenses that weren't paid
+				{/* A dot says which of several plans is asked; one plan needs none, so no dot and no count (#602). */}
+				{waiting > 1 && (
+					<span class="ml-auto flex items-center gap-1.5">
+						{Array.from({ length: waiting }, (_, i) => (
+							<span
+								aria-hidden="true"
+								class={`size-2.5 rounded-full ${i === 0 ? "bg-ink" : "bg-muted/40"}`}
+							/>
+						))}
+						<span class="sr-only">
+							1 of {waiting} planned expenses that weren't paid
+						</span>
 					</span>
-				</span>
+				)}
 			</div>
 		</section>
 	);

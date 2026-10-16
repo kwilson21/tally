@@ -35,10 +35,11 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 	});
 	afterEach(() => vi.useRealTimers());
 
-	it("Paid this month totals the paid rows it lists: Streaming $2.99 and Water $13.99", async () => {
+	it("Paid this month totals every bill paid this month, listed or not: the rows Streaming $2.99 and Water $13.99, and Daycare's Oct 2 and 9 Fridays (decision 122)", async () => {
 		const paid = groupUnder(await billsPage(), "Paid this month");
 		expect(rowNamesOf(paid)).toEqual(["Streaming", "Water"]);
-		expect(totalOf(paid)).toBe("$16.98");
+		expect(totalOf(paid)).toBe("$496.98");
+		expect(paid).toContain("Includes Daycare&#39;s Fridays on Oct 2 and 9</p>");
 	});
 
 	it("Paid this month adds a planned expense paid this month to the bills it lists", async () => {
@@ -56,7 +57,7 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 			"Water",
 			"Car registration",
 		]);
-		expect(totalOf(paid)).toBe("$196.98");
+		expect(totalOf(paid)).toBe("$676.98");
 	});
 
 	it("Due in the next 7 days totals each row it lists once: Internet $65.00 and Daycare's Friday $240.00", async () => {
@@ -78,8 +79,14 @@ describe("Bills section headings add up to the rows under them (issue #601)", ()
 		// The spec's rule (§8.4): Upcoming includes only occurrences due this month, and says so with "this month".
 		expect(rowNamesOf(upcoming)).toEqual(["Soccer league"]);
 		expect(totalOf(upcoming)).toBe("$480.00 this month");
+		// The total counts Daycare's Oct 23 and 30 Fridays, which no row lists, and says so under the heading (decision 122).
+		expect(upcoming).toContain(
+			"Includes Daycare&#39;s Fridays on Oct 23 and 30</p>",
+		);
 		// Daycare's Oct 16 Friday is set aside under Due; the Upcoming total does not count it a second time.
 		expect(groupUnder(html, "Due in the next 7 days")).toContain("Daycare");
-		expect(upcoming).not.toContain("Daycare");
+		expect(groupUnder(html, "Due in the next 7 days")).not.toContain(
+			"Includes",
+		);
 	});
 });

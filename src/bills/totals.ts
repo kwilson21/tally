@@ -7,6 +7,9 @@ export type BillTotalFrequency =
 	| "biweekly"
 	| "quarterly";
 
+/** An occurrence a status heading's total counts that no row lists (decision 122): Bills names it under the heading. */
+type UnlistedOccurrence = { billId: number; dueDate: string };
+
 /** Bills whose occurrences fall every 7 or 14 days: each one is judged on its own, so several can be set aside. */
 const dayStepFrequencies = new Set<BillTotalFrequency>(["weekly", "biweekly"]);
 
@@ -149,11 +152,40 @@ export function calculateBillTotals({
 		upcomingCents: 0,
 		paidCents: 0,
 	};
-	// Paid this month sums the rows Bills lists as paid, one per bill, each at its full amount: a paid row has nothing
-	// left to pay, so the heading shows what the row shows (issue #601). A paid Friday no row shows is left out.
-	for (const occurrence of displayedOccurrences)
-		if (occurrence.status === "paid" && activeIds.has(occurrence.billId))
-			groups.paidCents += occurrence.amountCents;
+	const unlisted: Record<BillStatus, UnlistedOccurrence[]> = {
+		overdue: [],
+		due: [],
+		upcoming: [],
+		paid: [],
+	};
+	// Every heading counts each occurrence of its group in the month, listed as a row or not (decision 122, P136 A), and
+	// names the ones no row lists in `unlisted`. Paid this month counts each paid occurrence at its full amount, since a
+	// paid occurrence has nothing left to pay (issue #601). A shown paid row counts whatever its month; an unlisted one
+	// counts only when it is due this month, so next month's prepaid occurrence stays out.
+	const listed = new Set(
+		displayedOccurrences.map(
+			(occurrence) => `${occurrence.billId}:${occurrence.dueDate}`,
+		),
+	);
+	const countedPaid = new Set<string>();
+	for (const occurrence of [...displayedOccurrences, ...thisMonthOccurrences]) {
+		const key = `${occurrence.billId}:${occurrence.dueDate}`;
+		if (
+			occurrence.status !== "paid" ||
+			countedPaid.has(key) ||
+			!activeIds.has(occurrence.billId)
+		)
+			continue;
+		const isListed = listed.has(key);
+		if (!isListed && !occurrence.dueDate.startsWith(month)) continue;
+		countedPaid.add(key);
+		groups.paidCents += occurrence.amountCents;
+		if (!isListed)
+			unlisted.paid.push({
+				billId: occurrence.billId,
+				dueDate: occurrence.dueDate,
+			});
+	}
 	// "To pay soon" counts each due or overdue occurrence once (spec §6).
 	const soon = new Map<string, number>();
 	const soonBillIds = new Set<number>();
@@ -165,8 +197,14 @@ export function calculateBillTotals({
 		if (
 			occurrence.status !== "paid" &&
 			(occurrence.status !== "upcoming" || occurrence.dueDate.startsWith(month))
-		)
+		) {
 			groups[groupKey] += left;
+			if (!listed.has(key))
+				unlisted[occurrence.status].push({
+					billId: occurrence.billId,
+					dueDate: occurrence.dueDate,
+				});
+		}
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
 			continue;
 		soon.set(key, left);
@@ -208,5 +246,6 @@ export function calculateBillTotals({
 		soonCents,
 		setAsideCents,
 		groups,
+		unlisted,
 	};
 }
