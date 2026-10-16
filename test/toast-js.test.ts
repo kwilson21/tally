@@ -341,32 +341,35 @@ describe("cash entry confirmations", () => {
 
 describe("a saved row's mark", () => {
 	/** A row a save's reply swapped in, with the mark that save gave it. */
-	const swapIn = (pageRoot: FakeNode) => {
+	const swapIn = (pageRoot: FakeNode, mark = "row-saved") => {
 		const row = new FakeNode("div");
-		row.className = "row-saved";
+		row.className = mark;
 		pageRoot.append(row);
 		return row;
 	};
+	/** An Undo toast: it keeps its own mark for its ten seconds. */
+	const undoToast = (target: EventTarget, undo = "token") =>
+		fire(target, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo,
+			undoExpiresInMs: 10000,
+		});
 
 	it("ends the earlier save's mark when a later save's toast replaces its toast, even when the later save marks no row (#597)", async () => {
 		const { document, pageRoot } = await page();
 		// The time zone's save: its reply swaps its row in with the mark, then its toast comes.
-		fire(document, "htmx:before:swap", { ctx: {} });
 		const zone = swapIn(pageRoot);
 		fire(document, "toast", { message: "Saved time zone" });
 		// The bank sign-in emails switch: its reply swaps another region in, and draws no mark.
-		fire(document, "htmx:before:swap", { ctx: {} });
 		fire(document, "toast", { message: "Saved bank sign-in emails" });
 		expect(zone.className).toBe("");
 	});
 
 	it("keeps the newest save's mark and ends the earlier one: two saves never mark two rows", async () => {
 		const { document, pageRoot } = await page();
-		fire(document, "htmx:before:swap", { ctx: {} });
 		const first = swapIn(pageRoot);
 		fire(document, "toast", { message: "Saved time zone" });
 		// The second save's reply swaps its own row in with the mark, beside the first row the page still has.
-		fire(document, "htmx:before:swap", { ctx: {} });
 		const second = swapIn(pageRoot);
 		fire(document, "toast", { message: "Saved Groceries" });
 		expect(first.className).toBe("");
@@ -375,11 +378,87 @@ describe("a saved row's mark", () => {
 
 	it("ends the earlier save's mark when a later save fails, since that failure's toast replaces the earlier one", async () => {
 		const { document, pageRoot } = await page();
-		fire(document, "htmx:before:swap", { ctx: {} });
 		const zone = swapIn(pageRoot);
 		fire(document, "toast", { message: "Saved time zone" });
 		fire(document, "htmx:error", dropped("POST"));
 		expect(zone.className).toBe("");
+	});
+
+	it("keeps a plain save's mark while a later Undo toast is up, and ends it when the plain toast's 4 seconds are up", async () => {
+		const { document, pageRoot } = await page();
+		const zone = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		undoToast(document);
+		vi.advanceTimersByTime(3999);
+		expect(zone.className).toBe("row-saved");
+		vi.advanceTimersByTime(1);
+		expect(zone.className).toBe("");
+	});
+
+	it("keeps an Undo toast's own mark while a later plain toast is up, and ends it at the Undo toast's 10 seconds", async () => {
+		const { document, pageRoot } = await page();
+		const coffee = swapIn(pageRoot, "row-saved-undo");
+		undoToast(document);
+		vi.advanceTimersByTime(1000);
+		fire(document, "toast", { message: "Saved Groceries' budget." });
+		vi.advanceTimersByTime(8999);
+		expect(coffee.className).toBe("row-saved-undo");
+		vi.advanceTimersByTime(1);
+		expect(coffee.className).toBe("");
+	});
+
+	it("ends an Undo toast's mark at once when a later toast's undoDone names its token", async () => {
+		const { document, pageRoot } = await page();
+		const coffee = swapIn(pageRoot, "row-saved-undo");
+		undoToast(document, "token-coffee");
+		fire(document, "toast", {
+			message: "Restored Coffee.",
+			undoDone: "token-coffee",
+		});
+		expect(coffee.className).toBe("");
+	});
+
+	it("does not bring back a cleared mark when the Likely sheet's close morphs the row, since its toast was replaced (#681)", async () => {
+		const { document, pageRoot } = await page();
+		const row = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		fire(document, "htmx:error", dropped("GET"));
+		expect(row.className).toBe("");
+		// The close's morph keeps the row's element and sets its saved mark again, then htmx's finally runs.
+		row.className = "row-saved";
+		fire(document, "htmx:finally:request", { ctx: {} });
+		expect(row.className).toBe("");
+	});
+
+	it("keeps the mark when the close morphs the row while the save's own toast is still up, and ends it with that toast", async () => {
+		const { document, pageRoot } = await page();
+		const row = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		row.className = "row-saved";
+		fire(document, "htmx:finally:request", { ctx: {} });
+		expect(row.className).toBe("row-saved");
+		vi.advanceTimersByTime(4000);
+		expect(row.className).toBe("");
+	});
+
+	it("does not strip a row a later reply re-marked and claimed, when an earlier toast's late timer runs", async () => {
+		const { document, pageRoot } = await page();
+		const row = swapIn(pageRoot);
+		fire(document, "toast", { message: "Saved time zone" });
+		vi.advanceTimersByTime(1000);
+		// A failure replaces the save's toast, so its mark ends.
+		fire(document, "htmx:error", dropped("POST"));
+		expect(row.className).toBe("");
+		// A later save's reply marks the same row again, and its own toast claims the mark before htmx's finally.
+		row.className = "row-saved";
+		fire(document, "toast", { message: "Saved Rent's budget." });
+		fire(document, "htmx:finally:request", { ctx: {} });
+		// The time zone's toast was due at 4000 ms: its late timer must leave the newer claim alone.
+		vi.advanceTimersByTime(3000);
+		expect(row.className).toBe("row-saved");
+		// The newer toast's own 4 seconds end it, at 5000 ms.
+		vi.advanceTimersByTime(2000);
+		expect(row.className).toBe("");
 	});
 });
 

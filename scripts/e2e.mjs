@@ -880,8 +880,22 @@ assert.equal(
 	0,
 	"the time zone's tick must end when its toast is replaced",
 );
-// Back to the switch's state the demo started with, so later steps see the same household.
+assert.equal(
+	await page
+		.locator("#time-zone-disclosure .saved-tick")
+		.evaluate((tick) => getComputedStyle(tick).opacity),
+	"0",
+	"the time zone's tick must not draw once its toast is replaced",
+);
+// Back to the switch's state the demo started with, so later steps see the same household. The restore's own reply is
+// awaited, so the next step never races the server.
+const bankEmailsRestored = page.waitForResponse(
+	(response) =>
+		response.request().method() === "POST" &&
+		response.url().includes("/settings/bank-sign-in-emails"),
+);
 await page.locator("#bank-sign-in-emails-label").click();
+assert.equal((await bankEmailsRestored).status(), 200);
 await page.waitForFunction(
 	(on) => document.getElementById("bank-sign-in-emails")?.checked === on,
 	bankEmailsOn,

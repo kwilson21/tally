@@ -122,6 +122,7 @@
 	function takeOffPage(toast, lostToo = false) {
 		if (toast.contains(document.activeElement) || (lostToo && focusLost()))
 			focusHeading();
+		endMarks(toast);
 		toast.remove();
 		measureToasts();
 	}
@@ -129,21 +130,35 @@
 	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
 	// event is synchronous.
 	let lastToast = null;
-	// A saved row's mark (P119 A, #71) belongs to the newest save alone (#597). htmx swaps a reply in before it fires the
-	// reply's toast, so the marks on the page when a swap begins are the earlier saves', and a row the reply marks itself
-	// is a new node, not one of them. Each toast clears the earlier marks, whether or not its own reply draws one: the
-	// toast replaces the earlier save's toast, and its tick goes with it.
-	let earlierMarks = [];
+	// A saved row's mark (P119 A, #71, #597) belongs to one toast, the toast of the save that gave it. A plain or error
+	// toast ends the marks of the plain toasts it replaces; an Undo toast is never replaced early, so its mark runs its
+	// own ten seconds, and a later toast leaves it alone. A toast claims the marks no toast owns when it arrives, since
+	// htmx swaps a reply in before that reply's toast comes. The Likely sheet's close morphs its row back to the mark,
+	// but that row's toast is gone by then (endedMarks), so htmx's finally strips the mark before anything paints it.
+	// A reply's own mark is a new node, never in endedMarks, so it stays.
 	const savedRows = () =>
 		document.querySelectorAll(".row-saved, .row-saved-undo");
-	document.addEventListener("htmx:before:swap", () => {
-		earlierMarks = [...savedRows()];
-	});
-	const clearEarlierMarks = () => {
-		for (const row of earlierMarks)
+	const markOwner = new WeakMap();
+	const toastMarks = new WeakMap();
+	const endedMarks = new WeakSet();
+	// Ends the marks a toast owns when it goes. The owner check matters: a replaced toast's late timer must not strip a
+	// row a newer toast has claimed.
+	function endMarks(toast) {
+		const rows = toastMarks.get(toast);
+		if (!rows) return;
+		toastMarks.delete(toast);
+		for (const row of rows) {
+			if (markOwner.get(row) !== toast) continue;
 			row.classList.remove("row-saved", "row-saved-undo");
-		earlierMarks = [...savedRows()];
-	};
+			markOwner.delete(row);
+			endedMarks.add(row);
+		}
+	}
+	document.addEventListener("htmx:finally:request", () => {
+		for (const row of savedRows())
+			if (endedMarks.has(row))
+				row.classList.remove("row-saved", "row-saved-undo");
+	});
 	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
 	// document once that element has left the page: an Undo form whose toast ends during the restore's own
 	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
@@ -159,9 +174,17 @@
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
-		clearEarlierMarks();
 		const toast = document.createElement("div");
 		lastToast = toast;
+		// The marks no toast owns yet are this save's: its reply drew them before this toast came.
+		const rows = [];
+		for (const row of savedRows()) {
+			if (markOwner.has(row)) continue;
+			markOwner.set(row, toast);
+			endedMarks.delete(row);
+			rows.push(row);
+		}
+		toastMarks.set(toast, rows);
 		// An Undo toast's button, focused once the toast is on the page (see the undo block below).
 		let undoButton = null;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
@@ -215,7 +238,10 @@
 		const region = document.getElementById("toasts");
 		if (!undo)
 			for (const old of [...(region?.children ?? [])]) {
-				if (!undoToasts.has(old)) old.remove();
+				if (!undoToasts.has(old)) {
+					endMarks(old);
+					old.remove();
+				}
 			}
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
 		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a
