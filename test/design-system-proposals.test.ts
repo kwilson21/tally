@@ -1454,7 +1454,9 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("Childcare");
-		// Childcare's numbers are the demo seed's: a $1,040 budget, and $480 from the two Fridays of October so far (Oct 2 and 9).
+		// Childcare's numbers are what the demo seed had when P123 was drawn: a $1,040 budget, and $480 from the two
+		// Fridays of October so far (Oct 2 and 9). Since #631 the seed sets $1,200 (decision 123); the picture keeps
+		// what the owner saw.
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("$480 of $1,040");

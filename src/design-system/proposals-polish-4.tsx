@@ -42,8 +42,10 @@ type Budget = {
 };
 
 /**
- * The demo's October budgets in Settings' order: Eating Out is $36 over, Gas nearly spent. Childcare's
- * $1,040 budget and $480 spent (two $240 Fridays, Oct 2 and 9, by Oct 13) are the seed's own (src/demo/seed.ts).
+ * The demo's October budgets in Settings' order: Eating Out is $36 over, Gas nearly spent. Childcare's $1,040
+ * budget and $480 spent (two $240 Fridays, Oct 2 and 9, by Oct 13) were the seed's when these pictures were drawn;
+ * since #631 the seed sets Childcare at $1,200 and Groceries at $950 from this month (decision 123), and the
+ * pictures keep what the owner saw.
  */
 const BUDGETS: Budget[] = [
 	{
