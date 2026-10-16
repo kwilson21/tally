@@ -44,6 +44,15 @@ export function incomeGuessSql(alias: string): string {
 }
 
 /**
+ * The stored income guess without the Never suggest hide: `income_confidence`, unless the income is settled or the person
+ * said No to the Maybe (`income_maybe_declined`, so a credit already declined stays decided). The first page's pay question
+ * reads it, so a Never suggest line can't leave an unanswered deposit out of the pay step (#651).
+ */
+export function storedIncomeGuessSql(alias: string): string {
+	return `CASE WHEN ${hasIncomeAnswerSql(alias)} OR ${alias}.income_maybe_declined = 1 THEN NULL ELSE ${alias}.income_confidence END`;
+}
+
+/**
  * The income guess a row shows: `income_confidence`, unless the person said No to the Maybe as well (`income_maybe_declined`,
  * decision 101). Only the shown value is hidden, so the stored guess stays and Remove brings the Maybe back. The rows, the
  * panel and the review queue all read it from here, so they can't drift apart.

@@ -32,7 +32,7 @@ describe("the demo's planned expenses", () => {
 		const data = await loadMonth(env.DB, MONTH);
 		const billData = await loadBillRows(env.DB, TODAY);
 		// The same bills total Home's Safe to spend subtracts (home.test.ts), so only the plans differ here.
-		const dueBills = billTotalsForRows(MONTH, billData.rows).soonCents;
+		const dueBills = billTotalsForRows(MONTH, billData.rows).setAsideCents;
 		const withoutPlans = summarizeMonth({
 			month: MONTH,
 			...data,

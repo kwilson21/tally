@@ -11,12 +11,13 @@ const wholeDollars = (cents: number) =>
 	formatCents(cents, { wholeDollars: true });
 
 /**
- * The value a Keep form's hidden field carries for one found charge: what the page showed of it (merchant, amount, due
- * day).
+ * The value a Keep form's hidden field carries for one found charge: what the page showed of it (merchant, name, amount
+ * and due day).
  */
 export function shownBillValue(suggestion: BillSuggestion): string {
 	return JSON.stringify({
 		rawName: suggestion.rawName,
+		displayName: suggestion.displayName,
 		amountCents: suggestion.amountCents,
 		dueDay: suggestion.dueDay,
 	});
@@ -24,8 +25,9 @@ export function shownBillValue(suggestion: BillSuggestion): string {
 
 /**
  * The found charges a Keep form submitted, of those the current reading finds: a charge is kept only when a submitted
- * value shows its merchant, amount and due day exactly. So a charge the page never showed, or one whose amount or due
- * day changed since, is not kept, and a value that isn't one of these (garbled, or with the wrong types) matches none.
+ * value shows its merchant, name, amount and due day exactly. So a charge the page never showed, or one whose name,
+ * amount or due day changed since, is not kept, and a value that isn't one of these (garbled, or with the wrong types)
+ * matches none.
  */
 export function keepShown(
 	current: BillSuggestion[],

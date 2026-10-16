@@ -107,7 +107,7 @@ const BILL_STATUSES = [
 	[
 		"overdue",
 		"Overdue",
-		"Its due date has passed and it isn't paid. A monthly, yearly or quarterly bill stays overdue, with its amount set aside, until it's paid or the next one is due. A weekly or every-two-weeks bill stays overdue until it's paid, within the month it was due.",
+		"Its due date has passed and it isn't paid. A monthly, yearly or quarterly bill stays overdue until it's paid or the next one is due. If it was due this month, its amount is set aside until it's paid or the month ends. A weekly or every-two-weeks bill stays overdue until it's paid, within the month it was due.",
 	],
 	[
 		"due",
@@ -206,8 +206,11 @@ howItWorks.get("/how-it-works", async (c) => {
 	const trendsExampleText = trendsExample(buildTrends(trendsData));
 	const hasTransactions =
 		demo || counts.counted + excludedTotal(excluded) > 0 || bankDated > 0;
-	// The same totals Home and Bills show, so this page's set-aside amount is theirs.
-	const unpaidDueBillsCents = billTotalsForRows(month, billData.rows).soonCents;
+	// The same totals Home and Bills show, so this page's set-aside amount is Safe to spend's (decision 123).
+	const unpaidDueBillsCents = billTotalsForRows(
+		month,
+		billData.rows,
+	).setAsideCents;
 	// Planned expenses are set aside in the current month only, as Home sets them (spec §8.4).
 	const unpaidPlansCents =
 		month === today.slice(0, 7) ? await plansSetAsideCents(c.env.DB, month) : 0;
@@ -296,9 +299,10 @@ howItWorks.get("/how-it-works", async (c) => {
 						</li>
 						<li>
 							Safe to spend is the whole month's budget, minus all counted
-							spending (including uncategorized and unbudgeted), minus bills
-							that are due or overdue and not yet paid, minus the full monthly
-							savings goal from the 1st, and minus planned one-time expenses.
+							spending (including uncategorized and unbudgeted), minus this
+							month's bills that are due or overdue and not yet paid, minus the
+							full monthly savings goal from the 1st, and minus planned one-time
+							expenses.
 						</li>
 						<li>
 							A planned one-time expense is set aside for its whole month, and
@@ -622,7 +626,8 @@ howItWorks.get("/how-it-works", async (c) => {
 							earlier month says “Not paid” and is no longer set aside. A due
 							date from before the day a bill was added is not counted as
 							missed. Safe to spend sets aside every due or overdue occurrence
-							that is unpaid.
+							due this month that is unpaid; one due next month waits for its
+							month.
 						</li>
 						<li>
 							A late payment counts in the month of the bill it paid, instead of
