@@ -6082,6 +6082,12 @@ describe("GET /design-system/proposals, the open follow-ups of the second audit 
 		"Chevron",
 		"Shell",
 	];
+	// A payment row's label, as PaymentRow draws it (Select mode's mark and focus ring; & is escaped in the HTML).
+	const PAYMENT_ROW =
+		'<label class="group relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&amp;_.selection-mark]:outline-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-accent">';
+	// The desktop sidebar's links for the two pages these pictures name: the current one in accent, the rest in ink.
+	const SIDEBAR = (href: string, color: "text-accent" | "text-ink") =>
+		`href="${href}" class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${color}"`;
 
 	it("opens the list with an Open section for P137 and P138, dated Oct 16 for #644 and #645", async () => {
 		const html = await drawn();
@@ -6251,7 +6257,7 @@ describe("GET /design-system/proposals, the open follow-ups of the second audit 
 		const closed = a.slice(0, a.indexOf(`${P138_A}, closed at 1280 px`));
 		const head = closed.slice(0, closed.indexOf("Show all 20 charges"));
 		expect(count(head, 'name="transaction_id"')).toBe(5);
-		expect(count(head, '<label class="flex min-h-11')).toBe(5);
+		expect(count(head, PAYMENT_ROW)).toBe(5);
 		let last = -1;
 		for (const name of FIVE) {
 			const at = head.indexOf(name);
@@ -6283,27 +6289,134 @@ describe("GET /design-system/proposals, the open follow-ups of the second audit 
 		);
 	});
 
-	it("gives B a labelled search over all the charges, its count announced: empty, and after typing lawn", async () => {
+	it("gives B a labelled search over all the charges, its count announced: empty, and after typing farmers", async () => {
 		const chunk = block(await drawn(), "p138-payment-list");
 		const [, , b = ""] = options(chunk);
 		expect(b).toContain(P138_B);
 		expect(b).toContain("Find a charge by store or amount");
 		expect(b).toContain('type="search"');
-		// The search asks the server through hx-get, inside the inert picture. No hx-trigger: the page draws none (#448), so the
-		// short delay the search waits for is named in the summary, not drawn.
 		expect(b).toContain('hx-get="/plans/1/payments/search"');
 		expect(b).toContain('aria-live="polite"');
-		const lawn = b.indexOf("after typing lawn at 390 px");
-		expect(lawn).toBeGreaterThan(-1);
-		const empty = b.slice(0, lawn);
-		const typed = b.slice(lawn);
+		// The page draws no hx-trigger (#448): the short delay the search waits for is named in B's trade-off line, not drawn.
+		expect(b).not.toContain("hx-trigger");
+		expect(b).toContain(
+			"Look it up when it isn&#39;t in the first five: typing farmers finds the two Farmers charges, Oct 16 and Oct 5.",
+		);
+		expect(b).toContain(
+			"Trade-off: One search route over the same charges, asked a moment after typing stops, and the count announced.",
+		);
+		// Farmers is not among the closest five, so typing it finds two charges the empty search never shows.
+		const pictures = b.slice(b.indexOf('role="img"'));
+		const farmers = pictures.indexOf("after typing farmers at 390 px");
+		expect(farmers).toBeGreaterThan(-1);
+		const empty = pictures.slice(0, farmers);
+		const typed = pictures.slice(farmers);
 		// Empty, the search shows the closest five as rows (at each size) and says what it shows.
 		expect(count(empty, 'name="transaction_id"')).toBe(10);
 		expect(empty).toContain("Showing the closest 5 of 20 charges");
-		// After "lawn", no charge matches: no rows, and the count says so.
-		expect(typed).toContain('value="lawn"');
-		expect(count(typed, 'name="transaction_id"')).toBe(0);
-		expect(typed).toContain("No charges match");
+		expect(empty).not.toContain("Farmers");
+		// After "farmers", two charges match at each size, in the picker's order, and none of the closest five.
+		expect(typed).toContain('value="farmers"');
+		expect(count(typed, 'name="transaction_id"')).toBe(4);
+		expect(count(typed, "2 charges match")).toBe(2);
+		expect(count(typed, "Farmers market")).toBe(2);
+		expect(count(typed, "Farmers mkt")).toBe(2);
+		expect(typed.indexOf("Farmers market")).toBeLessThan(
+			typed.indexOf("Farmers mkt"),
+		);
+		for (const name of FIVE) expect(typed).not.toContain(name);
+	});
+
+	it("gives each of B's pictures a results fieldset as the search's target, and a count outside it that the same reply refreshes", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, , b = ""] = options(chunk);
+		const pictures = b.split('role="img"').slice(1, 5);
+		expect(pictures).toHaveLength(4);
+		const targets = new Set<string>();
+		for (const pic of pictures) {
+			// The reply replaces the fieldset's contents, and hx-select-oob refreshes the count above it, so a live region is never swapped.
+			const target = /hx-target="#([^"]+)"/.exec(pic)?.[1] ?? "";
+			expect(target).toMatch(/-payment-results$/);
+			targets.add(target);
+			const field = pic.indexOf(`<fieldset id="${target}"`);
+			expect(field, target).toBeGreaterThan(-1);
+			const fieldset = pic.slice(field, pic.indexOf("</fieldset>", field));
+			expect(count(fieldset, 'name="transaction_id"')).toBe(
+				count(pic, 'name="transaction_id"'),
+			);
+			expect(count(pic, 'name="transaction_id"')).toBeGreaterThan(0);
+			const oob = /hx-select-oob="#([^"]+):innerHTML"/.exec(pic)?.[1] ?? "";
+			expect(oob).toMatch(/-payment-count$/);
+			const tag = pic.match(new RegExp(`<p [^>]*id="${oob}"[^>]*>`))?.[0] ?? "";
+			expect(tag, oob).toContain('aria-live="polite"');
+			expect(pic.indexOf(tag)).toBeGreaterThan(-1);
+			expect(pic.indexOf(tag)).toBeLessThan(field);
+			// Each picture has one Link payment button, and only when it has rows to link.
+			expect(count(pic, ">Link payment</span>")).toBe(1);
+		}
+		expect(targets.size).toBe(4);
+	});
+
+	it("draws each picture's plan page as /plans draws it: the Bills link, the plan's name as the heading, Link a payment as a heading, and no extra space above its button", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const pictures = chunk.split('role="img"').slice(1);
+		expect(pictures).toHaveLength(10);
+		const bills =
+			'<a href="/bills" class="inline-flex min-h-11 items-center text-accent">Bills</a>';
+		expect(count(chunk, bills)).toBe(10);
+		expect(
+			count(
+				chunk,
+				'<h1 class="font-serif text-5xl font-semibold tracking-tight">Lawn service</h1>',
+			),
+		).toBe(10);
+		expect(
+			count(
+				chunk,
+				'<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>',
+			),
+		).toBe(10);
+		expect(chunk).not.toContain('<p class="font-serif text-5xl');
+		for (const pic of pictures) {
+			expect(pic.indexOf(bills)).toBeLessThan(pic.indexOf("<h1 "));
+			// The button's wrapper is a plain div, as the live picker draws it: no class, and no mt-4 above the button.
+			const button = pic.indexOf('<button type="submit"');
+			expect(button).toBeGreaterThan(-1);
+			expect(pic.slice(0, button).endsWith("<div>")).toBe(true);
+		}
+	});
+
+	it("draws each payment row with Select mode's mark and focus ring: a visually hidden radio, and a circle that fills when checked", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, a = "", b = ""] = options(chunk);
+		const closed = a.slice(0, a.indexOf(`${P138_A}, closed at 1280 px`));
+		expect(count(closed, 'class="peer sr-only"')).toBe(20);
+		expect(count(closed, "group-has-[:checked]:flex")).toBe(20);
+		expect(count(closed, PAYMENT_ROW)).toBe(20);
+		// B's rows have the same at each size, and each picture has as many marks as rows.
+		for (const pic of b.split('role="img"').slice(1, 5)) {
+			const rows = count(pic, 'name="transaction_id"');
+			expect(count(pic, 'class="peer sr-only"')).toBe(rows);
+			expect(count(pic, "group-has-[:checked]:flex")).toBe(rows);
+			expect(count(pic, PAYMENT_ROW)).toBe(rows);
+		}
+	});
+
+	it("marks How Tally works as the current page in P137's desktop sidebar, and no other link", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		// Five desktop pictures, each with How Tally works in accent; no other sidebar link is in accent.
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-accent"))).toBe(5);
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-ink"))).toBe(0);
+		for (const item of SIDEBAR_ITEMS)
+			expect(count(chunk, SIDEBAR(item.href, "text-accent")), item.label).toBe(
+				0,
+			);
+	});
+
+	it("keeps Bills as the current page in P138's desktop sidebar, with How Tally works in ink", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		expect(count(chunk, SIDEBAR("/bills", "text-accent"))).toBe(5);
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-ink"))).toBe(5);
 	});
 
 	it("adds the muted line both options share, and no client JavaScript to either specimen", async () => {

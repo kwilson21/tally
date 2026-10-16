@@ -50,6 +50,10 @@ function PhoneScreen({ label, children }: { label: string; children?: Child }) {
 	);
 }
 
+/** A desktop sidebar link's classes: accent when it is the page's own, ink otherwise, the same for every link in the sidebar. */
+const sidebarLink = (current: boolean) =>
+	`flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${current ? "text-accent" : "text-ink"}`;
+
 /** A desktop window at 1280 px as the proposals draw it: the sidebar, then the page, as tall as its content. */
 function DeskScreen({
 	label,
@@ -80,7 +84,7 @@ function DeskScreen({
 											<li>
 												<a
 													href={item.href}
-													class={`flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${item.key === active ? "text-accent" : "text-ink"}`}
+													class={sidebarLink(item.key === active)}
 												>
 													<Icon name={item.icon} />
 													{item.label}
@@ -92,7 +96,7 @@ function DeskScreen({
 										<li>
 											<a
 												href="/how-it-works"
-												class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg text-ink no-underline"
+												class={sidebarLink(active === "how")}
 											>
 												<TallyMark class="size-6" />
 												How Tally works
@@ -101,7 +105,7 @@ function DeskScreen({
 										<li>
 											<a
 												href="/feedback"
-												class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg text-ink no-underline"
+												class={sidebarLink(active === "feedback")}
 											>
 												<Icon name="message" />
 												Feedback
@@ -356,19 +360,23 @@ const countSentence = (n: number) =>
 /** One payment as a 44px radio label, with the look of TransactionRow: name and date, the amount in tabular figures. */
 function PaymentRow({ c, index }: { c: Candidate; index: number }) {
 	return (
-		<label class="flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink">
+		<label class="group relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 			<input
 				type="radio"
 				name="transaction_id"
 				value={String(c.id)}
-				class="sr-only"
+				class="peer sr-only"
 				// Nothing is chosen for the person; one required radio makes the group required.
 				required={index === 0}
 			/>
 			<span
 				aria-hidden="true"
-				class="size-5 shrink-0 rounded-full border border-ink"
-			/>
+				class="selection-mark flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band"
+			>
+				<span class="hidden group-has-[:checked]:flex">
+					<Icon name="check" class="size-4" />
+				</span>
+			</span>
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{c.name}</span>
 				<span class="block truncate leading-6 text-muted">
@@ -381,16 +389,23 @@ function PaymentRow({ c, index }: { c: Candidate; index: number }) {
 	);
 }
 
-/** The plan's page above its Link a payment section, as the plan page draws it. */
+/**
+ * The plan's page above its Link a payment section, drawn by hand: PlanPaymentPicker's `<h2 id="plan-link-title">` (and its
+ * section's aria-labelledby) is a fixed id that would repeat in every one of these pictures, which the page's unique-ID test
+ * forbids. Its markup and classes are copied from src/routes/plans.tsx and src/views/planned-expense.tsx, so the picture matches /plans.
+ */
 function PlanPage({ children }: { children?: Child }) {
 	return (
 		<>
-			<p class="font-serif text-5xl font-semibold tracking-tight">
+			<a href="/bills" class="inline-flex min-h-11 items-center text-accent">
+				Bills
+			</a>
+			<h1 class="font-serif text-5xl font-semibold tracking-tight">
 				Lawn service
-			</p>
+			</h1>
 			<p class="text-lg">{formatCents(9000)} · Set aside for October</p>
 			<div class="mt-6 border-t border-rule pt-4">
-				<h3 class="font-serif text-3xl font-semibold">Link a payment</h3>
+				<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>
 				<p class="mt-2 text-lg">To Lawn service, {formatCents(9000)}.</p>
 				<p class="mt-1 text-muted">
 					Money out in the planned expense's month and the next, closest amount
@@ -405,7 +420,7 @@ function PlanPage({ children }: { children?: Child }) {
 /** The payment's button, as the picker draws it. */
 function LinkButton() {
 	return (
-		<div class="mt-4">
+		<div>
 			<Button type="submit" busyLabel="Linking…">
 				Link payment
 			</Button>
@@ -467,8 +482,11 @@ function ClosestRows({ open }: { open: boolean }) {
 	);
 }
 
-/** B: a labelled search over every charge, its count announced, and the closest five when nothing is typed. */
-function SearchRows({ query }: { query: string }) {
+/**
+ * B: a labelled search over every charge, its count announced, and the closest five when nothing is typed. `id` prefixes the
+ * picture's own ids: the results fieldset is the search's target, and the count is refreshed by the same reply's hx-select-oob.
+ */
+function SearchRows({ id, query }: { id: string; query: string }) {
 	const q = query.trim().toLowerCase();
 	const matches = q
 		? CANDIDATES.filter(
@@ -490,24 +508,28 @@ function SearchRows({ query }: { query: string }) {
 						value={query}
 						class="min-h-11 rounded-control border border-ink bg-paper px-3 text-lg"
 						hx-get="/plans/1/payments/search"
-						hx-target="#payment-results"
+						hx-target={`#${id}-payment-results`}
+						hx-select-oob={`#${id}-payment-count:innerHTML`}
 						hx-swap="innerHTML"
 					/>
 				</label>
-				<p aria-live="polite" class="text-sm text-muted">
+				{/* The count stays outside the swap, so screen readers announce each new count; the reply's hx-select-oob refreshes its words, as Transactions' result count does. */}
+				<p
+					id={`${id}-payment-count`}
+					aria-live="polite"
+					class="text-sm text-muted"
+				>
 					{announced}
 				</p>
-				{matches.length > 0 && (
-					<fieldset>
-						<legend>Payment</legend>
-						<div class="mt-1">
-							{matches.map((c, index) => (
-								<PaymentRow c={c} index={index} />
-							))}
-						</div>
-					</fieldset>
-				)}
-				<LinkButton />
+				<fieldset id={`${id}-payment-results`}>
+					<legend>Payment</legend>
+					<div class="mt-1">
+						{matches.map((c, index) => (
+							<PaymentRow c={c} index={index} />
+						))}
+					</div>
+				</fieldset>
+				{matches.length > 0 && <LinkButton />}
 			</div>
 		</PlanPage>
 	);
@@ -534,6 +556,7 @@ export function AuditFollowupProposals() {
 					>
 						<Pictures
 							id="p137-today"
+							active="how"
 							label="Today"
 							render={(id) => <BudgetSection id={id} fold="list" />}
 						/>
@@ -547,12 +570,14 @@ export function AuditFollowupProposals() {
 					>
 						<Pictures
 							id="p137-a-closed"
+							active="how"
 							label="A · The rules fold under the picture, closed"
 							state="Closed"
 							render={(id) => <BudgetSection id={id} fold="closed" />}
 						/>
 						<Pictures
 							id="p137-a-open"
+							active="how"
 							label="A · The rules fold under the picture, opened"
 							state="Opened"
 							render={(id) => <BudgetSection id={id} fold="open" />}
@@ -568,6 +593,7 @@ export function AuditFollowupProposals() {
 					>
 						<Pictures
 							id="p137-b-closed"
+							active="how"
 							label="B · Each rule named, folded, closed"
 							state="Closed"
 							render={(id) => (
@@ -576,6 +602,7 @@ export function AuditFollowupProposals() {
 						/>
 						<Pictures
 							id="p137-b-open"
+							active="how"
 							label="B · Each rule named, folded, opened"
 							state="Opened"
 							render={(id) => (
@@ -630,8 +657,8 @@ export function AuditFollowupProposals() {
 					</Choice>
 					<Choice
 						name="B · The closest five, and a search over all of them"
-						note="Look it up when it isn't in the first five."
-						cost="One search route over the same candidates, and its count announced."
+						note="Look it up when it isn't in the first five: typing farmers finds the two Farmers charges, Oct 16 and Oct 5."
+						cost="One search route over the same charges, asked a moment after typing stops, and the count announced."
 						why="Faster than scrolling when the charge is far from the amount."
 						recommended={false}
 						width="w-[1140px]"
@@ -641,14 +668,14 @@ export function AuditFollowupProposals() {
 							active="bills"
 							label="B · The closest five, and a search over all of them, empty"
 							state="Empty"
-							render={() => <SearchRows query="" />}
+							render={(id) => <SearchRows id={id} query="" />}
 						/>
 						<Pictures
-							id="p138-b-lawn"
+							id="p138-b-farmers"
 							active="bills"
-							label="B · The closest five, and a search over all of them, after typing lawn"
-							state="After typing lawn"
-							render={() => <SearchRows query="lawn" />}
+							label="B · The closest five, and a search over all of them, after typing farmers"
+							state="After typing farmers"
+							render={(id) => <SearchRows id={id} query="farmers" />}
 						/>
 					</Choice>
 				</Choices>
