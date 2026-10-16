@@ -2,8 +2,11 @@ import { Button } from "./button";
 import { Icon } from "./icons";
 
 export type GroupRuleOfferValue = {
-	/** The charges the save filed: Yes makes the rule on their merchant keys, only while they still hold the category (a person's choice). */
-	savedIds: number[];
+	/**
+	 * The store's merchant row number, as the question's address carries it (#532). Yes rebuilds the store's charges in the
+	 * category from it, so the form posts this number and never a list of ids or a name.
+	 */
+	store: number;
 	/** The store's name as Organize shows it after the save. */
 	merchant: string;
 	categoryId: number;
@@ -13,7 +16,8 @@ export type GroupRuleOfferValue = {
 /**
  * Organize's question after a group is saved (#353): the group variant of RuleOffer, with no count, since the
  * group's charges were just filed. Not now and Yes post the same form with `answer` set, so the answer reaches
- * the route in one request, with or without JavaScript. Its heading takes focus, like RuleOffer's.
+ * the route in one request, with or without JavaScript. The form carries only the store and the category (#532): the
+ * route rebuilds the store's charges from them. Its heading takes focus, like RuleOffer's.
  */
 export function GroupRuleOffer({
 	value,
@@ -54,12 +58,7 @@ export function GroupRuleOffer({
 				hx-swap="outerHTML"
 				class="grid grid-cols-2 gap-3"
 			>
-				<input
-					type="hidden"
-					name="saved"
-					value={JSON.stringify(value.savedIds)}
-				/>
-				<input type="hidden" name="merchant" value={value.merchant} />
+				<input type="hidden" name="store" value={String(value.store)} />
 				<input type="hidden" name="category" value={String(value.categoryId)} />
 				<Button
 					kind="secondary"
