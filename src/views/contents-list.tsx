@@ -96,7 +96,7 @@ function FolioWords({ folio }: { folio: Folio }) {
 		);
 	return (
 		<span
-			class={`shrink-0 text-sm tabular-nums ${folio.tone === "ink" ? "text-ink" : "text-muted"}`}
+			class={`text-right text-sm tabular-nums ${folio.tone === "ink" ? "text-ink" : "text-muted"}`}
 		>
 			{folio.text}
 		</span>
@@ -107,7 +107,8 @@ function FolioWords({ folio }: { folio: Folio }) {
  * More's contents list (P122 A): a ruled list of places. Each is a link with the sidebar's icon (or the
  * tally mark), its name, a dotted leader and its folio when it has one, and a muted line on what it holds.
  * The leader is hidden from screen readers, so each link's name reads in order: "Accounts, 3 accounts,
- * Balances, net worth and your banks".
+ * Balances, net worth and your banks". When the leader and folio don't fit beside the name, they drop together
+ * to a line of their own under it, the folio at the right edge, so a count is never cut short or squeezed.
  */
 export function ContentsList({
 	places,
@@ -134,16 +135,16 @@ export function ContentsList({
 							place.icon && <Icon name={place.icon} class="mt-0.5 size-6" />
 						)}
 						<span class="min-w-0">
-							<span class="flex items-baseline gap-2">
-								<span class="text-lg">{place.name}</span>
+							<span class="flex flex-wrap items-baseline gap-x-2">
+								<span class="shrink-0 text-lg">{place.name}</span>
 								{place.folio && (
-									<>
+									<span class="flex min-w-0 flex-auto items-baseline gap-2">
 										<span
 											aria-hidden="true"
 											class="min-w-4 flex-1 border-b-2 border-dotted border-rule"
 										/>
 										<FolioWords folio={place.folio} />
-									</>
+									</span>
 								)}
 							</span>
 							<span class="block text-sm text-muted">{place.desc}</span>

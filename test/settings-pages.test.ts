@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
+import { settingsPlaces } from "../src/views/settings-pages";
 
 // Settings is a contents page (decision 120): each section is its own page with Settings as its back link.
 
@@ -47,6 +48,22 @@ const h1Of = (html: string) => {
 
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+});
+
+describe("settingsPlaces: the folios are never shortened", () => {
+	it("keeps every category and the whole budget in Categories' folio, however large", () => {
+		const [categories] = settingsPlaces({
+			categories: { count: 50, budgetCents: 5_000_000_000 },
+			merchants: 0,
+			zone: DEFAULT_TIME_ZONE,
+			bankEmailsOn: true,
+			people: 0,
+			aiOff: 0,
+			sorted: 0,
+			month: "2026-10",
+		});
+		expect(categories?.folio?.text).toBe("50 categories · $50,000,000 a month");
+	});
 });
 
 describe("GET /settings: the contents page", () => {
