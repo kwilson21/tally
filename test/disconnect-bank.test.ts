@@ -2,7 +2,13 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
+import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import {
+	answerPay,
+	type PayMerchant,
+	payMerchants,
+} from "../src/first-tally/first-page";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
 
@@ -76,6 +82,25 @@ const sentence = async (id: number) =>
 			await accounts.request(`/accounts/${id}/disconnect`, {}, bindings)
 		).text()
 	).match(/Tally stops syncing it\.[^<]*/)?.[0];
+
+/** Answers Yes for one income deposit into the bank's first account, as the pay question does; returns its transaction id. */
+async function answerPayFrom(id: number) {
+	const account = await env.DB.prepare(
+		"SELECT MIN(id) AS id FROM accounts WHERE plaid_item_id = ?",
+	)
+		.bind(id)
+		.first<{ id: number }>();
+	const deposit = await env.DB.prepare(
+		"INSERT INTO transactions (account_id, date, amount_cents, raw_name, flag_income) VALUES (?, '2026-10-01', -245000, 'NORTHWIND PAYROLL', 1) RETURNING id",
+	)
+		.bind(account?.id)
+		.first<{ id: number }>();
+	const merchant = (await payMerchants(env.DB)).find(
+		(m) => m.key === "NORTHWIND PAYROLL",
+	) as PayMerchant;
+	await answerPay(env.DB, merchant, "yes", "person@example.com");
+	return deposit?.id as number;
+}
 
 const countFor = async (id: number) =>
 	(
@@ -199,7 +224,9 @@ describe("disconnect bank", () => {
 
 	it("doesn't delete kept history when a second submit asks to delete it", async () => {
 		const id = await itemId();
+		await answerPayFrom(id);
 		const before = await countFor(id);
+		const pay = await readFirstTally(env.DB);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({})),
@@ -212,6 +239,20 @@ describe("disconnect bank", () => {
 		);
 		expect(await countFor(id)).toBe(before);
 		expect(before).toBeGreaterThan(0);
+		expect(await readFirstTally(env.DB)).toEqual(pay);
+	});
+
+	it("keeps the pay answers when the bank is disconnected without deleting its history", async () => {
+		const id = await itemId();
+		await answerPayFrom(id);
+		const pay = await readFirstTally(env.DB);
+		expect(Object.keys(pay?.pay ?? {})).toEqual(["NORTHWIND PAYROLL"]);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({})),
+		);
+		expect((await post(id)).status).toBe(303);
+		expect(await readFirstTally(env.DB)).toEqual(pay);
 	});
 
 	it("doesn't delete history when another tab keeps it while Plaid is answering", async () => {
@@ -310,6 +351,7 @@ describe("disconnect bank", () => {
 		await env.DB.prepare(
 			"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (1, '2026-01-01', 1)",
 		).run();
+		const deposit = await answerPayFrom(id);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async () => Response.json({})),
@@ -323,6 +365,9 @@ describe("disconnect bank", () => {
 				.first<{ count: number }>();
 			expect(row?.count).toBe(0);
 		}
+		const pay = (await readFirstTally(env.DB))?.pay ?? {};
+		expect(JSON.stringify(pay)).not.toContain(`"${deposit}"`);
+		expect(Object.keys(pay)).toEqual([]);
 	});
 
 	it("leaves everything unchanged on a Plaid failure", async () => {

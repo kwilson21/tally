@@ -41,6 +41,23 @@ beforeEach(async () => {
 	vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(new Date(NOW));
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+	// A household that has finished its first week (the demo's budgets, as migration 0057 marks them): no setup shows.
+	await env.DB.prepare(
+		"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
+	)
+		.bind(
+			JSON.stringify({
+				strokes: {
+					bank: null,
+					pay: null,
+					bills: null,
+					budgets: null,
+					count: null,
+				},
+				budgets: {},
+			}),
+		)
+		.run();
 	// Both banks synced this morning; each test then breaks what it needs to.
 	await setBank(FIRST, { syncedAt: "2026-10-05 12:00:00" });
 	await setBank(SECOND, { syncedAt: "2026-10-05 12:00:00" });

@@ -106,8 +106,8 @@ firstPage.get("/first-page", async (c) => {
 
 /**
  * A pay answer covers only the deposits the page showed: its `deposit` fields, each checked against the merchant's
- * deposits now (payShown). When one is new or changed since the page drew, nothing is written and the question is drawn
- * again.
+ * deposits now (payShown here, and again inside answerPay's batch). When one is new or changed since the page drew,
+ * nothing is written and the question is drawn again.
  */
 firstPage.post("/first-page/pay", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
@@ -125,22 +125,20 @@ firstPage.post("/first-page/pay", async (c) => {
 	const merchant = before.pay.find((m) => m.key === key);
 	// Nothing left to ask about this merchant: the page as it is now, and nothing written.
 	if (!merchant) return stale(c, await settleAndLoad(c.env.DB, today));
-	if (!payShown(merchant, shown))
-		return answered(
-			c,
-			before,
-			`Nothing saved. The deposits from ${merchant.name} changed since the page drew, so the question is asked again below.`,
-			NO_MOTION,
-			"info",
-		);
-	// A competing answer changed no row first: the page as it is now, and nothing written. The re-read is fresh, since
-	// `before` may be stale by now.
+	if (!payShown(merchant, shown)) return payChanged(c, before, merchant.name);
 	const hadYesLine = before.ledger.some(
 		(line) => line.id === `pay:${merchant.key}`,
 	);
-	if ((await answerPay(c.env.DB, merchant, answer, actor(c))) === 0)
-		return stale(c, await settleAndLoad(c.env.DB, today));
+	const written = await answerPay(c.env.DB, merchant, answer, actor(c));
+	// The re-read is fresh, since `before` may be stale by now. With 0 rows written, a shown deposit still asked about
+	// means a sync changed it after the check above, so the question is asked again with payChanged's words. Otherwise a
+	// competing answer changed the rows first, and the page is the page as it is now (stale).
 	const after = await settleAndLoad(c.env.DB, today);
+	if (written === 0) {
+		return after.pay.some((m) => m.ids.some((id) => merchant.ids.includes(id)))
+			? payChanged(c, after, merchant.name)
+			: stale(c, after);
+	}
 	return answered(
 		c,
 		after,
@@ -148,6 +146,17 @@ firstPage.post("/first-page/pay", async (c) => {
 		motionOf(before, after, answer === "yes" ? `pay:${merchant.key}` : null),
 	);
 });
+
+/** The reply when a shown deposit changed since the page drew: nothing saved, and the question asked again. */
+function payChanged(c: Context<App>, model: FirstPageModel, name: string) {
+	return answered(
+		c,
+		model,
+		`Nothing saved. The deposits from ${name} changed since the page drew, so the question is asked again below.`,
+		NO_MOTION,
+		"info",
+	);
+}
 
 /**
  * The words a pay answer saves. A No for a merchant whose Yes line is already there says only what it covered, since
