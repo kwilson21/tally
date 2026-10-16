@@ -177,6 +177,14 @@ function requestEvent(target: FakeNode | null, from?: string) {
 	};
 }
 
+/**
+ * htmx's htmx:before:request for a request whose ctx.target is the node given, with the abort htmx gives the request's ctx.
+ * It fires once the request may run, so the keys request is in flight from here until its finish.
+ */
+function beforeRequestEvent(target: FakeNode | null) {
+	return { detail: { ctx: { target, request: { abort: vi.fn() } } } };
+}
+
 /** htmx's htmx:after:settle for a swap, which fires on the swap's target: the region the swap put in. */
 function settleEvent(target: FakeNode) {
 	return { target };
@@ -201,6 +209,9 @@ function setup(page: FakePage, win = windowFor()) {
 		ended: (event: ReturnType<typeof finishEvent>) => keys.ended(event),
 		responded: (event: ReturnType<typeof requestEvent>) =>
 			keys.responded(event),
+		requested: (event: ReturnType<typeof beforeRequestEvent>) =>
+			keys.requested(event),
+		restoring: () => keys.restoring(),
 	};
 }
 
@@ -520,14 +531,29 @@ describe("? (the keys sheet)", () => {
 		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
 	});
 
-	it("takes a ? again when #keys settles for a request that never finished, as a history restore leaves it", () => {
+	it("takes a ? again once #keys itself settles", () => {
 		const page = new FakePage();
-		el(page, "div", { id: "keys" });
+		const region = el(page, "div", { id: "keys" });
 		const win = windowFor();
 		const { keydown, settled } = setup(page, win);
 		keydown(press("?", { shiftKey: true }));
-		// A history restore drops the queued keys request without a finish, and redraws the body with #keys in it.
+		settled(settleEvent(region));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+	});
+
+	it("still sends nothing for a second ? when a body-targeted POST settles while the keys load", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, settled, ended } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		// A POST that targets the body settles while the keys load: that is not the keys request's own swap, so it waits on.
 		settled(settleEvent(page.body));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(1);
+		// The keys request's own finish ends its wait, and a ? sends again.
+		ended(finishEvent(region, "swapped"));
 		keydown(press("?", { shiftKey: true }));
 		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
 	});
@@ -863,6 +889,25 @@ describe("a keys response that comes after another sheet opened or the address m
 		settled(settleEvent(sheetRegion));
 		expect(first.focusCount).toBe(0);
 	});
+
+	it("is thrown away when #keys was redrawn while it loaded (a body POST or a Back), so no ?keys is pushed", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, responded, ended } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		// A body-targeted POST redrew the page: the region the request targeted is gone, and a new #keys is in its place.
+		remove(page, region);
+		el(page, "div", { id: "keys" });
+		// The address is the same, so only the redraw drops this response.
+		const event = requestEvent(region, "http://localhost/transactions");
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+		// The drop leaves the request to finish, and its finish ends the wait, so a ? sends again.
+		ended(finishEvent(region, "issuing"));
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+	});
 });
 
 describe("a history restore that takes the keys sheet away (the browser's Back)", () => {
@@ -969,6 +1014,36 @@ describe("a history restore that takes the keys sheet away (the browser's Back)"
 			"",
 			"/transactions#budget",
 		);
+	});
+
+	it("aborts a keys request still loading when Back restores the page, and takes a ? again", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, requested, restoring } = setup(page, win);
+		keydown(press("?", { shiftKey: true }));
+		const start = beforeRequestEvent(region);
+		requested(start);
+		restoring();
+		expect(start.detail.ctx.request.abort).toHaveBeenCalledTimes(1);
+		keydown(press("?", { shiftKey: true }));
+		expect(win.htmx.ajax).toHaveBeenCalledTimes(2);
+	});
+
+	it("aborts nothing on a history restore when no keys request is loading", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor();
+		const { keydown, requested, ended, restoring } = setup(page, win);
+		expect(() => restoring()).not.toThrow();
+		expect(win.htmx.ajax).not.toHaveBeenCalled();
+		keydown(press("?", { shiftKey: true }));
+		const start = beforeRequestEvent(region);
+		requested(start);
+		// The keys request has swapped and finished, so the restore has no request left to abort.
+		ended(finishEvent(region, "swapped"));
+		restoring();
+		expect(start.detail.ctx.request.abort).not.toHaveBeenCalled();
 	});
 });
 
