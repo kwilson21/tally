@@ -124,7 +124,7 @@ describe("budgetCategory", () => {
 			id: 1,
 			name: "Groceries",
 			archived: false,
-			budgetCents: 70000,
+			budgetCents: 95000,
 		});
 		expect(await budgetCategory(db, 999, MONTH)).toBeNull();
 	});

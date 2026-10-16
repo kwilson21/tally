@@ -80,7 +80,8 @@ export type BillTotalsRow = {
 
 /**
  * The month's bill totals from Bills' rows. Bills, Home and How Tally works all call this, so they agree
- * on what is set aside (`soonCents`), which Home's "Bills due soon" list also follows, and what is still to pay.
+ * on what is due soon (`soonCents`, `soonCount`, which Home's "Bills due soon" list also follows), what Safe to
+ * spend sets aside (`setAsideCents`), and what is still to pay.
  */
 export function billTotalsForRows(month: string, rows: BillTotalsRow[]) {
 	const active = rows.filter((row) => row.active);
@@ -153,7 +154,7 @@ export function calculateBillTotals({
 	for (const occurrence of displayedOccurrences)
 		if (occurrence.status === "paid" && activeIds.has(occurrence.billId))
 			groups.paidCents += occurrence.amountCents;
-	// Safe to spend and "to pay soon" set aside each due or overdue occurrence once (spec §6).
+	// "To pay soon" counts each due or overdue occurrence once (spec §6).
 	const soon = new Map<string, number>();
 	const soonBillIds = new Set<number>();
 	for (const [key, occurrence] of judged) {
@@ -184,12 +185,28 @@ export function calculateBillTotals({
 		(total, cents) => total + cents,
 		0,
 	);
+	// Safe to spend sets aside only this month's bills that are due or overdue and not paid (decision 123, #631). The
+	// shown occurrence and this month's occurrences are each judged once, the shown one winning a tie. A bill due in a
+	// later month waits for its month; it still counts in soonCents, as Bills shows it due soon.
+	const judgedForSetAside = new Set<string>();
+	let setAsideCents = 0;
+	for (const occurrence of [...displayedOccurrences, ...thisMonthOccurrences]) {
+		const key = `${occurrence.billId}:${occurrence.dueDate}`;
+		if (judgedForSetAside.has(key)) continue;
+		judgedForSetAside.add(key);
+		if (!activeIds.has(occurrence.billId)) continue;
+		if (!occurrence.dueDate.startsWith(month)) continue;
+		if (occurrence.status !== "due" && occurrence.status !== "overdue")
+			continue;
+		setAsideCents += Math.max(0, occurrence.amountCents - occurrence.paidCents);
+	}
 	return {
 		monthlyCents,
 		stillToPayCents,
-		// Bills to pay soon, each bill once; soonCents still sums every occurrence set aside.
+		// Bills to pay soon, each bill once; soonCents still sums every occurrence due soon.
 		soonCount: soonBillIds.size,
 		soonCents,
+		setAsideCents,
 		groups,
 	};
 }

@@ -204,6 +204,66 @@ describe("the 500 page (app.onError)", () => {
 		expect(JSON.stringify([...res.headers])).not.toContain("access-sandbox");
 	});
 
+	describe("the keys sheet's request on a failing page (#655)", () => {
+		const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+		// keyboard.js asks for #keys, and htmx names that target by its tag and id: the region is a div.
+		const keysHeaders = { "HX-Request": "true", "HX-Target": "div#keys" };
+		/** The keys region Layout draws, as keys-routes.test.ts reads it: from #keys to the toasts. */
+		const keysRegion = (html: string) => {
+			const start = html.indexOf('<div id="keys"');
+			const end = html.indexOf('<div id="toasts"', start);
+			return start === -1 || end === -1 ? "" : html.slice(start, end);
+		};
+
+		it("answers ? with the keys sheet in #keys, as a 200 htmx swaps, with no HX-Reswap or toast", async () => {
+			quiet();
+			const res = await fail("/?keys", keysHeaders);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Reswap")).toBeNull();
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			const region = keysRegion(await text(res));
+			expect(region).toContain('role="dialog"');
+			expect(region).toContain("Keyboard shortcuts");
+		});
+
+		it("answers the sheet's close with an empty #keys", async () => {
+			quiet();
+			const html = await text(await fail("/", keysHeaders));
+			expect(html).toContain('<div id="keys"></div>');
+			expect(html).not.toContain('role="dialog"');
+		});
+
+		it("never shows what failed, in a header or the body, and logs only the error's name and the route", async () => {
+			const logged = quiet();
+			const res = await fail("/?keys", keysHeaders);
+			const html = await text(res);
+			expect(JSON.stringify([...res.headers])).not.toContain("access-sandbox");
+			expect(html).not.toContain("access-sandbox");
+			expect(html).not.toContain("Whole Foods");
+			expect(html).not.toContain("42.17");
+			expect(logged).toHaveBeenCalledTimes(1);
+			expect(JSON.stringify(logged.mock.calls)).not.toContain("access-sandbox");
+		});
+
+		it("still gives any other htmx request on a failing page the empty 500 htmx does not swap", async () => {
+			quiet();
+			const res = await fail("/?keys", {
+				"HX-Request": "true",
+				"HX-Target": "div#main",
+			});
+			expect(res.status).toBe(500);
+			expect(await text(res)).toBe("");
+			expect(res.headers.get("HX-Reswap")).toBe("none");
+		});
+
+		it("keeps a full load of the keys address on the failing page a 500 page", async () => {
+			quiet();
+			const res = await fail("/?keys");
+			expect(res.status).toBe(500);
+			expect(await text(res)).toContain("Something went wrong on our side.");
+		});
+	});
+
 	it("keeps the security headers on the error page", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const res = await fail("/");
