@@ -49,6 +49,12 @@ async function amountRows() {
 	return results;
 }
 
+/** The ledger row that names a month, as a whole word: its name and its muted words (#604). */
+const monthRow = (html: string, month: string) =>
+	(html.split("<li").find((item) => item.includes(`>${month}<`)) ?? "").split(
+		"</li>",
+	)[0] ?? "";
+
 describe("a bill's amount history", () => {
 	let categoryId = 0;
 
@@ -89,12 +95,13 @@ describe("a bill's amount history", () => {
 		).toBe(1799);
 	});
 
-	it("shows $15.49 for September and $17.99 for October and November on the bill's page", async () => {
+	it("shows $17.99 for November's due amount, and October's charge at that price, on the bill's page", async () => {
 		await post(`/bills/${BILL}`, netflixForm("17.99", categoryId));
 		const page = await get(`/bills/${BILL}`);
-		expect(page).toContain("September · $15.49");
-		expect(page).toContain("October · $17.99");
-		expect(page).toContain("November · $17.99");
+		// A month's words carry its amount (P131 A, #604): an upcoming month its due amount, and a charge Tally
+		// found for a month says the charge's amount. A month with no payment says only No payment.
+		expect(monthRow(page, "November")).toContain("$17.99");
+		expect(monthRow(page, "October")).toContain("A $17.99 charge");
 	});
 
 	it("replaces this month's row when the amount is edited twice in one month", async () => {
@@ -238,7 +245,7 @@ describe("the demo's Netflix price history", () => {
 		expect(await get(`/bills/${id}`)).toContain(
 			"Price went up to $17.99 in October",
 		);
-		expect(await get(`/bills/${id}`)).toContain("September · $15.49");
+		expect(monthRow(await get(`/bills/${id}`), "October")).toContain("$17.99");
 	});
 });
 

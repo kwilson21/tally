@@ -5,6 +5,7 @@ const genericFailure = "Couldn't link the bank. Try again.";
 
 function harness({
 	linkBank = true,
+	dataset,
 	tokenResponse = {
 		ok: true,
 		json: async () => ({ link_token: "link-secret" }),
@@ -15,8 +16,14 @@ function harness({
 		text: async () =>
 			'<section id="accounts-summary" data-version="new"></section>',
 	},
+	homeRefreshResponse = {
+		ok: true,
+		text: async () =>
+			'<main id="page" data-version="new"><p id="setup-status" data-link-bank-focus></p></main>',
+	},
 }: {
 	linkBank?: boolean;
+	dataset?: Record<string, string>;
 	tokenResponse?: {
 		ok: boolean;
 		json?: () => Promise<{ link_token: string }>;
@@ -24,6 +31,10 @@ function harness({
 	};
 	ajax?: ReturnType<typeof vi.fn>;
 	refreshResponse?: {
+		ok: boolean;
+		text: () => Promise<string>;
+	};
+	homeRefreshResponse?: {
 		ok: boolean;
 		text: () => Promise<string>;
 	};
@@ -39,6 +50,7 @@ function harness({
 	type RequestListener = (event: { detail?: { ctx?: unknown } }) => void;
 	const listeners = new Map<string, Set<RequestListener>>();
 	const button = {
+		dataset,
 		disabled: false,
 		focus: vi.fn(),
 		setAttribute: vi.fn(),
@@ -96,6 +108,16 @@ function harness({
 		replaceWith: vi.fn(),
 	};
 	const parsedSummaries: Array<{ version: string }> = [];
+	// Home's #page holds Link a bank, so the refresh that swaps it in also takes the button away.
+	let linkButtonGone = false;
+	const currentPage = {
+		version: "old",
+		replaceWith: vi.fn(() => {
+			linkButtonGone = true;
+		}),
+	};
+	const parsedPages: Array<{ version: string }> = [];
+	const status = { focus: vi.fn() };
 	const document = {
 		body: { dispatchEvent: vi.fn() },
 		addEventListener: (name: string, listener: never) => {
@@ -103,9 +125,13 @@ function harness({
 		},
 		querySelector: (selector: string) => {
 			if (selector === "[data-link-bank]")
-				return liveLinkButton ?? (linkBank ? button : undefined);
+				return linkButtonGone
+					? undefined
+					: (liveLinkButton ?? (linkBank ? button : undefined));
 			if (selector === "[data-link-bank-error]") return liveErrorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
+			if (selector === "#page") return currentPage;
+			if (selector === "[data-link-bank-focus]") return status;
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
 		},
@@ -117,9 +143,11 @@ function harness({
 			textContent: "",
 		}),
 	};
-	const fetch = vi.fn(async (url: string) =>
-		url === "/accounts" ? refreshResponse : tokenResponse,
-	);
+	const fetch = vi.fn(async (url: string) => {
+		if (url === "/accounts") return refreshResponse;
+		if (url === "/") return homeRefreshResponse;
+		return tokenResponse;
+	});
 	const create = vi.fn((options) => {
 		linkOptions = options;
 		return { open: vi.fn() };
@@ -143,13 +171,20 @@ function harness({
 					}
 				: undefined;
 			if (summary) parsedSummaries.push(summary);
+			const pageMatch = text.match(
+				/id=["']page["'][^>]*data-version=["']([^"']*)/,
+			);
+			const page = pageMatch?.[1] ? { version: pageMatch[1] } : undefined;
+			if (page) parsedPages.push(page);
 			return {
 				querySelector: (selector: string) =>
 					selector === "#accounts-summary"
 						? summary
-						: match
-							? { textContent: match[1] }
-							: undefined,
+						: selector === "#page"
+							? page
+							: match
+								? { textContent: match[1] }
+								: undefined,
 			};
 		}
 	}
@@ -188,6 +223,9 @@ function harness({
 		document,
 		currentSummary,
 		parsedSummaries,
+		currentPage,
+		parsedPages,
+		status,
 		process,
 		replaceRepairError(region: typeof repairError) {
 			liveRepairError = region;
@@ -441,6 +479,72 @@ describe("plaid-link.js", () => {
 		expect(h.button.focus).toHaveBeenCalledOnce();
 	});
 
+	it("on Home, refreshes the page its button names (/, not Accounts' list), then focuses the status line, not the gone button", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				const ctx = { response: { status: 204 }, text: "" };
+				h.button.dispatchRequest("htmx:after:request", ctx);
+				h.button.dispatchRequest("htmx:finally:request", ctx);
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
+		});
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+		expect(h.fetch).toHaveBeenCalledWith("/");
+		expect(h.fetch).not.toHaveBeenCalledWith("/accounts");
+		expect(h.parsedPages).toHaveLength(1);
+		expect(h.currentPage.replaceWith).toHaveBeenCalledWith(h.parsedPages[0]);
+		expect(h.process).toHaveBeenCalledWith(h.parsedPages[0]);
+		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+		expect(h.children).toHaveLength(0);
+		expect(h.status.focus).toHaveBeenCalledOnce();
+		expect(h.button.focus).not.toHaveBeenCalled();
+	});
+
+	it("on Home, a failed page refresh after linking says the page didn't refresh, not the list", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							announce:
+								"First Bank is linked. Tally's reading your last 90 days.",
+						}),
+					},
+				});
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
+			homeRefreshResponse: { ok: false, text: async () => "Refresh failed." },
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.children).toEqual([
+			expect.objectContaining({
+				role: "alert",
+				textContent:
+					"First Bank is linked. Tally's reading your last 90 days, but the page didn't refresh. Reload the page to see it.",
+			}),
+		]);
+		const announcements = h.document.body.dispatchEvent.mock.calls.filter(
+			([event]) => event.type === "announce",
+		);
+		expect(announcements).toHaveLength(1);
+		expect(h.currentPage.replaceWith).not.toHaveBeenCalled();
+		expect(h.status.focus).not.toHaveBeenCalled();
+		expect(h.button.focus).not.toHaveBeenCalled();
+		expect(h.button.disabled).toBe(false);
+	});
+
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {
 		const h = harness();
 		delete (globalThis as { Plaid?: unknown }).Plaid;
@@ -572,6 +676,38 @@ describe("plaid-link.js", () => {
 		expect(h.button.disabled).toBe(false);
 		expect(h.button.focus).not.toHaveBeenCalled();
 		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
+	});
+
+	it("on Accounts, a failed list refresh while the household is setting up still says the list", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							announce:
+								"First Bank is linked. Tally's reading your last 90 days.",
+						}),
+					},
+				});
+			}
+		});
+		const h = harness({
+			ajax,
+			refreshResponse: { ok: false, text: async () => "Refresh failed." },
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.children).toEqual([
+			expect.objectContaining({
+				role: "alert",
+				textContent:
+					"First Bank is linked. Tally's reading your last 90 days, but the list didn't refresh. Reload the page to see it.",
+			}),
+		]);
 	});
 
 	it("leaves the summary unchanged and reports a refresh network error", async () => {

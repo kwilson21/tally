@@ -57,7 +57,7 @@ Feedback is stored in D1. When private GitHub filing is configured, the Worker s
 
 ## Tracking and other technologies
 
-See the [Cookie Notice draft](cookie-notice-draft.md). Tally's current source does not include an analytics or replay SDK. The feedback limiter cookie is described in the Cookie Notice draft. Cloudflare Access supplies authentication for production. When Plaid is configured, the Accounts page loads Plaid Link from `cdn.plaid.com`.
+See the [Cookie Notice draft](cookie-notice-draft.md). Tally's current source does not include an analytics or replay SDK. The feedback limiter cookie is described in the Cookie Notice draft. Cloudflare Access supplies authentication for production. When Plaid is configured, the Accounts page loads Plaid Link from `cdn.plaid.com`, and so does Home before a bank is linked.
 
 ## Retention and your choices
 
