@@ -50,10 +50,30 @@ describe("MoneyInput", () => {
 		expect(input).toMatch(/class="(?:[^"]* )?-my-3[ "]/);
 	});
 
-	// Guard (decision 128): the amount and its chips are already tabular; this keeps them so.
-	it("keeps the typed amount and its chips in tabular figures", () => {
+	// Decision 128 (#676): the typed amount and the Round to figure are tabular; a chip's words are prose.
+	it("sets the typed amount and the Round to figure in tabular figures, and the chips' words in normal ones", () => {
 		expect(inputTag()).toMatch(/class="[^"]*\btabular-nums\b/);
-		expect(moneyChip.split(" ")).toContain("tabular-nums");
+		expect(moneyChip.split(" ")).not.toContain("tabular-nums");
+		const html = renderToString(
+			<MoneyInput
+				id="amount"
+				name="amount"
+				label="Budget"
+				value="612.45"
+				lastMonthCents={57200}
+				averageCents={65000}
+			/>,
+		);
+		expect(html).toContain(
+			'<span data-roundup-label="true" class="tabular-nums">Round to $613</span>',
+		);
+		const average =
+			html.match(/<button[^>]*data-set="65000"[\s\S]*?<\/button>/)?.[0] ?? "";
+		expect(average).toContain("3-month average: $650.00");
+		expect(average).not.toContain("tabular-nums");
+		const lastMonth =
+			html.match(/<button[^>]*data-set="57200"[\s\S]*?<\/button>/)?.[0] ?? "";
+		expect(lastMonth).not.toContain("tabular-nums");
 	});
 
 	it("keeps the field-shake class on the same input when there is an error", () => {
@@ -110,7 +130,7 @@ describe("MoneyInput's words and steps (decision 117)", () => {
 		const round = chipTag(html, "data-roundup");
 		expect(round).toContain('aria-pressed="false"');
 		expect(html).toContain(
-			'<span data-roundup-label="true">Round to $613</span>',
+			'<span data-roundup-label="true" class="tabular-nums">Round to $613</span>',
 		);
 	});
 

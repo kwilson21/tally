@@ -1,5 +1,6 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
+import { BillFindingRow } from "../src/views/bill-finding";
 import { BillOccurrenceRow } from "../src/views/bill-occurrence-row";
 import { BillPaymentPicker } from "../src/views/bill-payment-picker";
 import { BillRow } from "../src/views/bill-row";
@@ -76,6 +77,29 @@ describe("BillRow amount (decision 128)", () => {
 		expect(row).toContain(
 			'<span class="shrink-0 text-lg tabular-nums">$15.49</span>',
 		);
+	});
+});
+
+// Decision 128 (#676): a found bill's "About $X" is a figure; its name is prose.
+describe("BillFindingRow amount (decision 128)", () => {
+	it("sets the About amount in tabular figures, and the name outside them", () => {
+		const row = String(
+			BillFindingRow({
+				suggestion: {
+					rawName: "GYM MEMBERSHIP",
+					bankText: "GYM MEMBERSHIP 0042",
+					displayName: "Gym",
+					amountCents: 8415,
+					dueDay: 12,
+					categoryId: null,
+					chargeCount: 4,
+				},
+			}),
+		);
+		expect(row).toContain(
+			'<span class="shrink-0 text-right tabular-nums">About $84.15</span>',
+		);
+		expect(row).toContain("<span>Gym</span>");
 	});
 });
 

@@ -231,7 +231,7 @@ export function ChangeRow({
 				<span class="block truncate text-lg leading-6">{name}</span>
 				<span class="block leading-6 text-muted">{detail}</span>
 			</span>
-			<span class="flex shrink-0 items-center gap-1 text-lg">
+			<span class="flex shrink-0 items-center gap-1 text-lg tabular-nums">
 				{direction !== "same" && (
 					<Icon
 						name={direction === "up" ? "arrow-up" : "arrow-down"}

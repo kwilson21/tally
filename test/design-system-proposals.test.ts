@@ -4820,7 +4820,8 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(opened).toContain('<details class="group" open');
 		// The five months under the fold each say Link a payment in muted words, not terracotta ones.
 		expect(
-			opened.split('text-sm text-muted">Link a payment</span>').length - 1,
+			opened.split('text-sm tabular-nums text-muted">Link a payment</span>')
+				.length - 1,
 		).toBe(5);
 		expect(opened).not.toContain('text-accent">Link a payment');
 		expect(opened).not.toContain("rounded-control bg-band px-2");

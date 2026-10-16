@@ -407,10 +407,9 @@ export function NotOnPageCount({
 	oob?: boolean;
 }) {
 	return (
-		<span
-			id="not-on-page-count"
-			hx-swap-oob={oob ? "innerHTML" : undefined}
-		>{`${count} not on this page`}</span>
+		<span id="not-on-page-count" hx-swap-oob={oob ? "innerHTML" : undefined}>
+			<span class="tabular-nums">{count}</span> not on this page
+		</span>
 	);
 }
 

@@ -86,7 +86,7 @@ import {
 	type SplitRefund,
 } from "../transactions/refund-guards";
 import { oneOffGuessesAgain } from "../transactions/rename";
-import { resultCount } from "../transactions/result-count";
+import { resultCountParts } from "../transactions/result-count";
 import {
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
@@ -391,7 +391,7 @@ async function renderList(
 			label: `account ${filters.account}`,
 			disconnected: false,
 		});
-	const count = resultCount(
+	const count = resultCountParts(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
@@ -794,7 +794,11 @@ async function renderList(
 						>
 							{/* One span, so the chip's flex gap doesn't split the text around the count. */}
 							<span>
-								Needs category (<span id="needs-count">{needs}</span>)
+								Needs category (
+								<span class="tabular-nums" id="needs-count">
+									{needs}
+								</span>
+								)
 							</span>
 						</Chip>
 					</div>
@@ -822,9 +826,11 @@ async function renderList(
 						aria-live="polite"
 						tabindex={focusCount ? -1 : undefined}
 						autofocus={focusCount}
-						class="mt-4 text-sm tabular-nums text-muted"
+						class="mt-4 text-sm text-muted"
 					>
-						{count}
+						{count.before}
+						<span class="tabular-nums">{count.figures}</span>
+						{count.after}
 					</p>
 				)}
 				{/* Always drawn on a list, so a search that runs in every month can add or remove its link (LIST_OOB). */}
