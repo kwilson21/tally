@@ -26,6 +26,14 @@ const LONG_NAME = "x".repeat(48);
 /** The page's document while a test runs, so a node that is focused becomes its activeElement. */
 let activeDocument: { activeElement: unknown } | null = null;
 
+/** The selector toast.js asks for a saved row's mark: .row-saved or .row-saved-undo. */
+const SAVED_ROWS = ".row-saved, .row-saved-undo";
+/** Whether a node carries a saved row's mark. */
+const isSavedRow = (node: FakeNode) =>
+	node.className
+		.split(" ")
+		.some((name) => name === "row-saved" || name === "row-saved-undo");
+
 class FakeNode extends EventTarget {
 	children: FakeNode[] = [];
 	parent: FakeNode | null = null;
@@ -74,6 +82,20 @@ class FakeNode extends EventTarget {
 	/** Every node under this one, this one first. */
 	all(): FakeNode[] {
 		return [this, ...this.children.flatMap((child) => child.all())];
+	}
+	/** 3 for a text node, 1 for an element, as a page reports them. */
+	get nodeType() {
+		return this.tag === "#text" ? 3 : 1;
+	}
+	/** Whether this node is a saved row's mark, for toast.js's matches(SAVED_ROWS). */
+	matches(selector: string) {
+		return selector === SAVED_ROWS && isSavedRow(this);
+	}
+	/** The saved rows under this node, not this node itself, as a page's querySelectorAll gives them. */
+	querySelectorAll(selector: string) {
+		return this.children
+			.flatMap((child) => child.all())
+			.filter((node) => selector === SAVED_ROWS && isSavedRow(node));
 	}
 	/** The first node under this one that matches a simple selector: a tag, then [attribute] or [attribute=value] parts. */
 	querySelector(selector: string): FakeNode | null {
@@ -223,16 +245,8 @@ async function page({
 		querySelectorAll: (selector: string) =>
 			selector === "section[data-sheet]" && sheetSection
 				? [sheetSection]
-				: selector === ".row-saved, .row-saved-undo"
-					? pageRoot
-							.all()
-							.filter((node) =>
-								node.className
-									.split(" ")
-									.some(
-										(name) => name === "row-saved" || name === "row-saved-undo",
-									),
-							)
+				: selector === SAVED_ROWS
+					? pageRoot.all().filter(isSavedRow)
 					: [],
 		getElementById: (id: string) =>
 			id === "toasts"
@@ -354,6 +368,35 @@ describe("a saved row's mark", () => {
 			undo,
 			undoExpiresInMs: 10000,
 		});
+	type Doc = EventTarget & { createTextNode: (text: string) => FakeNode };
+	/**
+	 * A save's reply, as htmx runs it: its swap starts (htmx:before:swap), draws its row with the mark, then settles
+	 * (htmx:before:settle) with the row among its new content. Its own toast comes after, in finish.
+	 */
+	const reply = (document: Doc, pageRoot: FakeNode, mark = "row-saved") => {
+		const ctx = {};
+		const task = {};
+		const row = new FakeNode("div");
+		row.className = mark;
+		fire(document, "htmx:before:swap", { ctx, tasks: [task] });
+		pageRoot.append(row);
+		fire(document, "htmx:before:settle", {
+			task,
+			newContent: [document.createTextNode("\n"), row],
+			settleTasks: [],
+		});
+		return { ctx, row };
+	};
+	/** htmx's end of a reply: its HX-Trigger toast (if it sends one), then its finally event, then the run ends. */
+	const finish = async (
+		document: EventTarget,
+		ctx: unknown,
+		toast?: Record<string, unknown>,
+	) => {
+		if (toast) fire(document, "toast", toast);
+		fire(document, "htmx:finally:request", { ctx });
+		await Promise.resolve();
+	};
 
 	it("ends the earlier save's mark when a later save's toast replaces its toast, even when the later save marks no row (#597)", async () => {
 		const { document, pageRoot } = await page();
@@ -458,6 +501,84 @@ describe("a saved row's mark", () => {
 		expect(row.className).toBe("row-saved");
 		// The newer toast's own 4 seconds end it, at 5000 ms.
 		vi.advanceTimersByTime(2000);
+		expect(row.className).toBe("");
+	});
+
+	it("keeps each overlapping save's tick until its own toast is replaced, when a later reply's marked row lands before the earlier reply's toast (#597)", async () => {
+		const { document, pageRoot } = await page();
+		const zone = reply(document, pageRoot);
+		const person = reply(document, pageRoot);
+		await finish(document, zone.ctx, { message: "Saved time zone" });
+		expect(zone.row.className).toBe("row-saved");
+		expect(person.row.className).toBe("row-saved");
+		// The person save's toast replaces the time zone's toast, so only the time zone's tick ends.
+		await finish(document, person.ctx, { message: "Saved Sam" });
+		expect(zone.row.className).toBe("");
+		expect(person.row.className).toBe("row-saved");
+		vi.advanceTimersByTime(3999);
+		expect(person.row.className).toBe("row-saved");
+		vi.advanceTimersByTime(1);
+		expect(person.row.className).toBe("");
+	});
+
+	it("keeps a settling reply's tick for its own toast when another reply's unmarked toast comes first, and ends it when a later toast replaces its toast (#597)", async () => {
+		const { document, pageRoot } = await page();
+		const zone = reply(document, pageRoot);
+		// Another reply's toast comes first, and that reply marks no row.
+		await finish(document, {}, { message: "Saved bank sign-in emails" });
+		expect(zone.row.className).toBe("row-saved");
+		await finish(document, zone.ctx, { message: "Saved time zone" });
+		expect(zone.row.className).toBe("row-saved");
+		fire(document, "toast", { message: "Saved Rent's budget." });
+		expect(zone.row.className).toBe("");
+	});
+
+	it("leaves a reply's mark to no other toast when that reply sends no toast", async () => {
+		const { document, pageRoot } = await page();
+		const silent = reply(document, pageRoot);
+		await finish(document, silent.ctx);
+		await finish(document, {}, { message: "Saved Groceries" });
+		fire(document, "toast", { message: "Saved Rent's budget." });
+		expect(silent.row.className).toBe("row-saved");
+	});
+
+	it("keeps an Undo reply's mark through a later plain toast, and ends it at the Undo toast's 10 seconds (#597)", async () => {
+		const { document, pageRoot } = await page();
+		const coffee = reply(document, pageRoot, "row-saved-undo");
+		await finish(document, coffee.ctx, {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		vi.advanceTimersByTime(1000);
+		fire(document, "toast", { message: "Saved Groceries' budget." });
+		vi.advanceTimersByTime(8999);
+		expect(coffee.row.className).toBe("row-saved-undo");
+		vi.advanceTimersByTime(1);
+		expect(coffee.row.className).toBe("");
+	});
+
+	it("gives a reply's marked row to its toast when the row sits inside the swapped-in node, not at its top (#597)", async () => {
+		const { document, pageRoot } = await page();
+		const ctx = {};
+		const task = {};
+		const row = new FakeNode("div");
+		row.className = "row-saved";
+		const wrapper = new FakeNode("section");
+		wrapper.append(row);
+		fire(document, "htmx:before:swap", { ctx, tasks: [task] });
+		pageRoot.append(wrapper);
+		fire(document, "htmx:before:settle", {
+			task,
+			newContent: [wrapper],
+			settleTasks: [],
+		});
+		// An unmarked toast comes first and must not take the reply's row.
+		await finish(document, {}, { message: "Saved bank sign-in emails" });
+		expect(row.className).toBe("row-saved");
+		await finish(document, ctx, { message: "Saved time zone" });
+		expect(row.className).toBe("row-saved");
+		fire(document, "toast", { message: "Saved Rent's budget." });
 		expect(row.className).toBe("");
 	});
 });
