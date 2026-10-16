@@ -1639,6 +1639,23 @@ function postedRefundOf(tx: TransactionDetail, form: FormData): number | null {
 	return posted === null ? current : posted === "" ? null : Number(posted);
 }
 
+/**
+ * The name of a rule category the panel posted, read by id, so the rule tick's hint says what the panel was drawn
+ * with. Read from the table, not the active categories: archiving leaves a merchant's rule in place.
+ */
+async function postedRuleCategoryName(
+	db: D1Database,
+	id: number | null | undefined,
+): Promise<string | undefined> {
+	if (!id) return undefined;
+	return (
+		await db
+			.prepare("SELECT name FROM categories WHERE id = ?")
+			.bind(id)
+			.first<{ name: string }>()
+	)?.name;
+}
+
 const filtersFrom = (c: Context<App>, today: string, url: string) =>
 	parseFilters(
 		new URL(url, "http://tally").searchParams,
@@ -2652,6 +2669,16 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 	// A locked choice is disabled, so the browser posts none of its radios: it carries the last pick in hidden
 	// fields (CategoryChoice), and the row's own category is drawn only when nothing is posted.
 	const posted = form.get("category");
+	// The rule the panel was drawn with, named by its category: the posted id is a number, not a name.
+	const ruleName =
+		form.get("always_was") === "1"
+			? ((await postedRuleCategoryName(
+					c.env.DB,
+					Number(form.get("rule_category_was")) || null,
+				)) ??
+				tx.merchantRuleCategoryName ??
+				undefined)
+			: undefined;
 	return c.html(
 		<CategoryChoice
 			tx={tx}
@@ -2665,15 +2692,7 @@ transactions.post("/transactions/:id{[0-9]+}/category/lock", async (c) => {
 			back={back}
 			rule={
 				tx.refundOfId == null
-					? {
-							checked: form.get("always") === "1",
-							ruleCategory:
-								form.get("always_was") === "1"
-									? form.get("rule_category_was")?.toString() ||
-										tx.merchantRuleCategoryName ||
-										undefined
-									: undefined,
-						}
+					? { checked: form.get("always") === "1", ruleCategory: ruleName }
 					: undefined
 			}
 		/>,
@@ -2865,12 +2884,9 @@ async function savePanel(
 		};
 		// The rule the panel posted, named as it was: another tab may have set the store's rule since, and the
 		// save clears only the rule posted (saveEdit), so the hint must not name the rule the store has now.
-		const postedRule =
-			values.alwaysWas && values.merchantRuleWas
-				? await c.env.DB.prepare("SELECT name FROM categories WHERE id = ?")
-						.bind(values.merchantRuleWas)
-						.first<{ name: string }>()
-				: null;
+		const postedRuleName = values.alwaysWas
+			? await postedRuleCategoryName(c.env.DB, values.merchantRuleWas)
+			: undefined;
 		return renderList(c, today, filters, {
 			status: 422,
 			sheet: (all, today) => (
@@ -2887,7 +2903,7 @@ async function savePanel(
 					nameWas={form.get("merchant_was")?.toString() ?? null}
 					nameScope={form.get("name_scope") === "all" ? "all" : "one"}
 					jevCategories={jevCategories}
-					ruleCategoryName={postedRule?.name}
+					ruleCategoryName={postedRuleName}
 					cashValues={cashValues}
 					changePartsTotalCents={changePartsTotalCents}
 				/>

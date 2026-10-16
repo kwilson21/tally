@@ -169,6 +169,38 @@ describe("the category leads the panel (P120 B)", () => {
 			expect(tag).toContain(" open");
 		}
 	});
+
+	it("names the posted rule's category on a lock redraw, not its id", async () => {
+		const merchantKey = (
+			await env.DB.prepare(
+				"SELECT COALESCE(NULLIF(merchant_name, ''), raw_name) AS key FROM transactions WHERE id = ?",
+			)
+				.bind(bakery)
+				.first<{ key: string }>()
+		)?.key;
+		const groceries = (
+			await env.DB.prepare(
+				"SELECT id FROM categories WHERE name = 'Groceries'",
+			).first<{ id: number }>()
+		)?.id;
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+		)
+			.bind(merchantKey, groceries)
+			.run();
+		// The rule tick was drawn with the store's rule (always_was), so a redraw keeps naming it by its category.
+		const { html } = await post(`/transactions/${bakery}/category/lock`, {
+			category: String(groceries),
+			always: "1",
+			always_was: "1",
+			rule_category_was: String(groceries),
+			back: "/transactions",
+		});
+		expect(html).toContain(
+			"Local Bakery is always Groceries. Untick it and save to remove the rule.",
+		);
+		expect(html).not.toContain(`is always ${groceries}.`);
+	});
 });
 
 describe("Exclude and Count as income are switches (P120 B)", () => {
