@@ -418,7 +418,7 @@ describe("a save that moves the household into another month", () => {
 	// gets one, so the two months show different budgets.
 	const LATE_OCTOBER = "2026-11-01T03:30:00Z";
 
-	/** What a row's closed summary says about its budget: "$700 a month" or "No budget". */
+	/** What a row's closed summary says about its budget: "$950 a month" or "No budget". */
 	const amountOf = (html: string, id: number) =>
 		textOf(
 			`<span ${html.split(`id="cat-${id}-amount"`)[1]?.split("</summary>")[0] ?? ""}`,
@@ -437,7 +437,7 @@ describe("a save that moves the household into another month", () => {
 
 	it("shows October's budgets on Categories, where the month's amounts are drawn", async () => {
 		const { html } = await get("/settings/categories");
-		expect(amountOf(html, 1)).toBe("$700 a month");
+		expect(amountOf(html, 1)).toBe("$950 a month");
 		expect(amountOf(html, 5)).toBe("No budget");
 		expect(html).not.toContain("hx-swap-oob");
 	});

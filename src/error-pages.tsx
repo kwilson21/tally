@@ -79,7 +79,14 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 	);
 	// Layout's noSwap already keeps a 500 out of the page; saying so here too means it never swaps.
 	// No toast from here: toast.js shows "Couldn't save" or "Couldn't load" for a 500 itself.
-	if (isHtmx(c)) {
+	// The keys sheet (#72, #655): keyboard.js's ? and the sheet's close ask for #keys, which htmx names by its tag and id.
+	// Such a GET gets the page, so Layout draws the sheet from the address or leaves #keys empty, with a 200 htmx swaps
+	// (htmx doesn't swap a 500, and the page behind already shows this one).
+	const keys =
+		c.req.method === "GET" &&
+		isHtmx(c) &&
+		c.req.header("HX-Target") === "div#keys";
+	if (isHtmx(c) && !keys) {
 		c.header("HX-Reswap", "none");
 		return c.body(null, 500);
 	}
@@ -94,6 +101,6 @@ export const serverErrorPage: ErrorHandler<App> = (err, c) => {
 				retryHref={retryHref(c.req.method, c.req.url, c.req.header("Referer"))}
 			/>
 		</Layout>,
-		500,
+		keys ? 200 : 500,
 	);
 };

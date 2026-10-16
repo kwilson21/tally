@@ -1459,7 +1459,9 @@ describe("GET /design-system/proposals", () => {
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("Childcare");
-		// Childcare's numbers are the demo seed's: a $1,040 budget, and $480 from the two Fridays of October so far (Oct 2 and 9).
+		// Childcare's numbers are what the demo seed had when P123 was drawn: a $1,040 budget, and $480 from the two
+		// Fridays of October so far (Oct 2 and 9). Since #631 the seed sets $1,200 (decision 123); the picture keeps
+		// what the owner saw.
 		expect(
 			picture(feedback, "Today (current), Home scrolled, on a phone"),
 		).toContain("$480 of $1,040");
@@ -3712,15 +3714,19 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 		}
 	});
 
-	it("lists P136 in the decisions file as decision 122, last in the table, with option A's words", () => {
+	it("lists P136 in the decisions file as decision 122, after decision 119, with option A's words", () => {
 		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
-		const last = rows.at(-1) ?? "";
-		expect(
-			last.startsWith("| 122 | 2026-10-15 | The owner's pick on P136 (#602)"),
-		).toBe(true);
-		expect(last).toContain("**P136 A:**");
-		expect(last).toContain("This replaces Paid's rule from #612");
-		expect(last).toContain("Decided by seeing (decision 47)");
+		const row =
+			rows.find((line) =>
+				line.startsWith("| 122 | 2026-10-15 | The owner's pick on P136 (#602)"),
+			) ?? "";
+		expect(row).not.toBe("");
+		expect(rows.indexOf(row)).toBeGreaterThan(
+			rows.findIndex((line) => line.startsWith("| 119 | ")),
+		);
+		expect(row).toContain("**P136 A:**");
+		expect(row).toContain("This replaces Paid's rule from #612");
+		expect(row).toContain("Decided by seeing (decision 47)");
 	});
 
 	it("states the totals rule in spec §8.4 as decision 122 does, and drops the old sentence", () => {

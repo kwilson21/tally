@@ -941,7 +941,7 @@ describe("Bills", () => {
 		const category = await env.DB.prepare(
 			"SELECT c.name AS name, b.amount_cents AS budget FROM bills d JOIN categories c ON c.id = d.category_id JOIN budget_amounts b ON b.category_id = c.id WHERE d.name = 'Daycare'",
 		).first<{ name: string; budget: number }>();
-		expect(category).toEqual({ name: "Childcare", budget: 104000 });
+		expect(category).toEqual({ name: "Childcare", budget: 120000 });
 		const { rows } = await loadBillRows(env.DB, "2026-10-10");
 		const daycare = rows.find((row) => row.name === "Daycare");
 		expect(
