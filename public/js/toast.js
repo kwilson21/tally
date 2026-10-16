@@ -122,6 +122,7 @@
 	function takeOffPage(toast, lostToo = false) {
 		if (toast.contains(document.activeElement) || (lostToo && focusLost()))
 			focusHeading();
+		endMarks(toast);
 		toast.remove();
 		measureToasts();
 	}
@@ -129,6 +130,73 @@
 	// The toast the last "toast" event made. failed() reads it straight after dispatching, since the
 	// event is synchronous.
 	let lastToast = null;
+	// A saved row's mark (P119 A, #71, #597) belongs to one toast, the toast of the save that gave it. A reply's marks go
+	// to the toast its own HX-Trigger made, which htmx sends just before that reply's htmx:finally:request. So each mark
+	// belongs to the reply whose swap drew it, and a mark no reply drew goes to the next toast. A reply that sends no
+	// toast gives its marks to none, and they stay until the CSS hides .saved-tick by itself. A plain or error
+	// toast ends the marks of the plain toasts it replaces; an Undo toast is never replaced early, so its mark runs its
+	// own ten seconds, and a later toast leaves it alone. The Likely sheet's close morphs its row back to the mark, but
+	// that row's toast is gone by then (endedMarks), so htmx's finally strips the mark before anything paints it. That
+	// strip is unchanged. A reply's own mark is a new node, never in endedMarks, so it stays.
+	const SAVED_ROWS = ".row-saved, .row-saved-undo";
+	const savedRows = () => document.querySelectorAll(SAVED_ROWS);
+	const markOwner = new WeakMap();
+	const toastMarks = new WeakMap();
+	const endedMarks = new WeakSet();
+	// Which reply each swap task belongs to, the marks each reply's swaps drew, and every mark a reply drew. turnToast
+	// is the toast the "toast" event just made, for as long as that htmx run lasts (a microtask clears it).
+	const taskReply = new WeakMap();
+	const replyMarks = new WeakMap();
+	const drawnMarks = new WeakSet();
+	let turnToast = null;
+	// Ends the marks a toast owns when it goes. The owner check matters: a replaced toast's late timer must not strip a
+	// row a newer toast has claimed.
+	function endMarks(toast) {
+		const rows = toastMarks.get(toast);
+		if (!rows) return;
+		toastMarks.delete(toast);
+		for (const row of rows) {
+			if (markOwner.get(row) !== toast) continue;
+			row.classList.remove("row-saved", "row-saved-undo");
+			markOwner.delete(row);
+			endedMarks.add(row);
+		}
+	}
+	document.addEventListener("htmx:before:swap", (event) => {
+		const { ctx, tasks = [] } = event.detail ?? {};
+		for (const task of tasks) taskReply.set(task, ctx);
+	});
+	document.addEventListener("htmx:before:settle", (event) => {
+		const ctx = taskReply.get(event.detail?.task);
+		if (!ctx) return;
+		const rows = replyMarks.get(ctx) ?? [];
+		replyMarks.set(ctx, rows);
+		// A text node has no marks. An element's own mark, and every mark inside it, is drawn by this reply.
+		for (const node of event.detail.newContent ?? []) {
+			if (node.nodeType !== 1) continue;
+			const marked = [...node.querySelectorAll(SAVED_ROWS)];
+			if (node.matches(SAVED_ROWS)) marked.unshift(node);
+			for (const row of marked) {
+				rows.push(row);
+				drawnMarks.add(row);
+			}
+		}
+	});
+	document.addEventListener("htmx:finally:request", (event) => {
+		const ctx = event.detail?.ctx;
+		// The reply's marks go to the toast its trigger made, when its run made one. A reply with no toast hands over none.
+		const rows = replyMarks.get(ctx);
+		replyMarks.delete(ctx);
+		if (rows && turnToast)
+			for (const row of rows) {
+				markOwner.set(row, turnToast);
+				endedMarks.delete(row);
+				toastMarks.get(turnToast)?.push(row);
+			}
+		for (const row of savedRows())
+			if (endedMarks.has(row))
+				row.classList.remove("row-saved", "row-saved-undo");
+	});
 	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
 	// document once that element has left the page: an Undo form whose toast ends during the restore's own
 	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
@@ -146,6 +214,20 @@
 		if (undo && !(undoExpiresInMs > 0)) return;
 		const toast = document.createElement("div");
 		lastToast = toast;
+		turnToast = toast;
+		queueMicrotask(() => {
+			if (turnToast === toast) turnToast = null;
+		});
+		// Marks no reply drew and no toast owns are taken here, such as a mark on the page as it loaded. A mark a reply drew
+		// waits for that reply's own toast, which takes it in the finally listener above.
+		const rows = [];
+		for (const row of savedRows()) {
+			if (markOwner.has(row) || drawnMarks.has(row)) continue;
+			markOwner.set(row, toast);
+			endedMarks.delete(row);
+			rows.push(row);
+		}
+		toastMarks.set(toast, rows);
 		// An Undo toast's button, focused once the toast is on the page (see the undo block below).
 		let undoButton = null;
 		toast.className = `${undo ? "undo-toast " : ""}min-w-0 max-w-full wrap-anywhere rounded-control border border-rule bg-paper px-4 py-3 text-sm text-ink shadow-sm`;
@@ -199,7 +281,10 @@
 		const region = document.getElementById("toasts");
 		if (!undo)
 			for (const old of [...(region?.children ?? [])]) {
-				if (!undoToasts.has(old)) old.remove();
+				if (!undoToasts.has(old)) {
+					endMarks(old);
+					old.remove();
+				}
 			}
 		// The one exception: an Undo's answer names the Undo toast it answers, and that one ends now. A successful
 		// Undo's toast ends its Deleted toast, since the entry is back (#397), and a refusal ends its toast too, a

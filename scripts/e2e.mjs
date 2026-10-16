@@ -865,6 +865,43 @@ assert.deepEqual(
 );
 step("Move up in Settings moves Gas up one place");
 
+// Two quick saves on one page (#597): the time zone's save marks its row, and the bank sign-in emails switch's save
+// replaces that toast a moment later. The first row's tick ends with its toast, so no row keeps a mark beside the second.
+await goto(`${BASE}/settings/household`, { waitUntil: "networkidle" });
+await page.locator("#time-zone-disclosure > summary").click();
+await page.locator("#time-zone-save").click();
+await page.locator("#toasts").getByText("Saved time zone").waitFor();
+assert.equal(await page.locator("#time-zone-disclosure.row-saved").count(), 1);
+const bankEmailsOn = await page.locator("#bank-sign-in-emails").isChecked();
+await page.locator("#bank-sign-in-emails-label").click();
+await page.locator("#toasts").getByText("Saved bank sign-in emails").waitFor();
+assert.equal(
+	await page.locator(".row-saved, .row-saved-undo").count(),
+	0,
+	"the time zone's tick must end when its toast is replaced",
+);
+assert.equal(
+	await page
+		.locator("#time-zone-disclosure .saved-tick")
+		.evaluate((tick) => getComputedStyle(tick).opacity),
+	"0",
+	"the time zone's tick must not draw once its toast is replaced",
+);
+// Back to the switch's state the demo started with, so later steps see the same household. The restore's own reply is
+// awaited, so the next step never races the server.
+const bankEmailsRestored = page.waitForResponse(
+	(response) =>
+		response.request().method() === "POST" &&
+		response.url().includes("/settings/bank-sign-in-emails"),
+);
+await page.locator("#bank-sign-in-emails-label").click();
+assert.equal((await bankEmailsRestored).status(), 200);
+await page.waitForFunction(
+	(on) => document.getElementById("bank-sign-in-emails")?.checked === on,
+	bankEmailsOn,
+);
+step("a second quick save ends the first row's tick with its toast");
+
 const slowCount = (route) => holdReply(route, 1500);
 
 // Select all from the keyboard: its link leaves with the reply, so focus must land on Set category, not the page top (#215).
