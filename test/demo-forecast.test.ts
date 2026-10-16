@@ -42,14 +42,20 @@ function forecastOf(html: string): { direction: string; cents: number } {
 	};
 }
 
-/** Safe to spend as Home shows it, in cents: negative when the page shows a minus sign. */
+/**
+ * Safe to spend as Home shows it, in cents: negative when the page shows a minus sign, and its cents counted when the
+ * page shows them (−$0.40 is −40). Home rounds a negative of $1 or more to whole dollars, so only its sign is exact.
+ */
 function safeToSpendOf(html: string): number {
 	const match = html.match(
-		/Safe to spend[\s\S]*?<\/p><p[^>]*><span class="whitespace-nowrap">(−?)\$([\d,]+)/,
+		/Safe to spend[\s\S]*?<\/p><p[^>]*><span class="whitespace-nowrap">(−?)\$([\d,]+)(?:\.(\d{2}))?/,
 	);
 	if (!match) throw new Error("Home shows no Safe to spend");
-	const dollars = Number((match[2] ?? "0").replaceAll(",", ""));
-	return (match[1] === "−" ? -1 : 1) * dollars * 100;
+	return (
+		(match[1] === "−" ? -1 : 1) *
+		(Number((match[2] ?? "0").replaceAll(",", "")) * 100 +
+			Number(match[3] ?? "0"))
+	);
 }
 
 /** The category's spending on the reset demo, summarized as Home summarizes it. */
