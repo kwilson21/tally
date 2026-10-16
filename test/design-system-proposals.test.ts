@@ -4895,14 +4895,16 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("writes the cause sentence from integer cents, with Most of it only when the causes are over half", async () => {
-		const { monthCause } = await import(
-			"../src/design-system/proposals-audit-2"
-		);
+		const { monthCause: rule } = await import("../src/budgets/month-cause");
+		const monthCause = (
+			causes: Parameters<typeof rule>[0],
+			overCents: number,
+		) => rule(causes, overCents)?.text ?? "";
 		expect(
 			monthCause(
 				[
-					{ name: "Childcare", cents: 96000, budgeted: false },
-					{ name: "Rent", cents: 120000, budgeted: false },
+					{ name: "Childcare", cents: 96000, kind: "unbudgeted" },
+					{ name: "Rent", cents: 120000, kind: "unbudgeted" },
 				],
 				213400,
 			),
@@ -4910,8 +4912,8 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(
 			monthCause(
 				[
-					{ name: "Eating Out", cents: 18000, budgeted: true },
-					{ name: "Kids", cents: 4000, budgeted: true },
+					{ name: "Eating Out", cents: 18000, kind: "over" },
+					{ name: "Kids", cents: 4000, kind: "over" },
 				],
 				22000,
 			),
@@ -4919,8 +4921,8 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(
 			monthCause(
 				[
-					{ name: "Childcare", cents: 10000, budgeted: false },
-					{ name: "Rent", cents: 5000, budgeted: false },
+					{ name: "Childcare", cents: 10000, kind: "unbudgeted" },
+					{ name: "Rent", cents: 5000, kind: "unbudgeted" },
 				],
 				100000,
 			),
@@ -4928,8 +4930,8 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 		expect(
 			monthCause(
 				[
-					{ name: "Rent", cents: 120000, budgeted: false },
-					{ name: "Eating Out", cents: 18000, budgeted: true },
+					{ name: "Rent", cents: 120000, kind: "unbudgeted" },
+					{ name: "Eating Out", cents: 18000, kind: "over" },
 				],
 				138000,
 			),
@@ -4938,20 +4940,22 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("leaves out a category with a net refund from the causes, whether or not it has a budget", async () => {
-		const { monthCause } = await import(
-			"../src/design-system/proposals-audit-2"
-		);
+		const { monthCause: rule } = await import("../src/budgets/month-cause");
+		const monthCause = (
+			causes: Parameters<typeof rule>[0],
+			overCents: number,
+		) => rule(causes, overCents)?.text ?? "";
 		expect(
 			monthCause(
 				[
-					{ name: "Rent", cents: 120000, budgeted: false },
-					{ name: "Gifts", cents: -5000, budgeted: false },
+					{ name: "Rent", cents: 120000, kind: "unbudgeted" },
+					{ name: "Gifts", cents: -5000, kind: "unbudgeted" },
 				],
 				115000,
 			),
 		).toBe("Most of it had no budget: Rent $1,200.");
 		expect(
-			monthCause([{ name: "Gifts", cents: -5000, budgeted: false }], 1000),
+			monthCause([{ name: "Gifts", cents: -5000, kind: "unbudgeted" }], 1000),
 		).toBe("");
 	});
 
@@ -5069,6 +5073,25 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 			"Today, the month dots, September, on a phone",
 			"Today, the month dots, October, on desktop",
 		]);
+	});
+
+	it("draws the Today pictures' month dots as hand-drawn grey discs, with no mark from the real strip", async () => {
+		const html = await drawn();
+		const dots = specimen(html, "p133-month-dots");
+		const todayLabels = labelsOf(dots).filter((label) =>
+			label.startsWith("Today, the month dots"),
+		);
+		expect(todayLabels).toHaveLength(3);
+		const p132 = specimen(html, "p132-month-result");
+		const todayShots = [
+			...todayLabels.map((label) => picture(dots, label)),
+			picture(p132, `Today, September${PHONE}`),
+			picture(p132, `Today, September${DESK}`),
+		];
+		for (const shot of todayShots) {
+			expect(shot).not.toContain("data-mark=");
+			expect(shot).toContain("bg-muted/45");
+		}
 	});
 
 	it("marks P133 A Picked and Recommended, C not recommended, and C, D and E not picked", async () => {
