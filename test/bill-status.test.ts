@@ -155,6 +155,31 @@ describe("bill status", () => {
 		).toBe("overdue");
 	});
 
+	it("shows a monthly bill's next occurrence from seven days before it's due, and a paid one until then (decision 62)", () => {
+		const paid = new Set(["2026-10", "2026-11"]);
+		expect(
+			billOccurrence({ frequency: "monthly", dueDay: 1 }, "2026-10-24", paid),
+		).toMatchObject({
+			dueDate: "2026-10-01",
+			period: "2026-10",
+			status: "paid",
+		});
+		expect(
+			billOccurrence({ frequency: "monthly", dueDay: 1 }, "2026-10-25", paid),
+		).toMatchObject({
+			dueDate: "2026-11-01",
+			period: "2026-11",
+			status: "paid",
+		});
+		expect(
+			billOccurrence({ frequency: "monthly", dueDay: 8 }, "2026-10-31", paid),
+		).toMatchObject({
+			dueDate: "2026-10-08",
+			period: "2026-10",
+			status: "paid",
+		});
+	});
+
 	it("moves into the next month and year when it enters the seven-day window", () => {
 		expect(
 			billOccurrence({ frequency: "monthly", dueDay: 1 }, "2026-09-28", false),
