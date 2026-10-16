@@ -243,4 +243,60 @@ describe("which charges a month offers as found (#604)", () => {
 		expect(html).not.toContain("looks like this");
 		expect(html).toContain("April to September");
 	});
+
+	it("lists Link it's found charge first and checked, even when a charge closer in amount sorts ahead of it (#604)", async () => {
+		// $2.99 on Aug 28 is nearer August's due date, so it is August's found charge. September's own charge is $3.49,
+		// so the picker's amount order would list August's first. Link it names September's, and that one leads.
+		await setUp(
+			env.DB.prepare(
+				"UPDATE transactions SET amount_cents=349 WHERE id=?",
+			).bind(FOUND),
+			charge(9603, "2026-08-28"),
+		);
+		const html = await page();
+		expect(monthRow(html, "September")).toContain(
+			`href="/bills/${BILL}/occurrences/2026-09/link?transaction_id=${FOUND}#payment-picker"`,
+		);
+		const picker = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/${BILL}/occurrences/2026-09/link?transaction_id=${FOUND}`,
+			)
+		).text();
+		const section = picker.slice(
+			picker.indexOf('<section id="payment-picker"'),
+		);
+		const first =
+			section.match(/<input[^>]*name="transaction_id"[^>]*>/)?.[0] ?? "";
+		expect(first).toContain(`value="${FOUND}"`);
+		expect(first).toContain("checked");
+		expect(first).toContain("required");
+		expect(section.indexOf('value="9603"')).toBeGreaterThan(
+			section.indexOf(`value="${FOUND}"`),
+		);
+	});
+
+	it('keeps a chosen payment the person turned away under "You said not this one", after the rest, even when the address names it (#340, #604)', async () => {
+		// With no transaction named, the SQL order is already covered by test/bills.test.ts (about line 2265).
+		await setUp(
+			charge(9603, "2026-09-10"),
+			env.DB.prepare(
+				"INSERT INTO bill_payments(bill_id,period,transaction_id,matched_by,status) VALUES(?,'2026-09',?,'user','dismissed')",
+			).bind(BILL, 9603),
+		);
+		const picker = await (
+			await exports.default.fetch(
+				`http://tally.test/bills/${BILL}/occurrences/2026-09/link?transaction_id=9603`,
+			)
+		).text();
+		const section = picker.slice(
+			picker.indexOf('<section id="payment-picker"'),
+		);
+		const turnedAwayLine = section.indexOf("You said not this one");
+		expect(turnedAwayLine).toBeGreaterThan(-1);
+		expect(section.match(/<input[^>]*value="9603"[^>]*>/)?.[0]).toContain(
+			"checked",
+		);
+		expect(section.indexOf('value="9603"')).toBeGreaterThan(turnedAwayLine);
+		expect(section.indexOf(`value="${FOUND}"`)).toBeLessThan(turnedAwayLine);
+	});
 });
