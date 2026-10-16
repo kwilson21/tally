@@ -834,6 +834,40 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("puts the CategoryGrid specimen's Tally's guess chip in the grid's radio group, so only one choice can be checked (#687)", async () => {
+		const { html } = await get("/design-system");
+		const specimen =
+			html.split('id="category-grid"')[1]?.split("</section>")[0] ?? "";
+		const radios = [...specimen.matchAll(/<input[^>]*type="radio"[^>]*>/g)].map(
+			(m) => m[0],
+		);
+		const nameOf = (input: string) => input.match(/ name="([^"]+)"/)?.[1];
+		const guess = radios.find((input) =>
+			input.includes('aria-describedby="category-suggestion-confidence-3-3"'),
+		);
+		// The chip and the grid's choices share one group, named for the grid, and no other specimen uses that name.
+		const group = nameOf(guess ?? "");
+		expect(group).toBe("ds-grid-guess");
+		const inGroup = radios.filter((input) => nameOf(input) === group);
+		expect(inGroup.length).toBeGreaterThan(2);
+		expect(html.split(`name="${group}"`)).toHaveLength(inGroup.length + 1);
+		// With Groceries chosen, that group has exactly one checked choice.
+		expect(
+			inGroup.filter((input) => /\schecked(\s|>|=)/.test(input)),
+		).toHaveLength(1);
+	});
+
+	it("drops the How this works sentence from DESIGN.md's edit-panel layout, since decision 111 took that link off the panel (#687)", () => {
+		const bullet =
+			design
+				.split("\n")
+				.find((line) =>
+					line.startsWith("- Edit panel layout (owner's pick C, #27):"),
+				) ?? "";
+		expect(bullet).toMatch(/\(spec §8\.5\)\.$/);
+		expect(bullet).not.toContain("How this works");
+	});
+
 	it("shows the time zone row closed, open, with an error and on a narrow phone, with its whole use spec, as Settings' Household group draws it (P35 A)", async () => {
 		const { html } = await get("/design-system");
 		const tag = specimens(html).find((t) => t.includes('id="time-zone-row"'));
@@ -997,6 +1031,12 @@ describe("GET /design-system in the demo", () => {
 		// DESIGN.md names each Not this one by its payment, as #205 asks, and says a credit reads unpaid (#469).
 		expect(design).toMatch(
 			/\| LedgerMonth, LedgerDisclosure[^\n]*#469[^\n]*Not this one: Harbor Property \$600\.00 on Oct 1/,
+		);
+	});
+
+	it("says in DESIGN.md that a paid month's check hangs in the margin, so every month's name lines up (decision 125, #682)", () => {
+		expect(design).toMatch(
+			/\| LedgerMonth, LedgerDisclosure[^\n]*a paid month's check hangs in the margin left of its name[^\n]*decision 125/,
 		);
 	});
 
