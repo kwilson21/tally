@@ -6,6 +6,7 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
+import { PERSON_INCOME_SET_SQL } from "../db/income";
 import {
 	type NameChoice,
 	type NameReview,
@@ -392,11 +393,10 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "yes") {
 				const result = await db
 					.prepare(
-						`UPDATE transactions SET flag_income = 1, income_source = 'user', income_confidence = NULL,
-							updated_by = ?, updated_at = datetime('now')
+						`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
 						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
 					)
-					.bind(who, item.transactionId)
+					.bind(1, who, item.transactionId)
 					.run();
 				if (result.meta.changes === 0) return stale();
 				const after = await suggestionQueue(db);
