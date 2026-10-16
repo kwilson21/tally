@@ -139,6 +139,7 @@ import {
 } from "../views/trends";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
+import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import {
 	ADJUST_ROWS,
 	BAND,
@@ -943,6 +944,7 @@ const HOME_MONTH_HEADING = (
 		month="2026-10"
 		firstMonth="2026-05"
 		currentMonth="2026-10"
+		results={DEMO_MONTH_RESULTS}
 	/>
 );
 
@@ -1186,7 +1188,7 @@ function HomeTopGroup() {
 					"PastNotBudgeted",
 					"ProgressRow",
 				]}
-				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311)."
+				sentence="No-JavaScript arrows and month dots open a finished month, which shows its budget result, distinct category labels (including suffixes for exact stored duplicates), read-only bars and any Not budgeted spending (P46 A, P91–P93, decisions 82 and 94). Uncategorized spending is named last under Not budgeted as Needs a category, the owner's pick for #310 (Oct 11); a large result's stamp wraps under it at 320px (#311). Each finished month's dot holds its mark (a check for under, a minus for over, an empty ring for no budgets), its link names the result in words, and an Over month names its biggest causes in one muted line under its stamp, linked to what it names (P132 A and P133 A, decision 121)."
 			>
 				<State label="September ended under overall, with Eating Out over its own budget">
 					<Picture label="September 2026 ended with $86 under overall; Eating Out finished $36 over its budget; finished rows are read-only">
@@ -1195,11 +1197,14 @@ function HomeTopGroup() {
 								month="2026-09"
 								firstMonth="2026-05"
 								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": 8600 }}
 							/>
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september"
 								monthName="September"
 								amountCents={8600}
+								unbudgeted={[{ name: "Kids", spentCents: 3000 }]}
 								rows={[
 									{
 										id: 1,
@@ -1263,13 +1268,169 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
+				<State label="An Over month with spending that had no budget: its cause line names the two largest and links to Not budgeted">
+					<Picture label="September 2026 ended $2,312 over; Rent $1,200 and Childcare $960 had no budget, so the line says Most of it had no budget and links down to them">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -231200 }}
+							/>
+							<MonthEnd
+								needsCategoryCents={0}
+								chartId="catalog-cause-no-budget"
+								monthName="September"
+								amountCents={-231200}
+								unbudgeted={[
+									{ name: "Childcare", spentCents: 96000 },
+									{ name: "Rent", spentCents: 120000 },
+								]}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 67200,
+										leftCents: 2800,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-no-budget"
+								items={[
+									{
+										name: "Childcare",
+										icon: "kids",
+										color: "cat-blue",
+										spentCents: 96000,
+									},
+									{
+										name: "Rent",
+										icon: "rent",
+										color: "cat-slate",
+										spentCents: 120000,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="An Over month with budgets over: its cause line names both and links to the bars">
+					<Picture label="September 2026 ended $220 over; Eating Out $180 and Kids $40 over their budgets, so the line says Most of it was over budget">
+						<div class="max-w-2xl">
+							<MonthEnd
+								needsCategoryCents={0}
+								chartId="catalog-cause-over-budget"
+								monthName="September"
+								amountCents={-22000}
+								unbudgeted={[]}
+								rows={[
+									{
+										id: 1,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+									{
+										id: 2,
+										name: "Kids",
+										budgetCents: 30000,
+										spentCents: 34000,
+										leftCents: -4000,
+										over: true,
+									},
+								]}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="An Over month whose causes sit in two places: its over-budget category links to the bars and Needs a category to its row">
+					<Picture label="September 2026 ended $429 over; Eating Out finished $180 over its budget and $277 is Needs a category, so the line says Most of it and links each cause to where it's listed">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -42900 }}
+							/>
+							<MonthEnd
+								chartId="catalog-cause-two-places"
+								monthName="September"
+								amountCents={-42900}
+								unbudgeted={[]}
+								needsCategoryCents={27700}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 67200,
+										leftCents: 2800,
+										over: false,
+									},
+									{
+										id: 2,
+										name: "Eating Out",
+										budgetCents: 25000,
+										spentCents: 43000,
+										leftCents: -18000,
+										over: true,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-two-places"
+								items={[]}
+								needsCategory={{ spentCents: 27700, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="The month strip on this month: its dot is a plain dot in an accent ring, and its link says so far">
+					<Picture label="October, so far, in the month strip: a plain dot in an accent ring, with the finished months' marks beside it">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-10"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="The month strip on a finished month: its mark in a bordered dot, its ink ring on the shown month, and its words name the result">
+					<Picture label="September, ended $2,134 over, in the month strip: the over mark in brick inside its ink ring, with August over and May under beside it">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
+							/>
+						</div>
+					</Picture>
+				</State>
 				<State label="Uncategorized spending: the result takes it out, and Needs a category names it once">
 					<Picture label="$100 budget, $20 categorized and $50 uncategorized: $30 under, with Needs a category at the end of Not budgeted">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={5000}
 								chartId="catalog-needs-category"
 								monthName="September"
 								amountCents={3000}
+								unbudgeted={[]}
 								rows={[
 									{
 										id: 1,
@@ -1309,9 +1470,11 @@ function HomeTopGroup() {
 					<Picture label="A seven-figure finished amount in the 280px column of a 320px phone, one size smaller, with its Under stamp dropping beneath it">
 						<div class="w-[320px] max-w-full px-5">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-large-result"
 								monthName="September"
 								amountCents={100_000_000}
+								unbudgeted={[]}
 								rows={[
 									{
 										id: 1,
@@ -1330,9 +1493,11 @@ function HomeTopGroup() {
 					<Picture label="September 2026 ended with no budgets set: −$57 in ink as the result, with no Over or Under stamp">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-september-no-budgets"
 								monthName="September"
 								amountCents={-5700}
+								unbudgeted={[]}
 								rows={[]}
 							/>
 						</div>
@@ -1345,6 +1510,7 @@ function HomeTopGroup() {
 								month="2026-10"
 								firstMonth="2025-11"
 								currentMonth="2026-10"
+								results={DEMO_MONTH_RESULTS}
 							/>
 						</div>
 					</Picture>
@@ -1353,9 +1519,11 @@ function HomeTopGroup() {
 					<Picture label="Five categories in one row with no scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-five"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 5 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
@@ -1372,9 +1540,11 @@ function HomeTopGroup() {
 					<Picture label="Ten categories at lg, the last one over budget, with the budget word clear of its bar">
 						<div class="max-w-2xl">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-ten-wide"
 								monthName="September"
 								amountCents={16000}
+								unbudgeted={[]}
 								rows={[
 									"Groceries",
 									"Eating Out",
@@ -1402,9 +1572,11 @@ function HomeTopGroup() {
 					<Picture label="Twelve categories in one row with a fade, arrow and sideways scrolling cue">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 12 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
@@ -1421,9 +1593,11 @@ function HomeTopGroup() {
 					<Picture label="The twelve-category chart cue stays still under reduced motion">
 						<div class="w-[320px] max-w-full">
 							<MonthEnd
+								needsCategoryCents={0}
 								chartId="catalog-twelve-reduced-motion"
 								monthName="September"
 								amountCents={0}
+								unbudgeted={[]}
 								rows={Array.from({ length: 12 }, (_, index) => ({
 									id: index + 1,
 									name: `Category ${index + 1}`,
