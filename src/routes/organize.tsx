@@ -2,16 +2,15 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { addressOf } from "../address";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
-import { jevSaysMixedAmong } from "../db/mixed-trip";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
-	groupHasRule,
 	organizeGroups,
-	organizeOffer,
 	saveOrganizeGroup,
 	setOrganizeRule,
+	storeOffer,
+	storeRowOf,
 } from "../transactions/organize";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
@@ -92,7 +91,7 @@ async function renderOrganize(
 		? `${group.bankTexts.slice(0, 3).join(", ")}${group.bankTexts.length > 3 ? ` and ${group.bankTexts.length - 3} more` : ""}`
 		: "";
 	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
-	// question's own address also carries its category and saved ids, which an answer must not repeat.
+	// question's own address also carries its category and store, which an answer must not repeat.
 	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
 	if (trigger) {
 		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
@@ -233,38 +232,37 @@ async function renderOrganize(
 }
 
 /**
- * The address of Organize's question for a saved group (#353): the skips the page carries, then the category and the
- * saved charges' ids joined by dots. The question has an address of its own, so a reload asks it again.
+ * The address of Organize's question for a store (#353, #532): the skips the page carries, then the category and the
+ * store's merchant row number. The question has an address of its own, so a reload asks it again, and the address is the
+ * same length however many charges the store has.
  */
 function questionAddress(
 	skips: string[],
 	categoryId: number,
-	savedIds: number[],
+	storeRow: number,
 ): string {
 	const params = new URLSearchParams([
 		...skips.map((name): [string, string] => ["skip", name]),
 		["category", String(categoryId)],
-		["saved", savedIds.join(".")],
+		["store", String(storeRow)],
 	]);
 	return `/transactions/organize?${params}`;
 }
 
 /**
  * Organize's page. A Save that asks the question lands on the question's own address both ways (#353): by a 303
- * redirect with JavaScript off, and by the reply's HX-Push-Url with it. Anything else in those parameters, or a
- * question the charges no longer hold, shows the ordinary page.
+ * redirect with JavaScript off, and by the reply's HX-Push-Url with it. The address names the store and the category
+ * (#532), and storeOffer rebuilds the question from them. Anything else in those parameters, or a question the charges
+ * no longer hold, shows the ordinary page. An address from before #532, which carried the saved ids, shows the ordinary
+ * page too.
  */
 organize.get("/transactions/organize", async (c) => {
 	const params = new URL(c.req.url).searchParams;
-	const categoryId = Number(params.get("category"));
-	const savedIds = (params.get("saved") ?? "")
-		.split(".")
-		.map(Number)
-		.filter((id) => Number.isSafeInteger(id) && id > 0);
-	const offer =
-		Number.isSafeInteger(categoryId) && categoryId > 0 && savedIds.length > 0
-			? await organizeOffer(c.env.DB, savedIds, categoryId)
-			: null;
+	const offer = await storeOffer(
+		c.env.DB,
+		Number(params.get("store")),
+		Number(params.get("category")),
+	);
 	return offer
 		? renderOrganize(c, undefined, 200, true, offer)
 		: renderOrganize(c);
@@ -355,23 +353,15 @@ organize.post("/transactions/organize", async (c) => {
 	}
 	const count = filed.length;
 	const message = `${count} ${count === 1 ? "transaction" : "transactions"} set to ${chosen.name}.`;
-	// The save makes no rule. Organize asks #209's question after it (#353), unless every merchant of the group
-	// has this rule already; then it moves on as it always did.
-	// No question when a trip it filed looks mixed (decision 113): a rule is never offered across categories.
-	const asks =
-		!(await groupHasRule(c.env.DB, currentGroup.merchantKeys, chosen.id)) &&
-		!(await jevSaysMixedAmong(c.env.DB, filed));
-	const rule: GroupRuleOfferValue | undefined = asks
-		? {
-				savedIds: filed,
-				merchant: name || currentGroup.name,
-				categoryId: chosen.id,
-				category: chosen.name,
-			}
-		: undefined;
+	// The save makes no rule. Organize asks #209's question after it (#353), about the store's charges in the category
+	// (#532), rebuilt the way a reload rebuilds it: no question when that rebuild holds none, as when every merchant of
+	// the store has the rule already or a trip looks mixed (decision 113).
+	const store = await storeRowOf(c.env.DB, filed);
+	const offer =
+		store === null ? null : await storeOffer(c.env.DB, store, chosen.id);
 	// The question has an address of its own (#353), so a reload asks it again.
-	const asked = rule
-		? questionAddress(url.searchParams.getAll("skip"), chosen.id, filed)
+	const asked = offer
+		? questionAddress(url.searchParams.getAll("skip"), chosen.id, offer.store)
 		: null;
 	if (!c.req.header("HX-Request")) return c.redirect(asked ?? next, 303);
 	c.header(
@@ -379,71 +369,44 @@ organize.post("/transactions/organize", async (c) => {
 		hxTrigger({ toast: { message, type: "success" }, announce: message }),
 	);
 	if (asked) c.header("HX-Push-Url", asked);
-	return renderOrganize(c, undefined, 200, true, rule);
+	return renderOrganize(c, undefined, 200, true, offer ?? undefined);
 });
 
 /**
- * The items a question posts back as a JSON array, keeping only the ones `keep` accepts. Anything else posts none:
- * JSON.parse throws on what is not JSON, and a file upload reads as "[object File]".
- */
-function postedItems<T>(
-	value: unknown,
-	keep: (item: unknown) => item is T,
-): T[] {
-	try {
-		const items: unknown = JSON.parse(String(value ?? "[]"));
-		return Array.isArray(items) ? items.filter(keep) : [];
-	} catch {
-		return [];
-	}
-}
-
-/**
- * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the charges the save
- * filed (read from the database, never from the request), and names the store in the toast; either answer moves on
- * to the next store, with focus on its name.
+ * Not now or Yes on Organize's question (#353). Yes makes the rule on each merchant key of the store's charges in the
+ * category (#532): storeOffer rebuilds them from the store and category the form posts, so nothing else in the request
+ * counts, and a posted list of ids or a name is ignored. Either answer moves on to the next store, with focus on its name.
  */
 organize.post("/transactions/organize/rule", async (c) => {
 	const form = await c.req.formData();
 	const url = new URL(c.req.url);
-	// The skips only: an answer to the question must not carry its category or saved ids back into the question.
+	// The skips only: an answer to the question must not carry its category or store back into the question.
 	const skips = new URLSearchParams(
 		url.searchParams.getAll("skip").map((name) => ["skip", name]),
 	);
 	const next = `/transactions/organize${skips.size ? `?${skips}` : ""}`;
-	const savedIds = postedItems(
-		form.get("saved"),
-		(id): id is number =>
-			typeof id === "number" && Number.isInteger(id) && id > 0,
-	);
-	const categoryId = Number(form.get("category"));
-	const category =
-		Number.isInteger(categoryId) && categoryId > 0
-			? await c.env.DB.prepare(
-					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+	const offer =
+		form.get("answer") === "yes"
+			? await storeOffer(
+					c.env.DB,
+					Number(form.get("store")),
+					Number(form.get("category")),
 				)
-					.bind(categoryId)
-					.first<{ id: number; name: string }>()
 			: null;
-	const ruled =
-		form.get("answer") === "yes" && category && savedIds.length > 0
-			? category
-			: null;
-	const merchant = form.get("merchant")?.toString().trim() ?? "";
-	const written = ruled
+	const written = offer
 		? await setOrganizeRule(
 				c.env.DB,
-				ruled.id,
-				JSON.stringify(savedIds),
-				merchant,
+				offer.categoryId,
+				JSON.stringify(offer.savedIds),
+				offer.merchant,
 				actor(c),
 			)
 		: [];
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
-	// Named only when a rule was written: a group whose charges were filed elsewhere meanwhile makes none.
+	// Named only when a rule was written: a store whose charges were filed elsewhere meanwhile makes none.
 	const trigger: Trigger = {};
-	if (ruled && written.length > 0) {
-		const message = `${merchant || written[0]} is always ${ruled.name} now.`;
+	if (offer && written.length > 0) {
+		const message = `${offer.merchant} is always ${offer.category} now.`;
 		trigger.toast = { message, type: "success" };
 		trigger.announce = message;
 	}
