@@ -12,6 +12,7 @@ import {
 } from "../db/first-tally";
 import type { StepLine } from "../views/tally-steps";
 import {
+	BANK_CONNECTED_SQL,
 	banksHistoryIn,
 	type GateBank,
 	questionsOpen,
@@ -201,10 +202,11 @@ export async function readSetup(
 	if (isSetUp(record)) return null;
 	const { banks, waiting } = await readGateInputs(db);
 	// A connected bank with no stroke one (linked before the first week shipped, in a household with no budgets, so
-	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. markStroke keeps a stroke
-	// already drawn, so this is idempotent.
+	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. The write checks for a
+	// connected bank in the same statement (BANK_CONNECTED_SQL), so a last bank disconnected since the read above draws
+	// nothing. markStroke keeps a stroke already drawn, so this is idempotent.
 	if (banks.length > 0 && record?.strokes.bank === undefined) {
-		await markStroke(db, "bank", today);
+		await markStroke(db, "bank", today, BANK_CONNECTED_SQL);
 		record = await readFirstTally(db);
 	}
 	const total =

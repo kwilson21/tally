@@ -44,6 +44,14 @@ export function questionsOpen(facts: QuestionsFacts): boolean {
 export type GateBank = QuestionsFacts["banks"][number] & { name: string };
 
 /**
+ * True while a bank is connected, as SQL for a write's guard (markStroke): the same predicate readGateInputs reads the banks
+ * with, so a write checked with it draws only while a bank is connected. takeBackBankStrokes checks the same predicate
+ * when the last bank goes, so the draw and the take-back agree.
+ */
+export const BANK_CONNECTED_SQL =
+	"EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL)";
+
+/**
  * What the gate reads besides the record: each connected bank, and what Jev is still owed, counted with the AI switches
  * that decide it. One place, so Home's setup and the gate count the same things.
  */
