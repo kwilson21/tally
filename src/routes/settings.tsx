@@ -76,7 +76,11 @@ import { NewCategoryCard } from "../views/suggestion-card";
 import { AskFirst } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { TimeZoneRow } from "../views/time-zone-row";
-import { neverSuggestedMessage, writeNeverSuggest } from "./suggestions";
+import {
+	askedStores,
+	neverSuggestedMessage,
+	writeNeverSuggest,
+} from "./suggestions";
 
 type App = { Bindings: Env };
 export const settings = new Hono<App>();
@@ -977,35 +981,21 @@ settings.post("/settings/suggestions/:id{[0-9]+}/dismiss", async (c) => {
 	// The question's own answer, posted from the question drawn in the card's place (decision 101).
 	if (form.get("answer")) return answerQuestion(c, id, form);
 	// The No retires the suggestion, and the question asks in the card's place (decisions 101, 120).
-	const item = (await suggestionQueue(db)).find(
-		(candidate) =>
-			candidate.kind === "new_category" && candidate.suggestionId === id,
-	);
 	const result = await dismissSuggestion(db, id);
-	if (result && item?.kind === "new_category")
-		return renderPage(c, "categories", {
-			ask: {
-				suggestionId: id,
-				id: item.id,
-				name: item.name,
-				stores: item.stores.map((store) => ({
-					merchantKey: store.merchantKey,
-					label: store.merchant,
-				})),
-			},
-		});
 	if (!result)
 		return renderPage(c, "categories", {
 			listError:
 				"That suggestion was changed somewhere else. Here's the current list.",
 			status: 404,
 		});
-	return done(
-		c,
-		`Dismissed ${result.name}`,
-		`Dismissed ${result.name}. Tally won't suggest it again.`,
-		{ page: "categories" },
-	);
+	const stores = await askedStores(db, id);
+	if (stores.length > 0)
+		return renderPage(c, "categories", {
+			ask: { suggestionId: id, id: `new-${id}`, name: result.name, stores },
+		});
+	// Nothing is left to ask about, so the toast says only what the No did: the name is never suggested again.
+	const message = `Tally won't suggest ${result.name} again.`;
+	return done(c, message, message, { page: "categories" });
 });
 
 /** After a change: htmx gets the page the change lives on, with a toast and announcement; a plain browser goes there. */

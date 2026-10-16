@@ -4,7 +4,10 @@ import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { createFromSuggestion } from "../db/category-suggestions";
-import { type SuggestionItem, suggestionQueue } from "../db/suggestions-queue";
+import {
+	type NewCategorySuggestion,
+	newCategoryItems,
+} from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -53,13 +56,11 @@ export const organize = new Hono<App>();
 
 /** The waiting new-category suggestion that holds a purchase from this merchant, if there is one (decision 120). */
 function waitingSuggestion(
-	queue: SuggestionItem[],
+	queue: NewCategorySuggestion[],
 	merchantKeys: string[],
-): Extract<SuggestionItem, { kind: "new_category" }> | undefined {
-	return queue.find(
-		(item): item is Extract<SuggestionItem, { kind: "new_category" }> =>
-			item.kind === "new_category" &&
-			item.stores.some((store) => merchantKeys.includes(store.merchantKey)),
+): NewCategorySuggestion | undefined {
+	return queue.find((item) =>
+		item.stores.some((store) => merchantKeys.includes(store.merchantKey)),
 	);
 }
 
@@ -80,7 +81,7 @@ async function renderOrganize(
 	const requestedSkips = params.getAll("skip");
 	const [allGroups, queue, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
-		suggestionQueue(c.env.DB),
+		newCategoryItems(c.env.DB),
 		c.env.DB.prepare(
 			"SELECT id, name, icon, color FROM categories WHERE archived = 0 ORDER BY sort_order, name",
 		).all<Category>(),
@@ -314,11 +315,8 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	const suggestionId = Number(form.get("suggestion"));
 	const url = new URL(c.req.url);
 	const next = `/transactions/organize${url.search}`;
-	const queue = await suggestionQueue(c.env.DB);
-	const item = queue.find(
-		(candidate) =>
-			candidate.kind === "new_category" &&
-			candidate.suggestionId === suggestionId,
+	const item = (await newCategoryItems(c.env.DB)).find(
+		(candidate) => candidate.suggestionId === suggestionId,
 	);
 	const answered = (message: string) => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
@@ -328,8 +326,7 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		);
 		return renderOrganize(c, undefined, 200, true);
 	};
-	if (item?.kind !== "new_category")
-		return answered("That one was already answered.");
+	if (!item) return answered("That one was already answered.");
 	const ids = item.rows.map((row) => row.transactionId);
 	const result = await createFromSuggestion(
 		c.env.DB,

@@ -456,3 +456,14 @@ export async function suggestionQueue(
 	};
 	return ORDER.flatMap((kind) => byKind[kind]);
 }
+
+/**
+ * The waiting new-category suggestions, each with its purchases, for a screen that shows one card of them (decision
+ * 120): Organize's card, which follows Settings' rule. Like Settings' card, it is not gated by Guess categories, so a
+ * suggestion waits until it is answered whatever that switch says; the Suggestions page's queue (suggestionQueue) is gated by it.
+ */
+export async function newCategoryItems(
+	db: D1Database,
+): Promise<NewCategorySuggestion[]> {
+	return (await newCategorySuggestions(db)).map(({ item }) => item);
+}

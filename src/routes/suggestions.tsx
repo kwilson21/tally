@@ -167,6 +167,27 @@ export function neverSuggestedMessage(
 			: `Got it. Tally won't suggest a new category for ${labels} again. Change it in Settings.`;
 }
 
+/**
+ * The stores a No on a suggested new category asks about (decision 101), read once the suggestion is dismissed. It is the
+ * check the question's Yes writes with, so the question and its line can't disagree, and it doesn't read the Suggestions
+ * queue, whose new categories follow Guess categories (decision 79); Settings' card doesn't follow that switch either.
+ */
+export async function askedStores(
+	db: D1Database,
+	id: number,
+): Promise<{ merchantKey: string; label: string }[]> {
+	const { results } = await db
+		.prepare(`SELECT key FROM (${neverSuggestAskedSql("new_category")})`)
+		.bind(id)
+		.all<{ key: string }>();
+	const keys = results.map((row) => row.key);
+	const labels = await storeLabels(db, keys);
+	return keys.map((key) => ({
+		merchantKey: key,
+		label: labels.get(key) ?? key,
+	}));
+}
+
 /** The screen as it is now, with the item to show, and the Band count's words. */
 type ScreenInput = {
 	skipped: string[];

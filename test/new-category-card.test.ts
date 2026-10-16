@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 
 // Decision 120 (P135 A): one suggestion card wherever Tally asks, with one set of answers. Settings' No retires the
@@ -149,6 +150,47 @@ describe("Settings: one card, and No asks in its place", () => {
 				"SELECT COUNT(*) AS n FROM never_suggest_rules WHERE kind = 'new_category'",
 			),
 		).toBe(0);
+	});
+});
+
+describe("the card follows its own rule, not the Suggestions queue's switch", () => {
+	it("No still asks with Guess categories off, since Settings' card is drawn whatever that switch says", async () => {
+		await saveAiSwitches(env.DB, { categories: false });
+		const { html } = await post(
+			`/settings/suggestions/${suggestion}/dismiss`,
+			[],
+		);
+		expect(html).toContain("Don&#39;t suggest Pet Care again for");
+		await saveAiSwitches(env.DB, { categories: true });
+	});
+
+	it("says only that the name is not suggested again when no purchase is left to ask about", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = ?",
+		)
+			.bind(suggestion)
+			.run();
+		const { res, html } = await post(
+			`/settings/suggestions/${suggestion}/dismiss`,
+			[],
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Tally won't suggest Pet Care again.",
+		);
+		expect(html).not.toContain("Dismissed");
+		expect(await count("SELECT COUNT(*) AS n FROM never_suggest_rules")).toBe(
+			0,
+		);
+	});
+
+	it("Organize's card shows with Guess categories off, as Settings' card does", async () => {
+		await saveAiSwitches(env.DB, { categories: false });
+		const { html } = await get("/transactions/organize");
+		expect(html).toContain(
+			"Tally suggested a new category for this and 1 more: Pet Care",
+		);
+		await saveAiSwitches(env.DB, { categories: true });
 	});
 });
 
