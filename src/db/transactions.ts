@@ -1815,7 +1815,7 @@ async function partBills(
 ): Promise<PartPayment[]> {
 	const { results } = await db
 		.prepare(
-			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period,
+			`SELECT bp.id AS paymentId, b.id AS billId, b.name AS name, bp.period AS period, bp.transaction_id AS transactionId,
 			part.amount_cents AS amountCents, part.category_id AS categoryId
 			FROM bill_payments bp JOIN bills b ON b.id = bp.bill_id JOIN transactions part ON part.id = bp.transaction_id
 			WHERE part.parent_id = ? AND bp.status = 'linked' ORDER BY bp.id`,
@@ -1852,10 +1852,14 @@ async function partPlans(
 	return results;
 }
 
-/** A linked payment on a part, with the part's amount and category: what a replacement can keep it by. */
+/**
+ * A linked payment on a part, with the part's amount and category: what a replacement can keep it by. `transactionId` is
+ * the part it was on when read, so a save can tell whether it has since moved (decision 99).
+ */
 type PartPayment = UnpaidBill & {
 	billId: number;
 	paymentId: number;
+	transactionId: number;
 	amountCents: number;
 	categoryId: number | null;
 };
@@ -1949,6 +1953,9 @@ function unpaidBillsFrom(result: D1Result | undefined): UnpaidBill[] {
  * whole change: nothing is written, and `planLinked` says so, since the read never saw that plan where it is and a write
  * would unlink, move or pair it unseen. A plan read on a part and still on it is carried to the new part of its amount
  * and category, as a bill's payment is (decision 99).
+ *
+ * A bill payment on a part that a competing save moved, linked or unlinked since the read refuses the whole change the
+ * same way, and `billLinked` says so: a write would pair it by the values the read saw (#638).
  */
 export async function saveSplit(
 	db: D1Database,
@@ -1960,6 +1967,8 @@ export async function saveSplit(
 	saved: boolean;
 	/** Set (true) only when a plan linked to a part, or moved between parts, after the read refused the change; absent otherwise. */
 	planLinked?: true;
+	/** Set (true) only when a bill payment on a part moved, was linked or was unlinked after the read refused the change; absent otherwise. */
+	billLinked?: true;
 	unlinked: string[];
 	bills: UnpaidBill[];
 	moved: { date: string; part: number }[];
@@ -2161,6 +2170,9 @@ export async function saveSplit(
 	// planned_expenses.amount_cents, so this text is refuseMovedPlan's alone.
 	const movedPlanRefusal =
 		/NOT NULL constraint failed: planned_expenses\.amount_cents/;
+	// The text of refuseMovedBill's failure, as D1 passes it on. No statement in the batch writes bill_payments.bill_id to
+	// NULL (the bill-copying inserts take it from a row), so this text is refuseMovedBill's alone.
+	const movedBillRefusal = /NOT NULL constraint failed: bill_payments\.bill_id/;
 	// Runs before any write. A plan the read didn't see on its part fails this statement (amount_cents is NOT NULL), and D1
 	// rolls the whole batch back, so nothing is written and the catch below says planLinked. RAISE(ABORT) works only inside
 	// a trigger, and no trigger covers this, so the batch is stopped by a NOT NULL failure the catch recognises by its
@@ -2169,8 +2181,26 @@ export async function saveSplit(
 	const refuseMovedPlan = db.prepare(
 		`UPDATE planned_expenses SET amount_cents = NULL WHERE ${plansMovedSinceRead}`,
 	);
+	// The same for a bill payment on a part (#638). A payment the read saw that is no longer linked on its part, or a linked
+	// payment on a part the read didn't see, fails refuseMovedBill, the batch's second statement, since bill_id is NOT NULL.
+	// The count catches a read payment that left its part; the extra check, one linked to a part after the read.
+	const paymentsReadOnTheirPart =
+		payments
+			.map(
+				(payment) =>
+					`(bp.id = ${Number(payment.paymentId)} AND bp.transaction_id = ${Number(payment.transactionId)})`,
+			)
+			.join(" OR ") || "0";
+	const paymentsOnParts = `FROM bill_payments bp JOIN transactions part ON part.id = bp.transaction_id
+		WHERE part.parent_id = ${Number(parentId)} AND bp.status = 'linked'`;
+	const paymentsMovedSinceRead = `(EXISTS (SELECT 1 ${paymentsOnParts} AND NOT (${paymentsReadOnTheirPart}))
+		OR (SELECT COUNT(*) ${paymentsOnParts}) <> ${payments.length})`;
+	const refuseMovedBill = db.prepare(
+		`UPDATE bill_payments SET bill_id = NULL WHERE ${paymentsMovedSinceRead}`,
+	);
 	const statements = [
 		refuseMovedPlan,
+		refuseMovedBill,
 		parkMoved,
 		unlinkLinked,
 		// A person's own Not this one on a part moves onto the purchase before the parts go (decision 105). It runs before
@@ -2230,16 +2260,25 @@ export async function saveSplit(
 		results = await db.batch(statements);
 	} catch (error) {
 		// A NOT NULL failure on planned_expenses.amount_cents (movedPlanRefusal) is refuseMovedPlan's, for a plan that moved
-		// since the read, so it is refused. Any other error is rethrown unchanged.
-		if (!(error instanceof Error && movedPlanRefusal.test(error.message)))
-			throw error;
-		return {
-			saved: false,
-			planLinked: true,
-			unlinked: [],
-			bills: [],
-			moved: [],
-		};
+		// since the read, and one on bill_payments.bill_id (movedBillRefusal) is refuseMovedBill's, for a bill payment that
+		// did. Each is refused. Any other error is rethrown unchanged.
+		if (error instanceof Error && movedPlanRefusal.test(error.message))
+			return {
+				saved: false,
+				planLinked: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			};
+		if (error instanceof Error && movedBillRefusal.test(error.message))
+			return {
+				saved: false,
+				billLinked: true,
+				unlinked: [],
+				bills: [],
+				moved: [],
+			};
+		throw error;
 	}
 	const saved =
 		(results[statements.indexOf(markParent)]?.meta.changes ?? 0) > 0;

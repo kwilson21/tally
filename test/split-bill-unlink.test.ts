@@ -465,6 +465,156 @@ describe("a replaced part keeps its bill payment when its amount and category ar
 	});
 });
 
+describe("a re-split refuses the save when a bill payment moved after the read, and changes nothing (#638)", () => {
+	const KEEP_TWO = [
+		{ categoryId: KIDS, amountCents: 4000 },
+		{ categoryId: GROCERIES, amountCents: 1000 },
+	];
+
+	/** A database whose `batch` is `around` instead of the real one, so a test can race the save's batch. */
+	const batchAround = (
+		around: (statements: D1PreparedStatement[]) => Promise<D1Result[]>,
+	) =>
+		new Proxy(db, {
+			get(target, prop) {
+				if (prop === "batch") return around;
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as unknown as D1Database;
+
+	/** Runs `race` on the database just before the save's batch, as a competing save would, so the save reads first. */
+	const racingWith = (race: string, bind: (number | null)[]) =>
+		batchAround(async (statements) => {
+			await db
+				.prepare(race)
+				.bind(...bind)
+				.run();
+			return db.batch(statements);
+		});
+
+	it("refuses a re-split when a competing save moves a bill payment from one part to another, and writes nothing", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		const before = await partIds(PURCHASE);
+		const racing = racingWith(
+			"UPDATE bill_payments SET transaction_id = ? WHERE bill_id = ? AND status = 'linked'",
+			[PART_GROCERIES, MEMBERSHIP],
+		);
+
+		const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+		expect(result).toEqual({
+			saved: false,
+			billLinked: true,
+			unlinked: [],
+			bills: [],
+			moved: [],
+		});
+		expect(await partIds(PURCHASE)).toEqual(before);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{
+				transactionId: PART_GROCERIES,
+				amountCents: 1000,
+				categoryId: GROCERIES,
+			},
+		]);
+
+		// The retry reads the payment on its part, so the payment takes the new part of its amount and category.
+		const retry = await saveSplit(db, PURCHASE, KEEP_TWO, "test");
+		expect(retry).toEqual({ saved: true, unlinked: [], bills: [], moved: [] });
+		const [, newGroceries] = await partIds(PURCHASE);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: newGroceries, parentId: PURCHASE },
+		]);
+	});
+
+	it("refuses a re-split when a competing save moves a bill payment off its part onto the purchase, and writes nothing", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		const before = await partIds(PURCHASE);
+		const racing = racingWith(
+			"UPDATE bill_payments SET transaction_id = ? WHERE bill_id = ? AND status = 'linked'",
+			[PURCHASE, MEMBERSHIP],
+		);
+
+		const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+		expect(result).toEqual({
+			saved: false,
+			billLinked: true,
+			unlinked: [],
+			bills: [],
+			moved: [],
+		});
+		expect(await partIds(PURCHASE)).toEqual(before);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: PURCHASE, parentId: null },
+		]);
+	});
+
+	it("refuses a re-split when a competing save links a bill payment to a part after the read, and writes nothing", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		const before = await partIds(PURCHASE);
+		const racing = racingWith(
+			"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', ?, 'user', 'linked')",
+			[WATER, PART_GROCERIES],
+		);
+
+		const result = await saveSplit(racing, PURCHASE, KEEP_TWO, "test");
+
+		expect(result).toEqual({
+			saved: false,
+			billLinked: true,
+			unlinked: [],
+			bills: [],
+			moved: [],
+		});
+		expect(await partIds(PURCHASE)).toEqual(before);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: PART_MEMBERSHIP },
+		]);
+		expect(await linkedOn(WATER)).toMatchObject([
+			{ transactionId: PART_GROCERIES },
+		]);
+	});
+
+	it("keeps an ordinary re-split carrying a bill payment, even with a person's Not this one on a part", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		await db
+			.prepare(
+				"INSERT INTO bill_payments (bill_id, period, transaction_id, matched_by, status) VALUES (?, '2026-09', ?, 'user', 'dismissed')",
+			)
+			.bind(WATER, PART_GROCERIES)
+			.run();
+
+		const result = await saveSplit(db, PURCHASE, KEEP_TWO, "test");
+
+		expect(result.saved).toBe(true);
+		expect(result.billLinked).toBeUndefined();
+		const [newMembership] = await partIds(PURCHASE);
+		expect(await linkedOn(MEMBERSHIP)).toMatchObject([
+			{ transactionId: newMembership, amountCents: 4000, categoryId: KIDS },
+		]);
+	});
+
+	it("rethrows a batch failure for another reason while a bill payment also moved, not the bill refusal", async () => {
+		await seedSplit([membershipPart, groceriesPart]);
+		const failure = new Error("D1_ERROR: network connection lost");
+		const racing = batchAround(async () => {
+			await db
+				.prepare(
+					"UPDATE bill_payments SET transaction_id = ? WHERE bill_id = ? AND status = 'linked'",
+				)
+				.bind(PART_GROCERIES, MEMBERSHIP)
+				.run();
+			throw failure;
+		});
+
+		await expect(saveSplit(racing, PURCHASE, KEEP_TWO, "test")).rejects.toBe(
+			failure,
+		);
+	});
+});
+
 describe("Link a payment lists a split change's dismissal, and linking it links it (decision 99)", () => {
 	const BASE = "http://tally.test";
 	const LISTED = 9815;
