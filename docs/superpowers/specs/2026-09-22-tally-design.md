@@ -398,7 +398,7 @@ Things to try lives in Start here, no longer on Home. Every screen has a small "
 | Logging | Never log tokens, secrets, or transaction details. |
 | Plaid access tokens | Encrypted with AES-GCM (Web Crypto) using `TOKEN_ENCRYPTION_KEY` before they're stored. |
 | Backups | D1 Time Travel restores to a point in time. The retention window gets confirmed in Phase 0 and recorded in the README. |
-| Security headers | `X-Frame-Options: DENY`, a strict CSP (no inline scripts; Plaid's CDN allow-listed on the Accounts page and on Home in the family app, decisions 63 and 124), and `SameSite=Lax` on any cookie. |
+| Security headers | `X-Frame-Options: DENY`, a strict CSP (no inline scripts; Plaid's CDN allow-listed, and Plaid Link's inline styles allowed, on the Accounts page and on Home in the family app, decisions 63 and 124), and `SameSite=Lax` on any cookie. |
 | Form posts from other sites | Rejected with 403 unless the browser shows the post came from this site (`Sec-Fetch-Site: same-origin` or a matching `Origin`), using Hono's built-in `csrf` middleware. |
 
 ## 11. Phases

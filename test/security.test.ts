@@ -1,5 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import decisions from "../docs/decisions.md?raw";
+import spec from "../docs/superpowers/specs/2026-09-22-tally-design.md?raw";
 
 describe("security headers", () => {
 	it("denies framing and restricts scripts to our origin", async () => {
@@ -75,5 +77,36 @@ describe("Home in the family app", () => {
 			expect(csp).not.toContain("plaid.com");
 			expect(csp).not.toContain("unsafe-inline");
 		}
+	});
+});
+
+describe("decision and spec records for the Home Plaid allowances", () => {
+	const decisionRows = () =>
+		decisions.split("\n").filter((line) => /^\| \d+ \|/.test(line));
+
+	it("numbers each decision row once, in ascending order", () => {
+		const numbers = decisionRows().map((line) => Number(line.split("|")[1]));
+		expect(numbers.length).toBeGreaterThan(100);
+		expect(new Set(numbers).size).toBe(numbers.length);
+		expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+	});
+
+	it("records the Home Plaid allowances as decision 124, the last row, with inline styles and decision 63", () => {
+		const last = decisionRows().at(-1) ?? "";
+		expect(last.startsWith("| 124 | 2026-10-16 | Home in the family app")).toBe(
+			true,
+		);
+		expect(last).toContain("'unsafe-inline'");
+		expect(last).toContain("decision 63");
+	});
+
+	it("cites decisions 63 and 124 in the spec's Security headers row for Plaid Link's inline styles", () => {
+		const row =
+			spec
+				.split("\n")
+				.find((line) => line.startsWith("| Security headers |")) ?? "";
+		expect(row).toContain("decisions 63 and 124");
+		expect(row).toContain("Plaid Link's inline styles");
+		expect(row).not.toContain("decisions 63 and 123");
 	});
 });
