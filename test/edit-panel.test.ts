@@ -440,3 +440,160 @@ describe("Organize's category sheet uses the same grid (#498)", () => {
 		expect(sheet).not.toContain("flex flex-wrap gap-2");
 	});
 });
+
+/** A closed detail row's summary: its label, its source line when it has one, and its value. */
+const summaryOf = (html: string, id: string) => {
+	const start = html.indexOf(`data-detail-row="${id}"`);
+	return html.slice(start, html.indexOf("</summary>", start));
+};
+const SOURCE_WORDS = /Tally&#39;s guess|From your bank|Your choice/;
+const setDetails = (fields: string) =>
+	env.DB.prepare(`UPDATE transactions SET ${fields} WHERE id = ?`)
+		.bind(bakery)
+		.run();
+
+describe("a category's line says only what Tally did (#688)", () => {
+	it.each([
+		["a person's choice", "user"],
+		["a merchant rule", "merchant_rule"],
+	])("folds %s into its name with no line under it", async (_, source) => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = 'Groceries'), category_source = ?, category_confidence = NULL WHERE id = ?",
+		)
+			.bind(source, bakery)
+			.run();
+		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+		const summary = block.slice(
+			block.indexOf("<summary"),
+			block.indexOf("</summary>"),
+		);
+		expect(summary).toContain("Groceries");
+		expect(summary).not.toContain("text-sm text-muted");
+		expect(block).not.toContain("Your choice");
+	});
+
+	it("keeps Tally's pick and how sure it is under a category Tally picked", async () => {
+		await pickedByTally();
+		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+		expect(block).toContain("Picked by Tally · 92% sure");
+	});
+
+	it("keeps a bill's Why? link under its category", async () => {
+		await env.DB.prepare(
+			"UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = 'Groceries'), category_source = 'bill', category_confidence = NULL WHERE id = ?",
+		)
+			.bind(bakery)
+			.run();
+		const block = categoryBlock((await get(`/transactions/${bakery}`)).html);
+		expect(block).toContain('aria-label="Why? this category"');
+		expect(block).not.toContain("Your choice");
+	});
+});
+
+describe("an empty detail has no source line (#688)", () => {
+	it("draws an empty note, kind and For as Add with no source line, with two household people", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people (id, name) VALUES (2, 'Kids')",
+		).run();
+		await setDetails(
+			"note = NULL, note_guessed = 0, kind = NULL, kind_guessed = 0, for_person_id = NULL, for_person_guessed = 0",
+		);
+		const html = (await get(`/transactions/${bakery}`)).html;
+		for (const id of ["detail-note", "detail-kind", "detail-for"]) {
+			const summary = summaryOf(html, id);
+			expect(summary).toContain(">Add</span>");
+			expect(summary).not.toMatch(SOURCE_WORDS);
+			expect(summary).not.toContain("text-sm text-muted");
+		}
+	});
+
+	it("draws For's placeholder with no source line while there is one household person", async () => {
+		await setDetails("for_person_id = NULL, for_person_guessed = 0");
+		const summary = summaryOf(
+			(await get(`/transactions/${bakery}`)).html,
+			"detail-for",
+		);
+		expect(summary).toContain("Add the people in your household");
+		expect(summary).not.toMatch(SOURCE_WORDS);
+		expect(summary).not.toContain("text-sm text-muted");
+	});
+
+	it("keeps Your choice under a note and a kind a person chose", async () => {
+		await setDetails(
+			"note = 'Coffee with a friend', note_guessed = 0, kind = 'one_off', kind_guessed = 0",
+		);
+		const html = (await get(`/transactions/${bakery}`)).html;
+		expect(summaryOf(html, "detail-note")).toContain("Your choice");
+		expect(summaryOf(html, "detail-kind")).toContain("Your choice");
+	});
+
+	it("keeps Tally's guess and its dashed underline under a guessed note while Fill in details is on", async () => {
+		await saveAiSwitches(env.DB, { details: true });
+		await setDetails("note = 'Coffee with a friend', note_guessed = 1");
+		const summary = summaryOf(
+			(await get(`/transactions/${bakery}`)).html,
+			"detail-note",
+		);
+		expect(summary).toContain("Tally&#39;s guess");
+		expect(summary).toContain("decoration-dashed");
+	});
+
+	it("draws a guess hidden by Fill in details off as Add with no source line and no dashes", async () => {
+		await env.DB.prepare(
+			"INSERT INTO household_people (id, name) VALUES (2, 'Kids')",
+		).run();
+		await setDetails(
+			"note = 'Dinner claim', note_guessed = 1, kind = 'one_off', kind_guessed = 1, for_person_id = 1, for_person_guessed = 1",
+		);
+		const html = (await get(`/transactions/${bakery}`)).html;
+		for (const id of ["detail-note", "detail-kind", "detail-for"]) {
+			const summary = summaryOf(html, id);
+			expect(summary).toContain(">Add</span>");
+			expect(summary).not.toMatch(SOURCE_WORDS);
+			expect(summary).not.toContain("decoration-dashed");
+		}
+	});
+
+	it("draws the name the bank sent as From your bank", async () => {
+		const row = await env.DB.prepare(
+			"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, merchant_name) VALUES ('plaid-lupita', 1, '2026-09-20', 650, 'SQ *LUPITAS TAQ 2210', ?) RETURNING id",
+		)
+			.bind("Lupita's Taqueria")
+			.first<{ id: number }>();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status, display_name) VALUES (?, ?, 'pending', NULL)",
+		)
+			.bind("Lupita's Taqueria", "Lupita's Taqueria")
+			.run();
+		const summary = summaryOf(
+			(await get(`/transactions/${row?.id}`)).html,
+			"detail-name",
+		);
+		expect(summary).toContain("From your bank");
+	});
+
+	it("draws an emptied note from a refused save with no source line, though the saved note was a person's", async () => {
+		await setDetails("note = 'Coffee with a friend', note_guessed = 0");
+		const { res, html } = await post(`/transactions/${bakery}`, {
+			category: "99",
+			name_pick: "own",
+			merchant: "Local Bakery",
+			note: "",
+			back: "/transactions",
+			income: "0",
+			creditReviewed: "0",
+		});
+		expect(res.status).toBe(422);
+		const summary = summaryOf(html, "detail-note");
+		expect(summary).toContain(">Add</span>");
+		expect(summary).not.toMatch(SOURCE_WORDS);
+	});
+});
+
+describe("a bank transaction's panel has no cash fields (#688)", () => {
+	it("draws no Amount or Date for a bank transaction", async () => {
+		const html = (await get(`/transactions/${bakery}`)).html;
+		expect(html).not.toContain('id="cash-edit-amount"');
+		expect(html).not.toContain('id="cash-edit-date"');
+	});
+});

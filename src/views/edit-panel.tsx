@@ -374,8 +374,8 @@ export function CategoryChoice({
 }
 
 /**
- * The line under the category: a bank bill's category keeps its Why? link; Tally's pick and its sureness, Tally's
- * guess, or "Your choice" otherwise. A locked choice shows its "Counts in" line instead (`locked`).
+ * The line under the category: a bank bill's category keeps its Why? link; Tally's pick and its sureness, or Tally's
+ * guess. A person's choice or a merchant rule has no line. A locked choice shows its "Counts in" line instead (`locked`).
  */
 function categorySource(
 	tx: TransactionDetail,
@@ -389,7 +389,6 @@ function categorySource(
 		return `Picked by Tally · ${Math.round(tx.categoryConfidence * 100)}% sure`;
 	if (guessLine && tx.categoryConfidence !== null)
 		return `Tally's guess · ${Math.round(tx.categoryConfidence * 100)}% sure`;
-	if (tx.categorySource === "user") return "Your choice";
 	return undefined;
 }
 
@@ -439,6 +438,13 @@ export function EditSheet({
 				"hx-include": "closest form",
 			}
 		: {};
+	// The For name drawn for the posted choice: none while nothing is chosen (the placeholder asks for the people) or the
+	// person is gone, so their row has no source line either.
+	const forName =
+		values.forPersonId == null
+			? null
+			: (people.find((person) => person.id === values.forPersonId)?.name ??
+				null);
 	const showIncomeGuess = showEditIncomeGuess(tx, values);
 	// Whether the row counts with the review ticked or unticked, read as if Exclude were ticked, income off and no new link
 	// (excludedAfterSave). So it asks only whether the review lifts the exclusion that Exclude stands for, which the
@@ -576,46 +582,6 @@ export function EditSheet({
 					name="displayed_name_guess"
 					value={tx.nameSuggested ? tx.displayName : ""}
 				/>
-				{cashValues && (
-					<>
-						<MoneyInput
-							id="cash-edit-amount"
-							name="amount"
-							label="Amount"
-							value={cashValues.amount}
-							error={errors.amount}
-						/>
-						{/* Its own request, with its own indicator (not Save's), and the panel's fields go with it. htmx 4
-						    sends a button's name and value only with a submit event, so hx-vals carries change_parts. */}
-						{changePartsTotalCents !== undefined && (
-							<Button
-								kind="secondary"
-								type="submit"
-								name="change_parts"
-								value="1"
-								class="w-full"
-								hx-post={`/transactions/${tx.id}`}
-								hx-vals={JSON.stringify({ change_parts: "1" })}
-								hx-target="#page"
-								hx-select="#page"
-								hx-swap="outerHTML"
-								hx-select-oob="#needs-count:innerHTML"
-							>
-								Change the parts
-							</Button>
-						)}
-						<TextInput
-							id="cash-edit-date"
-							name="date"
-							label="Date"
-							type="date"
-							value={cashValues.date}
-							max={today}
-							surface="paper"
-							error={errors.date}
-						/>
-					</>
-				)}
 				<input
 					type="hidden"
 					name="income_was"
@@ -668,6 +634,46 @@ export function EditSheet({
 							: undefined
 					}
 				/>
+				{cashValues && (
+					<>
+						<MoneyInput
+							id="cash-edit-amount"
+							name="amount"
+							label="Amount"
+							value={cashValues.amount}
+							error={errors.amount}
+						/>
+						{/* Its own request, with its own indicator (not Save's), and the panel's fields go with it. htmx 4
+						    sends a button's name and value only with a submit event, so hx-vals carries change_parts. */}
+						{changePartsTotalCents !== undefined && (
+							<Button
+								kind="secondary"
+								type="submit"
+								name="change_parts"
+								value="1"
+								class="w-full"
+								hx-post={`/transactions/${tx.id}`}
+								hx-vals={JSON.stringify({ change_parts: "1" })}
+								hx-target="#page"
+								hx-select="#page"
+								hx-swap="outerHTML"
+								hx-select-oob="#needs-count:innerHTML"
+							>
+								Change the parts
+							</Button>
+						)}
+						<TextInput
+							id="cash-edit-date"
+							name="date"
+							label="Date"
+							type="date"
+							value={cashValues.date}
+							max={today}
+							surface="paper"
+							error={errors.date}
+						/>
+					</>
+				)}
 				{/* An error keeps the section, even when no purchase is offered any more. */}
 				{(refunds.length > 0 || tx.refundOfId != null || errors.refund) && (
 					<details
@@ -797,7 +803,10 @@ export function EditSheet({
 						id="detail-note"
 						label="What it was"
 						value={values.note}
-						source={tx.noteGuessed ? "guess" : "person"}
+						// Keyed off what is drawn, so a refused save's emptied note has no source line.
+						source={
+							values.note ? (tx.noteGuessed ? "guess" : "person") : undefined
+						}
 						guessed={tx.noteGuessed}
 						open={Boolean(errors.note)}
 					>
@@ -837,7 +846,9 @@ export function EditSheet({
 									)[values.kind]
 								: null
 						}
-						source={tx.kindGuessed ? "guess" : "person"}
+						source={
+							values.kind ? (tx.kindGuessed ? "guess" : "person") : undefined
+						}
 						guessed={tx.kindGuessed}
 						open={Boolean(errors.kind)}
 					>
@@ -888,10 +899,15 @@ export function EditSheet({
 								? people.length < 2
 									? "Add the people in your household"
 									: null
-								: (people.find((person) => person.id === values.forPersonId)
-										?.name ?? null)
+								: forName
 						}
-						source={tx.forPersonGuessed ? "guess" : "person"}
+						source={
+							forName === null
+								? undefined
+								: tx.forPersonGuessed
+									? "guess"
+									: "person"
+						}
 						guessed={tx.forPersonGuessed}
 						open={Boolean(errors.forPerson)}
 					>

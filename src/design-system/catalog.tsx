@@ -1015,7 +1015,7 @@ const DETAIL_ROW_SPEC: UseSpecText = {
 	motion:
 		"The chevron turns in 150 ms; reduced motion shows the open state at once.",
 	edges:
-		"An empty detail stays empty until a person fills it. Kind offers Not known, and For offers No one, distinct from Everyone. A missing household list prompts Settings. No JavaScript: native details, labeled fields, chips and the panel form.",
+		"An empty detail stays empty until a person fills it. An empty detail has no source line. Kind offers Not known, and For offers No one, distinct from Everyone. A missing household list prompts Settings. No JavaScript: native details, labeled fields, chips and the panel form.",
 	words:
 		"Name · What it was · Kind · For · Tally's guess · From your bank · Your choice · Looks right.",
 };
@@ -5091,6 +5091,9 @@ function Controls() {
 								))}
 							</div>
 						</DetailRow>
+					</State>
+					<State label="An empty Kind shows Add, with no source line">
+						<DetailRow id="ds-detail-empty-kind" label="Kind" value={null} />
 					</State>
 					<State label="Name the bank sent, and a choice a person kept">
 						<DetailRow

@@ -596,11 +596,20 @@ describe("GET /design-system in the demo", () => {
 		expect(detail).toContain("What it was");
 		expect(detail).toContain("Tally&#39;s guess");
 		expect(detail).toContain("decoration-dashed");
+		// An empty Kind shows Add with no source line, in the catalog and in DESIGN.md (#688).
+		expect(detail).toContain('id="ds-detail-empty-kind"');
+		expect(detail).toContain("An empty detail has no source line.");
 		expect(people).toContain('data-ds-components="HouseholdPeople"');
 		expect(html).toContain("Add a person");
 		expect(html).toContain("Everyone");
 		expect(design).toMatch(
 			/\| DetailRow \|[^\n]*Name, What it was, Kind and For/,
+		);
+		expect(design).toMatch(
+			/\| DetailRow \|[^\n]*An empty detail has no source line\./,
+		);
+		expect(design).toMatch(
+			/Transaction details \(P89 A[^\n]*An empty detail has no source line\./,
 		);
 		expect(design).toMatch(/\| HouseholdPeople \|[^\n]*Everyone/);
 	});

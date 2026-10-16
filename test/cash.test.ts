@@ -3738,6 +3738,54 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		});
 		expect(await rowCount()).toBe(before);
 	});
+
+	it("draws a cash entry's category, then its Amount and Date, then Exclude (#688)", async () => {
+		await request("/transactions/cash", {
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"HX-Request": "true",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams({
+				date: today(),
+				amount: "12.00",
+				merchant: "Panel order",
+				category: "1",
+			}),
+		});
+		const id = await idByName("Panel order");
+		const { html } = await request(`/transactions/${id}`);
+		const at = (needle: string) => html.indexOf(needle);
+		expect(at('id="edit-category"')).toBeGreaterThan(-1);
+		expect(at('id="edit-category"')).toBeLessThan(at('id="cash-edit-amount"'));
+		expect(at('id="cash-edit-amount"')).toBeGreaterThan(-1);
+		expect(at('id="cash-edit-amount"')).toBeLessThan(at('id="cash-edit-date"'));
+		expect(at('id="cash-edit-date"')).toBeLessThan(at('id="edit-exclude"'));
+	});
+
+	it("draws a refused split cash entry's Change the parts between its Amount and Date, after its category (#688)", async () => {
+		const { id } = await splitCash("Panel parts");
+		const { html } = await post(`/transactions/${id}`, [
+			["date", today()],
+			["amount", "100.00"],
+			["back", "/transactions"],
+		]);
+		const at = (needle: string) => html.indexOf(needle);
+		expect(at('id="edit-category"')).toBeGreaterThan(-1);
+		expect(at('id="edit-category"')).toBeLessThan(at('id="cash-edit-amount"'));
+		expect(at('name="change_parts"')).toBeGreaterThan(-1);
+		expect(at('id="cash-edit-amount"')).toBeLessThan(at('name="change_parts"'));
+		expect(at('name="change_parts"')).toBeLessThan(at('id="cash-edit-date"'));
+		expect(at('id="cash-edit-date"')).toBeLessThan(at('id="edit-exclude"'));
+	});
+
+	it("draws no Amount or Date for a split cash part", async () => {
+		const { a } = await splitCash("Panel part");
+		const { html } = await request(`/transactions/${a}`);
+		expect(html).not.toContain('id="cash-edit-amount"');
+		expect(html).not.toContain('id="cash-edit-date"');
+	});
 });
 
 describe("a bank transaction split into parts", () => {
