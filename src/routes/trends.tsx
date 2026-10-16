@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { loadTrends } from "../db/trends";
 import { buildTrends } from "../trends";
@@ -18,7 +19,7 @@ trends.get("/trends", async (c) => {
 			title="Trends · Tally"
 			active="trends"
 			demo={c.env.DEMO === "true"}
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 		>
 			<TrendsScreen page={page} />
 		</Layout>,

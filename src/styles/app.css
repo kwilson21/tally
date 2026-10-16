@@ -36,6 +36,8 @@
 @theme {
 	--font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 	--font-serif: "Newsreader", Georgia, serif;
+	/* The key chips only (decision 118): a system monospace stack, no web font. */
+	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
 	--color-paper: #fbf8f2;
 	--color-band: #efebe3;
@@ -407,6 +409,43 @@ html:not(.js) [data-money-js] {
 .due-row:has(select[name="frequency"] option[value="yearly"]:checked)
 	.due-month {
 	display: flex;
+}
+
+/*
+ * The first page's answer (P125 E, decision 114). The reply's own ledger line rises in (first-line-new): a fade and a 4 px
+ * rise over the rising token. The reply's own notebook stroke (first-stroke-new) is drawn in pencil over the rising token,
+ * then inked over the confirm token. Reduced motion shows the end state.
+ */
+@keyframes ledger-rise {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+@keyframes stroke-draw {
+	from {
+		stroke-dashoffset: 36;
+	}
+}
+@keyframes stroke-ink {
+	from {
+		stroke: var(--color-muted);
+	}
+}
+.first-line-new {
+	animation: ledger-rise var(--duration-rising) ease-out;
+}
+.first-stroke-new {
+	stroke-dasharray: 36;
+	animation:
+		stroke-draw var(--duration-rising) ease-out,
+		stroke-ink var(--duration-confirm) linear var(--duration-rising) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+	.first-line-new,
+	.first-stroke-new {
+		animation: none;
+	}
 }
 
 /*

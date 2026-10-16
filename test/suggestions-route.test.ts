@@ -1727,7 +1727,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		);
 		const res = await answer(
 			{ id: `income-${credit}`, answer: "yes" },
-			racing("UPDATE transactions SET flag_income = 1", () =>
+			racing("UPDATE transactions SET flag_income = ?", () =>
 				reviewAsNotIncome(credit),
 			),
 		);
@@ -1775,7 +1775,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 		);
 		const res = await answer(
 			{ id: `income-${credit}`, answer: "yes" },
-			racing("UPDATE transactions SET flag_income = 1", () =>
+			racing("UPDATE transactions SET flag_income = ?", () =>
 				db
 					.prepare(
 						"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
@@ -1973,7 +1973,7 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 			);
 			const res = await answer(
 				{ id: `income-${credit}`, answer: "yes" },
-				racing("UPDATE transactions SET flag_income = 1", () =>
+				racing("UPDATE transactions SET flag_income = ?", () =>
 					moveGuess("income_confidence", credit, confidence),
 				),
 			);

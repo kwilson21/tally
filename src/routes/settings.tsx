@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
+import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdTimeZone, householdToday, todayIn } from "../dates";
 import { type AiTallyCounts, readAiTally } from "../db/ai-log";
@@ -316,7 +317,7 @@ function settingsPage(
 		<Layout
 			title={`${title} · Tally`}
 			active="settings"
-			currentPath={c.req.path + new URL(c.req.url).search}
+			currentPath={addressOf(c)}
 			demo={c.env.DEMO === "true"}
 		>
 			{body}

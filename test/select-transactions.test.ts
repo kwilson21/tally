@@ -1696,7 +1696,8 @@ describe("select several transactions", () => {
 			);
 			expect(html).toMatch(/id="selected-count"[^>]*>3 selected</);
 			expect(html).not.toContain("not on this page");
-			expect(html).not.toContain("<details");
+			// The keys' details under How this works (decision 118) is the page's only disclosure.
+			expect(html.match(/<details/g)).toHaveLength(1);
 		});
 
 		it("counts the unticked rows out, and says how many ticks are not on this page", async () => {

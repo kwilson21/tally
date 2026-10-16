@@ -45,24 +45,22 @@ const FREE =
 const OWN_OR_FREE = `(lower(trim(name))=lower(trim(?)) OR ${FREE})`;
 
 /**
- * Adds a bill. False, with nothing written, when an active bill already has its name. Its merchant text
- * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1). Its
- * first `bill_amounts` row is this month's (the household's), so the amount applies from this month on.
- * `added_on` is the day it was added (decision 99): the household's today, or the day the caller has.
+ * The two statements of an add, in order: the bill, which writes nothing when an active bill already has its name,
+ * then its first `bill_amounts` row. Returned, not run, so a caller can put its own statement between them in one
+ * batch (keepBills records each kept bill there). The bill is the first statement, so its changes are the add's.
+ * `added_on` is the day it was added (decision 99), and the row is this month's (the household's), so the amount
+ * applies from this month on.
  */
-export async function insertBill(
+export function insertBillStatements(
 	db: D1Database,
 	f: BillFields,
-	/** The household's day (YYYY-MM-DD) when the caller has it; read here otherwise. */
-	today?: string,
-): Promise<boolean> {
-	const day = today ?? (await householdToday(db));
+	day: string,
+): [D1PreparedStatement, D1PreparedStatement] {
 	const at = day.slice(0, 7);
-	// One batch, so the bill and its first row land together or not at all. The row goes to whichever active
-	// bill has the new name and no row yet. That is only the bill just added, because every bill has a row
-	// (from migration 0044's backfill, from insertBill, and from the demo reset). The same rule keeps a refused
-	// add from giving its namesake a row, since the namesake already has one.
-	const [added] = await db.batch([
+	// The row goes to whichever active bill has the new name and no row yet. That is only the bill just added, because
+	// every bill has a row (from migration 0044's backfill, from insertBill, and from the demo reset). The same rule
+	// keeps a refused add from giving its namesake a row, since the namesake already has one.
+	return [
 		db
 			.prepare(
 				`INSERT INTO bills(name,amount_cents,due_day,frequency,anchor_month,anchor_date,category_id,merchant_raw_name,merchant_raw_text,added_on)
@@ -88,7 +86,22 @@ export async function insertBill(
 				   AND NOT EXISTS (SELECT 1 FROM bill_amounts WHERE bill_id=bills.id)`,
 			)
 			.bind(at, f.amountCents, f.name),
-	]);
+	];
+}
+
+/**
+ * Adds a bill. False, with nothing written, when an active bill already has its name. Its merchant text
+ * is a key, not the bank's raw text from before Phase 3.5, so `merchant_raw_text` is 0 (spec §6.1).
+ */
+export async function insertBill(
+	db: D1Database,
+	f: BillFields,
+	/** The household's day (YYYY-MM-DD) when the caller has it; read here otherwise. */
+	today?: string,
+): Promise<boolean> {
+	const day = today ?? (await householdToday(db));
+	// One batch, so the bill and its first row land together or not at all.
+	const [added] = await db.batch(insertBillStatements(db, f, day));
 	return (added?.meta.changes ?? 0) > 0;
 }
 

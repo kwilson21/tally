@@ -3928,7 +3928,8 @@ describe("GET /design-system/proposals, P128 (the keyboard shortcuts list)", () 
 			expect(at, name).toEqual([...at].sort((x, y) => x - y));
 			expect(more, name).toMatch(/<details class="group">/);
 			expect(more, name).not.toMatch(/<details class="group"[^>]*\sopen\b/);
-			expect(more, name).not.toContain("Show these keys");
+			// Closed, the ledger is still in the markup (the details reads without the script); the browser hides it.
+			expect(more, name).toContain("Show these keys");
 			expect(more.slice(0, more.indexOf("<h1")), name).toContain(
 				'href="/feedback"',
 			);
