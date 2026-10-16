@@ -156,13 +156,20 @@ function press(key: string, modifiers: Partial<Record<string, boolean>> = {}) {
 	};
 }
 
-/** The keyboard for a page and window, with the page's own keydown and htmx settle as the browser sends them. */
+/** htmx's htmx:after:request for a request whose ctx.target is the node given, as the browser sends it (cancelable). */
+function requestEvent(target: FakeNode | null) {
+	return { detail: { ctx: { target } }, preventDefault: vi.fn() };
+}
+
+/** The keyboard for a page and window, with the page's own keydown, htmx settle and request events as the browser sends them. */
 function setup(page: FakePage, win = windowFor()) {
 	const keys = keyboard(page, win);
 	return {
 		win,
 		keydown: (event: ReturnType<typeof press>) => keys.keydown(event),
 		settled: () => keys.settled(),
+		responded: (event: ReturnType<typeof requestEvent>) =>
+			keys.responded(event),
 	};
 }
 
@@ -379,6 +386,58 @@ describe("? (the keys sheet)", () => {
 			"",
 			"/transactions#budget",
 		);
+	});
+});
+
+describe("a keys response that comes after another sheet opened (htmx:after:request)", () => {
+	it("is thrown away when a sheet outside #keys opened while it loaded", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, responded } = setup(page);
+		keydown(press("?", { shiftKey: true }));
+		el(page, "section", { "data-sheet": "" }, page.body);
+		const event = requestEvent(region);
+		responded(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+	});
+
+	it("is kept when the keys sheet itself closes, since its sheet is inside #keys", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		el(page, "section", { "data-sheet": "" }, region);
+		const { responded } = setup(page);
+		const event = requestEvent(region);
+		responded(event);
+		expect(event.preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("is kept with no sheet open, and for a request that does not target #keys", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const elsewhere = el(page, "div", { id: "elsewhere" });
+		const { responded } = setup(page);
+		const none = requestEvent(region);
+		responded(none);
+		expect(none.preventDefault).not.toHaveBeenCalled();
+		el(page, "section", { "data-sheet": "" }, page.body);
+		const other = requestEvent(elsewhere);
+		responded(other);
+		expect(other.preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("leaves focus alone when the sheet that opened meanwhile closes", () => {
+		const page = new FakePage();
+		const [first] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, responded, settled } = setup(page);
+		page.activeElement = first;
+		keydown(press("?", { shiftKey: true }));
+		const other = el(page, "section", { "data-sheet": "" }, page.body);
+		responded(requestEvent(region));
+		settled();
+		remove(page, other);
+		settled();
+		expect(first.focusCount).toBe(0);
 	});
 });
 

@@ -71,6 +71,13 @@ export function keyboard(doc, win) {
 		armed = true;
 	}
 
+	/** Forgets the keys' return: what opened the sheet, the fragment it kept, and that a sheet was seen open. */
+	function forget() {
+		armed = false;
+		returnTo = null;
+		keptHash = "";
+	}
+
 	/** Moves focus to the row j or k goes to: from the row focus is on, one down or up, stopping at the ends. */
 	function moveRow(key, active) {
 		const rows = rowsOf(doc);
@@ -151,9 +158,7 @@ export function keyboard(doc, win) {
 			// A settle with no sheet open ends the keys' return: it was the close, or nothing ever opened (a failed request).
 			const back = armed ? returnTo : null;
 			const fragment = armed ? keptHash : "";
-			armed = false;
-			returnTo = null;
-			keptHash = "";
+			forget();
 			// The close's address has no fragment, so the page's own goes back on. replaceState keeps htmx's state and
 			// neither scrolls nor adds a history entry.
 			if (fragment && !win.location.hash)
@@ -164,6 +169,19 @@ export function keyboard(doc, win) {
 				);
 			if (back?.isConnected) back.focus();
 		},
+		/**
+		 * A keys response is thrown away when a sheet outside #keys opened while it loaded: its swap would put the keys
+		 * sheet over that one. htmx returns before the swap when htmx:after:request is cancelled, so no address is pushed
+		 * either. The keys sheet's own close is kept, since its sheet is inside #keys.
+		 */
+		responded(event) {
+			const target = event.detail?.ctx?.target;
+			if (target?.id !== "keys") return;
+			const sheet = openSheet(doc);
+			if (!sheet || target.contains(sheet)) return;
+			event.preventDefault();
+			forget();
+		},
 	};
 }
 
@@ -172,4 +190,7 @@ if (typeof document !== "undefined") {
 	const keys = keyboard(document, window);
 	document.addEventListener("keydown", (event) => keys.keydown(event));
 	document.addEventListener("htmx:after:settle", () => keys.settled());
+	document.addEventListener("htmx:after:request", (event) =>
+		keys.responded(event),
+	);
 }
