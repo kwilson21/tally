@@ -118,6 +118,26 @@ describe("the category leads the panel (P120 B)", () => {
 		expect(block).toContain('class="grid grid-cols-2 gap-2"');
 	});
 
+	it("names the saved category's source only while the posted choice is that category", async () => {
+		await pickedByTally();
+		const ids = await env.DB.prepare(
+			"SELECT (SELECT id FROM categories WHERE name = 'Gas') AS gas, (SELECT id FROM categories WHERE name = 'Groceries') AS groceries",
+		).first<{ gas: number; groceries: number }>();
+		// Another choice posted (a redraw after a refused save): the row shows it, and says nothing about the saved pick.
+		const other = await post(`/transactions/${bakery}/category/lock`, {
+			category: String(ids?.gas),
+			back: "/transactions",
+		});
+		expect(other.html).toContain("Gas");
+		expect(other.html).not.toContain("Picked by Tally");
+		// The saved category posted again keeps its source line.
+		const same = await post(`/transactions/${bakery}/category/lock`, {
+			category: String(ids?.groceries),
+			back: "/transactions",
+		});
+		expect(same.html).toContain("Picked by Tally · 92% sure");
+	});
+
 	it("opens the folded row when New category is chosen", async () => {
 		await pickedByTally();
 		const { html } = await post(`/transactions/${bakery}/category/lock`, {

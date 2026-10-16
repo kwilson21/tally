@@ -4288,11 +4288,14 @@ function Controls() {
 				</State>
 				<State label="Exclude ticked on a row Tally could guess again: the Rename list shows, This one only ticked, and the re-guess note stays hidden until Exclude is unticked">
 					<div class="group/edit flex max-w-xl flex-col gap-3">
-						<div class="flex flex-wrap gap-2">
-							<Chip type="checkbox" name="excluded" value="1" checked>
-								Exclude from budget
-							</Chip>
-						</div>
+						<Switch
+							id="ds-rename-excluded-switch"
+							name="excluded"
+							value="1"
+							label="Exclude from budget"
+							hint="It won't count in Spent or any budget."
+							checked
+						/>
 						<NameChoices
 							id="ds-rename-excluded"
 							radioName="ds-rename-excluded"

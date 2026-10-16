@@ -191,33 +191,44 @@ export function CategoryChoice({
 }) {
 	// The two categories Jev named, when this trip looks mixed (#233): the line and its split name them.
 	const mixed = mixedCategories(tx);
-	// Tally's guess waits as a dashed chip, the grid's first cell, and its line sits under the legend.
-	const guessChip =
+	// Tally's guess waits unsure: its line sits under the legend, and when it names a category its dashed chip is the
+	// grid's first cell.
+	const unsureGuess =
 		!purchase &&
 		tx.categorySource !== "jev" &&
-		tx.maybeCategoryName &&
+		Boolean(tx.maybeCategoryName) &&
 		!tx.maybeCategoryNew &&
-		tx.suggestedCategoryId !== null &&
-		tx.suggestedCategoryName &&
+		Boolean(tx.suggestedCategoryName) &&
 		tx.categoryConfidence !== null &&
 		tx.categoryConfidence < JEV_THRESHOLD;
-	const guessLine =
-		!purchase &&
-		tx.categorySource !== "jev" &&
-		tx.maybeCategoryName &&
-		!tx.maybeCategoryNew &&
-		tx.suggestedCategoryName &&
-		tx.categoryConfidence !== null &&
-		tx.categoryConfidence < JEV_THRESHOLD;
+	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
 	const chosen = categories.find((cat) => cat.id === values.categoryId);
-	const needsCategory = tx.categoryId === null || Boolean(guessChip);
+	const needsCategory = tx.categoryId === null || guessChip;
 	// Folded once it has one (or New category is chosen, which the row says); open by itself on an error or New category.
 	const folded =
 		!purchase && !needsCategory && (chosen !== undefined || values.newCategory);
 	const openFolded = Boolean(
 		errors.category || errors.newCategory || values.newCategory,
 	);
-	const source = categorySource(tx, Boolean(guessLine), purchase !== undefined);
+	// The line says how the saved category was settled. A redraw after a refused save with another choice posted says
+	// nothing about the saved one, so the line goes unless the posted choice is the saved category or Tally's guess.
+	const savedChoice =
+		!values.newCategory &&
+		(values.categoryId === tx.categoryId ||
+			(guessChip && values.categoryId === tx.suggestedCategoryId));
+	const source = savedChoice
+		? categorySource(tx, unsureGuess, purchase !== undefined)
+		: undefined;
+	const choiceValue: Child = values.newCategory ? (
+		<span class="text-accent">New category</span>
+	) : (
+		chosen && (
+			<>
+				<CategoryIcon icon={chosen.icon} color={chosen.color} />
+				<span class="truncate text-lg">{chosen.name}</span>
+			</>
+		)
+	);
 	const choices = (
 		<>
 			<CategoryGrid
@@ -281,19 +292,8 @@ export function CategoryChoice({
 				<FoldedRow
 					label="Category"
 					open={openFolded}
-					sub={values.newCategory ? undefined : source}
-					value={
-						values.newCategory ? (
-							<span class="text-accent">New category</span>
-						) : (
-							chosen && (
-								<>
-									<CategoryIcon icon={chosen.icon} color={chosen.color} />
-									<span class="truncate text-lg">{chosen.name}</span>
-								</>
-							)
-						)
-					}
+					sub={source}
+					value={choiceValue}
 				>
 					<fieldset
 						class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}

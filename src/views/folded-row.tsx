@@ -31,7 +31,9 @@ export function FoldedRow({
 					<span class="text-muted">{label}</span>
 				</span>
 				{value && (
-					<span class="col-start-2 row-span-2 row-start-1 flex min-w-0 justify-self-end">
+					<span
+						class={`col-start-2 row-start-1 flex min-w-0 justify-self-end ${sub ? "row-span-2" : ""}`}
+					>
 						<span class="ml-auto flex min-w-0 items-center gap-2">{value}</span>
 					</span>
 				)}
@@ -42,7 +44,7 @@ export function FoldedRow({
 				)}
 				<Icon
 					name="chevron-right"
-					class="col-start-3 row-span-2 row-start-1 size-5 shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none"
+					class={`col-start-3 row-start-1 size-5 shrink-0 text-muted transition-transform group-open:rotate-90 motion-reduce:transition-none ${sub ? "row-span-2" : ""}`}
 				/>
 			</summary>
 			{children && <div class="pb-3">{children}</div>}
