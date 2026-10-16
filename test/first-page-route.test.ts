@@ -357,6 +357,7 @@ describe("Yes and No writes", () => {
 		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]).toEqual({
 			answer: "yes",
 			deposits: merchant.deposits,
+			at: 0,
 		});
 		const rows = await db
 			.prepare(
@@ -413,6 +414,59 @@ describe("Yes and No writes", () => {
 		expect((await readFirstTally(db))?.pay?.["ACME CORP PAYROLL"]?.answer).toBe(
 			"yes",
 		);
+	});
+
+	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		let raced = false;
+		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
+		const racing = new Proxy(db, {
+			get(target, prop) {
+				if (prop === "batch" && !raced) {
+					return async (statements: D1PreparedStatement[]) => {
+						raced = true;
+						await txn({
+							raw_name: "ACME CORP PAYROLL",
+							date: daysBefore(TODAY, 7),
+							amount_cents: -245000,
+							flag_income: 1,
+							plaid_category: "INCOME",
+						});
+						return target.batch(statements);
+					};
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const res = await app(false, racing).fetch("/first-page/pay", {
+			method: "POST",
+			redirect: "manual",
+			headers: { "content-type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				merchant: "ACME CORP PAYROLL",
+				answer: "yes",
+			}).toString(),
+		});
+		expect(res.status).toBe(303);
+		const late = await db
+			.prepare(
+				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' AND date = ?",
+			)
+			.bind(daysBefore(TODAY, 7))
+			.first<{ flag_income: number; income_source: string | null }>();
+		expect(late).toEqual({ flag_income: 1, income_source: null });
+		const answered = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE raw_name = 'ACME CORP PAYROLL' AND income_source = 'user'",
+			)
+			.first<{ n: number }>();
+		expect(answered?.n).toBe(2);
+		const record = await readFirstTally(db);
+		expect(record?.pay?.["ACME CORP PAYROLL"]?.deposits).toHaveLength(2);
+		expect(record?.strokes.pay).toBeUndefined();
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("ACME CORP PAYROLL paying");
 	});
 });
 
@@ -675,6 +729,33 @@ describe("the answer's motion", () => {
 		// The ledger is in the order each merchant was first answered: Zed was answered first, though its name sorts after Acme's.
 		expect(html.indexOf("Pay · Zed Co")).toBeLessThan(
 			html.indexOf("Pay · Acme Corp"),
+		);
+	});
+
+	it("keeps the answer order for a numeric merchant key, which JSON lists first", async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp'), ('1234', 'Bistro 1234')",
+			)
+			.run();
+		await deposits("ACME CORP", 245000, 2);
+		await deposits("1234", 9000, 2);
+		await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP", answer: "yes" },
+			true,
+		);
+		const { html } = await post(
+			"/first-page/pay",
+			{ merchant: "1234", answer: "yes" },
+			true,
+		);
+		expect(html).toMatch(
+			/class="py-2 text-ink first-line-new">Pay · Bistro 1234,/,
+		);
+		expect(html).not.toMatch(/first-line-new">Pay · Acme Corp/);
+		expect(html.indexOf("Pay · Acme Corp")).toBeLessThan(
+			html.indexOf("Pay · Bistro 1234"),
 		);
 	});
 });

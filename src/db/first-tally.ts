@@ -27,11 +27,15 @@ export type NightCounts = {
 /** The pay step's answer for one merchant: Yes, it's the family's pay, or No, it isn't (spec §8.8). */
 export type PayAnswer = "yes" | "no";
 
+/** One pay answer as given: the answer, and the deposits it covered (the ones the question asked about, which a Yes marked as income). */
+export type PayAnswerRecord = { answer: PayAnswer; deposits: PayDeposit[] };
+
 /**
- * One pay answer as recorded: the answer, and the deposits it covered (the ones the question asked about, which a Yes
- * marked as income). The ledger reads those deposits, so a change made later elsewhere adds nothing to the line.
+ * One pay answer as recorded: that answer, and `at`, the merchant's place in the order the merchants were first answered
+ * (0 for the first; a merchant answered again keeps its place). The ledger reads the deposits, so a change made later
+ * elsewhere adds nothing to the line, and it sorts the lines by `at`.
  */
-export type PayRecord = { answer: PayAnswer; deposits: PayDeposit[] };
+export type PayRecord = PayAnswerRecord & { at: number };
 
 /** What the bills step kept: how many bills, and their monthly total in cents, added to as each bill is kept. */
 export type BillsKept = { kept: number; cents: number };
@@ -46,7 +50,7 @@ export type FirstTally = {
 	budgets: Record<string, BudgetAnswer>;
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
-	/** The pay step's answers so far, by merchant key (the store's raw name); a merchant answered again keeps the newest. */
+	/** The pay step's answers so far, by merchant key (the store's raw name); a merchant answered again keeps the newest answer and its place (`at`). */
 	pay?: Record<string, PayRecord>;
 	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
 	bills?: BillsKept;
@@ -128,17 +132,20 @@ export async function keepNightCounts(
  * lands only when that UPDATE changed rows (`WHERE changes() > 0`), so a stale answer that changes nothing leaves the
  * record as the first answer set it, and the record and the flags always agree. The merchant's key is bound as a
  * value and merged with json_patch, not written into a JSON path, so a bank text with a quote in it is safe; json_patch
- * also creates `pay` on a record that has none yet.
+ * also creates `pay` on a record that has none yet. `at` is the merchant's place: the next one (the merchants already
+ * answered, which are never removed) for a merchant new to the record, and the place it already has for one answered again.
  */
 export function payAnswerStatement(
 	db: D1Database,
 	merchant: string,
-	record: PayRecord,
+	record: PayAnswerRecord,
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json(?3)))) WHERE changes() > 0
-			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json(?3))))`,
+			`INSERT INTO household_settings (key, value) SELECT ?1, json_patch('${EMPTY_RECORD}', json_object('pay', json_object(?2, json_set(json(?3), '$.at', 0)))) WHERE changes() > 0
+			ON CONFLICT(key) DO UPDATE SET value = json_patch(value, json_object('pay', json_object(?2, json_set(json(?3), '$.at', COALESCE(
+				(SELECT json_extract(p.value, '$.at') FROM json_each(household_settings.value, '$.pay') AS p WHERE p.key = ?2),
+				(SELECT COUNT(*) FROM json_each(household_settings.value, '$.pay')))))))`,
 		)
 		.bind(KEY, merchant, JSON.stringify(record));
 }

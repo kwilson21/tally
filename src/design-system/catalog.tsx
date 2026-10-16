@@ -6260,6 +6260,7 @@ const FIRST_WEEK_PAY = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
 	deposits: FIRST_WEEK_PAY_DEPOSITS,
+	ids: FIRST_WEEK_PAY_DEPOSITS.map((_, i) => i + 1),
 };
 const FIRST_WEEK_PAY_LINE = "Pay · Acme Corp, $2,450 every other Friday";
 const FIRST_WEEK_CHARGES: BillSuggestion[] = [

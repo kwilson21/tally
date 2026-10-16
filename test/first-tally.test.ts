@@ -7,7 +7,7 @@ import {
 	keepBudgetAnswer,
 	keepNightCounts,
 	markStroke,
-	type PayRecord,
+	type PayAnswerRecord,
 	payAnswerStatement,
 	readFirstTally,
 	STROKES,
@@ -26,7 +26,7 @@ const stored = async () =>
  * A pay answer's batch as answerPay writes it: the answer's own change, then the record behind it. The stand-in change
  * is an UPDATE of the record's row, which changes one row whenever the record exists (each test writes one first).
  */
-const payBatch = (merchant: string, record: PayRecord) =>
+const payBatch = (merchant: string, record: PayAnswerRecord) =>
 	db.batch([
 		db.prepare(
 			"UPDATE household_settings SET value = value WHERE key = 'first_tally'",
@@ -157,10 +157,12 @@ describe("the pay answers' record (P125 E)", () => {
 			'ACME "CORP"': {
 				answer: "yes",
 				deposits: [{ date: "2026-10-01", cents: 245000 }],
+				at: 0,
 			},
 			"SIDE GIG": {
 				answer: "yes",
 				deposits: [{ date: "2026-10-01", cents: 245000 }],
+				at: 1,
 			},
 		});
 	});
@@ -169,8 +171,34 @@ describe("the pay answers' record (P125 E)", () => {
 		await markStroke(db, "bank", null);
 		await payBatch("ACME CORP", { answer: "no", deposits: [] });
 		expect((await readFirstTally(db))?.pay).toEqual({
-			"ACME CORP": { answer: "no", deposits: [] },
+			"ACME CORP": { answer: "no", deposits: [], at: 0 },
 		});
+	});
+
+	it("keeps a merchant's place in the order first answered, and a re-answer keeps it, a numeric key included", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await payBatch("ACME CORP", {
+			answer: "yes",
+			deposits: [{ date: "2026-10-01", cents: 245000 }],
+		});
+		await payBatch("1234", {
+			answer: "yes",
+			deposits: [{ date: "2026-10-02", cents: 9000 }],
+		});
+		await payBatch("ACME CORP", { answer: "no", deposits: [] });
+		const pay = (await readFirstTally(db))?.pay;
+		expect(pay?.["ACME CORP"]).toEqual({ answer: "no", deposits: [], at: 0 });
+		expect(pay?.["1234"]?.at).toBe(1);
+	});
+
+	it("gives a key with a quote in it the next place, since no key is ever put in a JSON path", async () => {
+		await markStroke(db, "bank", "2026-10-10");
+		await payBatch("ACME CORP", { answer: "no", deposits: [] });
+		await payBatch('ACME "CORP"', {
+			answer: "yes",
+			deposits: [{ date: "2026-10-01", cents: 245000 }],
+		});
+		expect((await readFirstTally(db))?.pay?.['ACME "CORP"']?.at).toBe(1);
 	});
 
 	it("writes no record for an answer whose own change touched no row", async () => {

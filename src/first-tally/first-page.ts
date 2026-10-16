@@ -1,8 +1,8 @@
 // The question page's data (P125 E, spec §8.8, decision 114): what the family's own bank shows, which pay and bills are
 // still to ask, and the ledger of what they answered. A reload asks only what is still open. The ledger reads what the
-// answers recorded in first_tally (each pay answer with the deposits it covered, and the bills step's kept count and
-// total), so a change made elsewhere, in the Transactions panel or on Bills, adds no line. The strokes never overwrite
-// a stroke's first day (markStroke).
+// answers recorded in first_tally (each pay answer with the deposits it covered, in the order its merchant was first
+// answered, and the bills step's kept count and total), so a change made elsewhere, in the Transactions panel or on
+// Bills, adds no line. The strokes never overwrite a stroke's first day (markStroke).
 
 import { type BillSuggestion, loadBillSuggestions } from "../bills/find";
 import { matchBillPayments } from "../bills/match";
@@ -32,6 +32,8 @@ export type PayMerchant = {
 	/** The name the family sees: the merchant's own name, or its key tidied. */
 	name: string;
 	deposits: PayDeposit[];
+	/** The transaction ids the question covers, which the answer changes. */
+	ids: number[];
 };
 
 /** The connected banks' lines, before any answer: the head lines (spec §8.8, the first page's muted lines). */
@@ -59,11 +61,12 @@ export type FirstPageModel = {
 };
 
 /** The money in Tally marked as income that nobody has decided, one row per deposit the pay questions cover (payAskedSql). */
-const PAY_SQL = `SELECT ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date, -t.amount_cents AS cents
+const PAY_SQL = `SELECT t.id AS id, ${merchantKeySql("t")} AS key, m.display_name AS displayName, t.date AS date, -t.amount_cents AS cents
 	FROM transactions t LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}
 	WHERE ${payAskedSql("t")}`;
 
 type PayRow = {
+	id: number;
 	key: string;
 	displayName: string | null;
 	date: string;
@@ -81,18 +84,21 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 			key: row.key,
 			name: row.displayName || tidyName(row.key),
 			deposits: [],
+			ids: [],
 		};
 		merchant.deposits.push({ date: row.date, cents: row.cents });
+		merchant.ids.push(row.id);
 		byKey.set(row.key, merchant);
 	}
 	return [...byKey.values()];
 }
 
 /**
- * Yes and No on a merchant's money in: each row the question covers is marked income or not, as the person's choice
- * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). The answer is recorded in the
- * same batch, with the deposits the question asked about (`merchant.deposits`, read just before this write). Returns the
- * rows changed (0 when the merchant has nothing left to ask).
+ * Yes and No on a merchant's money in: each row the question showed is marked income or not, as the person's choice
+ * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). Only those rows change
+ * (`merchant.ids`), and the answer is recorded in the same batch, with the deposits the question asked about. So a
+ * deposit that arrives between the question and the answer stays unanswered and is asked next. Returns the rows changed
+ * (0 when the merchant has nothing left to ask).
  */
 export async function answerPay(
 	db: D1Database,
@@ -103,9 +109,9 @@ export async function answerPay(
 	const [changed] = await db.batch([
 		db
 			.prepare(
-				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")} AND ${merchantKeySql("transactions")} = ?`,
+				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")} AND transactions.id IN (SELECT value FROM json_each(?))`,
 			)
-			.bind(answer === "yes" ? 1 : 0, who, merchant.key),
+			.bind(answer === "yes" ? 1 : 0, who, JSON.stringify(merchant.ids)),
 		payAnswerStatement(db, merchant.key, {
 			answer,
 			deposits: merchant.deposits,
@@ -146,17 +152,20 @@ export async function bankHead(db: D1Database): Promise<BankHead | null> {
 }
 
 /**
- * The ledger lines of the pay answers (first_tally's `pay`), in the order each merchant was first answered (a merchant
- * answered again keeps its place): "Pay · {Merchant}, …" for a Yes, from the deposits that Yes covered, as recorded
- * with the answer, so a deposit marked later in the Transactions panel adds nothing. A No writes no line.
+ * The ledger lines of the pay answers (first_tally's `pay`), in the order each merchant was first answered: the record's
+ * `at`, not the object's key order, which puts a numeric key first. A merchant answered again keeps its place.
+ * "Pay · {Merchant}, …" for a Yes, from the deposits that Yes covered, as recorded with the answer, so a deposit marked
+ * later in the Transactions panel adds nothing. A No writes no line.
  */
 async function payLedger(
 	db: D1Database,
 	pay: Record<string, PayRecord> | undefined,
 ): Promise<string[]> {
-	const yeses = Object.entries(pay ?? {}).filter(
-		([, record]) => record.answer === "yes" && record.deposits.length > 0,
-	);
+	const yeses = Object.entries(pay ?? {})
+		.filter(
+			([, record]) => record.answer === "yes" && record.deposits.length > 0,
+		)
+		.sort(([, a], [, b]) => a.at - b.at);
 	if (yeses.length === 0) return [];
 	const { results } = await db
 		.prepare(
