@@ -138,11 +138,16 @@ function windowFor(search = "", hash = "") {
 	};
 }
 
-/** Takes a node out of the page, as a swap does when it replaces the sheet. */
+/**
+ * Takes a node out of the page, as a swap does when it replaces the sheet. As a browser does, focus on a removed node
+ * (or inside one) goes to the body.
+ */
 function remove(page: FakePage, node: FakeNode) {
 	const parent = node.parentElement;
 	if (parent) parent.children.splice(parent.children.indexOf(node), 1);
 	page.nodes.splice(page.nodes.indexOf(node), 1);
+	if (page.activeElement.ancestry().includes(node))
+		page.activeElement = page.body;
 }
 
 /** A key press, as a keydown event: no modifiers unless the test sets them. */
@@ -664,6 +669,113 @@ describe("a keys response that comes after another sheet opened (htmx:after:requ
 		remove(page, other);
 		settled(settleEvent(sheetRegion));
 		expect(first.focusCount).toBe(0);
+	});
+});
+
+describe("a history restore that takes the keys sheet away (the browser's Back)", () => {
+	// A Back to a page without the sheet redraws the body: the sheet and its opener are gone, and the page's <main> and
+	// heading are drawn again. The body's settle is the sheet's close, and focus then goes to the heading.
+	it("focuses the page's heading when the opener is gone, and forgets the return", () => {
+		const page = new FakePage();
+		const [first] = list(page);
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("", "#budget");
+		const { keydown, settled } = setup(page, win);
+		page.activeElement = first;
+		keydown(press("?", { shiftKey: true }));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		remove(page, first);
+		const main = el(page, "main", { id: "main" });
+		const heading = el(page, "h1", {}, main);
+		settled(settleEvent(page.body));
+		expect(page.activeElement).toBe(heading);
+		expect(heading.getAttribute("tabindex")).toBe("-1");
+		// The return is forgotten, so a later settle of #keys moves focus nowhere.
+		const focuses = heading.focusCount;
+		settled(settleEvent(region));
+		expect(heading.focusCount).toBe(focuses);
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+	});
+
+	it("focuses the heading when the opener was an Undo whose toast left the page while the sheet was open", () => {
+		const page = new FakePage();
+		const toasts = el(page, "div", { id: "toasts" });
+		const undo = el(page, "button", { "aria-keyshortcuts": "u" }, toasts);
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, settled } = setup(page);
+		page.activeElement = undo;
+		keydown(press("?", { shiftKey: true }));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, undo);
+		const main = el(page, "main", { id: "main" });
+		const heading = el(page, "h1", {}, main);
+		remove(page, sheet);
+		settled(settleEvent(region));
+		expect(page.activeElement).toBe(heading);
+		expect(heading.getAttribute("tabindex")).toBe("-1");
+	});
+
+	it("leaves focus where it is when the sheet was opened from the body, and does not focus the heading", () => {
+		const page = new FakePage();
+		const region = el(page, "div", { id: "keys" });
+		const { keydown, settled } = setup(page);
+		keydown(press("?", { shiftKey: true }));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		remove(page, sheet);
+		const main = el(page, "main", { id: "main" });
+		const heading = el(page, "h1", {}, main);
+		settled(settleEvent(page.body));
+		expect(page.activeElement).toBe(page.body);
+		expect(heading.focusCount).toBe(0);
+	});
+
+	it("moves no focus on a history restore when no keys sheet was ever opened", () => {
+		const page = new FakePage();
+		const [first] = list(page);
+		el(page, "div", { id: "keys" });
+		const win = windowFor("", "#budget");
+		const { settled } = setup(page, win);
+		page.activeElement = first;
+		remove(page, first);
+		const main = el(page, "main", { id: "main" });
+		const heading = el(page, "h1", {}, main);
+		settled(settleEvent(page.body));
+		expect(page.activeElement).toBe(page.body);
+		expect(heading.focusCount).toBe(0);
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+	});
+
+	it("changes nothing on a body or another region's settle while the keys sheet is open, and a later close still gives focus back", () => {
+		const page = new FakePage();
+		const [, second] = list(page);
+		const syncRegion = el(page, "div", { id: "sync" });
+		const region = el(page, "div", { id: "keys" });
+		const win = windowFor("", "#budget");
+		const { keydown, settled } = setup(page, win);
+		page.activeElement = second;
+		keydown(press("?", { shiftKey: true }));
+		const sheet = el(page, "section", { "data-sheet": "" }, region);
+		settled(settleEvent(region));
+		const main = el(page, "main", { id: "main" });
+		const heading = el(page, "h1", {}, main);
+		settled(settleEvent(page.body));
+		settled(settleEvent(syncRegion));
+		expect(page.activeElement).toBe(second);
+		expect(heading.focusCount).toBe(0);
+		expect(win.history.replaceState).not.toHaveBeenCalled();
+		remove(page, sheet);
+		win.location.hash = "";
+		settled(settleEvent(region));
+		expect(second.focusCount).toBe(1);
+		expect(win.history.replaceState).toHaveBeenCalledWith(
+			{ htmx: true },
+			"",
+			"/transactions#budget",
+		);
 	});
 });
 

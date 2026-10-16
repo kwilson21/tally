@@ -3,10 +3,12 @@
 // opens the row focus is on (Enter already does, on a link), ← and → go to the previous and next month on Home, and u
 // presses the Undo of the toast on screen. Shift is part of ? and of / and nothing else. No key acts while focus is in
 // a field, with Ctrl, Alt or Cmd held, or while a sheet is open (sheet.js owns the keys then). The sheet keeps the
-// page's #fragment, and a keys response that arrives after another sheet opened is dropped. Only a swap of #keys moves
-// the sheet's return, and a keys request that ends without a swap gives focus back (to Undo) and forgets it. Without
-// this script every page works as a plain page: the keys are a details at the foot, and More lists them. Pages say
-// what they can do with data attributes and aria-keyshortcuts; this script only reads them.
+// page's #fragment, and a keys response that arrives after another sheet opened is dropped. A swap of #keys moves the
+// sheet's return, and so does a history restore (Back) that redraws the page without the sheet: that counts as the
+// close, and when the opener is gone, focus goes to the page's heading. A keys request that ends without a swap gives
+// focus back (to Undo) and forgets it. Without this script every page works as a plain page: the keys are a details at
+// the foot, and More lists them. Pages say what they can do with data attributes and aria-keyshortcuts; this script
+// only reads them.
 
 const FIELD = "input, textarea, select, [contenteditable]";
 // The row a person opens, marked on transaction, Home's category and bill rows. Only a link can take focus, so a
@@ -62,8 +64,10 @@ export function rowsOf(doc) {
 /**
  * The keys for one page. `doc` is the document and `win` the window (its location, and htmx for the keys sheet). The
  * sheet's close returns focus to whatever opened it, once htmx has swapped the sheet away: `settled` is htmx's
- * after-settle, and it acts only on a swap of #keys, after the sheet has been seen open. `ended` is htmx's
- * finally-request, and clears the return when a keys request ends without a swap.
+ * after-settle, and it acts on a swap of #keys or of a region that holds it, after the sheet has been seen open. A
+ * history restore (Back) that redraws the page without the sheet counts as the close, and when the opener is gone,
+ * focus goes to the page's heading. `ended` is htmx's finally-request, and clears the return when a keys request ends
+ * without a swap.
  */
 export function keyboard(doc, win) {
 	let returnTo = null;
@@ -83,6 +87,17 @@ export function keyboard(doc, win) {
 		armed = false;
 		returnTo = null;
 		keptHash = "";
+	}
+
+	/** Focuses the page's heading: the first h1 in #main, or else #main, as toast.js's focusHeading does. */
+	function focusHeading() {
+		const main = doc.getElementById("main");
+		if (!main) return;
+		const heading =
+			[...doc.querySelectorAll("h1")].find((h1) => main.contains(h1)) ?? main;
+		if (!heading.hasAttribute("tabindex"))
+			heading.setAttribute("tabindex", "-1");
+		heading.focus();
 	}
 
 	/** Moves focus to the row j or k goes to: from the row focus is on, one down or up, stopping at the ends. */
@@ -160,14 +175,17 @@ export function keyboard(doc, win) {
 			}
 		},
 		settled(event) {
-			// Only a swap of #keys opens or closes the sheet, so another request's settle (Sync now, a row's sheet)
-			// leaves the return alone.
-			if (event?.target?.id !== "keys") return;
-			if (openSheet(doc)) {
-				armed = true;
+			// A settle of #keys, or of a region that holds it (a history restore swaps the body, which holds #keys), is the
+			// keys sheet's swap. Another request's settle (Sync now, a row's sheet) leaves the return alone.
+			const region = doc.getElementById("keys");
+			if (!region || !event?.target?.contains?.(region)) return;
+			const sheet = openSheet(doc);
+			if (sheet) {
+				// Only the keys sheet's own open arms the return; a different sheet's settle changes nothing.
+				if (region.contains(sheet)) armed = true;
 				return;
 			}
-			// A #keys settle with no sheet open ends the keys' return: it was the close (a failed request is ended(), below).
+			// A settle with no sheet open ends the keys' return: it was the close (a failed request is ended(), below).
 			const back = armed ? returnTo : null;
 			const fragment = armed ? keptHash : "";
 			forget();
@@ -179,7 +197,11 @@ export function keyboard(doc, win) {
 					"",
 					win.location.pathname + win.location.search + fragment,
 				);
+			// When the opener is gone (a Back redrew the page, or an Undo left its toast), focus goes to the page's heading,
+			// but only from nothing, as ended() gives it back.
 			if (back?.isConnected) back.focus();
+			else if (back && (doc.activeElement === doc.body || !doc.activeElement))
+				focusHeading();
 		},
 		/** A keys request that ends with no swap forgets the return, and refocuses its opener if focus is on nothing. */
 		ended(event) {
