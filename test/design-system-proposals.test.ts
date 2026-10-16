@@ -396,7 +396,9 @@ describe("GET /design-system/proposals", () => {
 				id === "p133-month-dots" ||
 				id === "p134-settings" ||
 				id === "p135-suggestions" ||
-				id === "p136-bills-totals";
+				id === "p136-bills-totals" ||
+				id === "p137-rules-fold" ||
+				id === "p138-payment-list";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -414,6 +416,7 @@ describe("GET /design-system/proposals", () => {
 			];
 			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P133 decision 121, and P136 option A decision 122.
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
+			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
@@ -451,7 +454,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(91);
+		expect(DECIDED.length).toBe(93);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -495,7 +498,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-12)).toBe(entry);
+		expect(DECIDED.at(-14)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -504,7 +507,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-11)).toBe(entry);
+		expect(DECIDED.at(-13)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -520,7 +523,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-10)).toBe(entry);
+		expect(DECIDED.at(-12)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -529,7 +532,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-9)).toBe(entry);
+		expect(DECIDED.at(-11)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -542,10 +545,10 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-8)).toBe(entry);
+		expect(DECIDED.at(-10)).toBe(entry);
 	});
 
-	it("keeps P125 to P136 in proposal order, P136 last, so a later decision can't move them", () => {
+	it("keeps P125 to P138 in proposal order, so a later decision can't move them", () => {
 		const order = [
 			"P125 ·",
 			"P126 ·",
@@ -559,6 +562,8 @@ describe("GET /design-system/proposals", () => {
 			"P134 ·",
 			"P135 ·",
 			"P136 ·",
+			"P137 ·",
+			"P138 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
@@ -583,7 +588,7 @@ describe("GET /design-system/proposals", () => {
 		expect(suggestions?.outcome).toContain("(decision 120).");
 	});
 
-	it("lists P136 as decided with issue 602, decision 122 and option A, last in the list", () => {
+	it("lists P136 as decided with issue 602, decision 122 and option A, before P137 and P138", () => {
 		const entry = DECIDED.find((d) => d.title.startsWith("P136 ·"));
 		expect(entry?.title).toBe("P136 · What Bills' section totals count");
 		expect(entry?.issue).toBe(602);
@@ -595,7 +600,26 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"up to two bills by name, then “and N more”",
 		);
-		expect(DECIDED.at(-1)).toBe(entry);
+		expect(DECIDED.at(-3)).toBe(entry);
+	});
+
+	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 last", () => {
+		const rules = DECIDED.find((d) => d.title.startsWith("P137 ·"));
+		expect(rules?.title).toBe("P137 · How Tally works' exact rules");
+		expect(rules?.issue).toBe(644);
+		expect(rules?.outcome).toContain(
+			"Option A: each section's exact rules fold under its diagram and worked example",
+		);
+		expect(rules?.outcome).toContain("(decision 126).");
+		const payments = DECIDED.find((d) => d.title.startsWith("P138 ·"));
+		expect(payments?.title).toBe("P138 · Link a payment's list");
+		expect(payments?.issue).toBe(645);
+		expect(payments?.outcome).toContain(
+			"Option A: Link a payment on a plan's and a bill's page shows the five closest charges as rows",
+		);
+		expect(payments?.outcome).toContain("(decision 126).");
+		expect(DECIDED.at(-2)).toBe(rules);
+		expect(DECIDED.at(-1)).toBe(payments);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -3449,14 +3473,20 @@ describe("GET /design-system/proposals, P136 (what Bills' section totals count, 
 	const UPCOMING_LINE = "Includes Daycare&#39;s Fridays on Oct 23 and 30";
 	const PAID_LINE = "Includes Daycare&#39;s Fridays on Oct 2 and 9";
 
-	it("sits first among the Picked sections, straight after the page's intro and before P128, titled and dated as the brief asks", async () => {
+	it("sits straight after the follow-ups' Picked section, and before P128, titled and dated as the brief asks", async () => {
 		const html = await drawn();
-		const intro = html.indexOf("Back to the design system");
+		const open = html.indexOf(
+			'<section aria-labelledby="followups-picks-title" class="mt-12">',
+		);
 		const start = html.indexOf(
 			'<section aria-labelledby="p136-title" class="mt-12">',
 		);
-		expect(start).toBeGreaterThan(intro);
-		expect(html.slice(intro, start)).not.toContain("<section ");
+		expect(open).toBeGreaterThan(-1);
+		expect(start).toBeGreaterThan(open);
+		// The follow-ups' section holds only its two drawings (P137 and P138, #644 and #645); nothing else sits before P136.
+		expect(html.slice(open + 1, start)).not.toContain(
+			'<section aria-labelledby="',
+		);
 		expect(start).toBeLessThan(
 			html.indexOf('<section aria-labelledby="p128-title" class="mt-12">'),
 		);
@@ -5138,7 +5168,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("lists P130 to P133 as the decided entries before P134, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-7, -3);
+		const last = DECIDED.slice(-9, -5);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",
@@ -5252,7 +5282,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(markup, "Skip").toContain(">Skip</a>");
 	};
 
-	it("opens the Picked list with P136's section, then P130 to P133's, then the audit's section, ahead of P128, P129, P127 and P126, titled and dated as the brief asks", async () => {
+	it("opens the Picked list with the follow-ups' section, then P136's, then P130 to P133's, then the audit's section, ahead of P128, P129, P127 and P126, titled and dated as the brief asks", async () => {
 		const html = await drawn();
 		const top = html.indexOf(">Proposals</h1>");
 		const p136 = html.indexOf('<section aria-labelledby="p136-title"');
@@ -5270,9 +5300,17 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Nothing sits between the intro and P136's section. Between P136's section and the audit's, the only section drawn with
+		// Nothing sits between the intro and the follow-ups' section (P137 and P138, #644 and #645), and between it and P136 only
+		// its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
-		expect(html.slice(top, p136)).not.toContain("<section ");
+		const open = html.indexOf(
+			'<section aria-labelledby="followups-picks-title" class="mt-12">',
+		);
+		expect(open).toBeGreaterThan(top);
+		expect(html.slice(top, open)).not.toContain("<section ");
+		expect(html.slice(open + 1, p136)).not.toContain(
+			'<section aria-labelledby="',
+		);
 		expect(picked).toBeGreaterThan(p136);
 		expect(audit).toBeGreaterThan(picked);
 		expect(
@@ -6016,5 +6054,472 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(block(html, "p134-settings")).not.toContain("<script");
 		expect(block(html, "p135-suggestions")).not.toContain("<script");
 		expect(audit(html)).not.toContain("<script");
+	});
+});
+
+describe("GET /design-system/proposals, the picked follow-ups of the second audit (P137 and P138, #644 and #645, decision 126)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const count = (text: string, part: string) => text.split(part).length - 1;
+	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
+	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+	// The eight rules of How Tally works' Budget and safe to spend, read from the live page: each <li> of its first
+	// list, with the whitespace the JSX leaves between its lines collapsed. A reworded rule fails here, not in the drawing.
+	const liveRules = async () => {
+		const page = (await get("/how-it-works")).html;
+		const budget = page.slice(
+			page.indexOf('<section id="budget"'),
+			page.indexOf('<section id="transactions"'),
+		);
+		const list = budget.slice(budget.indexOf("<ul "), budget.indexOf("</ul>"));
+		return [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) =>
+			(m[1] ?? "").replace(/\s+/g, " ").trim(),
+		);
+	};
+	const labelsOf = (chunk: string) =>
+		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map((m) => m[1]);
+
+	const RULE_NAMES = [
+		"Budget.",
+		"Spent.",
+		"Left.",
+		"Income.",
+		"Cash.",
+		"Safe to spend.",
+		"Planned.",
+		"Daily amount.",
+	];
+	const P137_TODAY = "Today";
+	const P137_A = "A · The rules fold under the picture";
+	const P137_B = "B · Each rule named, folded";
+	const P138_TODAY = "Today";
+	const P138_A = "A · The closest five as rows, then Show all";
+	const P138_B = "B · The closest five, and a search over all of them";
+	// The closest five charges, in the picker's order (planPaymentCandidates sorts by the amount's distance from $90).
+	const FIVE = [
+		"Mario&#39;s Pizza",
+		"Olive Garden",
+		"Trader Joe&#39;s",
+		"Chevron",
+		"Shell",
+	];
+	// A payment row's label, as PaymentRow draws it (Select mode's mark and focus ring; & is escaped in the HTML).
+	const PAYMENT_ROW =
+		'<label class="group relative flex min-h-11 cursor-pointer items-center gap-4 py-2 text-ink has-[:focus-visible]:[&amp;_.selection-mark]:outline-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&amp;_.selection-mark]:outline-accent">';
+	// The desktop sidebar's links for the two pages these pictures name: the current one in accent, the rest in ink.
+	const SIDEBAR = (href: string, color: "text-accent" | "text-ink") =>
+		`href="${href}" class="flex min-h-11 items-center gap-3 rounded-control px-2 text-lg no-underline ${color}"`;
+
+	it("opens the list with a Picked section for P137 and P138, dated Oct 16 with decision 126, ahead of P136", async () => {
+		const html = await drawn();
+		expect(html).toContain(
+			'<h2 id="followups-picks-title" class="font-serif text-3xl font-semibold">Picked: from the second design audit, the rules and the payment list</h2>',
+		);
+		expect(html).toContain(
+			"Drawn Oct 16. The owner&#39;s picks, marked Picked, are decision 126: P137 A, P138 A.",
+		);
+		expect(html).not.toContain('aria-labelledby="open-followups-title"');
+		expect(html).not.toContain(
+			"Open: from the second design audit, the rules and the payment list",
+		);
+		const picks = html.indexOf(
+			'<section aria-labelledby="followups-picks-title" class="mt-12">',
+		);
+		const p137 = html.indexOf('<section id="p137-rules-fold"');
+		const p138 = html.indexOf('<section id="p138-payment-list"');
+		expect(picks).toBeGreaterThan(-1);
+		expect(p137).toBeGreaterThan(picks);
+		expect(p138).toBeGreaterThan(p137);
+		expect(p138).toBeLessThan(
+			html.indexOf('<section aria-labelledby="p136-title" class="mt-12">'),
+		);
+	});
+
+	it("marks option A as the one Picked on P137 and P138, and today and B carry no Picked pill", async () => {
+		const html = await drawn();
+		for (const [id, a] of [
+			["p137-rules-fold", P137_A],
+			["p138-payment-list", P138_A],
+		] as const) {
+			const chunk = block(html, id);
+			expect(count(chunk, ">Picked<"), id).toBe(1);
+			expect(
+				optionPicks(chunk)
+					.filter((option) => option.picked)
+					.map((option) => option.name),
+				id,
+			).toEqual([a]);
+		}
+	});
+
+	it("records decision 126 in the decisions file between 124 and 127, with both picks, the Not picked options and the Why", () => {
+		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
+		const row =
+			rows.find((line) =>
+				line.startsWith(
+					"| 126 | 2026-10-16 | The owner's picks from the second audit's follow-ups",
+				),
+			) ?? "";
+		expect(row).not.toBe("");
+		expect(rows.indexOf(row)).toBeGreaterThan(
+			rows.findIndex((line) => line.startsWith("| 124 | ")),
+		);
+		expect(rows.indexOf(row)).toBeLessThan(
+			rows.findIndex((line) => line.startsWith("| 127 | ")),
+		);
+		for (const text of [
+			"**P137 A (#644):**",
+			"**P138 A (#645):**",
+			"Not picked: P137 B (each rule named) and P138 B (a search box).",
+			'in a closed "The exact rules" details with its rule count',
+		])
+			expect(row, text).toContain(text);
+		expect(
+			row.endsWith(
+				"| The picture and your own numbers answer first; the likely payment is in the first five. |",
+			),
+		).toBe(true);
+	});
+
+	it("puts decision 126's picks in the spec: §9's diagram and example before the rule, §6.1's picker, and Planned one-time expenses", () => {
+		expect(spec).toContain(
+			'Each section\'s diagram and worked example come before its rule, and the rule\'s exact words fold under them in a closed "The exact rules" details that gives the rule count ("The exact rules · 8 rules"); the words stay this spec\'s (decision 126, P137 A, #644).',
+		);
+		expect(spec).toContain(
+			'It shows the five closest as rows with the transaction row\'s look, each a 44px radio, then "Show all N charges", which opens the rest in the same order (decision 126, P138 A, #645).',
+		);
+		expect(spec).toContain(
+			', shown as §6.1\'s picker shows them, the five closest as rows, then "Show all N charges" (decision 126)',
+		);
+	});
+
+	it("corrects decision 127's early-November sentence in place, and the spec's copy of it, to the seven-day handoff (decision 62)", () => {
+		const rows = decisions.split("\n").filter((line) => line.startsWith("| "));
+		const row = rows.find((line) => line.startsWith("| 127 | ")) ?? "";
+		expect(row).toContain(
+			"unless the bill's row already shows that occurrence, as a monthly, yearly or quarterly bill's row does from seven days before it's due (decision 62)",
+		);
+		expect(row).not.toContain("shows under November. Which month");
+		expect(spec).toContain(
+			"unless the bill's row already shows it, as a monthly, yearly or quarterly bill's row does from seven days before it's due",
+		);
+		expect(spec).not.toContain("counts under November; when a heading's");
+	});
+
+	it("draws P137 as one specimen, titled and sentenced over 390 and 1280 px", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		expect(chunk).toContain('<section id="p137-rules-fold"');
+		expect(chunk).toContain("P137 · How Tally works: the exact rules fold");
+		expect(chunk).toContain(
+			"The Budget and safe to spend section of How Tally works, today and with its eight rules folded under the picture, at 390 and 1280 px.",
+		);
+	});
+
+	it("draws today, A and B, each at 390 px and at 1280 px, with A and B drawn closed and then opened", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		const [today = "", a = "", b = ""] = options(chunk);
+		expect(options(chunk)).toHaveLength(3);
+		expect(today).toContain(P137_TODAY);
+		expect(a).toContain(P137_A);
+		expect(b).toContain(P137_B);
+		expect(labelsOf(today)).toEqual([
+			"Today at 390 px, on a phone",
+			"Today at 1280 px, on desktop",
+		]);
+		for (const name of [P137_A, P137_B]) {
+			const option = name === P137_A ? a : b;
+			expect(labelsOf(option)).toEqual([
+				`${name}, closed at 390 px, on a phone`,
+				`${name}, closed at 1280 px, on desktop`,
+				`${name}, opened at 390 px, on a phone`,
+				`${name}, opened at 1280 px, on desktop`,
+			]);
+		}
+	});
+
+	it("keeps the eight rules word for word, as the live page says them, in today's picture and in A's and B's opened ones", async () => {
+		const rules = await liveRules();
+		expect(rules).toHaveLength(8);
+		const chunk = block(await drawn(), "p137-rules-fold");
+		// Today's list shows each rule at 390 and at 1280 px. A's and B's folds hold the same list in the DOM whether
+		// shut or open (FoldedRow keeps its contents in place, as Settings' folds do), so each rule appears in both states.
+		const [today = "", a = "", b = ""] = options(chunk);
+		for (const rule of rules) {
+			expect(count(today, rule)).toBe(2);
+			expect(count(a, rule)).toBe(4);
+			expect(count(b, rule)).toBe(4);
+		}
+	});
+
+	it("folds A's rules under the picture: a closed details named The exact rules with its count, then opened", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		const [, a = ""] = options(chunk);
+		const cut = a.indexOf(`${P137_A}, opened at 390 px`);
+		expect(cut).toBeGreaterThan(-1);
+		const closed = a.slice(0, cut);
+		const opened = a.slice(cut);
+		// The fold is FoldedRow's details: closed in one picture, open in the other, with the count in muted words.
+		expect(count(closed, '<details class="group border-b border-rule">')).toBe(
+			2,
+		);
+		expect(count(closed, "The exact rules")).toBe(2);
+		expect(count(closed, "8 rules")).toBe(2);
+		expect(
+			count(opened, '<details class="group border-b border-rule" open="">'),
+		).toBe(2);
+		expect(count(opened, "The exact rules")).toBe(2);
+		expect(count(opened, "8 rules")).toBe(2);
+	});
+
+	it("names each rule in B's fold: the summary lists them, and each opened rule starts with its name in semibold", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		const [, , b = ""] = options(chunk);
+		const cut = b.indexOf(`${P137_B}, opened at 390 px`);
+		expect(cut).toBeGreaterThan(-1);
+		expect(
+			count(
+				b,
+				"The exact rules: budget, spent, left, income, cash, Safe to spend, planned, daily amount",
+			),
+		).toBe(4);
+		for (const name of RULE_NAMES)
+			expect(
+				count(b.slice(cut), `<span class="font-semibold">${name}</span>`),
+			).toBe(2);
+	});
+
+	it("gives each option its note: the page's height on a phone today and with the fold closed, and A's and B's cost and why", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		const [today = "", a = "", b = ""] = options(chunk);
+		expect(today).toContain(
+			"A Why? lands here and meets eight rules before the picture.",
+		);
+		expect(today).toContain("On a phone the page is 14,456px today.");
+		// The closed fold's height is estimated: today's measured page, less the rules list and its margin, plus the closed
+		// fold as the drawing measures it at 390 px (49px for A's one line, 89px for B's named summary, which wraps).
+		expect(a).toContain(
+			"On a phone the page is 14,456px today, and about 13,829px with the fold closed (estimated).",
+		);
+		expect(b).toContain(
+			"On a phone the page is 14,456px today, and about 13,869px with the fold closed (estimated).",
+		);
+		expect(a).toContain(
+			"The picture and your own numbers answer first; the spec&#39;s words are one tap away.",
+		);
+		expect(a).toContain(
+			"Trade-off: One details per section, nine in all; no words change.",
+		);
+		expect(a).toContain(
+			"Why: Since P130 A every Why? lands on a section, so its first lines have to answer.",
+		);
+		expect(b).toContain(
+			"The fold says what&#39;s inside before it&#39;s opened.",
+		);
+		expect(b).toContain(
+			"Trade-off: A short name for each of about 45 rules, kept beside the spec&#39;s words.",
+		);
+		expect(b).toContain(
+			"Why: Someone after one rule finds it without reading eight.",
+		);
+	});
+
+	it("draws P138 as one specimen, titled and sentenced over 390 and 1280 px", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		expect(chunk).toContain('<section id="p138-payment-list"');
+		expect(chunk).toContain("P138 · Link a payment: the closest few as rows");
+		expect(chunk).toContain(
+			"A plan&#39;s own page, /plans/1 (Lawn service, $90), at its payment picker, at 390 and 1280 px.",
+		);
+	});
+
+	it("draws today's picker with all 20 charges as radio chips at both sizes, and its note counts them and gives the phone height", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [today = ""] = options(chunk);
+		expect(today).toContain(P138_TODAY);
+		expect(count(today, 'name="transaction_id"')).toBe(40);
+		expect(count(today, 'type="radio"')).toBe(40);
+		expect(today).toContain(
+			"20 chips, 1,680px on a phone, as the page draws them now.",
+		);
+		expect(labelsOf(today)).toEqual([
+			"Today at 390 px, on a phone",
+			"Today at 1280 px, on desktop",
+		]);
+	});
+
+	it("draws A's closest five as rows in the picker's order, before Show all 20 charges, and the other fifteen inside the fold", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, a = ""] = options(chunk);
+		const closed = a.slice(0, a.indexOf(`${P138_A}, closed at 1280 px`));
+		const head = closed.slice(0, closed.indexOf("Show all 20 charges"));
+		expect(count(head, 'name="transaction_id"')).toBe(5);
+		expect(count(head, PAYMENT_ROW)).toBe(5);
+		let last = -1;
+		for (const name of FIVE) {
+			const at = head.indexOf(name);
+			expect(at, name).toBeGreaterThan(last);
+			last = at;
+		}
+		// Closed, the picture has the five rows and the fold's summary; the fifteen rows sit inside the closed details.
+		expect(count(closed, 'name="transaction_id"')).toBe(20);
+		expect(count(closed, '<details class="group border-b border-rule">')).toBe(
+			1,
+		);
+		// Opened, the fold shows its fifteen rows after the summary, with the same radio and label markup.
+		const opened = a.slice(
+			a.indexOf(`${P138_A}, opened at 390 px`),
+			a.indexOf(`${P138_A}, opened at 1280 px`),
+		);
+		expect(count(opened, 'name="transaction_id"')).toBe(20);
+		expect(
+			count(opened, '<details class="group border-b border-rule" open="">'),
+		).toBe(1);
+		expect(a).toContain(
+			"The likely payment is in the first five; the rest are one tap away.",
+		);
+		expect(a).toContain(
+			"Trade-off: The picker&#39;s rows reuse TransactionRow&#39;s look; one details; no new route. A bill&#39;s picker keeps “You said not this one” last, inside the fold.",
+		);
+		expect(a).toContain(
+			"Why: A list of 20 chips hides the one that matches; rows read like Transactions.",
+		);
+	});
+
+	it("gives B a labelled search over all the charges, its count announced: empty, and after typing farmers", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, , b = ""] = options(chunk);
+		expect(b).toContain(P138_B);
+		expect(b).toContain("Find a charge by store or amount");
+		expect(b).toContain('type="search"');
+		expect(b).toContain('hx-get="/plans/1/payments/search"');
+		expect(b).toContain('aria-live="polite"');
+		// The page draws no hx-trigger (#448): the short delay the search waits for is named in B's trade-off line, not drawn.
+		expect(b).not.toContain("hx-trigger");
+		expect(b).toContain(
+			"Look it up when it isn&#39;t in the first five: typing farmers finds the two Farmers charges, Oct 16 and Oct 5.",
+		);
+		expect(b).toContain(
+			"Trade-off: One search route over the same charges, asked a moment after typing stops, and the count announced.",
+		);
+		// Farmers is not among the closest five, so typing it finds two charges the empty search never shows.
+		const pictures = b.slice(b.indexOf('role="img"'));
+		const farmers = pictures.indexOf("after typing farmers at 390 px");
+		expect(farmers).toBeGreaterThan(-1);
+		const empty = pictures.slice(0, farmers);
+		const typed = pictures.slice(farmers);
+		// Empty, the search shows the closest five as rows (at each size) and says what it shows.
+		expect(count(empty, 'name="transaction_id"')).toBe(10);
+		expect(empty).toContain("Showing the closest 5 of 20 charges");
+		expect(empty).not.toContain("Farmers");
+		// After "farmers", two charges match at each size, in the picker's order, and none of the closest five.
+		expect(typed).toContain('value="farmers"');
+		expect(count(typed, 'name="transaction_id"')).toBe(4);
+		expect(count(typed, "2 charges match")).toBe(2);
+		expect(count(typed, "Farmers market")).toBe(2);
+		expect(count(typed, "Farmers mkt")).toBe(2);
+		expect(typed.indexOf("Farmers market")).toBeLessThan(
+			typed.indexOf("Farmers mkt"),
+		);
+		for (const name of FIVE) expect(typed).not.toContain(name);
+	});
+
+	it("gives each of B's pictures a results fieldset as the search's target, and a count outside it that the same reply refreshes", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, , b = ""] = options(chunk);
+		const pictures = b.split('role="img"').slice(1, 5);
+		expect(pictures).toHaveLength(4);
+		const targets = new Set<string>();
+		for (const pic of pictures) {
+			// The reply replaces the fieldset's contents, and hx-select-oob refreshes the count above it, so a live region is never swapped.
+			const target = /hx-target="#([^"]+)"/.exec(pic)?.[1] ?? "";
+			expect(target).toMatch(/-payment-results$/);
+			targets.add(target);
+			const field = pic.indexOf(`<fieldset id="${target}"`);
+			expect(field, target).toBeGreaterThan(-1);
+			const fieldset = pic.slice(field, pic.indexOf("</fieldset>", field));
+			expect(count(fieldset, 'name="transaction_id"')).toBe(
+				count(pic, 'name="transaction_id"'),
+			);
+			expect(count(pic, 'name="transaction_id"')).toBeGreaterThan(0);
+			const oob = /hx-select-oob="#([^"]+):innerHTML"/.exec(pic)?.[1] ?? "";
+			expect(oob).toMatch(/-payment-count$/);
+			const tag = pic.match(new RegExp(`<p [^>]*id="${oob}"[^>]*>`))?.[0] ?? "";
+			expect(tag, oob).toContain('aria-live="polite"');
+			expect(pic.indexOf(tag)).toBeGreaterThan(-1);
+			expect(pic.indexOf(tag)).toBeLessThan(field);
+			// Each picture has one Link payment button, and only when it has rows to link.
+			expect(count(pic, ">Link payment</span>")).toBe(1);
+		}
+		expect(targets.size).toBe(4);
+	});
+
+	it("draws each picture's plan page as /plans draws it: the Bills link, the plan's name as the heading, Link a payment as a heading, and no extra space above its button", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const pictures = chunk.split('role="img"').slice(1);
+		expect(pictures).toHaveLength(10);
+		const bills =
+			'<a href="/bills" class="inline-flex min-h-11 items-center text-accent">Bills</a>';
+		expect(count(chunk, bills)).toBe(10);
+		expect(
+			count(
+				chunk,
+				'<h1 class="font-serif text-5xl font-semibold tracking-tight">Lawn service</h1>',
+			),
+		).toBe(10);
+		expect(
+			count(
+				chunk,
+				'<h2 class="font-serif text-3xl font-semibold">Link a payment</h2>',
+			),
+		).toBe(10);
+		expect(chunk).not.toContain('<p class="font-serif text-5xl');
+		for (const pic of pictures) {
+			expect(pic.indexOf(bills)).toBeLessThan(pic.indexOf("<h1 "));
+			// The button's wrapper is a plain div, as the live picker draws it: no class, and no mt-4 above the button.
+			const button = pic.indexOf('<button type="submit"');
+			expect(button).toBeGreaterThan(-1);
+			expect(pic.slice(0, button).endsWith("<div>")).toBe(true);
+		}
+	});
+
+	it("draws each payment row with Select mode's mark and focus ring: a visually hidden radio, and a circle that fills when checked", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		const [, a = "", b = ""] = options(chunk);
+		const closed = a.slice(0, a.indexOf(`${P138_A}, closed at 1280 px`));
+		expect(count(closed, 'class="peer sr-only"')).toBe(20);
+		expect(count(closed, "group-has-[:checked]:flex")).toBe(20);
+		expect(count(closed, PAYMENT_ROW)).toBe(20);
+		// B's rows have the same at each size, and each picture has as many marks as rows.
+		for (const pic of b.split('role="img"').slice(1, 5)) {
+			const rows = count(pic, 'name="transaction_id"');
+			expect(count(pic, 'class="peer sr-only"')).toBe(rows);
+			expect(count(pic, "group-has-[:checked]:flex")).toBe(rows);
+			expect(count(pic, PAYMENT_ROW)).toBe(rows);
+		}
+	});
+
+	it("marks How Tally works as the current page in P137's desktop sidebar, and no other link", async () => {
+		const chunk = block(await drawn(), "p137-rules-fold");
+		// Five desktop pictures, each with How Tally works in accent; no other sidebar link is in accent.
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-accent"))).toBe(5);
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-ink"))).toBe(0);
+		for (const item of SIDEBAR_ITEMS)
+			expect(count(chunk, SIDEBAR(item.href, "text-accent")), item.label).toBe(
+				0,
+			);
+	});
+
+	it("keeps Bills as the current page in P138's desktop sidebar, with How Tally works in ink", async () => {
+		const chunk = block(await drawn(), "p138-payment-list");
+		expect(count(chunk, SIDEBAR("/bills", "text-accent"))).toBe(5);
+		expect(count(chunk, SIDEBAR("/how-it-works", "text-ink"))).toBe(5);
+	});
+
+	it("adds the muted line both options share, and no client JavaScript to either specimen", async () => {
+		const html = await drawn();
+		expect(block(html, "p138-payment-list")).toContain(
+			"A bill&#39;s Link a payment opens the same list, so it changes the same way.",
+		);
+		expect(block(html, "p137-rules-fold")).not.toContain("<script");
+		expect(block(html, "p138-payment-list")).not.toContain("<script");
 	});
 });
