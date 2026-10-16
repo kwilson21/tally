@@ -480,7 +480,9 @@ describe("data exports", () => {
 	});
 
 	it("links both downloads from the Your data section", async () => {
-		const html = await (await exports.default.fetch(`${BASE}/settings`)).text();
+		const html = await (
+			await exports.default.fetch(`${BASE}/settings/data`)
+		).text();
 		expect(html).toContain("Your data");
 		expect(html).toContain(
 			"Everything Tally has stored, to keep or open elsewhere. Bank logins are never included.",

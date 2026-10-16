@@ -168,6 +168,28 @@ describe("ContentsList", () => {
 		);
 	});
 
+	it("lets a name's line wrap, and keeps each name whole, so a folio can drop under it", () => {
+		const out = html(places({ toCheck: 3 }));
+		expect(out).toContain(
+			'<span class="flex flex-wrap items-baseline gap-x-2">',
+		);
+		expect(out).toContain('<span class="shrink-0 text-lg">Settings</span>');
+	});
+
+	it("groups the leader and the folio, so they wrap together under the name and the folio stays at the right", () => {
+		const out = html(places({ toCheck: 3 }));
+		expect(out).toMatch(
+			/<span class="flex min-w-0 flex-auto items-baseline gap-2"><span aria-hidden="true" class="min-w-4 flex-1 border-b-2 border-dotted border-rule"><\/span><span class="text-right text-sm tabular-nums text-ink">3 to check<\/span><\/span>/,
+		);
+	});
+
+	it("lets a plain folio wider than a line wrap at its spaces, rather than overflow the phone", () => {
+		const out = html(places({ toCheck: 3 }));
+		expect(out).toContain(
+			'<span class="text-right text-sm tabular-nums text-ink">3 to check</span>',
+		);
+	});
+
 	it("draws Needs attention with the alert icon in brick", () => {
 		const out = html([
 			{

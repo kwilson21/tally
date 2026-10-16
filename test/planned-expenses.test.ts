@@ -1572,6 +1572,12 @@ describe("a split keeps a plan on a part only as it keeps a bill's payment (deci
 		);
 	});
 
+	it("says a split refused because a bill payment on a part changed is not an amount change (#638)", () => {
+		expect(splitRefusedError(false, true)).toBe(
+			"A bill payment on one of these parts just changed. Check the parts and save again.",
+		);
+	});
+
 	it("an ordinary re-split carries a plan on the first part to the new part of its amount (#573)", async () => {
 		const tx = await payment(9830, 30000);
 		await splitInTwo(tx, 12000, 18000);

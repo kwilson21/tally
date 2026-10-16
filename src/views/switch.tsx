@@ -15,6 +15,19 @@ type Props = {
 	disabled?: boolean;
 	/** With `disabled`, what it needs, in words, so the greying never rests on color alone. */
 	note?: string;
+	/** Focus this switch after a swap, so a flip that answered with the page leaves focus on it (#606). */
+	autofocus?: boolean;
+	/**
+	 * The request a switch that saves when flipped sends (#606). htmx 4 reads these from the switch itself, never
+	 * from a parent, so each switch carries its own (its own hx-vals and queue); the form it sits in is still posted.
+	 */
+	"hx-post"?: string;
+	"hx-trigger"?: string;
+	"hx-vals"?: string;
+	"hx-sync"?: string;
+	"hx-target"?: string;
+	"hx-select"?: string;
+	"hx-swap"?: string;
 };
 
 /**
@@ -35,6 +48,8 @@ export function Switch({
 	checked,
 	disabled,
 	note,
+	autofocus,
+	...requestAttrs
 }: Props) {
 	const describedBy = [hint && `${id}-hint`, disabled && note && `${id}-note`]
 		.filter(Boolean)
@@ -54,9 +69,11 @@ export function Switch({
 				value="on"
 				checked={checked}
 				disabled={disabled}
+				autofocus={autofocus}
 				aria-labelledby={`${id}-label`}
 				aria-describedby={describedBy || undefined}
 				class="sr-only"
+				{...requestAttrs}
 			/>
 			<span class="min-w-0 flex-1">
 				<span

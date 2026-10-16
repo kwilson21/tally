@@ -12,14 +12,15 @@ import {
 const COUNTED_MONTH = countedMonthSql();
 const COUNTED_CATEGORY = countedCategorySql();
 /**
- * False when an archive period covers the whole month ?1 (spec §5): archived in an earlier month and not
- * restored until a later one. A month the category was archived in still counts. Alias `c`.
+ * False when an archive period covers the whole month `month` (spec §5, an SQL expression such as ?1): archived in an
+ * earlier month and not restored until a later one. A month the category was archived in still counts. Alias `c`.
  */
-const ACTIVE_IN_MONTH = `NOT EXISTS (
+const activeInMonthSql = (month: string) => `NOT EXISTS (
 	SELECT 1 FROM category_archive_periods p
-	WHERE p.category_id = c.id AND substr(p.archived_on, 1, 7) < ?1
-		AND (p.restored_on IS NULL OR substr(p.restored_on, 1, 7) > ?1)
+	WHERE p.category_id = c.id AND substr(p.archived_on, 1, 7) < ${month}
+		AND (p.restored_on IS NULL OR substr(p.restored_on, 1, 7) > ${month})
 )`;
+const ACTIVE_IN_MONTH = activeInMonthSql("?1");
 
 export type CategoryRow = {
 	id: number;
@@ -110,6 +111,55 @@ export async function loadMonth(
 			(savingsGoal.results[0] as { amountCents: number } | undefined)
 				?.amountCents ?? null,
 	};
+}
+
+/**
+ * Each listed month's result (spec §6, "How a finished month ended"), as MonthEnd shows it from summarizeMonth: its
+ * budgets less all its counted spending, Not budgeted and uncategorized included. A month with no budget is null.
+ * It is one statement for the whole list, so the month strip costs the same queries however many months it shows.
+ */
+export async function monthResults(
+	db: D1Database,
+	months: string[],
+): Promise<Record<string, number | null>> {
+	const rows = await db
+		.prepare(
+			`WITH wanted(month) AS (SELECT value FROM json_each(?1)),
+			spent AS (
+				SELECT s.month, SUM(s.amountCents) AS cents
+				FROM (SELECT ${COUNTED_MONTH} AS month, t.amount_cents AS amountCents
+					FROM transactions t ${COUNTED_JOINS} WHERE ${COUNTED_SPENDING}) s
+				JOIN wanted w ON w.month = s.month
+				GROUP BY s.month
+			),
+			budget AS (
+				SELECT w.month, COUNT(*) AS budgeted, SUM(ba.amount_cents) AS cents
+				FROM wanted w
+				JOIN categories c ON ${activeInMonthSql("w.month")}
+				JOIN budget_amounts ba ON ba.category_id = c.id AND ba.effective_month = (
+					SELECT MAX(b.effective_month) FROM budget_amounts b
+					WHERE b.category_id = c.id AND b.effective_month <= w.month)
+				GROUP BY w.month
+			)
+			SELECT w.month, COALESCE(budget.budgeted, 0) AS budgeted,
+				COALESCE(budget.cents, 0) AS budgetCents, COALESCE(spent.cents, 0) AS spentCents
+			FROM wanted w
+			LEFT JOIN budget ON budget.month = w.month
+			LEFT JOIN spent ON spent.month = w.month`,
+		)
+		.bind(JSON.stringify(months))
+		.all<{
+			month: string;
+			budgeted: number;
+			budgetCents: number;
+			spentCents: number;
+		}>();
+	return Object.fromEntries(
+		rows.results.map((row) => [
+			row.month,
+			row.budgeted > 0 ? row.budgetCents - row.spentCents : null,
+		]),
+	);
 }
 
 /**
