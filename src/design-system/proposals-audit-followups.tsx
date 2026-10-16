@@ -1,5 +1,6 @@
-// P137 and P138 (#644 and #645): the two open follow-ups of the second design audit (HW2 and PL3 in
-// docs/design-system/audit-2026-10.md), each option drawn as the screens it changes, for the owner's picks. Every picture is
+// P137 and P138 (#644 and #645): the two follow-ups of the second design audit (HW2 and PL3 in
+// docs/design-system/audit-2026-10.md), each option drawn as the screens it changes. The owner picked A for both (decision 126).
+// These drawings stay as the build reference until #644 and #645 ship. Every picture is
 // inert and labelled, like the rest of the page. The Budget diagram, the example, the folded rows, the payment chips and the
 // Button are the app's own views; the rules are How Tally works' words (src/routes/how-it-works.tsx). The numbers are the
 // demo's on Oct 16, read from its own pages: /how-it-works (the October budget, 10 transactions that need a category) and
@@ -538,7 +539,7 @@ function SearchRows({ id, query }: { id: string; query: string }) {
 // ---------------------------------------------------------------------------------------------
 // The section: P137 and P138 with their options, each drawn at 390 and 1280 px.
 
-/** The open follow-ups of the second audit: P137 (How Tally works' rules fold, #644) and P138 (the payment list, #645). */
+/** The follow-ups of the second audit, A picked for both (decision 126): P137 (How Tally works' rules fold, #644) and P138 (the payment list, #645). */
 export function AuditFollowupProposals() {
 	return (
 		<>
@@ -566,6 +567,7 @@ export function AuditFollowupProposals() {
 						note="The picture and your own numbers answer first; the spec's words are one tap away. On a phone the page is 14,456px today, and about 13,829px with the fold closed (estimated)."
 						cost="One details per section, nine in all; no words change."
 						why="Since P130 A every Why? lands on a section, so its first lines have to answer."
+						picked
 						width="w-[1140px]"
 					>
 						<Pictures
@@ -638,6 +640,7 @@ export function AuditFollowupProposals() {
 						note="The likely payment is in the first five; the rest are one tap away."
 						cost="The picker's rows reuse TransactionRow's look; one details; no new route. A bill's picker keeps “You said not this one” last, inside the fold."
 						why="A list of 20 chips hides the one that matches; rows read like Transactions."
+						picked
 						width="w-[1140px]"
 					>
 						<Pictures
