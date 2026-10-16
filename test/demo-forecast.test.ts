@@ -4,6 +4,7 @@ import { summarizeMonth } from "../src/budget";
 import { daysInMonth } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
+import { safeToSpendText } from "../src/views/home-top";
 
 // The demo's spending is paced through the month, so from the 7th Home's forecast agrees with its sentence (#322,
 // decision 119): the forecast says "under", or "over" by no more than Eating Out's overage. The check runs to the
@@ -139,4 +140,22 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 			"Eating Out is $86 over. Everything else is on track.",
 		);
 	});
+});
+
+describe("safeToSpendOf reads Home's Safe to spend in cents (#631)", () => {
+	/** The markup Home's top writes around the amount (src/views/home-top.tsx). */
+	const homeTop = (cents: number) =>
+		`<p class="text-lg text-muted">Safe to spend · </p><p class="font-serif"><span class="whitespace-nowrap">${safeToSpendText(cents)}</span></p>`;
+
+	it("reads −$0.40 as −40, so the $0-or-more check catches a negative with cents", () => {
+		expect(safeToSpendOf(homeTop(-40))).toBe(-40);
+		expect(safeToSpendOf(homeTop(-40)) < 0).toBe(true);
+	});
+
+	it.each([-600, 0, 37900, 120300])(
+		"reads %i back as the same cents",
+		(cents) => {
+			expect(safeToSpendOf(homeTop(cents))).toBe(cents);
+		},
+	);
 });
