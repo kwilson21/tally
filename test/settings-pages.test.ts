@@ -55,7 +55,7 @@ describe("GET /settings: the contents page", () => {
 		expect(res.status).toBe(200);
 		expect(h1Of(html)).toBe("Settings");
 		for (const [path, count] of [
-			["/settings/categories", "7 categories · $3,940 a month"],
+			["/settings/categories", "7 categories · $4,350 a month"],
 			["/settings/rules", "merchants"],
 			["/settings/household", "Eastern · sign-in emails on"],
 			["/settings/people", "Everyone"],
