@@ -9,6 +9,7 @@ import {
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
+import { payShown } from "../first-tally/pay";
 import { hxTrigger } from "../htmx";
 import { FirstPageBody, type Motion, NO_MOTION } from "../views/first-page";
 import { Layout } from "../views/layout";
@@ -101,23 +102,38 @@ firstPage.get("/first-page", async (c) => {
 	);
 });
 
+/**
+ * A pay answer covers only the deposits the page showed: its `deposit` fields, each checked against the merchant's
+ * deposits now (payShown). When one is new or changed since the page drew, nothing is written and the question is drawn
+ * again.
+ */
 firstPage.post("/first-page/pay", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
-	const form = await c.req.parseBody();
-	const key = String(form.merchant ?? "");
-	const answer = String(form.answer ?? "");
+	const form = await c.req.formData();
+	const key = String(form.get("merchant") ?? "");
+	const answer = String(form.get("answer") ?? "");
+	const shown = form
+		.getAll("deposit")
+		.filter((value): value is string => typeof value === "string");
 	if (answer !== "yes" && answer !== "no")
 		return c.text("Choose yes or no.", 400);
 	const before = await settleAndLoad(c.env.DB, today);
 	const merchant = before.pay.find((m) => m.key === key);
-	// Nothing left to ask about this merchant, or the answer changed no row (a competing one got there first): the
-	// page as it is now, and nothing written. The re-read is fresh, since `before` may be stale by now.
-	if (
-		!merchant ||
-		(await answerPay(c.env.DB, merchant, answer, actor(c))) === 0
-	)
+	// Nothing left to ask about this merchant: the page as it is now, and nothing written.
+	if (!merchant) return stale(c, await settleAndLoad(c.env.DB, today));
+	if (!payShown(merchant, shown))
+		return answered(
+			c,
+			before,
+			`Nothing saved. The deposits from ${merchant.name} changed since the page drew, so the question is asked again below.`,
+			NO_MOTION,
+			"info",
+		);
+	// A competing answer changed no row first: the page as it is now, and nothing written. The re-read is fresh, since
+	// `before` may be stale by now.
+	if ((await answerPay(c.env.DB, merchant, answer, actor(c))) === 0)
 		return stale(c, await settleAndLoad(c.env.DB, today));
 	const after = await settleAndLoad(c.env.DB, today);
 	return answered(
@@ -135,7 +151,7 @@ firstPage.post("/first-page/bills", async (c) => {
 	const today = await householdToday(c.env.DB);
 	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
 	// Only the charges the form showed are kept: its `keep` fields, each one re-checked against the charges now. An
-	// empty form keeps none, and a charge that is new or changed since the page drew waits for the page to ask it again.
+	// empty form keeps none, and a charge that is new or changed since the page drew is asked again on the page.
 	const values = (await c.req.formData())
 		.getAll("keep")
 		.filter((value): value is string => typeof value === "string");

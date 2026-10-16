@@ -16,7 +16,7 @@ import type {
 	FirstPageModel,
 	PayMerchant,
 } from "../first-tally/first-page";
-import { paySentence } from "../first-tally/pay";
+import { paySentence, shownPayValues } from "../first-tally/pay";
 import { Button } from "./button";
 import { Notebook } from "./notebook";
 
@@ -131,7 +131,10 @@ export function ledgerLines(
 	];
 }
 
-/** The pay question for one merchant: what the bank shows, "Is this your pay?", and Yes or No. */
+/**
+ * The pay question for one merchant: what the bank shows, "Is this your pay?", and Yes or No. The form carries one
+ * `deposit` field per deposit shown, so an answer covers only those (the POST checks them against the deposits then).
+ */
 export function PayQuestion({
 	merchant,
 	focus,
@@ -159,6 +162,9 @@ export function PayQuestion({
 				hx-swap="outerHTML"
 			>
 				<input type="hidden" name="merchant" value={merchant.key} />
+				{shownPayValues(merchant).map((value) => (
+					<input type="hidden" name="deposit" value={value} />
+				))}
 				<div class="mt-4">
 					<Button type="submit" name="answer" value="yes" class="w-full">
 						Yes, that's my pay

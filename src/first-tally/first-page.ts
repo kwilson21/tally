@@ -98,10 +98,11 @@ export async function payMerchants(db: D1Database): Promise<PayMerchant[]> {
 
 /**
  * Yes and No on a merchant's money in: each row the question showed is marked income or not, as the person's choice
- * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). Only those rows change
- * (`merchant.ids`), and the answer is recorded in the same batch, with the deposits the question asked about. So a
- * deposit that arrives between the question and the answer stays unanswered and is asked next. Returns the rows changed
- * (0 when the merchant has nothing left to ask).
+ * (PERSON_INCOME_SET_SQL, the review's Yes write, which wins over Plaid and Jev, spec §6). The answer covers only the
+ * deposits the page showed, which the route has checked against `merchant` (payShown): only those rows change
+ * (`merchant.ids`), and the answer is recorded in the same batch, with the deposits it covered. So a deposit that
+ * arrives between the question and the answer stays unanswered and is asked next. Returns the rows changed (0 when the
+ * merchant has nothing left to ask).
  */
 export async function answerPay(
 	db: D1Database,

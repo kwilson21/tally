@@ -11,6 +11,7 @@ import {
 	type PayMerchant,
 	payMerchants,
 } from "../src/first-tally/first-page";
+import { shownPayValues } from "../src/first-tally/pay";
 import { firstPage } from "../src/routes/first-page";
 
 // The question page at /first-page (P125 E, spec §8.8, decision 114): one question at a time, each answer written
@@ -70,16 +71,36 @@ async function post(
 }
 
 /**
- * The `keep` fields a Keep form submits for the charges its page shows: one per hidden field, unescaped as the browser
- * sends them (the `&amp;` last, as textOf does). A test that keeps the page's charges posts these.
+ * The hidden fields a form submits under one name, one pair per field, unescaped as the browser sends them (the `&amp;`
+ * last, as textOf does).
  */
-function keepFields(html: string): [string, string][] {
-	return [...html.matchAll(/name="keep" value="([^"]*)"/g)].map(([, value]) => [
-		"keep",
+function hiddenFields(html: string, name: string): [string, string][] {
+	return [
+		...html.matchAll(new RegExp(`name="${name}" value="([^"]*)"`, "g")),
+	].map(([, value]): [string, string] => [
+		name,
 		(value ?? "")
 			.replaceAll("&#39;", "'")
 			.replaceAll("&quot;", '"')
 			.replaceAll("&amp;", "&"),
+	]);
+}
+
+/** The `keep` fields a Keep form submits for the charges its page shows. A test that keeps the page's charges posts these. */
+function keepFields(html: string): [string, string][] {
+	return hiddenFields(html, "keep");
+}
+
+/** The `deposit` fields a pay form submits: one per deposit its question shows. */
+function payFields(html: string): [string, string][] {
+	return hiddenFields(html, "deposit");
+}
+
+/** The `deposit` fields a pay answer posts for a merchant, the values shownPayValues gives its deposits as payMerchants reads them now. */
+function depositFields(merchant: PayMerchant): [string, string][] {
+	return shownPayValues(merchant).map((value): [string, string] => [
+		"deposit",
+		value,
 	]);
 }
 
@@ -88,6 +109,36 @@ async function keepAsShown(htmx = false) {
 	return post(
 		"/first-page/bills",
 		keepFields((await get("/first-page")).html),
+		htmx,
+	);
+}
+
+/**
+ * Yes or No, as the page's own form posts it: the page is read, and its first question's merchant, deposit fields and
+ * answer are posted.
+ */
+async function answerAsShown(answer: "yes" | "no", htmx = false) {
+	const { html } = await get("/first-page");
+	return post(
+		"/first-page/pay",
+		[...hiddenFields(html, "merchant"), ...payFields(html), ["answer", answer]],
+		htmx,
+	);
+}
+
+/**
+ * Yes or No for a merchant the page doesn't ask first, or doesn't ask at all: posted with the deposits its question
+ * would show, and none when nothing is asked about it (so the reply is stale).
+ */
+async function answerFor(key: string, answer: "yes" | "no", htmx = false) {
+	const merchant = (await payMerchants(db)).find((m) => m.key === key);
+	return post(
+		"/first-page/pay",
+		[
+			["merchant", key],
+			...(merchant ? depositFields(merchant) : []),
+			["answer", answer],
+		],
 		htmx,
 	);
 }
@@ -247,10 +298,7 @@ describe("pay questions from data", () => {
 		expect(first.html.match(/Is this your pay\?/g)?.length).toBe(1);
 		expect(first.html).toContain("ACME CORP PAYROLL");
 		expect(first.html).not.toContain("SIDE GIG");
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
+		await answerAsShown("yes");
 		const second = await get("/first-page");
 		expect(second.html).toContain("SIDE GIG");
 	});
@@ -277,10 +325,7 @@ describe("pay questions from data", () => {
 describe("Yes and No writes", () => {
 	it("Yes marks the merchant's money in as income, as the person's choice", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const { res } = await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
+		const { res } = await answerAsShown("yes");
 		expect(res.status).toBe(303);
 		const rows = await db
 			.prepare(
@@ -299,7 +344,7 @@ describe("Yes and No writes", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		await post("/first-page/pay", { merchant: "TRANSFER IN", answer: "no" });
+		await answerAsShown("no");
 		const rows = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'TRANSFER IN'",
@@ -318,12 +363,9 @@ describe("Yes and No writes", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
+		await answerAsShown("yes");
 		expect((await readFirstTally(db))?.strokes.pay).toBeUndefined();
-		await post("/first-page/pay", { merchant: "SIDE GIG", answer: "no" });
+		await answerAsShown("no");
 		expect((await readFirstTally(db))?.strokes.pay).toBe(TODAY);
 	});
 
@@ -333,10 +375,7 @@ describe("Yes and No writes", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
+		await answerAsShown("yes");
 		const { html } = await get("/first-page");
 		expect(textOf(html)).not.toContain("ACME CORP PAYROLL paying");
 		expect(html).toContain("SIDE GIG");
@@ -344,10 +383,7 @@ describe("Yes and No writes", () => {
 
 	it("a stale answer for a merchant with nothing left to ask changes nothing", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
+		await answerAsShown("yes");
 		const before = await db
 			.prepare(
 				"SELECT updated_at FROM transactions WHERE raw_name = 'ACME CORP PAYROLL'",
@@ -419,10 +455,11 @@ describe("Yes and No writes", () => {
 				"content-type": "application/x-www-form-urlencoded",
 				"HX-Request": "true",
 			},
-			body: new URLSearchParams({
-				merchant: "ACME CORP PAYROLL",
-				answer: "no",
-			}).toString(),
+			body: new URLSearchParams([
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "no"],
+			]).toString(),
 		});
 		const html = await res.text();
 		expect(res.status).toBe(200);
@@ -441,6 +478,7 @@ describe("Yes and No writes", () => {
 
 	it("a deposit added between loading the question and answering it stays unanswered and is asked next", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const merchant = (await payMerchants(db))[0] as PayMerchant;
 		let raced = false;
 		// A deposit arrives after the question was read and before this reply's batch: the answer must leave it alone.
 		const racing = new Proxy(db, {
@@ -466,10 +504,11 @@ describe("Yes and No writes", () => {
 			method: "POST",
 			redirect: "manual",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				merchant: "ACME CORP PAYROLL",
-				answer: "yes",
-			}).toString(),
+			body: new URLSearchParams([
+				["merchant", "ACME CORP PAYROLL"],
+				...depositFields(merchant),
+				["answer", "yes"],
+			]).toString(),
 		});
 		expect(res.status).toBe(303);
 		const late = await db
@@ -490,6 +529,100 @@ describe("Yes and No writes", () => {
 		expect(record?.strokes.pay).toBeUndefined();
 		const { html } = await get("/first-page");
 		expect(textOf(html)).toContain("ACME CORP PAYROLL paying");
+	});
+});
+
+describe("A pay answer answers what the page showed", () => {
+	const REFUSED =
+		"Nothing saved. The deposits from Acme Corp changed since the page drew, so the question is asked again below.";
+
+	beforeEach(async () => {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP PAYROLL', 'Acme Corp')",
+			)
+			.run();
+	});
+
+	/**
+	 * The reply to a pay answer that wrote nothing: the info toast and announcement, the question drawn again with `asked`
+	 * in its sentence, and no deposit marked, no pay record and no stroke.
+	 */
+	async function expectRefused(res: Response, html: string, asked: string) {
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({ message: REFUSED, type: "info" });
+		expect(trigger(res).announce).toBe(REFUSED);
+		expect(html).not.toContain("Saved:");
+		expect(html).toContain("Is this your pay?");
+		expect(html).toContain(asked);
+		const marked = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM transactions WHERE income_source = 'user'",
+			)
+			.first<{ n: number }>();
+		expect(marked?.n).toBe(0);
+		const record = await readFirstTally(db);
+		expect(record?.pay?.["ACME CORP PAYROLL"]).toBeUndefined();
+		expect(record?.strokes.pay).toBeUndefined();
+	}
+
+	it("marks nothing for a deposit added after the page drew, and asks the question again", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const page = (await get("/first-page")).html;
+		await txn({
+			raw_name: "ACME CORP PAYROLL",
+			date: daysBefore(TODAY, 28),
+			amount_cents: -245000,
+			flag_income: 1,
+			plaid_category: "INCOME",
+		});
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				...hiddenFields(page, "merchant"),
+				...payFields(page),
+				["answer", "yes"],
+			],
+			true,
+		);
+		await expectRefused(res, html, "3 times since");
+	});
+
+	it("marks nothing for a deposit whose amount changed in place after the page drew", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const page = (await get("/first-page")).html;
+		await db
+			.prepare(
+				"UPDATE transactions SET amount_cents = -250000 WHERE raw_name = 'ACME CORP PAYROLL' AND date = ?",
+			)
+			.bind(TODAY)
+			.run();
+		const { res, html } = await post(
+			"/first-page/pay",
+			[
+				...hiddenFields(page, "merchant"),
+				...payFields(page),
+				["answer", "yes"],
+			],
+			true,
+		);
+		await expectRefused(res, html, "2 times since");
+	});
+
+	it("marks nothing when the form posts no deposit field", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { res, html } = await post(
+			"/first-page/pay",
+			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
+			true,
+		);
+		await expectRefused(res, html, "2 times since");
+	});
+
+	it("renders one hidden deposit input per deposit the question shows", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 3);
+		const { html } = await get("/first-page");
+		expect(html.match(/name="deposit"/g)).toHaveLength(3);
 	});
 });
 
@@ -556,7 +689,7 @@ describe("Keep keeps what the page showed", () => {
 			.all<{ name: string }>();
 		expect(bills.results.map((bill) => bill.name)).toEqual(["Netflix"]);
 		expect(trigger(res).announce).toBe(
-			"Kept 1 bill. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+			"Kept 1 bill. 1 charge changed since the page drew, so it's asked again below.",
 		);
 		expect((await readFirstTally(db))?.strokes.bills).toBeUndefined();
 		expect(textOf(html)).toContain("Keep this one as a bill?");
@@ -577,7 +710,7 @@ describe("Keep keeps what the page showed", () => {
 			.first<{ count: number }>();
 		expect(bills?.count).toBe(0);
 		expect(trigger(res).announce).toBe(
-			"Nothing kept. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+			"Nothing kept. 1 charge changed since the page drew, so it's asked again below.",
 		);
 		expect(trigger(res).toast?.type).toBe("info");
 		expect(textOf(html)).toContain("Keep this one as a bill?");
@@ -612,11 +745,7 @@ describe("announcements and focus", () => {
 			)
 			.run();
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const { res, html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
-			true,
-		);
+		const { res, html } = await answerAsShown("yes", true);
 		expect(res.status).toBe(200);
 		const headers = trigger(res);
 		expect(headers.announce).toBe("Saved: Acme Corp is your pay.");
@@ -708,11 +837,7 @@ describe("the answer's motion", () => {
 	it("marks the notebook's pay line for its one-shot draw when the reply draws the pay stroke", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		await charge("NETFLIX", 1549);
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
-			true,
-		);
+		const { html } = await answerAsShown("yes", true);
 		// The pay stroke is the second of the five, and the bills step still has a charge to keep: only its line draws.
 		expect(html.match(/first-stroke-new/g)).toHaveLength(1);
 		expect(html).toMatch(
@@ -722,11 +847,7 @@ describe("the answer's motion", () => {
 
 	it("marks every line the reply drew, when an empty step after the answer is done too", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
-			true,
-		);
+		const { html } = await answerAsShown("yes", true);
 		// Pay is the last merchant, and no bill charge is found: the pay and the bills strokes are drawn together.
 		expect(html.match(/first-stroke-new/g)).toHaveLength(2);
 		expect(html).toMatch(
@@ -752,22 +873,14 @@ describe("the answer's motion", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP PAYROLL", answer: "yes" },
-			true,
-		);
+		const { html } = await answerAsShown("yes", true);
 		expect(html).toContain("first-line-new");
 		expect(html).not.toContain("first-stroke-new");
 	});
 
 	it("marks no line and no stroke for a stale answer, which writes nothing", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
-		const { res, html } = await post(
-			"/first-page/pay",
-			{ merchant: "GONE MERCHANT", answer: "yes" },
-			true,
-		);
+		const { res, html } = await answerFor("GONE MERCHANT", "yes", true);
 		expect(trigger(res).announce).toBe("That one is already answered.");
 		expect(html).not.toContain("first-line-new");
 		expect(html).not.toContain("first-stroke-new");
@@ -788,12 +901,8 @@ describe("the answer's motion", () => {
 			.run();
 		await deposits("ZED CO", 245000, 2);
 		await deposits("ACME CORP", 245000, 2);
-		await post("/first-page/pay", { merchant: "ZED CO", answer: "yes" }, true);
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP", answer: "yes" },
-			true,
-		);
+		await answerFor("ZED CO", "yes", true);
+		const { html } = await answerAsShown("yes", true);
 		expect(html).toMatch(
 			/class="py-2 text-ink first-line-new">Pay · Acme Corp,/,
 		);
@@ -812,12 +921,8 @@ describe("the answer's motion", () => {
 			.run();
 		await deposits("ACME A", 245000, 2);
 		await deposits("ACME B", 245000, 2);
-		await post("/first-page/pay", { merchant: "ACME A", answer: "yes" }, true);
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "ACME B", answer: "yes" },
-			true,
-		);
+		await answerAsShown("yes", true);
+		const { html } = await answerAsShown("yes", true);
 		const lines = [
 			...html.matchAll(/<li class="([^"]*)">([^<]*)<\/li>/g),
 		].filter((match) => match[2]?.startsWith("Pay · Acme Corp"));
@@ -838,16 +943,8 @@ describe("the answer's motion", () => {
 			.run();
 		await deposits("ACME CORP", 245000, 2);
 		await deposits("1234", 9000, 2);
-		await post(
-			"/first-page/pay",
-			{ merchant: "ACME CORP", answer: "yes" },
-			true,
-		);
-		const { html } = await post(
-			"/first-page/pay",
-			{ merchant: "1234", answer: "yes" },
-			true,
-		);
+		await answerFor("ACME CORP", "yes", true);
+		const { html } = await answerAsShown("yes", true);
 		expect(html).toMatch(
 			/class="py-2 text-ink first-line-new">Pay · Bistro 1234,/,
 		);
@@ -944,10 +1041,7 @@ describe("refunds and the Yes write", () => {
 			"Tally didn't spot a paycheck. You can mark one from any transaction later.",
 		);
 		expect(html).not.toContain("STORE REFUND");
-		await post("/first-page/pay", {
-			merchant: "STORE REFUND",
-			answer: "yes",
-		});
+		await answerFor("STORE REFUND", "yes");
 		const row = await db
 			.prepare(
 				"SELECT flag_income, income_source FROM transactions WHERE raw_name = 'STORE REFUND'",
@@ -961,7 +1055,7 @@ describe("refunds and the Yes write", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		await post("/first-page/pay", { merchant: "SIDE GIG", answer: "yes" });
+		await answerAsShown("yes");
 		const rows = await db
 			.prepare(
 				"SELECT income_confidence FROM transactions WHERE raw_name = 'SIDE GIG'",
@@ -1077,7 +1171,7 @@ describe("the pay question's scope", () => {
 		});
 		const { html } = await get("/first-page");
 		expect(html).toContain("CREDIT PAY");
-		await post("/first-page/pay", { merchant: "CREDIT PAY", answer: "yes" });
+		await answerAsShown("yes");
 		const rows = await db
 			.prepare(
 				"SELECT income_source FROM transactions WHERE raw_name = 'CREDIT PAY'",
@@ -1106,14 +1200,8 @@ describe("the pay question's scope", () => {
 				)
 				.all();
 		const before = await rows();
-		await post("/first-page/pay", {
-			merchant: "ACME CORP PAYROLL",
-			answer: "yes",
-		});
-		await post("/first-page/pay", {
-			merchant: "XFER FROM SAVINGS",
-			answer: "no",
-		});
+		await answerFor("ACME CORP PAYROLL", "yes");
+		await answerFor("XFER FROM SAVINGS", "no");
 		expect((await rows()).results).toEqual(before.results);
 	});
 
@@ -1160,7 +1248,7 @@ describe("the pay ledger reads what the page recorded", () => {
 			flag_income: 1,
 			income_source: "user",
 		});
-		await post("/first-page/pay", { merchant: "ACME CORP", answer: "yes" });
+		await answerAsShown("yes");
 	}
 
 	it("a deposit the Transactions panel marked adds nothing to a Yes's pay line", async () => {
@@ -1184,7 +1272,7 @@ describe("the pay ledger reads what the page recorded", () => {
 			flag_income: 0,
 			income_confidence: 0.5,
 		});
-		await post("/first-page/pay", { merchant: "TRANSFER IN", answer: "no" });
+		await answerAsShown("no");
 		const { html } = await get("/first-page");
 		expect(textOf(html)).not.toMatch(/Not pay|Pay · /);
 		expect(textOf(html)).toContain("From Chase");

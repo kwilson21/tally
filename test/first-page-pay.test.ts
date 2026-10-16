@@ -4,6 +4,8 @@ import {
 	cadenceOf,
 	payLedgerLine,
 	paySentence,
+	payShown,
+	shownPayValues,
 } from "../src/first-tally/pay";
 
 // The pay step's words (P125 E, spec §8.8): what the bank shows for one merchant whose money in marked as income.
@@ -234,5 +236,73 @@ describe("payLedgerLine", () => {
 				),
 			}),
 		).toBe("Pay · Acme Corp, $2,450");
+	});
+});
+
+describe("shownPayValues and payShown", () => {
+	// A merchant as payMerchants reads it: the deposits and their transaction ids, in the same order.
+	const merchant = {
+		ids: [11, 12, 13],
+		deposits: deposits(
+			["2026-07-17", "2026-07-31", "2026-08-14"],
+			[245000, 245000, 260000],
+		),
+	};
+	const shown = shownPayValues(merchant);
+
+	it("gives one value per deposit, pairing each id with its deposit", () => {
+		expect(shown).toEqual([
+			JSON.stringify({ id: 11, date: "2026-07-17", cents: 245000 }),
+			JSON.stringify({ id: 12, date: "2026-07-31", cents: 245000 }),
+			JSON.stringify({ id: 13, date: "2026-08-14", cents: 260000 }),
+		]);
+	});
+
+	it("is true for the same set of values in any order", () => {
+		expect(payShown(merchant, [...shown].reverse())).toBe(true);
+	});
+
+	it("is false when a deposit arrived since the page drew", () => {
+		const later = {
+			ids: [...merchant.ids, 14],
+			deposits: [...merchant.deposits, { date: "2026-08-28", cents: 245000 }],
+		};
+		expect(payShown(later, shown)).toBe(false);
+	});
+
+	it("is false when a deposit's cents changed since the page drew", () => {
+		const changed = {
+			...merchant,
+			deposits: merchant.deposits.map((d, i) =>
+				i === 0 ? { ...d, cents: 250000 } : d,
+			),
+		};
+		expect(payShown(changed, shown)).toBe(false);
+	});
+
+	it("is false when a deposit's date changed since the page drew", () => {
+		const changed = {
+			...merchant,
+			deposits: merchant.deposits.map((d, i) =>
+				i === 1 ? { ...d, date: "2026-08-01" } : d,
+			),
+		};
+		expect(payShown(changed, shown)).toBe(false);
+	});
+
+	it("is false when a shown deposit is no longer current", () => {
+		const fewer = {
+			ids: merchant.ids.slice(1),
+			deposits: merchant.deposits.slice(1),
+		};
+		expect(payShown(fewer, shown)).toBe(false);
+	});
+
+	it("is false for an empty submission", () => {
+		expect(payShown(merchant, [])).toBe(false);
+	});
+
+	it("is false for a garbled value", () => {
+		expect(payShown(merchant, [...shown.slice(0, 2), "not json"])).toBe(false);
 	});
 });

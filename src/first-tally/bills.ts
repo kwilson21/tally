@@ -36,23 +36,24 @@ export function keepShown(
 }
 
 /**
- * The words a Keep says: what it kept, then, when charges waiting now are new or changed since the page showed them,
- * how many and where they wait. With none waiting it is the plain count ("Kept 1 bill.", "Nothing to keep.").
+ * The words a Keep says: what it kept, then, when charges the page now asks are new or changed since it drew, how many,
+ * and that the redrawn page asks them again below. With none changed it is the plain count ("Kept 1 bill.", "Nothing to
+ * keep.").
  */
-export function keepReply(kept: number, waiting: number): string {
-	if (waiting === 0 && kept === 0) return "Nothing to keep.";
+export function keepReply(kept: number, changed: number): string {
+	if (changed === 0 && kept === 0) return "Nothing to keep.";
 	const keptWords =
 		kept === 0
 			? "Nothing kept."
 			: kept === 1
 				? "Kept 1 bill."
 				: `Kept ${kept} bills.`;
-	if (waiting === 0) return keptWords;
-	const waitingPart =
-		waiting === 1
-			? "1 is new or changed since the page showed it, so it waits in Possible bills."
-			: `${waiting} are new or changed since the page showed them, so they wait in Possible bills.`;
-	return `${keptWords} ${waitingPart}`;
+	if (changed === 0) return keptWords;
+	const askedPart =
+		changed === 1
+			? "1 charge changed since the page drew, so it's asked again below."
+			: `${changed} charges changed since the page drew, so they're asked again below.`;
+	return `${keptWords} ${askedPart}`;
 }
 
 /** The found charges, split: `keep` is the one-tap answer, and `waiting` stays in Possible bills. */

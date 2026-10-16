@@ -171,27 +171,27 @@ describe("keepReply", () => {
 		expect(keepReply(8, 0)).toBe("Kept 8 bills.");
 	});
 
-	it("says nothing was kept, and one charge is new or changed and waits", () => {
+	it("says nothing was kept, and one charge changed since the page drew and is asked again", () => {
 		expect(keepReply(0, 1)).toBe(
-			"Nothing kept. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+			"Nothing kept. 1 charge changed since the page drew, so it's asked again below.",
 		);
 	});
 
-	it("says what was kept, and one charge is new or changed and waits", () => {
+	it("says what was kept, and one charge changed since the page drew and is asked again", () => {
 		expect(keepReply(1, 1)).toBe(
-			"Kept 1 bill. 1 is new or changed since the page showed it, so it waits in Possible bills.",
+			"Kept 1 bill. 1 charge changed since the page drew, so it's asked again below.",
 		);
 	});
 
-	it("says what was kept, and several charges are new or changed and wait", () => {
+	it("says what was kept, and several charges changed since the page drew and are asked again", () => {
 		expect(keepReply(2, 3)).toBe(
-			"Kept 2 bills. 3 are new or changed since the page showed them, so they wait in Possible bills.",
+			"Kept 2 bills. 3 charges changed since the page drew, so they're asked again below.",
 		);
 	});
 
-	it("says nothing was kept, and several charges are new or changed and wait", () => {
+	it("says nothing was kept, and several charges changed since the page drew and are asked again", () => {
 		expect(keepReply(0, 2)).toBe(
-			"Nothing kept. 2 are new or changed since the page showed them, so they wait in Possible bills.",
+			"Nothing kept. 2 charges changed since the page drew, so they're asked again below.",
 		);
 	});
 });

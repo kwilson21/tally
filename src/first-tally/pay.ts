@@ -101,3 +101,40 @@ export function payLedgerLine({
 	const cadence = cadenceOf(dates);
 	return `Pay · ${name}, ${amountWords(deposits)}${cadence ? ` ${cadence}` : ""}`;
 }
+
+/**
+ * The value a pay form's hidden `deposit` field carries for each deposit the question shows: its transaction id, day and
+ * cents. `ids[i]` goes with `deposits[i]` (payMerchants builds them in step), so a value is what the page showed of it.
+ */
+export function shownPayValues({
+	ids,
+	deposits,
+}: {
+	ids: number[];
+	deposits: PayDeposit[];
+}): string[] {
+	return deposits.map((deposit, i) =>
+		JSON.stringify({
+			id: ids[i] as number,
+			date: deposit.date,
+			cents: deposit.cents,
+		}),
+	);
+}
+
+/**
+ * Whether a pay answer's submitted values are exactly the merchant's deposits now: as a set, the same size, and every
+ * current value among them. So a deposit that arrived since the page drew, or one whose day or cents changed in place,
+ * fails it, and so do an empty or garbled submission.
+ */
+export function payShown(
+	merchant: { ids: number[]; deposits: PayDeposit[] },
+	values: string[],
+): boolean {
+	const current = shownPayValues(merchant);
+	const submitted = new Set(values);
+	return (
+		submitted.size === current.length &&
+		current.every((value) => submitted.has(value))
+	);
+}
