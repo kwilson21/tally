@@ -753,6 +753,14 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 		expect(record?.strokes.count).toBeUndefined();
 	});
 
+	it("a third bank linked while the re-ask is still open names itself in the marker, not the second", async () => {
+		await answeredQuestions("2026-10-12");
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		// Nothing is drawn now, so only the open marker lets this link take its place.
+		await takeBackQuestionStrokes(db, "Capital One").run();
+		expect((await readFirstTally(db))?.reAsk).toEqual({ bank: "Capital One" });
+	});
+
 	it("the marker goes once budgets is drawn again, after pay and bills", async () => {
 		await answeredQuestions("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();

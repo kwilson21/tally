@@ -12,6 +12,7 @@ import {
 	STROKES,
 	type Stroke,
 } from "../db/first-tally";
+import { merchantDisplayNames } from "../db/merchant-names";
 import type { FlaggedBank } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
 import type { StepLine } from "../views/tally-steps";
@@ -271,24 +272,6 @@ export async function readFirstWeek(
 			),
 		},
 	};
-}
-
-/**
- * The display names the merchants table has for these raw merchant keys, one query: a key with no row (or no display name)
- * maps to null. The ledger and the first week's lines name a merchant with this, falling back to tidyName.
- */
-export async function merchantDisplayNames(
-	db: D1Database,
-	keys: string[],
-): Promise<Map<string, string | null>> {
-	if (keys.length === 0) return new Map();
-	const { results } = await db
-		.prepare(
-			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
-		)
-		.bind(JSON.stringify(keys))
-		.all<{ key: string; displayName: string | null }>();
-	return new Map(results.map((row) => [row.key, row.displayName]));
 }
 
 /**

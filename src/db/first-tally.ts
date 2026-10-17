@@ -281,8 +281,8 @@ export function keepNightStatement(
  * lose their strokes, and the night with them, so the questions are asked again once the new bank's history is in. The
  * answers stay (only the strokes go), and so does stroke one. It also sets `reAsk` to the new bank's name (`bankName`,
  * bound as a value, never built into a path), which stroke one's note reads. It is checked in the same batch as the new
- * bank's INSERT, so no bank read is needed. It writes only while the count stroke isn't drawn and a question is drawn, so
- * a link that takes nothing back sets no marker.
+ * bank's INSERT, so no bank read is needed. It writes only while the count stroke isn't drawn and a question is drawn or a
+ * re-ask is still open (so the newest bank names itself), so a link that takes nothing back sets no marker.
  */
 export function takeBackQuestionStrokes(
 	db: D1Database,
@@ -294,7 +294,7 @@ export function takeBackQuestionStrokes(
 				'$.reAsk', json_object('bank', ?2))
 			WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL
 				AND (json_type(value, '$.strokes.pay') IS NOT NULL OR json_type(value, '$.strokes.bills') IS NOT NULL
-					OR json_type(value, '$.strokes.budgets') IS NOT NULL)`,
+					OR json_type(value, '$.strokes.budgets') IS NOT NULL OR json_type(value, '$.reAsk') IS NOT NULL)`,
 		)
 		.bind(KEY, bankName);
 }

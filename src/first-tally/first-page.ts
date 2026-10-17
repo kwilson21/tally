@@ -37,6 +37,7 @@ import {
 } from "../db/first-tally";
 import { PERSON_INCOME_SET_SQL } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
+import { merchantDisplayNames } from "../db/merchant-names";
 import { payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
@@ -48,7 +49,6 @@ import {
 	type NothingAsked,
 } from "./budgets";
 import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
-import { merchantDisplayNames } from "./setup";
 
 /** A merchant whose money in Tally marked as income, and the deposits behind the question. */
 export type PayMerchant = {
