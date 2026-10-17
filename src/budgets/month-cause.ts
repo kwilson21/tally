@@ -51,9 +51,10 @@ export function monthCauses(
 /**
  * The cause line for a month that ended over budget, or null: nothing for a month under budget, or with no cause to
  * name. It takes the two largest causes by amount (ties keep the order given) and says "Most of it" only when those
- * two are over half the overspend, "Part of it" otherwise. `lead` is the words before the names: when both are
- * unbudgeted (or uncategorized) it says so once, when both are over budget once, and when they mix each names its own
- * kind. `named` has each cause's words and kind, so MonthEnd can link each one to where it's listed.
+ * two are over half the overspend, "Part of it" otherwise. `lead` is the words before the names: when Needs a category
+ * is the only cause it says it still needs a category and names just the amount; when both are over budget it says so
+ * once; when both have no budget (Needs a category counts as one) it says so once; and when they mix, each names its
+ * own kind. `named` has each cause's words and kind, so MonthEnd can link each one to where it's listed.
  */
 export function monthCause(
 	causes: MonthCause[],
@@ -72,14 +73,22 @@ export function monthCause(
 	const share = shareCents * 2 > overCents ? "Most of it" : "Part of it";
 	const amount = (cause: MonthCause) =>
 		`${cause.name} ${wholeUnlessTiny(cause.cents)}`;
+	// Needs a category is the only uncategorized cause, so this is true only when it is the one cause named.
+	const onlyUncategorized = largest.every(
+		(cause) => cause.kind === "uncategorized",
+	);
 	const allOver = largest.every((cause) => cause.kind === "over");
 	const noBudget = largest.every((cause) => cause.kind !== "over");
-	const lead = allOver
-		? `${share} was over budget: `
-		: noBudget
-			? `${share} had no budget: `
-			: `${share}: `;
+	const lead = onlyUncategorized
+		? `${share} still needs a category: `
+		: allOver
+			? `${share} was over budget: `
+			: noBudget
+				? `${share} had no budget: `
+				: `${share}: `;
 	const named = largest.map((cause): NamedCause => {
+		if (onlyUncategorized)
+			return { words: wholeUnlessTiny(cause.cents), kind: cause.kind };
 		if (allOver || noBudget) return { words: amount(cause), kind: cause.kind };
 		return {
 			words:

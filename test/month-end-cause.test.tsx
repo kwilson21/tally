@@ -137,6 +137,23 @@ describe("MonthEnd cause line", () => {
 		);
 	});
 
+	it("links a Needs a category-only cause to its row as one line, with the still-needs words", () => {
+		const html = renderToString(
+			<MonthEnd
+				chartId="X"
+				monthName="September"
+				amountCents={-27700}
+				rows={[row("Groceries", 70000, 70000)]}
+				unbudgeted={[]}
+				needsCategoryCents={27700}
+			/>,
+		);
+		expect(html).toMatch(
+			/<p class="mt-2 text-muted"><a href="#X-needs-category"[^>]*>Most of it still needs a category: \$277\.<\/a><\/p>/,
+		);
+		expect(html).not.toContain("had no budget");
+	});
+
 	it("keeps one whole-line link for a sentence whose causes are all over budget", () => {
 		const html = renderToString(
 			<MonthEnd

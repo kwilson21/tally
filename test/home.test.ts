@@ -474,8 +474,10 @@ describe("GET / with the demo seed", () => {
 		await resetDemo(env.DB, "2026-10-16", { categoryExample: true });
 		const { html } = await homeAt("2026-08");
 		expect(html).toMatch(/>Over<span class="sr-only"> budget<\/span>/);
-		expect(html).toContain("Needs a category $277");
-		expect(html).toContain('<a href="#2026-08-needs-category"');
+		expect(html).toMatch(
+			/<a href="#2026-08-needs-category"[^>]*>Most of it still needs a category: \$277\.<\/a>/,
+		);
+		expect(html).not.toContain("had no budget");
 		expect(html).toContain('<li id="2026-08-needs-category"');
 	});
 
