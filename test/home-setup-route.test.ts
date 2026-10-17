@@ -323,7 +323,7 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 		expect((await storedRecord()).strokes.count).toBe(today());
 	});
 
-	it("says what needs a person, and links to the list it belongs in", async () => {
+	it("says what needs a person, and links to the full list when nothing else is waiting (#714)", async () => {
 		await bankHistoryIn();
 		await env.DB.prepare("DELETE FROM transactions").run();
 		await writeRecord({
@@ -335,7 +335,49 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 			"Five. Overnight Tally kept count on its own: 1 new transaction; 2 need you.",
 		);
 		expect(html).toContain(">See what needs you</a>");
-		expect(html).toContain('href="/transactions?uncategorized=1&month=all"');
+		expect(html).toContain('href="/transactions?month=all"');
+		expect(html).not.toContain("uncategorized=1");
+	});
+
+	it("links to the suggestions when a suggestion waits and nothing needs a category (#714)", async () => {
+		await bankHistoryIn();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		// A paycheck guess Tally is unsure of: money in (a credit) with an income guess, no category to set.
+		await env.DB.prepare(
+			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, income_confidence)
+			 VALUES ((SELECT MIN(id) FROM accounts), 'fifth-suggestion', ?, -250000, 'VENMO PAYMENT', 0.5)`,
+		)
+			.bind(today())
+			.run();
+		await writeRecord({
+			...answeredOn(yesterday()),
+			night: { brought: 1, needYou: 1 },
+		});
+		const html = decoded(await page(family));
+		expect(html).toContain(">See what needs you</a>");
+		expect(html).toContain('href="/settings/suggestions"');
+		expect(html).not.toContain('href="/transactions/organize"');
+	});
+
+	it("links to the full list, where a held credit shows Review credit, when only a held credit waits (#714)", async () => {
+		await bankHistoryIn();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		// A credit with no income guess and no category: held for review, and nothing in the suggestions queue.
+		await env.DB.prepare(
+			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name)
+			 VALUES ((SELECT MIN(id) FROM accounts), 'fifth-held', ?, -5000, 'ZELLE FROM FRIEND')`,
+		)
+			.bind(today())
+			.run();
+		await writeRecord({
+			...answeredOn(yesterday()),
+			night: { brought: 1, needYou: 1 },
+		});
+		const html = decoded(await page(family));
+		expect(html).toContain(">See what needs you</a>");
+		expect(html).toContain('href="/transactions?month=all"');
+		expect(html).not.toContain('href="/transactions/organize"');
+		expect(html).not.toContain('href="/settings/suggestions"');
 	});
 
 	it("links to the organize list when Home shows its own needs-you count", async () => {

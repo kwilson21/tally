@@ -71,6 +71,18 @@ export const NAMES = [
 ];
 
 /**
+ * The five lines' names once each is drawn (#714): the fifth reads as what it did, since its count is drawn. Undrawn lines
+ * keep NAMES, and so does the set-up-before form.
+ */
+export const DRAWN_NAMES = [
+	"Link your bank",
+	"Your pay",
+	"Your bills",
+	"Your budgets",
+	"Tally kept count on its own",
+];
+
+/**
  * The notes of the lines whose stroke isn't drawn, outside the reading phase. Before a bank no line says Next, so each
  * says how long it takes, and the first entry shows only there: stroke one is drawn once a bank is linked. Once the
  * questions are open, the first line not drawn says Next instead (setupSteps).
@@ -168,31 +180,41 @@ export function setupSteps(
 		if (drawn) {
 			note =
 				i === 0
-					? record?.reAsk
-						? `${record.reAsk.bank} linked: Tally asks again about pay, bills and budgets.`
-						: `${bankName ?? "Your bank"}, linked`
+					? `${bankName ?? "Your bank"}, linked`
 					: day
 						? dayLabel(day, today)
 						: "";
 		}
-		return { name: NAMES[i] ?? "", done: drawn, note };
+		// The re-ask note sits under step one as its own line (#714), so step one's note stays the bank's own.
+		const line: StepLine = { name: NAMES[i] ?? "", done: drawn, note };
+		if (drawn && i === 0 && record?.reAsk)
+			line.reAsk = reAskNote(record.reAsk.bank);
+		return line;
 	});
 }
 
 const count = (n: number) => n.toLocaleString("en-US");
 
+/** The line under step one when a bank linked during setup took the questions back (#578). */
+export function reAskNote(bank: string): string {
+	return `${bank} linked: Tally asks again about pay, bills and budgets.`;
+}
+
 /**
  * The night's counts in words, the same for the fifth day's sentence and the first week's line: "3 new transactions, all
  * sorted", or "3 new transactions; 1 needs you" (#586).
  */
-export function nightCountWords({ brought, needYou }: NightCounts): string {
+export function nightCountWords(
+	{ brought, needYou }: NightCounts,
+	between = "; ",
+): string {
 	const arrived =
 		brought === 0
 			? "no new transactions"
 			: `${count(brought)} new ${brought === 1 ? "transaction" : "transactions"}`;
 	return needYou === 0
 		? `${arrived}, all sorted`
-		: `${arrived}; ${count(needYou)} ${needYou === 1 ? "needs" : "need"} you`;
+		: `${arrived}${between}${count(needYou)} ${needYou === 1 ? "needs" : "need"} you`;
 }
 
 /**
@@ -229,8 +251,7 @@ export function doneNote(
 		}
 		case "bills": {
 			const kept = record.bills?.kept ?? 0;
-			if (kept === 0) return "no bills kept";
-			return `${count(kept)} ${kept === 1 ? "bill" : "bills"} kept`;
+			return kept === 0 ? "none kept" : `${count(kept)} kept`;
 		}
 		case "budgets": {
 			const set = Object.values(record.budgets).filter(
@@ -240,9 +261,8 @@ export function doneNote(
 			return `${count(set)} ${set === 1 ? "budget" : "budgets"}`;
 		}
 		case "count":
-			return record.night
-				? `Overnight: ${nightCountWords(record.night)}`
-				: null;
+			// The line's own joiner (#714): "3 new transactions, 1 needs you", where the fifth-day sentence uses "; ".
+			return record.night ? nightCountWords(record.night, ", ") : null;
 	}
 }
 
@@ -256,7 +276,8 @@ export async function readFirstWeek(
 	const record = await readFirstTally(db);
 	const bank = await db
 		.prepare(
-			"SELECT institution_name AS name FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id LIMIT 1",
+			// The first bank ever linked, disconnected or not (#714): stroke one names it, so a later bank never replaces it.
+			"SELECT institution_name AS name FROM plaid_items ORDER BY id LIMIT 1",
 		)
 		.first<{ name: string }>();
 	const keys = Object.entries(record?.pay ?? {})

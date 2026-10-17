@@ -29,8 +29,8 @@ export const utcDay = (ms: number): string =>
 
 /**
  * The 09:00 run's sync result, kept for the second sort to decide (#586). The run is clean when nothing failed or was
- * skipped and the household-wide step after the banks ran; nightSyncStatement adds that no connected bank needs signing
- * in, since a bank that needs it is never synced and the counts can't see it.
+ * skipped, Plaid was on, and the household-wide step after the banks ran; nightSyncStatement adds that no connected bank
+ * needs signing in, since a bank that needs it is never synced and the counts can't see it.
  */
 export async function recordNightSync(
 	db: D1Database,
@@ -38,7 +38,10 @@ export async function recordNightSync(
 	on: string,
 ): Promise<void> {
 	const clean =
-		synced.failed === 0 && synced.skipped === 0 && !synced.afterSyncFailed;
+		synced.failed === 0 &&
+		synced.skipped === 0 &&
+		!synced.afterSyncFailed &&
+		!synced.disabled;
 	await nightSyncStatement(db, { brought: synced.added, on, ok: clean }).run();
 }
 

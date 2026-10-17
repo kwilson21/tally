@@ -24,6 +24,7 @@ import {
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
+import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { readSetup } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
@@ -64,6 +65,20 @@ const bandAmount = (cents: number) =>
 
 const COUNTED_CATEGORY = countedCategorySql();
 const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+
+/**
+ * Where "See what needs you" goes on the fifth day (#586, #714), the list the stored needs-you count is about: a transaction
+ * that needs a category goes to Organize; else a suggestion waiting in the suggestions queue goes to Settings' suggestions;
+ * else a credit held for review, which the full list shows as Review credit (no link to held credits exists).
+ */
+async function fifthNeedsHref(
+	db: D1Database,
+	needsCategory: boolean,
+): Promise<string> {
+	if (needsCategory) return "/transactions/organize";
+	const queue = await suggestionQueue(db);
+	return queue.length > 0 ? "/settings/suggestions" : "/transactions?month=all";
+}
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -195,11 +210,6 @@ async function renderHome(
 	const olderNeeds = current
 		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
 		: 0;
-	// Where "See what needs you" goes on the fifth day (#586): Home's own needs-you count when it shows one, else the list.
-	const needsHref =
-		currentNeeds > 0 || olderNeeds > 0
-			? "/transactions/organize"
-			: "/transactions?uncategorized=1&month=all";
 	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
 	const needs = (
 		<>
@@ -275,6 +285,11 @@ async function renderHome(
 		current && !demo
 			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
 			: null;
+	// The fifth day's "See what needs you" (#586, #714) is read only when its link renders: a night that left something for a person.
+	const fifthNeeds =
+		setup?.fifth && setup.fifth.needYou > 0
+			? await fifthNeedsHref(c.env.DB, currentNeeds > 0 || olderNeeds > 0)
+			: undefined;
 	// Link a bank is Plaid Link's button only on a full load of Home: Plaid's script loads only there (loadsPlaid, security.ts),
 	// and an htmx swap loads no script. Every other response, an htmx re-render of Home included, links to Home with a plain
 	// link, which loads Home in full, where the button is (#678).
@@ -323,7 +338,7 @@ async function renderHome(
 									setup.fifth
 										? {
 												safeToSpendCents: summary.safeToSpendCents,
-												needsHref,
+												needsHref: fifthNeeds,
 											}
 										: undefined
 								}

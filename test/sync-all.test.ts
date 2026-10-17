@@ -108,6 +108,8 @@ describe("syncAllItems", () => {
 			busy: 0,
 			failed: 0,
 			failedBanks: [],
+			// Nothing synced because Plaid is off: not a clean night (#714).
+			disabled: true,
 		});
 		expect(fetchImpl).not.toHaveBeenCalled();
 		expect(log).toHaveBeenCalledOnce();

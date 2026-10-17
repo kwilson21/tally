@@ -598,7 +598,7 @@ function Brand() {
 						)}
 					/>
 				</State>
-				<State label="A bank linked during setup: its line says Tally asks again about the questions">
+				<State label="A bank linked during setup: a line under step one says Tally asks again about the questions">
 					<TallySteps
 						steps={setupSteps(
 							{

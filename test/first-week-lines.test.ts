@@ -69,17 +69,23 @@ describe("doneNote: the pay line", () => {
 });
 
 describe("doneNote: the bills line", () => {
-	it("says no bills kept with no bills record", () => {
-		expect(doneNote("bills", EMPTY, names)).toBe("no bills kept");
+	it("says none kept with no bills record", () => {
+		expect(doneNote("bills", EMPTY, names)).toBe("none kept");
 	});
 
-	it("says how many bills were kept, and 1 bill for one", () => {
+	it("says how many bills were kept, and 1 kept for one (#714)", () => {
 		expect(
 			doneNote("bills", { ...EMPTY, bills: { kept: 8, cents: 206200 } }, names),
-		).toBe("8 bills kept");
+		).toBe("8 kept");
 		expect(
 			doneNote("bills", { ...EMPTY, bills: { kept: 1, cents: 1600 } }, names),
-		).toBe("1 bill kept");
+		).toBe("1 kept");
+	});
+
+	it("says none kept when the bills step kept none", () => {
+		expect(
+			doneNote("bills", { ...EMPTY, bills: { kept: 0, cents: 0 } }, names),
+		).toBe("none kept");
 	});
 });
 
@@ -122,19 +128,19 @@ describe("doneNote: the count line", () => {
 	it("says the night's transactions, all sorted, when none needs a person", () => {
 		expect(
 			doneNote("count", { ...EMPTY, night: { brought: 3, needYou: 0 } }, names),
-		).toBe("Overnight: 3 new transactions, all sorted");
+		).toBe("3 new transactions, all sorted");
 	});
 
 	it("says no new transactions on a quiet night, in the fifth day's words", () => {
 		expect(
 			doneNote("count", { ...EMPTY, night: { brought: 0, needYou: 0 } }, names),
-		).toBe("Overnight: no new transactions, all sorted");
+		).toBe("no new transactions, all sorted");
 	});
 
-	it("says how many need a person, and 1 needs you for one", () => {
+	it("says how many need a person, with a comma, and 1 needs you for one", () => {
 		expect(
 			doneNote("count", { ...EMPTY, night: { brought: 3, needYou: 1 } }, names),
-		).toBe("Overnight: 3 new transactions; 1 needs you");
+		).toBe("3 new transactions, 1 needs you");
 	});
 
 	it("groups a large count with commas", () => {
@@ -144,7 +150,7 @@ describe("doneNote: the count line", () => {
 				{ ...EMPTY, night: { brought: 1234, needYou: 2 } },
 				names,
 			),
-		).toBe("Overnight: 1,234 new transactions; 2 need you");
+		).toBe("1,234 new transactions, 2 need you");
 	});
 
 	it("has no line with no night kept", () => {

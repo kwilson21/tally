@@ -73,7 +73,8 @@ function FifthDay({
 	view: SetupView;
 	night: NightCounts;
 	safeToSpendCents: number;
-	needsHref: string;
+	/** Where "See what needs you" goes, given when the night left something for a person (home.tsx). */
+	needsHref?: string;
 	bankLine?: string[];
 }) {
 	const amount = safeToSpendText(safeToSpendCents);
@@ -101,7 +102,7 @@ function FifthDay({
 			<p id="setup-status" class="mt-3 font-serif text-lg italic">
 				{nightSentence(night)}
 			</p>
-			{night.needYou > 0 && (
+			{night.needYou > 0 && needsHref && (
 				<p class="mt-2">
 					<a
 						href={needsHref}
@@ -137,7 +138,7 @@ export function HomeSetup({
 	view: SetupView;
 	linkBank?: Child;
 	bankLine?: string[];
-	fifthDay?: { safeToSpendCents: number; needsHref: string };
+	fifthDay?: { safeToSpendCents: number; needsHref?: string };
 }) {
 	if (view.fifth && fifthDay) {
 		return (

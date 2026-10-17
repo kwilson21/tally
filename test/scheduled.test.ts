@@ -1960,6 +1960,8 @@ describe("recordNightSync's result", () => {
 			"a failed household step after the banks",
 			{ afterSyncFailed: true as const },
 		],
+		// Plaid switched off is no sync at all, so the night isn't clean (#714).
+		["Plaid switched off", { disabled: true as const }],
 	])("is not ok with %s", async (_, over) => {
 		await recordNightSync(env.DB, synced(over), "2026-10-13");
 		expect((await readFirstTally(env.DB))?.nightSync).toEqual({

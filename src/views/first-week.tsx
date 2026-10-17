@@ -5,6 +5,7 @@
 import { shortDay } from "../dates";
 import { type FirstTally, isSetUp, STROKES } from "../db/first-tally";
 import {
+	DRAWN_NAMES,
 	doneNote,
 	type FirstWeekNames,
 	NAMES,
@@ -31,15 +32,17 @@ export function FirstWeekPart({
 				{STROKES.map((stroke, i) => {
 					const day = record?.strokes[stroke];
 					const what = record && day ? doneNote(stroke, record, names) : null;
+					// A drawn line reads `<step>: <what> · <day>` (#714); the set-up-before form keeps the step names, with no day.
+					const name = day ? DRAWN_NAMES[i] : NAMES[i];
 					const note =
 						day === undefined
 							? QUESTION_NOTES[i]
 							: day
-								? `${what ? `${what} · ` : ""}done ${shortDay(day, today)}`
+								? `${what ? `${what} · ` : ""}${shortDay(day, today)}`
 								: "done";
 					return (
 						<li key={stroke}>
-							{NAMES[i]}: {note}
+							{name}: {note}
 						</li>
 					);
 				})}

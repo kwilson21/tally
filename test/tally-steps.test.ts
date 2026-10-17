@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Notebook } from "../src/views/notebook";
-import { stepsOf, TallySteps } from "../src/views/tally-steps";
+import { type StepLine, stepsOf, TallySteps } from "../src/views/tally-steps";
 
 const NAMES = [
 	"Link your bank",
@@ -66,5 +66,43 @@ describe("TallySteps", () => {
 		const all = String(await TallySteps({ steps: stepsOf(NAMES, blank, 5) }));
 		expect(all).toContain("Your first tally · 5 of 5");
 		expect(all.match(/, done</g)?.length).toBe(5);
+	});
+});
+
+describe("TallySteps: the re-ask line (#714)", () => {
+	it("draws the re-ask line as its own full-width muted line under step one, not in its note column", async () => {
+		const steps: StepLine[] = [
+			{
+				name: "Link your bank",
+				done: true,
+				note: "Chase, linked",
+				reAsk:
+					"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
+			},
+			{ name: "Your pay", done: false, note: "Next" },
+			{ name: "Your bills", done: false, note: "Later" },
+			{ name: "Your budgets", done: false, note: "Later" },
+			{ name: NAMES[4] ?? "", done: false, note: "Later" },
+		];
+		const html = String(await TallySteps({ steps }));
+		const line = html.indexOf(
+			"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
+		);
+		expect(line).toBeGreaterThan(html.indexOf("Link your bank"));
+		expect(line).toBeLessThan(html.indexOf("Your pay"));
+		expect(html).toMatch(
+			/<p class="[^"]*basis-full[^"]*text-muted[^"]*">Wells Fargo linked/,
+		);
+		// The line sits in step one's row, so the note column still says the bank's own words.
+		expect(html).toContain("Chase, linked");
+	});
+
+	it("draws no re-ask line without one", async () => {
+		const html = String(
+			await TallySteps({
+				steps: stepsOf(NAMES, ["Chase, linked", "", "", "", ""], 1),
+			}),
+		);
+		expect(html).not.toContain("basis-full");
 	});
 });

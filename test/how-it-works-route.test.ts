@@ -1288,8 +1288,8 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		});
 		const html = await familyPage();
 		expect(html).toContain('id="first-week"');
-		expect(html).toContain("Link your bank: Chase, linked · done Oct 12");
-		expect(html).toContain("Your pay: no paycheck found · done Oct 13");
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).toContain("Your pay: no paycheck found · Oct 13");
 		expect(html).toContain("Your bills: done");
 		expect(html).toContain("Your budgets: One tap, or one at a time");
 		expect(html).toContain(
@@ -1329,13 +1329,15 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 			night: { brought: 3, needYou: 1 },
 		});
 		const html = await familyPage();
-		expect(html).toContain("Link your bank: Chase, linked · done Oct 12");
-		expect(html).toContain("Your pay: Acme Corp · done Oct 13");
-		expect(html).toContain("Your bills: 8 bills kept · done Oct 13");
-		expect(html).toContain("Your budgets: 12 budgets · done Oct 13");
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).toContain("Your pay: Acme Corp · Oct 13");
+		expect(html).toContain("Your bills: 8 kept · Oct 13");
+		expect(html).toContain("Your budgets: 12 budgets · Oct 13");
 		expect(html).toContain(
-			"Tomorrow · Tally keeps count on its own: Overnight: 3 new transactions; 1 needs you · done Oct 14",
+			"Tally kept count on its own: 3 new transactions, 1 needs you · Oct 14",
 		);
+		expect(html).not.toContain("done Oct");
+		expect(html).not.toContain("Overnight");
 	});
 
 	it("gives an undrawn stroke its question note and no line", async () => {
@@ -1348,6 +1350,28 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		expect(html).toContain("Your pay: One question");
 		expect(html).toContain("Your budgets: One tap, or one at a time");
 		expect(html).not.toContain("Your pay: no paycheck");
+	});
+
+	it("keeps the bank line on the first bank after it is disconnected and a second is linked (#714)", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET institution_name = 'Chase' WHERE id = (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await writeRecord({
+			strokes: { bank: "2026-10-12", pay: "2026-10-13" },
+			budgets: {},
+		});
+		// Disconnecting keeps the row, so the first bank stays the lowest id; the second bank links after it.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Wells Fargo', 'owner', 'item-wells-714')",
+		)
+			.bind(new Uint8Array([1, 2, 3]))
+			.run();
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).not.toContain("Wells Fargo, linked");
 	});
 
 	it("mid-setup, with no record, reads every stroke as not drawn, with its note", async () => {

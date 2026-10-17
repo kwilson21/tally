@@ -285,10 +285,13 @@ describe("setupView: which setup state Home shows", () => {
 			],
 		});
 		expect(reading?.phase).toBe("reading");
+		// The re-ask note is its own line under step one (#714), so step one's note stays the bank's own.
 		expect(reading?.steps[0]).toEqual({
 			name: "Link your bank",
 			done: true,
-			note: "Wells Fargo linked: Tally asks again about pay, bills and budgets.",
+			note: "Chase, linked",
+			reAsk:
+				"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
 		});
 	});
 
@@ -305,7 +308,8 @@ describe("setupView: which setup state Home shows", () => {
 				{ name: "Chase", lastSyncedAt: null, historyCompleteAt: null },
 			],
 		});
-		expect(reading?.steps[0]?.note).toBe(
+		expect(reading?.steps[0]?.note).toBe("Chase, linked");
+		expect(reading?.steps[0]?.reAsk).toBe(
 			`O'Brien "Savings" linked: Tally asks again about pay, bills and budgets.`,
 		);
 	});
