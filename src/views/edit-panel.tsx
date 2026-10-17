@@ -498,7 +498,7 @@ export function EditSheet({
 				<p class="text-muted">Cash · you entered this</p>
 			) : (
 				<p class="text-muted">
-					<span class="text-lg font-semibold text-ink">
+					<span class="text-lg font-semibold tabular-nums text-ink">
 						{formatCents(tx.amountCents, { signed: true })}
 					</span>{" "}
 					· {dayLabel(tx.date, today)} · {account}

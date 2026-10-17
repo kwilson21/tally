@@ -70,9 +70,17 @@ describe("ProgressRow", () => {
 		expect(await row(20001, 20000)).toContain("fill-over");
 	});
 
+	it("sets its spent of budget amount in tabular figures, so amounts line up down the list (decision 128)", async () => {
+		expect(await row(18600, 20000)).toContain(
+			'<span class="ml-auto text-right text-lg tabular-nums">$186 of $200',
+		);
+	});
+
 	it("shows a net refund in green with an empty bar and its budget under the name", async () => {
 		const html = await row(-2000, 20000);
-		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toMatch(
+			/class="text-right text-lg tabular-nums text-ok">\+\$20/,
+		);
 		expect(html).toContain(
 			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
 		);
@@ -166,7 +174,9 @@ describe("ProgressRow in Adjust mode (#94)", () => {
 
 	it("keeps a net refund's budget under its name, and its empty bar, in Adjust mode too", async () => {
 		const html = await adjusting(-2000, 20000);
-		expect(html).toMatch(/class="text-right text-lg text-ok">\+\$20/);
+		expect(html).toMatch(
+			/class="text-right text-lg tabular-nums text-ok">\+\$20/,
+		);
 		expect(html).toContain(
 			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
 		);

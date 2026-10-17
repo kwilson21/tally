@@ -351,13 +351,23 @@ function Foundation() {
 				id="type"
 				title="Type roles"
 				tier="visual"
-				sentence="Newsreader for the one thing that matters on a screen; Inter with tabular numerals for everything else."
+				sentence="Newsreader for the one thing that matters on a screen; Inter for everything else, with tabular figures where amounts, dates and counts line up or change in place."
 			>
 				{TYPE_ROLES.map((r) => (
 					<State label={`${r.role} · ${r.classes}`}>
 						<p class={r.classes}>{r.sample}</p>
 					</State>
 				))}
+				<State label="Body / rows beside an amount column · normal figures in the words, tabular figures in the amounts">
+					<div class="flex w-full max-w-sm flex-wrap items-start justify-between gap-x-4 gap-y-2 text-lg">
+						<p>Time zone and bank sign-in emails</p>
+						<div class="flex shrink-0 flex-col items-end text-right tabular-nums">
+							<span>$412</span>
+							<span>$1,284</span>
+							<span>$36</span>
+						</div>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="radii"

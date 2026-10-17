@@ -407,10 +407,9 @@ export function NotOnPageCount({
 	oob?: boolean;
 }) {
 	return (
-		<span
-			id="not-on-page-count"
-			hx-swap-oob={oob ? "innerHTML" : undefined}
-		>{`${count} not on this page`}</span>
+		<span id="not-on-page-count" hx-swap-oob={oob ? "innerHTML" : undefined}>
+			<span class="tabular-nums">{count}</span> not on this page
+		</span>
 	);
 }
 
@@ -518,7 +517,11 @@ export function SelectionActionBar({
 	return (
 		<div class="flex flex-col gap-1">
 			<div class="flex items-center justify-between gap-2">
-				<span id="selected-count" aria-live="polite" class="text-lg">
+				<span
+					id="selected-count"
+					aria-live="polite"
+					class="text-lg tabular-nums"
+				>
 					{label ?? <SelectedCount count={count} notOnPage={notOnPage} />}
 				</span>
 				<SelectAllOnPage

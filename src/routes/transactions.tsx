@@ -86,7 +86,7 @@ import {
 	type SplitRefund,
 } from "../transactions/refund-guards";
 import { oneOffGuessesAgain } from "../transactions/rename";
-import { resultCount } from "../transactions/result-count";
+import { resultCountParts } from "../transactions/result-count";
 import {
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
@@ -391,7 +391,7 @@ async function renderList(
 			label: `account ${filters.account}`,
 			disconnected: false,
 		});
-	const count = resultCount(
+	const count = resultCountParts(
 		{ total, first, shown: rows.length, pages },
 		filters,
 		categoryName,
@@ -568,7 +568,9 @@ async function renderList(
 	// The ticks not on this page, under their day headings, in the disclosure (ticked).
 	const offPageRows = byDay(offPage).map(([date, dayRows]) => (
 		<>
-			<h2 class="mt-3 text-sm text-muted">{dayLabel(date, today)}</h2>
+			<h2 class="mt-3 text-sm tabular-nums text-muted">
+				{dayLabel(date, today)}
+			</h2>
 			<ul class="divide-y divide-rule">
 				{dayRows.map((row) => (
 					<SelectableTransactionRow row={shown(row)} checked today={today} />
@@ -792,7 +794,11 @@ async function renderList(
 						>
 							{/* One span, so the chip's flex gap doesn't split the text around the count. */}
 							<span>
-								Needs category (<span id="needs-count">{needs}</span>)
+								Needs category (
+								<span class="tabular-nums" id="needs-count">
+									{needs}
+								</span>
+								)
 							</span>
 						</Chip>
 					</div>
@@ -822,7 +828,9 @@ async function renderList(
 						autofocus={focusCount}
 						class="mt-4 text-sm text-muted"
 					>
-						{count}
+						{count.before}
+						<span class="tabular-nums">{count.figures}</span>
+						{count.after}
 					</p>
 				)}
 				{/* Always drawn on a list, so a search that runs in every month can add or remove its link (LIST_OOB). */}
@@ -909,7 +917,7 @@ async function renderList(
 							) : (
 								byDay(rows).map(([date, dayRows]) => (
 									<>
-										<h2 class="mt-3 text-sm text-muted">
+										<h2 class="mt-3 text-sm tabular-nums text-muted">
 											{dayLabel(date, today)}
 										</h2>
 										<ul class="divide-y divide-rule">
@@ -989,7 +997,7 @@ async function renderList(
 						) : (
 							byDay(rows).map(([date, dayRows]) => (
 								<>
-									<h2 class="mt-3 text-sm text-muted">
+									<h2 class="mt-3 text-sm tabular-nums text-muted">
 										{dayLabel(date, today)}
 									</h2>
 									<ul class="divide-y divide-rule">
@@ -2039,7 +2047,7 @@ function SplitSheet({
 			>
 				{tx.displayName}
 			</h2>
-			<p class="font-serif text-4xl font-semibold">
+			<p class="font-serif text-4xl font-semibold tabular-nums">
 				{formatCents(correction?.totalCents ?? tx.amountCents, {
 					signed: true,
 				})}

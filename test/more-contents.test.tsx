@@ -179,14 +179,15 @@ describe("ContentsList", () => {
 	it("groups the leader and the folio, so they wrap together under the name and the folio stays at the right", () => {
 		const out = html(places({ toCheck: 3 }));
 		expect(out).toMatch(
-			/<span class="flex min-w-0 flex-auto items-baseline gap-2"><span aria-hidden="true" class="min-w-4 flex-1 border-b-2 border-dotted border-rule"><\/span><span class="text-right text-sm tabular-nums text-ink">3 to check<\/span><\/span>/,
+			/<span class="flex min-w-0 flex-auto items-baseline gap-2"><span aria-hidden="true" class="min-w-4 flex-1 border-b-2 border-dotted border-rule"><\/span><span class="text-right text-sm text-ink">3 to check<\/span><\/span>/,
 		);
 	});
 
+	// Decision 128 (#676): folios are short phrases, not columns, so they use normal figures.
 	it("lets a plain folio wider than a line wrap at its spaces, rather than overflow the phone", () => {
 		const out = html(places({ toCheck: 3 }));
 		expect(out).toContain(
-			'<span class="text-right text-sm tabular-nums text-ink">3 to check</span>',
+			'<span class="text-right text-sm text-ink">3 to check</span>',
 		);
 	});
 

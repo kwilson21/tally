@@ -75,7 +75,9 @@ export function LedgerMonth({
 					<span class="block text-lg">{month}</span>
 					{sub && <span class="block text-sm text-muted">{sub}</span>}
 				</span>
-				{words && <span class={`text-sm ${wordsClass}`}>{words}</span>}
+				{words && (
+					<span class={`text-sm tabular-nums ${wordsClass}`}>{words}</span>
+				)}
 				{action}
 				<RowArrow />
 			</a>
@@ -120,7 +122,7 @@ export function LedgerDisclosure({
 						{sr && <span class="sr-only">{`, ${sr}`}</span>}
 					</span>
 					<span
-						class="text-sm text-muted"
+						class="text-sm tabular-nums text-muted"
 						aria-hidden={sr ? "true" : undefined}
 					>
 						{words}
@@ -199,7 +201,7 @@ export function LedgerPriceRow({
 		<li class="py-2">
 			<p class="flex justify-between gap-3">
 				<span class="text-lg">{month}</span>
-				<span class="text-sm text-muted">{words}</span>
+				<span class="text-sm tabular-nums text-muted">{words}</span>
 			</p>
 			{children}
 		</li>

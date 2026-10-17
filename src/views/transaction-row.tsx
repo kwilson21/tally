@@ -293,7 +293,7 @@ export function TransactionRow({
 						{pendingLast && <span class="shrink-0 text-muted">· Pending</span>}
 					</span>
 				</span>
-				<span class="shrink-0 text-lg">
+				<span class="shrink-0 text-lg tabular-nums">
 					{formatCents(row.amountCents, { signed: true })}
 				</span>
 				{href && <RowArrow saved={mark} />}
