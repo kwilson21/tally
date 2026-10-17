@@ -1,10 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { runScheduled } from "../src/index";
-import { loadBillRows } from "../src/routes/bills";
 
 // "Today" is the household's date, so the month and bill status change at midnight Eastern, not UTC.
 // Only Date is faked: the Workers runtime and D1 keep their real timers.

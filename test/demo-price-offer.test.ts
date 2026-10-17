@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { loadPriceOffers } from "../src/bills/price-change";
+import { loadBillRows } from "../src/bills/rows";
 import { daysBefore } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
 
 // The demo moves with "today", so what its Bills page asks has to hold on every day of a month: exactly
 // one "Price changed?" offer, Netflix's ($15.49, charged $17.99), and none because some other bill's

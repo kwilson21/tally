@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
@@ -7,7 +8,6 @@ import { loadMonth } from "../src/db/month";
 import { plansSetAsideCents } from "../src/db/planned-expenses";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
-import { loadBillRows } from "../src/routes/bills";
 
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);

@@ -1,8 +1,8 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows } from "../src/bills/totals";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
 
 // Decision 123 (#631): Safe to spend sets aside only this month's bills that are due or overdue and not paid. A bill
 // due in the next month is not set aside until its month, though it still shows as due soon on Bills and on Home.

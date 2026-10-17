@@ -8,6 +8,7 @@ import {
 	loadPriceOffers,
 	pickPriceOffer,
 } from "../src/bills/price-change";
+import { loadBillRows } from "../src/bills/rows";
 import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../src/bills/status";
 import { summarizeMonth } from "../src/budget";
 import {
@@ -19,7 +20,6 @@ import {
 	todayIn,
 } from "../src/dates";
 import { loadMonth } from "../src/db/month";
-import { loadBillRows } from "../src/routes/bills";
 
 // Spec §6.1 rule 4 and §8.5 "Bill matching" (decision 67; P36 B, decision 72): an excluded payment can
 // pay a bill, and a payment from the same merchant outside ±10% is offered as "Price changed?" rather
