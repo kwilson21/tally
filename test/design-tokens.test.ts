@@ -5,6 +5,7 @@ import {
 	DURATION_TOKENS,
 	SHADOW_TOKENS,
 	SWIPE_MOTION_TOKENS,
+	TYPE_ROLES,
 } from "../src/design-system/tokens";
 import tokensSource from "../src/design-system/tokens.ts?raw";
 import css from "../src/styles/app.css?raw";
@@ -835,5 +836,37 @@ describe("the press token and the rows that open (P118 A)", () => {
 			/\.row-opens\.htmx-request \{\s*background-color: var\(--color-press\);\s*\}/,
 		);
 		expect(css).not.toMatch(/\.row-opens[^{]*\{[^}]*transition/);
+	});
+});
+
+// Decision 128: tabular figures only on the amounts, dates and counts that line up or change in place.
+// Inter's tabular figures also widen the hyphen, so html must not set them for every word.
+describe("tabular figures (decision 128)", () => {
+	const roleClasses = (role: string) =>
+		TYPE_ROLES.find((r) => r.role === role)?.classes.split(" ") ?? [];
+
+	it("sets no tabular figures on html, so hyphenated words and prose keep Inter's normal figures", () => {
+		const roots = cssRules(css).filter(({ selector }) => selector === "html");
+		expect(roots.length).toBeGreaterThan(0);
+		for (const rule of roots)
+			expect(rule.body).not.toContain("font-variant-numeric");
+	});
+
+	it("gives the amounts, dates and counts role tabular figures, and body text normal ones", () => {
+		expect(roleClasses("Amounts, dates and counts")).toContain("tabular-nums");
+		expect(roleClasses("Body / rows")).not.toContain("tabular-nums");
+		expect(roleClasses("Headline amount")).toContain("tabular-nums");
+		expect(roleClasses("Headline amount, 9 or more characters")).toContain(
+			"tabular-nums",
+		);
+	});
+
+	it("writes the rule into DESIGN.md's type roles", () => {
+		expect(design).toMatch(
+			/^\| Body \/ rows \| font-sans \(Inter\), base–lg, normal figures \|$/m,
+		);
+		expect(design).toMatch(
+			/^\| Amounts, dates and counts \| Inter, tabular figures \(`tabular-nums`\) where they line up or change in place, as their own element; a figure that changes in place inside a sentence gets its own tabular span, and the words around it keep normal figures \(decision 128\) \|$/m,
+		);
 	});
 });

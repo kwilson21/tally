@@ -184,7 +184,7 @@ export function MonthNavigation({
 								<a
 									href={`/?month=${item}`}
 									aria-current={selected ? "page" : undefined}
-									class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm text-muted no-underline"
+									class="flex min-h-11 w-11 flex-col items-center gap-0.5 text-sm tabular-nums text-muted no-underline"
 								>
 									<MonthDot mark={mark} shown={selected} />
 									<span aria-hidden="true">{monthName(item).slice(0, 3)}</span>

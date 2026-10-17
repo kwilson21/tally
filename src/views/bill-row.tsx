@@ -86,7 +86,7 @@ export function BillStatusHeading({
 			<span aria-hidden="true">·</span>
 			<WhyLink section="bills" topic={look.why} />
 			{totalCents !== undefined && (
-				<span class="ml-auto shrink-0">
+				<span class="ml-auto shrink-0 tabular-nums">
 					{formatCents(totalCents)}
 					{status === "upcoming" ? " this month" : ""}
 				</span>
@@ -250,7 +250,9 @@ export function BillRow({
 					</span>
 				)}
 			</span>
-			<span class="shrink-0 text-lg">{formatCents(bill.amountCents)}</span>
+			<span class="shrink-0 text-lg tabular-nums">
+				{formatCents(bill.amountCents)}
+			</span>
 		</>
 	);
 	const look = `flex min-h-16 items-center gap-4${offer ? " py-2" : ""}`;

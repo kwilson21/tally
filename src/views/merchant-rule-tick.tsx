@@ -5,7 +5,9 @@ import { Icon } from "./icons";
  * mark, in place of the "Always for this merchant" pill. Unticked by default. Its hint says what the rule is
  * when one matches this transaction (`ruleCategory`, given only then), and otherwise that unticking changes
  * just this one. The input keeps the name `always` the form has always posted, so the save (parseEdit) and
- * the re-guess note's hooks (name-choices.tsx) read it unchanged.
+ * the re-guess note's hooks (name-choices.tsx) read it unchanged. The label is the named group `group/rule`, so its
+ * check reads only this checkbox: the edit panel draws the row inside FoldedRow's `details.group`, where a checked
+ * category radio would match a bare `group` (#701).
  */
 export function MerchantRuleTick({
 	merchant,
@@ -26,7 +28,7 @@ export function MerchantRuleTick({
 		? `${merchant} is always ${ruleCategory}. Untick it and save to remove the rule.`
 		: "Leave it unticked to change just this one.";
 	return (
-		<label class="group flex min-h-11 cursor-pointer items-start gap-3 py-2 text-base text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+		<label class="group/rule flex min-h-11 cursor-pointer items-start gap-3 py-2 text-base text-ink has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 			<input
 				class="peer sr-only"
 				type="checkbox"
@@ -37,7 +39,7 @@ export function MerchantRuleTick({
 				aria-describedby={`${id}-hint`}
 			/>
 			<span class="selection-mark mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band">
-				<span class="hidden group-has-[:checked]:flex">
+				<span class="hidden group-has-[:checked]/rule:flex">
 					<Icon name="check" class="size-4" />
 				</span>
 			</span>

@@ -100,7 +100,7 @@ describe("the edit panel's head (P120 B)", () => {
 		expect(h2).not.toContain("text-4xl");
 		const panel = panelOf(html);
 		const amount = panel.indexOf(
-			'<span class="text-lg font-semibold text-ink">',
+			'<span class="text-lg font-semibold tabular-nums text-ink">',
 		);
 		expect(amount).toBeGreaterThan(0);
 		expect(panel.indexOf("font-serif text-4xl")).toBe(-1);

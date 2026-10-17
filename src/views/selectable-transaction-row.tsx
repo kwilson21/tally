@@ -37,8 +37,8 @@ export function SelectableTransactionRow({
 	const reasonId = `select-${row.id}-reason`;
 	return (
 		<li data-transaction={row.id} class="group/tx">
-			{/* relative keeps the visually hidden checkbox inside its own row. */}
-			<label class="group relative flex min-h-16 min-w-11 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
+			{/* relative keeps the visually hidden checkbox inside its own row. The label is the named group `group/select`, so its check reads only this checkbox: a bare `group` ancestor, like the off-page disclosure's `details.group`, would match a checked tick in another row (#701). */}
+			<label class="group/select relative flex min-h-16 min-w-11 cursor-pointer items-center gap-3 has-[:focus-visible]:[&_.selection-mark]:outline-2 has-[:focus-visible]:[&_.selection-mark]:outline-offset-2 has-[:focus-visible]:[&_.selection-mark]:outline-accent">
 				<input
 					class="peer sr-only"
 					type="checkbox"
@@ -50,7 +50,7 @@ export function SelectableTransactionRow({
 					aria-describedby={reason ? reasonId : undefined}
 				/>
 				<span class="selection-mark flex size-7 shrink-0 items-center justify-center rounded-full border border-muted peer-checked:border-ink peer-checked:bg-band">
-					<span class="hidden group-has-[:checked]:flex">
+					<span class="hidden group-has-[:checked]/select:flex">
 						<Icon name="check" class="size-4" />
 					</span>
 				</span>

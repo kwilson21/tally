@@ -154,10 +154,20 @@ describe("GET /settings", () => {
 		).run();
 		const twentyOne = await get("/settings/rules");
 		expect(twentyOne.html).toContain('name="rules_search"');
-		expect(twentyOne.html).toContain("21 merchants, A to Z");
+		// The count's figure is its own tabular span; the words after it are normal (#676, decision 128).
+		expect(twentyOne.html).toContain(
+			'<span class="tabular-nums">21</span> merchants, A to Z',
+		);
+		const countLine = twentyOne.html.match(
+			/<p id="merchant-rules-count"[^>]*>/,
+		)?.[0];
+		expect(countLine).toBeDefined();
+		expect(countLine).not.toContain("tabular-nums");
 		const narrowed = await get("/settings/rules?rules_search=co");
 		expect(narrowed.html).toContain('value="co"');
-		expect(narrowed.html).toContain("2 merchants matching “co”");
+		expect(narrowed.html).toContain(
+			'<span class="tabular-nums">2</span> merchants matching “co”',
+		);
 		expect(narrowed.html).toContain("Paused while Groceries is archived");
 		expect(narrowed.html).not.toContain("Merchant 01");
 	});
