@@ -46,22 +46,32 @@ export function SplitLine({
 			class={`flex items-center gap-2 text-lg font-medium ${status.kind === "over" ? "text-over" : "text-ink"}`}
 		>
 			{status.kind === "done" && <Icon name="check" class="size-5" />}
-			{status.text}
+			{/* One span, so the line's flex gap doesn't split the sentence around its figures. */}
+			<span>
+				{status.before}
+				<span class="tabular-nums">{status.figures}</span>
+				{status.after}
+			</span>
 		</p>
 	);
 }
 
-/** A part's chip on the refund chooser: its category and amount, or "Part N" until both are filled in. */
-function partLabel(
-	value: SplitValue,
-	index: number,
-	categories: Category[],
-): string {
+/**
+ * A part's chip on the refund chooser: its category and amount, or "Part N" until both are filled in. Only the amount
+ * is a tabular span; the category name and the dot stay normal text, since a name can be hyphenated (#676, decision 128).
+ */
+function partLabel(value: SplitValue, index: number, categories: Category[]) {
 	const category = categories.find((cat) => String(cat.id) === value.category);
 	const cents = positiveCents(value.amount);
-	return category && cents !== null
-		? `${category.name} · ${formatCents(cents)}`
-		: `Part ${index + 1}`;
+	return category && cents !== null ? (
+		<>
+			{category.name}
+			{" · "}
+			<span class="tabular-nums">{formatCents(cents)}</span>
+		</>
+	) : (
+		`Part ${index + 1}`
+	);
 }
 
 /**

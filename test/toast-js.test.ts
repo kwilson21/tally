@@ -1037,6 +1037,56 @@ describe("the toasts the server sends", () => {
 	});
 });
 
+// #704: an Undo's back address is this page's address without keys. A toast made while the keys sheet is open holds
+// ?keys, and an Undo pressed after the person closed the sheet would push that address with no sheet open.
+describe("the address an Undo goes back to (#704)", () => {
+	/** The back address an Undo form carries, for a toast made at this pathname and query. */
+	async function backFrom(pathname: string, search: string) {
+		const { body, toasts } = await page();
+		vi.stubGlobal("location", { pathname, search, hash: "" });
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		const form = (toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "form");
+		return form?.children.find((node) => node.name === "back")?.value;
+	}
+
+	it.each([
+		[
+			"keys after another parameter",
+			"?month=2026-09&keys",
+			"/transactions?month=2026-09",
+		],
+		["keys alone", "?keys", "/transactions"],
+		[
+			"keys between two parameters, which keep their order",
+			"?month=2026-09&keys&q=coffee",
+			"/transactions?month=2026-09&q=coffee",
+		],
+		[
+			"no keys, so the address is saved unchanged",
+			"?month=2026-09&q=coffee",
+			"/transactions?month=2026-09&q=coffee",
+		],
+		[
+			"a value named keys, which is kept",
+			"?month=keys",
+			"/transactions?month=keys",
+		],
+		[
+			"a value named keys, with keys after it",
+			"?month=keys&keys",
+			"/transactions?month=keys",
+		],
+	])("saves the back address for %s", async (_name, search, expected) => {
+		expect(await backFrom("/transactions", search)).toBe(expected);
+	});
+});
+
 // Only the newest plain or error toast shows, so a stack never covers the page. An Undo toast is
 // the one exception: it stays until its own time is up, and a newer toast never removes it early.
 describe("only the newest plain or error toast shows", () => {

@@ -1,7 +1,7 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
 import type { MonthPoint } from "../src/trends";
-import { MonthBars, TrendRow } from "../src/views/trends";
+import { ChangeRow, MonthBars, TrendRow } from "../src/views/trends";
 
 const months: MonthPoint[] = [
 	{
@@ -135,5 +135,30 @@ describe("TrendRow", () => {
 			expect(other).toContain('<pattern id="ds-row-2-part"');
 			expect(other).not.toContain("ds-row-part");
 		});
+	});
+});
+
+// Decision 128 (#676): a change's words ("Up $31") are figures; the category's name and its detail are prose.
+describe("ChangeRow (decision 128)", () => {
+	const props = {
+		name: "Groceries",
+		icon: "groceries",
+		color: "cat-blue",
+		detail: "$92, was $61",
+		direction: "up" as const,
+		words: "Up $31",
+	};
+
+	it("sets the change's words in tabular figures, and the name and detail outside them", () => {
+		const html = String(<ChangeRow {...props} />);
+		expect(html).toMatch(
+			/<span class="flex shrink-0 items-center gap-1 text-lg tabular-nums">(?:<svg[\s\S]*?<\/svg>)?Up \$31<\/span>/,
+		);
+		expect(html).toContain(
+			'<span class="block truncate text-lg leading-6">Groceries</span>',
+		);
+		expect(html).toContain(
+			'<span class="block leading-6 text-muted">$92, was $61</span>',
+		);
 	});
 });

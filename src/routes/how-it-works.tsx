@@ -9,6 +9,7 @@ import {
 	BILL_FIND_MONTHS,
 } from "../bills/find";
 import { BILL_AMOUNT_TOLERANCE, BILL_DATE_WINDOW_DAYS } from "../bills/match";
+import { loadBillRows } from "../bills/rows";
 import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
 import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
@@ -52,7 +53,6 @@ import {
 import { Layout } from "../views/layout";
 import { StartHere } from "../views/start-here";
 import { SystemDiagram } from "../views/system-diagram";
-import { loadBillRows } from "./bills";
 
 export const howItWorks = new Hono<{ Bindings: Env }>();
 

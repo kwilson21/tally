@@ -134,6 +134,21 @@ const categories = async () =>
 			}>()
 	).results;
 
+/** Another member's writes land between a save's read and its batch; only that save runs against the proxy. */
+function racing(...between: (() => Promise<unknown>)[]) {
+	return new Proxy(db, {
+		get(target, property) {
+			if (property === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					for (const write of between) await write();
+					return db.batch(statements);
+				};
+			const value = Reflect.get(target, property);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as D1Database;
+}
+
 beforeEach(async () => {
 	await resetDemo(db, "2026-09-22");
 	await db.batch([
@@ -1097,6 +1112,214 @@ describe("createFromSuggestion", () => {
 		});
 	});
 
+	describe("whole: Organize's Create files every shown purchase or none (#705)", () => {
+		const nothing = {
+			ok: false,
+			reason: "empty",
+			error: "Tick at least one transaction, or say No to this suggestion.",
+		};
+		/** Changes that stop a shown purchase being filed. A save has its own tests below. */
+		const stops: [string, string][] = [
+			["excluded", "excluded = 1"],
+			["still pending at the bank", "pending = 1"],
+			["split", "is_split = 1"],
+			["marked as income", "flag_income = 1"],
+			["refunded", "amount_cents = -1000"],
+			["taken off the suggestion", "category_suggestion_id = NULL"],
+		];
+
+		it("files all the shown purchases when none changed", async () => {
+			const { id, made } = await pending();
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			expect(result).toMatchObject({ ok: true, moved: 4, leftOut: [] });
+			expect(await suggestion(id)).toMatchObject({ status: "created" });
+		});
+
+		it("files the one purchase left when the card shows only it", async () => {
+			const { id, made } = await pending(3);
+			for (const tx of made.slice(0, 2))
+				await db
+					.prepare(
+						"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
+					)
+					.bind(tx)
+					.run();
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{
+					ticked: [made[2] as number],
+					shown: [made[2] as number],
+					notes: {},
+					whole: true,
+				},
+				"person",
+			);
+			expect(result).toMatchObject({ ok: true, moved: 1, leftOut: [] });
+			expect(await row(made[2] as number)).toMatchObject({
+				category_id: expect.any(Number),
+				category_source: "user",
+			});
+		});
+
+		it("files nothing when a shown purchase was saved before the call", async () => {
+			const { id, made } = await pending();
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
+				)
+				.bind(made[0])
+				.run();
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			expect(result).toEqual(nothing);
+			for (const tx of made.slice(1))
+				expect((await row(tx))?.category_id).toBeNull();
+			expect(await suggestion(id)).toMatchObject({
+				status: "pending",
+				decided_at: null,
+			});
+			expect((await categories()).some((c) => c.name === "Subscriptions")).toBe(
+				false,
+			);
+		});
+
+		it("files nothing when a shown purchase is saved during the write, after the claim", async () => {
+			const { id, made } = await pending();
+			await db
+				.prepare(
+					`CREATE TRIGGER save_one_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'merchant_rule' WHERE id = ${made[0]}; END`,
+				)
+				.run();
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			await db.prepare("DROP TRIGGER save_one_during_create").run();
+			expect(result).toEqual(nothing);
+			for (const tx of made.slice(1))
+				expect((await row(tx))?.category_id).toBeNull();
+			expect(await suggestion(id)).toMatchObject({
+				status: "pending",
+				decided_at: null,
+			});
+			expect((await categories()).some((c) => c.name === "Subscriptions")).toBe(
+				false,
+			);
+		});
+
+		it("files nothing when a shown purchase is saved between the read and the write", async () => {
+			const { id, made } = await pending();
+			const result = await createFromSuggestion(
+				racing(() =>
+					db
+						.prepare(
+							"UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ?",
+						)
+						.bind(made[0])
+						.run(),
+				),
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			expect(result).toEqual(nothing);
+			for (const tx of made.slice(1))
+				expect((await row(tx))?.category_id).toBeNull();
+			expect(await suggestion(id)).toMatchObject({
+				status: "pending",
+				decided_at: null,
+			});
+		});
+
+		it("files nothing when a Never suggest line hides a shown purchase between the read and the write", async () => {
+			const made = [
+				await add({ rawName: "CHEWY.COM", date: "2026-09-10" }),
+				await add({ rawName: "HULU", date: "2026-09-11" }),
+				await add({ rawName: "MAX", date: "2026-09-12" }),
+			];
+			const id = (await saveSuggestion(db, "Subscriptions", made)) as number;
+			const result = await createFromSuggestion(
+				racing(() =>
+					addNeverSuggest(db, {
+						merchantKey: "CHEWY.COM",
+						kind: "new_category",
+						decidedOn: "2026-10-03",
+					}),
+				),
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			expect(result).toEqual(nothing);
+			for (const tx of made) expect((await row(tx))?.category_id).toBeNull();
+			expect(await suggestion(id)).toMatchObject({
+				status: "pending",
+				decided_at: null,
+			});
+		});
+
+		it.each(stops)(
+			"files nothing when a shown purchase is %s before the call",
+			async (_kind, change) => {
+				const { id, made } = await pending();
+				await db
+					.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
+					.bind(made[0])
+					.run();
+				const result = await createFromSuggestion(
+					db,
+					id,
+					{ ticked: made, shown: made, notes: {}, whole: true },
+					"person",
+				);
+				expect(result).toEqual(nothing);
+				for (const tx of made.slice(1))
+					expect((await row(tx))?.category_id).toBeNull();
+				expect(await suggestion(id)).toMatchObject({
+					status: "pending",
+					decided_at: null,
+				});
+			},
+		);
+
+		it.each(stops)(
+			"files nothing when a shown purchase is %s between the read and the write",
+			async (_kind, change) => {
+				const { id, made } = await pending();
+				const result = await createFromSuggestion(
+					racing(() =>
+						db
+							.prepare(`UPDATE transactions SET ${change} WHERE id = ?`)
+							.bind(made[0])
+							.run(),
+					),
+					id,
+					{ ticked: made, shown: made, notes: {}, whole: true },
+					"person",
+				);
+				expect(result).toEqual(nothing);
+				for (const tx of made.slice(1))
+					expect((await row(tx))?.category_id).toBeNull();
+				expect(await suggestion(id)).toMatchObject({
+					status: "pending",
+					decided_at: null,
+				});
+			},
+		);
+	});
+
 	describe("an archived category with the suggested name comes back with the ticks (decision 110)", () => {
 		/** Purchases behind a suggestion named Pet Care, saved before any Pet Care exists (namesToAvoid keeps archived names out). */
 		async function petCare() {
@@ -1293,6 +1516,37 @@ describe("createFromSuggestion", () => {
 			expect(await suggestion(id)).toMatchObject({ status: "pending" });
 		});
 
+		it("leaves it archived when a shown purchase is saved during the write, so no restore is left behind", async () => {
+			const { id, made } = await petCare();
+			const archived = await archivedPetCare();
+			await db
+				.prepare(
+					`CREATE TRIGGER save_one_during_restore AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 2, category_source = 'user' WHERE id = ${made[0]}; END`,
+				)
+				.run();
+
+			const result = await createFromSuggestion(
+				db,
+				id,
+				{ ticked: made, shown: made, notes: {}, whole: true },
+				"person",
+			);
+			await db.prepare("DROP TRIGGER save_one_during_restore").run();
+
+			expect(result).toEqual({
+				ok: false,
+				reason: "empty",
+				error: "Tick at least one transaction, or say No to this suggestion.",
+			});
+			expect(
+				(await categories()).find((c) => c.id === archived)?.archived,
+			).toBe(1);
+			expect(await periods(archived)).toEqual([
+				{ archived_on: "2026-07-15", restored_on: null },
+			]);
+			expect(await suggestion(id)).toMatchObject({ status: "pending" });
+		});
+
 		it("files the ticks into it without a second restore when someone restored it after the page was drawn", async () => {
 			const { id, made } = await petCare();
 			const archived = await archivedPetCare();
@@ -1352,21 +1606,6 @@ describe("createFromSuggestion", () => {
 				{ name: "Pets", archived: 1 },
 			);
 		});
-
-		/** Another member's writes land between this save's read and its batch; only this save runs against the proxy. */
-		function racing(...between: (() => Promise<unknown>)[]) {
-			return new Proxy(db, {
-				get(target, property) {
-					if (property === "batch")
-						return async (statements: D1PreparedStatement[]) => {
-							for (const write of between) await write();
-							return db.batch(statements);
-						};
-					const value = Reflect.get(target, property);
-					return typeof value === "function" ? value.bind(target) : value;
-				},
-			}) as D1Database;
-		}
 
 		it("makes a new Pet Care and files the ticks there when it was restored and renamed between the read and the write", async () => {
 			const { id, made } = await petCare();
@@ -2108,10 +2347,11 @@ describe("createFromSuggestion", () => {
 		);
 
 		expect(result).toMatchObject({ ok: true, moved: 1 });
-		// 15 counts the restore and the create, both always in the write so the path is decided at write time
-		// (decision 110); the archive-period close is one statement either way, and the household's time zone is
-		// read on every save, since any save may restore a category. None of it grows with the notes.
-		expect(statements).toBeLessThanOrEqual(15);
+		// 16 counts the release that Organize's whole Create always runs (#705), and the restore and the create, both always
+		// in the write so the path is decided at write time (decision 110); the archive-period close is one statement either
+		// way, and the household's time zone is read on every save, since any save may restore a category. None of it grows
+		// with the notes.
+		expect(statements).toBeLessThanOrEqual(16);
 		expect((await row(made[300] as number))?.note).toBe(
 			`Note for ${made[300]}`,
 		);

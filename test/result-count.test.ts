@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Filters } from "../src/transactions/filters";
-import { resultCount } from "../src/transactions/result-count";
+import {
+	resultCount,
+	resultCountParts,
+} from "../src/transactions/result-count";
 
 const TODAY = "2026-09-22";
 const base: Filters = {
@@ -266,6 +269,101 @@ describe("resultCount", () => {
 	it("names no amount or category in the raw view, whose search is the bank's own text (#211)", () => {
 		expect(resultCount(one, { ...base, q: "42", raw: true }, null, TODAY)).toBe(
 			'12 transactions matching "42" in September, as the bank sends them',
+		);
+	});
+});
+
+// Decision 128 (#676): only the numbers go in the count's tabular figures; the words around them stay prose.
+describe("resultCountParts", () => {
+	it("puts a single page's total in figures, and the rest of the sentence after it", () => {
+		expect(resultCountParts(one, base, null, TODAY)).toEqual({
+			before: "",
+			figures: "12",
+			after: " transactions in September",
+		});
+	});
+
+	it("puts Showing before the figures, which are the page's span and its total", () => {
+		expect(
+			resultCountParts(
+				{ total: 34, first: 1, shown: 25, pages: 2 },
+				base,
+				null,
+				TODAY,
+			),
+		).toEqual({
+			before: "Showing ",
+			figures: "1–25 of 34",
+			after: " transactions in September",
+		});
+	});
+
+	it("keeps the noun, Needs category, a search and its hyphenated words, the place and the raw suffix out of figures", () => {
+		expect(
+			resultCountParts(
+				{ total: 40, first: 26, shown: 14, pages: 2 },
+				{
+					...base,
+					show: "spending",
+					uncategorized: true,
+					q: "shell",
+					category: 4,
+					raw: true,
+				},
+				"Gas",
+				TODAY,
+				CARD,
+			),
+		).toEqual({
+			before: "Showing ",
+			figures: "26–39 of 40",
+			after: ` spending transactions needing a category matching "shell" in Gas, ${CARD}, September, as the bank sends them`,
+		});
+	});
+
+	it("keeps a hyphenated search's words, and the amount it reads, out of figures", () => {
+		expect(
+			resultCountParts(
+				one,
+				{ ...base, q: "sign-in", month: "all" },
+				null,
+				TODAY,
+			),
+		).toEqual({
+			before: "",
+			figures: "12",
+			after: ' transactions matching "sign-in" in all months',
+		});
+		expect(
+			resultCountParts(
+				{ total: 2, first: 1, shown: 2, pages: 1 },
+				{ ...base, q: "42.17", month: "all" },
+				null,
+				TODAY,
+			),
+		).toEqual({
+			before: "",
+			figures: "2",
+			after: ' transactions matching "42.17" (amount $42.17) in all months',
+		});
+	});
+
+	it("reads as resultCount does: before, then figures, then the rest", () => {
+		const joined = (
+			page: { total: number; first: number; shown: number; pages: number },
+			f: typeof base,
+			categoryName: string | null,
+		) => {
+			const p = resultCountParts(page, f, categoryName, TODAY);
+			return p.before + p.figures + p.after;
+		};
+		expect(joined(one, base, null)).toBe(resultCount(one, base, null, TODAY));
+		const page = { total: 35, first: 26, shown: 10, pages: 2 };
+		expect(joined(page, { ...base, category: 1 }, "Groceries")).toBe(
+			resultCount(page, { ...base, category: 1 }, "Groceries", TODAY),
+		);
+		expect(joined(one, { ...base, uncategorized: true }, null)).toBe(
+			resultCount(one, { ...base, uncategorized: true }, null, TODAY),
 		);
 	});
 });

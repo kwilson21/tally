@@ -15,6 +15,9 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const THIS = TODAY.slice(0, 7);
 const LAST = monthsBefore(THIS, 1);
 const GROCERIES = 1;
+/** The opening tag of the Add button whose count is its own tabular span (#676, decision 128). */
+const addButtonTag = (html: string) =>
+	html.match(/<button[^>]*>Add <span/)?.[0];
 
 async function get(path: string) {
 	const res = await exports.default.fetch(BASE + path);
@@ -409,7 +412,11 @@ describe("the likely transactions after a new category", () => {
 		expect(saved.html).toMatch(
 			new RegExp(`name="ids" value="${second}" checked`),
 		);
-		expect(saved.html).toContain("Add 2 to Pet Care");
+		expect(saved.html).toContain(
+			'Add <span class="tabular-nums">2</span> to Pet Care</button>',
+		);
+		expect(addButtonTag(saved.html)).toBeDefined();
+		expect(addButtonTag(saved.html)).not.toContain("tabular-nums");
 		expect(saved.html).toContain("Same merchant as");
 		// The panel posts the name its rows were matched by, so Add can check the category still has it.
 		expect(saved.html).toContain('name="category_name" value="Pet Care"');
@@ -453,7 +460,10 @@ describe("the likely transactions after a new category", () => {
 			category_name: "Pet Care",
 			ids: String(first),
 		});
-		expect(one.html).toContain("Add 1 to Pet Care");
+		expect(one.html).toContain(
+			'Add <span class="tabular-nums">1</span> to Pet Care</button>',
+		);
+		expect(addButtonTag(one.html)).not.toContain("tabular-nums");
 	});
 
 	it("count a ticked row the six shown no longer include, as Add files it", async () => {
@@ -483,7 +493,10 @@ describe("the likely transactions after a new category", () => {
 			ids: String(older),
 		});
 
-		expect(count.html).toContain("Add 1 to Pet Care");
+		expect(count.html).toContain(
+			'Add <span class="tabular-nums">1</span> to Pet Care</button>',
+		);
+		expect(addButtonTag(count.html)).not.toContain("tabular-nums");
 		expect(count.html).not.toContain("Add to Pet Care");
 	});
 

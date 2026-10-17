@@ -11,7 +11,9 @@ const groupUnder = (html: string, heading: string) =>
 
 /** A group's heading total: the only ml-auto span in its section (rows never use it). */
 const totalOf = (section: string) =>
-	section.match(/<span class="ml-auto shrink-0">([^<]*)<\/span>/)?.[1];
+	section.match(
+		/<span class="ml-auto shrink-0 tabular-nums">([^<]*)<\/span>/,
+	)?.[1];
 
 /** The labels of a group's rows, in the order they are listed. */
 const rowNamesOf = (section: string) =>

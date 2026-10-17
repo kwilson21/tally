@@ -376,10 +376,11 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 	const result = await createFromSuggestion(
 		c.env.DB,
 		suggestionId,
-		{ ticked: ids, shown: ids, notes: {} },
+		{ ticked: ids, shown: ids, notes: {}, whole: true },
 		actor(c),
 	);
-	// Organize ticks every purchase the card showed, so "empty" means another tab filed them: the same answer as "gone".
+	// Organize ticks every purchase the card showed and files them whole, so "empty" means another tab changed one of them:
+	// the same answer as "gone".
 	if (!result.ok) {
 		if (result.reason === "gone" || result.reason === "empty") return changed();
 		return refused(result.error ?? "That category couldn't be made.");

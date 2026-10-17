@@ -38,7 +38,7 @@ const groceries = {
 async function caption(row: ListRow) {
 	const html = await TransactionRow({ row }).toString();
 	const line = html.match(
-		/gap-2 leading-6">(.*?)<\/span><\/span><span class="shrink-0 text-lg">/s,
+		/gap-2 leading-6">(.*?)<\/span><\/span><span class="shrink-0 text-lg tabular-nums">/s,
 	)?.[1];
 	return (line ?? "").split(/<[^>]+>/).filter(Boolean);
 }

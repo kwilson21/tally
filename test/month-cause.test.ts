@@ -124,6 +124,41 @@ describe("monthCause", () => {
 		);
 	});
 
+	it("says Most of it still needs a category when Needs a category is the only cause and over half the overspend", () => {
+		expect(monthCause(monthCauses([], [], 27700), 27700)).toEqual({
+			text: "Most of it still needs a category: $277.",
+			lead: "Most of it still needs a category: ",
+			named: [{ words: "$277", kind: "uncategorized" }],
+		});
+	});
+
+	it("says Part of it still needs a category when Needs a category is under half the overspend", () => {
+		expect(monthCause(monthCauses([], [], 27700), 60000)?.text).toBe(
+			"Part of it still needs a category: $277.",
+		);
+	});
+
+	it("counts exactly half of the overspend as under half for Needs a category alone", () => {
+		expect(monthCause(monthCauses([], [], 27700), 55400)?.text).toBe(
+			"Part of it still needs a category: $277.",
+		);
+	});
+
+	it("keeps cents under $1 when Needs a category is the only cause", () => {
+		expect(monthCause(monthCauses([], [], 40), 40)?.text).toBe(
+			"Most of it still needs a category: $0.40.",
+		);
+	});
+
+	it("names no cause for a refund under Needs a category", () => {
+		expect(
+			monthCause(
+				[{ name: "Needs a category", cents: -5000, kind: "uncategorized" }],
+				1000,
+			),
+		).toBeNull();
+	});
+
 	it("names one cause alone", () => {
 		expect(
 			monthCause(

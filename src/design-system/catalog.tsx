@@ -352,13 +352,23 @@ function Foundation() {
 				id="type"
 				title="Type roles"
 				tier="visual"
-				sentence="Newsreader for the one thing that matters on a screen; Inter with tabular numerals for everything else."
+				sentence="Newsreader for the one thing that matters on a screen; Inter for everything else, with tabular figures where amounts, dates and counts line up or change in place."
 			>
 				{TYPE_ROLES.map((r) => (
 					<State label={`${r.role} · ${r.classes}`}>
 						<p class={r.classes}>{r.sample}</p>
 					</State>
 				))}
+				<State label="Body / rows beside an amount column · normal figures in the words, tabular figures in the amounts">
+					<div class="flex w-full max-w-sm flex-wrap items-start justify-between gap-x-4 gap-y-2 text-lg">
+						<p>Time zone and bank sign-in emails</p>
+						<div class="flex shrink-0 flex-col items-end text-right tabular-nums">
+							<span>$412</span>
+							<span>$1,284</span>
+							<span>$36</span>
+						</div>
+					</div>
+				</State>
 			</Specimen>
 			<Specimen
 				id="radii"
@@ -1803,6 +1813,40 @@ function HomeTopGroup() {
 							/>
 							<PastNotBudgeted
 								chartId="catalog-cause-two-places"
+								items={[]}
+								needsCategory={{ spentCents: 27700, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
+				<State label="An Over month whose only cause is uncategorized spending: the line says it still needs a category and links to its Needs a category row">
+					<Picture label="September 2026 ended $277 over with Groceries on budget; $277 is Needs a category and the only cause, so the line says Most of it still needs a category and links to that row">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -27700 }}
+							/>
+							<MonthEnd
+								needsCategoryCents={27700}
+								chartId="catalog-cause-needs-category"
+								monthName="September"
+								amountCents={-27700}
+								unbudgeted={[]}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 70000,
+										leftCents: 0,
+										over: false,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-needs-category"
 								items={[]}
 								needsCategory={{ spentCents: 27700, count: 1 }}
 							/>

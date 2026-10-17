@@ -1292,7 +1292,12 @@ describe("select several transactions", () => {
 	 * The count's reply for these ticked ids, on a page whose selectable rows are `pageIds`. `disclosure`
 	 * sends the marker a form carries while the "not on this page" line is drawn (#350).
 	 */
-	const countReply = (ids: number[], pageIds: number[], disclosure = false) =>
+	const countReply = (
+		ids: number[],
+		pageIds: number[],
+		disclosure = false,
+		currentUrl?: string,
+	) =>
 		request(
 			`/transactions/select/count?${new URLSearchParams([
 				...ids.map((id) => ["ids", String(id)]),
@@ -1300,6 +1305,10 @@ describe("select several transactions", () => {
 				["back", "/transactions?month=all"],
 				...(disclosure ? [["not-on-page", "1"]] : []),
 			])}`,
+			// currentUrl is the address htmx sends as HX-Current-URL, fragment and all (htmx.js:435).
+			currentUrl === undefined
+				? undefined
+				: { headers: { "HX-Current-URL": currentUrl } },
 		);
 	const countFragment = async (
 		ids: number[],
@@ -1924,6 +1933,107 @@ describe("select several transactions", () => {
 			expect(res.headers.get("HX-Replace-Url")).toBe(
 				"/transactions?month=all&select=1",
 			);
+		});
+
+		describe("keeps the page's #fragment in the replaced address (#686)", () => {
+			const current = "http://tally.test/transactions?select=1#main";
+
+			it("keeps #main on the address when no row is ticked", async () => {
+				const res = await countReply([], [], false, current);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					"/transactions?month=all&select=1#main",
+				);
+			});
+
+			it("keeps #main after the ticks, so it is the last thing in the address", async () => {
+				const ids = await pageOneTicks();
+				const res = await countReply(ids, [], false, current);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					`/transactions?month=all&select=1&ids=${ticksParam(ids)}#main`,
+				);
+			});
+
+			it("keeps #main in all mode with a row unticked from the whole set", async () => {
+				const [unticked] = await firstPageIds();
+				const res = await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["back", "/transactions?month=all"],
+						["all", "1"],
+						["unticked", String(unticked)],
+					])}`,
+					{ headers: { "HX-Current-URL": current } },
+				);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					`/transactions?month=all&select=1&all=1&unticked=${unticked}#main`,
+				);
+			});
+
+			it("keeps #main after the query when the month turns over", async () => {
+				const res = await request(
+					`/transactions/select/count?${new URLSearchParams([
+						["back", "/transactions?month=2026-09"],
+					])}`,
+					{ headers: { "HX-Current-URL": current } },
+				);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					"/transactions?month=2026-09&select=1#main",
+				);
+			});
+
+			it("keeps an element id of 64 characters", async () => {
+				const id = "a".repeat(64);
+				const res = await countReply(
+					[],
+					[],
+					false,
+					`http://tally.test/transactions?select=1#${id}`,
+				);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					`/transactions?month=all&select=1#${id}`,
+				);
+			});
+
+			it.each([
+				["no header", undefined],
+				[
+					"a header with no fragment",
+					"http://tally.test/transactions?select=1",
+				],
+				["an empty header", ""],
+				["a malformed header", "not a url"],
+			])(
+				"replaces the address with today's value with %s",
+				async (_label, currentUrl) => {
+					const res = await countReply([], [], false, currentUrl);
+					expect(res.headers.get("HX-Replace-Url")).toBe(
+						"/transactions?month=all&select=1",
+					);
+				},
+			);
+
+			it.each([
+				[
+					"a fragment with a space",
+					"http://tally.test/transactions?select=1#a%20b",
+				],
+				[
+					"a text fragment directive",
+					"http://tally.test/transactions?select=1#:~:text=x",
+				],
+				[
+					"an id of 65 characters",
+					`http://tally.test/transactions?select=1#${"a".repeat(65)}`,
+				],
+				[
+					"another page's pathname",
+					"http://tally.test/transactions/organize?select=1#main",
+				],
+			])("carries no fragment for %s", async (_label, currentUrl) => {
+				const res = await countReply([], [], false, currentUrl);
+				expect(res.headers.get("HX-Replace-Url")).toBe(
+					"/transactions?month=all&select=1",
+				);
+			});
 		});
 
 		it("moves focus to Select all when the last tick off the page is unticked from the disclosure", async () => {

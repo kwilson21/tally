@@ -2,10 +2,10 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
 import { acceptPriceOffer, loadPriceOffers } from "../src/bills/price-change";
+import { loadBillRows } from "../src/bills/rows";
 import { type BillFields, insertBill, updateBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
 
 // Spec §5 `bill_amounts`, §8.4 and decision 101: a bill's amount from a month on. Editing it writes this
 // month's row, earlier months keep theirs, and the bill's page, its edit sheet and its payment matching
@@ -529,6 +529,8 @@ describe("a price that moved after September went overdue", () => {
 		const overdueGroup =
 			page.split("<section").find((part) => part.includes(">Overdue</h2>")) ??
 			"";
-		expect(overdueGroup).toContain('<span class="ml-auto shrink-0">$100.00');
+		expect(overdueGroup).toContain(
+			'<span class="ml-auto shrink-0 tabular-nums">$100.00',
+		);
 	});
 });

@@ -96,7 +96,7 @@ function FolioWords({ folio }: { folio: Folio }) {
 		);
 	return (
 		<span
-			class={`text-right text-sm tabular-nums ${folio.tone === "ink" ? "text-ink" : "text-muted"}`}
+			class={`text-right text-sm ${folio.tone === "ink" ? "text-ink" : "text-muted"}`}
 		>
 			{folio.text}
 		</span>

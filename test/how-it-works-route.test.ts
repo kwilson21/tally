@@ -999,7 +999,11 @@ describe("Start here's month and count (#502)", () => {
 
 	/** The raw list's result count text, as a visitor reads it. */
 	const resultCount = (html: string) =>
-		decodeHtml(html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1] ?? "");
+		decodeHtml(
+			html
+				.match(/<p id="result-count"[^>]*>([\s\S]*?)<\/p>/)?.[1]
+				?.replace(/<[^>]+>/g, "") ?? "",
+		);
 	const startHere = (html: string) =>
 		decodeHtml(
 			html.match(/<section[^>]*id="start-here"[\s\S]*?<\/section>/)?.[0] ?? "",

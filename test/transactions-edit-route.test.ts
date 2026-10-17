@@ -1716,7 +1716,9 @@ describe("POST /transactions/:id", () => {
 			/<form method="post"[^>]*hx-select-oob="#needs-count:innerHTML"/,
 		);
 		const { html } = await post(`/transactions/${bakery}`, save);
-		expect(html).toMatch(/<span id="needs-count">9<\/span>/);
+		expect(html).toMatch(
+			/<span class="tabular-nums" id="needs-count">9<\/span>/,
+		);
 	});
 
 	it("saves a person's income choice and preserves it when Jev runs again", async () => {
