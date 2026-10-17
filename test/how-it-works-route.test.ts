@@ -1272,16 +1272,24 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		)
 			.bind(JSON.stringify(value))
 			.run();
+	/** The first connected bank, named as the test's line reads it (its name is the stroke-one line's). */
+	const nameFirstBank = (name: string) =>
+		env.DB.prepare(
+			"UPDATE plaid_items SET institution_name = ? WHERE id = (SELECT MIN(id) FROM plaid_items WHERE disconnected_at IS NULL)",
+		)
+			.bind(name)
+			.run();
 
 	it("in the family app, names the five strokes with the day each was drawn, and how a first budget is suggested", async () => {
+		await nameFirstBank("Chase");
 		await writeRecord({
 			strokes: { bank: "2026-10-12", pay: "2026-10-13", bills: null },
 			budgets: {},
 		});
 		const html = await familyPage();
 		expect(html).toContain('id="first-week"');
-		expect(html).toContain("Link your bank: done Oct 12");
-		expect(html).toContain("Your pay: done Oct 13");
+		expect(html).toContain("Link your bank: Chase, linked · done Oct 12");
+		expect(html).toContain("Your pay: no paycheck found · done Oct 13");
 		expect(html).toContain("Your bills: done");
 		expect(html).toContain("Your budgets: One tap, or one at a time");
 		expect(html).toContain(
@@ -1290,6 +1298,56 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		expect(html).not.toContain(
 			"Tally set up your household before this page existed.",
 		);
+	});
+
+	it("gives each drawn stroke its line on what it did, beside its day, and an undrawn stroke its question note", async () => {
+		await nameFirstBank("Chase");
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP PAYROLL', 'Acme Corp') ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-12",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+				count: "2026-10-14",
+			},
+			pay: {
+				"ACME CORP PAYROLL": {
+					yes: { "1": { date: "2026-10-03", cents: 245000 } },
+					at: 0,
+				},
+			},
+			bills: { kept: 8, cents: 206200 },
+			budgets: Object.fromEntries(
+				Array.from({ length: 12 }, (_, i) => [
+					String(i + 1),
+					{ kind: "suggested", cents: 10000 },
+				]),
+			),
+			night: { brought: 3, needYou: 1 },
+		});
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: Chase, linked · done Oct 12");
+		expect(html).toContain("Your pay: Acme Corp · done Oct 13");
+		expect(html).toContain("Your bills: 8 bills kept · done Oct 13");
+		expect(html).toContain("Your budgets: 12 budgets · done Oct 13");
+		expect(html).toContain(
+			"Tomorrow · Tally keeps count on its own: Overnight: 3 new transactions; 1 needs you · done Oct 14",
+		);
+	});
+
+	it("gives an undrawn stroke its question note and no line", async () => {
+		await nameFirstBank("Chase");
+		await writeRecord({
+			strokes: { bank: "2026-10-12" },
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain("Your pay: One question");
+		expect(html).toContain("Your budgets: One tap, or one at a time");
+		expect(html).not.toContain("Your pay: no paycheck");
 	});
 
 	it("mid-setup, with no record, reads every stroke as not drawn, with its note", async () => {

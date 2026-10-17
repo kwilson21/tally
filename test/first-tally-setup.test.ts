@@ -271,10 +271,11 @@ describe("setupView: which setup state Home shows", () => {
 	});
 
 	it("a bank linked after the answers takes the questions back, so it reads again and says Tally asks again (#578)", () => {
-		// takeBackQuestionStrokes has removed the three strokes; the answers and stroke one stay.
+		// takeBackQuestionStrokes has removed the three strokes and set reAsk; the answers and stroke one stay.
 		const record: FirstTally = {
 			strokes: { bank: "2026-10-13" },
 			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			reAsk: { bank: "Wells Fargo" },
 		};
 		const reading = view({
 			record,
@@ -289,6 +290,64 @@ describe("setupView: which setup state Home shows", () => {
 			done: true,
 			note: "Wells Fargo linked: Tally asks again about pay, bills and budgets.",
 		});
+	});
+
+	it("names the bank in the re-ask note with the marker's name, quotes and all", () => {
+		const record: FirstTally = {
+			strokes: { bank: "2026-10-13" },
+			budgets: {},
+			reAsk: { bank: `O'Brien "Savings"` },
+		};
+		const reading = view({
+			record,
+			banks: [
+				BANK,
+				{ name: "Chase", lastSyncedAt: null, historyCompleteAt: null },
+			],
+		});
+		expect(reading?.steps[0]?.note).toBe(
+			`O'Brien "Savings" linked: Tally asks again about pay, bills and budgets.`,
+		);
+	});
+
+	it("shows no re-ask note for two banks linked before the questions open, with pay drawn: no marker, so no note", () => {
+		const record: FirstTally = {
+			strokes: { bank: "2026-10-13", pay: "2026-10-13" },
+			budgets: {},
+		};
+		const early = view({
+			record,
+			banks: [
+				BANK,
+				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+			],
+		});
+		expect(early?.steps[0]).toEqual({
+			name: "Link your bank",
+			done: true,
+			note: "Chase, linked",
+		});
+	});
+
+	it("shows no re-ask note for a two-bank record mid pay step: the answers alone are not a retake", () => {
+		const record: FirstTally = {
+			strokes: { bank: "2026-10-13" },
+			budgets: {},
+			pay: {
+				"ACME CORP PAYROLL": {
+					yes: { "1": { date: "2026-10-03", cents: 245000 } },
+					at: 0,
+				},
+			},
+		};
+		const midPay = view({
+			record,
+			banks: [
+				BANK,
+				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+			],
+		});
+		expect(midPay?.steps[0]?.note).toBe("Chase, linked");
 	});
 
 	it("names the done lines by their day, and an undated stroke has no day", () => {

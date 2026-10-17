@@ -70,6 +70,12 @@ export type FirstTally = {
 	pay?: Record<string, PayRecord>;
 	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
 	bills?: BillsKept;
+	/**
+	 * The bank a setup link took the questions back for (takeBackQuestionStrokes): its institution name, which stroke one's
+	 * note reads ("Wells Fargo linked: Tally asks again…"). Removed when the budgets stroke draws (the last of the three
+	 * questions again) or when the last bank goes before setup is done (takeBackBankStrokes). Absent otherwise.
+	 */
+	reAsk?: { bank: string };
 };
 
 const KEY = "first_tally";
@@ -119,10 +125,16 @@ export function strokeStatement(
 	day: string | null,
 	guard = "1",
 ): D1PreparedStatement {
+	// The budgets stroke is drawn last of the three questions (its guard needs pay and bills, budgetsStrokeGuard), so its
+	// write takes the re-ask marker away in the same statement (reAsk).
+	const drawn =
+		stroke === "budgets"
+			? "json_remove(json_insert(value, '$.strokes.' || ?2, ?3), '$.reAsk')"
+			: "json_insert(value, '$.strokes.' || ?2, ?3)";
 	return db
 		.prepare(
 			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
-			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+			ON CONFLICT(key) DO UPDATE SET value = ${drawn}`,
 		)
 		.bind(KEY, stroke, day);
 }
@@ -161,7 +173,7 @@ export function takeBackBankStrokes(
 	).join(" AND ");
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.night', '$.nightSync')
+			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.night', '$.nightSync', '$.reAsk')
 			WHERE key = ?1 AND NOT (${notSetUp})
 				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
 		)
@@ -267,18 +279,24 @@ export function keepNightStatement(
 /**
  * The statement that takes the questions back when a second bank is linked during setup (#578): pay, bills and budgets
  * lose their strokes, and the night with them, so the questions are asked again once the new bank's history is in. The
- * answers stay (only the strokes go), and so does stroke one. It is checked in the same batch as the new bank's INSERT,
- * so no bank read is needed. It writes only while the count stroke isn't drawn and a question is drawn.
+ * answers stay (only the strokes go), and so does stroke one. It also sets `reAsk` to the new bank's name (`bankName`,
+ * bound as a value, never built into a path), which stroke one's note reads. It is checked in the same batch as the new
+ * bank's INSERT, so no bank read is needed. It writes only while the count stroke isn't drawn and a question is drawn, so
+ * a link that takes nothing back sets no marker.
  */
-export function takeBackQuestionStrokes(db: D1Database): D1PreparedStatement {
+export function takeBackQuestionStrokes(
+	db: D1Database,
+	bankName: string,
+): D1PreparedStatement {
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.strokes.budgets', '$.night', '$.nightSync')
+			`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.strokes.budgets', '$.night', '$.nightSync'),
+				'$.reAsk', json_object('bank', ?2))
 			WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL
 				AND (json_type(value, '$.strokes.pay') IS NOT NULL OR json_type(value, '$.strokes.bills') IS NOT NULL
 					OR json_type(value, '$.strokes.budgets') IS NOT NULL)`,
 		)
-		.bind(KEY);
+		.bind(KEY, bankName);
 }
 
 /**

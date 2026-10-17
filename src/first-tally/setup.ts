@@ -10,8 +10,10 @@ import {
 	questionsAnswered,
 	readFirstTally,
 	STROKES,
+	type Stroke,
 } from "../db/first-tally";
 import type { FlaggedBank } from "../stale-bank";
+import { tidyName } from "../transactions/tidy-name";
 import type { StepLine } from "../views/tally-steps";
 import { andList } from "./budgets";
 import {
@@ -118,23 +120,6 @@ export function strokesDrawn(record: FirstTally | null): number {
 }
 
 /**
- * The bank a re-ask is for (#578): a bank linked during setup took the questions back, so while one of them is undrawn
- * and an answer is kept, the newest bank's line says Tally asks again. Nothing is stored for it: it reads the record and the
- * banks. It needs two banks, since only a bank linked after the questions were drawn takes them back.
- */
-function reAskingBank(
-	record: FirstTally | null,
-	banks: GateBank[],
-): string | null {
-	if (banks.length < 2 || !record || questionsAnswered(record)) return null;
-	const answered =
-		record.pay !== undefined ||
-		record.bills !== undefined ||
-		Object.keys(record.budgets).length > 0;
-	return answered ? (banks[banks.length - 1]?.name ?? null) : null;
-}
-
-/**
  * The answered phase's wait (#671): while a connected bank is reading its history or needs signing in, the status says what
  * Tally waits for, in place of tomorrow's promise. A bank that needs signing in is named first, since it has a Fix action.
  */
@@ -160,7 +145,6 @@ export function setupSteps(
 	bankName: string | null,
 	today: string,
 	byMorning: boolean,
-	reAskBank: string | null = null,
 ): StepLine[] {
 	// The line the family acts on now says "Next": the first stroke not yet drawn once the questions are open. Before a
 	// bank no line says Next (each says how long it takes), and while the import is read, or once the three questions are
@@ -183,8 +167,8 @@ export function setupSteps(
 		if (drawn) {
 			note =
 				i === 0
-					? reAskBank
-						? `${reAskBank} linked: Tally asks again about pay, bills and budgets.`
+					? record?.reAsk
+						? `${record.reAsk.bank} linked: Tally asks again about pay, bills and budgets.`
 						: `${bankName ?? "Your bank"}, linked`
 					: day
 						? dayLabel(day, today)
@@ -192,6 +176,119 @@ export function setupSteps(
 		}
 		return { name: NAMES[i] ?? "", done: drawn, note };
 	});
+}
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * The night's counts in words, the same for the fifth day's sentence and the first week's line: "3 new transactions, all
+ * sorted", or "3 new transactions; 1 needs you" (#586).
+ */
+export function nightCountWords({ brought, needYou }: NightCounts): string {
+	const arrived =
+		brought === 0
+			? "no new transactions"
+			: `${count(brought)} new ${brought === 1 ? "transaction" : "transactions"}`;
+	return needYou === 0
+		? `${arrived}, all sorted`
+		: `${arrived}; ${count(needYou)} ${needYou === 1 ? "needs" : "need"} you`;
+}
+
+/**
+ * The names a drawn stroke's line uses (doneNote), read with the record: the first connected bank's name, and the name of
+ * each merchant the pay record answered Yes, as the ledger shows it, keyed by the merchant's raw key.
+ */
+export type FirstWeekNames = {
+	bankName: string | null;
+	merchants: Record<string, string>;
+};
+
+/**
+ * What a drawn stroke did, in one plain line (spec §9 item 1), or null when there is nothing to say: the bank, the pay
+ * merchant or merchants kept, the bills kept, the budgets set, and the night's counts. A stroke's day is shown beside it,
+ * not inside it. Pure over the record and the names, so each kind of answer is tested without a database.
+ */
+export function doneNote(
+	stroke: Stroke,
+	record: FirstTally,
+	names: FirstWeekNames,
+): string | null {
+	switch (stroke) {
+		case "bank":
+			return `${names.bankName ?? "Your bank"}, linked`;
+		case "pay": {
+			if (!record.pay) return "no paycheck found";
+			const kept = Object.entries(record.pay)
+				.filter(([, merchant]) => Object.keys(merchant.yes ?? {}).length > 0)
+				.sort(([, a], [, b]) => a.at - b.at)
+				.map(([key]) => names.merchants[key] ?? key);
+			const [first, ...rest] = kept;
+			if (first === undefined) return "no paycheck kept";
+			return rest.length === 0 ? first : `${first} and ${rest.length} more`;
+		}
+		case "bills": {
+			const kept = record.bills?.kept ?? 0;
+			if (kept === 0) return "no bills kept";
+			return `${count(kept)} ${kept === 1 ? "bill" : "bills"} kept`;
+		}
+		case "budgets": {
+			const set = Object.values(record.budgets).filter(
+				(answer) => answer.cents !== null,
+			).length;
+			if (set === 0) return "no budgets to set";
+			return `${count(set)} ${set === 1 ? "budget" : "budgets"}`;
+		}
+		case "count":
+			return record.night
+				? `Overnight: ${nightCountWords(record.night)}`
+				: null;
+	}
+}
+
+/**
+ * The first week's record and its names (FirstWeekNames): the first connected bank, and each Yes merchant's display name
+ * from the merchants table (tidyName when it has none), in one query.
+ */
+export async function readFirstWeek(
+	db: D1Database,
+): Promise<{ record: FirstTally | null; names: FirstWeekNames }> {
+	const record = await readFirstTally(db);
+	const bank = await db
+		.prepare(
+			"SELECT institution_name AS name FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id LIMIT 1",
+		)
+		.first<{ name: string }>();
+	const keys = Object.entries(record?.pay ?? {})
+		.filter(([, merchant]) => Object.keys(merchant.yes ?? {}).length > 0)
+		.map(([key]) => key);
+	const displays = await merchantDisplayNames(db, keys);
+	return {
+		record,
+		names: {
+			bankName: bank?.name ?? null,
+			merchants: Object.fromEntries(
+				keys.map((key) => [key, displays.get(key) || tidyName(key)]),
+			),
+		},
+	};
+}
+
+/**
+ * The display names the merchants table has for these raw merchant keys, one query: a key with no row (or no display name)
+ * maps to null. The ledger and the first week's lines name a merchant with this, falling back to tidyName.
+ */
+export async function merchantDisplayNames(
+	db: D1Database,
+	keys: string[],
+): Promise<Map<string, string | null>> {
+	if (keys.length === 0) return new Map();
+	const { results } = await db
+		.prepare(
+			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
+		)
+		.bind(JSON.stringify(keys))
+		.all<{ key: string; displayName: string | null }>();
+	return new Map(results.map((row) => [row.key, row.displayName]));
 }
 
 /**
@@ -249,7 +346,6 @@ export function setupView({
 			bankName,
 			today,
 			historyIn && fitsOneNight,
-			reAskingBank(record, banks),
 		),
 		bankName,
 		bankCount: banks.length,

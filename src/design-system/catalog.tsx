@@ -604,12 +604,12 @@ function Brand() {
 							{
 								strokes: { bank: "2026-10-13" },
 								budgets: { "3": { kind: "suggested", cents: 65000 } },
+								reAsk: { bank: "Wells Fargo" },
 							},
 							"reading",
 							"Chase",
 							FIRST_WEEK_TODAY,
 							false,
-							"Wells Fargo",
 						)}
 					/>
 				</State>
@@ -7773,9 +7773,9 @@ function FirstWeekGroup() {
 				title="How Tally works · Your first week"
 				tier="visual"
 				components={["FirstWeekPart"]}
-				sentence="How Tally works' part after its intro, in the family app (P125 E, decision 114, spec §9): the five strokes in words, each with the day it was drawn, and how a first budget is suggested (§6). A household set up before the feature shipped has no days, and says so under the list."
+				sentence="How Tally works' part after its intro, in the family app (P125 E, decision 114, spec §9): the five strokes in words, each with the day it was drawn and one plain line on what it did (Chase, linked; the pay merchant; the bills kept; the budgets set; the night's counts), and how a first budget is suggested (§6). A stroke not drawn keeps its question note. A household set up before the feature shipped has no days and no lines, and says so under the list."
 			>
-				<State label="With days: the five strokes as the week drew them">
+				<State label="With days: the five strokes as the week drew them, each with its line">
 					<FirstWeekPart
 						record={{
 							strokes: {
@@ -7785,12 +7785,31 @@ function FirstWeekGroup() {
 								budgets: "2026-10-13",
 								count: FIRST_WEEK_TODAY,
 							},
-							budgets: {},
+							pay: {
+								"ACME CORP PAYROLL": {
+									yes: {
+										"1": { date: "2026-10-03", cents: 245000 },
+									},
+									at: 0,
+								},
+							},
+							bills: { kept: 8, cents: 206200 },
+							budgets: Object.fromEntries(
+								Array.from({ length: 12 }, (_, i) => [
+									String(i + 1),
+									{ kind: "suggested" as const, cents: 10000 },
+								]),
+							),
+							night: { brought: 3, needYou: 1 },
+						}}
+						names={{
+							bankName: "Chase",
+							merchants: { "ACME CORP PAYROLL": "Acme Corp" },
 						}}
 						today={FIRST_WEEK_TODAY}
 					/>
 				</State>
-				<State label="Set up before the feature shipped: no days, with its sentence">
+				<State label="Set up before the feature shipped: no days and no lines, with its sentence">
 					<FirstWeekPart
 						record={{
 							strokes: {
@@ -7802,6 +7821,7 @@ function FirstWeekGroup() {
 							},
 							budgets: {},
 						}}
+						names={{ bankName: "Chase", merchants: {} }}
 						today={FIRST_WEEK_TODAY}
 					/>
 				</State>

@@ -275,12 +275,12 @@ async function renderHome(
 		current && !demo
 			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
 			: null;
-	// Link a bank is Plaid Link's button, and Plaid's script runs only on the pages the CSP allows it (security.ts): Home
-	// itself, and an htmx swap made from Home's document. A sheet's full load (/budget/:id, /savings-goal) links from Home
-	// instead, with a plain link (#678).
+	// Link a bank is Plaid Link's button only on a full load of Home: Plaid's script loads only there (loadsPlaid, security.ts),
+	// and an htmx swap loads no script. Every other response, an htmx re-render of Home included, links to Home with a plain
+	// link, which loads Home in full, where the button is (#678).
 	const bankToLink = setup?.phase === "before" && enabled(c.env);
 	const plaidButton =
-		bankToLink && (loadsPlaid(c) || Boolean(c.req.header("HX-Request")));
+		bankToLink && loadsPlaid(c) && !c.req.header("HX-Request");
 	const linkBank = bankToLink ? (
 		plaidButton ? (
 			<LinkBank class="w-full" refresh="/" target="#page" />

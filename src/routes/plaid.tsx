@@ -209,7 +209,7 @@ plaid.post("/plaid/exchange", async (c) => {
 				).bind(encrypted, institution, actor(c), exchanged.item_id),
 				strokeStatement(c.env.DB, "bank", await householdToday(c.env.DB)),
 				// A bank linked during setup takes the questions back (#578): the new bank's deposits and charges are asked again.
-				takeBackQuestionStrokes(c.env.DB),
+				takeBackQuestionStrokes(c.env.DB, institution),
 			]);
 		} catch (error) {
 			try {

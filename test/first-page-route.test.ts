@@ -489,7 +489,7 @@ describe("Yes and No writes", () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		await answerAsShown("yes");
 		expect((await readFirstTally(db))?.strokes.pay).toBe(TODAY);
-		await takeBackQuestionStrokes(db).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect((await readFirstTally(db))?.strokes.pay).toBeUndefined();
 		await deposits("NEW BANK PAYROLL", 180000, 2);
 		const { html } = await get("/first-page");

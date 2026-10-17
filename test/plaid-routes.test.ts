@@ -574,6 +574,7 @@ describe("Plaid routes", () => {
 		expect(JSON.parse(record?.value ?? "null")).toEqual({
 			strokes: { bank: "2026-10-10" },
 			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			reAsk: { bank: "Second Bank" },
 		});
 	});
 

@@ -4,7 +4,7 @@
 // The words come from the setup view (src/first-tally/setup.ts); the catalog draws it from fake views.
 import type { Child } from "hono/jsx";
 import type { NightCounts } from "../db/first-tally";
-import type { SetupView } from "../first-tally/setup";
+import { nightCountWords, type SetupView } from "../first-tally/setup";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
 import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
@@ -50,15 +50,12 @@ function statusOf(view: SetupView, flagged: boolean): string {
  * The fifth day's sentence (#586): what the overnight run did, in words. Nothing needing a person leaves out the rest;
  * otherwise the count says how many do.
  */
-export function nightSentence({ brought, needYou }: NightCounts): string {
-	const arrived =
-		brought === 0
-			? "no new transactions"
-			: `${count(brought)} new ${brought === 1 ? "transaction" : "transactions"}`;
-	if (needYou === 0) {
-		return `Five. Overnight Tally kept count on its own: ${arrived}, all sorted. You're set up.`;
+export function nightSentence(counts: NightCounts): string {
+	const words = nightCountWords(counts);
+	if (counts.needYou === 0) {
+		return `Five. Overnight Tally kept count on its own: ${words}. You're set up.`;
 	}
-	return `Five. Overnight Tally kept count on its own: ${arrived}; ${count(needYou)} ${needYou === 1 ? "needs" : "need"} you.`;
+	return `Five. Overnight Tally kept count on its own: ${words}.`;
 }
 
 /**

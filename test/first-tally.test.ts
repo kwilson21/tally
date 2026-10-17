@@ -14,12 +14,14 @@ import {
 	payAnswerStatement,
 	readFirstTally,
 	STROKES,
+	strokeStatement,
 	takeBackBankStrokes,
 	takeBackQuestionStrokes,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import {
 	answerPay,
+	budgetsStrokeGuard,
 	keepBills,
 	NO_PAY_LEFT_SQL,
 	type PayMerchant,
@@ -728,17 +730,74 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 			ok: true,
 		}).run();
 		await keepNightStatement(db, "2026-10-13", 1).run();
-		await takeBackQuestionStrokes(db).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect(await readFirstTally(db)).toEqual({
 			strokes: { bank: "2026-10-12" },
 			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			reAsk: { bank: "Wells Fargo" },
 		});
+	});
+
+	it("names the bank it took the questions back for in reAsk, the marker the re-ask note reads", async () => {
+		await answeredQuestions("2026-10-12");
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		expect((await readFirstTally(db))?.reAsk).toEqual({ bank: "Wells Fargo" });
+	});
+
+	it("stores a bank name with quotes and a path in it as the name itself", async () => {
+		const name = `O'Brien "Savings" $.strokes.count`;
+		await answeredQuestions("2026-10-12");
+		await takeBackQuestionStrokes(db, name).run();
+		const record = await readFirstTally(db);
+		expect(record?.reAsk).toEqual({ bank: name });
+		expect(record?.strokes.count).toBeUndefined();
+	});
+
+	it("the marker goes once budgets is drawn again, after pay and bills", async () => {
+		await answeredQuestions("2026-10-12");
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		await markStroke(db, "pay", "2026-10-13");
+		await markStroke(db, "bills", "2026-10-13");
+		expect((await readFirstTally(db))?.reAsk).toEqual({ bank: "Wells Fargo" });
+		await markStroke(db, "budgets", "2026-10-13");
+		expect((await readFirstTally(db))?.reAsk).toBeUndefined();
+	});
+
+	it("the budgets stroke's guard waits for pay as well as bills, so budgets is always the last question drawn", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		await markStroke(db, "bank", "2026-10-12");
+		await markStroke(db, "bills", "2026-10-13");
+		await strokeStatement(
+			db,
+			"budgets",
+			"2026-10-13",
+			budgetsStrokeGuard("2026-10"),
+		).run();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+		await markStroke(db, "pay", "2026-10-13");
+		await strokeStatement(
+			db,
+			"budgets",
+			"2026-10-13",
+			budgetsStrokeGuard("2026-10"),
+		).run();
+		expect((await readFirstTally(db))?.strokes.budgets).toBe("2026-10-13");
+	});
+
+	it("takes the re-ask marker with the bank strokes when the last bank goes before setup is done", async () => {
+		await answeredQuestions("2026-10-12");
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		await db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
+		await takeBackBankStrokes(db, 999).run();
+		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
 	});
 
 	it("takes nothing back once the count stroke is drawn, so a finished setup stays", async () => {
 		await answeredQuestions("2026-10-12");
 		await markStroke(db, "count", "2026-10-13");
-		await takeBackQuestionStrokes(db).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect((await readFirstTally(db))?.strokes).toEqual({
 			bank: "2026-10-12",
 			pay: "2026-10-12",
@@ -750,8 +809,9 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 
 	it("takes nothing back before any question is drawn", async () => {
 		await markStroke(db, "bank", "2026-10-12");
-		await takeBackQuestionStrokes(db).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect((await readFirstTally(db))?.strokes).toEqual({ bank: "2026-10-12" });
+		expect((await readFirstTally(db))?.reAsk).toBeUndefined();
 	});
 
 	it("takes the night and its sync back with the bank strokes when the last bank goes before setup is done", async () => {

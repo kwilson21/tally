@@ -465,7 +465,7 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 			["/savings-goal", (_id: number) => "/savings-goal"],
 			["/budget/:id", (id: number) => `/budget/${id}`],
 		])(
-			"an htmx request for %s draws Plaid's button, since the document is Home's",
+			"an htmx request for %s draws the plain link, not Plaid's button: a swap loads no Plaid script",
 			async (_, pathFor) => {
 				await unlinked();
 				const path = pathFor(await firstCategory());
@@ -476,9 +476,19 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 						plaidFamily,
 					)
 				).text();
-				expect(html).toContain("data-link-bank");
-				expect(html).not.toContain("Link a bank on Home</a>");
+				expect(html).toContain('href="/"');
+				expect(html).toContain(">Link a bank on Home</a>");
+				expect(html).not.toContain("data-link-bank");
+				expect(html).not.toContain(PLAID_MODULE);
 			},
 		);
+
+		it("a full load of Home still draws Plaid's button and loads Plaid", async () => {
+			await unlinked();
+			const html = await page(plaidFamily);
+			expect(html).toContain("data-link-bank");
+			expect(html).toContain(PLAID_MODULE);
+			expect(html).not.toContain(">Link a bank on Home</a>");
+		});
 	});
 });
