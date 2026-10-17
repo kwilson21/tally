@@ -2,14 +2,15 @@
 // screens it changes, beside today's, so the owner decides by seeing (decision 47). Every picture is
 // inert and labelled, like the rest of the page. The numbers are the local demo's as it shows them on
 // Thursday, Oct 15: Streaming's months, Bills' rows, September's result and the month strip. Where the
-// app has a component that draws the part, the real one draws it (BillRow, BillStatusHeading,
-// BillMonthlyTotal, BillOccurrenceRow, WhyLink, TrendsTop, TrendGroup, TrendRow, MonthNavigation,
-// PastNotBudgeted). Where an option changes a part that the app's component doesn't take (a heading
-// without its Why?, a month's dot with its mark, a sentence between a month's stamp and its bars), or
-// where a real component has a fixed id that a page can't repeat (PlanBand), the picture is a prototype
-// here, drawn with the same classes; src/views stays as it is. The Today pictures are hand-drawn
-// baselines of today's screen too: P132's Today, which the app drew before MonthEnd's cause line, and
-// P133's Today strips, main's grey discs drawn here, since the real strip now draws P133 A's marks.
+// app has a component that draws the part, the real one draws it (BillRow, BillMonthlyTotal,
+// BillOccurrenceRow, WhyLink, TrendsTop, TrendRow, MonthNavigation, PastNotBudgeted). Where an option
+// changes a part that the app's component doesn't take (a heading without its Why?, a month's dot with its
+// mark, a sentence between a month's stamp and its bars), or where a real component has a fixed id that a
+// page can't repeat (PlanBand), the picture is a prototype here, drawn with the same classes; src/views
+// stays as it is. The Today pictures are hand-drawn baselines of today's screen too: P130's Bills headings
+// and Trends groups, which each drew a Why? before decision 121 (so BillStatusHeading and TrendGroup are no
+// longer drawn here); P132's Today, which the app drew before MonthEnd's cause line; and P133's Today
+// strips, main's grey discs drawn here, since the real strip now draws P133 A's marks.
 
 import type { Child } from "hono/jsx";
 import { monthCause, monthCauses } from "../budgets/month-cause";
@@ -27,12 +28,7 @@ import {
 	BillOccurrenceRow,
 	type OccurrencePayment,
 } from "../views/bill-occurrence-row";
-import {
-	BillMonthlyTotal,
-	BillRow,
-	type BillRowData,
-	BillStatusHeading,
-} from "../views/bill-row";
+import { BillMonthlyTotal, BillRow, type BillRowData } from "../views/bill-row";
 import { Button } from "../views/button";
 import { Icon, ROW_OPENS, RowArrow } from "../views/icons";
 import { monthEndLabels, PastNotBudgeted } from "../views/month-end";
@@ -42,7 +38,7 @@ import {
 	monthMark,
 	monthResultWords,
 } from "../views/month-navigation";
-import { TrendGroup, TrendRow, TrendsTop } from "../views/trends";
+import { TrendRow, TrendsTop } from "../views/trends";
 import { WhyLink, type WhySection } from "../views/why-link";
 import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import { Fixed } from "./proposal-parts";
@@ -324,7 +320,7 @@ const GROUP_LOOK: Record<
 	due: { text: "Due in the next 7 days", icon: "bills", tone: "text-ink" },
 };
 
-/** A group's heading with `why` beside it (B's quiet link) or none (A): BillStatusHeading without its WhyLink. */
+/** A group's heading with `why` beside it (today's Why?, B's quiet link) or none (A): BillStatusHeading's markup. */
 function GroupHeading({
 	group,
 	totalCents,
@@ -469,49 +465,42 @@ function BillsTop({
 type TrendsMode = "today" | "a" | "b";
 
 /**
- * One of Trends' two groups: TrendGroup as the route draws it, with its terracotta Why? beside the title
- * (today) or none (A). B draws the same markup with a muted Why? instead.
+ * One of Trends' two groups, drawn as TrendGroup drew it before decision 121: the title row with `why` after it
+ * (today's terracotta Why?, B's muted one, none for A), then the ruled list. It draws its own markup in every
+ * mode, so it no longer renders the real TrendGroup.
  */
 function TrendsGroup({
-	mode,
 	id,
 	title,
 	icon,
 	tone,
-	topic,
+	why,
 	children,
 }: {
-	mode: TrendsMode;
 	id: string;
 	title: string;
 	icon: "check" | "arrow-up";
 	tone: "text-ok" | "text-ink";
-	topic: string;
+	why?: Child;
 	children?: Child;
 }) {
-	if (mode !== "b")
-		return (
-			<TrendGroup
-				id={id}
-				title={title}
-				icon={icon}
-				tone={tone}
-				why={mode === "today" ? topic : undefined}
-			>
-				{children}
-			</TrendGroup>
-		);
 	return (
 		<section aria-labelledby={`${id}-title`}>
-			<div class="mt-3 flex items-center gap-2 text-sm text-muted">
+			<div
+				class={`${why ? "mt-3" : "mt-5"} flex items-center gap-2 text-sm text-muted`}
+			>
 				<h2 id={`${id}-title`} class="flex items-center gap-2">
 					<span class={tone}>
 						<Icon name={icon} class="size-4" />
 					</span>
 					{title}
 				</h2>
-				<span aria-hidden="true">·</span>
-				<QuietWhy section="trends" topic={topic} />
+				{why && (
+					<>
+						<span aria-hidden="true">·</span>
+						{why}
+					</>
+				)}
 			</div>
 			<ul class="divide-y divide-rule border-y border-rule">{children}</ul>
 		</section>
@@ -530,6 +519,14 @@ function TrendsPicture({
 	mode: TrendsMode;
 }) {
 	const sentence = "$339 less than by this time in September.";
+	const groupWhy = (topic: string): Child | undefined => {
+		if (mode === "a") return undefined;
+		return mode === "today" ? (
+			<WhyLink section="trends" topic={topic} />
+		) : (
+			<QuietWhy section="trends" topic={topic} />
+		);
+	};
 	return (
 		<>
 			{mode === "b" ? (
@@ -546,12 +543,11 @@ function TrendsPicture({
 				<TrendsTop month="October" spent="$1,665" sentence={sentence} />
 			)}
 			<TrendsGroup
-				mode={mode}
 				id={`${idPrefix}-well`}
 				title="Going well"
 				icon="check"
 				tone="text-ok"
-				topic="going well"
+				why={groupWhy("going well")}
 			>
 				<TrendRow
 					id={`${idPrefix}-groceries`}
@@ -564,12 +560,11 @@ function TrendsPicture({
 				/>
 			</TrendsGroup>
 			<TrendsGroup
-				mode={mode}
 				id={`${idPrefix}-look`}
 				title="Worth a look"
 				icon="arrow-up"
 				tone="text-ink"
-				topic="worth a look"
+				why={groupWhy("worth a look")}
 			>
 				<TrendRow
 					id={`${idPrefix}-eating`}
@@ -606,9 +601,17 @@ function plainHeading(group: Group, totalCents: number) {
 	return <GroupHeading group={group} totalCents={totalCents} />;
 }
 
-/** Today's group headings: the real BillStatusHeading, with its terracotta Why?. */
+/** Today's group headings: BillStatusHeading as it drew them before decision 121, with its terracotta Why?. */
 function todayHeading(group: Group, totalCents: number) {
-	return <BillStatusHeading status={group} totalCents={totalCents} />;
+	return (
+		<GroupHeading
+			group={group}
+			totalCents={totalCents}
+			why={
+				<WhyLink section="bills" topic={GROUP_LOOK[group].text.toLowerCase()} />
+			}
+		/>
+	);
 }
 
 // ---------------------------------------------------------------------------------------------

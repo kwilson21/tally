@@ -9,7 +9,6 @@ import { dayLabel, monthDay, shortDay } from "../dates";
 import { formatCents } from "../money";
 import { CategoryIcon } from "./category";
 import { Icon, ROW_OPENS, RowArrow } from "./icons";
-import { WhyLink } from "./why-link";
 
 export type BillRowData = {
 	id: number;
@@ -37,32 +36,27 @@ const STATUS_HEADING = {
 		text: "Overdue",
 		icon: "alert",
 		tone: "text-over",
-		why: "overdue",
 	},
 	due: {
 		text: "Due in the next 7 days",
 		icon: "bills",
 		tone: "text-ink",
-		why: "due in the next 7 days",
 	},
 	upcoming: {
 		text: "Upcoming",
 		icon: "bills",
 		tone: "text-muted",
-		why: "upcoming",
 	},
 	paid: {
 		text: "Paid this month",
 		icon: "check",
 		tone: "text-ok",
-		why: "paid this month",
 	},
 } as const;
 
 /**
- * A bill group names status with both an icon and words, never color alone, then a Why? to How Tally works'
- * Bills section (decision 65, #341). The Why? sits beside the heading, not inside it, so the heading's name stays
- * the status; the group's total ends the row.
+ * A bill group names status with both an icon and words, never color alone, and its total ends the row. The
+ * heading carries no Why? (decision 121): Bills' one Why? sits beside its summary sentence.
  */
 export function BillStatusHeading({
 	status,
@@ -83,8 +77,6 @@ export function BillStatusHeading({
 				</span>
 				{look.text}
 			</h2>
-			<span aria-hidden="true">·</span>
-			<WhyLink section="bills" topic={look.why} />
 			{totalCents !== undefined && (
 				<span class="ml-auto shrink-0">
 					{formatCents(totalCents)}

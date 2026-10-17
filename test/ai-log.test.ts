@@ -820,6 +820,13 @@ describe("the tally's lines", () => {
 		expect(group).toContain("Why? what Tally did");
 		expect(group).toMatch(/Sorted \d+ transactions? · you changed \d+/);
 	});
+
+	it("has exactly one Why? on Settings' AI page, the tally's, not on a heading (decision 121)", async () => {
+		const html = await (
+			await exports.default.fetch(`${BASE}/settings/ai`)
+		).text();
+		expect(html.split('aria-label="Why? ').length - 1).toBe(1);
+	});
 });
 
 describe("what the Jev run and the names write", () => {

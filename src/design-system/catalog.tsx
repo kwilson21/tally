@@ -2706,7 +2706,7 @@ function Rows() {
 				title="BillRow and bill status heading"
 				tier="visual"
 				components={["BillRow", "BillStatusHeading", "BillMonthlyTotal"]}
-				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading has a Why? to How Tally works' Bills section beside it and ends with its total; a heading whose total counts occurrences no row lists has a muted line under it that names them (decision 122). Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
+				sentence="Bills shows a quiet monthly total and still-to-pay line; each status heading ends with its total and carries no Why? (decision 121: Bills' one Why? sits beside its summary sentence, as the WhyLink specimen shows); a heading whose total counts occurrences no row lists has a muted line under it that names them (decision 122). Each bill shows its category, name, status sentence and amount; an inactive bill shows its schedule instead of a status sentence. A part-paid bill stays in the group its date gives it and says “Part paid: $600 of $1,200” in place of its status sentence. A bill with a link ends in the chevron after its amount and takes the press tint while it opens; here each links to this section, so nothing leaves the catalog, and a pressed bill is held still in its own state."
 			>
 				<State label="Bills totals">
 					<div class="max-w-xl">
@@ -6042,9 +6042,14 @@ function Demo() {
 				components={["WhyLink"]}
 				sentence="A small terracotta “Why?” link beside a label goes to the exact section that explains the rule, with a distinct accessible name and a 44px target."
 			>
-				<p class="flex items-center gap-2">
-					Going well <span aria-hidden="true">·</span>{" "}
-					<WhyLink section="trends" topic="going well" />
+				<p class="mt-2 flex flex-wrap items-center gap-x-2 font-serif text-lg italic">
+					5 bills to pay soon, $1,062.49 in all
+					<span aria-hidden="true" class="not-italic">
+						·
+					</span>
+					<span class="font-sans not-italic">
+						<WhyLink section="bills" topic="bills to pay soon" />
+					</span>
 				</p>
 				<State label="Beside Category when a payment took the bill's category">
 					<p class="flex items-center gap-2">
@@ -6824,32 +6829,30 @@ function TrendsGroup() {
 				title="TrendGroup"
 				tier="visual"
 				components={["TrendGroup"]}
-				sentence="A small muted heading over a ruled list: Going well takes a check in ok, Worth a look an up arrow in ink, each with a Why? (a word and an icon, never color alone); the changes and every other category have a plain heading."
+				sentence="A small muted heading over a ruled list: Going well takes a check in ok, Worth a look an up arrow in ink (a word and an icon, never color alone); the changes and every other category have a plain heading. No group carries a Why? (decision 121): Trends' headline keeps the page's one."
 			>
-				<State label="Going well, with its Why?">
+				<State label="Going well">
 					<div class="max-w-xl">
-						<Picture label="Going well, with a Why? link, over one category row.">
+						<Picture label="Going well, over one category row.">
 							<TrendGroup
 								id="ds-going-well"
 								title="Going well"
 								icon="check"
 								tone="text-ok"
-								why="going well"
 							>
 								<TrendRow {...GOING_WELL_ROW} id="ds-group-good" />
 							</TrendGroup>
 						</Picture>
 					</div>
 				</State>
-				<State label="Worth a look, with its Why?">
+				<State label="Worth a look">
 					<div class="max-w-xl">
-						<Picture label="Worth a look, with a Why? link, over one category row.">
+						<Picture label="Worth a look, over one category row.">
 							<TrendGroup
 								id="ds-worth-a-look"
 								title="Worth a look"
 								icon="arrow-up"
 								tone="text-ink"
-								why="worth a look"
 							>
 								<TrendRow {...WORTH_A_LOOK_ROW} id="ds-group-watch" />
 							</TrendGroup>
