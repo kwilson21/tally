@@ -139,7 +139,7 @@ import {
 	FOCUS_SET_CATEGORY,
 	FOCUS_SET_CATEGORY_BACK,
 	LIST_LOAD_PAUSE,
-	MAX_SELECTED,
+	limitWords,
 	NOT_ON_PAGE_FIELD,
 	NOT_ON_PAGE_IDS_FIELD,
 	NotOnPage,
@@ -158,6 +158,7 @@ import {
 	TICKS,
 	TICKS_INCLUDE,
 	TOO_MANY,
+	TOO_MANY_UNTICKED,
 } from "../views/selection-action-bar";
 import {
 	isGuessedPart,
@@ -897,12 +898,14 @@ async function renderList(
 						</noscript>
 						<section id="results" class="mt-2" aria-label="Results">
 							{suggestedNameNote}
-							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over 100 says them once. */}
-							{selectionError && selectionError !== TOO_MANY && (
-								<p role="alert" class="my-3 text-sm text-over">
-									{selectionError}
-								</p>
-							)}
+							{/* The limit's words are the bar's alone (SelectionLimit), so a refusal over a limit says them once. */}
+							{selectionError &&
+								selectionError !== TOO_MANY &&
+								selectionError !== TOO_MANY_UNTICKED && (
+									<p role="alert" class="my-3 text-sm text-over">
+										{selectionError}
+									</p>
+								)}
 							{rows.length === 0 ? (
 								<EmptyState
 									kind="search"
@@ -965,7 +968,7 @@ async function renderList(
 								words={monthWords}
 								// Both actions wait on every tick the list keeps, as the limit does, not only the rows it shows.
 								disabled={
-									htmx && (tickCount === 0 || ticks.length > MAX_SELECTED)
+									htmx && (tickCount === 0 || limitWords(current) !== undefined)
 								}
 								focusSetCategory={focusSetCategory && tickCount > 0}
 							/>
@@ -1222,7 +1225,7 @@ transactions.get("/transactions/select/count", async (c) => {
 				fallback={!linkDrawn}
 			/>
 			<SelectionActionButtons
-				disabled={picked.length === 0 || selection.ticks.length > MAX_SELECTED}
+				disabled={picked.length === 0 || limitWords(selection) !== undefined}
 				oob
 			/>
 			<SelectAllOnPage
@@ -1235,7 +1238,7 @@ transactions.get("/transactions/select/count", async (c) => {
 				autofocus={focusSelectAll}
 				oob
 			/>
-			<SelectionLimit count={selection.ticks.length} oob />
+			<SelectionLimit selection={selection} oob />
 			{notOnPage > 0 ? (
 				<NotOnPageCount count={notOnPage} oob />
 			) : (
@@ -1330,9 +1333,10 @@ async function postedSelection(
 		}),
 		new Set(matched),
 	);
+	// Over a limit the words win, even when every match is unticked (so NONE_SELECTED would say less).
+	const limit = limitWords(selection);
+	if (limit) return { ids: [], set: [], selection, error: limit };
 	const ids = selectedIds(selection, matched);
-	if (selection.ticks.length > MAX_SELECTED)
-		return { ids: [], set: [], selection, error: TOO_MANY };
 	return {
 		ids,
 		set: setIds(selection, matched),
