@@ -9,9 +9,9 @@ import {
 	vi,
 } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { billOccurrence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
-import { loadBillRows } from "../src/routes/bills";
 import { billStatusLine } from "../src/views/bill-row";
 
 // Decision 99 (#337): an occurrence due before the day its bill was added is already handled. It is not

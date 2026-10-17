@@ -1,11 +1,11 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { occurrencePaid, partPaidSentence } from "../src/bills/status";
 import { billTotalsForRows } from "../src/bills/totals";
 import { linkPaymentSql, occurrenceUnpaidSql } from "../src/bills/unpaid";
 import { resetDemo } from "../src/demo/reset";
-import { loadBillRows } from "../src/routes/bills";
 import { type BillRowData, billStatusLine } from "../src/views/bill-row";
 
 // Partial bill payments (Phase 5, decision 101, #205): more than one payment can pay one occurrence, and an

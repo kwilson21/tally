@@ -2,12 +2,12 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
-import { loadBillRows } from "../src/routes/bills";
 import appCss from "../src/styles/app.css?raw";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */

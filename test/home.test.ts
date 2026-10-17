@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows, calculateBillTotals } from "../src/bills/totals";
 import { budgetForMonth, summarizeMonth } from "../src/budget";
 import { monthCause, monthCauses } from "../src/budgets/month-cause";
@@ -19,7 +20,6 @@ import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
-import { loadBillRows } from "../src/routes/bills";
 import { home as homeRoute } from "../src/routes/home";
 
 async function home() {

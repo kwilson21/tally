@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
 import {
@@ -21,7 +22,6 @@ import {
 import { removeSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
-import { loadBillRows } from "../src/routes/bills";
 import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 
