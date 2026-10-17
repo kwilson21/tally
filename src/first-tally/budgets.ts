@@ -75,7 +75,7 @@ export function nothingAskedLine(reason: NothingAsked): string {
 }
 
 /** A sentence's list of items: "A and B", "A, B and C" (a single item is itself). */
-function andList(items: string[]): string {
+export function andList(items: string[]): string {
 	if (items.length <= 1) return items[0] ?? "";
 	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }

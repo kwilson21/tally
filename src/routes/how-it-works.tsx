@@ -15,6 +15,7 @@ import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import { accountsByBank } from "../db/accounts";
 import { readAiTally } from "../db/ai-log";
+import { readFirstTally } from "../db/first-tally";
 import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
 import { plansSetAsideCents } from "../db/planned-expenses";
@@ -39,6 +40,7 @@ import {
 import { formatCents } from "../money";
 import { buildTrends, RUN_MONTHS, sameDaysCaption } from "../trends";
 import { TallyMark } from "../views/brand";
+import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import {
 	BillsDiagram,
@@ -269,6 +271,8 @@ howItWorks.get("/how-it-works", async (c) => {
 		startRows && startRows.month !== month
 			? `/transactions?raw=1&month=${startRows.month}`
 			: "/transactions?raw=1";
+	// The family app's "Your first week" part (P125 E, spec §9): the five strokes with their days, from the first_tally record.
+	const firstWeek = demo ? null : await readFirstTally(c.env.DB);
 
 	return c.html(
 		<Layout
@@ -298,6 +302,11 @@ howItWorks.get("/how-it-works", async (c) => {
 						: "AI helps with categories and store names, and a person can always change them."}{" "}
 					Code does all the math.
 				</p>
+				{!demo && (
+					<Section id="first-week" title="Your first week">
+						<FirstWeekPart record={firstWeek} today={today} />
+					</Section>
+				)}
 				<Section id="budget" title="Budget and safe to spend">
 					<p class="mt-2">
 						Home shows how much of this month's budget is left, for each

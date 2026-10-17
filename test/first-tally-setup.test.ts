@@ -60,6 +60,7 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 	setupView({
 		record: null,
 		banks: [],
+		flagged: [],
 		waiting: 0,
 		total: 0,
 		cap: 500,
@@ -269,19 +270,25 @@ describe("setupView: which setup state Home shows", () => {
 		expect(answered?.steps.some((s) => s.note === "Next")).toBe(false);
 	});
 
-	it("stays answered while a newly linked bank is read, since the three answers are kept", () => {
+	it("a bank linked after the answers takes the questions back, so it reads again and says Tally asks again (#578)", () => {
+		// takeBackQuestionStrokes has removed the three strokes; the answers and stroke one stay.
 		const record: FirstTally = {
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
+			strokes: { bank: "2026-10-13" },
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
 		};
-		expect(
-			view({ record, banks: [{ ...BANK, historyCompleteAt: null }] })?.phase,
-		).toBe("answered");
+		const reading = view({
+			record,
+			banks: [
+				BANK,
+				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+			],
+		});
+		expect(reading?.phase).toBe("reading");
+		expect(reading?.steps[0]).toEqual({
+			name: "Link your bank",
+			done: true,
+			note: "Wells Fargo linked: Tally asks again about pay, bills and budgets.",
+		});
 	});
 
 	it("names the done lines by their day, and an undated stroke has no day", () => {
@@ -315,12 +322,18 @@ describe("readSetup", () => {
 		)
 			.bind(JSON.stringify(ALL_DRAWN))
 			.run();
-		expect(await readSetup(env.DB, { today: TODAY, cap: 500 })).toBeNull();
+		expect(
+			await readSetup(env.DB, { today: TODAY, cap: 500, flagged: [] }),
+		).toBeNull();
 	});
 
 	it("draws stroke one today for a connected bank that has none (linked before the first week shipped)", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		const setup = await readSetup(env.DB, { today: TODAY, cap: 500 });
+		const setup = await readSetup(env.DB, {
+			today: TODAY,
+			cap: 500,
+			flagged: [],
+		});
 		// Stroke one is drawn today, so the questions open tomorrow at the earliest: the setup is reading, not set up.
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.steps[0]?.done).toBe(true);
@@ -338,7 +351,7 @@ describe("readSetup", () => {
 				"UPDATE plaid_items SET disconnected_at = datetime('now')",
 			).run(),
 		);
-		await readSetup(racing, { today: TODAY, cap: 500 });
+		await readSetup(racing, { today: TODAY, cap: 500, flagged: [] });
 		expect((await readFirstTally(env.DB))?.strokes.bank).toBeUndefined();
 	});
 
@@ -346,9 +359,9 @@ describe("readSetup", () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
-		expect((await readSetup(env.DB, { today: TODAY, cap: 500 }))?.phase).toBe(
-			"before",
-		);
+		expect(
+			(await readSetup(env.DB, { today: TODAY, cap: 500, flagged: [] }))?.phase,
+		).toBe("before");
 	});
 });
 
@@ -426,5 +439,225 @@ describe("takeBackBankStrokes", () => {
 		await store(ALL_DRAWN);
 		await env.DB.batch([takeBackBankStrokes(env.DB, 999)]);
 		expect(await read()).toEqual(ALL_DRAWN);
+	});
+});
+
+// The fifth day, the answered wait and the re-ask (P125 E, #586, #671, #578). Stroke five is drawn by readSetup on the first
+// later household day after the night was kept.
+describe("the fifth day (P125 E, #586)", () => {
+	const night = { brought: 3, needYou: 1 };
+	const budgetsDay = "2026-10-13";
+	const later = "2026-10-14";
+
+	/** One household: one connected bank, and the record as given. The bank's history is in, so the setup can be read. */
+	const seedHousehold = async (record: unknown) => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare(
+				"DELETE FROM household_settings WHERE key = 'first_tally'",
+			),
+		]);
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id, last_synced_at, history_complete_at) VALUES (?, 'Chase', 'person@example.com', 'item-chase', '2026-10-12T09:00:00Z', '2026-10-12T09:00:00Z')",
+		)
+			.bind(new Uint8Array([1, 2, 3]))
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
+		)
+			.bind(JSON.stringify(record))
+			.run();
+	};
+	const fourDrawn: FirstTally = {
+		strokes: {
+			bank: budgetsDay,
+			pay: budgetsDay,
+			bills: budgetsDay,
+			budgets: budgetsDay,
+		},
+		budgets: {},
+	};
+	const countOf = async () => (await readFirstTally(env.DB))?.strokes.count;
+
+	it("is not drawn on the budgets stroke's own day, even with the night kept", async () => {
+		await seedHousehold({ ...fourDrawn, night });
+		await readSetup(env.DB, { today: budgetsDay, cap: 500, flagged: [] });
+		expect(await countOf()).toBeUndefined();
+	});
+
+	it("is drawn on the first later day, and that day's view carries the night's counts", async () => {
+		await seedHousehold({ ...fourDrawn, night });
+		const view = await readSetup(env.DB, {
+			today: later,
+			cap: 500,
+			flagged: [],
+		});
+		expect(await countOf()).toBe(later);
+		expect(view?.fifth).toEqual(night);
+		expect(view?.steps[4]).toEqual({
+			name: "Tomorrow · Tally keeps count on its own",
+			done: true,
+			note: "Today, Oct 14",
+		});
+	});
+
+	it("keeps the first day it was drawn, so loading Home again the same day changes nothing", async () => {
+		await seedHousehold({ ...fourDrawn, night });
+		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		const again = await readSetup(env.DB, {
+			today: later,
+			cap: 500,
+			flagged: [],
+		});
+		expect(await countOf()).toBe(later);
+		expect(again?.fifth).toEqual(night);
+	});
+
+	it("is Home again from the next household day: no set-up view, and the record stays", async () => {
+		await seedHousehold({ ...fourDrawn, night });
+		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		expect(
+			await readSetup(env.DB, { today: "2026-10-15", cap: 500, flagged: [] }),
+		).toBeNull();
+		expect(await countOf()).toBe(later);
+	});
+
+	it("is not drawn while no night has been kept", async () => {
+		await seedHousehold(fourDrawn);
+		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		expect(await countOf()).toBeUndefined();
+	});
+
+	it("draws nothing on a household set up before the feature shipped (every stroke with no day, no night)", async () => {
+		await seedHousehold({
+			strokes: {
+				bank: null,
+				pay: null,
+				bills: null,
+				budgets: null,
+				count: null,
+			},
+			budgets: {},
+		});
+		expect(
+			await readSetup(env.DB, { today: later, cap: 500, flagged: [] }),
+		).toBeNull();
+	});
+
+	it("is shown by setupView only on the day stroke five is drawn", () => {
+		const fifth: FirstTally = {
+			strokes: { ...fourDrawn.strokes, count: TODAY },
+			budgets: {},
+			night,
+		};
+		expect(view({ record: fifth, banks: [BANK] })?.fifth).toEqual(night);
+		const after = {
+			...fifth,
+			strokes: { ...fifth.strokes, count: "2026-10-13" },
+		};
+		expect(view({ record: after, banks: [BANK] })).toBeNull();
+	});
+});
+
+describe("the answered wait (P125 E, #671)", () => {
+	const answered: FirstTally = {
+		strokes: {
+			bank: "2026-10-13",
+			pay: "2026-10-13",
+			bills: "2026-10-13",
+			budgets: "2026-10-13",
+		},
+		budgets: {},
+	};
+	const reading = {
+		name: "Chase",
+		lastSyncedAt: null,
+		historyCompleteAt: null,
+	};
+	const wells = {
+		name: "Wells Fargo",
+		lastSyncedAt: "2026-10-13",
+		historyCompleteAt: "2026-10-13",
+	};
+
+	it("says what Tally waits for while one bank reads its history, and promises nothing for tomorrow", () => {
+		const v = view({
+			record: answered,
+			banks: [{ ...BANK, historyCompleteAt: null }],
+		});
+		expect(v?.phase).toBe("answered");
+		expect(v?.answeredWaiting).toBe("once Chase's history is in.");
+	});
+
+	it("names the one bank that needs signing in", () => {
+		const v = view({
+			record: answered,
+			banks: [BANK],
+			flagged: [{ name: "Chase", reason: "sign-in" }],
+		});
+		expect(v?.answeredWaiting).toBe("once Chase is signed in again.");
+	});
+
+	it("names both banks that need signing in", () => {
+		const v = view({
+			record: answered,
+			banks: [BANK, wells],
+			flagged: [
+				{ name: "Chase", reason: "sign-in" },
+				{ name: "Wells Fargo", reason: "sign-in" },
+			],
+		});
+		expect(v?.answeredWaiting).toBe(
+			"once Chase and Wells Fargo are signed in again.",
+		);
+	});
+
+	it("says your banks' history with two banks reading", () => {
+		const v = view({
+			record: answered,
+			banks: [{ ...BANK, historyCompleteAt: null }, reading],
+		});
+		expect(v?.answeredWaiting).toBe("once your banks' history is in.");
+	});
+
+	it("waits for nothing once every bank is in and signed in", () => {
+		expect(
+			view({ record: answered, banks: [BANK, wells] })?.answeredWaiting,
+		).toBeNull();
+	});
+
+	it("waits for nothing outside the answered phase", () => {
+		const v = view({
+			record: { ...answered, strokes: { bank: "2026-10-13" }, budgets: {} },
+			banks: [{ ...BANK, historyCompleteAt: null }],
+		});
+		expect(v?.phase).toBe("reading");
+		expect(v?.answeredWaiting).toBeNull();
+	});
+});
+
+describe("the re-ask note (P125 E, #578)", () => {
+	it("says nothing with one bank, even when an answer is kept and a question is undrawn", () => {
+		const record: FirstTally = {
+			strokes: { bank: "2026-10-13" },
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
+		};
+		expect(view({ record, banks: [BANK] })?.steps[0]?.note).toBe(
+			"Chase, linked",
+		);
+	});
+
+	it("says nothing with two banks when no answer is kept", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const v = view({
+			record,
+			banks: [
+				BANK,
+				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+			],
+		});
+		expect(v?.steps[0]?.note).toBe("Chase, linked");
 	});
 });

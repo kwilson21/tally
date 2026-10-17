@@ -1255,3 +1255,74 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 		);
 	});
 });
+
+describe("How Tally works' Your first week (P125 E, #591)", () => {
+	const demoBindings = { ...env, DEMO: "true" } as unknown as Env;
+	const familyPage = async () =>
+		decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+	const writeRecord = (value: unknown) =>
+		env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+			.bind(JSON.stringify(value))
+			.run();
+
+	it("in the family app, names the five strokes with the day each was drawn, and how a first budget is suggested", async () => {
+		await writeRecord({
+			strokes: { bank: "2026-10-12", pay: "2026-10-13", bills: null },
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain('id="first-week"');
+		expect(html).toContain("Link your bank: done Oct 12");
+		expect(html).toContain("Your pay: done Oct 13");
+		expect(html).toContain("Your bills: done");
+		expect(html).toContain("Your budgets: One tap, or one at a time");
+		expect(html).toContain(
+			"A first budget is suggested from what your bank shows",
+		);
+		expect(html).not.toContain(
+			"Tally set up your household before this page existed.",
+		);
+	});
+
+	it("mid-setup, with no record, reads every stroke as not drawn, with its note", async () => {
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'first_tally'",
+		).run();
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: About a minute");
+		expect(html).toContain("Your pay: One question");
+		expect(html).toContain("Tomorrow · Tally keeps count on its own: Later");
+	});
+
+	it("for a household set up before the feature shipped, shows the steps without days, under the sentence", async () => {
+		await writeRecord({
+			strokes: {
+				bank: null,
+				pay: null,
+				bills: null,
+				budgets: null,
+				count: null,
+			},
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: done");
+		expect(html).not.toContain("Link your bank: done Oct");
+		expect(html).toContain(
+			"Tally set up your household before this page existed.",
+		);
+	});
+
+	it("is not shown in the demo", async () => {
+		const html = decodeHtml(
+			await (
+				await howItWorks.request("/how-it-works", {}, demoBindings)
+			).text(),
+		);
+		expect(html).not.toContain('id="first-week"');
+	});
+});

@@ -183,6 +183,11 @@ export const PAGE_SIZE = 25;
 // while held credits and income stay out of spending classification.
 /** A transaction that still needs a category (Home's count, Organize's list). Needs `t` and COUNTED_JOINS. */
 export const NEEDS_CATEGORY = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+/**
+ * A credit a person still has to review (decision 70): money out, not reviewed, not income, and not a linked refund that
+ * follows its purchase. Monthly counts and the night's needs-you count both read it. Needs `t` and COUNTED_JOINS.
+ */
+export const HELD_FOR_REVIEW_SQL = `t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}`;
 export const OLDER_NEEDS_CATEGORY_SQL = `SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS}
 	WHERE (t.date < ?1 OR (t.date >= ?1 AND t.date < ?2 AND ${COUNTED_MONTH} < ?3))
 	AND ${NEEDS_CATEGORY}`;
@@ -3272,7 +3277,7 @@ export async function monthCounts(
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NOT NULL AND ${COUNTED_BY.jev} IS NULL), 0) AS noneFit,
 				COALESCE(SUM(${NEEDS_CATEGORY} AND ${COUNTED_BY.source} IS NULL AND ${COUNTED_BY.confidence} IS NULL), 0) AS notYetAsked,
 				COALESCE(SUM(t.category_id IS NULL AND t.flag_income = 1), 0) AS income,
-				COALESCE(SUM(t.amount_cents < 0 AND COALESCE(t.credit_reviewed, 0) = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE}), 0) AS heldForReview,
+				COALESCE(SUM(${HELD_FOR_REVIEW_SQL}), 0) AS heldForReview,
 				COALESCE(SUM(${FOLLOWS_PURCHASE} AND ${COUNTED_CATEGORY} IS NULL AND t.flag_income = 0), 0) AS linkedWaiting
 			FROM transactions t
 			${COUNTED_JOINS}

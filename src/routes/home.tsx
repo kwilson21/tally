@@ -30,6 +30,7 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import { loadsPlaid } from "../security";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
@@ -194,6 +195,11 @@ async function renderHome(
 	const olderNeeds = current
 		? await olderNeedsCategoryCount(c.env.DB, `${month}-01`)
 		: 0;
+	// Where "See what needs you" goes on the fifth day (#586): Home's own needs-you count when it shows one, else the list.
+	const needsHref =
+		currentNeeds > 0 || olderNeeds > 0
+			? "/transactions/organize"
+			: "/transactions?uncategorized=1&month=all";
 	const hasSavingsGoal = (data.savingsGoalCents ?? 0) > 0;
 	const needs = (
 		<>
@@ -206,12 +212,12 @@ async function renderHome(
 		</>
 	);
 	const demo = c.env.DEMO === "true";
-	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
-	// no real banks, so it never asks.
-	const bankNotice =
-		demo || !current
-			? null
-			: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
+	// needs signing in. Read once, for the bank line and for the setup (its fifth day and the answered wait, #671). The demo
+	// has no real banks, so it never asks.
+	const flagged =
+		demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today);
+	const bankNotice = homeBankNotice(flagged, today);
 	const day = Number(today.slice(8, 10));
 	const forecastDays = current
 		? await homeForecastDays(c.env.DB, month, today)
@@ -267,12 +273,26 @@ async function renderHome(
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
 		current && !demo
-			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env) })
+			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
 			: null;
-	const linkBank =
-		setup?.phase === "before" && enabled(c.env) ? (
+	// Link a bank is Plaid Link's button, and Plaid's script runs only on the pages the CSP allows it (security.ts): Home
+	// itself, and an htmx swap made from Home's document. A sheet's full load (/budget/:id, /savings-goal) links from Home
+	// instead, with a plain link (#678).
+	const bankToLink = setup?.phase === "before" && enabled(c.env);
+	const plaidButton =
+		bankToLink && (loadsPlaid(c) || Boolean(c.req.header("HX-Request")));
+	const linkBank = bankToLink ? (
+		plaidButton ? (
 			<LinkBank class="w-full" refresh="/" target="#page" />
-		) : undefined;
+		) : (
+			<a
+				href="/"
+				class="inline-flex min-h-11 w-full items-center justify-center text-accent underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+			>
+				Link a bank on Home
+			</a>
+		)
+	) : undefined;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
@@ -286,7 +306,7 @@ async function renderHome(
 	return c.html(
 		<Layout
 			active="home"
-			{...plaidScripts(linkBank !== undefined)}
+			{...plaidScripts(plaidButton)}
 			demo={demo}
 			currentPath={addressOf(c)}
 		>
@@ -299,6 +319,14 @@ async function renderHome(
 								view={setup}
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
+								fifthDay={
+									setup.fifth
+										? {
+												safeToSpendCents: summary.safeToSpendCents,
+												needsHref,
+											}
+										: undefined
+								}
 							/>
 						) : current ? (
 							<HomeTop

@@ -13,6 +13,8 @@ const base: SetupView = {
 	historyIn: true,
 	sorted: 0,
 	total: 0,
+	fifth: null,
+	answeredWaiting: null,
 };
 const top = async (
 	view: Partial<SetupView>,
