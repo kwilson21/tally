@@ -279,6 +279,9 @@ export async function pendingSuggestions(
 	}) as PendingSuggestions;
 }
 
+const NOTHING_TICKED =
+	"Tick at least one transaction, or say No to this suggestion.";
+
 export type CreateResult =
 	/**
 	 * `attached` is true when a category the family already had as active with that name took the ticks (decision
@@ -297,7 +300,13 @@ export type CreateResult =
 export async function createFromSuggestion(
 	db: D1Database,
 	id: number,
-	input: { ticked: number[]; shown: number[]; notes: Record<number, string> },
+	input: {
+		ticked: number[];
+		shown: number[];
+		notes: Record<number, string>;
+		/** Organize's Create (#705): every shown purchase is filed or none is, so a change since the card was drawn stops all. */
+		whole?: boolean;
+	},
 	actor: string,
 ): Promise<CreateResult> {
 	const s = await db
@@ -317,13 +326,11 @@ export async function createFromSuggestion(
 			.bind(id, JSON.stringify(input.shown))
 			.all<{ id: number }>()
 	).results.map((row) => row.id);
+	if (input.whole && attached.length !== new Set(input.shown).size)
+		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 	const ticked = input.ticked.filter((tx) => attached.includes(tx));
 	if (!ticked.length)
-		return {
-			ok: false,
-			reason: "empty",
-			error: "Tick at least one transaction, or say No to this suggestion.",
-		};
+		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 	if (Object.values(input.notes).some((note) => note.length > 500))
 		return {
 			ok: false,
@@ -410,6 +417,14 @@ export async function createFromSuggestion(
 					"UPDATE category_suggestions SET decided_at=? WHERE id=? AND status='pending' AND decided_at IS NULL",
 				)
 				.bind(token, id),
+			// Organize's Create (#705): a shown purchase no longer suggested releases the claim, so every later statement's
+			// gate fails and nothing is restored, created or filed. The rest of the batch then changes no row.
+			db
+				.prepare(
+					`UPDATE category_suggestions SET decided_at=NULL WHERE id=? AND status='pending' AND decided_at=? AND ?=1
+					AND EXISTS (SELECT 1 FROM json_each(?) shown WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE transactions.id=shown.value AND transactions.category_suggestion_id=? AND ${suggestedRowSql("transactions")} AND NOT ${neverSuggestedSql("transactions", "new_category")}))`,
+				)
+				.bind(id, token, input.whole ? 1 : 0, JSON.stringify(input.shown), id),
 			restore,
 			create,
 			// Closes the archive period a restore opened, as setArchived's restore does. It closes only for a picked category
@@ -472,7 +487,21 @@ export async function createFromSuggestion(
 			return { ok: false, reason: "invalid", error: "That name is taken." };
 		throw error;
 	}
-	if ((results[4]?.meta.changes ?? 0) === 0) {
+	// The batch's results by position; the claim (0) is not read. The release (1) is checked first (#705).
+	const [
+		,
+		releaseResult,
+		restoreResult,
+		createResult,
+		,
+		flipResult,
+		filedResult,
+		,
+		leftOutResult,
+	] = results;
+	if ((releaseResult?.meta.changes ?? 0) > 0)
+		return { ok: false, reason: "empty", error: NOTHING_TICKED };
+	if ((flipResult?.meta.changes ?? 0) === 0) {
 		const stillPending = await db
 			.prepare("SELECT status FROM category_suggestions WHERE id=?")
 			.bind(id)
@@ -490,22 +519,18 @@ export async function createFromSuggestion(
 			return { ok: false, reason: "invalid", error: fullMessage("add") };
 		if (!existing && now)
 			return { ok: false, reason: "invalid", error: "That name is taken." };
-		return {
-			ok: false,
-			reason: "empty",
-			error: "Tick at least one transaction, or say No to this suggestion.",
-		};
+		return { ok: false, reason: "empty", error: NOTHING_TICKED };
 	}
 	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that
 	// arrived after the page was drawn, is still cleared by the write above (its NULL confidence sends it to the
 	// night), but it is not named.
-	const leftOut = ((results[7]?.results as { id: number }[]) ?? []).filter(
+	const leftOut = ((leftOutResult?.results as { id: number }[]) ?? []).filter(
 		(row) => attached.includes(row.id),
 	);
 	// The write itself decides the path, so the flags come from its own statements (decision 110): a restore changed
 	// a row, or the create did, or neither did and the ticks joined the active category with that name (decision 101).
-	const restored = (results[1]?.meta.changes ?? 0) > 0;
-	const joined = !restored && (results[2]?.meta.changes ?? 0) === 0;
+	const restored = (restoreResult?.meta.changes ?? 0) > 0;
+	const joined = !restored && (createResult?.meta.changes ?? 0) === 0;
 	// A joined or restored category is named as the family stored it, whatever capitals the suggestion has. It is read
 	// after the write, so the name is the one the family has once the write has run.
 	const stored =
@@ -520,7 +545,7 @@ export async function createFromSuggestion(
 	return {
 		ok: true,
 		name: stored?.name ?? target,
-		moved: results[5]?.meta.changes ?? 0,
+		moved: filedResult?.meta.changes ?? 0,
 		leftOut: leftOut.map((row) => row.id),
 		attached: joined,
 		restored,
