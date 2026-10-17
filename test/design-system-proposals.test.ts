@@ -418,15 +418,8 @@ describe("GET /design-system/proposals", () => {
 			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P133 decision 121, and P136 option A decision 122.
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
-			// P139 (#660) is open: the owner hasn't picked an option yet, so none is marked Picked.
-			const expected =
-				id === "p139-split-category"
-					? 0
-					: n < 34
-						? 0
-						: twoPicks.includes(id)
-							? 2
-							: 1;
+			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
+			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -463,7 +456,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(93);
+		expect(DECIDED.length).toBe(94);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -507,7 +500,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-14)).toBe(entry);
+		expect(DECIDED.at(-15)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -516,7 +509,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-13)).toBe(entry);
+		expect(DECIDED.at(-14)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -532,7 +525,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-12)).toBe(entry);
+		expect(DECIDED.at(-13)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -541,7 +534,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-11)).toBe(entry);
+		expect(DECIDED.at(-12)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -554,10 +547,10 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-10)).toBe(entry);
+		expect(DECIDED.at(-11)).toBe(entry);
 	});
 
-	it("keeps P125 to P138 in proposal order, so a later decision can't move them", () => {
+	it("keeps P125 to P139 in proposal order, so a later decision can't move them", () => {
 		const order = [
 			"P125 ·",
 			"P126 ·",
@@ -573,6 +566,7 @@ describe("GET /design-system/proposals", () => {
 			"P136 ·",
 			"P137 ·",
 			"P138 ·",
+			"P139 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
@@ -609,10 +603,10 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"up to two bills by name, then “and N more”",
 		);
-		expect(DECIDED.at(-3)).toBe(entry);
+		expect(DECIDED.at(-4)).toBe(entry);
 	});
 
-	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 last", () => {
+	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 before P139", () => {
 		const rules = DECIDED.find((d) => d.title.startsWith("P137 ·"));
 		expect(rules?.title).toBe("P137 · How Tally works' exact rules");
 		expect(rules?.issue).toBe(644);
@@ -627,8 +621,18 @@ describe("GET /design-system/proposals", () => {
 			"Option A: Link a payment on a plan's and a bill's page shows the five closest charges as rows",
 		);
 		expect(payments?.outcome).toContain("(decision 126).");
-		expect(DECIDED.at(-2)).toBe(rules);
-		expect(DECIDED.at(-1)).toBe(payments);
+		const split = DECIDED.find((d) => d.title.startsWith("P139 ·"));
+		expect(split?.title).toBe(
+			"P139 · How each part of a split picks its category",
+		);
+		expect(split?.issue).toBe(660);
+		expect(split?.outcome).toContain(
+			"Option A: each part picks its category in a folded row like the edit panel (P120 B)",
+		);
+		expect(split?.outcome).toContain("(decision 131).");
+		expect(DECIDED.at(-3)).toBe(rules);
+		expect(DECIDED.at(-2)).toBe(payments);
+		expect(DECIDED.at(-1)).toBe(split);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -5180,7 +5184,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("lists P130 to P133 as the decided entries before P134, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-9, -5);
+		const last = DECIDED.slice(-10, -6);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",
@@ -5312,7 +5316,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Between the intro and the follow-ups' section sits only the Open section (P139, #660) and its one specimen, and between
+		// Between the intro and the follow-ups' section sits only the Picked section (P139, #660) and its one specimen, and between
 		// the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
@@ -6564,13 +6568,13 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 			(m) => m[1] ?? "",
 		);
 	const P139 = "p139-split-category";
-	// The specimen alone: block() runs to the next section, which takes the Open section's closing tag with it.
+	// The specimen alone: block() runs to the next section, which takes the Picked section's closing tag with it.
 	const specimenOf = (html: string) => {
 		const chunk = block(html, P139);
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
 
-	it("opens an Open section above the Picked sections, titled and dated as the brief asks", async () => {
+	it("opens a Picked section above the other Picked sections, titled and dated as the brief asks", async () => {
 		const html = await drawn();
 		const open = html.indexOf('aria-labelledby="p139-title"');
 		const picked = html.indexOf('aria-labelledby="followups-picks-title"');
@@ -6578,12 +6582,15 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		expect(open).toBeLessThan(picked);
 		const section = html.slice(open, picked);
 		expect(section).toContain('<h2 id="p139-title"');
-		expect(section).toContain("Open: the split form&#39;s category picker");
-		expect(section).toContain("Drawn Oct 17 for #660.");
+		expect(section).toContain("Picked: the split form&#39;s category picker");
+		expect(section).toContain(
+			"Drawn Oct 17. The owner&#39;s pick, marked Picked, is decision 131: A.",
+		);
+		expect(html).not.toContain("Open: the split form&#39;s category picker");
 		expect(section).toContain(`<section id="${P139}"`);
 	});
 
-	it("draws P139 as one visual specimen with Today, A and B, A recommended and none picked", async () => {
+	it("draws P139 as one visual specimen with Today, A and B, A recommended and picked", async () => {
 		const chunk = specimenOf(await drawn());
 		expect(chunk).toContain('data-ds-tier="visual"');
 		expect(chunk).toContain(
@@ -6596,7 +6603,8 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		expect(named[2]).toContain(">B · A compact grid per part");
 		expect(count(chunk, ">Recommended<")).toBe(1);
 		expect(named[1]).toContain(">Recommended<");
-		expect(count(chunk, ">Picked<")).toBe(0);
+		expect(named[1]).toContain(">Picked<");
+		expect(count(chunk, ">Picked<")).toBe(1);
 	});
 
 	it("draws Today as one picture at each size, a native select per part, and only Part 1 chosen", async () => {
