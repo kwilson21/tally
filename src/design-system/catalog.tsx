@@ -1688,6 +1688,40 @@ function HomeTopGroup() {
 						</div>
 					</Picture>
 				</State>
+				<State label="An Over month whose only cause is uncategorized spending: the line says it still needs a category and links to its Needs a category row">
+					<Picture label="September 2026 ended $277 over with Groceries on budget; $277 is Needs a category and the only cause, so the line says Most of it still needs a category and links to that row">
+						<div class="max-w-2xl">
+							<MonthNavigation
+								month="2026-09"
+								firstMonth="2026-05"
+								currentMonth="2026-10"
+								results={{ ...DEMO_MONTH_RESULTS, "2026-09": -27700 }}
+							/>
+							<MonthEnd
+								needsCategoryCents={27700}
+								chartId="catalog-cause-needs-category"
+								monthName="September"
+								amountCents={-27700}
+								unbudgeted={[]}
+								rows={[
+									{
+										id: 1,
+										name: "Groceries",
+										budgetCents: 70000,
+										spentCents: 70000,
+										leftCents: 0,
+										over: false,
+									},
+								]}
+							/>
+							<PastNotBudgeted
+								chartId="catalog-cause-needs-category"
+								items={[]}
+								needsCategory={{ spentCents: 27700, count: 1 }}
+							/>
+						</div>
+					</Picture>
+				</State>
 				<State label="The month strip on this month: its dot is a plain dot in an accent ring, and its link says so far">
 					<Picture label="October, so far, in the month strip: a plain dot in an accent ring, with the finished months' marks beside it">
 						<div class="max-w-2xl">
