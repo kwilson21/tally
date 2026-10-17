@@ -1,7 +1,7 @@
 // P137 and P138 (#644 and #645): the two follow-ups of the second design audit (HW2 and PL3 in
 // docs/design-system/audit-2026-10.md), each option drawn as the screens it changes. The owner picked A for both (decision 126).
-// These drawings stay as the build reference until #644 and #645 ship. P139 (#660, SP2 in the same audit) is open: its
-// options are drawn for the owner's pick, and none is picked yet. Every picture is
+// These drawings stay as the build reference until #644 and #645 ship. P139 (#660, SP2 in the same audit) is picked:
+// option A, the owner's pick of decision 131. Every picture is
 // inert and labelled, like the rest of the page. The Budget diagram, the example, the folded rows, the payment chips and the
 // Button are the app's own views; the rules are How Tally works' words (src/routes/how-it-works.tsx). The numbers are the
 // demo's on Oct 16, read from its own pages: /how-it-works (the October budget, 10 transactions that need a category) and
@@ -29,8 +29,16 @@ import { Specimen } from "./specimen";
 // The screens: a phone's and a desktop window's first screen, as tall as their content, so a whole section or picker
 // is drawn at full height. Each is one labelled image with nothing inside to Tab to, like the others on the page.
 
-/** A phone screen at 390 px, the demo banner on top, as tall as what it holds. */
-function PhoneScreen({ label, children }: { label: string; children?: Child }) {
+/** A phone screen at 390 px, the demo banner on top, as tall as what it holds. `overlay` is drawn over the whole screen, as Phone's is. */
+function PhoneScreen({
+	label,
+	overlay,
+	children,
+}: {
+	label: string;
+	overlay?: Child;
+	children?: Child;
+}) {
 	return (
 		<div class="overflow-x-auto">
 			<div
@@ -49,6 +57,7 @@ function PhoneScreen({ label, children }: { label: string; children?: Child }) {
 							</div>
 							{children}
 						</div>
+						{overlay}
 					</div>
 				</div>
 			</div>
@@ -890,19 +899,21 @@ function SplitPhone({
 	parts: SplitPart[];
 }) {
 	return (
-		<PhoneScreen label={label}>
+		<PhoneScreen
+			label={label}
+			overlay={<div class="absolute inset-0 bg-ink/30" />}
+		>
 			<div class="relative h-36 overflow-hidden">
 				<SplitBehind />
-				<div class="absolute inset-0 bg-ink/30" />
 			</div>
-			<div class="-mx-5 -mb-6 rounded-t-sheet bg-paper p-5">
+			<div class="relative z-10 -mx-5 -mb-6 rounded-t-sheet bg-paper p-5">
 				<SplitSheetBody id={id} mode={mode} parts={parts} />
 			</div>
 		</PhoneScreen>
 	);
 }
 
-/** A 1280 picture: the sheet as BottomSheet's right panel, 28rem wide, over the Transactions page, dimmed where the panel isn't. */
+/** A 1280 picture: the sheet as BottomSheet's right panel, 28rem wide, over the full-width Transactions page, dimmed where the panel isn't. */
 function SplitDesk({
 	label,
 	id,
@@ -922,12 +933,14 @@ function SplitDesk({
 				class="relative w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
 			>
 				<div inert>
-					<div data-screen="picture" class="flex items-stretch">
-						<div class="relative min-w-0 flex-1 px-8 pt-8">
+					{/* One cell holds the page, its dimming and the panel, so the picture is as tall as the sheet and the page
+					keeps its full width; the panel sits over the page at the right, as BottomSheet's does. */}
+					<div data-screen="picture" class="grid">
+						<div class="col-start-1 row-start-1 px-8 pt-8">
 							<SplitBehind />
-							<div class="absolute inset-0 bg-ink/30" />
 						</div>
-						<div class="w-[28rem] shrink-0 rounded-l-sheet bg-paper p-5">
+						<div class="col-start-1 row-start-1 bg-ink/30" />
+						<div class="col-start-1 row-start-1 w-[28rem] justify-self-end rounded-l-sheet bg-paper p-5">
 							<SplitSheetBody id={id} mode={mode} parts={parts} />
 						</div>
 					</div>
@@ -986,7 +999,7 @@ export function SplitCategoryProposal() {
 			<Choices>
 				<Choice
 					name="Today"
-					note="Each part's category is a native select that reads “Pick a category” until a person chooses one, as the split form draws it now. Every other category choice in Tally is chips; this is the one select. A guessed part, on a mixed trip, would show its select dashed; the demo has no mixed trip, so none is drawn. The sheet's content is 670px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
+					note="Each part's category is a native select that reads “Pick a category” until a person chooses one, as the split form draws it now. Every other category pick in Tally is chips or a grid; this is the only select that sets a category. A guessed part, on a mixed trip, would show its select dashed; the demo has no mixed trip, so none is drawn. The sheet's content is 670px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
 					width="w-[1140px]"
 				>
 					<SplitPictures
@@ -1002,6 +1015,7 @@ export function SplitCategoryProposal() {
 					note="Each part's category is a row labelled “Part 1 category” and “Part 2 category”, as the edit panel's category row is. Opened, it holds the two-column grid of categories; a part with a category folds to one line, its icon and name. Each part reads like the edit panel: a chosen category folds to one line. As it opens, both rows are open. After Part 1's pick, at the next drawing, Part 1 folds to Groceries and Part 2 stays open. A guessed part stays open, with its guessed category dashed, until a person picks. The sheet's content is 1,104px as it opens and 892px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
 					cost="A part with nothing chosen posts nothing, so the save and the live line read each part's category by its own name instead of by position, and a guessed part's dashed look moves from the select to its chips; the row's value follows a pick only when the sheet is drawn again."
 					why="One way to pick a category everywhere; a chosen part folds to one line."
+					picked
 					width="w-[1140px]"
 				>
 					<SplitPictures
