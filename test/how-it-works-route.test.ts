@@ -1259,3 +1259,156 @@ describe("each section's exact rules fold under its picture (decision 126, P137 
 		);
 	});
 });
+
+describe("How Tally works' Your first week (P125 E, #591)", () => {
+	const demoBindings = { ...env, DEMO: "true" } as unknown as Env;
+	const familyPage = async () =>
+		decodeHtml(
+			await (await howItWorks.request("/how-it-works", {}, notDemo)).text(),
+		);
+	const writeRecord = (value: unknown) =>
+		env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+			.bind(JSON.stringify(value))
+			.run();
+	/** The first connected bank, named as the test's line reads it (its name is the stroke-one line's). */
+	const nameFirstBank = (name: string) =>
+		env.DB.prepare(
+			"UPDATE plaid_items SET institution_name = ? WHERE id = (SELECT MIN(id) FROM plaid_items WHERE disconnected_at IS NULL)",
+		)
+			.bind(name)
+			.run();
+
+	it("in the family app, names the five strokes with the day each was drawn, and how a first budget is suggested", async () => {
+		await nameFirstBank("Chase");
+		await writeRecord({
+			strokes: { bank: "2026-10-12", pay: "2026-10-13", bills: null },
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain('id="first-week"');
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).toContain("Your pay: no paycheck found · Oct 13");
+		expect(html).toContain("Your bills: done");
+		expect(html).toContain("Your budgets: One tap, or one at a time");
+		expect(html).toContain(
+			"A first budget is suggested from what your bank shows a category spent in up to its last three full months",
+		);
+		expect(html).not.toContain(
+			"Tally set up your household before this page existed.",
+		);
+	});
+
+	it("gives each drawn stroke its line on what it did, beside its day, and an undrawn stroke its question note", async () => {
+		await nameFirstBank("Chase");
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP PAYROLL', 'Acme Corp') ON CONFLICT(raw_name) DO UPDATE SET display_name = excluded.display_name",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-12",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+				count: "2026-10-14",
+			},
+			pay: {
+				"ACME CORP PAYROLL": {
+					yes: { "1": { date: "2026-10-03", cents: 245000 } },
+					at: 0,
+				},
+			},
+			bills: { kept: 8, cents: 206200 },
+			budgets: Object.fromEntries(
+				Array.from({ length: 12 }, (_, i) => [
+					String(i + 1),
+					{ kind: "suggested", cents: 10000 },
+				]),
+			),
+			night: { brought: 3, needYou: 1 },
+		});
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).toContain("Your pay: Acme Corp · Oct 13");
+		expect(html).toContain("Your bills: 8 kept · Oct 13");
+		expect(html).toContain("Your budgets: 12 budgets · Oct 13");
+		expect(html).toContain(
+			"Tally kept count on its own: 3 new transactions, 1 needs you · Oct 14",
+		);
+		expect(html).not.toContain("done Oct");
+		expect(html).not.toContain("Overnight");
+	});
+
+	it("gives an undrawn stroke its question note and no line", async () => {
+		await nameFirstBank("Chase");
+		await writeRecord({
+			strokes: { bank: "2026-10-12" },
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain("Your pay: One question");
+		expect(html).toContain("Your budgets: One tap, or one at a time");
+		expect(html).not.toContain("Your pay: no paycheck");
+	});
+
+	it("keeps the bank line on the first bank after it is disconnected and a second is linked (#714)", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET institution_name = 'Chase' WHERE id = (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await writeRecord({
+			strokes: { bank: "2026-10-12", pay: "2026-10-13" },
+			budgets: {},
+		});
+		// Disconnecting keeps the row, so the first bank stays the lowest id; the second bank links after it.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, 'Wells Fargo', 'owner', 'item-wells-714')",
+		)
+			.bind(new Uint8Array([1, 2, 3]))
+			.run();
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: Chase, linked · Oct 12");
+		expect(html).not.toContain("Wells Fargo, linked");
+	});
+
+	it("mid-setup, with no record, reads every stroke as not drawn, with its note", async () => {
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'first_tally'",
+		).run();
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: About a minute");
+		expect(html).toContain("Your pay: One question");
+		expect(html).toContain("Tomorrow · Tally keeps count on its own: Later");
+	});
+
+	it("for a household set up before the feature shipped, shows the steps without days, under the sentence", async () => {
+		await writeRecord({
+			strokes: {
+				bank: null,
+				pay: null,
+				bills: null,
+				budgets: null,
+				count: null,
+			},
+			budgets: {},
+		});
+		const html = await familyPage();
+		expect(html).toContain("Link your bank: done");
+		expect(html).not.toContain("Link your bank: done Oct");
+		expect(html).toContain(
+			"Tally set up your household before this page existed.",
+		);
+	});
+
+	it("is not shown in the demo", async () => {
+		const html = decodeHtml(
+			await (
+				await howItWorks.request("/how-it-works", {}, demoBindings)
+			).text(),
+		);
+		expect(html).not.toContain('id="first-week"');
+	});
+});

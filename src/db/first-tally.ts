@@ -24,6 +24,13 @@ export type NightCounts = {
 	needYou: number;
 };
 
+/**
+ * The 09:00 run's sync, kept until the second sort's run decides the night (#586): how many transactions the sync
+ * brought in, the UTC date of that run (the run's own night, not a household day), and whether every bank synced cleanly
+ * (no failure, no skipped bank, no bank that needs signing in, and the household-wide step after the banks ran).
+ */
+export type NightSync = { brought: number; on: string; ok: boolean };
+
 /** The pay step's answer for one merchant: Yes, it's the family's pay, or No, it isn't (spec §8.8). */
 export type PayAnswer = "yes" | "no";
 
@@ -52,6 +59,8 @@ export type FirstTally = {
 	strokes: Partial<Record<Stroke, string | null>>;
 	/** The budgets step's answers so far, by category id. */
 	budgets: Record<string, BudgetAnswer>;
+	/** The 09:00 run's sync, until the second sort keeps the night's counts (or the next 09:00 run replaces it). */
+	nightSync?: NightSync;
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
 	/**
@@ -61,6 +70,12 @@ export type FirstTally = {
 	pay?: Record<string, PayRecord>;
 	/** What the bills step kept so far, added to as each bill is kept (keptBillStatement); absent until one is. */
 	bills?: BillsKept;
+	/**
+	 * The bank a setup link took the questions back for (takeBackQuestionStrokes): its institution name, which stroke one's
+	 * note reads ("Wells Fargo linked: Tally asks again…"). Removed when the budgets stroke draws (the last of the three
+	 * questions again) or when the last bank goes before setup is done (takeBackBankStrokes). Absent otherwise.
+	 */
+	reAsk?: { bank: string };
 };
 
 const KEY = "first_tally";
@@ -110,10 +125,16 @@ export function strokeStatement(
 	day: string | null,
 	guard = "1",
 ): D1PreparedStatement {
+	// The budgets stroke is drawn last of the three questions (its guard needs pay and bills, budgetsStrokeGuard), so its
+	// write takes the re-ask marker away in the same statement (reAsk).
+	const drawn =
+		stroke === "budgets"
+			? "json_remove(json_insert(value, '$.strokes.' || ?2, ?3), '$.reAsk')"
+			: "json_insert(value, '$.strokes.' || ?2, ?3)";
 	return db
 		.prepare(
 			`INSERT INTO household_settings (key, value) SELECT ?1, json_insert('${EMPTY_RECORD}', '$.strokes.' || ?2, ?3) WHERE ${guard}
-			ON CONFLICT(key) DO UPDATE SET value = json_insert(value, '$.strokes.' || ?2, ?3)`,
+			ON CONFLICT(key) DO UPDATE SET value = ${drawn}`,
 		)
 		.bind(KEY, stroke, day);
 }
@@ -132,6 +153,13 @@ export async function markStroke(
 const BANK_STROKES = STROKES.slice(0, 4);
 
 /**
+ * The night's writes are open while the three questions are answered, the count stroke isn't drawn and no night is kept
+ * yet (the guard of nightSyncStatement and keepNightStatement).
+ */
+const NIGHT_OPEN_SQL = `json_type(value, '$.strokes.pay') IS NOT NULL AND json_type(value, '$.strokes.bills') IS NOT NULL
+	AND json_type(value, '$.strokes.budgets') IS NOT NULL AND json_type(value, '$.strokes.count') IS NULL AND json_type(value, '$.night') IS NULL`;
+
+/**
  * The statement that takes strokes one to four back when the last connected bank goes before setup is done (spec §8.8,
  * #578). `disconnectingId` is the bank being disconnected, which doesn't count as connected for this check, so the
  * statement is right whether it runs before or after that disconnect in the same batch. The budget answers stay (§5).
@@ -145,7 +173,7 @@ export function takeBackBankStrokes(
 	).join(" AND ");
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")})
+			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.night', '$.nightSync', '$.reAsk')
 			WHERE key = ?1 AND NOT (${notSetUp})
 				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
 		)
@@ -207,18 +235,68 @@ export function keepBudgetStatement(
 		.bind(KEY, String(categoryId), JSON.stringify(answer));
 }
 
-/** Keeps the counts of the first night, once its sorting has all finished. */
-export async function keepNightCounts(
+/**
+ * The statement that keeps the 09:00 run's sync result (`nightSync`, #586), after the sync. `ok` is the run's own check
+ * (nothing failed or was skipped, and the household step ran); the statement adds that no connected bank needs signing in
+ * (a bank that needs it is never synced, so the run can't see it), in the same statement. It is an UPDATE: the guard needs
+ * the three questions drawn, so the record exists. It writes only while the night is open (NIGHT_OPEN_SQL), so the count
+ * stroke or a kept night is never overwritten; a run that didn't finish leaves its sync to the next 09:00 run, which
+ * replaces it.
+ */
+export function nightSyncStatement(
 	db: D1Database,
-	counts: NightCounts,
-): Promise<void> {
-	await db
+	sync: { brought: number; on: string; ok: boolean },
+): D1PreparedStatement {
+	return db
 		.prepare(
-			`INSERT INTO household_settings (key, value) VALUES (?1, json_set('${EMPTY_RECORD}', '$.night', json(?2)))
-			ON CONFLICT(key) DO UPDATE SET value = json_set(value, '$.night', json(?2))`,
+			`UPDATE household_settings SET value = json_set(value, '$.nightSync', json_object('brought', ?2, 'on', ?3,
+				'ok', json(CASE WHEN ?4 = 1 AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND status <> 'ok') THEN 'true' ELSE 'false' END)))
+			WHERE key = ?1 AND ${NIGHT_OPEN_SQL}`,
 		)
-		.bind(KEY, JSON.stringify(counts))
-		.run();
+		.bind(KEY, sync.brought, sync.on, sync.ok ? 1 : 0);
+}
+
+/**
+ * The statement that keeps the first night's counts at the end of the second sort (#586), once its sorting and names
+ * have all finished (the caller checks those): it keeps `brought` from the 09:00 sync and `needYou`, then removes
+ * `nightSync`. It writes only when that sync is for `on` and was ok, and the night is open, so a night is kept once.
+ */
+export function keepNightStatement(
+	db: D1Database,
+	on: string,
+	needYou: number,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`UPDATE household_settings SET value = json_set(json_remove(value, '$.nightSync'), '$.night',
+				json_object('brought', json_extract(value, '$.nightSync.brought'), 'needYou', ?3))
+			WHERE key = ?1 AND json_extract(value, '$.nightSync.on') = ?2 AND json_extract(value, '$.nightSync.ok') = 1
+				AND ${NIGHT_OPEN_SQL}`,
+		)
+		.bind(KEY, on, needYou);
+}
+
+/**
+ * The statement that takes the questions back when a second bank is linked during setup (#578): pay, bills and budgets
+ * lose their strokes, and the night with them, so the questions are asked again once the new bank's history is in. The
+ * answers stay (only the strokes go), and so does stroke one. It also sets `reAsk` to the new bank's name (`bankName`,
+ * bound as a value, never built into a path), which stroke one's note reads. It is checked in the same batch as the new
+ * bank's INSERT, so no bank read is needed. It writes only while the count stroke isn't drawn and a question is drawn or a
+ * re-ask is still open (so the newest bank names itself), so a link that takes nothing back sets no marker.
+ */
+export function takeBackQuestionStrokes(
+	db: D1Database,
+	bankName: string,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.strokes.budgets', '$.night', '$.nightSync'),
+				'$.reAsk', json_object('bank', ?2))
+			WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL
+				AND (json_type(value, '$.strokes.pay') IS NOT NULL OR json_type(value, '$.strokes.bills') IS NOT NULL
+					OR json_type(value, '$.strokes.budgets') IS NOT NULL OR json_type(value, '$.reAsk') IS NOT NULL)`,
+		)
+		.bind(KEY, bankName);
 }
 
 /**

@@ -3,8 +3,16 @@
 // The words carry the state: a done line says "done" to a screen reader, and the note at the right says what was done
 // or when it comes.
 
-/** One line of the list: its name, its note, and whether its stroke is drawn. */
-export type StepLine = { name: string; done: boolean; note: string };
+/**
+ * One line of the list: its name, its note, and whether its stroke is drawn. `reAsk` is the line under step one when a bank
+ * linked during setup took the questions back (#714): its own full-width muted line, not the note column's.
+ */
+export type StepLine = {
+	name: string;
+	done: boolean;
+	note: string;
+	reAsk?: string;
+};
 
 /** The lines in order: `notes` gives each its note, and the first `done` of them are done. */
 export function stepsOf(
@@ -27,7 +35,7 @@ export function TallySteps({ steps }: { steps: StepLine[] }) {
 			<p class="text-sm text-muted">Your first tally · {done} of 5</p>
 			<ul class="mt-2 border-t border-rule">
 				{steps.map((s, i) => (
-					<li class="flex min-h-11 items-center gap-3 border-b border-rule">
+					<li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule">
 						<svg
 							class="h-6 w-3 shrink-0"
 							viewBox="0 0 12 24"
@@ -63,6 +71,9 @@ export function TallySteps({ steps }: { steps: StepLine[] }) {
 							{s.done && <span class="sr-only">, done</span>}
 						</span>
 						<span class="shrink-0 text-sm text-muted">{s.note}</span>
+						{s.reAsk && (
+							<p class="basis-full pb-2 text-sm text-muted">{s.reAsk}</p>
+						)}
 					</li>
 				))}
 			</ul>

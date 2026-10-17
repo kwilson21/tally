@@ -24,12 +24,14 @@ import {
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
+import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { readSetup } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import { loadsPlaid } from "../security";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
@@ -63,6 +65,20 @@ const bandAmount = (cents: number) =>
 
 const COUNTED_CATEGORY = countedCategorySql();
 const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
+
+/**
+ * Where "See what needs you" goes on the fifth day (#586, #714), the list the stored needs-you count is about: a transaction
+ * that needs a category goes to Organize; else a suggestion waiting in the suggestions queue goes to Settings' suggestions;
+ * else a credit held for review, which the full list shows as Review credit (no link to held credits exists).
+ */
+async function fifthNeedsHref(
+	db: D1Database,
+	needsCategory: boolean,
+): Promise<string> {
+	if (needsCategory) return "/transactions/organize";
+	const queue = await suggestionQueue(db);
+	return queue.length > 0 ? "/settings/suggestions" : "/transactions?month=all";
+}
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -206,12 +222,12 @@ async function renderHome(
 		</>
 	);
 	const demo = c.env.DEMO === "true";
-	// A connected bank that stopped syncing, so Safe to spend may be too high (spec §8.5). The demo has
-	// no real banks, so it never asks.
-	const bankNotice =
-		demo || !current
-			? null
-			: homeBankNotice(flaggedBanks(await bankSyncs(c.env.DB), today), today);
+	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
+	// needs signing in. Read once, for the bank line and for the setup (its fifth day and the answered wait, #671). The demo
+	// has no real banks, so it never asks.
+	const flagged =
+		demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today);
+	const bankNotice = homeBankNotice(flagged, today);
 	const day = Number(today.slice(8, 10));
 	const forecastDays = current
 		? await homeForecastDays(c.env.DB, month, today)
@@ -267,12 +283,31 @@ async function renderHome(
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
 		current && !demo
-			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env) })
+			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
 			: null;
-	const linkBank =
-		setup?.phase === "before" && enabled(c.env) ? (
+	// The fifth day's "See what needs you" (#586, #714) is read only when its link renders: a night that left something for a person.
+	const fifthNeeds =
+		setup?.fifth && setup.fifth.needYou > 0
+			? await fifthNeedsHref(c.env.DB, currentNeeds > 0 || olderNeeds > 0)
+			: undefined;
+	// Link a bank is Plaid Link's button only on a full load of Home: Plaid's script loads only there (loadsPlaid, security.ts),
+	// and an htmx swap loads no script. Every other response, an htmx re-render of Home included, links to Home with a plain
+	// link, which loads Home in full, where the button is (#678).
+	const bankToLink = setup?.phase === "before" && enabled(c.env);
+	const plaidButton =
+		bankToLink && loadsPlaid(c) && !c.req.header("HX-Request");
+	const linkBank = bankToLink ? (
+		plaidButton ? (
 			<LinkBank class="w-full" refresh="/" target="#page" />
-		) : undefined;
+		) : (
+			<a
+				href="/"
+				class="inline-flex min-h-11 w-full items-center justify-center text-accent underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+			>
+				Link a bank on Home
+			</a>
+		)
+	) : undefined;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
@@ -286,7 +321,7 @@ async function renderHome(
 	return c.html(
 		<Layout
 			active="home"
-			{...plaidScripts(linkBank !== undefined)}
+			{...plaidScripts(plaidButton)}
 			demo={demo}
 			currentPath={addressOf(c)}
 		>
@@ -299,6 +334,14 @@ async function renderHome(
 								view={setup}
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
+								fifthDay={
+									setup.fifth
+										? {
+												safeToSpendCents: summary.safeToSpendCents,
+												needsHref: fifthNeeds,
+											}
+										: undefined
+								}
 							/>
 						) : current ? (
 							<HomeTop

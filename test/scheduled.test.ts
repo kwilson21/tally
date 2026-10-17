@@ -1,18 +1,21 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
 import { jevCallLimit } from "../src/categorize-pending";
 import { categoryCallLimit } from "../src/category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { loadMonth } from "../src/db/month";
 import { resetDemo as resetDemoBase } from "../src/demo/reset";
 import { monthOffset } from "../src/demo/seed";
+import { needsYouCount, recordNightSync } from "../src/first-tally/night";
 import handler, {
 	runFirstSort,
 	runScheduled,
 	runSecondSort,
 } from "../src/index";
+import type { SyncAllResult } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
 import {
 	nameCallLimit,
@@ -1222,8 +1225,9 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		).toEqual(["new"]);
 		expect(many).toBeLessThan(100);
 		expect(many).toBe(few);
-		expect(few).toBe(1);
-		expect(many).toBe(1);
+		// The cash cleanup is one statement, and the 09:00 run's night sync (#586) is one more, whatever the count.
+		expect(few).toBe(2);
+		expect(many).toBe(2);
 	});
 
 	/** `n` charges nobody has sorted or named, each from a store of its own. */
@@ -1551,4 +1555,436 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		expect(counted.statements()).toBeLessThan(D1_LIMIT);
 		vi.restoreAllMocks();
 	}, 60_000);
+});
+
+/** A UTC clock for a run, so a test pins the night's day (the cron runs at 09:00, 09:20 and 09:40 UTC). */
+const runAt = (iso: string) => ({ now: () => Date.parse(iso) });
+
+/** A Plaid fake for one bank: its one account, and `added` new transactions; `failSync` makes its sync fail. */
+const plaidBank = (
+	prefix: string,
+	{ added, failSync = false }: { added: number; failSync?: boolean },
+) =>
+	vi.fn(async (url: RequestInfo | URL) => {
+		if (String(url).endsWith("/accounts/get")) {
+			return Response.json({
+				accounts: [
+					{
+						account_id: "account",
+						name: "Checking",
+						type: "depository",
+						balances: { current: 10 },
+					},
+				],
+			});
+		}
+		if (failSync) return new Response("unavailable", { status: 500 });
+		return Response.json({
+			added: Array.from({ length: added }, (_, i) => ({
+				transaction_id: `${prefix}-${i}`,
+				account_id: "account",
+				date: "2026-10-13",
+				amount: 12,
+				name: `${prefix} SHOP ${i}`,
+				pending: false,
+			})),
+			modified: [],
+			removed: [],
+			next_cursor: "next",
+			has_more: false,
+		});
+	});
+
+/** One bank's item, connected, with the encrypted token a sync reads. */
+const linkBank = async (name: string, status: "ok" | "needs_attention") =>
+	env.DB.prepare(
+		"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id, status) VALUES (?, ?, 'person@example.com', ?, ?)",
+	)
+		.bind(await encryptToken("access-token", KEY), name, `item-${name}`, status)
+		.run();
+
+/** A household with its bank linked and pay, bills and budgets drawn, and no night kept yet. */
+const answeredHousehold = async () => {
+	await env.DB.batch([
+		env.DB.prepare("DELETE FROM transactions"),
+		env.DB.prepare("DELETE FROM accounts"),
+		env.DB.prepare("DELETE FROM plaid_items"),
+		env.DB.prepare("DELETE FROM merchants"),
+		env.DB.prepare("DELETE FROM merchant_name_failures"),
+		env.DB.prepare("DELETE FROM household_settings WHERE key = 'first_tally'"),
+	]);
+	await linkBank("Chase", "ok");
+	for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
+		await markStroke(env.DB, stroke, "2026-10-12");
+	}
+};
+
+/** The production run's environment: Plaid on, no Jev key, and the given AI binding (none by default). */
+const production = (extra: Record<string, unknown> = {}) => ({
+	...env,
+	DEMO: "false",
+	PLAID_CLIENT_ID: "client",
+	PLAID_SECRET: "secret",
+	TOKEN_ENCRYPTION_KEY: KEY,
+	JEV_API_KEY: undefined,
+	AI: undefined,
+	...extra,
+});
+
+/** Jev's switches for a night test: categories on or off, the others off. */
+const switches = (categories: boolean, names = false) =>
+	saveAiSwitches(env.DB, {
+		names,
+		details: false,
+		categories,
+		income: false,
+		sortOnArrival: false,
+	});
+
+describe("scheduled handler: the first night's counts (P125 E, #586)", () => {
+	beforeEach(async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		await switches(false);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("keeps the night's counts at the second sort once the sync was clean and nothing waits", async () => {
+		await answeredHousehold();
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 2 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 2,
+			on: "2026-10-13",
+			ok: true,
+		});
+		await runSecondSort(production(), undefined, runAt("2026-10-13T09:40:00Z"));
+
+		// Both new transactions need a category, and nothing else asks a question.
+		expect((await readFirstTally(env.DB))?.night).toEqual({
+			brought: 2,
+			needYou: 2,
+		});
+		expect((await readFirstTally(env.DB))?.nightSync).toBeUndefined();
+	});
+
+	it("records no sync before the three questions are answered", async () => {
+		await answeredHousehold();
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'first_tally'",
+		).run();
+		await markStroke(env.DB, "bank", "2026-10-12");
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.nightSync).toBeUndefined();
+	});
+
+	it("records the night not ok when a bank's sync failed, and keeps nothing", async () => {
+		await answeredHousehold();
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", {
+				added: 1,
+				failSync: true,
+			}) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 0,
+			on: "2026-10-13",
+			ok: false,
+		});
+		await runSecondSort(production(), undefined, runAt("2026-10-13T09:40:00Z"));
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+	});
+
+	it("records the night not ok when a connected bank needs signing in, though the others synced", async () => {
+		await answeredHousehold();
+		await linkBank("Wells Fargo", "needs_attention");
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 1,
+			on: "2026-10-13",
+			ok: false,
+		});
+		await runSecondSort(production(), undefined, runAt("2026-10-13T09:40:00Z"));
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+	});
+
+	it("keeps nothing at the second sort while Jev still has a transaction waiting for its category", async () => {
+		await answeredHousehold();
+		await switches(true);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(production(), undefined, runAt("2026-10-13T09:40:00Z"));
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+	});
+
+	it("keeps nothing while a bank text is still waiting for its name, when Workers AI is bound and the switch is on", async () => {
+		await answeredHousehold();
+		await switches(false, true);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(
+			production({ AI: aiThatSays("[]") }),
+			undefined,
+			runAt("2026-10-13T09:40:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+	});
+
+	it("does not wait for names when Workers AI is unbound, though the names switch is on", async () => {
+		await answeredHousehold();
+		await switches(false, true);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(
+			production({ AI: undefined }),
+			undefined,
+			runAt("2026-10-13T09:40:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.night).toEqual({
+			brought: 1,
+			needYou: 1,
+		});
+	});
+
+	it("does not wait for names when the names switch is off, though Workers AI is bound", async () => {
+		await answeredHousehold();
+		await switches(false, false);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(
+			production({ AI: aiThatSays("[]") }),
+			undefined,
+			runAt("2026-10-13T09:40:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.night).toEqual({
+			brought: 1,
+			needYou: 1,
+		});
+	});
+
+	it("counts a bank text whose name call failed as done, so it never holds the night", async () => {
+		await answeredHousehold();
+		await switches(false, true);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await env.DB.prepare(
+			"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('CHASE SHOP 0', datetime('now'))",
+		).run();
+		await runSecondSort(
+			production({ AI: aiThatSays("[]") }),
+			undefined,
+			runAt("2026-10-13T09:40:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.night).toEqual({
+			brought: 1,
+			needYou: 1,
+		});
+	});
+
+	it("replaces a sync of a night that did not finish with the next 09:00 run's", async () => {
+		await answeredHousehold();
+		await switches(true);
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 3 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(production(), undefined, runAt("2026-10-13T09:40:00Z"));
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+
+		await switches(false);
+		await runScheduled(
+			production(),
+			plaidBank("LATER", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-14T09:00:00Z"),
+		);
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 1,
+			on: "2026-10-14",
+			ok: true,
+		});
+		await runSecondSort(production(), undefined, runAt("2026-10-14T09:40:00Z"));
+		// The three from the unfinished night still need a category too.
+		expect((await readFirstTally(env.DB))?.night).toEqual({
+			brought: 1,
+			needYou: 4,
+		});
+	});
+
+	it("keeps nothing at the second sort when the 09:00 sync was for another day", async () => {
+		await answeredHousehold();
+
+		await runScheduled(
+			production(),
+			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		await runSecondSort(production(), undefined, runAt("2026-10-14T09:40:00Z"));
+		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
+	});
+
+	it("records no sync in the demo's 09:00 run", async () => {
+		await answeredHousehold();
+
+		await runScheduled(
+			{ ...env, DEMO: "true", AI: undefined },
+			undefined,
+			runAt("2026-10-13T09:00:00Z"),
+		);
+		expect(await readFirstTally(env.DB)).toBeNull();
+	});
+});
+
+describe("the night's needs-you count (P125 E, #586)", () => {
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM merchants"),
+			env.DB.prepare("DELETE FROM merchant_name_failures"),
+		]);
+	});
+
+	const all = {
+		names: false,
+		details: false,
+		categories: true,
+		income: true,
+		sortOnArrival: false,
+	};
+
+	it("counts a transaction once, even when it needs a category and is also a category Maybe", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'needs-once', '2026-10-13', 1000, 'ONCE SHOP')",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET jev_category_id = (SELECT id FROM categories WHERE archived = 0 LIMIT 1), category_confidence = 0.5 WHERE plaid_transaction_id = 'needs-once'",
+		).run();
+		expect(await needsYouCount(env.DB, all)).toBe(1);
+	});
+
+	it("counts a held credit once, though it is also an income Maybe", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'held-credit', '2026-10-13', -5000, 'HELD CREDIT')",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET income_confidence = 0.6 WHERE plaid_transaction_id = 'held-credit'",
+		).run();
+		expect(await needsYouCount(env.DB, all)).toBe(1);
+	});
+
+	it("adds the name suggestion a person still has to choose", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'named', '2026-10-13', 1000, 'SHOP NAMED')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('SHOP NAMED', 'Named Shop', 'pending')",
+		).run();
+		// The transaction needs a category, and its name is waiting for a choice.
+		expect(await needsYouCount(env.DB, { ...all, names: true })).toBe(2);
+	});
+});
+
+describe("recordNightSync's result", () => {
+	const synced = (over: Partial<SyncAllResult>): SyncAllResult => ({
+		added: 2,
+		modified: 0,
+		changedIds: [],
+		synced: 1,
+		skipped: 0,
+		busy: 0,
+		failed: 0,
+		failedBanks: [],
+		...over,
+	});
+
+	beforeEach(async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM transactions"),
+			env.DB.prepare("DELETE FROM accounts"),
+			env.DB.prepare("DELETE FROM plaid_items"),
+			env.DB.prepare(
+				"DELETE FROM household_settings WHERE key = 'first_tally'",
+			),
+		]);
+		await linkBank("Chase", "ok");
+		for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
+			await markStroke(env.DB, stroke, "2026-10-12");
+		}
+	});
+
+	it.each([
+		["a failed bank", { failed: 1 }],
+		["a skipped bank", { skipped: 1 }],
+		[
+			"a failed household step after the banks",
+			{ afterSyncFailed: true as const },
+		],
+		// Plaid switched off is no sync at all, so the night isn't clean (#714).
+		["Plaid switched off", { disabled: true as const }],
+	])("is not ok with %s", async (_, over) => {
+		await recordNightSync(env.DB, synced(over), "2026-10-13");
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 2,
+			on: "2026-10-13",
+			ok: false,
+		});
+	});
+
+	it("is ok only when every connected bank is ok and nothing failed or was skipped", async () => {
+		await recordNightSync(env.DB, synced({}), "2026-10-13");
+		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
+			brought: 2,
+			on: "2026-10-13",
+			ok: true,
+		});
+	});
+
+	it("ignores a disconnected bank that needs signing in", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET status = 'needs_attention', disconnected_at = datetime('now')",
+		).run();
+		await recordNightSync(env.DB, synced({}), "2026-10-13");
+		expect((await readFirstTally(env.DB))?.nightSync?.ok).toBe(true);
+	});
 });

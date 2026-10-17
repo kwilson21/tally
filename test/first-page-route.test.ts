@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON } from "../src/db/ai-switches";
-import { markStroke, readFirstTally, STROKES } from "../src/db/first-tally";
+import {
+	markStroke,
+	readFirstTally,
+	STROKES,
+	takeBackQuestionStrokes,
+} from "../src/db/first-tally";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -478,6 +483,18 @@ describe("Yes and No writes", () => {
 		const { html } = await get("/first-page");
 		expect(textOf(html)).not.toContain("ACME CORP PAYROLL paying");
 		expect(html).toContain("SIDE GIG");
+	});
+
+	it("after a bank linked during setup takes the questions back, asks the new deposits and not the answered ones (#578)", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		await answerAsShown("yes");
+		expect((await readFirstTally(db))?.strokes.pay).toBe(TODAY);
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		expect((await readFirstTally(db))?.strokes.pay).toBeUndefined();
+		await deposits("NEW BANK PAYROLL", 180000, 2);
+		const { html } = await get("/first-page");
+		expect(textOf(html)).toContain("NEW BANK PAYROLL paying");
+		expect(textOf(html)).not.toContain("ACME CORP PAYROLL paying");
 	});
 
 	it("a stale answer for a merchant with nothing left to ask changes nothing", async () => {

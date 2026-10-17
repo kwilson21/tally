@@ -26,12 +26,19 @@ export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
 	ELSE 'rejected' END`;
 
 /**
- * The bank texts to ask Workers AI about, at most `limit` (spec §7): a text Plaid sent no `merchant_name`
- * for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash entry a
- * person typed (on the Cash account) is never asked about, nor a split part. A Plaid id isn't needed, so
- * the demo's seeded bank texts are asked too. A merchant is asked about once, so an answer with no usable
- * name is kept as an empty suggestion. A text whose call failed (`merchant_name_failures`, #468) is still asked,
- * but after the ones never tried, the longest-ago failure first, so texts that keep failing can't hold up the
+ * The bank texts Workers AI is asked about (spec §7), as one predicate over `t` with `merchants m` joined: a text Plaid
+ * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash
+ * entry a person typed (on the Cash account) is never asked about, nor a split part. Shared by merchantsToAsk and the
+ * night's count of names still waiting (namesStillAsked), so the two can't disagree.
+ */
+export const NAME_ASKED_SQL = `t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
+	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
+	AND m.display_name IS NULL AND m.suggested_name IS NULL AND COALESCE(m.suggestion_status, 'none') = 'none'`;
+
+/**
+ * The bank texts to ask Workers AI about, at most `limit` (NAME_ASKED_SQL). A merchant is asked about once, so an answer
+ * with no usable name is kept as an empty suggestion. A text whose call failed (`merchant_name_failures`, #468) is still
+ * asked, but after the ones never tried, the longest-ago failure first, so texts that keep failing can't hold up the
  * rest. Within each group, most charges first.
  */
 export async function merchantsToAsk(
@@ -43,9 +50,7 @@ export async function merchantsToAsk(
 			`SELECT t.raw_name AS rawName FROM transactions t
 			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
 			 LEFT JOIN merchant_name_failures f ON f.raw_name = t.raw_name
-			 WHERE t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
-			   AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
-			   AND m.display_name IS NULL AND m.suggested_name IS NULL AND COALESCE(m.suggestion_status, 'none') = 'none'
+			 WHERE ${NAME_ASKED_SQL}
 			 GROUP BY t.raw_name
 			 ORDER BY f.failed_at IS NOT NULL, f.failed_at, COUNT(*) DESC, t.raw_name
 			 LIMIT ?`,
@@ -53,6 +58,23 @@ export async function merchantsToAsk(
 		.bind(limit)
 		.all<{ rawName: string }>();
 	return results.map((row) => row.rawName);
+}
+
+/**
+ * How many bank texts are still waiting for a name (the night's count, #586): the texts NAME_ASKED_SQL asks about, except
+ * one whose call failed (`merchant_name_failures`) counts as done, as the gate counts a failed sort (`jev_failed_at`), so
+ * a name that keeps failing never holds the night.
+ */
+export async function namesStillAsked(db: D1Database): Promise<number> {
+	const row = await db
+		.prepare(
+			`SELECT COUNT(DISTINCT t.raw_name) AS n FROM transactions t
+			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
+			 LEFT JOIN merchant_name_failures f ON f.raw_name = t.raw_name
+			 WHERE ${NAME_ASKED_SQL} AND f.raw_name IS NULL`,
+		)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
 }
 
 /**
@@ -261,4 +283,22 @@ export async function settleSuggestion(
 		update,
 	]);
 	return (result?.meta.changes ?? 0) > 0;
+}
+
+/**
+ * The display names the merchants table has for these raw merchant keys, one query: a key with no row (or no display name)
+ * maps to null. The ledger and the first week's lines name a merchant with this, falling back to tidyName.
+ */
+export async function merchantDisplayNames(
+	db: D1Database,
+	keys: string[],
+): Promise<Map<string, string | null>> {
+	if (keys.length === 0) return new Map();
+	const { results } = await db
+		.prepare(
+			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
+		)
+		.bind(JSON.stringify(keys))
+		.all<{ key: string; displayName: string | null }>();
+	return new Map(results.map((row) => [row.key, row.displayName]));
 }

@@ -6,11 +6,17 @@ import {
 	type FirstTally,
 	isSetUp,
 	markStroke,
+	type NightCounts,
 	questionsAnswered,
 	readFirstTally,
 	STROKES,
+	type Stroke,
 } from "../db/first-tally";
+import { merchantDisplayNames } from "../db/merchant-names";
+import type { FlaggedBank } from "../stale-bank";
+import { tidyName } from "../transactions/tidy-name";
 import type { StepLine } from "../views/tally-steps";
+import { andList } from "./budgets";
 import {
 	BANK_CONNECTED_SQL,
 	banksHistoryIn,
@@ -21,8 +27,8 @@ import {
 
 /**
  * before: no connected bank yet (Link a bank). reading: a bank is linked and the questions are shut (the import is
- * being read). ready: the questions are open (the gate, §8.8). answered: the three questions are done, so only the
- * night's count is left (it stays answered while a newly linked bank is read).
+ * being read). ready: the questions are open (the gate, §8.8). answered: the three questions are drawn, so only the
+ * night's count is left. A bank linked after the answers takes the questions back (#578), so it is reading again.
  */
 export type SetupPhase = "before" | "reading" | "ready" | "answered";
 
@@ -43,10 +49,20 @@ export type SetupView = {
 	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
 	sorted: number;
 	total: number;
+	/**
+	 * The fifth day (#586): set on the day stroke five is drawn, with what the night did. Home shows that day's set-up view
+	 * only; from the next household day it is Home. Null on every other day.
+	 */
+	fifth: NightCounts | null;
+	/**
+	 * Answered, while a connected bank is reading its history or needs signing in (#671): what Tally waits for, as the
+	 * status's clause after "Tally keeps count" ("once Chase's history is in."). Null when nothing is waiting.
+	 */
+	answeredWaiting: string | null;
 };
 
 /** The five lines' names (spec §8.8). */
-const NAMES = [
+export const NAMES = [
 	"Link your bank",
 	"Your pay",
 	"Your bills",
@@ -55,11 +71,23 @@ const NAMES = [
 ];
 
 /**
+ * The five lines' names once each is drawn (#714): the fifth reads as what it did, since its count is drawn. Undrawn lines
+ * keep NAMES, and so does the set-up-before form.
+ */
+export const DRAWN_NAMES = [
+	"Link your bank",
+	"Your pay",
+	"Your bills",
+	"Your budgets",
+	"Tally kept count on its own",
+];
+
+/**
  * The notes of the lines whose stroke isn't drawn, outside the reading phase. Before a bank no line says Next, so each
  * says how long it takes, and the first entry shows only there: stroke one is drawn once a bank is linked. Once the
  * questions are open, the first line not drawn says Next instead (setupSteps).
  */
-const QUESTION_NOTES = [
+export const QUESTION_NOTES = [
 	"About a minute",
 	"One question",
 	"One question",
@@ -91,10 +119,37 @@ const CATCH_UP_NOTES = [
 	"Later",
 ];
 
+/**
+ * The guard of stroke five's draw: the night was kept (`$.night` is in the record). It is code, never input (strokeStatement's
+ * guard), so a stroke drawn with no kept night draws nothing.
+ */
+const NIGHT_KEPT_SQL =
+	"(SELECT json_type(value, '$.night') FROM household_settings WHERE key = 'first_tally') IS NOT NULL";
+
 /** Strokes drawn so far: a stroke with a key in the record is drawn, whether or not it has a day. */
 export function strokesDrawn(record: FirstTally | null): number {
 	return STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
 		.length;
+}
+
+/**
+ * The answered phase's wait (#671): while a connected bank is reading its history or needs signing in, the status says what
+ * Tally waits for, in place of tomorrow's promise. A bank that needs signing in is named first, since it has a Fix action.
+ */
+export function answeredWaitingFor(
+	banks: GateBank[],
+	flagged: FlaggedBank[],
+): string | null {
+	const signIn = flagged
+		.filter((bank) => bank.reason === "sign-in")
+		.map((bank) => bank.name);
+	if (signIn.length > 0)
+		return `once ${andList(signIn)} ${signIn.length === 1 ? "is" : "are"} signed in again.`;
+	const reading = banks.filter((bank) => bank.historyCompleteAt === null);
+	if (reading.length === 0) return null;
+	return banks.length === 1
+		? `once ${reading[0]?.name}'s history is in.`
+		: "once your banks' history is in.";
 }
 
 export function setupSteps(
@@ -130,17 +185,125 @@ export function setupSteps(
 						? dayLabel(day, today)
 						: "";
 		}
-		return { name: NAMES[i] ?? "", done: drawn, note };
+		// The re-ask note sits under step one as its own line (#714), so step one's note stays the bank's own.
+		const line: StepLine = { name: NAMES[i] ?? "", done: drawn, note };
+		if (drawn && i === 0 && record?.reAsk)
+			line.reAsk = reAskNote(record.reAsk.bank);
+		return line;
 	});
 }
 
+const count = (n: number) => n.toLocaleString("en-US");
+
+/** The line under step one when a bank linked during setup took the questions back (#578). */
+export function reAskNote(bank: string): string {
+	return `${bank} linked: Tally asks again about pay, bills and budgets.`;
+}
+
 /**
- * The setup Home shows, from the record, the connected banks and what Jev still owes; null once the first week is set
- * up. `cap` is the day's Jev allowance, `total` how many transactions the banks sent.
+ * The night's counts in words, the same for the fifth day's sentence and the first week's line: "3 new transactions, all
+ * sorted", or "3 new transactions; 1 needs you" (#586).
+ */
+export function nightCountWords(
+	{ brought, needYou }: NightCounts,
+	between = "; ",
+): string {
+	const arrived =
+		brought === 0
+			? "no new transactions"
+			: `${count(brought)} new ${brought === 1 ? "transaction" : "transactions"}`;
+	return needYou === 0
+		? `${arrived}, all sorted`
+		: `${arrived}${between}${count(needYou)} ${needYou === 1 ? "needs" : "need"} you`;
+}
+
+/**
+ * The names a drawn stroke's line uses (doneNote), read with the record: the first connected bank's name, and the name of
+ * each merchant the pay record answered Yes, as the ledger shows it, keyed by the merchant's raw key.
+ */
+export type FirstWeekNames = {
+	bankName: string | null;
+	merchants: Record<string, string>;
+};
+
+/**
+ * What a drawn stroke did, in one plain line (spec §9 item 1), or null when there is nothing to say: the bank, the pay
+ * merchant or merchants kept, the bills kept, the budgets set, and the night's counts. A stroke's day is shown beside it,
+ * not inside it. Pure over the record and the names, so each kind of answer is tested without a database.
+ */
+export function doneNote(
+	stroke: Stroke,
+	record: FirstTally,
+	names: FirstWeekNames,
+): string | null {
+	switch (stroke) {
+		case "bank":
+			return `${names.bankName ?? "Your bank"}, linked`;
+		case "pay": {
+			if (!record.pay) return "no paycheck found";
+			const kept = Object.entries(record.pay)
+				.filter(([, merchant]) => Object.keys(merchant.yes ?? {}).length > 0)
+				.sort(([, a], [, b]) => a.at - b.at)
+				.map(([key]) => names.merchants[key] ?? key);
+			const [first, ...rest] = kept;
+			if (first === undefined) return "no paycheck kept";
+			return rest.length === 0 ? first : `${first} and ${rest.length} more`;
+		}
+		case "bills": {
+			const kept = record.bills?.kept ?? 0;
+			return kept === 0 ? "none kept" : `${count(kept)} kept`;
+		}
+		case "budgets": {
+			const set = Object.values(record.budgets).filter(
+				(answer) => answer.cents !== null,
+			).length;
+			if (set === 0) return "no budgets to set";
+			return `${count(set)} ${set === 1 ? "budget" : "budgets"}`;
+		}
+		case "count":
+			// The line's own joiner (#714): "3 new transactions, 1 needs you", where the fifth-day sentence uses "; ".
+			return record.night ? nightCountWords(record.night, ", ") : null;
+	}
+}
+
+/**
+ * The first week's record and its names (FirstWeekNames): the first connected bank, and each Yes merchant's display name
+ * from the merchants table (tidyName when it has none), in one query.
+ */
+export async function readFirstWeek(
+	db: D1Database,
+): Promise<{ record: FirstTally | null; names: FirstWeekNames }> {
+	const record = await readFirstTally(db);
+	const bank = await db
+		.prepare(
+			// The first bank ever linked, disconnected or not (#714): stroke one names it, so a later bank never replaces it.
+			"SELECT institution_name AS name FROM plaid_items ORDER BY id LIMIT 1",
+		)
+		.first<{ name: string }>();
+	const keys = Object.entries(record?.pay ?? {})
+		.filter(([, merchant]) => Object.keys(merchant.yes ?? {}).length > 0)
+		.map(([key]) => key);
+	const displays = await merchantDisplayNames(db, keys);
+	return {
+		record,
+		names: {
+			bankName: bank?.name ?? null,
+			merchants: Object.fromEntries(
+				keys.map((key) => [key, displays.get(key) || tidyName(key)]),
+			),
+		},
+	};
+}
+
+/**
+ * The setup Home shows, from the record, the connected banks, what Jev still owes and the banks' flags (src/stale-bank.ts);
+ * null once the first week is set up, except on the day stroke five is drawn. `cap` is the day's Jev allowance, `total`
+ * how many transactions the banks sent.
  */
 export function setupView({
 	record,
 	banks,
+	flagged,
 	waiting,
 	total,
 	cap,
@@ -148,6 +311,8 @@ export function setupView({
 }: {
 	record: FirstTally | null;
 	banks: GateBank[];
+	/** The connected banks Home flags: one that needs signing in, or stopped updating (flaggedBanks). */
+	flagged: FlaggedBank[];
 	/** Imported transactions still waiting for Jev's category or income answer (countWaitingForJev). */
 	waiting: number;
 	total: number;
@@ -155,11 +320,13 @@ export function setupView({
 	cap: number;
 	today: string;
 }): SetupView | null {
-	if (isSetUp(record)) return null;
+	const fifthDay =
+		record?.strokes.count === today && record.night !== undefined;
+	if (isSetUp(record) && !fifthDay) return null;
 	const bankName = banks[0]?.name ?? null;
 	const historyIn = banksHistoryIn(banks);
-	// Answered is checked before the gate, so a bank linked after the answers (which shuts the gate again) doesn't send
-	// the family back to "reading" for questions they have already answered.
+	// Answered is checked before the gate: a set of answers that the gate would show as reading stays answered until a
+	// bank linked since takes them back (takeBackQuestionStrokes), so the phase follows the strokes.
 	const phase: SetupPhase =
 		banks.length === 0
 			? "before"
@@ -190,16 +357,38 @@ export function setupView({
 		fitsOneNight,
 		sorted: Math.max(0, total - waiting),
 		total,
+		fifth: fifthDay ? (record?.night ?? null) : null,
+		answeredWaiting:
+			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
 	};
 }
 
-/** The setup for this household, read from the database, or null once the first week is set up. */
+/**
+ * The setup for this household, read from the database, or null once the first week is set up (except on the day stroke
+ * five is drawn). Stroke five (#586) is drawn here on the first later household day after the night was kept: `today` is
+ * later than the budgets stroke's day. json_insert keeps the first day, so repeated Home loads are harmless.
+ */
 export async function readSetup(
 	db: D1Database,
-	{ today, cap }: { today: string; cap: number },
+	{
+		today,
+		cap,
+		flagged,
+	}: { today: string; cap: number; flagged: FlaggedBank[] },
 ): Promise<SetupView | null> {
 	let record = await readFirstTally(db);
-	if (isSetUp(record)) return null;
+	const budgetsDay = record?.strokes.budgets;
+	if (
+		record?.night !== undefined &&
+		record.strokes.count === undefined &&
+		budgetsDay &&
+		today > budgetsDay
+	) {
+		await markStroke(db, "count", today, NIGHT_KEPT_SQL);
+		record = await readFirstTally(db);
+	}
+	// Set up is shown only on the day stroke five is drawn (the fifth-day view); from the next household day, Home is Home.
+	if (isSetUp(record) && record?.strokes.count !== today) return null;
 	const { banks, waiting } = await readGateInputs(db);
 	// A connected bank with no stroke one (linked before the first week shipped, in a household with no budgets, so
 	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. The write checks for a
@@ -217,5 +406,5 @@ export async function readSetup(
 				)
 				.first<{ total: number }>()
 		)?.total ?? 0;
-	return setupView({ record, banks, waiting, total, cap, today });
+	return setupView({ record, banks, flagged, waiting, total, cap, today });
 }

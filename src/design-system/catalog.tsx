@@ -77,6 +77,7 @@ import {
 	FirstPageBody,
 	PayQuestion,
 } from "../views/first-page";
+import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeSetup } from "../views/home-setup";
@@ -597,6 +598,21 @@ function Brand() {
 						)}
 					/>
 				</State>
+				<State label="A bank linked during setup: a line under step one says Tally asks again about the questions">
+					<TallySteps
+						steps={setupSteps(
+							{
+								strokes: { bank: "2026-10-13" },
+								budgets: { "3": { kind: "suggested", cents: 65000 } },
+								reAsk: { bank: "Wells Fargo" },
+							},
+							"reading",
+							"Chase",
+							FIRST_WEEK_TODAY,
+							false,
+						)}
+					/>
+				</State>
 				<State label="All five drawn, each with its day">
 					<TallySteps
 						steps={setupSteps(
@@ -696,6 +712,100 @@ function Brand() {
 						})}
 					/>
 				</State>
+				<State label="The fifth day, all sorted: Safe to spend, what the night did, and the five lines">
+					<HomeSetup
+						view={firstWeek(FIFTH_RECORD, "answered", {
+							bankName: "Chase",
+							drawn: 5,
+							total: 362,
+							sorted: 362,
+							fifth: { brought: 3, needYou: 0 },
+						})}
+						fifthDay={FIFTH_DAY}
+					/>
+				</State>
+				<State label="The fifth day, one needs you: the link to what needs a person">
+					<HomeSetup
+						view={firstWeek(FIFTH_RECORD, "answered", {
+							bankName: "Chase",
+							drawn: 5,
+							total: 362,
+							sorted: 362,
+							fifth: { brought: 3, needYou: 1 },
+						})}
+						fifthDay={FIFTH_DAY}
+					/>
+				</State>
+				<State label="Answered, a bank still reads its history: what Tally waits for, not tomorrow">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{
+								bankName: "Chase",
+								drawn: 4,
+								total: 362,
+								sorted: 362,
+								answeredWaiting: "once Chase's history is in.",
+							},
+						)}
+					/>
+				</State>
+				<State label="Answered, a bank needs signing in: its line under the status, and no promise beside its Fix">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{
+								bankName: "Chase",
+								drawn: 4,
+								total: 362,
+								sorted: 362,
+								answeredWaiting: "once Chase is signed in again.",
+							},
+						)}
+						bankLine={["Chase needs signing in"]}
+					/>
+				</State>
+				<State label="Answered, a bank stopped updating: its line and Fix under a bare count, with no promise">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{
+								bankName: "Chase",
+								drawn: 4,
+								total: 362,
+								sorted: 362,
+							},
+						)}
+						bankLine={["Chase stopped updating Oct 12"]}
+					/>
+				</State>
 				<State label="Questions answered: the ruled total, and no Band">
 					<HomeSetup
 						view={firstWeek(
@@ -728,6 +838,8 @@ const firstWeek = (
 	const view = {
 		phase,
 		drawn: strokesDrawn(record),
+		fifth: null,
+		answeredWaiting: null,
 		bankName: null,
 		bankCount: 1,
 		historyIn: true,
@@ -746,6 +858,23 @@ const firstWeek = (
 			view.historyIn && view.fitsOneNight,
 		),
 	};
+};
+/** The fifth day's fake record: stroke five drawn today, and the night kept with its counts (P125 E, #586). */
+const FIFTH_RECORD: FirstTally = {
+	strokes: {
+		bank: "2026-10-13",
+		pay: "2026-10-13",
+		bills: "2026-10-13",
+		budgets: "2026-10-13",
+		count: FIRST_WEEK_TODAY,
+	},
+	budgets: {},
+	night: { brought: 3, needYou: 0 },
+};
+/** The fifth day's Safe to spend, as the proposal draws it ($1,398), and where "See what needs you" goes. */
+const FIFTH_DAY = {
+	safeToSpendCents: 139800,
+	needsHref: "/transactions/organize",
 };
 const BANK_SYNCED: FirstTally = {
 	strokes: { bank: "2026-10-13" },
@@ -7659,6 +7788,64 @@ function FirstWeekGroup() {
 	});
 	return (
 		<Group id="first-week" title="A new family's first week">
+			<Specimen
+				id="first-week-part"
+				title="How Tally works · Your first week"
+				tier="visual"
+				components={["FirstWeekPart"]}
+				sentence="How Tally works' part after its intro, in the family app (P125 E, decision 114, spec §9): the five strokes in words, each with the day it was drawn and one plain line on what it did (Chase, linked; the pay merchant; the bills kept; the budgets set; the night's counts), and how a first budget is suggested (§6). A stroke not drawn keeps its question note. A household set up before the feature shipped has no days and no lines, and says so under the list."
+			>
+				<State label="With days: the five strokes as the week drew them, each with its line">
+					<FirstWeekPart
+						record={{
+							strokes: {
+								bank: "2026-10-13",
+								pay: "2026-10-13",
+								bills: "2026-10-13",
+								budgets: "2026-10-13",
+								count: FIRST_WEEK_TODAY,
+							},
+							pay: {
+								"ACME CORP PAYROLL": {
+									yes: {
+										"1": { date: "2026-10-03", cents: 245000 },
+									},
+									at: 0,
+								},
+							},
+							bills: { kept: 8, cents: 206200 },
+							budgets: Object.fromEntries(
+								Array.from({ length: 12 }, (_, i) => [
+									String(i + 1),
+									{ kind: "suggested" as const, cents: 10000 },
+								]),
+							),
+							night: { brought: 3, needYou: 1 },
+						}}
+						names={{
+							bankName: "Chase",
+							merchants: { "ACME CORP PAYROLL": "Acme Corp" },
+						}}
+						today={FIRST_WEEK_TODAY}
+					/>
+				</State>
+				<State label="Set up before the feature shipped: no days and no lines, with its sentence">
+					<FirstWeekPart
+						record={{
+							strokes: {
+								bank: null,
+								pay: null,
+								bills: null,
+								budgets: null,
+								count: null,
+							},
+							budgets: {},
+						}}
+						names={{ bankName: "Chase", merchants: {} }}
+						today={FIRST_WEEK_TODAY}
+					/>
+				</State>
+			</Specimen>
 			<Specimen
 				id="first-page"
 				title="FirstPage"

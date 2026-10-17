@@ -531,6 +531,53 @@ describe("Plaid routes", () => {
 		).toBe("access-private");
 	});
 
+	it("a bank linked during setup takes the questions back and keeps the answers and stroke one (#578)", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+			.bind(
+				JSON.stringify({
+					strokes: {
+						bank: "2026-10-10",
+						pay: "2026-10-11",
+						bills: "2026-10-11",
+						budgets: "2026-10-11",
+					},
+					budgets: { "3": { kind: "suggested", cents: 65000 } },
+					night: { brought: 1, needYou: 0 },
+				}),
+			)
+			.run();
+		const plaidResponses: Record<string, unknown>[] = [
+			{ access_token: "access-private", item_id: "item-2" },
+			{ item: { institution_id: "ins-2" } },
+			{ institution: { name: "Second Bank" } },
+		];
+		vi.stubGlobal("fetch", async (input: string | URL | Request) =>
+			String(input).includes("cloudflareaccess.com")
+				? Response.json({ keys: [jwk] })
+				: Response.json(plaidResponses.shift()),
+		);
+
+		const response = await post(
+			"/plaid/exchange",
+			jwt,
+			new URLSearchParams({ public_token: "public-private" }).toString(),
+		);
+
+		expect(response.status).toBe(204);
+		const record = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(record?.value ?? "null")).toEqual({
+			strokes: { bank: "2026-10-10" },
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			reAsk: { bank: "Second Bank" },
+		});
+	});
+
 	it("stores the linked item with a fallback name when Plaid name lookup fails", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});

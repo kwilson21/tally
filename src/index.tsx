@@ -14,6 +14,7 @@ import { noteHouseholdMember } from "./db/reconnect";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
+import { keepNightCounts, recordNightSync, utcDay } from "./first-tally/night";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
 import { runReconnectReminders } from "./reconnect/reminders";
@@ -132,6 +133,12 @@ export async function runScheduled(
 		});
 	}
 	const synced = await syncAllItems(env, fetchImpl);
+	// The first night's sync (#586), kept for the second sort to decide. Production only: the demo has no banks.
+	if (env.DEMO === "false") {
+		await nightStep("sync", () =>
+			recordNightSync(env.DB, synced, utcDay(clockNow(time))),
+		);
+	}
 	// Production stops here for Jev and names: the 09:20 and 09:40 runs make them, in invocations of their
 	// own. This one has synced, at about five queries for each new transaction, so 16 new ones (about 110
 	// queries) plus 300 Jev calls (about 900) already go past 1,000, and a big sync could leave no queries
@@ -265,6 +272,27 @@ export async function runSecondSort(
 		maxCalls: MAX_CALLS_PER_RUN,
 		time: budgetsFor(time).run,
 	});
+	// The night's counts (#586) are kept here, once this run has sorted what the first sort left.
+	await nightStep("counts", () =>
+		keepNightCounts(env.DB, env, utcDay(clockNow(time))),
+	);
+}
+
+/** The run's clock: a test's, or Date.now in production. */
+const clockNow = (time?: RunClock) => (time?.now ?? Date.now)();
+
+/**
+ * One of the night's steps (#586). A failure is logged by name and the run goes on, so the night's counts never stop a
+ * run's own work.
+ */
+async function nightStep(name: string, step: () => Promise<void>) {
+	try {
+		await step();
+	} catch (error) {
+		console.error(
+			`first night: ${name} step failed ${error instanceof Error ? error.name : "unknown"}`,
+		);
+	}
 }
 
 app.use("*", security);

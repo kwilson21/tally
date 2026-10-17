@@ -37,6 +37,7 @@ import {
 } from "../db/first-tally";
 import { PERSON_INCOME_SET_SQL } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
+import { merchantDisplayNames } from "../db/merchant-names";
 import { payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
@@ -248,13 +249,10 @@ async function payLedger(
 		.filter(([, record]) => Object.keys(record.yes ?? {}).length > 0)
 		.sort(([, a], [, b]) => a.at - b.at);
 	if (yeses.length === 0) return [];
-	const { results } = await db
-		.prepare(
-			"SELECT raw_name AS key, display_name AS displayName FROM merchants WHERE raw_name IN (SELECT value FROM json_each(?1))",
-		)
-		.bind(JSON.stringify(yeses.map(([key]) => key)))
-		.all<{ key: string; displayName: string | null }>();
-	const names = new Map(results.map((row) => [row.key, row.displayName]));
+	const names = await merchantDisplayNames(
+		db,
+		yeses.map(([key]) => key),
+	);
 	return yeses.map(([key, record]) => ({
 		id: `pay:${key}`,
 		text: payLedgerLine({
@@ -309,11 +307,12 @@ export function budgetAskedSql(alias: string, month: string): string {
 }
 
 /**
- * The guard of the budgets stroke, as SQL: the bills stroke is drawn, and no category is left to ask (budgetAskedSql), so
- * the stroke can't be drawn while a question is still asked.
+ * The guard of the budgets stroke, as SQL: the pay and bills strokes are drawn, and no category is left to ask
+ * (budgetAskedSql), so the stroke can't be drawn while a question is still asked. Pay is checked too, so budgets is the
+ * last of the three questions drawn, and its write is the one that takes the re-ask marker away (strokeStatement).
  */
 export function budgetsStrokeGuard(month: string): string {
-	return `EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.strokes.bills') IS NOT NULL)
+	return `EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.strokes.pay') IS NOT NULL AND json_type(h.value, '$.strokes.bills') IS NOT NULL)
 		AND NOT EXISTS (SELECT 1 FROM categories c WHERE ${budgetAskedSql("c", month)})`;
 }
 
