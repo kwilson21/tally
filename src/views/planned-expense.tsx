@@ -7,7 +7,6 @@ import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import { LedgerField } from "./ledger-field";
 import { CLOSEST_PAYMENTS, PaymentRow } from "./payment-row";
 import { TextInput } from "./text-input";
-import { WhyLink } from "./why-link";
 
 /** The longest name a planned expense can have: the sheet's field stops at it, and the save refuses more (plans.tsx). */
 export const PLAN_NAME_MAX = 80;
@@ -93,8 +92,8 @@ export function PlannedRow({
 }
 
 /**
- * The Planned group's heading: the tag icon and the word, the Why? link, and this month's total of the plans
- * still unpaid ("$180.00 this month", decision 101).
+ * The Planned group's heading: the tag icon and the word, and this month's total of the plans still unpaid
+ * ("$180.00 this month", decision 101). The heading carries no Why? (decision 121).
  */
 export function PlannedHeading({ totalCents }: { totalCents?: number }) {
 	return (
@@ -105,8 +104,6 @@ export function PlannedHeading({ totalCents }: { totalCents?: number }) {
 				</span>
 				Planned
 			</h2>
-			<span aria-hidden="true">·</span>
-			<WhyLink section="bills" topic="planned expenses" />
 			{totalCents !== undefined && (
 				<span class="ml-auto shrink-0 tabular-nums">
 					{formatCents(totalCents)} this month

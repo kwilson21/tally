@@ -100,6 +100,7 @@ import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { PlanBand, PlannedHeading, PlannedRow } from "../views/planned-expense";
 import { TextInput } from "../views/text-input";
+import { WhyLink } from "../views/why-link";
 
 type App = { Bindings: Env };
 export const bills = new Hono<App>();
@@ -224,9 +225,15 @@ export async function page(
 			<div id="page" class="max-w-2xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">Bills</h1>
 				{rows.length > 0 && (
-					<p class="mt-2 font-serif text-lg italic">
+					<p class="mt-2 flex flex-wrap items-center gap-x-2 font-serif text-lg italic">
 						{totals.soonCount} {totals.soonCount === 1 ? "bill" : "bills"} to
 						pay soon, {formatCents(totals.soonCents)} in all
+						<span aria-hidden="true" class="not-italic">
+							·
+						</span>
+						<span class="font-sans not-italic">
+							<WhyLink section="bills" topic="bills to pay soon" />
+						</span>
 					</p>
 				)}
 				{rows.length > 0 && (

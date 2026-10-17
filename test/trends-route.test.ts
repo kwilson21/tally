@@ -137,19 +137,13 @@ describe("GET /trends with the demo seed", () => {
 		expect(html).not.toMatch(/<svg[^>]*\sstyle=/);
 	});
 
-	it("explains the rules with Why? and How this works links to the Trends section", async () => {
+	it("explains the headline's rule with its one Why?, and the group headings carry none (decision 121)", async () => {
 		const { html } = await get("/trends");
-		for (const topic of [
-			"this month against last",
-			"going well",
-			"worth a look",
-		]) {
-			expect(html).toMatch(
-				new RegExp(
-					`<a href="/how-it-works#trends" aria-label="Why\\? ${topic}"[^>]*min-h-11`,
-				),
-			);
-		}
+		expect(html).toMatch(
+			/<a href="\/how-it-works#trends" aria-label="Why\? this month against last"[^>]*min-h-11/,
+		);
+		expect(html).not.toContain('aria-label="Why? going well"');
+		expect(html).not.toContain('aria-label="Why? worth a look"');
 		expect(html).toContain('aria-label="How this works: trends"');
 	});
 

@@ -55,13 +55,15 @@ export function TrendsTop({
 	);
 }
 
-/** A small muted heading over a ruled list, with an optional icon (a word and an icon, never color alone) and Why?. */
+/**
+ * A small muted heading over a ruled list, with an optional icon (a word and an icon, never color alone). The
+ * heading carries no Why? (decision 121): Trends' headline keeps the page's one.
+ */
 export function TrendGroup({
 	id,
 	title,
 	icon,
 	tone = "text-ink",
-	why,
 	children,
 }: {
 	id: string;
@@ -69,15 +71,11 @@ export function TrendGroup({
 	icon?: "check" | "arrow-up";
 	/** The icon's color token class: "text-ok" for good news, "text-ink" for what to watch. */
 	tone?: "text-ok" | "text-ink";
-	/** What the Why? link is about ("going well"); none, no link. */
-	why?: string;
 	children?: Child;
 }) {
 	return (
 		<section aria-labelledby={`${id}-title`}>
-			<div
-				class={`${why ? "mt-3" : "mt-5"} flex items-center gap-2 text-sm text-muted`}
-			>
+			<div class="mt-5 flex items-center gap-2 text-sm text-muted">
 				<h2 id={`${id}-title`} class="flex items-center gap-2">
 					{icon && (
 						<span class={tone}>
@@ -86,12 +84,6 @@ export function TrendGroup({
 					)}
 					{title}
 				</h2>
-				{why && (
-					<>
-						<span aria-hidden="true">·</span>
-						<WhyLink section="trends" topic={why} />
-					</>
-				)}
 			</div>
 			<ul class="divide-y divide-rule border-y border-rule">{children}</ul>
 		</section>
@@ -389,7 +381,6 @@ export function TrendsScreen({
 							title="Going well"
 							icon="check"
 							tone="text-ok"
-							why="going well"
 						>
 							{page.goingWell.map((row) => (
 								<TrendRow
@@ -411,7 +402,6 @@ export function TrendsScreen({
 							title="Worth a look"
 							icon="arrow-up"
 							tone="text-ink"
-							why="worth a look"
 						>
 							{page.worthALook.map((row) => (
 								<TrendRow
