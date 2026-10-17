@@ -1,11 +1,18 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { addressOf } from "../address";
+import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
+import { createFromSuggestion } from "../db/category-suggestions";
+import {
+	type NewCategorySuggestion,
+	newCategoryItem,
+} from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
+	type OrganizeGroup,
 	organizeGroups,
 	saveOrganizeGroup,
 	setOrganizeRule,
@@ -23,7 +30,9 @@ import {
 	NewCategoryName,
 } from "../views/new-category-choice";
 import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
+import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
+import { CHANGED_SUGGESTION } from "./suggestions";
 
 type App = { Bindings: Env };
 type Category = { id: number; name: string; icon: string; color: string };
@@ -47,6 +56,18 @@ type Trigger = {
 
 export const organize = new Hono<App>();
 
+/** The suggestion's other merchants, each counted once: its stores outside this group, by the name each shows (decision 120). */
+function otherMerchants(
+	suggestion: NewCategorySuggestion,
+	group: OrganizeGroup,
+): number {
+	return new Set(
+		suggestion.stores
+			.filter((store) => !group.merchantKeys.includes(store.merchantKey))
+			.map((store) => store.merchant),
+	).size;
+}
+
 async function renderOrganize(
 	c: Context<App>,
 	values?: Values,
@@ -59,6 +80,11 @@ async function renderOrganize(
 	 * joins the announcement when the list ends on it. Without it, the caller's own header stands.
 	 */
 	trigger?: Trigger,
+	/**
+	 * A refused Create's reason, or the words that the suggestion changed (decision 120), with the suggestion they answer. They
+	 * sit in its card when that card is drawn, and under Organize's heading when it isn't.
+	 */
+	cardError?: { suggestionId: number; message: string },
 ) {
 	const params = new URL(c.req.url).searchParams;
 	const requestedSkips = params.getAll("skip");
@@ -76,6 +102,13 @@ async function renderOrganize(
 	const group =
 		(values && allGroups.find((item) => item.name === values.groupName)) ||
 		available[0];
+	// The one waiting suggestion that holds a purchase from this merchant (decision 120), read only when its card is drawn.
+	const waiting =
+		!rule && group
+			? await newCategoryItem(c.env.DB, { merchantKeys: group.merchantKeys })
+			: undefined;
+	// The changed or refused words sit in the card when that suggestion's card is drawn, and under the heading when it isn't.
+	const inCard = !!waiting && cardError?.suggestionId === waiting.suggestionId;
 	const remaining = available.reduce((sum, item) => sum + item.count, 0);
 	const doneSentence =
 		allGroups.length > 0
@@ -120,6 +153,11 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
+				{cardError && !inCard && (
+					<p role="alert" class="mt-3 text-sm text-over">
+						{cardError.message}
+					</p>
+				)}
 				{rule ? (
 					<GroupRuleOffer value={rule} action={ruleAction} focus />
 				) : group ? (
@@ -143,11 +181,27 @@ async function renderOrganize(
 							</p>
 							<p class="mt-1 text-sm text-muted">From {sources}</p>
 						</div>
+						{/* Tally's guess for this merchant sits above the chips (decision 120): its Create files the purchases the card counts. */}
+						{waiting && (
+							<div class="mt-5">
+								<OrganizeNewCategoryCard
+									name={waiting.name}
+									existing={waiting.existing ?? undefined}
+									archived={waiting.archived}
+									others={otherMerchants(waiting, group)}
+									action={`/transactions/organize/suggestion${query.size ? `?${query}` : ""}`}
+									suggestionId={waiting.suggestionId}
+									shown={waiting.rows.map((row) => row.transactionId)}
+									error={inCard ? cardError?.message : undefined}
+								/>
+							</div>
+						)}
 						<form
 							method="post"
 							action={action}
 							hx-post={action}
-							hx-disable="findAll button[type=submit]"
+							hx-disable="#organize-page button[type=submit]"
+							hx-sync="#organize-page:drop"
 							hx-target="#organize-page"
 							hx-select="#organize-page"
 							hx-swap="outerHTML"
@@ -156,6 +210,8 @@ async function renderOrganize(
 						>
 							<input type="hidden" name="group" value={group.name} />
 							<fieldset
+								id="organize-category"
+								tabindex={-1}
 								class={`flex flex-col gap-2 ${NEW_CATEGORY_GROUP}`}
 								aria-describedby={
 									values?.categoryError ? "category-error" : undefined
@@ -266,6 +322,86 @@ organize.get("/transactions/organize", async (c) => {
 	return offer
 		? renderOrganize(c, undefined, 200, true, offer)
 		: renderOrganize(c);
+});
+
+/**
+ * Create on Organize's card (decision 120): the same write as Settings' Create, with every purchase the card showed
+ * ticked and filed. Create files only what the card showed (`shown`): when the suggestion's purchases no longer match
+ * them, it files nothing and says the suggestion changed. Organize stays where it is: its list is drawn again with the
+ * next merchant. With JavaScript the words are a toast, and a refused Create's reason shows in the card; without it, the
+ * same words are drawn on the page, in the card or under Organize's heading when no card for the suggestion is drawn.
+ */
+organize.post("/transactions/organize/suggestion", async (c) => {
+	const form = await c.req.formData();
+	const suggestionId = Number(form.get("suggestion"));
+	const url = new URL(c.req.url);
+	const next = `/transactions/organize${url.search}`;
+	const item =
+		Number.isInteger(suggestionId) && suggestionId > 0
+			? await newCategoryItem(c.env.DB, { id: suggestionId })
+			: undefined;
+	// The suggestion changed: a toast with JavaScript, or Organize drawn with the words without it.
+	const changed = () => {
+		if (c.req.header("HX-Request")) {
+			c.header(
+				"HX-Trigger",
+				hxTrigger({
+					toast: { message: CHANGED_SUGGESTION, type: "info" },
+					announce: CHANGED_SUGGESTION,
+				}),
+			);
+			return renderOrganize(c, undefined, 200, true);
+		}
+		return renderOrganize(c, undefined, 200, true, undefined, undefined, {
+			suggestionId,
+			message: CHANGED_SUGGESTION,
+		});
+	};
+	// A refused Create's reason, drawn on the page for either kind of request.
+	const refused = (message: string) =>
+		renderOrganize(c, undefined, 422, true, undefined, undefined, {
+			suggestionId,
+			message,
+		});
+	if (!item) return changed();
+	const ids = item.rows.map((row) => row.transactionId);
+	const shown = new Set(
+		form
+			.getAll("shown")
+			.map(Number)
+			.filter((n) => Number.isInteger(n) && n > 0),
+	);
+	if (shown.size !== ids.length || !ids.every((id) => shown.has(id)))
+		return changed();
+	const result = await createFromSuggestion(
+		c.env.DB,
+		suggestionId,
+		{ ticked: ids, shown: ids, notes: {} },
+		actor(c),
+	);
+	// Organize ticks every purchase the card showed, so "empty" means another tab filed them: the same answer as "gone".
+	if (!result.ok) {
+		if (result.reason === "gone" || result.reason === "empty") return changed();
+		return refused(result.error ?? "That category couldn't be made.");
+	}
+	await askAgainLeftOut(
+		c.env as Env & { JEV_API_KEY?: string },
+		result.leftOut,
+		(work) => c.executionCtx.waitUntil(work),
+	);
+	const count = result.moved;
+	const transactions = `${count} ${count === 1 ? "transaction" : "transactions"}`;
+	const message = result.restored
+		? `Restored ${result.name} with ${transactions}`
+		: result.attached
+			? `Added ${transactions} to ${result.name}`
+			: `Created ${result.name} with ${transactions}`;
+	const left = leftOutSentence(result.leftOut.length);
+	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	return renderOrganize(c, undefined, 200, true, undefined, {
+		toast: { message, type: "success" },
+		announce: `${message}.${left ? ` ${left}` : ""}`,
+	});
 });
 
 organize.post("/transactions/organize", async (c) => {

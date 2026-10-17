@@ -1007,7 +1007,7 @@ describe("new categories", () => {
 		expect(lines.results.map((line) => line.key)).toEqual(["CHEWY.COM 1"]);
 	});
 
-	it("asks a new category with Tally's guess and a Why? to How Tally works", async () => {
+	it("asks a new category with Tally's guess and a Why? to How Tally works (decision 120)", async () => {
 		const suggestion = await db
 			.prepare(
 				"INSERT INTO category_suggestions (name, status) VALUES ('Pet Care', 'pending') RETURNING id",
@@ -1016,11 +1016,11 @@ describe("new categories", () => {
 		for (const raw of ["CHEWY.COM 1", "PETSMART 22", "BANFIELD 5"])
 			await insertTx({ raw, amount: 4500, suggestionId: suggestion?.id });
 		const { html } = await get("/settings/suggestions");
-		expect(textOf(html)).toContain("Maybe new: Pet Care");
+		expect(textOf(html)).toContain("A new category: Pet Care");
 		expect(textOf(html)).toContain("Tally's guess");
 		expect(html).toContain('data-icon="sparkles"');
 		expect(html).toContain('href="/how-it-works#categorization"');
-		expect(html).toContain('aria-label="Why? Tally&#39;s guess"');
+		expect(html).toContain('aria-label="Why? suggested categories"');
 	});
 });
 
@@ -1363,7 +1363,7 @@ describe("a new category the family already has is added to, and the button says
 			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}&skip=category-${ids.category}`,
 		);
 
-	it("reads 'Yes, add to' with the family's own name for it, and not 'Yes, create'", async () => {
+	it("reads 'Add to' with the family's own name for it, and not 'Create'", async () => {
 		const ids = await oneOfEach();
 		await db
 			.prepare(
@@ -1371,20 +1371,20 @@ describe("a new category the family already has is added to, and the button says
 			)
 			.run();
 		const { html } = await newCategoryPage(ids);
-		expect(textOf(html)).toContain("Maybe new: Pet Care");
-		expect(textOf(html)).toContain("Yes, add to pet care");
-		expect(textOf(html)).not.toContain("Yes, create");
+		expect(textOf(html)).toContain("A new category: Pet Care");
+		expect(textOf(html)).toContain("Add to pet care");
+		expect(textOf(html)).not.toContain("Create Pet Care");
 	});
 
-	it("reads 'Yes, create' with the suggested name when the family has no such category", async () => {
+	it("reads 'Create' with the suggested name when the family has no such category", async () => {
 		const ids = await oneOfEach();
 		const { html } = await newCategoryPage(ids);
-		expect(textOf(html)).toContain("Maybe new: Pet Care");
-		expect(textOf(html)).toContain("Yes, create Pet Care");
-		expect(textOf(html)).not.toContain("Yes, add to");
+		expect(textOf(html)).toContain("A new category: Pet Care");
+		expect(textOf(html)).toContain("Create Pet Care");
+		expect(textOf(html)).not.toContain("Add to");
 	});
 
-	it("reads 'Yes, restore' with the family's name for an archived category (decision 110)", async () => {
+	it("reads 'Restore' with the family's name for an archived category (decision 110)", async () => {
 		const ids = await oneOfEach();
 		const archived = (
 			await db
@@ -1395,10 +1395,10 @@ describe("a new category the family already has is added to, and the button says
 		)?.id as number;
 		await setArchived(db, archived, true, "2026-07-15");
 		const { html } = await newCategoryPage(ids);
-		expect(textOf(html)).toContain("Maybe new: Pet Care");
-		expect(textOf(html)).toContain("Yes, restore pet care");
-		expect(textOf(html)).not.toContain("Yes, add to");
-		expect(textOf(html)).not.toContain("Yes, create");
+		expect(textOf(html)).toContain("A new category: Pet Care");
+		expect(textOf(html)).toContain("Restore pet care");
+		expect(textOf(html)).not.toContain("Add to pet care");
+		expect(textOf(html)).not.toContain("Create Pet Care");
 	});
 
 	it("reads 'Yes, add to' with the active category's name when an archived one differs only in an accent (migration 0052)", async () => {
@@ -1422,8 +1422,8 @@ describe("a new category the family already has is added to, and the button says
 			)
 			.run();
 		const { html } = await newCategoryPage(ids);
-		expect(textOf(html)).toContain("Yes, add to école");
-		expect(textOf(html)).not.toContain("Yes, restore");
+		expect(textOf(html)).toContain("Add to école");
+		expect(textOf(html)).not.toContain("Restore");
 	});
 });
 
@@ -2216,14 +2216,15 @@ describe("a card calls a transaction by its own name, else by its store's (spec 
 		},
 	);
 
-	it("names one purchase of a new category by its own name, as typed, while the heading still joins the stores", async () => {
+	it("names one purchase of a new category by its own name, as typed, on its row", async () => {
 		const ids = await oneOfEach();
 		await ownName(ids.pets[0] ?? 0, "Pup's kibble");
 		const { html } = await get(
 			`/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}&skip=category-${ids.category}`,
 		);
-		expect(titleOf(html)).toBe("Chewy, Petsmart and Banfield");
-		expect(textOf(html)).toContain("Pup's kibble · $45.00 ·");
+		expect(titleOf(html)).toBe("A new category: Pet Care");
+		expect(textOf(html)).toContain("Pup's kibble");
+		expect(textOf(html)).toContain("$45.00");
 		expect(textOf(html)).not.toContain("Chewy · $45.00");
 	});
 });
@@ -2251,7 +2252,6 @@ describe("the primary Yes sits on its own full-width row, No under it (P42 A)", 
 	it.each([
 		["income", []],
 		["transfer", ["income"]],
-		["new category", ["income", "transfer", "category"]],
 	])(
 		"draws the %s card's Yes first in a full-width column, with No under it",
 		async (_card, earlier) => {

@@ -61,7 +61,6 @@ import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
 import { CategoryGrid } from "../views/category-grid";
 import { AddCategoryRow, CategoryRow } from "../views/category-row";
-import { CategorySuggestionCard } from "../views/category-suggestion-card";
 import { Chip } from "../views/chip";
 import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
 import { DetailRow } from "../views/detail-row";
@@ -144,6 +143,10 @@ import {
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { StartHere } from "../views/start-here";
+import {
+	NewCategoryCard,
+	OrganizeNewCategoryCard,
+} from "../views/suggestion-card";
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
@@ -208,6 +211,15 @@ import {
 	SWIPE_MOTION_TOKENS,
 	TYPE_ROLES,
 } from "./tokens";
+
+/** The sample suggestion's purchases as the new-category card reads them: each a name, an amount and a day. */
+const SUGGESTION_CARD_ROWS = CATEGORY_SUGGESTION.rows.map((row) => ({
+	id: row.id,
+	name: row.displayName,
+	amountCents: row.amountCents,
+	date: row.date,
+}));
+const SUGGESTION_CARD_TODAY = "2026-10-16";
 
 const SECTIONS = [
 	["foundation", "Foundation"],
@@ -2083,8 +2095,9 @@ function Rows() {
 					"LedgerPriceRow",
 					"PriceChanged",
 					"BillPaymentPicker",
+					"PaymentRow",
 				]}
-				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”."
+				sentence="A bill's page is a quiet ledger of months, newest first: each month is one ruled row with its status in muted words and its arrow, and no filled pill. A paid or part-paid month opens in place to each payment with its own Not this one; a part-paid month says what it has and offers Link another payment; a month whose payment a bank corrected into a credit counts $0 and reads as unpaid, with Link a payment. A charge Tally found but nothing is linked to reads “A $2.99 charge on Sep 23 looks like this” with Link it, which opens the picker with that charge first, and consecutive months with no payment fold into one row, “April to August · No payment”. The newest month asks whether to update the bill when a payment came at another price, and the picker offers eligible payments as rows, the five closest first, then Show all N charges, keeping its month choices when a chosen month has none; a payment the person said Not this one to is still offered, last, under “You said not this one”, inside that fold."
 			>
 				<State label="Head: the name, its amount, the bank's text">
 					<div inert>
@@ -2435,6 +2448,135 @@ function Rows() {
 								{ value: "2026-09", label: "September" },
 								{ value: "2026-10", label: "October" },
 							]}
+						/>
+					</div>
+				</State>
+				<State label="Seven payments: the closest five as rows, the rest folded">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+								{
+									id: 3,
+									displayName: "Power Co",
+									date: "2026-09-22",
+									dateLabel: "Sep 22",
+									amountCents: 14300,
+								},
+								{
+									id: 4,
+									displayName: "Utility Pay",
+									date: "2026-09-21",
+									dateLabel: "Sep 21",
+									amountCents: 13900,
+								},
+								{
+									id: 5,
+									displayName: "Bank transfer",
+									date: "2026-09-20",
+									dateLabel: "Sep 20",
+									amountCents: 14600,
+								},
+								{
+									id: 6,
+									displayName: "Venmo",
+									date: "2026-09-19",
+									dateLabel: "Sep 19",
+									amountCents: 12500,
+								},
+								{
+									id: 7,
+									displayName: "Grocery",
+									date: "2026-09-18",
+									dateLabel: "Sep 18",
+									amountCents: 9900,
+								},
+								{
+									id: 8,
+									displayName: "Market",
+									date: "2026-09-17",
+									dateLabel: "Sep 17",
+									amountCents: 9500,
+								},
+							]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+						/>
+					</div>
+				</State>
+				<State label="A payment said Not this one to, checked, opens the fold">
+					<div inert>
+						<BillPaymentPicker
+							billId={1}
+							billName="Electric"
+							billAmountCents={14200}
+							openedPeriod="2026-09"
+							dueDateLabel="Sep 24"
+							bill={{ frequency: "monthly", anchorMonth: null }}
+							candidates={[
+								{
+									id: 1,
+									displayName: "City Electric",
+									date: "2026-09-24",
+									dateLabel: "Sep 24",
+									amountCents: 14150,
+								},
+								{
+									id: 3,
+									displayName: "Power Co",
+									date: "2026-09-22",
+									dateLabel: "Sep 22",
+									amountCents: 14300,
+								},
+								{
+									id: 4,
+									displayName: "Utility Pay",
+									date: "2026-09-21",
+									dateLabel: "Sep 21",
+									amountCents: 13900,
+								},
+								{
+									id: 5,
+									displayName: "Bank transfer",
+									date: "2026-09-20",
+									dateLabel: "Sep 20",
+									amountCents: 14600,
+								},
+								{
+									id: 7,
+									displayName: "Grocery",
+									date: "2026-09-18",
+									dateLabel: "Sep 18",
+									amountCents: 9900,
+								},
+								{
+									id: 6,
+									displayName: "Venmo",
+									date: "2026-09-19",
+									dateLabel: "Sep 19",
+									amountCents: 12500,
+									turnedAway: true,
+								},
+							]}
+							periods={[
+								{ value: "2026-09", label: "September" },
+								{ value: "2026-10", label: "October" },
+							]}
+							selectedTransactionId={6}
 						/>
 					</div>
 				</State>
@@ -2901,6 +3043,7 @@ function Rows() {
 					"PlanBand",
 					"PlanSheet",
 					"PlanPaymentPicker",
+					"PaymentRow",
 				]}
 				sentence="A planned one-time expense sits under Planned on Bills, set aside for its month until a payment is linked. An unpaid one from an earlier month asks once, with a Move to Nov button (this month's short name) and a Drop button (decision 101)."
 			>
@@ -3045,6 +3188,38 @@ function Rows() {
 								dateLabel: "Nov 3",
 								amountCents: 18000,
 								displayName: "DMV",
+								excluded: false,
+							},
+							{
+								id: 13,
+								date: "2026-10-31",
+								dateLabel: "Oct 31",
+								amountCents: 18500,
+								displayName: "Target",
+								excluded: false,
+							},
+							{
+								id: 14,
+								date: "2026-10-29",
+								dateLabel: "Oct 29",
+								amountCents: 17500,
+								displayName: "Gas station",
+								excluded: false,
+							},
+							{
+								id: 15,
+								date: "2026-10-28",
+								dateLabel: "Oct 28",
+								amountCents: 19000,
+								displayName: "Shell",
+								excluded: false,
+							},
+							{
+								id: 16,
+								date: "2026-10-27",
+								dateLabel: "Oct 27",
+								amountCents: 16000,
+								displayName: "Amazon",
 								excluded: false,
 							},
 							{
@@ -3440,42 +3615,84 @@ function Rows() {
 				<UseSpec spec={LIKELY_SPEC} />
 			</Specimen>
 			<Specimen
-				id="category-suggestion-card"
-				title="CategorySuggestionCard"
+				id="suggestion-card"
+				title="NewCategoryCard and OrganizeNewCategoryCard"
 				tier="visual"
 				components={[
-					"CategorySuggestionCard",
-					"SelectableTransactionRow",
+					"NewCategoryCard",
+					"OrganizeNewCategoryCard",
+					"AskFirst",
 					"Button",
 					"WhyLink",
 				]}
-				sentence="An open dashed card shows a suggested category and its transactions; each real round checkbox decides which transactions go in, and only unticked rows reveal a note."
+				sentence="One card for a suggested new category, the same in Settings and on the Suggestions page: Tally's guess, one headline, the purchases as ruled rows with one checkbox each, then Create and No, with Why? after No. An unticked row keeps its note. No puts the question in the card's place. Organize shows a short form above its chips."
 			>
-				<State label="P30 A: three selected, one unticked with a note">
+				<State label="All ticked: Create Pet Care, then No, with Why? after it">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							ticked={[31, 32, 33]}
-							notes={{ 34: "Birthday present" }}
+						<NewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							rows={SUGGESTION_CARD_ROWS}
+							today={SUGGESTION_CARD_TODAY}
+							tickName="ids"
+							form={{}}
+							answers={{ create: { type: "button" }, no: { type: "button" } }}
 						/>
 					</div>
 				</State>
-				<State label="An archived category has this name: Restore Pet Care">
+				<State label="One unticked, with its note under it">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							existing="Pet Care"
-							archived
-							ticked={[31, 32, 33]}
+						<NewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							rows={SUGGESTION_CARD_ROWS}
+							today={SUGGESTION_CARD_TODAY}
+							tickName="ids"
+							ticked={[32, 33]}
+							notes={{ 31: "Birthday present" }}
+							form={{}}
+							answers={{ create: { type: "button" }, no: { type: "button" } }}
 						/>
 					</div>
 				</State>
-				<State label="The family already has this category: Add to Pet Care">
+				<State label="After No: the question in the card's place">
 					<div class="max-w-xl" inert>
-						<CategorySuggestionCard
-							suggestion={CATEGORY_SUGGESTION}
-							existing="Pet Care"
-							ticked={[31, 32, 33]}
+						<AskFirst
+							action="/settings/suggestions/30/dismiss"
+							target="#categories"
+							kind="new_category"
+							id="new-30"
+							name={CATEGORY_SUGGESTION.name}
+							stores={[
+								{ merchantKey: "CHEWY", label: "Chewy" },
+								{ merchantKey: "PETSMART", label: "Petsmart" },
+								{
+									merchantKey: "BANFIELD PET HOSPITAL",
+									label: "Banfield Pet Hospital",
+								},
+							]}
+							focus
+						/>
+					</div>
+				</State>
+				<State label="Organize: the short form above the chips, with Create and Pick a category below">
+					<div class="max-w-xl" inert>
+						<OrganizeNewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							others={3}
+							action="/transactions/organize/suggestion"
+							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+						/>
+					</div>
+				</State>
+				<State label="Organize: a refused Create, with its reason under the headline">
+					<div class="max-w-xl" inert>
+						<OrganizeNewCategoryCard
+							name={CATEGORY_SUGGESTION.name}
+							others={3}
+							action="/transactions/organize/suggestion"
+							suggestionId={CATEGORY_SUGGESTION.id}
+							shown={SUGGESTION_CARD_ROWS.map((row) => row.id)}
+							error="Tally has room for 50 categories. Archive one to add another."
 						/>
 					</div>
 				</State>

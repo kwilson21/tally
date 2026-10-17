@@ -168,9 +168,30 @@ export const suggestedRowSql = (alias: string) =>
 	`${alias}.category_id IS NULL AND ${alias}.category_source IS NULL AND ${alias}.pending = 0 AND ${alias}.amount_cents > 0
 		AND ${alias}.excluded = 0 AND ${alias}.flag_income = 0 AND ${alias}.is_split = 0 AND ${alias}.parent_id IS NULL`;
 
+/**
+ * Narrows pendingSuggestions to the one suggestion Organize's card asks about (decision 120): the pending one that holds a
+ * purchase from these merchant keys, or the one with this id. The purchases a suggestion holds are still all of them.
+ */
+export type SuggestionFilter = { merchantKeys: string[] } | { id: number };
+
+/**
+ * The candidate query's clause and its bind for a filter, none when the list is unfiltered. The EXISTS keeps a
+ * suggestion's own count (n) over all its eligible purchases, so the order matches the unfiltered list.
+ */
+function filterClause(only?: SuggestionFilter): [string, unknown[]] {
+	if (!only) return ["", []];
+	if ("id" in only) return ["AND cs.id = ?", [only.id]];
+	return [
+		`AND EXISTS (SELECT 1 FROM transactions k WHERE k.category_suggestion_id = cs.id AND ${suggestedRowSql("k")}
+			AND NOT ${neverSuggestedSql("k", "new_category")} AND ${merchantKeySql("k")} IN (SELECT value FROM json_each(?)))`,
+		[JSON.stringify(only.merchantKeys)],
+	];
+}
+
 export async function pendingSuggestions(
 	db: D1Database,
 	limit = SETTINGS_SUGGESTION_LIMIT,
+	only?: SuggestionFilter,
 ): Promise<PendingSuggestions> {
 	await db.batch([
 		db.prepare(
@@ -181,6 +202,7 @@ export async function pendingSuggestions(
 		),
 	]);
 	// Select the busiest eligible pending suggestions (up to `limit`) before loading ids or purchase rows.
+	const [onlyClause, onlyBinds] = filterClause(only);
 	const { results: suggestions } = await db
 		.prepare(
 			`WITH candidates AS (
@@ -188,11 +210,11 @@ export async function pendingSuggestions(
 				FROM category_suggestions cs JOIN transactions t ON t.category_suggestion_id=cs.id
 				AND ${suggestedRowSql("t")}
 				AND NOT ${neverSuggestedSql("t", "new_category")}
-				WHERE cs.status='pending' GROUP BY cs.id HAVING COUNT(t.id)>0
+				WHERE cs.status='pending' ${onlyClause} GROUP BY cs.id HAVING COUNT(t.id)>0
 			), ranked AS (SELECT *, COUNT(*) OVER() total, ROW_NUMBER() OVER(ORDER BY n DESC,id) rank FROM candidates)
 			SELECT id,name,n,total FROM ranked WHERE rank<=? ORDER BY rank`,
 		)
-		.bind(limit)
+		.bind(...onlyBinds, limit)
 		.all<{ id: number; name: string; n: number; total: number }>();
 	if (!suggestions.length)
 		return Object.defineProperty([], "more", {
@@ -270,7 +292,8 @@ export type CreateResult =
 			attached: boolean;
 			restored: boolean;
 	  }
-	| { ok: false; reason: "gone" | "invalid"; error?: string };
+	// "empty": no ticked purchase could be filed; Organize, which ticks them all, reads it as changed elsewhere.
+	| { ok: false; reason: "gone" | "empty" | "invalid"; error?: string };
 export async function createFromSuggestion(
 	db: D1Database,
 	id: number,
@@ -298,8 +321,8 @@ export async function createFromSuggestion(
 	if (!ticked.length)
 		return {
 			ok: false,
-			reason: "invalid",
-			error: "Tick at least one transaction, or dismiss this suggestion.",
+			reason: "empty",
+			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	if (Object.values(input.notes).some((note) => note.length > 500))
 		return {
@@ -469,8 +492,8 @@ export async function createFromSuggestion(
 			return { ok: false, reason: "invalid", error: "That name is taken." };
 		return {
 			ok: false,
-			reason: "invalid",
-			error: "Tick at least one transaction, or dismiss this suggestion.",
+			reason: "empty",
+			error: "Tick at least one transaction, or say No to this suggestion.",
 		};
 	}
 	// Only the rows the question showed and the person left unticked. A row a Never suggest line hides, or one that

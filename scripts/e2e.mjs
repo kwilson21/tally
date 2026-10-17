@@ -186,7 +186,7 @@ for (const width of [390, 1280]) {
 		(response) =>
 			response.status() === 422 && response.request().method() === "POST",
 	);
-	await page.getByRole("button", { name: /Yes, create Pet Care/ }).click();
+	await page.getByRole("button", { name: /Create Pet Care/ }).click();
 	const response = await failedSave;
 	expected422.push({
 		status: response.status(),
