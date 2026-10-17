@@ -1147,6 +1147,19 @@ function parseIds(values: (string | File)[]) {
 	return [...ids];
 }
 
+/** The page's #fragment (such as #main) from HX-Current-URL, kept on the count's replaced address only on the list and for an element id (#686). */
+const keptFragment = (currentUrl = "") => {
+	try {
+		const url = new URL(currentUrl);
+		return url.pathname === "/transactions" &&
+			/^#[A-Za-z][\w-]{0,63}$/.test(url.hash)
+			? url.hash
+			: "";
+	} catch {
+		return "";
+	}
+};
+
 /** The bar's count (swapped into the live region's text) and its buttons, out of band. */
 transactions.get("/transactions/select/count", async (c) => {
 	const params = new URL(c.req.url).searchParams;
@@ -1173,9 +1186,11 @@ transactions.get("/transactions/select/count", async (c) => {
 	const unselected = matched.filter((id) => !pickedSet.has(id)).length;
 	const notOnPage = selection.ticks.filter((id) => !onPage.has(id)).length;
 	// Each tap keeps the selection in the address, replacing its entry rather than adding one, so a reload keeps it (#350).
+	// htmx sends the page's #fragment as HX-Current-URL, so the replaced address keeps it (#686).
 	c.header(
 		"HX-Replace-Url",
-		selectModeHref(listAddress(c, today, back), selection),
+		selectModeHref(listAddress(c, today, back), selection) +
+			keptFragment(c.req.header("HX-Current-URL")),
 	);
 	// The last tick off the page was unticked in its disclosure, so its line goes with the tick. Focus moves
 	// into the bar then: Select all if it is drawn, else the count. Any other count keeps focus where it is.
