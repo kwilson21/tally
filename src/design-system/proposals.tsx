@@ -6,7 +6,10 @@
 import { AiProposals } from "./proposals-ai";
 import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
-import { AuditFollowupProposals } from "./proposals-audit-followups";
+import {
+	AuditFollowupProposals,
+	SplitCategoryProposal,
+} from "./proposals-audit-followups";
 import { AutofillProposals } from "./proposals-autofill";
 import { BillsTotalsProposal } from "./proposals-bills-totals";
 import { P75 } from "./proposals-corners";
@@ -33,7 +36,7 @@ import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 126), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 131), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -559,6 +562,12 @@ export const DECIDED: readonly {
 			"Option A: Link a payment on a plan's and a bill's page shows the five closest charges as rows with the transaction row's look, each a 44px radio, then “Show all N charges” opening the rest in the same order (decision 126).",
 		issue: 645,
 	},
+	{
+		title: "P139 · How each part of a split picks its category",
+		outcome:
+			"Option A: each part picks its category in a folded row like the edit panel (P120 B): the two-column category grid shows until a category is chosen, then the row folds to one line naming it; each part's radios have their own group, read by part (decision 131).",
+		issue: 660,
+	},
 ];
 
 /** The proposals page body. */
@@ -577,6 +586,16 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="p139-title" class="mt-12">
+				<h2 id="p139-title" class="font-serif text-3xl font-semibold">
+					Picked: the split form's category picker
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 17. The owner's pick, marked Picked, is decision 131: A.
+				</p>
+				<SplitCategoryProposal />
+			</section>
 
 			<section aria-labelledby="followups-picks-title" class="mt-12">
 				<h2

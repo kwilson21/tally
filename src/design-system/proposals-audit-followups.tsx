@@ -1,6 +1,7 @@
 // P137 and P138 (#644 and #645): the two follow-ups of the second design audit (HW2 and PL3 in
 // docs/design-system/audit-2026-10.md), each option drawn as the screens it changes. The owner picked A for both (decision 126).
-// These drawings stay as the build reference until #644 and #645 ship. Every picture is
+// These drawings stay as the build reference until #644 and #645 ship. P139 (#660, SP2 in the same audit) is picked:
+// option A, the owner's pick of decision 131. Every picture is
 // inert and labelled, like the rest of the page. The Budget diagram, the example, the folded rows, the payment chips and the
 // Button are the app's own views; the rules are How Tally works' words (src/routes/how-it-works.tsx). The numbers are the
 // demo's on Oct 16, read from its own pages: /how-it-works (the October budget, 10 transactions that need a category) and
@@ -12,11 +13,15 @@ import { budgetExample } from "../how-it-works/examples";
 import { formatCents } from "../money";
 import { TallyMark, Wordmark } from "../views/brand";
 import { Button } from "../views/button";
+import { CategoryIcon } from "../views/category";
+import { CategoryGrid } from "../views/category-grid";
 import { Chip } from "../views/chip";
 import { FoldedRow } from "../views/folded-row";
 import { BudgetDiagram } from "../views/how-diagrams";
 import { Icon } from "../views/icons";
+import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
+import { SplitLine } from "../views/split-form";
 import { Choice, Choices, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -24,8 +29,16 @@ import { Specimen } from "./specimen";
 // The screens: a phone's and a desktop window's first screen, as tall as their content, so a whole section or picker
 // is drawn at full height. Each is one labelled image with nothing inside to Tab to, like the others on the page.
 
-/** A phone screen at 390 px, the demo banner on top, as tall as what it holds. */
-function PhoneScreen({ label, children }: { label: string; children?: Child }) {
+/** A phone screen at 390 px, the demo banner on top, as tall as what it holds. `overlay` is drawn over the whole screen, as Phone's is. */
+function PhoneScreen({
+	label,
+	overlay,
+	children,
+}: {
+	label: string;
+	overlay?: Child;
+	children?: Child;
+}) {
 	return (
 		<div class="overflow-x-auto">
 			<div
@@ -44,6 +57,7 @@ function PhoneScreen({ label, children }: { label: string; children?: Child }) {
 							</div>
 							{children}
 						</div>
+						{overlay}
 					</div>
 				</div>
 			</div>
@@ -688,5 +702,354 @@ export function AuditFollowupProposals() {
 				</p>
 			</Specimen>
 		</>
+	);
+}
+
+// ---------------------------------------------------------------------------------------------
+// P139 (#660, SP2): how each part of a split picks its category. Each picture is the split sheet for the demo's
+// Local Bakery ($12.00, SQ *LOCAL BAKERY 4432), drawn as the sheet is: the app's own SplitLine, MoneyInput, CategoryGrid
+// and FoldedRow, with the Transactions page dimmed behind it. Nothing in a picture posts or swaps: no htmx attribute.
+
+/** The demo's seven categories, with the icon and colour the seed gives each (src/demo/seed.ts). */
+const SPLIT_CATEGORIES = [
+	{ id: 1, name: "Groceries", icon: "groceries", color: "cat-blue" },
+	{ id: 2, name: "Eating Out", icon: "eating-out", color: "cat-plum" },
+	{ id: 3, name: "Gas", icon: "gas", color: "cat-slate" },
+	{ id: 4, name: "Kids", icon: "kids", color: "cat-ochre" },
+	{ id: 5, name: "Household", icon: "household", color: "cat-brown" },
+	{ id: 6, name: "Childcare", icon: "kids", color: "cat-blue" },
+	{ id: 7, name: "Rent", icon: "household", color: "cat-ochre" },
+];
+
+type SplitPart = { categoryId: number | null; amount: string };
+/** Today's select, A's folded row, or B's grid, for each part's category. */
+type PartMode = "select" | "folded" | "grid";
+
+/** The split as it opens: both parts empty, as the split form opens a new split. */
+const AS_IT_OPENS: SplitPart[] = [
+	{ categoryId: null, amount: "" },
+	{ categoryId: null, amount: "" },
+];
+
+/** After Part 1's pick: Groceries at $5.00, and Part 2 at $7.00 still choosing its category. */
+const AFTER_PART_ONE: SplitPart[] = [
+	{ categoryId: 1, amount: "5.00" },
+	{ categoryId: null, amount: "7.00" },
+];
+
+/** The Transactions page behind the sheet, dimmed in both pictures: its title and the Local Bakery row. */
+function SplitBehind() {
+	return (
+		<>
+			<p class="font-serif text-3xl font-semibold tracking-tight">
+				Transactions
+			</p>
+			<div class="mt-4 flex items-center justify-between gap-3 border-t border-rule py-3 text-lg">
+				<span>Local Bakery</span>
+				<span class="tabular-nums">$12.00</span>
+			</div>
+		</>
+	);
+}
+
+/** One part: its category as a native select, a folded row or a grid, then its amount, in the order each mode draws them. */
+function SplitPartRow({
+	id,
+	index,
+	mode,
+	part,
+}: {
+	id: string;
+	index: number;
+	mode: PartMode;
+	part: SplitPart;
+}) {
+	const n = index + 1;
+	const name = `${id}-part-${index}`;
+	const chosen = SPLIT_CATEGORIES.find((cat) => cat.id === part.categoryId);
+	const amount = (
+		<MoneyInput
+			id={`${id}-part-amount-${index}`}
+			name="part_amount"
+			label={`Part ${n} amount`}
+			value={part.amount}
+		/>
+	);
+	return (
+		<div
+			class={`flex flex-col gap-2 ${index ? "border-t border-rule pt-3" : ""}`}
+		>
+			{mode === "select" && (
+				<>
+					<label for={`${id}-part-category-${index}`} class="sr-only">
+						Part {n} category
+					</label>
+					<select
+						id={`${id}-part-category-${index}`}
+						name="part_category"
+						class="min-h-11 rounded-full border border-rule bg-paper px-3"
+					>
+						<option value="">Pick a category</option>
+						{SPLIT_CATEGORIES.map((cat) => (
+							<option
+								value={String(cat.id)}
+								selected={cat.id === part.categoryId}
+							>
+								{cat.name}
+							</option>
+						))}
+					</select>
+					{amount}
+				</>
+			)}
+			{mode === "folded" && (
+				<>
+					<FoldedRow
+						label={`Part ${n} category`}
+						open={!chosen}
+						value={
+							chosen && (
+								<>
+									<CategoryIcon icon={chosen.icon} color={chosen.color} />
+									<span class="truncate text-lg">{chosen.name}</span>
+								</>
+							)
+						}
+					>
+						<CategoryGrid
+							categories={SPLIT_CATEGORIES}
+							name={name}
+							checkedId={part.categoryId}
+						/>
+					</FoldedRow>
+					{amount}
+				</>
+			)}
+			{mode === "grid" && (
+				<>
+					{amount}
+					<fieldset class="flex flex-col gap-2">
+						<legend class="text-sm text-muted">Part {n} category</legend>
+						<CategoryGrid
+							categories={SPLIT_CATEGORIES}
+							name={name}
+							checkedId={part.categoryId}
+						/>
+					</fieldset>
+				</>
+			)}
+		</div>
+	);
+}
+
+/** The sheet's content, as SplitForm draws it: the bank's text, the name, the total, the day, the live line, the parts, the buttons. */
+function SplitSheetBody({
+	id,
+	mode,
+	parts,
+}: {
+	id: string;
+	mode: PartMode;
+	parts: SplitPart[];
+}) {
+	return (
+		<div data-split-sheet="">
+			<p class="text-sm text-muted">SQ *LOCAL BAKERY 4432</p>
+			<p class="font-serif text-4xl font-semibold">Local Bakery</p>
+			<p class="font-serif text-4xl font-semibold tabular-nums">$12.00</p>
+			<p class="text-muted">Oct 16</p>
+			<div class="mt-4 flex flex-col gap-4 border-t border-rule pt-4">
+				<div class="flex items-center justify-between gap-3">
+					<div id={`${id}-split-line`} aria-live="polite">
+						<SplitLine
+							parentCents={1200}
+							amounts={parts.map((part) => part.amount)}
+						/>
+					</div>
+					<Button kind="text" type="button">
+						Add a part
+					</Button>
+				</div>
+				{parts.map((part, index) => (
+					<SplitPartRow id={id} index={index} mode={mode} part={part} />
+				))}
+				<div class="grid grid-cols-2 gap-3">
+					<Button kind="secondary" type="button" class="w-full">
+						Cancel
+					</Button>
+					<Button type="button" class="w-full">
+						Save split
+					</Button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/** A phone's picture: the Transactions strip behind, dimmed, and the sheet in flow below it, the full width of the screen. */
+function SplitPhone({
+	label,
+	id,
+	mode,
+	parts,
+}: {
+	label: string;
+	id: string;
+	mode: PartMode;
+	parts: SplitPart[];
+}) {
+	return (
+		<PhoneScreen
+			label={label}
+			overlay={<div class="absolute inset-0 bg-ink/30" />}
+		>
+			<div class="relative h-36 overflow-hidden">
+				<SplitBehind />
+			</div>
+			<div class="relative z-10 -mx-5 -mb-6 rounded-t-sheet bg-paper p-5">
+				<SplitSheetBody id={id} mode={mode} parts={parts} />
+			</div>
+		</PhoneScreen>
+	);
+}
+
+/** A 1280 picture: the sheet as BottomSheet's right panel, 28rem wide, over the full-width Transactions page, dimmed where the panel isn't. */
+function SplitDesk({
+	label,
+	id,
+	mode,
+	parts,
+}: {
+	label: string;
+	id: string;
+	mode: PartMode;
+	parts: SplitPart[];
+}) {
+	return (
+		<div class="overflow-x-auto">
+			<div
+				role="img"
+				aria-label={`${label}, on desktop`}
+				class="relative w-[722px] shrink-0 overflow-hidden rounded-control border border-ink bg-paper"
+			>
+				<div inert>
+					{/* One cell holds the page, its dimming and the panel, so the picture is as tall as the sheet and the page
+					keeps its full width; the panel sits over the page at the right, as BottomSheet's does. */}
+					<div data-screen="picture" class="grid">
+						<div class="col-start-1 row-start-1 px-8 pt-8">
+							<SplitBehind />
+						</div>
+						<div class="col-start-1 row-start-1 bg-ink/30" />
+						<div class="col-start-1 row-start-1 w-[28rem] justify-self-end rounded-l-sheet bg-paper p-5">
+							<SplitSheetBody id={id} mode={mode} parts={parts} />
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/** One state of an option at both sizes, each captioned with its state: as it opens, or after Part 1's pick. */
+function SplitPictures({
+	id,
+	label,
+	state,
+	mode,
+	parts,
+}: {
+	/** The picture's own id; each size's ids are prefixed with it, so every id and radio name is unique. */
+	id: string;
+	label: string;
+	state: string;
+	mode: PartMode;
+	parts: SplitPart[];
+}) {
+	return (
+		<>
+			<Shot caption={`${state}, at 390 px`}>
+				<SplitPhone
+					label={`${label} at 390 px`}
+					id={`${id}-390`}
+					mode={mode}
+					parts={parts}
+				/>
+			</Shot>
+			<Shot caption={`${state}, at 1280 px`}>
+				<SplitDesk
+					label={`${label} at 1280 px`}
+					id={`${id}-1280`}
+					mode={mode}
+					parts={parts}
+				/>
+			</Shot>
+		</>
+	);
+}
+
+/** P139 (#660): how each part of a split picks its category, three ways, drawn for the owner's pick. */
+export function SplitCategoryProposal() {
+	return (
+		<Specimen
+			id="p139-split-category"
+			title="P139 · How each part of a split picks its category"
+			tier="visual"
+			sentence="The split form for the demo's Local Bakery ($12.00), with each part's category picked three ways, at 390 and 1280 px."
+		>
+			<Choices>
+				<Choice
+					name="Today"
+					note="Each part's category is a native select that reads “Pick a category” until a person chooses one, as the split form draws it now. Every other category pick in Tally is chips or a grid; this is the only select that sets a category. A guessed part, on a mixed trip, would show its select dashed; the demo has no mixed trip, so none is drawn. The sheet's content is 670px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
+					width="w-[1140px]"
+				>
+					<SplitPictures
+						id="p139-today"
+						label="Today"
+						state="After Part 1's pick"
+						mode="select"
+						parts={AFTER_PART_ONE}
+					/>
+				</Choice>
+				<Choice
+					name="A · A folded category row per part"
+					note="Each part's category is a row labelled “Part 1 category” and “Part 2 category”, as the edit panel's category row is. Opened, it holds the two-column grid of categories; a part with a category folds to one line, its icon and name. Each part reads like the edit panel: a chosen category folds to one line. As it opens, both rows are open. After Part 1's pick, at the next drawing, Part 1 folds to Groceries and Part 2 stays open. A guessed part stays open, with its guessed category dashed, until a person picks. The sheet's content is 1,104px as it opens and 892px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
+					cost="A part with nothing chosen posts nothing, so the save and the live line read each part's category by its own name instead of by position, and a guessed part's dashed look moves from the select to its chips; the row's value follows a pick only when the sheet is drawn again."
+					why="One way to pick a category everywhere; a chosen part folds to one line."
+					picked
+					width="w-[1140px]"
+				>
+					<SplitPictures
+						id="p139-a-open"
+						label="A · A folded category row per part"
+						state="As it opens"
+						mode="folded"
+						parts={AS_IT_OPENS}
+					/>
+					<SplitPictures
+						id="p139-a-folded"
+						label="A · A folded category row per part"
+						state="After Part 1's pick"
+						mode="folded"
+						parts={AFTER_PART_ONE}
+					/>
+				</Choice>
+				<Choice
+					name="B · A compact grid per part"
+					note="Each part shows the two-column grid of categories, always open, under its amount. Every category in sight for every part. A guessed part, on a mixed trip, would lead its grid with its guessed category, dashed. The sheet's content is 1,022px after Part 1's pick at 390px, measured on the drawing; the real sheet scrolls past 90% of the screen."
+					cost="A part with nothing chosen posts nothing, so the save and the live line read each part's category by its own name; a guessed part's dashed look moves to its chips."
+					why="No tap to open before choosing."
+					recommended={false}
+					width="w-[1140px]"
+				>
+					<SplitPictures
+						id="p139-b"
+						label="B · A compact grid per part"
+						state="After Part 1's pick"
+						mode="grid"
+						parts={AFTER_PART_ONE}
+					/>
+				</Choice>
+			</Choices>
+		</Specimen>
 	);
 }
