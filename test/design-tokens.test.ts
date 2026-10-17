@@ -866,7 +866,7 @@ describe("tabular figures (decision 128)", () => {
 			/^\| Body \/ rows \| font-sans \(Inter\), base–lg, normal figures \|$/m,
 		);
 		expect(design).toMatch(
-			/^\| Amounts, dates and counts \| Inter, tabular figures \(`tabular-nums`\) where they line up or change in place; never inside a sentence \(decision 128\) \|$/m,
+			/^\| Amounts, dates and counts \| Inter, tabular figures \(`tabular-nums`\) where they line up or change in place, as their own element; a figure that changes in place inside a sentence gets its own tabular span, and the words around it keep normal figures \(decision 128\) \|$/m,
 		);
 	});
 });

@@ -89,7 +89,7 @@ Radii: `rounded-control` (0.75rem) for inputs, buttons, tags, cards and the toas
 | Status sentence | font-serif italic, lg |
 | Key chip | font-mono, sm: the `--font-mono` token (a system monospace stack, no web font), used only for a key's name in a Key chip (decision 118) |
 | Body / rows | font-sans (Inter), base–lg, normal figures |
-| Amounts, dates and counts | Inter, tabular figures (`tabular-nums`) where they line up or change in place; never inside a sentence (decision 128) |
+| Amounts, dates and counts | Inter, tabular figures (`tabular-nums`) where they line up or change in place, as their own element; a figure that changes in place inside a sentence gets its own tabular span, and the words around it keep normal figures (decision 128) |
 | Secondary | font-sans, text-muted |
 
 ## Components (src/views/)
