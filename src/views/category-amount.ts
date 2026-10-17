@@ -10,9 +10,12 @@ export function categoryRowAmount(cents: number) {
 	return cents < 0
 		? {
 				text: `+${centsWhenAny(-cents)}`,
-				className: "text-right text-lg text-ok",
+				className: "text-right text-lg tabular-nums text-ok",
 			}
-		: { text: centsWhenAny(cents), className: "text-right text-lg" };
+		: {
+				text: centsWhenAny(cents),
+				className: "text-right text-lg tabular-nums",
+			};
 }
 
 /** What a screen reader hears after "+$20", as the P98 drawing says it. */

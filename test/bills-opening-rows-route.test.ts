@@ -82,7 +82,9 @@ describe("Paid this month with only unlisted payments (decision 122)", () => {
 
 	it("shows the heading with its total and the line naming the Fridays no row lists", async () => {
 		const paid = groupUnder(await get("/bills"), "Paid this month");
-		expect(paid).toContain('<span class="ml-auto shrink-0">$480.00</span>');
+		expect(paid).toContain(
+			'<span class="ml-auto shrink-0 tabular-nums">$480.00</span>',
+		);
 		expect(paid).toContain(
 			"Includes Friday paid fixture&#39;s Fridays on Oct 2 and 9</p>",
 		);

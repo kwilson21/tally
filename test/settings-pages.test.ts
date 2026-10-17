@@ -67,6 +67,17 @@ describe("settingsPlaces: the folios are never shortened", () => {
 });
 
 describe("GET /settings: the contents page", () => {
+	// Decision 128 (#676): a folio is a short phrase, not a column, so its words keep normal figures.
+	it("sets the household folio's words in normal figures", async () => {
+		const { html } = await get("/settings");
+		const row = html.split('href="/settings/household"')[1]?.split("</a>")[0];
+		const folio = row?.match(
+			/<span class="([^"]*)">Eastern · sign-in emails on<\/span>/,
+		);
+		expect(folio).toBeDefined();
+		expect(folio?.[1]).not.toContain("tabular-nums");
+	});
+
 	it("lists each section as a row to its own page, each with its live count", async () => {
 		const { res, html } = await get("/settings");
 		expect(res.status).toBe(200);

@@ -45,7 +45,7 @@ export function BillFindingRow({
 		<li id={`finding-${encodeURIComponent(suggestion.rawName)}`} class="py-3">
 			<p class="flex items-baseline justify-between gap-3 text-lg">
 				<span>{suggestion.displayName}</span>
-				<span class="shrink-0 text-right">
+				<span class="shrink-0 text-right tabular-nums">
 					About {formatCents(suggestion.amountCents)}
 				</span>
 			</p>

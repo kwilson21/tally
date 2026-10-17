@@ -617,7 +617,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			billData.rows.filter((bill) => bill.active),
 		).groups.paidCents;
 		const total = html.match(
-			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0">([^<]*)<\/span>/,
+			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0 tabular-nums">([^<]*)<\/span>/,
 		)?.[1];
 		expect(total).toBe(formatCents(bills + 18000));
 	});
