@@ -648,7 +648,9 @@ describe("GET /design-system/proposals", () => {
 		expect(mixed).toContain("Costco trips go in Groceries and Household.");
 		expect(mixed).toContain("Split this one?");
 		const split = picture(option("Option A, next · The split"));
-		expect(split).toContain("$214.36 left to assign");
+		expect(split).toContain(
+			'<span class="tabular-nums">$214.36</span> left to assign',
+		);
 		expect(split).toContain(
 			"Tally&#39;s guess: Groceries and Household from this trip&#39;s details",
 		);

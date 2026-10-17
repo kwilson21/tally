@@ -2457,7 +2457,9 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
-		expect(html).toContain("$10.00 left to assign");
+		expect(html).toContain(
+			'<span class="tabular-nums">$10.00</span> left to assign',
+		);
 	});
 
 	it("says what is left against the new total as the parts change", async () => {
@@ -2467,13 +2469,17 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["part_amount", "60.00"],
 			["part_amount", "30.00"],
 		]);
-		expect(left.html).toContain("$10.00 left to assign");
+		expect(left.html).toContain(
+			'<span class="tabular-nums">$10.00</span> left to assign',
+		);
 		const full = await post(`/transactions/${id}/split/line`, [
 			["total", "10000"],
 			["part_amount", "60.00"],
 			["part_amount", "40.00"],
 		]);
-		expect(full.html).toContain("Adds up to $100.00");
+		expect(full.html).toContain(
+			'Adds up to <span class="tabular-nums">$100.00</span>',
+		);
 	});
 
 	it("saves the new total and the corrected parts together, keeping the split and the refund on its part", async () => {

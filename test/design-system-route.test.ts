@@ -195,7 +195,9 @@ describe("GET /design-system in the demo", () => {
 		expect(split).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
-		expect(split).toContain("$10.00 left to assign");
+		expect(split).toContain(
+			'<span class="tabular-nums">$10.00</span> left to assign',
+		);
 		const cash = html.split('id="cash-form"')[1]?.split("</section>")[0] ?? "";
 		expect(cash).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
