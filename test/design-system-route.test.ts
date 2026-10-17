@@ -1046,6 +1046,31 @@ describe("GET /design-system in the demo", () => {
 		expect(design).toMatch(/\| BillPaymentPicker \|[^\n]*Excluded/);
 	});
 
+	it("words the catalog's one Why? beside Bills' summary, and says no heading or Trends group carries one (decision 121)", async () => {
+		const { html } = await get("/design-system");
+		// The WhyLink specimen leads with the Bills summary sentence and its one Why?.
+		const why = html.split('id="why-link"')[1]?.split("</section>")[0] ?? "";
+		expect(why).toContain(
+			'5 bills to pay soon, $1,062.49 in all<span aria-hidden="true" class="not-italic">·</span><span class="font-sans not-italic"><a href="/how-it-works#bills" aria-label="Why? bills to pay soon"',
+		);
+		// The BillRow specimen says its status headings carry no Why?, and draws none.
+		const bills =
+			html.split('id="bill-row"')[1]?.split('id="bill-finding"')[0] ?? "";
+		expect(bills).toContain(
+			"each status heading ends with its total and carries no Why? (decision 121: Bills&#39; one Why? sits beside its summary sentence",
+		);
+		expect(bills).not.toContain('aria-label="Why?');
+		// The TrendGroup specimen: no group carries a Why?, so its groups link nowhere.
+		const groups =
+			html.split('id="trend-group"')[1]?.split('id="trend-row"')[0] ?? "";
+		expect(groups).toContain('id="ds-going-well-title"');
+		expect(groups).toContain('id="ds-worth-a-look-title"');
+		expect(groups).toContain(
+			"No group carries a Why? (decision 121): Trends&#39; headline keeps the page&#39;s one.",
+		);
+		expect(groups).not.toContain("how-it-works#trends");
+	});
+
 	it("shows both pickers' payments as rows, the closest five then Show all N charges (#645, P138 A)", async () => {
 		const { html } = await get("/design-system");
 		const bill =
