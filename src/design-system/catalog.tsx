@@ -801,7 +801,6 @@ function Brand() {
 								drawn: 4,
 								total: 362,
 								sorted: 362,
-								answeredFlagged: true,
 							},
 						)}
 						bankLine={["Chase stopped updating Oct 12"]}
@@ -841,7 +840,6 @@ const firstWeek = (
 		drawn: strokesDrawn(record),
 		fifth: null,
 		answeredWaiting: null,
-		answeredFlagged: false,
 		bankName: null,
 		bankCount: 1,
 		historyIn: true,

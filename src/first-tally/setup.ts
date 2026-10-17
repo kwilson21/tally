@@ -56,11 +56,6 @@ export type SetupView = {
 	 * status's clause after "Tally keeps count" ("once Chase's history is in."). Null when nothing is waiting.
 	 */
 	answeredWaiting: string | null;
-	/**
-	 * Answered, while a connected bank is flagged (flaggedBanks): its line sits under the status with a Fix (BankBehind).
-	 * The status then makes no promise, so with nothing waiting it is only "Four." (#671).
-	 */
-	answeredFlagged: boolean;
 };
 
 /** The five lines' names (spec §8.8). */
@@ -265,7 +260,6 @@ export function setupView({
 		fifth: fifthDay ? (record?.night ?? null) : null,
 		answeredWaiting:
 			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
-		answeredFlagged: phase === "answered" && flagged.length > 0,
 	};
 }
 

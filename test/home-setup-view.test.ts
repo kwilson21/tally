@@ -15,7 +15,6 @@ const base: SetupView = {
 	total: 0,
 	fifth: null,
 	answeredWaiting: null,
-	answeredFlagged: false,
 };
 const top = async (
 	view: Partial<SetupView>,
@@ -177,6 +176,23 @@ describe("HomeSetup", () => {
 		expect(html).not.toContain("Three things to check");
 		expect(html).not.toContain('href="/first-page"');
 		expect(html).not.toContain("Nothing for you to do");
+	});
+
+	it("answered, with a bank flagged: the status is the count alone, with no promise beside the bank's Fix (#671)", async () => {
+		const html = await top(
+			{
+				phase: "answered",
+				drawn: 4,
+				bankName: "Chase",
+				total: 362,
+				sorted: 362,
+			},
+			undefined,
+			["Chase stopped updating Oct 9"],
+		);
+		expect(html).toContain(">Four.</p>");
+		expect(html).toContain("Chase stopped updating Oct 9");
+		expect(html).not.toContain("Tomorrow Tally keeps count");
 	});
 
 	it("shows a bank that stopped updating under the status, as Home's top does", async () => {
