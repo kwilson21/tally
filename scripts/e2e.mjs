@@ -1789,8 +1789,11 @@ for (const width of [320, 390]) {
 	);
 }
 step("How Tally works doesn't scroll sideways at 320px or 390px");
-// A bank sign-in email switch flip and a Remove sent back to back (#674). Both answer into #household-emails, so the Remove
-// waits for the flip's reply. The page must end on the flipped switch with the address gone, and a reload must show the same.
+// A bank sign-in email switch flip and a Remove sent back to back (#674). Both answer into #household-emails. The flip's
+// answer is held, not its request: the server handles the flip first, so the held answer still lists dana. The Remove is
+// clicked while that answer waits. On main the Remove is answered at once, so the held answer lands last and brings dana
+// back. On this branch the shared queue holds the Remove until the held answer has swapped in. Either way the page must
+// end on the flipped switch with the address gone, and a reload must show the same.
 await page.setViewportSize({ width: 390, height: 844 });
 writeLocalD1(
 	"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",
@@ -1800,10 +1803,6 @@ await page
 	.locator("#household-emails summary", { hasText: "Who gets them" })
 	.click();
 const bankEmailsBefore = await page.locator("#bank-sign-in-emails").isChecked();
-// The first POST is the flip. It is held, so the Remove is sent while the flip is still waiting for its reply.
-let emailPosts = 0;
-const holdFirstEmailPost = (route) =>
-	++emailPosts === 1 ? holdReply(route, 1500) : route.continue();
 const shownEmails = () =>
 	page.evaluate(() => ({
 		on: document.getElementById("bank-sign-in-emails").checked,
@@ -1822,26 +1821,65 @@ const assertShownEmails = (shown, on) => {
 		"the other address remains",
 	);
 };
-await page.route("**/settings/bank-sign-in-emails", holdFirstEmailPost);
+// The first POST is the flip. Its answer is fetched from the server now and held back. The Remove is the second POST: it
+// is counted, and it must not reach the server before the held answer has been let go.
+let emailPosts = 0;
+let removeBeforeRelease = false;
+let released = false;
+let releaseFlipAnswer;
+const flipAnswerHeld = new Promise((resolve) => (releaseFlipAnswer = resolve));
+let markFlipFetched;
+const flipFetched = new Promise((resolve) => (markFlipFetched = resolve));
+const holdFlipAnswer = async (route) => {
+	if (route.request().method() !== "POST") return route.continue();
+	if (++emailPosts > 1) {
+		if (!released) removeBeforeRelease = true;
+		return route.continue();
+	}
+	const response = await route.fetch();
+	markFlipFetched();
+	const answered = flipAnswerHeld.then(() => route.fulfill({ response }));
+	heldReplies.push(answered);
+	return answered;
+};
+await page.route("**/settings/bank-sign-in-emails", holdFlipAnswer);
 await page.locator("#bank-sign-in-emails-label").click();
+await flipFetched;
 const removeReply = page.waitForResponse(
 	(response) =>
 		response.request().method() === "POST" &&
 		response.url().includes("/settings/bank-sign-in-emails") &&
 		(response.request().postData() ?? "").includes("remove="),
 );
+// dana leaves the list when the Remove's answer swaps in. On main that happens while the flip's answer is held. On this
+// branch the Remove waits for the held answer, so this wait gives up after 1500 ms and the answer is let go then.
+const danaRemoved = page.waitForFunction(
+	() =>
+		![
+			...document.querySelectorAll("#household-emails-body details li > span"),
+		].some((span) => span.textContent.trim() === "dana@example.com"),
+);
 await page
 	.getByRole("button", { name: "Remove dana@example.com", exact: true })
 	.click();
+await Promise.race([
+	danaRemoved,
+	new Promise((resolve) => setTimeout(resolve, 1500)),
+]);
+released = true;
+releaseFlipAnswer();
 await settleReplies();
+await danaRemoved;
+assert(
+	!removeBeforeRelease,
+	"the Remove reached the server before the flip's answer swapped in",
+);
 assert.equal((await removeReply).status(), 200);
-// The Remove's answer swaps in last, and its toast says so; only then is the page's state read.
-await page.locator("#toasts").getByText("Removed address").waitFor();
 assertShownEmails(await shownEmails(), !bankEmailsBefore);
 await goto(`${BASE}/settings/household`, { waitUntil: "networkidle" });
 assertShownEmails(await shownEmails(), !bankEmailsBefore);
 // Back to the switch's state the step started with, and the household's test addresses removed.
-await page.unroute("**/settings/bank-sign-in-emails", holdFirstEmailPost);
+await page.unroute("**/settings/bank-sign-in-emails", holdFlipAnswer);
 const flippedBack = page.waitForResponse(
 	(response) =>
 		response.request().method() === "POST" &&
