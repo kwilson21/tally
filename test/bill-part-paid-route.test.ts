@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { loadBillRows } from "../src/bills/rows";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
-import { loadBillRows } from "../src/routes/bills";
 
 // A bill paid in parts on its page and in its link picker (Phase 5, decision 101, #205): each payment has its
 // own Not this one, a part-paid month says what it has, and the picker sorts by what's still unpaid.

@@ -102,7 +102,6 @@
 		background: var(--color-paper);
 		color: var(--color-ink);
 		font-family: var(--font-sans);
-		font-variant-numeric: tabular-nums;
 		-webkit-font-smoothing: antialiased;
 	}
 	@media (max-width: 63.999rem) {

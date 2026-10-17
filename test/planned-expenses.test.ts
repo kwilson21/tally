@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows } from "../src/bills/totals";
 import { summarizeMonth } from "../src/budget";
 import {
@@ -21,7 +22,6 @@ import {
 import { removeSplit, saveEdit, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
-import { loadBillRows } from "../src/routes/bills";
 import { splitRefusedError } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
 
@@ -617,7 +617,7 @@ describe("Bills' Planned group, Band and sheet", () => {
 			billData.rows.filter((bill) => bill.active),
 		).groups.paidCents;
 		const total = html.match(
-			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0">([^<]*)<\/span>/,
+			/>Paid this month<\/h2>[\s\S]*?<span class="ml-auto shrink-0 tabular-nums">([^<]*)<\/span>/,
 		)?.[1];
 		expect(total).toBe(formatCents(bills + 18000));
 	});

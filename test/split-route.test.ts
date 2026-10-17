@@ -103,7 +103,9 @@ describe("transaction splits", () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/transactions/${bakery?.id}/split`)
 		).text();
-		expect(html).toContain("$12.00 left to assign");
+		expect(html).toContain(
+			'<span class="tabular-nums">$12.00</span> left to assign',
+		);
 		expect(html.match(/name="part_category"/g)).toHaveLength(2);
 		expect(html).toContain('hx-trigger="input delay:300ms"');
 		// The amount request is nested inside a form that selects #page. Override that inherited
@@ -112,6 +114,27 @@ describe("transaction splits", () => {
 		// Both parts' requests share one queue, and only the newest waiting one is sent after the one
 		// in flight, so a late answer about older amounts can't be the last word on the line.
 		expect(html.match(/hx-sync="#split-line:queue last"/g)).toHaveLength(2);
+	});
+
+	it("the live line's reply sets its amount in tabular figures and its words in normal ones", async () => {
+		const bakery = await env.DB.prepare(
+			"SELECT id FROM transactions WHERE raw_name = 'SQ *LOCAL BAKERY 4432'",
+		).first<{ id: number }>();
+		const category = await env.DB.prepare(
+			"SELECT id FROM categories ORDER BY id LIMIT 1",
+		).first<{ id: number }>();
+		const reply = await post(`/transactions/${bakery?.id}/split/line`, [
+			["part_category", String(category?.id)],
+			["part_amount", "4.00"],
+			["part_category", String(category?.id)],
+			["part_amount", ""],
+		]);
+		expect(reply.status).toBe(200);
+		const html = await reply.text();
+		expect(html).toContain(
+			'<span class="tabular-nums">$8.00</span> left to assign',
+		);
+		expect(html).not.toMatch(/<p[^>]*tabular-nums/);
 	});
 
 	it("does not offer or allow splitting income", async () => {

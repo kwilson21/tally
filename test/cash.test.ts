@@ -2438,7 +2438,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(res.status).toBe(200);
 		// The amount under the title is the new total, not the saved $90.00.
 		const shown = html.match(
-			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold tabular-nums">([^<]*)<\/p>/,
 		)?.[1];
 		expect(shown).toBe(formatCents(10000, { signed: true }));
 		expect(shown).not.toBe(formatCents(9000, { signed: true }));
@@ -2457,7 +2457,9 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 		expect(html).toContain(
 			"The parts add up to $90.00. Change them to match $100.00.",
 		);
-		expect(html).toContain("$10.00 left to assign");
+		expect(html).toContain(
+			'<span class="tabular-nums">$10.00</span> left to assign',
+		);
 	});
 
 	it("says what is left against the new total as the parts change", async () => {
@@ -2467,13 +2469,17 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 			["part_amount", "60.00"],
 			["part_amount", "30.00"],
 		]);
-		expect(left.html).toContain("$10.00 left to assign");
+		expect(left.html).toContain(
+			'<span class="tabular-nums">$10.00</span> left to assign',
+		);
 		const full = await post(`/transactions/${id}/split/line`, [
 			["total", "10000"],
 			["part_amount", "60.00"],
 			["part_amount", "40.00"],
 		]);
-		expect(full.html).toContain("Adds up to $100.00");
+		expect(full.html).toContain(
+			'Adds up to <span class="tabular-nums">$100.00</span>',
+		);
 	});
 
 	it("saves the new total and the corrected parts together, keeping the split and the refund on its part", async () => {
@@ -2548,7 +2554,7 @@ describe("changing a split cash entry's parts (Change the parts)", () => {
 	};
 	const shownTotal = (html: string) =>
 		html.match(
-			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold">([^<]*)<\/p>/,
+			/id="split-title"[\s\S]*?<p class="font-serif text-4xl font-semibold tabular-nums">([^<]*)<\/p>/,
 		)?.[1];
 
 	it("keeps the panel's other changes through Change the parts and saves them with the corrected parts", async () => {

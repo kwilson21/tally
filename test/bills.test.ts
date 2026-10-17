@@ -2,12 +2,12 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
+import { loadBillRows } from "../src/bills/rows";
 import { summarizeMonth } from "../src/budget";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
-import { loadBillRows } from "../src/routes/bills";
 import appCss from "../src/styles/app.css?raw";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
@@ -133,7 +133,7 @@ describe("Bills", () => {
 				["Paid this month", "$1,012.34"],
 			] as const)
 				expect(groupUnder(html, status)).toContain(
-					`<span class="ml-auto shrink-0">${total}</span>`,
+					`<span class="ml-auto shrink-0 tabular-nums">${total}</span>`,
 				);
 		},
 	);
@@ -199,7 +199,7 @@ describe("Bills", () => {
 				expect(html.includes(status)).toBe(groups.includes(status));
 			for (const status of groups)
 				expect(groupUnder(html, status)).toContain(
-					'<span class="ml-auto shrink-0">$100.00',
+					'<span class="ml-auto shrink-0 tabular-nums">$100.00',
 				);
 		},
 	);
@@ -238,7 +238,7 @@ describe("Bills", () => {
 			for (const [, section] of sections) {
 				// The group's total is the only ml-auto span in its section (rows never use it).
 				const heading = section?.match(
-					/<span class="ml-auto shrink-0">\$([\d,]+\.\d{2})/,
+					/<span class="ml-auto shrink-0 tabular-nums">\$([\d,]+\.\d{2})/,
 				);
 				if (!heading || !section) continue;
 				const title = section.match(
@@ -247,7 +247,7 @@ describe("Bills", () => {
 				if (!title) continue;
 				const rows = [
 					...section.matchAll(
-						/<span class="shrink-0 text-lg">\$([\d,]+\.\d{2})<\/span>/g,
+						/<span class="shrink-0 text-lg tabular-nums">\$([\d,]+\.\d{2})<\/span>/g,
 					),
 				];
 				const cents = (value: string) =>
@@ -1089,10 +1089,10 @@ describe("Bills", () => {
 		).text();
 		// Due is the shown Oct 16 Friday. Upcoming is Oct 23 and Oct 30 plus the monthly bill's Oct 28.
 		expect(groupUnder(html, "Due in the next 7 days")).toContain(
-			'<span class="ml-auto shrink-0">$240.00</span>',
+			'<span class="ml-auto shrink-0 tabular-nums">$240.00</span>',
 		);
 		expect(groupUnder(html, "Upcoming")).toContain(
-			'<span class="ml-auto shrink-0">$580.00 this month</span>',
+			'<span class="ml-auto shrink-0 tabular-nums">$580.00 this month</span>',
 		);
 		expect(html).toContain("$820 still to pay in October");
 	});

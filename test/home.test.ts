@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBillRows } from "../src/bills/rows";
 import { billTotalsForRows, calculateBillTotals } from "../src/bills/totals";
 import { budgetForMonth, summarizeMonth } from "../src/budget";
 import { monthCause, monthCauses } from "../src/budgets/month-cause";
@@ -19,7 +20,6 @@ import { OLDER_NEEDS_CATEGORY_SQL } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
-import { loadBillRows } from "../src/routes/bills";
 import { home as homeRoute } from "../src/routes/home";
 
 async function home() {
@@ -160,12 +160,12 @@ describe("GET / with the demo seed", () => {
 		]);
 		const current = await home();
 		const currentRow = current.html.match(
-			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg">([^<]+)<\/span>/,
+			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg tabular-nums">([^<]+)<\/span>/,
 		)?.[1];
 		vi.setSystemTime(new Date("2026-11-01T00:01:00-04:00"));
 		const finished = await homeAt("2026-10");
 		const finishedRow = finished.html.match(
-			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg">([^<]+)<\/span>/,
+			/<span class="text-lg">Archived this month[\s\S]*?<span class="ml-auto text-right text-lg tabular-nums">([^<]+)<\/span>/,
 		)?.[1];
 		expect(currentRow).toBe("$20 of $100");
 		expect(finishedRow).toBe("$20 of $100");
@@ -923,7 +923,7 @@ describe("GET / with the demo seed", () => {
 			'<h3 id="2026-09-not-budgeted" class="mt-6 text-sm text-muted">Not budgeted</h3>',
 		);
 		expect(html).toMatch(
-			/Needs a category<\/span><span class="text-right text-lg">\$50<\/span>/,
+			/Needs a category<\/span><span class="text-right text-lg tabular-nums">\$50<\/span>/,
 		);
 		expect(html).not.toMatch(/href="\/budget\//);
 	});
@@ -943,7 +943,7 @@ describe("GET / with the demo seed", () => {
 		const { html } = await homeAt("2026-09");
 		expect(html).toMatch(/whitespace-nowrap[^"]*">\$130<\/p>/);
 		expect(html).toMatch(
-			/Needs a category<\/span><span class="text-right text-lg text-ok">\+\$50<span class="sr-only"> back: refunds outweigh spending<\/span><\/span>/,
+			/Needs a category<\/span><span class="text-right text-lg tabular-nums text-ok">\+\$50<span class="sr-only"> back: refunds outweigh spending<\/span><\/span>/,
 		);
 	});
 

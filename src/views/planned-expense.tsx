@@ -64,7 +64,9 @@ export function PlannedRow({
 						: plannedLine(plan, month)}
 				</span>
 			</span>
-			<span class="shrink-0 text-lg">{formatCents(plan.amountCents)}</span>
+			<span class="shrink-0 text-lg tabular-nums">
+				{formatCents(plan.amountCents)}
+			</span>
 		</>
 	);
 	const look = "flex min-h-16 items-center gap-4";
@@ -103,7 +105,7 @@ export function PlannedHeading({ totalCents }: { totalCents?: number }) {
 				Planned
 			</h2>
 			{totalCents !== undefined && (
-				<span class="ml-auto shrink-0">
+				<span class="ml-auto shrink-0 tabular-nums">
 					{formatCents(totalCents)} this month
 				</span>
 			)}

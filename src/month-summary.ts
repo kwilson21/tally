@@ -1,11 +1,11 @@
 // A month's summary as Home draws it (spec §6, §8.4): the month's loaded numbers, the bills still to pay this month and
 // the plans set aside, and what they add up to. Home and the first page's ruled-off total both read it here, so the
 // Safe to spend they show is the same number (P125 E, decision 114).
+import { loadBillRows } from "./bills/rows";
 import { billTotalsForRows } from "./bills/totals";
 import { summarizeMonth } from "./budget";
 import { loadMonth } from "./db/month";
 import { plansSetAsideCents } from "./db/planned-expenses";
-import { loadBillRows } from "./routes/bills";
 
 /**
  * The month's summary, with what it was built from. Only the current month sets bills and plans aside (Safe to spend

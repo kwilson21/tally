@@ -78,4 +78,16 @@ describe("MerchantRuleTick (#353)", () => {
 		);
 		expect(html).not.toContain("Leave it unticked");
 	});
+
+	it("its check reads only its own checkbox (a named group), so a checked radio in a folded row above it can't show it (#701)", async () => {
+		const html = await (
+			<MerchantRuleTick merchant="Local Bakery" checked={false} />
+		).toString();
+		expect(html).toMatch(/<label class="group\/rule /);
+		expect(html).toContain(
+			'<span class="hidden group-has-[:checked]/rule:flex">',
+		);
+		expect(html).not.toContain("group-has-[:checked]:");
+		expect(html).not.toMatch(/<label class="group /);
+	});
 });
