@@ -1872,7 +1872,7 @@ await settleReplies();
 await danaRemoved;
 assert(
 	!removeBeforeRelease,
-	"the Remove reached the server before the flip's answer swapped in",
+	"the Remove reached the server before the flip's answer was let go",
 );
 assert.equal((await removeReply).status(), 200);
 assertShownEmails(await shownEmails(), !bankEmailsBefore);
