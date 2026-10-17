@@ -398,7 +398,8 @@ describe("GET /design-system/proposals", () => {
 				id === "p135-suggestions" ||
 				id === "p136-bills-totals" ||
 				id === "p137-rules-fold" ||
-				id === "p138-payment-list";
+				id === "p138-payment-list" ||
+				id === "p139-split-category";
 			const reasons = section.match(/text-muted">Why: /g)?.length ?? 0;
 			expect([id, reasons]).toEqual([
 				id,
@@ -417,7 +418,15 @@ describe("GET /design-system/proposals", () => {
 			// P126 (decision 115) and P127 (decision 116) are the owner's picks too, each marked Picked on its A. P128 is decision 118, P129 decision 117, P130 to P133 decision 121, and P136 option A decision 122.
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
-			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P139 (#660) is open: the owner hasn't picked an option yet, so none is marked Picked.
+			const expected =
+				id === "p139-split-category"
+					? 0
+					: n < 34
+						? 0
+						: twoPicks.includes(id)
+							? 2
+							: 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -5303,14 +5312,19 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Nothing sits between the intro and the follow-ups' section (P137 and P138, #644 and #645), and between it and P136 only
-		// its two drawings sit. Between P136's section and the audit's, the only section drawn with
+		// Between the intro and the follow-ups' section sits only the Open section (P139, #660) and its one specimen, and between
+		// the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
 		);
 		expect(open).toBeGreaterThan(top);
-		expect(html.slice(top, open)).not.toContain("<section ");
+		expect(
+			html.slice(top, open).match(/<section aria-labelledby="[^"]*"/g),
+		).toEqual(['<section aria-labelledby="p139-title"']);
+		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
+			'<section id="p139-split-category"',
+		]);
 		expect(html.slice(open + 1, p136)).not.toContain(
 			'<section aria-labelledby="',
 		);
@@ -6524,5 +6538,224 @@ describe("GET /design-system/proposals, the picked follow-ups of the second audi
 		);
 		expect(block(html, "p137-rules-fold")).not.toContain("<script");
 		expect(block(html, "p138-payment-list")).not.toContain("<script");
+	});
+});
+
+describe("GET /design-system/proposals, P139 (how each part of a split picks its category, #660)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const count = (text: string, part: string) => text.split(part).length - 1;
+	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
+	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+	// Each option's pictures, one figure each: a caption, then one labelled picture (Shot draws a figure per picture).
+	const shots = (chunk: string) => chunk.split("<figure").slice(1);
+	// An option's note: what sits above its first picture.
+	const noteOf = (option: string) => option.slice(0, option.indexOf("<figure"));
+	// Every opening tag of one kind, read through attributes(), so a value's own words never count.
+	const tags = (chunk: string, tag: string) =>
+		[...chunk.matchAll(new RegExp(`<${tag}\\b[^>]*>`, "g"))].map((m) => m[0]);
+	// The radios that are checked, as [name, value] pairs.
+	const checkedOf = (chunk: string) =>
+		tags(chunk, "input")
+			.map((tag) => attributes(tag))
+			.filter((a) => a.get("type") === "radio" && a.has("checked"))
+			.map((a) => [a.get("name") ?? "", a.get("value") ?? ""]);
+	const LABELS = (chunk: string) =>
+		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map(
+			(m) => m[1] ?? "",
+		);
+	const P139 = "p139-split-category";
+	// The specimen alone: block() runs to the next section, which takes the Open section's closing tag with it.
+	const specimenOf = (html: string) => {
+		const chunk = block(html, P139);
+		return chunk.slice(0, chunk.lastIndexOf("</section>"));
+	};
+
+	it("opens an Open section above the Picked sections, titled and dated as the brief asks", async () => {
+		const html = await drawn();
+		const open = html.indexOf('aria-labelledby="p139-title"');
+		const picked = html.indexOf('aria-labelledby="followups-picks-title"');
+		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeLessThan(picked);
+		const section = html.slice(open, picked);
+		expect(section).toContain('<h2 id="p139-title"');
+		expect(section).toContain("Open: the split form&#39;s category picker");
+		expect(section).toContain("Drawn Oct 17 for #660.");
+		expect(section).toContain(`<section id="${P139}"`);
+	});
+
+	it("draws P139 as one visual specimen with Today, A and B, A recommended and none picked", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).toContain('data-ds-tier="visual"');
+		expect(chunk).toContain(
+			"P139 · How each part of a split picks its category",
+		);
+		const named = options(chunk);
+		expect(named.length).toBe(3);
+		expect(named[0]).toContain(">Today</h4>");
+		expect(named[1]).toContain(">A · A folded category row per part");
+		expect(named[2]).toContain(">B · A compact grid per part");
+		expect(count(chunk, ">Recommended<")).toBe(1);
+		expect(named[1]).toContain(">Recommended<");
+		expect(count(chunk, ">Picked<")).toBe(0);
+	});
+
+	it("draws Today as one picture at each size, a native select per part, and only Part 1 chosen", async () => {
+		const [today = ""] = options(specimenOf(await drawn()));
+		const pics = shots(today);
+		expect(pics.length).toBe(2);
+		expect(LABELS(today)).toEqual([
+			"Today at 390 px, on a phone",
+			"Today at 1280 px, on desktop",
+		]);
+		expect(tags(today, "select").length).toBe(4);
+		expect(count(today, ">Pick a category</option>")).toBe(4);
+		const selected = tags(today, "option")
+			.map((tag) => attributes(tag))
+			.filter((a) => a.has("selected"))
+			.map((a) => a.get("value"));
+		expect(selected).toEqual(["1", "1"]);
+	});
+
+	it("draws A's two states, as it opens and after Part 1's pick, each at 390 and 1280 px", async () => {
+		const [, a = ""] = options(specimenOf(await drawn()));
+		expect(shots(a).length).toBe(4);
+		expect(count(a, "As it opens, at 390 px")).toBe(1);
+		expect(count(a, "As it opens, at 1280 px")).toBe(1);
+		expect(count(a, "After Part 1&#39;s pick, at 390 px")).toBe(1);
+		expect(count(a, "After Part 1&#39;s pick, at 1280 px")).toBe(1);
+	});
+
+	it("draws A's category as a folded row for each part, open as it opens and folded after Part 1's pick", async () => {
+		const [, a = ""] = options(specimenOf(await drawn()));
+		const [open390, open1280, folded390, folded1280] = shots(a);
+		for (const pic of [open390, open1280, folded390, folded1280]) {
+			expect(
+				count(pic ?? "", '<span class="text-muted">Part 1 category</span>'),
+			).toBe(1);
+			expect(
+				count(pic ?? "", '<span class="text-muted">Part 2 category</span>'),
+			).toBe(1);
+			expect(tags(pic ?? "", "details").length).toBe(2);
+		}
+		for (const pic of [open390, open1280]) {
+			for (const details of tags(pic ?? "", "details"))
+				expect(attributes(details).has("open")).toBe(true);
+			expect(
+				count(pic ?? "", '<span class="truncate text-lg">Groceries</span>'),
+			).toBe(0);
+		}
+		for (const pic of [folded390, folded1280]) {
+			const [part1 = "", part2 = ""] = tags(pic ?? "", "details");
+			expect(attributes(part1).has("open")).toBe(false);
+			expect(attributes(part2).has("open")).toBe(true);
+			expect(
+				count(pic ?? "", '<span class="truncate text-lg">Groceries</span>'),
+			).toBe(1);
+		}
+	});
+
+	it("draws B as one picture at each size, a two-column grid per part, always open, with no folded row", async () => {
+		const [, , b = ""] = options(specimenOf(await drawn()));
+		expect(shots(b).length).toBe(2);
+		expect(LABELS(b)).toEqual([
+			"B · A compact grid per part at 390 px, on a phone",
+			"B · A compact grid per part at 1280 px, on desktop",
+		]);
+		for (const pic of shots(b)) {
+			expect(count(pic, "grid grid-cols-2 gap-2")).toBe(2);
+			expect(tags(pic, "details").length).toBe(0);
+		}
+	});
+
+	it("gives each part's grid its own radio name, so every name is one part of one picture, seven chips each", async () => {
+		const chunk = specimenOf(await drawn());
+		const names = tags(chunk, "input")
+			.map((tag) => attributes(tag))
+			.filter((a) => a.get("type") === "radio")
+			.map((a) => a.get("name") ?? "");
+		const distinct = [...new Set(names)];
+		expect(distinct.length).toBe(12);
+		for (const name of distinct) {
+			expect(name).toMatch(/^p139-[a-z0-9-]+-(390|1280)-part-[01]$/);
+			expect(names.filter((n) => n === name).length).toBe(7);
+		}
+	});
+
+	it("checks the chosen category in each part's grid, and no radio before a part is chosen", async () => {
+		const [, a = "", b = ""] = options(specimenOf(await drawn()));
+		const [open390, open1280, folded390, folded1280] = shots(a);
+		expect(checkedOf(open390 ?? "")).toEqual([]);
+		expect(checkedOf(open1280 ?? "")).toEqual([]);
+		expect(checkedOf(folded390 ?? "")).toEqual([
+			["p139-a-folded-390-part-0", "1"],
+		]);
+		expect(checkedOf(folded1280 ?? "")).toEqual([
+			["p139-a-folded-1280-part-0", "1"],
+		]);
+		for (const pic of shots(b))
+			expect(checkedOf(pic)).toEqual([
+				[
+					`${pic.includes("on desktop") ? "p139-b-1280" : "p139-b-390"}-part-0`,
+					"1",
+				],
+			]);
+	});
+
+	it("draws the demo's Local Bakery split: its bank text and $12.00, Part 1 at $5.00 and Part 2 at $7.00 once both are typed", async () => {
+		const chunk = specimenOf(await drawn());
+		// Eight pictures, each with the bank's own text and the total.
+		expect(count(chunk, "SQ *LOCAL BAKERY 4432")).toBe(8);
+		expect(count(chunk, ">Local Bakery</p>")).toBe(8);
+		expect(count(chunk, ">$12.00</p>")).toBe(8);
+		// Today and A after Part 1's pick, and B: six pictures with both amounts typed and the line adding up.
+		expect(count(chunk, 'value="5.00"')).toBe(6);
+		expect(count(chunk, 'value="7.00"')).toBe(6);
+		expect(count(chunk, "Adds up to")).toBe(6);
+		// A as it opens: nothing typed, so the line says what is left to assign.
+		expect(count(chunk, "left to assign")).toBe(2);
+	});
+
+	it("draws the 1280 sheet as a 28rem right panel over the Transactions page, not in a column", async () => {
+		const chunk = specimenOf(await drawn());
+		const desks = shots(chunk).filter((s) => s.includes("on desktop"));
+		expect(desks.length).toBe(4);
+		for (const desk of desks) {
+			expect(count(desk, "w-[28rem]")).toBe(1);
+			expect(count(desk, "rounded-l-sheet")).toBe(1);
+			expect(desk).toContain("Transactions");
+		}
+		const phones = shots(chunk).filter((s) => s.includes("on a phone"));
+		expect(phones.length).toBe(4);
+		for (const phone of phones) expect(phone).not.toContain("w-[28rem]");
+	});
+
+	it("says in each option's note how a guessed part looks, and that its heights are measured on the drawing", async () => {
+		const chunk = specimenOf(await drawn());
+		const notes = options(chunk).map(noteOf);
+		expect(notes.length).toBe(3);
+		for (const note of notes) {
+			expect(note).toContain("measured on the drawing");
+			expect(note).toContain("scrolls past 90% of the screen");
+			expect(note).toContain("guessed part");
+		}
+		// The guess is words only: the demo has no mixed trip, so no dashed part is drawn.
+		expect(chunk).not.toContain("border-dashed");
+	});
+
+	it("draws no client JavaScript and no htmx request, and nothing reachable inside a picture", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).not.toContain("<script");
+		// The specimen's own hx-ignore (a visual tier) is not a request; no form or request attribute is drawn.
+		expect(actions(chunk)).toEqual([]);
+		expect(firesByItself(chunk)).toEqual([]);
+		expect(reachableInPictures(chunk)).toEqual([]);
+	});
+
+	it("keeps ids unique inside the section, and every label's for= points at one of them", async () => {
+		const chunk = specimenOf(await drawn());
+		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const [, target] of chunk.matchAll(/\sfor="([^"]+)"/g))
+			expect(ids).toContain(target);
 	});
 });
