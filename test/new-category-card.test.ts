@@ -548,9 +548,9 @@ describe("Organize: the card above the chips", () => {
 		);
 	});
 
-	it("Create answers that the suggestion changed when another tab filed its purchases", async () => {
+	it("Create answers that the suggestion changed when another tab saved one of its purchases", async () => {
 		await env.DB.prepare(
-			"CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = NEW.id; END",
+			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
 		).run();
 		const { res, html } = await post("/transactions/organize/suggestion", [
 			["suggestion", String(suggestion)],
@@ -569,6 +569,16 @@ describe("Organize: the card above the chips", () => {
 				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
 			),
 		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id = ${chewy} AND category_id IS NULL AND category_suggestion_id = ${suggestion}`,
+			),
+		).toBe(1);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM category_suggestions WHERE id = ${suggestion} AND status = 'pending' AND decided_at IS NULL`,
+			),
+		).toBe(1);
 	});
 
 	it("Create without JavaScript leaves Organize's address", async () => {
@@ -711,9 +721,9 @@ describe("Organize: Create files only the purchases the card showed", () => {
 });
 
 describe("Organize without JavaScript: a changed answer says so on the page", () => {
-	it("says it changed under Organize's heading when another tab filed its purchases during Create, and files nothing", async () => {
+	it("says it changed in the card when another tab saved one of its purchases during Create, and files nothing", async () => {
 		await env.DB.prepare(
-			"CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE category_suggestion_id = NEW.id; END",
+			`CREATE TRIGGER file_during_create AFTER UPDATE OF decided_at ON category_suggestions WHEN NEW.status='pending' AND OLD.status='pending' AND NEW.decided_at IS NOT NULL BEGIN UPDATE transactions SET category_id = 1, category_source = 'user' WHERE id = ${petsmart}; END`,
 		).run();
 		const { res, html } = await post(
 			"/transactions/organize/suggestion",
@@ -722,13 +732,26 @@ describe("Organize without JavaScript: a changed answer says so on the page", ()
 		).finally(() => env.DB.prepare("DROP TRIGGER file_during_create").run());
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Location")).toBeNull();
-		expect(html).toContain(CHANGED_LINE);
-		expect(html).not.toContain("Tally suggested a new category");
+		// chewy is still attached, so its card is drawn and the words sit in it, once, not under Organize's heading.
+		expect(cardMarkup(html, "Tally suggested a new category")).toContain(
+			'<p role="alert" class="text-sm text-over">That suggestion was changed somewhere else. Here&#39;s the current list.</p>',
+		);
+		expect(html).not.toContain('class="mt-3 text-sm text-over"');
 		expect(
 			await count(
 				"SELECT COUNT(*) AS n FROM categories WHERE name = 'Pet Care'",
 			),
 		).toBe(0);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM transactions WHERE id = ${chewy} AND category_id IS NULL AND category_suggestion_id = ${suggestion}`,
+			),
+		).toBe(1);
+		expect(
+			await count(
+				`SELECT COUNT(*) AS n FROM category_suggestions WHERE id = ${suggestion} AND status = 'pending' AND decided_at IS NULL`,
+			),
+		).toBe(1);
 	});
 
 	it("says it changed when Create comes for a suggestion already answered, and draws no card", async () => {
