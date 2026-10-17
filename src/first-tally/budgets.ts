@@ -169,11 +169,15 @@ export function budgetChangedWords(name: string): string {
 
 /**
  * The reply to an answer for a category that isn't the first one asked: the page moved on, so nothing is saved and the
- * first question is asked again. It is not budgetChangedWords, since no suggestion changed. It is also the reply to a form
- * drawn in another household month, which writes nothing.
+ * first question is asked again. It is not budgetChangedWords, since no suggestion changed.
  */
 export function budgetsMovedOnWords(): string {
 	return "Nothing saved. The categories changed since the page drew, so the next one is asked below.";
+}
+
+/** The reply to an answer from a form drawn in another household month: nothing saved, and the question is asked again for this month. */
+export function budgetsMonthChangedWords(): string {
+	return "Nothing saved. The month changed since the page drew, so the question is asked again below.";
 }
 
 /**

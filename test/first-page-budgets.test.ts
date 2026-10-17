@@ -1259,9 +1259,9 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 	const DRAWN = `${CUR}-${daysInMonth(CUR)}T16:00:00Z`;
 	const NEXT = monthsBefore(CUR, -1);
 	const POSTED = `${NEXT}-01T16:00:00Z`;
-	const MOVED_ON = {
+	const MONTH_CHANGED = {
 		message:
-			"Nothing saved. The categories changed since the page drew, so the next one is asked below.",
+			"Nothing saved. The month changed since the page drew, so the question is asked again below.",
 		type: "info",
 	};
 
@@ -1329,8 +1329,8 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			const fields = [...postedBy(drawn.html, answer), ...extra];
 			const res = await post("/first-page/budgets", fields);
 			expect(res.res.status).toBe(200);
-			expect(trigger(res.res).toast).toEqual(MOVED_ON);
-			expect(trigger(res.res).announce).toBe(MOVED_ON.message);
+			expect(trigger(res.res).toast).toEqual(MONTH_CHANGED);
+			expect(trigger(res.res).announce).toBe(MONTH_CHANGED.message);
 			await nothingWritten();
 			for (const form of budgetFormsOf(res.html))
 				expect(countOf(form, `name="month" value="${NEXT}"`)).toBe(1);
@@ -1352,7 +1352,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 		},
 	);
 
-	it("a last-month Another amount with a refused amount gets the moved-on reply at 200, with no error and nothing typed", async () => {
+	it("a last-month Another amount with a refused amount gets the month-changed reply at 200, with no error and nothing typed", async () => {
 		vi.setSystemTime(new Date(DRAWN));
 		const drawn = await get("/first-page?budgets=one");
 		vi.setSystemTime(new Date(POSTED));
@@ -1361,13 +1361,13 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			["budget", "lots"],
 		]);
 		expect(res.res.status).toBe(200);
-		expect(trigger(res.res).toast).toEqual(MOVED_ON);
+		expect(trigger(res.res).toast).toEqual(MONTH_CHANGED);
 		expect(res.html).not.toContain('role="alert"');
 		expect(res.html).not.toContain('value="lots"');
 		await nothingWritten();
 	});
 
-	it("a post with an empty month, from a tab drawn before the month was on its forms, writes nothing and gets the moved-on reply", async () => {
+	it("a post with an empty month, from a tab drawn before the month was on its forms, writes nothing and gets the month-changed reply", async () => {
 		vi.setSystemTime(new Date(POSTED));
 		const res = await post("/first-page/budgets", [
 			["category", String(A)],
@@ -1375,11 +1375,11 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			["month", ""],
 			["answer", "yes"],
 		]);
-		expect(trigger(res.res).toast).toEqual(MOVED_ON);
+		expect(trigger(res.res).toast).toEqual(MONTH_CHANGED);
 		await nothingWritten();
 	});
 
-	it("a post with no month at all, from a tab drawn before the month was on its forms, writes nothing and gets the moved-on reply", async () => {
+	it("a post with no month at all, from a tab drawn before the month was on its forms, writes nothing and gets the month-changed reply", async () => {
 		vi.setSystemTime(new Date(POSTED));
 		const res = await app(db).fetch("/first-page/budgets", {
 			method: "POST",
@@ -1394,7 +1394,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 				["answer", "yes"],
 			]).toString(),
 		});
-		expect(trigger(res).toast).toEqual(MOVED_ON);
+		expect(trigger(res).toast).toEqual(MONTH_CHANGED);
 		await nothingWritten();
 	});
 });

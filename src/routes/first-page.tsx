@@ -7,6 +7,7 @@ import { keepReply, keepShown } from "../first-tally/bills";
 import {
 	type BudgetAsk,
 	budgetChangedWords,
+	budgetsMonthChangedWords,
 	budgetsMovedOnWords,
 	keepShownBudgets,
 	keptBudgetsWords,
@@ -254,7 +255,7 @@ firstPage.post("/first-page/budgets", async (c) => {
 	if (!step || step.done) return stale(c, before);
 	// A form drawn in another household month writes nothing, since its amounts and 'From <month> on' were for that month.
 	if (form.get("month") !== step.month)
-		return answered(c, before, budgetsMovedOnWords(), NO_MOTION, "info");
+		return answered(c, before, budgetsMonthChangedWords(), NO_MOTION, "info");
 	if (answer === "all") {
 		const suggested = step.asks.filter((ask) => ask.suggestion !== null);
 		const values = form
