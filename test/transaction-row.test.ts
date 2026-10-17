@@ -999,6 +999,19 @@ describe("a TransactionRow that opens", () => {
 			expect(html).not.toContain("row-opens");
 		}
 	});
+
+	it("its check reads only its own checkbox (a named group), so a bare group ancestor like the off-page disclosure can't show it (#701)", async () => {
+		const html = await SelectableTransactionRow({
+			row: base,
+			today: "2026-09-22",
+		}).toString();
+		expect(html).toMatch(/<label class="group\/select /);
+		expect(html).toContain(
+			'<span class="hidden group-has-[:checked]/select:flex">',
+		);
+		expect(html).not.toContain("group-has-[:checked]:");
+		expect(html).not.toMatch(/<label class="group /);
+	});
 });
 
 describe("Chip", () => {
