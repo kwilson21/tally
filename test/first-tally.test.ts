@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { BillSuggestion } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
+	type BudgetAnswer,
 	forgetPayDeposits,
 	isSetUp,
-	keepBudgetAnswer,
+	keepBudgetStatement,
 	keepNightCounts,
 	markStroke,
 	type PayAnswerRecord,
@@ -42,6 +43,10 @@ const payBatch = (merchant: string, record: PayAnswerRecord) =>
 		),
 		payAnswerStatement(db, merchant, record),
 	]);
+
+/** One budgets answer, written the way the route writes it: its record statement, run on its own. */
+const keepBudget = (categoryId: number, answer: BudgetAnswer) =>
+	keepBudgetStatement(db, categoryId, answer).run();
 
 /** A found charge as Possible bills lists it, with a category, for keepBills. */
 const found = (
@@ -95,9 +100,9 @@ describe("first_tally record", () => {
 	});
 
 	it("keeps each budgets answer as it was given, a skip included, and the newest answer for a category", async () => {
-		await keepBudgetAnswer(db, 3, { kind: "suggested", cents: 65000 });
-		await keepBudgetAnswer(db, 4, { kind: "skipped", cents: null });
-		await keepBudgetAnswer(db, 4, { kind: "another", cents: 12000 });
+		await keepBudget(3, { kind: "suggested", cents: 65000 });
+		await keepBudget(4, { kind: "skipped", cents: null });
+		await keepBudget(4, { kind: "another", cents: 12000 });
 		expect((await readFirstTally(db))?.budgets).toEqual({
 			"3": { kind: "suggested", cents: 65000 },
 			"4": { kind: "another", cents: 12000 },
@@ -123,8 +128,8 @@ describe("first_tally record", () => {
 
 	it("keeps every field when the writes overlap, since each one changes only its own part", async () => {
 		await Promise.all([
-			keepBudgetAnswer(db, 3, { kind: "suggested", cents: 65000 }),
-			keepBudgetAnswer(db, 4, { kind: "skipped", cents: null }),
+			keepBudget(3, { kind: "suggested", cents: 65000 }),
+			keepBudget(4, { kind: "skipped", cents: null }),
 			markStroke(db, "bank", "2026-10-13"),
 			keepNightCounts(db, { brought: 3, needYou: 1 }),
 		]);

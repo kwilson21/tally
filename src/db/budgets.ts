@@ -28,6 +28,24 @@ export const THREE_MONTH_AVERAGE_SQL = `WITH monthly AS (
 				COALESCE(MAX(CASE WHEN month = ?3 THEN cents END), 0) AS third
 			FROM monthly`;
 
+/**
+ * The statement that sets a category's budget from `month` on, replacing one already set for that month. The first
+ * page's budget answers write their own guarded statement (budgetWriteStatement, first-tally/first-page.ts).
+ */
+export function setBudgetStatement(
+	db: D1Database,
+	categoryId: number,
+	cents: number,
+	month: string,
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)
+			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
+		)
+		.bind(categoryId, month, cents);
+}
+
 /** Sets a category's budget from `month` on, replacing one already set for that month. */
 export async function setBudget(
 	db: D1Database,
@@ -35,13 +53,7 @@ export async function setBudget(
 	cents: number,
 	month: string,
 ): Promise<void> {
-	await db
-		.prepare(
-			`INSERT INTO budget_amounts (category_id, effective_month, amount_cents) VALUES (?, ?, ?)
-			ON CONFLICT (category_id, effective_month) DO UPDATE SET amount_cents = excluded.amount_cents`,
-		)
-		.bind(categoryId, month, cents)
-		.run();
+	await setBudgetStatement(db, categoryId, cents, month).run();
 }
 
 /**

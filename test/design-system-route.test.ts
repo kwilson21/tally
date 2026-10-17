@@ -228,6 +228,47 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
+	it("shows the budgets question with Another amount opened and no error, its field holding the suggestion (#590)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the next state's (the page's "done" section closes before the question).
+		const section =
+			html
+				.split('id="first-page-budgets-amount"')[1]
+				?.split('id="first-page-budgets-error"')[0] ?? "";
+		expect(section).toMatch(/<details[^>]*\sopen\b/);
+		expect(section).toContain("Save this budget");
+		expect(section).toContain('value="650.00"');
+		expect(section).not.toContain('role="alert"');
+	});
+
+	it("shows the budgets step's nothing-to-ask state with its line above the ruled-off total (#590)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the no-categories state's (the line sits above the double rule).
+		const section =
+			html
+				.split('id="first-page-budgets-nothing-asked"')[1]
+				?.split('id="first-page-budgets-no-categories"')[0] ?? "";
+		expect(section).toContain("Every category already has a budget.");
+		expect(section).not.toContain("No categories to budget yet.");
+		expect(
+			section.indexOf("Every category already has a budget."),
+		).toBeLessThan(section.indexOf("border-double"));
+	});
+
+	it("shows the budgets step's no-categories state with its own line above the ruled-off total (#692)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the answered state's (the line sits above the double rule).
+		const section =
+			html
+				.split('id="first-page-budgets-no-categories"')[1]
+				?.split('id="first-page-budgets-done"')[0] ?? "";
+		expect(section).toContain("No categories to budget yet.");
+		expect(section).not.toContain("Every category already has a budget.");
+		expect(section.indexOf("No categories to budget yet.")).toBeLessThan(
+			section.indexOf("border-double"),
+		);
+	});
+
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
 		const { html } = await get("/design-system");
 		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";

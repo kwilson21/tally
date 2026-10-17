@@ -2,7 +2,7 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { addressOf } from "../address";
 import { billTotalsForRows } from "../bills/totals";
-import { statusSentence, summarizeMonth } from "../budget";
+import { statusSentence } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { jevCallLimit } from "../categorize-pending";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
@@ -22,14 +22,14 @@ import {
 	INCLUDED,
 } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
-import { firstCountedMonth, loadMonth, monthResults } from "../db/month";
-import { plansSetAsideCents } from "../db/planned-expenses";
+import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { readSetup } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
+import { readMonthSummary } from "../month-summary";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
@@ -48,7 +48,6 @@ import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
-import { loadBillRows } from "./bills";
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env };
@@ -150,9 +149,9 @@ async function renderHome(
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
 	const current = month === currentMonth;
-	const data = await loadMonth(c.env.DB, month);
-	const billData = current ? await loadBillRows(c.env.DB, today) : null;
-	const activeBills = billData?.rows.filter((bill) => bill.active) ?? [];
+	// The month's numbers and Safe to spend, as readMonthSummary reads them (the first page's ruled-off total reads it too).
+	const { data, billData, activeBills, billTotals, summary } =
+		await readMonthSummary(c.env.DB, today, month);
 	// The list is the bills due soon, judged by the same totals Bills uses. Safe to spend sets aside only this month's
 	// of them (decision 123), which billTotals.setAsideCents gives.
 	const dueBills = current
@@ -160,19 +159,6 @@ async function renderHome(
 				(bill) => billTotalsForRows(month, [bill]).soonCount > 0,
 			)
 		: [];
-	const billTotals = current ? billTotalsForRows(month, activeBills) : null;
-	const unpaidBillsCents = billTotals?.setAsideCents ?? 0;
-	// Planned expenses set aside this month (decision 74): only the current month's Safe to spend sets them aside.
-	const unpaidPlansCents = current
-		? await plansSetAsideCents(c.env.DB, month)
-		: 0;
-	const summary = summarizeMonth({
-		month,
-		...data,
-		unpaidDueBillsCents: unpaidBillsCents,
-		savingsGoalCents: data.savingsGoalCents,
-		unpaidPlansCents,
-	});
 	const looks = new Map(data.categories.map((cat) => [cat.id, cat]));
 	const storedFirstMonth =
 		firstMonthOption ?? (await firstCountedMonth(c.env.DB));

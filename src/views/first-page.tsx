@@ -4,21 +4,41 @@
 // (FirstPage, SmallNotebook, LedgerLine), so the drawing and the app can't drift.
 import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
-import { shortDay } from "../dates";
+import { shortDay, shortMonthName } from "../dates";
 import {
 	billsMutedLine,
 	keepHeading,
 	shownBillValue,
 	waitingWords,
 } from "../first-tally/bills";
+import {
+	askHeading,
+	type BudgetAsk,
+	bankLine,
+	keepAllHeading,
+	keepAllLine,
+	type NothingAsked,
+	needsTail,
+	nothingAskedLine,
+	RULED_STATUS,
+	shownBudgetValue,
+	suggestionNote,
+	yesLabel,
+} from "../first-tally/budgets";
 import type {
 	BankHead,
+	BudgetsStep,
 	FirstPageModel,
 	PayMerchant,
 } from "../first-tally/first-page";
-import { paySentence, shownPayValues } from "../first-tally/pay";
+import { dollarsWords, paySentence, shownPayValues } from "../first-tally/pay";
+import { centsToAmount } from "../money";
 import { Button } from "./button";
+import { FoldedRow } from "./folded-row";
+import { safeToSpendText } from "./home-top";
+import { MoneyInput } from "./money-input";
 import { Notebook } from "./notebook";
+import { WhyLink } from "./why-link";
 
 /** One line of a ledger: an answer (ink) or what the bank says (muted). */
 export type LedgerLine = { text: string; ink?: boolean };
@@ -286,6 +306,338 @@ export function FirstPageDone({
 	);
 }
 
+/** A refused amount in the budgets question: the words under its field, and what was typed (kept in the field). */
+export type BudgetError = { text: string; typed: string };
+
+/** One suggestion's row in the keep all list: its name, the months it came from, and the amount Tally suggests. */
+function SuggestionRow({ ask }: { ask: BudgetAsk }) {
+	const months = ask.months
+		.map(
+			(month) =>
+				`${shortMonthName(month.month.slice(0, 7))} ${dollarsWords(month.spentCents)}`,
+		)
+		.join(" · ");
+	return (
+		<li class="flex items-center justify-between gap-3 py-1">
+			<div class="min-w-0">
+				<p class="text-base">{ask.name}</p>
+				<p class="text-sm text-muted">{months}</p>
+			</div>
+			<span class="shrink-0 rounded-full border border-dashed border-muted px-3 py-0.5 text-sm text-muted">
+				{dollarsWords(ask.suggestion?.amountCents ?? 0)}
+				<span class="sr-only">Suggested, not kept yet</span>
+			</span>
+		</li>
+	);
+}
+
+/**
+ * The Needs a category line under the budgets question: a link to the Needs category filter across all months (the same
+ * count the line shows, needsCategoryCount "all"), then the count and the mean.
+ */
+function NeedsCategory({
+	needs,
+}: {
+	needs: { count: number; meanCents: number | null };
+}) {
+	return (
+		<p class="mt-3 text-sm text-muted">
+			<a href="/transactions?uncategorized=1&month=all" class="text-accent">
+				Needs a category
+			</a>
+			{needsTail(needs.count, needs.meanCents)}
+		</p>
+	);
+}
+
+/** The attributes of a budgets form: each posts an answer to the budgets step and swaps the page, as the other questions do. */
+const budgetForm = {
+	method: "post",
+	action: "/first-page/budgets",
+	"hx-post": "/first-page/budgets",
+	"hx-target": "#first-page",
+	"hx-swap": "outerHTML",
+} as const;
+
+/**
+ * The keep all question (spec §8.8, #590): the suggestions as a list (the first five; the rest folded), the total in the
+ * question, the one tap "Keep all N", and a quiet "One at a time" that asks each category in turn. Each budgets form carries
+ * the month it showed.
+ */
+function KeepAllBudgets({
+	asks,
+	month,
+	needs,
+	focus,
+}: {
+	asks: BudgetAsk[];
+	month: string;
+	needs: { count: number; meanCents: number | null } | null;
+	focus: boolean;
+}) {
+	const total = asks.reduce(
+		(sum, ask) => sum + (ask.suggestion?.amountCents ?? 0),
+		0,
+	);
+	const shown = asks.slice(0, 5);
+	const rest = asks.slice(5);
+	const restTotal = rest.reduce(
+		(sum, ask) => sum + (ask.suggestion?.amountCents ?? 0),
+		0,
+	);
+	return (
+		<section>
+			<p class="mt-6 text-base text-muted">
+				{keepAllLine(asks[0]?.months ?? [])}
+			</p>
+			<ul class="mt-3 divide-y divide-rule border-y border-rule">
+				{shown.map((ask) => (
+					<SuggestionRow ask={ask} />
+				))}
+			</ul>
+			{rest.length > 0 && (
+				<FoldedRow
+					label={`${rest.length} more · ${dollarsWords(restTotal)} a month`}
+				>
+					<ul class="divide-y divide-rule">
+						{rest.map((ask) => (
+							<SuggestionRow ask={ask} />
+						))}
+					</ul>
+				</FoldedRow>
+			)}
+			<h2
+				tabindex={-1}
+				autofocus={focus}
+				class="mt-3 font-serif text-xl font-semibold"
+			>
+				{keepAllHeading(asks.length, total)}
+			</h2>
+			<form {...budgetForm}>
+				{asks.map((ask) => (
+					<input type="hidden" name="keep" value={shownBudgetValue(ask)} />
+				))}
+				<input type="hidden" name="month" value={month} />
+				<div class="mt-3">
+					<Button type="submit" name="answer" value="all" class="w-full">
+						Keep all {asks.length}
+					</Button>
+				</div>
+			</form>
+			<div class="mt-1">
+				<Button kind="text" href="/first-page?budgets=one">
+					One at a time
+				</Button>
+			</div>
+			<p class="mt-3 text-sm text-muted">
+				Once set, a budget can be changed on Home but not removed.
+			</p>
+			{needs && <NeedsCategory needs={needs} />}
+		</section>
+	);
+}
+
+/**
+ * One category's question, one at a time (spec §8.8, #590): what the bank shows it spent, its suggestion in a dashed tag
+ * and the question, "Yes, $650" and Another amount (the real MoneyInput, opened in place), or, with no suggestion, the
+ * blank MoneyInput; then a quiet Skip this one. A refused amount keeps the question with its error in the field.
+ * Each answer is a form of its own, so Enter in the amount field presses only its Save: a form's default button is its
+ * first submit button, and the Yes form has no amount in it (#590). `amountOpen` draws Another amount open, as a
+ * refused amount does, for the catalog's picture. Each budgets form carries the month it showed.
+ */
+function OneBudget({
+	ask,
+	month,
+	needs,
+	focus,
+	error,
+	amountOpen,
+}: {
+	ask: BudgetAsk;
+	month: string;
+	needs: { count: number; meanCents: number | null } | null;
+	focus: boolean;
+	error: BudgetError | null;
+	amountOpen: boolean;
+}) {
+	const suggestion = ask.suggestion;
+	const typed =
+		error?.typed ?? (suggestion ? centsToAmount(suggestion.amountCents) : "");
+	const amount = (
+		<MoneyInput
+			id={`budget-${ask.id}`}
+			name="budget"
+			label={`${ask.name}, a month`}
+			value={typed}
+			error={error?.text}
+			autofocus={error !== null}
+		/>
+	);
+	const category = (
+		<input type="hidden" name="category" value={String(ask.id)} />
+	);
+	const shownMonth = <input type="hidden" name="month" value={month} />;
+	return (
+		<section>
+			<p class="mt-6 text-base text-muted">{bankLine(ask)}</p>
+			{suggestion && (
+				<p class="mt-2">
+					<span class="inline-flex items-center rounded-full border border-dashed border-muted px-3 py-1 text-sm text-muted">
+						{dollarsWords(suggestion.amountCents)} a month
+						<span class="sr-only">Suggested, not kept yet</span>
+					</span>
+				</p>
+			)}
+			<h2
+				tabindex={-1}
+				autofocus={focus && error === null}
+				class="mt-3 font-serif text-2xl font-semibold"
+			>
+				{askHeading(ask)}
+			</h2>
+			{suggestion && (
+				<p class="mt-2 text-sm text-muted">{suggestionNote(month)}</p>
+			)}
+			{suggestion ? (
+				<>
+					<form {...budgetForm}>
+						{category}
+						{shownMonth}
+						<input
+							type="hidden"
+							name="shown"
+							value={String(suggestion.amountCents)}
+						/>
+						<div class="mt-4">
+							<Button type="submit" name="answer" value="yes" class="w-full">
+								{yesLabel(suggestion.amountCents)}
+							</Button>
+						</div>
+					</form>
+					<details class="mt-3" open={error !== null || amountOpen}>
+						<summary class="inline-flex min-h-11 cursor-pointer items-center text-ink">
+							Another amount
+						</summary>
+						<form {...budgetForm}>
+							{category}
+							{shownMonth}
+							<div class="mt-3">{amount}</div>
+							<div class="mt-3">
+								<Button
+									type="submit"
+									name="answer"
+									value="another"
+									class="w-full"
+								>
+									Save this budget
+								</Button>
+							</div>
+						</form>
+					</details>
+				</>
+			) : (
+				<form {...budgetForm}>
+					{category}
+					{shownMonth}
+					<div class="mt-4">{amount}</div>
+					<div class="mt-3">
+						<Button type="submit" name="answer" value="another" class="w-full">
+							Save this budget
+						</Button>
+					</div>
+				</form>
+			)}
+			<form {...budgetForm}>
+				{category}
+				{shownMonth}
+				<div class="mt-1">
+					<Button kind="text" type="submit" name="answer" value="skip">
+						Skip this one
+					</Button>
+				</div>
+			</form>
+			{needs && <NeedsCategory needs={needs} />}
+		</section>
+	);
+}
+
+/**
+ * The budgets step's question: the keep all question while it is the one asked, else the next category. Nothing is asked
+ * once the budgets stroke is drawn (RuledTotal takes its place).
+ */
+export function BudgetsQuestion({
+	step,
+	focus,
+	error,
+	amountOpen = false,
+}: {
+	step: Extract<BudgetsStep, { done: false }>;
+	focus: boolean;
+	error: BudgetError | null;
+	/** Another amount drawn open with no error: the catalog's picture of it (a page opens it on a refused amount). */
+	amountOpen?: boolean;
+}) {
+	if (step.keepAllOpen)
+		return (
+			<KeepAllBudgets
+				asks={step.asks.filter((ask) => ask.suggestion !== null)}
+				month={step.month}
+				needs={step.needs}
+				focus={focus}
+			/>
+		);
+	const next = step.asks[0];
+	if (!next) return null;
+	return (
+		<OneBudget
+			ask={next}
+			month={step.month}
+			needs={step.needs}
+			focus={focus}
+			error={error}
+			amountOpen={amountOpen}
+		/>
+	);
+}
+
+/**
+ * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
+ * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says why above the rule.
+ */
+export function RuledTotal({
+	safeCents,
+	focus,
+	nothingAsked,
+}: {
+	safeCents: number;
+	focus: boolean;
+	/** Why the step asked nothing, which the muted line above the rule says; null when it says nothing. */
+	nothingAsked: NothingAsked | null;
+}) {
+	return (
+		<section>
+			{nothingAsked !== null && (
+				<p class="mt-6 text-base text-muted">
+					{nothingAskedLine(nothingAsked)}
+				</p>
+			)}
+			<div class="mt-6 border-b-[3px] border-double border-ink" />
+			<p tabindex={-1} autofocus={focus} class="mt-4 text-lg text-muted">
+				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+			</p>
+			<p class="font-serif text-6xl font-semibold tracking-tight">
+				{safeToSpendText(safeCents)}
+			</p>
+			<p class="mt-3 font-serif text-lg italic">{RULED_STATUS}</p>
+			<div class="mt-6">
+				<Button href="/" class="w-full">
+					Go to Home
+				</Button>
+			</div>
+		</section>
+	);
+}
+
 /**
  * The page's body, from its root `#first-page` down: the heading, the ledger, and the one question that is next. `focus`
  * is true on a swap, so the next question's heading takes focus (toast.js focuses [autofocus] after a swap).
@@ -295,6 +647,8 @@ export function FirstPageBody({
 	focus,
 	motion = NO_MOTION,
 	id = "first-page",
+	budgetError = null,
+	budgetAmountOpen = false,
 }: {
 	model: FirstPageModel;
 	focus: boolean;
@@ -302,8 +656,15 @@ export function FirstPageBody({
 	motion?: Motion;
 	/** The root's id: the page's is `first-page`, which the swap targets; the catalog's states name their own. */
 	id?: string;
+	/** A refused "another amount" in the budgets question: its words and what was typed, so the field keeps it. */
+	budgetError?: BudgetError | null;
+	/** Another amount drawn open with no error, for the catalog's picture of it (the page never sends this). */
+	budgetAmountOpen?: boolean;
 }) {
 	const billsAnswered = model.ledger.some((line) => line.id === "bills");
+	const budgets = model.budgets;
+	// Pay and bills come before the budgets question, so only the last question on the page takes the focus.
+	const stepFocus = focus && budgets === null;
 	return (
 		<div id={id}>
 			<FirstPage
@@ -327,13 +688,28 @@ export function FirstPageBody({
 							<BillsQuestion
 								keep={model.keep}
 								waiting={model.waiting}
-								focus={focus}
+								focus={stepFocus}
 							/>
 						) : billsAnswered ? (
-							<FirstPageDone waiting={model.waiting.length} focus={focus} />
+							<FirstPageDone waiting={model.waiting.length} focus={stepFocus} />
 						) : (
-							<BillsEmpty waiting={model.waiting.length} focus={focus} />
+							<BillsEmpty waiting={model.waiting.length} focus={stepFocus} />
 						)}
+						{budgets &&
+							(budgets.done ? (
+								<RuledTotal
+									safeCents={budgets.safeCents}
+									focus={focus}
+									nothingAsked={budgets.nothingAsked}
+								/>
+							) : (
+								<BudgetsQuestion
+									step={budgets}
+									focus={focus}
+									error={budgetError ?? null}
+									amountOpen={budgetAmountOpen}
+								/>
+							))}
 					</>
 				)}
 			</FirstPage>

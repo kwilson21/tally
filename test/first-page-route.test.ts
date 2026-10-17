@@ -1182,8 +1182,9 @@ describe("the answer's motion", () => {
 	it("marks every line the reply drew, when an empty step after the answer is done too", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const { html } = await answerAsShown("yes", true);
-		// Pay is the last merchant, and no bill charge is found: the pay and the bills strokes are drawn together.
-		expect(html.match(/first-stroke-new/g)).toHaveLength(2);
+		// Pay is the last merchant, and no bill charge is found: the pay and the bills strokes are drawn together. The
+		// household's categories are budgeted already, so the budgets step has nothing to ask and draws its stroke too (#590).
+		expect(html.match(/first-stroke-new/g)).toHaveLength(3);
 		expect(html).toMatch(
 			/<line x1="53" y1="38" x2="53" y2="60" class="stroke-ink first-stroke-new"/,
 		);

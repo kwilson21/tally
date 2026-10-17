@@ -8,6 +8,7 @@ import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
+import type { BudgetAsk } from "../first-tally/budgets";
 import type { BankHead, FirstPageModel } from "../first-tally/first-page";
 import {
 	type SetupPhase,
@@ -7537,6 +7538,46 @@ const FIRST_WEEK_GYM: BillSuggestion = {
 	chargeCount: 2,
 };
 
+/** The budgets step's sample categories (P125 E, #590): two with spending, and one with none. */
+const FIRST_WEEK_MONTHS = [
+	{ month: "2026-08", spentCents: 61000 },
+	{ month: "2026-09", spentCents: 67400 },
+];
+const FIRST_WEEK_GROCERIES: BudgetAsk = {
+	id: 1,
+	name: "Groceries",
+	months: FIRST_WEEK_MONTHS,
+	suggestion: { amountCents: 65000, months: FIRST_WEEK_MONTHS },
+};
+const FIRST_WEEK_EATING_OUT_MONTHS = [
+	{ month: "2026-08", spentCents: 9000 },
+	{ month: "2026-09", spentCents: 11000 },
+];
+const FIRST_WEEK_EATING_OUT: BudgetAsk = {
+	id: 2,
+	name: "Eating out",
+	months: FIRST_WEEK_EATING_OUT_MONTHS,
+	suggestion: { amountCents: 10000, months: FIRST_WEEK_EATING_OUT_MONTHS },
+};
+const FIRST_WEEK_GAS: BudgetAsk = {
+	id: 3,
+	name: "Gas",
+	months: [
+		{ month: "2026-08", spentCents: 0 },
+		{ month: "2026-09", spentCents: 0 },
+	],
+	suggestion: null,
+};
+const FIRST_WEEK_NEEDS = { count: 86, meanCents: 32000 };
+const FIRST_WEEK_BILLS_ENTRY = {
+	id: "bills",
+	text: "Bills · 2 kept, about $27 a month",
+};
+const FIRST_WEEK_BUDGETS_LEDGER = {
+	id: "budgets",
+	text: "Budgets · 2 kept, $750 a month",
+};
+
 function FirstWeekGroup() {
 	const page = (over: Partial<FirstPageModel>): FirstPageModel => ({
 		drawn: 1,
@@ -7546,6 +7587,7 @@ function FirstWeekGroup() {
 		pay: [FIRST_WEEK_PAY],
 		keep: [],
 		waiting: [],
+		budgets: null,
 		...over,
 	});
 	return (
@@ -7659,6 +7701,177 @@ function FirstWeekGroup() {
 				</State>
 				<State label="Bills with nothing to keep in one tap">
 					<BillsEmpty waiting={1} focus={false} />
+				</State>
+			</Specimen>
+			<Specimen
+				id="first-page-budgets"
+				title="BudgetsQuestion, RuledTotal"
+				tier="interactive"
+				components={["BudgetsQuestion", "RuledTotal"]}
+				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask says why above that rule: every category already budgeted on Home, or no categories to budget yet."
+			>
+				<State label="Keep all: the suggestions as a list, the total in the question, and One at a time">
+					<FirstPageBody
+						id="first-page-budgets-keep-all"
+						model={page({
+							drawn: 3,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								firstDate: "2026-08-01",
+								month: "2026-10",
+								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_EATING_OUT],
+								keepAllOpen: true,
+								needs: FIRST_WEEK_NEEDS,
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="One at a time: Groceries' suggestion, with Yes, Another amount and Skip this one; the ledger holds the budgets kept so far">
+					<FirstPageBody
+						id="first-page-budgets-one"
+						model={page({
+							drawn: 3,
+							ledger: [
+								FIRST_WEEK_PAY_ENTRY,
+								FIRST_WEEK_BILLS_ENTRY,
+								FIRST_WEEK_BUDGETS_LEDGER,
+							],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								firstDate: "2026-08-01",
+								month: "2026-10",
+								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_GAS],
+								keepAllOpen: false,
+								needs: FIRST_WEEK_NEEDS,
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Another amount, opened: the field holds Tally's suggestion, and Save this budget keeps it as typed">
+					<FirstPageBody
+						id="first-page-budgets-amount"
+						model={page({
+							drawn: 3,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								firstDate: "2026-08-01",
+								month: "2026-10",
+								asks: [FIRST_WEEK_GROCERIES],
+								keepAllOpen: false,
+								needs: null,
+							},
+						})}
+						focus={false}
+						budgetAmountOpen
+					/>
+				</State>
+				<State label="Another amount, refused: the field keeps what was typed, with its error under it, and takes focus">
+					{/* The field takes focus when it's refused, so the sample is a picture here, inert like Picture's. */}
+					<div inert>
+						<FirstPageBody
+							id="first-page-budgets-error"
+							model={page({
+								drawn: 3,
+								ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+								payAnswered: true,
+								pay: [],
+								budgets: {
+									done: false,
+									firstDate: "2026-08-01",
+									month: "2026-10",
+									asks: [FIRST_WEEK_GROCERIES],
+									keepAllOpen: false,
+									needs: null,
+								},
+							})}
+							focus={false}
+							budgetError={{
+								text: "Enter a dollar amount, like 250 or 250.50.",
+								typed: "lots",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="No history: a category with no spending asks for a blank amount, and says so">
+					<FirstPageBody
+						id="first-page-budgets-no-history"
+						model={page({
+							drawn: 3,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								firstDate: "2026-08-01",
+								month: "2026-10",
+								asks: [FIRST_WEEK_GAS],
+								keepAllOpen: false,
+								needs: null,
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Nothing to ask: every category already has a budget, so the step says so above the ruled-off Safe to spend">
+					<FirstPageBody
+						id="first-page-budgets-nothing-asked"
+						model={page({
+							drawn: 4,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: true,
+								safeCents: 70000,
+								nothingAsked: "every-category-budgeted",
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Nothing to ask: no categories to budget, so the step says so above the ruled-off Safe to spend">
+					<FirstPageBody
+						id="first-page-budgets-no-categories"
+						model={page({
+							drawn: 4,
+							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: true,
+								safeCents: 70000,
+								nothingAsked: "no-categories",
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Every category answered: the month's Safe to spend is ruled off under a double rule, with the Four line">
+					<FirstPageBody
+						id="first-page-budgets-done"
+						model={page({
+							drawn: 4,
+							ledger: [
+								FIRST_WEEK_PAY_ENTRY,
+								FIRST_WEEK_BILLS_ENTRY,
+								FIRST_WEEK_BUDGETS_LEDGER,
+							],
+							payAnswered: true,
+							pay: [],
+							budgets: { done: true, safeCents: 70000, nothingAsked: null },
+						})}
+						focus={false}
+					/>
 				</State>
 			</Specimen>
 		</Group>
