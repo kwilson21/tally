@@ -3193,26 +3193,48 @@ describe("Bills' status headings and inactive bills", () => {
 	});
 	afterEach(() => vi.useRealTimers());
 
+	// One Why? per page, beside Bills' summary sentence (decision 121): no section heading carries one, Planned included.
 	it.each([
-		["Overdue", "overdue"],
-		["Due in the next 7 days", "due in the next 7 days"],
-		["Upcoming", "upcoming"],
-		["Paid this month", "paid this month"],
-	])(
-		"gives the %s heading a Why? to the Bills section of How Tally works, beside it and not inside it",
-		async (heading, topic) => {
-			const html = await (
-				await exports.default.fetch("http://tally.test/bills")
-			).text();
-			const group = groupUnder(html, heading);
-			expect(group).toContain(`aria-label="Why? ${topic}"`);
-			expect(group).toMatch(
-				new RegExp(
-					`>${heading}</h2><span aria-hidden="true">·</span><a href="/how-it-works#bills" aria-label="Why\\? ${topic}"`,
-				),
-			);
-		},
-	);
+		"Overdue",
+		"Due in the next 7 days",
+		"Upcoming",
+		"Paid this month",
+		"Planned",
+	])("gives the %s heading no Why? (decision 121)", async (heading) => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const group = groupUnder(html, heading).split("</section>")[0] ?? "";
+		expect(group).toContain(`>${heading}</h2>`);
+		expect(group).not.toContain('aria-label="Why?');
+	});
+
+	it("puts Bills' one Why? beside the summary sentence, and no other on the page", async () => {
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		const summary =
+			html.match(/<p class="mt-2 flex flex-wrap[^"]*">[\s\S]*?<\/p>/)?.[0] ??
+			"";
+		expect(summary).toMatch(
+			/bills? to pay soon, \$[\d,.]+ in all<span aria-hidden="true" class="not-italic">·<\/span><span class="font-sans not-italic"><a href="\/how-it-works#bills" aria-label="Why\? bills to pay soon"/,
+		);
+		expect(
+			html.split('href="/how-it-works#bills" aria-label="Why?').length - 1,
+		).toBe(1);
+	});
+
+	it("draws no summary and no Why? on a page with no bills", async () => {
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM bills"),
+		]);
+		const html = await (
+			await exports.default.fetch("http://tally.test/bills")
+		).text();
+		expect(html).not.toContain("to pay soon");
+		expect(html).not.toContain('aria-label="Why?');
+	});
 
 	it("shows an inactive bill's schedule under Inactive, in place of a due date", async () => {
 		const html = await (
