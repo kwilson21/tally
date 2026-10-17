@@ -1701,6 +1701,76 @@ for (const width of [320, 390]) {
 	);
 }
 step("How Tally works doesn't scroll sideways at 320px or 390px");
+// A bank sign-in email switch flip and a Remove sent back to back (#674). Both answer into #household-emails, so the Remove
+// waits for the flip's reply. The page must end on the flipped switch with the address gone, and a reload must show the same.
+await page.setViewportSize({ width: 390, height: 844 });
+writeLocalD1(
+	"INSERT INTO household_members (email) VALUES ('dana@example.com'), ('riley@example.com')",
+);
+await goto(`${BASE}/settings/household`, { waitUntil: "networkidle" });
+await page
+	.locator("#household-emails summary", { hasText: "Who gets them" })
+	.click();
+const bankEmailsBefore = await page.locator("#bank-sign-in-emails").isChecked();
+// The first POST is the flip. It is held, so the Remove is sent while the flip is still waiting for its reply.
+let emailPosts = 0;
+const holdFirstEmailPost = (route) =>
+	++emailPosts === 1 ? holdReply(route, 1500) : route.continue();
+const shownEmails = () =>
+	page.evaluate(() => ({
+		on: document.getElementById("bank-sign-in-emails").checked,
+		emails: [
+			...document.querySelectorAll("#household-emails-body details li > span"),
+		].map((span) => span.textContent.trim()),
+	}));
+const assertShownEmails = (shown, on) => {
+	assert.equal(shown.on, on, "the switch shows the flipped value");
+	assert(
+		!shown.emails.includes("dana@example.com"),
+		"the removed address is gone",
+	);
+	assert(
+		shown.emails.includes("riley@example.com"),
+		"the other address remains",
+	);
+};
+await page.route("**/settings/bank-sign-in-emails", holdFirstEmailPost);
+await page.locator("#bank-sign-in-emails-label").click();
+const removeReply = page.waitForResponse(
+	(response) =>
+		response.request().method() === "POST" &&
+		response.url().includes("/settings/bank-sign-in-emails") &&
+		(response.request().postData() ?? "").includes("remove="),
+);
+await page
+	.getByRole("button", { name: "Remove dana@example.com", exact: true })
+	.click();
+await settleReplies();
+assert.equal((await removeReply).status(), 200);
+// The Remove's answer swaps in last, and its toast says so; only then is the page's state read.
+await page.locator("#toasts").getByText("Removed address").waitFor();
+assertShownEmails(await shownEmails(), !bankEmailsBefore);
+await goto(`${BASE}/settings/household`, { waitUntil: "networkidle" });
+assertShownEmails(await shownEmails(), !bankEmailsBefore);
+// Back to the switch's state the step started with, and the household's test addresses removed.
+await page.unroute("**/settings/bank-sign-in-emails", holdFirstEmailPost);
+const flippedBack = page.waitForResponse(
+	(response) =>
+		response.request().method() === "POST" &&
+		response.url().includes("/settings/bank-sign-in-emails"),
+);
+await page.locator("#bank-sign-in-emails-label").click();
+assert.equal((await flippedBack).status(), 200);
+await page.waitForFunction(
+	(on) => document.getElementById("bank-sign-in-emails")?.checked === on,
+	bankEmailsBefore,
+);
+writeLocalD1(
+	"DELETE FROM household_members WHERE email IN ('dana@example.com', 'riley@example.com')",
+);
+step(
+	"a switch flip then a Remove both persist, and a reload shows the same page",
+);
 // #600: the Budget diagram's boxes are the direct svg children of its labelled row. At 390px the column is 350px, so three
 // boxes fill the first line and "= Safe to spend" wraps below Budget; at 1280px all of them share one line. Each width
 // loads the page again, so what is measured doesn't depend on the loop above.

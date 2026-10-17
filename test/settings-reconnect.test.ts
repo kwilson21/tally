@@ -653,8 +653,8 @@ describe("bank sign-in reminder Settings", () => {
 		expect(await readBankSignInEmails(env.DB)).toBe(false);
 	});
 
-	// A flip and a Remove now send separate requests, so both can be in flight: each one's answer must hold up whatever
-	// order they land in. The route tests run them in sequence; the markup test covers the separate scopes.
+	// A flip and a Remove share one queue on #household-emails, so each is answered in the order it was sent. The route
+	// tests run them in sequence; the markup test covers the shared queue, and the e2e sends them while a reply is pending.
 	it("a switch save then a Remove leave the switch On and the address gone", async () => {
 		await noteHouseholdMember(env.DB, "dana@example.com", 100);
 		await noteHouseholdMember(env.DB, "riley@example.com", 100);
