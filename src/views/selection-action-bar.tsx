@@ -11,6 +11,17 @@ import { Icon } from "./icons";
 export const MAX_SELECTED = 100;
 /** Over the limit the bar says so in brick; both actions wait, and nothing is trimmed. */
 export const TOO_MANY = `Select ${MAX_SELECTED} or fewer transactions.`;
+/** The most rows one whole-set selection unticks: keeps the address a safe size (#423). */
+export const MAX_UNTICKED = 100;
+/** Over the untick limit, after Select all on the whole set: filter first, since the address holds every untick (#423). */
+export const TOO_MANY_UNTICKED = `Untick ${MAX_UNTICKED} or fewer. To leave out more, filter the list first.`;
+
+/** The words for a selection over a limit, or undefined: the ticks first, then the unticks from the whole set (#423). */
+export function limitWords(selection: Selection): string | undefined {
+	if (selection.ticks.length > MAX_SELECTED) return TOO_MANY;
+	if (selection.unticked.length > MAX_UNTICKED) return TOO_MANY_UNTICKED;
+	return undefined;
+}
 
 /**
  * The id of the Select all link, whichever link the bar draws (the page's or the whole set's). A count reply that
@@ -376,22 +387,23 @@ export function SelectedCount({
  * so a count can draw or remove the words out of band.
  */
 export function SelectionLimit({
-	count,
+	selection,
 	oob = false,
 }: {
-	count: number;
+	selection: Selection;
 	oob?: boolean;
 }) {
+	const limit = limitWords(selection);
 	return (
 		<div
 			id="selection-limit"
 			class="empty:hidden"
 			hx-swap-oob={oob ? "outerHTML" : undefined}
 		>
-			{count > MAX_SELECTED && (
+			{limit && (
 				<p role="alert" class="flex items-center gap-1 text-sm text-over">
 					<Icon name="alert" class="size-4 shrink-0" />
-					{TOO_MANY}
+					{limit}
 				</p>
 			)}
 		</div>
@@ -533,7 +545,7 @@ export function SelectionActionBar({
 					words={words}
 				/>
 			</div>
-			<SelectionLimit count={selection.ticks.length} />
+			<SelectionLimit selection={selection} />
 			<NotOnPage
 				count={notOnPage}
 				rows={rows}
