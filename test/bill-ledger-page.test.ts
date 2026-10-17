@@ -109,7 +109,7 @@ describe("a bill's page as a quiet ledger of months (#604)", () => {
 	it("says each month inside the fold reads Link a payment in muted words, not terracotta", async () => {
 		const html = await page();
 		expect(html).not.toContain('text-accent">Link a payment');
-		expect(html).toContain('text-sm text-muted">Link a payment');
+		expect(html).toContain('text-sm tabular-nums text-muted">Link a payment');
 	});
 
 	it("words each open month with today's status, in muted type, and uses no filled status pill", async () => {

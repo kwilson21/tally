@@ -179,7 +179,7 @@ export function ProgressRow({
 						) : (
 							<>
 								<span class="text-lg">{name}</span>
-								<span class="ml-auto text-right text-lg">
+								<span class="ml-auto text-right text-lg tabular-nums">
 									{whole(spentCents)} of {whole(budgetCents)}
 									{nearLimit && <span class="sr-only">, nearly spent</span>}
 								</span>

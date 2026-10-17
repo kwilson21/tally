@@ -54,9 +54,18 @@ export function MerchantRules({
 	focusHeading?: boolean;
 	error?: string;
 }) {
-	const count = search
-		? `${rules.length} merchants matching “${search}”`
-		: `${total} merchants, A to Z`;
+	// The number is its own tabular span; the words around it are normal text (#676, decision 128).
+	const countLine = search ? (
+		<>
+			<span class="tabular-nums">{rules.length}</span>
+			{` merchants matching “${search}”`}
+		</>
+	) : (
+		<>
+			<span class="tabular-nums">{total}</span>
+			{" merchants, A to Z"}
+		</>
+	);
 	return (
 		<section id={id} aria-labelledby={`${id}-title`} class="lg:max-w-3xl">
 			{head}
@@ -110,7 +119,7 @@ export function MerchantRules({
 					aria-live="polite"
 					aria-atomic="true"
 				>
-					{count}
+					{countLine}
 				</p>
 				<div id={`${id}-results`}>
 					{rules.length === 0 ? (

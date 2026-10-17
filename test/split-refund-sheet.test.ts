@@ -206,16 +206,22 @@ describe("the split sheet asks which part a linked refund goes with", () => {
 			[`refund_${FIRST}`, "1"],
 		]);
 		expect(res.status).toBe(200);
+		// Only the amount is tabular; the category name and the dot are normal text (#676, decision 128).
 		expect(html).toMatch(
 			new RegExp(
-				`<span id="refund-${token}-${FIRST}-part-0"[^>]*hx-swap-oob="true"[^>]*>Kids · \\$60\\.00</span>`,
+				`<span id="refund-${token}-${FIRST}-part-0"[^>]*hx-swap-oob="true"[^>]*>Kids · <span class="tabular-nums">\\$60\\.00</span></span>`,
 			),
 		);
 		expect(html).toMatch(
 			new RegExp(
-				`<span id="refund-${token}-${SECOND}-part-1"[^>]*hx-swap-oob="true"[^>]*>Household · \\$40\\.00</span>`,
+				`<span id="refund-${token}-${SECOND}-part-1"[^>]*hx-swap-oob="true"[^>]*>Household · <span class="tabular-nums">\\$40\\.00</span></span>`,
 			),
 		);
+		const outerLabel = html.match(
+			new RegExp(`<span id="refund-${token}-${FIRST}-part-0"[^>]*>`),
+		)?.[0];
+		expect(outerLabel).toBeDefined();
+		expect(outerLabel).not.toContain("tabular-nums");
 		expect(html).not.toContain('id="refund-choices"');
 		expect(html).not.toContain('type="radio"');
 		expect(html).not.toContain(`name="refund_${FIRST}"`);

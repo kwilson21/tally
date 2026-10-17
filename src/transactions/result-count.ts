@@ -37,25 +37,26 @@ function matchNote(q: string, matched: SearchMatch): string {
 	return matched.category ? " (category)" : "";
 }
 
-export function resultCount(
+/**
+ * The count in three parts (#676, decision 128): `figures` is only the numbers, the part that lines up in
+ * tabular figures; `before` and `after` are the words around them. Joined, they are the count's text.
+ */
+export function resultCountParts(
 	{ total, first, shown, pages }: Page,
 	f: Filters,
 	categoryName: string | null,
 	today: string,
 	accountName: string | null = null,
 	matched: SearchMatch = NO_MATCH,
-): string {
+): { before: string; figures: string; after: string } {
+	const paged = pages > 1;
 	const noun = `${TYPE_WORDS[f.show]}transaction${total === 1 ? "" : "s"}`;
-	const lead =
-		pages > 1
-			? `Showing ${first}–${first + shown - 1} of ${total} ${noun}`
-			: `${total} ${noun}`;
 	const month = f.month === "all" ? "all months" : monthLabel(f.month, today);
 	// The category and the account come first, then the month: "in Groceries, Chase Card ••9921, October".
 	const named = [categoryName, accountName].filter(Boolean);
 	const where = `in ${[...named, month].join(", ")}`;
-	const text = [
-		lead,
+	const rest = [
+		noun,
 		f.uncategorized && "needing a category",
 		f.q && `matching "${f.q}"${f.raw ? "" : matchNote(f.q, matched)}`,
 		where,
@@ -63,5 +64,29 @@ export function resultCount(
 		.filter(Boolean)
 		.join(" ");
 	// The demo's raw view says so at the end, so switching views changes the text and is announced.
-	return f.raw ? `${text}, as the bank sends them` : text;
+	const tail = f.raw ? `${rest}, as the bank sends them` : rest;
+	return {
+		before: paged ? "Showing " : "",
+		figures: paged ? `${first}–${first + shown - 1} of ${total}` : `${total}`,
+		after: ` ${tail}`,
+	};
+}
+
+export function resultCount(
+	page: Page,
+	f: Filters,
+	categoryName: string | null,
+	today: string,
+	accountName: string | null = null,
+	matched: SearchMatch = NO_MATCH,
+): string {
+	const { before, figures, after } = resultCountParts(
+		page,
+		f,
+		categoryName,
+		today,
+		accountName,
+		matched,
+	);
+	return before + figures + after;
 }

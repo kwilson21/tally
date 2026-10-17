@@ -23,9 +23,10 @@ export function LikelyAdd({
 				Add to {categoryName}
 			</Button>
 		);
+	// The count is its own tabular span; the words around it are normal text (#676, decision 128).
 	return (
 		<Button type="submit">
-			Add {count} to {categoryName}
+			Add <span class="tabular-nums">{count}</span> to {categoryName}
 		</Button>
 	);
 }

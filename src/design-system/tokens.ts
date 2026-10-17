@@ -193,13 +193,14 @@ export const TYPE_ROLES = [
 	},
 	{
 		role: "Headline amount",
-		classes: "font-serif text-6xl font-semibold tracking-tight lg:text-7xl",
+		classes:
+			"font-serif text-6xl font-semibold tabular-nums tracking-tight lg:text-7xl",
 		sample: "$1,284",
 	},
 	{
 		role: "Headline amount, 9 or more characters",
 		classes:
-			"font-serif text-6xl font-semibold tracking-tight lg:text-7xl max-sm:text-5xl",
+			"font-serif text-6xl font-semibold tabular-nums tracking-tight lg:text-7xl max-sm:text-5xl",
 		sample: "$1,000,000",
 	},
 	{
@@ -219,6 +220,11 @@ export const TYPE_ROLES = [
 	},
 	{
 		role: "Body / rows",
+		classes: "text-lg",
+		sample: "Time zone and bank sign-in emails",
+	},
+	{
+		role: "Amounts, dates and counts",
 		classes: "text-lg tabular-nums",
 		sample: "Groceries  $412 of $600",
 	},

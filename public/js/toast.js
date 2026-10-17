@@ -197,6 +197,14 @@
 			if (endedMarks.has(row))
 				row.classList.remove("row-saved", "row-saved-undo");
 	});
+	// An Undo's back address: this page's own, without keys. A toast made while the keys sheet is open has ?keys in its
+	// address, and an Undo pressed after the sheet closed would push that address with no sheet open (#704).
+	function backAddress() {
+		const query = new URLSearchParams(location.search);
+		query.delete("keys");
+		const search = query.toString();
+		return location.pathname + (search ? `?${search}` : "");
+	}
 	// Both events are heard on document. htmx sends each HX-Trigger event from its request's element, or from
 	// document once that element has left the page: an Undo form whose toast ends during the restore's own
 	// triggers (#397). plaid-link.js sends announce from the body, and it bubbles up to document.
@@ -252,7 +260,7 @@
 			form.setAttribute("hx-swap", "outerHTML");
 			for (const [name, value] of Object.entries({
 				token: undo,
-				back: location.pathname + location.search,
+				back: backAddress(),
 			})) {
 				const input = document.createElement("input");
 				input.type = "hidden";

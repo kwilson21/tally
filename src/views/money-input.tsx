@@ -41,7 +41,7 @@ const cent =
 	"flex w-11 flex-1 items-center justify-center text-muted hover:bg-band hover:text-ink disabled:opacity-40";
 /** A chip under the field. Exported so a drawing of a chip the app doesn't have yet can't drift. */
 export const moneyChip =
-	"group inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted tabular-nums hover:text-ink aria-pressed:text-ink";
+	"group inline-flex min-h-11 items-center gap-1 rounded-full bg-band px-3 text-sm font-medium text-muted hover:text-ink aria-pressed:text-ink";
 
 /** A chip's check: its slot is always in the chip, hidden until the chip is pressed, so a chip never changes width. */
 const Check = () => (
@@ -174,7 +174,7 @@ export function MoneyInput({
 					class={moneyChip}
 				>
 					<Check />
-					<span data-roundup-label>
+					<span data-roundup-label class="tabular-nums">
 						Round to{" "}
 						{hasCents ? formatCents(roundedCents, { wholeDollars: true }) : ""}
 					</span>

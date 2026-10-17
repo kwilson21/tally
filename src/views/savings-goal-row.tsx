@@ -29,7 +29,7 @@ export function SavingsGoalRow({
 				<div class="flex flex-wrap items-baseline justify-between gap-x-3">
 					<span class="text-lg">Savings</span>
 					{amountCents !== null && amountCents > 0 ? (
-						<span class="ml-auto text-right text-lg">
+						<span class="ml-auto text-right text-lg tabular-nums">
 							{formatCents(amountCents, {
 								wholeDollars: amountCents % 100 === 0,
 							})}{" "}

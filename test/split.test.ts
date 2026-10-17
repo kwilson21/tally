@@ -36,20 +36,35 @@ describe("split validation", () => {
 
 describe("split status", () => {
 	it("uses words as well as the check icon state", () => {
-		expect(splitStatus(1000, ["4.00", ""])).toEqual({
+		// The live amount is its own part, in tabular figures; the words around it stay in normal ones (#676, decision 128).
+		const left = splitStatus(1000, ["4.00", ""]);
+		expect(left).toEqual({
 			kind: "left",
 			cents: 600,
-			text: "$6.00 left to assign",
+			before: "",
+			figures: "$6.00",
+			after: " left to assign",
 		});
-		expect(splitStatus(1000, ["7", "4"])).toEqual({
+		expect(left.before + left.figures + left.after).toBe(
+			"$6.00 left to assign",
+		);
+		const over = splitStatus(1000, ["7", "4"]);
+		expect(over).toEqual({
 			kind: "over",
 			cents: 100,
-			text: "$1.00 over",
+			before: "",
+			figures: "$1.00",
+			after: " over",
 		});
-		expect(splitStatus(-1000, ["4", "6"])).toEqual({
+		expect(over.before + over.figures + over.after).toBe("$1.00 over");
+		const done = splitStatus(-1000, ["4", "6"]);
+		expect(done).toEqual({
 			kind: "done",
 			cents: 1000,
-			text: "Adds up to $10.00",
+			before: "Adds up to ",
+			figures: "$10.00",
+			after: "",
 		});
+		expect(done.before + done.figures + done.after).toBe("Adds up to $10.00");
 	});
 });

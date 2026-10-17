@@ -191,7 +191,9 @@ describe("the split form with Tally's guessed parts (#233)", () => {
 		expect(html).toMatch(GUESS_LINE);
 		expect(html).toMatch(/id="part-category-0"[^>]*border-dashed/);
 		expect(html).toMatch(/id="part-category-1"[^>]*border-dashed/);
-		expect(html).toContain("$214.36 left to assign");
+		expect(html).toContain(
+			'<span class="tabular-nums">$214.36</span> left to assign',
+		);
 	});
 
 	it("draws no guess on a trip that doesn't look mixed, and never fills an amount from Jev", async () => {
@@ -353,7 +355,9 @@ describe("the live line redraws the parts as a person types or picks (#233)", ()
 		);
 		// The untouched part is still Tally's guess, so the reply doesn't draw it.
 		expect(html).not.toContain('id="part-category-1"');
-		expect(html).toContain("$70.00 left to assign");
+		expect(html).toContain(
+			'<span class="tabular-nums">$70.00</span> left to assign',
+		);
 	});
 
 	it("turns a part solid once its category is changed, keeping the picked category selected", async () => {

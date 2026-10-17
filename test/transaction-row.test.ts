@@ -29,7 +29,7 @@ const captionLine = (html: string) => {
 		'<span class="flex min-w-0 items-center gap-2 leading-6">',
 	);
 	const end = html.indexOf(
-		'</span></span><span class="shrink-0 text-lg">',
+		'</span></span><span class="shrink-0 text-lg tabular-nums">',
 		start,
 	);
 	return html
@@ -960,6 +960,13 @@ describe("TransactionRow", () => {
 		expect(html).not.toContain("Maybe Groceries");
 	});
 
+	it("sets its amount in tabular figures, so a column of amounts lines up (decision 128)", async () => {
+		const html = await TransactionRow({ row: base }).toString();
+		expect(html).toMatch(
+			/<span class="shrink-0 text-lg tabular-nums">[^<]+<\/span>/,
+		);
+	});
+
 	it("is a plain row without a link otherwise", async () => {
 		const html = await TransactionRow({ row: base }).toString();
 		expect(html).not.toContain("<a ");
@@ -974,7 +981,7 @@ describe("a TransactionRow that opens", () => {
 			href: "/transactions/7",
 		}).toString();
 		expect(html).toMatch(
-			/<span class="shrink-0 text-lg">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
+			/<span class="shrink-0 text-lg tabular-nums">[^<]*<\/span><svg class="size-5 shrink-0 -ml-3 -mr-2 text-muted group-hover\/row:text-ink" viewBox="0 0 24 24"[^>]*aria-hidden="true" data-icon="chevron-right"/,
 		);
 	});
 
@@ -998,6 +1005,19 @@ describe("a TransactionRow that opens", () => {
 			expect(html).not.toContain("chevron-right");
 			expect(html).not.toContain("row-opens");
 		}
+	});
+
+	it("its check reads only its own checkbox (a named group), so a bare group ancestor like the off-page disclosure can't show it (#701)", async () => {
+		const html = await SelectableTransactionRow({
+			row: base,
+			today: "2026-09-22",
+		}).toString();
+		expect(html).toMatch(/<label class="group\/select /);
+		expect(html).toContain(
+			'<span class="hidden group-has-[:checked]/select:flex">',
+		);
+		expect(html).not.toContain("group-has-[:checked]:");
+		expect(html).not.toMatch(/<label class="group /);
 	});
 });
 

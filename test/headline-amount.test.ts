@@ -94,6 +94,12 @@ describe("HomeTop Safe to spend", () => {
 			"max-sm",
 		);
 	});
+
+	it("sets the amount in tabular figures, as the headline role does (decision 128)", async () => {
+		expect(headlineClassOf(await top(100000000), "$1,000,000")).toContain(
+			"tabular-nums",
+		);
+	});
 });
 
 describe("MonthEnd result", () => {
@@ -133,6 +139,12 @@ describe("MonthEnd result", () => {
 	it("keeps the base size for a result that shows 8 characters", async () => {
 		expect(classOf(await end(99999900), "$999,999")).not.toContain("max-sm");
 	});
+
+	it("sets the result in tabular figures at every size (decision 128)", async () => {
+		expect(classOf(await end(100000000), "$1,000,000")).toContain(
+			"tabular-nums",
+		);
+	});
 });
 
 describe("AccountsTop Net worth", () => {
@@ -147,6 +159,13 @@ describe("AccountsTop Net worth", () => {
 			await AccountsTop({ netWorthCents: -100000000, history: noDays }),
 		);
 		expect(classOf(down, "-$1,000,000")).toContain(RULE);
+	});
+
+	it("sets the net worth in tabular figures (decision 128)", async () => {
+		const html = String(
+			await AccountsTop({ netWorthCents: 100000000, history: noDays }),
+		);
+		expect(classOf(html, "$1,000,000")).toContain("tabular-nums");
 	});
 
 	it("keeps the base size for a net worth of 8 characters", async () => {
@@ -167,5 +186,12 @@ describe("TrendsTop Spent so far", () => {
 			await TrendsTop({ month: "October", spent: "$999,999" }),
 		);
 		expect(classOf(small, "$999,999")).not.toContain("max-sm");
+	});
+
+	it("sets the spent amount in tabular figures (decision 128)", async () => {
+		const big = String(
+			await TrendsTop({ month: "October", spent: "$1,000,000" }),
+		);
+		expect(classOf(big, "$1,000,000")).toContain("tabular-nums");
 	});
 });

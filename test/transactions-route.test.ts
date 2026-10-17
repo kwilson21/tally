@@ -29,9 +29,11 @@ async function post(path: string, fields: Record<string, string>) {
 const rowCount = (html: string) =>
 	(html.match(/<li data-transaction=/g) ?? []).length;
 
-/** The aria-live result count's text. */
+/** The aria-live result count's text, without the tags of its tabular figures (#676). */
 const countOf = (html: string) =>
-	html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1];
+	html
+		.match(/<p id="result-count"[^>]*>([\s\S]*?)<\/p>/)?.[1]
+		?.replace(/<[^>]+>/g, "");
 
 describe("saving a transaction whose category matches its merchant rule", () => {
 	it("sets a newly checked rule and recategorizes eligible transactions", async () => {
@@ -255,8 +257,9 @@ describe("GET /transactions", () => {
 		);
 		expect(html).toMatch(/<label[^>]*for="month"/);
 		expect(html).toMatch(/<label[^>]*for="category"/);
+		// The count's figure is tabular, and its words ("Needs category") sit outside the span (decision 128, #676).
 		expect(html).toMatch(
-			/Needs category \(<span id="needs-count">10<\/span>\)/,
+			/Needs category \(<span class="tabular-nums" id="needs-count">10<\/span>\)/,
 		);
 		expect(html).toMatch(/Excluded/);
 		// Day headings ("Today, Sep 22" or "Sep 21"); which day is newest depends on the seed and today.
@@ -321,11 +324,31 @@ describe("GET /transactions", () => {
 	it("shows the result count in a stable live region that htmx updates in place", async () => {
 		const { html } = await get("/transactions?uncategorized=1");
 		expect(html).toMatch(
-			/<p id="result-count" aria-live="polite"[^>]*>10 transactions needing a category in [A-Z][a-z]+<\/p>/,
+			/<p id="result-count" aria-live="polite"[^>]*><span class="tabular-nums">10<\/span> transactions needing a category in [A-Z][a-z]+<\/p>/,
 		);
 		expect(html).toContain(
 			'hx-select-oob="#needs-count:innerHTML, #result-count:innerHTML, #organize-link:innerHTML, #add-cash:outerHTML, #select-toggle:outerHTML,',
 		);
+	});
+
+	it("keeps a hyphenated search's words out of the count's tabular figures, which hold only the number (#676)", async () => {
+		const { html } = await get("/transactions?q=sign-in");
+		const open = html.match(/<p id="result-count"[^>]*>/)?.[0] ?? "";
+		expect(open).not.toContain("tabular-nums");
+		const inner =
+			html.match(/<p id="result-count"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
+		const n = inner.match(/<span class="tabular-nums">(\d+)<\/span>/)?.[1];
+		expect(n).toBeDefined();
+		expect(countOf(html)?.replaceAll("&quot;", '"')).toMatch(
+			new RegExp(`^${n} transactions matching "sign-in" in [A-Z][a-z]+$`),
+		);
+		expect(inner).toContain(
+			`<span class="tabular-nums">${n}</span> transactions matching &quot;sign-in&quot;`,
+		);
+		const tabular = [
+			...inner.matchAll(/<span class="tabular-nums">([^<]*)<\/span>/g),
+		].map((m) => m[1]);
+		expect(tabular).toEqual([n]);
 	});
 
 	it("names the filters in the count, so two filters with the same count still read differently (#56)", async () => {
@@ -336,12 +359,10 @@ describe("GET /transactions", () => {
 			.map(Number) as [number, number];
 		const last =
 			m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
-		const countText = (html: string) =>
-			html.match(/<p id="result-count"[^>]*>([^<]+)<\/p>/)?.[1];
-		const a = countText(
+		const a = countOf(
 			(await get(`/transactions?month=${last}&category=1`)).html,
 		);
-		const b = countText(
+		const b = countOf(
 			(await get(`/transactions?month=${last}&category=3`)).html,
 		);
 		expect(a).toMatch(/^3 transactions in Groceries, /);
@@ -353,8 +374,8 @@ describe("GET /transactions", () => {
 			"UPDATE categories SET archived = 1 WHERE id = 1",
 		).run();
 		const { html } = await get("/transactions?month=all&category=1");
-		expect(html).toMatch(
-			/<p id="result-count"[^>]*>\d+ transactions in Groceries, all months<\/p>/,
+		expect(countOf(html)).toMatch(
+			/^\d+ transactions in Groceries, all months$/,
 		);
 	});
 
@@ -381,7 +402,7 @@ describe("GET /transactions", () => {
 			await resetDemo(env.DB, "2026-10-20");
 			const first = (await get("/transactions")).html;
 			expect(first).toMatch(
-				/<p id="result-count"[^>]*>Showing 1–25 of 34 transactions in [A-Z][a-z]+<\/p>/,
+				/<p id="result-count"[^>]*>Showing <span class="tabular-nums">1–25 of 34<\/span> transactions in [A-Z][a-z]+<\/p>/,
 			);
 			expect(first).toMatch(/<nav aria-label="Pages"/);
 			expect(first).toContain("Page 1 of 2");
@@ -392,7 +413,9 @@ describe("GET /transactions", () => {
 
 			const second = (await get("/transactions?page=2")).html;
 			expect(rowCount(second)).toBe(9);
-			expect(second).toMatch(/Showing 26–34 of 34 transactions/);
+			expect(second).toMatch(
+				/Showing <span class="tabular-nums">26–34 of 34<\/span> transactions/,
+			);
 			expect(second).toMatch(
 				/<a[^>]*href="\/transactions"[^>]*rel="prev"[^>]*>Newer<\/a>/,
 			);
