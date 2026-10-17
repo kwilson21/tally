@@ -1,7 +1,10 @@
 import type { Child } from "hono/jsx";
 import { Icon } from "./icons";
 
-/** One of the four transaction details: its source stays visible and an unkept guess is dashed. */
+/**
+ * One of the four transaction details: its source stays visible and an unkept guess is dashed. An empty detail has no
+ * source (`source` undefined), so no source line is drawn.
+ */
 export function DetailRow({
 	id,
 	label,
@@ -14,7 +17,7 @@ export function DetailRow({
 	id: string;
 	label: string;
 	value: string | null;
-	source: "guess" | "bank" | "person";
+	source?: "guess" | "bank" | "person";
 	guessed?: boolean;
 	open?: boolean;
 	children?: Child;
@@ -29,13 +32,15 @@ export function DetailRow({
 			<summary class="flex min-h-11 cursor-pointer list-none items-center gap-4 py-2 [&::-webkit-details-marker]:hidden">
 				<span class="min-w-0 flex-1">
 					<span class="block font-medium">{label}</span>
-					<span class="block text-sm text-muted">
-						{source === "guess"
-							? "Tally's guess"
-							: source === "bank"
-								? "From your bank"
-								: "Your choice"}
-					</span>
+					{source && (
+						<span class="block text-sm text-muted">
+							{source === "guess"
+								? "Tally's guess"
+								: source === "bank"
+									? "From your bank"
+									: "Your choice"}
+						</span>
+					)}
 				</span>
 				<span
 					class={`ml-auto flex min-w-0 items-center gap-1 text-right ${guessed ? "underline decoration-muted decoration-dashed underline-offset-4" : ""}`}
