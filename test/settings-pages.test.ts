@@ -158,11 +158,12 @@ describe("Switches save when flipped", () => {
 		const switchTag = block.match(/<input[^>]*role="switch"[^>]*>/)?.[0] ?? "";
 		const form = block.match(/<form[^>]*>/)?.[0] ?? "";
 		expect(switchTag).toContain('hx-post="/settings/bank-sign-in-emails"');
-		// Each flip replaces the one before it, on the switch's own queue; a Remove keeps the form's default queue.
+		// A flip and a Remove share the wrapper's queue, so each answer lands in the order its request was sent. Both carry
+		// the attribute: htmx 4 doesn't inherit hx-sync. "queue all" keeps every one; replace or queue last would drop a Remove.
 		expect(switchTag).toContain('hx-trigger="change"');
-		expect(switchTag).toContain('hx-sync="replace"');
+		expect(switchTag).toContain('hx-sync="#household-emails:queue all"');
 		expect(form).toContain('hx-post="/settings/bank-sign-in-emails"');
-		expect(form).not.toContain("hx-sync");
+		expect(form).toContain('hx-sync="#household-emails:queue all"');
 		// No hx-trigger on the form: htmx's default trigger for a form is its submit, and a Remove is that submit.
 		expect(form).not.toContain("hx-trigger");
 		expect(form).toContain("data-switches-revert");

@@ -8,12 +8,13 @@ const INITIAL_LOOKS = ["bg-accent", "bg-ok", "bg-muted"];
 /**
  * The Bank sign-in emails block under Household (P107 "In Settings", decision 82, #606): the shared
  * Switch, the people it goes to as round initials, and a plain "Who gets them" disclosure that lists each
- * address with its Remove. The Switch saves when flipped: it sends its own change, on its own queue, so a second
- * flip replaces the first and a Remove never does. A Remove is the form's own submit, on the form's queue. Both
- * answers swap the body inside the stable #household-emails wrapper, which no answer replaces, so they never
- * nest, and focus goes back on the Switch. A switch whose save fails goes back to how the page drew it (the
- * form's data-switches-revert, read by toast.js). Save shows only without the script (in noscript). A Remove
- * sends its address as `remove`. The route and the catalog both render it, so they can't drift apart.
+ * address with its Remove. The Switch saves when flipped, and a Remove is the form's own submit. Both queue on
+ * #household-emails (#674), so a flip and a Remove apply in the order they were sent, and neither replaces or
+ * drops the other. Both answers swap the body inside the stable #household-emails wrapper, which no answer
+ * replaces, so they never nest, and focus goes back on the Switch. A switch whose save fails goes back to how
+ * the page drew it (the form's data-switches-revert, read by toast.js). Save shows only without the script (in
+ * noscript). A Remove sends its address as `remove`. The route and the catalog both render it, so they can't
+ * drift apart.
  */
 export function BankSignInEmails({
 	on,
@@ -48,6 +49,7 @@ export function BankSignInEmails({
 					hx-target="#household-emails"
 					hx-select="#household-emails-body"
 					hx-swap="innerHTML"
+					hx-sync="#household-emails:queue all"
 					data-switches-revert
 				>
 					{/* No hx-trigger on the form: htmx's default trigger for a form is its submit, which is the Remove. */}
@@ -59,7 +61,7 @@ export function BankSignInEmails({
 						autofocus={focus === "switch"}
 						hx-post={action}
 						hx-trigger="change"
-						hx-sync="replace"
+						hx-sync="#household-emails:queue all"
 						hx-target="#household-emails"
 						hx-select="#household-emails-body"
 						hx-swap="innerHTML"
