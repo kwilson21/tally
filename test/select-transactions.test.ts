@@ -3188,6 +3188,178 @@ describe("select several transactions", () => {
 			);
 		});
 
+		describe("past 100 rows unticked from the whole set (#423)", () => {
+			const ALL_BACK = "/transactions?month=all";
+			const WORDS_RE =
+				/<div id="selection-limit"[^>]*><p[^>]*role="alert"[^>]*>[\s\S]*?Untick 100 or fewer\. To leave out more, filter the list first\.<\/p><\/div>/;
+			/** A count's or action's request for the whole set, with these rows unticked from it. */
+			const unticking = (
+				unticked: (string | number)[],
+				extra: string[][] = [],
+			) =>
+				new URLSearchParams([
+					["back", ALL_BACK],
+					["all", "1"],
+					...extra,
+					...unticked.map((id) => ["unticked", String(id)]),
+				]);
+			const isDisabled = (html: string, id: string) =>
+				new RegExp(
+					`<button(?=[^>]*id="${id}")[^>]*\\sdisabled(?=[\\s>=])`,
+				).test(html);
+
+			it("says the words in brick once more than 100 rows are unticked, and both actions wait", async () => {
+				const ids = await addHundredOneRows();
+				const res = await request(
+					`/transactions/select/count?${unticking(ids)}`,
+				);
+				const text = await res.text();
+				expect(text).toMatch(WORDS_RE);
+				expect(isDisabled(text, "set-category-selection")).toBe(true);
+				expect(isDisabled(text, "exclude-selection")).toBe(true);
+				const replaced = new URL(
+					`http://tally.test${res.headers.get("HX-Replace-Url")}`,
+				).searchParams.get("unticked");
+				expect(replaced?.split(",")).toHaveLength(101);
+			});
+
+			it("allows exactly 100 unticked rows, with the actions on and no words", async () => {
+				const ids = await addHundredOneRows();
+				const text = await (
+					await request(
+						`/transactions/select/count?${unticking(ids.slice(0, 100))}`,
+					)
+				).text();
+				expect(text).not.toContain("Untick 100 or fewer");
+				expect(isDisabled(text, "set-category-selection")).toBe(false);
+				expect(isDisabled(text, "exclude-selection")).toBe(false);
+			});
+
+			// The address keeps every untick, so a gone row and a row the filters never match both count.
+			it.each([
+				["a row that is gone", 999999],
+				["a split parent the filters never match", 110],
+			])(
+				"counts an untick of %s, so 101 unticks show the words",
+				async (_kind, extra) => {
+					const ids = await addHundredOneRows();
+					await splitParent();
+					const text = await (
+						await request(
+							`/transactions/select/count?${unticking([...ids.slice(0, 100), extra])}`,
+						)
+					).text();
+					expect(text).toMatch(WORDS_RE);
+					expect(isDisabled(text, "set-category-selection")).toBe(true);
+				},
+			);
+
+			it("drops the words once a re-tick brings the unticks back to 100, and the actions come on", async () => {
+				const ids = await addHundredOneRows();
+				// The 101 unticks are hidden fields, and the first row is drawn and checked again, so 100 stay unticked.
+				const params = unticking(ids, [
+					["page-ids", String(ids[0])],
+					["ids", String(ids[0])],
+				]);
+				const text = await (
+					await request(`/transactions/select/count?${params}`)
+				).text();
+				expect(text).not.toContain("Untick 100 or fewer");
+				expect(isDisabled(text, "set-category-selection")).toBe(false);
+			});
+
+			it("counts a row unticked twice once, so 100 distinct unticks show no words", async () => {
+				const ids = await addHundredOneRows();
+				const text = await (
+					await request(
+						`/transactions/select/count?${unticking([...ids.slice(0, 100), ...ids.slice(0, 1)])}`,
+					)
+				).text();
+				expect(text).not.toContain("Untick 100 or fewer");
+			});
+
+			it("the whole-set link's request ticks the set again, so 101 unticks draw no words and no unticked fields", async () => {
+				const ids = await addHundredOneRows();
+				const html = await pageHtml(
+					`month=all&select=1&all=1&focus=set-category-selection&unticked=${ids.join(",")}`,
+					true,
+				);
+				expect(html).not.toContain("Untick 100 or fewer");
+				expect(html).not.toContain('name="unticked"');
+			});
+
+			it.each([
+				["/transactions/select/exclude", undefined],
+				["/transactions/select/category", undefined],
+				["/transactions/select/category/save", "1"],
+			])(
+				"refuses %s over 100 unticks in words, and changes nothing",
+				async (path, category) => {
+					const ids = await addHundredOneRows();
+					const before = await snapshot();
+					const extra = category === undefined ? [] : [["category", category]];
+					const res = await post(path, unticking(ids, extra));
+					expect(res.status).toBe(422);
+					expect(await res.text()).toMatch(
+						/role="alert"[\s\S]*?Untick 100 or fewer\. To leave out more, filter the list first\./,
+					);
+					expect(await snapshot()).toEqual(before);
+				},
+			);
+
+			it("says a refused Exclude over 100 unticks once, in the bar", async () => {
+				const ids = await addHundredOneRows();
+				const res = await post("/transactions/select/exclude", unticking(ids));
+				expect(res.status).toBe(422);
+				const html = await res.text();
+				expect(
+					html.match(
+						/Untick 100 or fewer\. To leave out more, filter the list first\./g,
+					),
+				).toHaveLength(1);
+				expect(html).toMatch(WORDS_RE);
+			});
+
+			it("on a list whose address carries 101 unticks, the words show once, and both actions wait with HX-Request only", async () => {
+				const ids = await addHundredOneRows();
+				const query = `month=all&select=1&all=1&unticked=${ids.join(",")}`;
+				const plain = await pageHtml(query);
+				expect(
+					plain.match(
+						/Untick 100 or fewer\. To leave out more, filter the list first\./g,
+					),
+				).toHaveLength(1);
+				expect(plain.match(/name="unticked"/g)).toHaveLength(101);
+				expect(isDisabled(plain, "set-category-selection")).toBe(false);
+				const htmx = await pageHtml(query, true);
+				expect(
+					htmx.match(
+						/Untick 100 or fewer\. To leave out more, filter the list first\./g,
+					),
+				).toHaveLength(1);
+				expect(htmx.match(/name="unticked"/g)).toHaveLength(101);
+				expect(isDisabled(htmx, "set-category-selection")).toBe(true);
+				expect(isDisabled(htmx, "exclude-selection")).toBe(true);
+			});
+
+			it("when 101 ticks and 101 unticks are both over, only the tick words show", async () => {
+				const ids = await addHundredOneRows();
+				const made = Array.from({ length: 101 }, (_, i) => 1000 + i);
+				const text = await (
+					await request(
+						`/transactions/select/count?${unticking(
+							ids,
+							made.map((id) => ["ids", String(id)]),
+						)}`,
+					)
+				).text();
+				expect(text.match(/Select 100 or fewer transactions\./g)).toHaveLength(
+					1,
+				);
+				expect(text).not.toContain("Untick 100 or fewer");
+			});
+		});
+
 		describe("a Select all list keeps the month on screen once the month turns over (#321)", () => {
 			beforeEach(async () => {
 				const rows: [number, string][] = [

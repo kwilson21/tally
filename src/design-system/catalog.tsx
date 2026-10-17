@@ -3756,7 +3756,7 @@ function Rows() {
 					"SelectableTransactionRow",
 					"Button",
 				]}
-				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it. The link ticks the page (“Select all 25”) until every row on the page is ticked; then it offers the whole set the filters match, named with its month (“Select all 112 in September”, P70 A, P81 A and #321). In all mode the rows unticked from the set are kept, and the link ticks them again. Set category and Exclude sit on a second line. Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350)."
+				sentence="Select mode's bar, pinned at the bottom of the list: the live count, with a text link beside it. The link ticks the page (“Select all 25”) until every row on the page is ticked; then it offers the whole set the filters match, named with its month (“Select all 112 in September”, P70 A, P81 A and #321). In all mode the rows unticked from the set are kept, and the link ticks them again. Set category and Exclude sit on a second line. Ticks that aren't on this page sit on a line of their own, closed or open, and past 100 the bar says so in brick (#350), and past 100 rows unticked from the set it says so in brick too (#423)."
 			>
 				<State label="Some rows ticked: the link offers the page">
 					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
@@ -3931,6 +3931,26 @@ function Rows() {
 							total={112}
 							words="September"
 							rows={undefined}
+							back="/transactions"
+							pageIds={SAMPLE_PAGE_IDS}
+							disabled
+						/>
+					</div>
+				</State>
+				<State label="Over 100 unticked from the whole set: the words in brick, and both actions wait">
+					<div class="max-w-xl border-t border-ink bg-paper py-3" inert>
+						<SelectionActionBar
+							count={239}
+							notOnPage={0}
+							selection={{
+								ticks: [],
+								held: [],
+								all: true,
+								unticked: [...SAMPLE_PAGE_IDS, ...OFF_PAGE_IDS],
+							}}
+							unselected={101}
+							total={340}
+							words="all months"
 							back="/transactions"
 							pageIds={SAMPLE_PAGE_IDS}
 							disabled

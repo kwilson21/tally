@@ -1439,6 +1439,15 @@ describe("GET /design-system in the demo", () => {
 			/<p[^>]*role="alert"[^>]*>[\s\S]*?Select 100 or fewer transactions\.<\/p>/,
 		);
 	});
+
+	it("shows the over-100 unticked words in brick, in the catalog (#423)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="selection-action-bar"')[1]?.split("</section>")[0] ?? "";
+		expect(section).toMatch(
+			/<p[^>]*role="alert"[^>]*>[\s\S]*?Untick 100 or fewer\. To leave out more, filter the list first\.<\/p>/,
+		);
+	});
 });
 
 describe("the ledger form (P72 A, decisions 75, 79, 80)", () => {
