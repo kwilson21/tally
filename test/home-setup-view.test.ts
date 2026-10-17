@@ -248,3 +248,34 @@ describe("HomeSetup", () => {
 		expect(html).toContain("data-link-bank-focus");
 	});
 });
+
+// The fifth day's notebook (P125 E, #586): it sits beside Safe to spend, so it follows the amount's length as Home's
+// notebook does (decision 116), and a phone under 390px never sees it over a long amount.
+describe("HomeSetup on the fifth day", () => {
+	const fifthTop = async (safeToSpendCents: number) =>
+		String(
+			await HomeSetup({
+				view: {
+					...base,
+					phase: "answered",
+					drawn: 5,
+					fifth: { brought: 3, needYou: 0 },
+				},
+				fifthDay: { safeToSpendCents, needsHref: "/transactions" },
+			}),
+		);
+
+	it("draws the notebook from 390px for a 7-character amount, as Home does", async () => {
+		const html = await fifthTop(1239800);
+		expect(html).toContain("$12,398");
+		expect(html).toMatch(
+			/<div class="hidden shrink-0 min-\[390px\]:block"><svg/,
+		);
+	});
+
+	it("waits for 640px for an 8-character amount, as Home does", async () => {
+		const html = await fifthTop(-1999900);
+		expect(html).toContain("−$19,999");
+		expect(html).toMatch(/<div class="hidden shrink-0 sm:block"><svg/);
+	});
+});

@@ -7,7 +7,7 @@ import type { NightCounts } from "../db/first-tally";
 import type { SetupView } from "../first-tally/setup";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
-import { headlineAmountClass } from "./headline-amount";
+import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
 import { safeToSpendText } from "./home-top";
 import { Notebook } from "./notebook";
 import { TallySteps } from "./tally-steps";
@@ -96,7 +96,10 @@ function FifthDay({
 						<span class="whitespace-nowrap">{amount}</span>
 					</p>
 				</div>
-				<Notebook strokes={5} ink size="size-24" />
+				{/* Hidden below 390px, and wider for longer amounts, as Home's notebook is (decision 116). */}
+				<div class={`hidden shrink-0 ${homeDrawingClass(amount)}`}>
+					<Notebook strokes={5} ink size="size-24" />
+				</div>
 			</div>
 			<p id="setup-status" class="mt-3 font-serif text-lg italic">
 				{nightSentence(night)}

@@ -1285,7 +1285,7 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		expect(html).toContain("Your bills: done");
 		expect(html).toContain("Your budgets: One tap, or one at a time");
 		expect(html).toContain(
-			"A first budget is suggested from what your bank shows",
+			"A first budget is suggested from what your bank shows a category spent in up to its last three full months",
 		);
 		expect(html).not.toContain(
 			"Tally set up your household before this page existed.",

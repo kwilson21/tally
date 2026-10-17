@@ -43,8 +43,9 @@ export function FirstWeekPart({
 			)}
 			<p class="mt-4">
 				A first budget is suggested from what your bank shows a category spent
-				in its last three full months: their average, rounded up to the next
-				$10, with the months it came from. Nothing is saved until you say yes.
+				in up to its last three full months: their average, rounded up to the
+				next $10, with the months it came from. Nothing is saved until you say
+				yes.
 			</p>
 		</>
 	);
