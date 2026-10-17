@@ -199,7 +199,7 @@ function EndBars({
 									x={x + barWidth / 2}
 									y={base - height - 6}
 									text-anchor="middle"
-									class="fill-over text-sm font-semibold"
+									class="fill-over text-sm font-semibold tabular-nums"
 									aria-label={`Over budget by ${wholeUnlessTiny(row.spentCents - row.budgetCents)}`}
 									{...(labelNeedsCap(
 										`+${wholeUnlessTiny(row.spentCents - row.budgetCents)}`,
@@ -384,7 +384,7 @@ export function MonthEnd({
 			<p class="mt-4 text-lg text-muted">{monthName} ended</p>
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<p
-					class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
+					class={`whitespace-nowrap font-serif text-6xl font-semibold tabular-nums tracking-tight ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 				>
 					{amount}
 				</p>

@@ -35,7 +35,7 @@ export function AccountRow({
 					</span>
 				)}
 			</span>
-			<span class="shrink-0 text-lg">
+			<span class="shrink-0 text-lg tabular-nums">
 				{formatCents(isLiability ? -balanceCents : balanceCents)}
 			</span>
 		</li>

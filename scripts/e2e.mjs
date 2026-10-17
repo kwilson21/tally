@@ -134,6 +134,16 @@ step("Tab keeps every focused transaction control above the phone tabs");
 await assertPhoneFocusClearsFixedControls("/settings");
 step("Tab keeps every focused Settings control above the phone tabs");
 
+// A folio is a short phrase, not a column, so its words keep normal figures (decision 128, #676).
+await goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+assert.equal(
+	await page
+		.getByText("Eastern · sign-in emails on", { exact: true })
+		.evaluate((el) => getComputedStyle(el).fontVariantNumeric),
+	"normal",
+);
+step("Settings' household folio keeps normal figures");
+
 await goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.keyboard.press("Tab");
 const skipLink = await page.locator('a[href="#main"]').boundingBox();

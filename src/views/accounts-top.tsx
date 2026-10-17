@@ -24,7 +24,7 @@ export function AccountsTop({
 			{action}
 			<p class="mt-3 text-lg text-muted">Net worth</p>
 			<p
-				class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${headlineAmountClass(netWorth)}`}
+				class={`font-serif text-6xl font-semibold tabular-nums tracking-tight lg:text-7xl ${headlineAmountClass(netWorth)}`}
 			>
 				{netWorth}
 			</p>

@@ -14,6 +14,10 @@ export function positiveCents(value: string): number | null {
 	}
 }
 
+/**
+ * The split's live sentence in three parts (#676, decision 128): `figures` is only the amount, the part that lines up in
+ * tabular figures; `before` and `after` are the words around it. Joined, they are the sentence's text.
+ */
 export function splitStatus(parentCents: number, amounts: string[]) {
 	const assigned = amounts.reduce(
 		(sum, value) => sum + (positiveCents(value) ?? 0),
@@ -24,18 +28,24 @@ export function splitStatus(parentCents: number, amounts: string[]) {
 		return {
 			kind: "done" as const,
 			cents: assigned,
-			text: `Adds up to ${formatCents(total)}`,
+			before: "Adds up to ",
+			figures: formatCents(total),
+			after: "",
 		};
 	if (assigned > total)
 		return {
 			kind: "over" as const,
 			cents: assigned - total,
-			text: `${formatCents(assigned - total)} over`,
+			before: "",
+			figures: formatCents(assigned - total),
+			after: " over",
 		};
 	return {
 		kind: "left" as const,
 		cents: total - assigned,
-		text: `${formatCents(total - assigned)} left to assign`,
+		before: "",
+		figures: formatCents(total - assigned),
+		after: " left to assign",
 	};
 }
 

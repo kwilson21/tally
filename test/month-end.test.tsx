@@ -256,6 +256,15 @@ describe("MonthEnd budget bars", () => {
 		expect(categoryRowAmount(cents).text).toBe(expected);
 	});
 
+	it.each([-2000, 0, 30])(
+		"sets category row amount %i cents in tabular figures (decision 128)",
+		(cents) => {
+			expect(categoryRowAmount(cents).className.split(" ")).toContain(
+				"tabular-nums",
+			);
+		},
+	);
+
 	it.each([
 		[2553, "$26", 1240, "+$12"],
 		[10, "$0.10", 40, "+$0.40"],
@@ -493,7 +502,7 @@ describe("MonthEnd budget bars", () => {
 				]}
 			/>,
 		);
-		expect(html).toContain('class="text-right text-lg text-ok"');
+		expect(html).toContain('class="text-right text-lg tabular-nums text-ok"');
 		expect(html).toContain(
 			'+$20<span class="sr-only"> back: refunds outweigh spending</span>',
 		);
@@ -647,6 +656,43 @@ describe("MonthEnd budget bars", () => {
 	});
 });
 
+// Decision 128: an over-budget label is a chart label with an amount, so its figures are tabular.
+describe("MonthEnd over-budget labels (decision 128)", () => {
+	it("sets each over-budget bar's amount label in tabular figures", () => {
+		const html = renderToString(
+			<MonthEnd
+				needsCategoryCents={0}
+				chartId="over"
+				monthName="September"
+				amountCents={0}
+				unbudgeted={[]}
+				rows={[
+					{
+						id: 1,
+						name: "Dining",
+						budgetCents: 10000,
+						spentCents: 11500,
+						leftCents: -1500,
+						over: true,
+					},
+					{
+						id: 2,
+						name: "Groceries",
+						budgetCents: 20000,
+						spentCents: 10000,
+						leftCents: 10000,
+						over: false,
+					},
+				]}
+			/>,
+		);
+		const label =
+			html.match(/<text\b[^>]*\bclass="([^"]*\bfill-over\b[^"]*)"/)?.[1] ?? "";
+		expect(html).toContain("+$15");
+		expect(label.split(" ")).toContain("tabular-nums");
+	});
+});
+
 // #310: a finished month's uncategorized spending is named once, at the end of Not budgeted.
 describe("PastNotBudgeted's Needs a category row", () => {
 	// The Needs a category row is the list's last item.
@@ -669,7 +715,9 @@ describe("PastNotBudgeted's Needs a category row", () => {
 		expect(row).toContain(
 			'<span class="min-w-0 flex-1 truncate text-lg">Needs a category</span>',
 		);
-		expect(row).toContain('<span class="text-right text-lg">$50</span>');
+		expect(row).toContain(
+			'<span class="text-right text-lg tabular-nums">$50</span>',
+		);
 		expect(row).not.toContain("<a");
 		expect(row).not.toContain("href");
 		expect(html.indexOf("Needs a category")).toBeGreaterThan(
@@ -685,7 +733,7 @@ describe("PastNotBudgeted's Needs a category row", () => {
 			/>,
 		);
 		expect(html).toContain(
-			'<span class="text-right text-lg text-ok">+$14<span class="sr-only"> back: refunds outweigh spending</span></span>',
+			'<span class="text-right text-lg tabular-nums text-ok">+$14<span class="sr-only"> back: refunds outweigh spending</span></span>',
 		);
 	});
 
@@ -743,6 +791,8 @@ describe("PastNotBudgeted's Needs a category row", () => {
 				needsCategory={{ spentCents: 0, count: 2 }}
 			/>,
 		);
-		expect(html).toContain('<span class="text-right text-lg">$0</span>');
+		expect(html).toContain(
+			'<span class="text-right text-lg tabular-nums">$0</span>',
+		);
 	});
 });

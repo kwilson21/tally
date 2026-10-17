@@ -14,7 +14,8 @@ const BASE = "http://tally.test";
 /** A transaction row's amount in integer cents: "$50.00" is money out, "+$15.00" money in (negative). */
 const rowCents = (row: string) => {
 	const text =
-		row.match(/shrink-0 text-lg">([^<]+)<\/span>/)?.[1]?.trim() ?? "";
+		row.match(/shrink-0 text-lg tabular-nums">([^<]+)<\/span>/)?.[1]?.trim() ??
+		"";
 	const cents = toCents(text.replace(/^\+/, ""));
 	return text.startsWith("+") ? -cents : cents;
 };
@@ -194,7 +195,8 @@ describe("GET /budget/:id", () => {
 		expect(rows).toHaveLength(9);
 		const listedCents = rows.reduce((sum, row) => {
 			const text =
-				row[2]?.match(/shrink-0 text-lg">([^<]+)<\/span>/)?.[1] ?? "";
+				row[2]?.match(/shrink-0 text-lg tabular-nums">([^<]+)<\/span>/)?.[1] ??
+				"";
 			return sum + Math.round(Number(text.replace(/[$,]/g, "")) * 100);
 		}, 0);
 		expect(listedCents).toBe(counted.reduce((sum, cents) => sum + cents, 0));

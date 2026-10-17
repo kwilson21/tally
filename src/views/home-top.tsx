@@ -67,7 +67,7 @@ export function HomeTop({
 						Safe to spend · <WhyLink section="budget" topic="safe to spend" />
 					</p>
 					<p
-						class={`font-serif text-6xl font-semibold tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
+						class={`font-serif text-6xl font-semibold tabular-nums tracking-tight lg:text-7xl ${over ? "text-over" : ""} ${headlineAmountClass(amount)}`}
 					>
 						{/* One unbreakable run, so a minus sign never sits alone above its number (#500). The class is on this span, not the <p>, so the "as of" pill stays free to wrap onto its own line. */}
 						<span class="whitespace-nowrap">{amount}</span>
