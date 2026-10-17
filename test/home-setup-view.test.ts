@@ -15,6 +15,7 @@ const base: SetupView = {
 	total: 0,
 	fifth: null,
 	answeredWaiting: null,
+	answeredFlagged: false,
 };
 const top = async (
 	view: Partial<SetupView>,

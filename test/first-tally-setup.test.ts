@@ -600,6 +600,23 @@ describe("the answered wait (P125 E, #671)", () => {
 		expect(v?.answeredWaiting).toBe("once Chase is signed in again.");
 	});
 
+	it("makes no promise beside a bank that stopped updating, and names no wait it cannot give (#671)", () => {
+		const v = view({
+			record: answered,
+			banks: [BANK],
+			flagged: [{ name: "Chase", reason: "stale", since: "2026-10-10" }],
+		});
+		expect(v?.phase).toBe("answered");
+		expect(v?.answeredWaiting).toBeNull();
+		expect(v?.answeredFlagged).toBe(true);
+	});
+
+	it("flags nothing in the answered phase while no bank is flagged", () => {
+		expect(
+			view({ record: answered, banks: [BANK, wells] })?.answeredFlagged,
+		).toBe(false);
+	});
+
 	it("names both banks that need signing in", () => {
 		const v = view({
 			record: answered,

@@ -416,6 +416,22 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 		expect(html).not.toContain("Tomorrow Tally keeps count");
 	});
 
+	it("makes no promise beside a bank that stopped updating, and keeps its Fix line (#671)", async () => {
+		await bankHistoryIn();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_synced_at = ? WHERE disconnected_at IS NULL",
+		)
+			.bind(`${daysBefore(today(), 4)} 00:00:00`)
+			.run();
+		await writeRecord(answeredOn(today()));
+		const html = decoded(await page(family));
+		expect(html).toContain(">Four.</p>");
+		expect(html).toContain("Chase stopped updating");
+		expect(html).toContain("the bank in Accounts");
+		expect(html).not.toContain("Four. Tally keeps count");
+		expect(html).not.toContain("Tomorrow Tally keeps count");
+	});
+
 	describe("Link a bank before a bank is linked (#678)", () => {
 		const unlinked = () =>
 			env.DB.prepare(
@@ -444,18 +460,25 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 			},
 		);
 
-		it("an htmx swap from a sheet draws Plaid's button, since the document is Home's", async () => {
-			await unlinked();
-			const id = await firstCategory();
-			const html = await (
-				await home.request(
-					`/budget/${id}`,
-					{ headers: { "HX-Request": "true" } },
-					plaidFamily,
-				)
-			).text();
-			expect(html).toContain("data-link-bank");
-			expect(html).not.toContain("Link a bank on Home</a>");
-		});
+		it.each([
+			["/", (_id: number) => "/"],
+			["/savings-goal", (_id: number) => "/savings-goal"],
+			["/budget/:id", (id: number) => `/budget/${id}`],
+		])(
+			"an htmx request for %s draws Plaid's button, since the document is Home's",
+			async (_, pathFor) => {
+				await unlinked();
+				const path = pathFor(await firstCategory());
+				const html = await (
+					await home.request(
+						path,
+						{ headers: { "HX-Request": "true" } },
+						plaidFamily,
+					)
+				).text();
+				expect(html).toContain("data-link-bank");
+				expect(html).not.toContain("Link a bank on Home</a>");
+			},
+		);
 	});
 });

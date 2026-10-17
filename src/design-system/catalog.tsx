@@ -773,6 +773,30 @@ function Brand() {
 						bankLine={["Chase needs signing in"]}
 					/>
 				</State>
+				<State label="Answered, a bank stopped updating: its line and Fix under a bare count, with no promise">
+					<HomeSetup
+						view={firstWeek(
+							{
+								strokes: {
+									bank: "2026-10-13",
+									pay: "2026-10-13",
+									bills: "2026-10-13",
+									budgets: "2026-10-13",
+								},
+								budgets: {},
+							},
+							"answered",
+							{
+								bankName: "Chase",
+								drawn: 4,
+								total: 362,
+								sorted: 362,
+								answeredFlagged: true,
+							},
+						)}
+						bankLine={["Chase stopped updating Oct 12"]}
+					/>
+				</State>
 				<State label="Questions answered: the ruled total, and no Band">
 					<HomeSetup
 						view={firstWeek(
@@ -807,6 +831,7 @@ const firstWeek = (
 		drawn: strokesDrawn(record),
 		fifth: null,
 		answeredWaiting: null,
+		answeredFlagged: false,
 		bankName: null,
 		bankCount: 1,
 		historyIn: true,

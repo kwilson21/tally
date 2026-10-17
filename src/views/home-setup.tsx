@@ -20,8 +20,13 @@ const count = (n: number) => n.toLocaleString("en-US");
 function statusOf(view: SetupView): string {
 	if (view.phase === "answered") {
 		// While a bank is reading its history or needs signing in, the status says what it waits for, not tomorrow (#671).
-		return view.answeredWaiting
-			? `Four. Tally keeps count ${view.answeredWaiting}`
+		if (view.answeredWaiting) {
+			return `Four. Tally keeps count ${view.answeredWaiting}`;
+		}
+		// A flagged bank's line sits under the status with its Fix, so no promise goes beside it, and nothing new is said
+		// for it: the status is only the count (#671).
+		return view.answeredFlagged
+			? "Four."
 			: "Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
 	}
 	if (view.phase === "ready") {
