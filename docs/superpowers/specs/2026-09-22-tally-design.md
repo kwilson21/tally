@@ -60,8 +60,7 @@ Also in scope: AI-suggested merchant name cleanup (accept or reject), AI-suggest
 | **Jev (TypeSafe AI)** | Picks a category and flags for each transaction, with a confidence score. |
 | **Workers AI** | Suggests a clean merchant name, which a person accepts or rejects. |
 | **Resend** | Sends bank sign-in reminder emails; Cloudflare Email Service is the best-effort fallback for destinations verified in Cloudflare Email Routing (decision 86). |
-| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. A separate 10:00 UTC run sends due reconnect reminders. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions. From #248 the 09:00 run sends what still waits to the Cloudflare Queue instead of asking about it itself (decision 132). |
-| **Cloudflare Queue** | From #248 (decision 132): holds one message per job (sort, name, note, suggest), so each batch runs in its own Worker invocation with its own limits. |
+| **Cron Triggers** | Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. A separate 10:00 UTC run sends due reconnect reminders. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions. |
 | **Cloudflare Access** | A login wall with the family's emails in front of the family app; the app has no login code of its own. |
 | **Wrangler** | The command-line tool that deploys the Worker and stores secrets. |
 
