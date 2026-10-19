@@ -2,25 +2,39 @@ import { type Context, Hono } from "hono";
 import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
-import type { BudgetAnswer, PayAnswer } from "../db/first-tally";
+import {
+	type BudgetAnswer,
+	type PayAnswer,
+	readFirstTally,
+	STROKES,
+	strokeStatement,
+} from "../db/first-tally";
+import { currentGoalSql, savingsGoalStatement } from "../db/savings-goals";
 import { keepReply, keepShown } from "../first-tally/bills";
 import {
 	type BudgetAsk,
 	budgetChangedWords,
 	budgetsMonthChangedWords,
 	budgetsMovedOnWords,
+	homeSavingsWords,
 	keepShownBudgets,
 	keptBudgetsWords,
+	SAVINGS_BLANK_WORDS,
+	SKIPPED_SAVINGS_WORDS,
 	savedBudgetWords,
+	savedSavingsWords,
 	shownBudgetIds,
 	skippedBudgetWords,
 } from "../first-tally/budgets";
 import {
 	answerPay,
+	budgetsStrokeGuard,
 	type FirstPageModel,
 	keepBills,
 	keepBudgetAnswers,
 	type PayMerchant,
+	savingsAnswerStatement,
+	savingsOpen,
 	settleAndLoad,
 } from "../first-tally/first-page";
 import { readQuestionsGate } from "../first-tally/gate";
@@ -59,7 +73,7 @@ function notOpen(c: Context<App>) {
  * 1). One answer can draw two, when the step after it has nothing to ask.
  */
 function motionOf(
-	before: FirstPageModel,
+	before: Pick<FirstPageModel, "drawn">,
 	after: FirstPageModel,
 	written: string | null,
 ): Motion {
@@ -112,6 +126,7 @@ function pageDocument(
 	model: FirstPageModel,
 	focus: boolean,
 	budgetError: BudgetError | null = null,
+	savingsError: BudgetError | null = null,
 ) {
 	return (
 		<Layout
@@ -120,7 +135,12 @@ function pageDocument(
 			currentPath="/first-page"
 		>
 			<div class="max-w-2xl">
-				<FirstPageBody model={model} focus={focus} budgetError={budgetError} />
+				<FirstPageBody
+					model={model}
+					focus={focus}
+					budgetError={budgetError}
+					savingsError={savingsError}
+				/>
 			</div>
 		</Layout>
 	);
@@ -356,6 +376,130 @@ firstPage.post("/first-page/budgets", async (c) => {
 		motionOf(before, after, "budgets"),
 	);
 });
+
+/**
+ * The savings question's answers (spec §8.8, decision 135, #721). Save it keeps the goal from this month on, with its line;
+ * Not now keeps "skipped" and writes no line. The question is checked before anything draws the page, so a goal Home set
+ * after the page drew is the answer's competitor, not a copy the page already made. Then one batch: the record's answer
+ * (it lands only while the question is open), the goal (only when that landed and no goal above $0 is set), and the
+ * budgets stroke. A goal Home set wins over either answer: the record keeps its amount, and the reply says so.
+ */
+firstPage.post("/first-page/savings", async (c) => {
+	if (c.env.DEMO === "true") return c.notFound();
+	const db = c.env.DB;
+	const today = await householdToday(db);
+	if (!(await readQuestionsGate(db, today))) return notOpen(c);
+	const form = await c.req.formData();
+	const answer = String(form.get("answer") ?? "");
+	if (answer !== "save" && answer !== "skip")
+		return c.text("Choose an answer.", 400);
+	const month = today.slice(0, 7);
+	// A question already answered gets the page as it is now, with nothing written. A category added since the page drew
+	// is caught by the write below, which then says so.
+	if (!(await savingsOpen(db))) return stale(c, await settleAndLoad(db, today));
+	// A form drawn in another household month writes nothing, as the budgets question's does.
+	if (form.get("month") !== month)
+		return answered(
+			c,
+			await settleAndLoad(db, today),
+			budgetsMonthChangedWords(),
+			NO_MOTION,
+			"info",
+		);
+	const typed = String(form.get("goal") ?? "");
+	let cents = 0;
+	if (answer === "save") {
+		// A blank amount is checked before parseBudgetAmount, which reads it as a bad amount; $0 is no goal.
+		if (typed.trim() === "")
+			return savingsRefused(c, db, today, SAVINGS_BLANK_WORDS, typed);
+		const parsed = parseBudgetAmount(typed);
+		if (!parsed.ok) return savingsRefused(c, db, today, parsed.error, typed);
+		if (parsed.cents === 0)
+			return savingsRefused(c, db, today, SAVINGS_BLANK_WORDS, typed);
+		cents = parsed.cents;
+	}
+	const record = await readFirstTally(db);
+	const drawnBefore = STROKES.filter(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	).length;
+	// The goal is written only after the answer landed (changes() > 0 is the answer's own write), and only when no goal above
+	// $0 is set, so a goal Home set keeps its amount.
+	const results = await db.batch([
+		savingsAnswerStatement(db, month, answer === "save" ? cents : "skipped"),
+		...(answer === "save"
+			? [
+					savingsGoalStatement(
+						db,
+						cents,
+						month,
+						`changes() > 0 AND ${currentGoalSql(month)} IS NULL`,
+					),
+				]
+			: []),
+		strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
+	]);
+	const after = await settleAndLoad(db, today);
+	if ((results[0]?.meta.changes ?? 0) === 0)
+		// Nothing was saved: a category added since the page drew asks its budget again, otherwise the page is as it is now.
+		return askedIds(after).size > 0
+			? answered(c, after, budgetsMovedOnWords(), NO_MOTION, "info")
+			: stale(c, after);
+	// The goal kept when it isn't the amount typed (or any amount, for Not now): Home's goal won over the answer.
+	const kept = (await readFirstTally(db))?.savings;
+	const homeGoal =
+		typeof kept === "number" && (answer === "skip" || kept !== cents)
+			? kept
+			: null;
+	const message =
+		homeGoal !== null
+			? homeSavingsWords(homeGoal)
+			: answer === "save"
+				? savedSavingsWords(cents)
+				: SKIPPED_SAVINGS_WORDS;
+	return answered(
+		c,
+		after,
+		message,
+		motionOf(
+			{ drawn: drawnBefore },
+			after,
+			answer === "save" ? "savings" : null,
+		),
+		homeGoal !== null ? "info" : "success",
+	);
+});
+
+/**
+ * A refused Save it: nothing is saved, and the question is drawn again with its error, the field holding what was typed.
+ * htmx swaps it in with a toast; without JavaScript the whole page comes back at 422, as a refused budget's does.
+ */
+async function savingsRefused(
+	c: Context<App>,
+	db: D1Database,
+	today: string,
+	error: string,
+	typed: string,
+) {
+	const model = await settleAndLoad(db, today);
+	const savingsError = { text: error, typed };
+	if (!c.req.header("HX-Request"))
+		return c.html(pageDocument(model, true, null, savingsError), 422);
+	return c.html(
+		<FirstPageBody
+			model={model}
+			focus
+			motion={NO_MOTION}
+			savingsError={savingsError}
+		/>,
+		422,
+		{
+			"HX-Trigger": hxTrigger({
+				toast: { message: error, type: "error" },
+				announce: error,
+			}),
+		},
+	);
+}
 
 /** The categories the budgets step still asks, by id: none once the step is done. */
 function askedIds(model: FirstPageModel): Set<number> {
