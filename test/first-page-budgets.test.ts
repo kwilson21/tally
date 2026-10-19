@@ -1724,9 +1724,53 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		const res = await post("/first-page/savings", [["answer", "skip"]]);
 		expect(await goalFor()).toBe(20000);
 		expect(await savingsOf()).toBe(20000);
+		expect(textOf(res.html)).toContain("Savings · $200 a month");
+		expect(textOf(res.html)).toContain(FOUR);
 		expect(trigger(res.res).toast?.message).toBe(
 			"Home already has a savings goal: $200 a month.",
 		);
+	});
+
+	/**
+	 * A refused Save it after Home set a goal: the goal drew the step when the refusal settled the page, so the reply is the
+	 * finished page with Home's words, not the refusal (#721).
+	 */
+	async function refusedAfterHomeGoal(goal: string) {
+		await skipAll();
+		await db
+			.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 20000)",
+			)
+			.bind(CUR)
+			.run();
+		const res = await post("/first-page/savings", [
+			["answer", "save"],
+			["goal", goal],
+		]);
+		expect(res.res.status).toBe(200);
+		expect(await goalFor()).toBe(20000);
+		expect(await goalRows()).toBe(1);
+		expect(await savingsOf()).toBe(20000);
+		expect(textOf(res.html)).toContain("Savings · $200 a month");
+		expect(textOf(res.html)).toContain(FOUR);
+		expect(res.html).not.toContain(QUESTION);
+		expect(textOf(res.html)).not.toContain(BLANK);
+		expect(res.html).not.toContain('role="alert"');
+		expect(trigger(res.res).toast).toEqual({
+			message: "Home already has a savings goal: $200 a month.",
+			type: "info",
+		});
+		expect(trigger(res.res).announce).toBe(
+			"Home already has a savings goal: $200 a month.",
+		);
+	}
+
+	it("answers a blank Save it with Home's words, not the refusal, when Home's goal drew the step", async () => {
+		await refusedAfterHomeGoal("");
+	});
+
+	it("answers a $0 Save it with Home's words, not the refusal, when Home's goal drew the step", async () => {
+		await refusedAfterHomeGoal("0");
 	});
 
 	it("gets the month-changed reply for a form drawn in another month, and writes nothing", async () => {

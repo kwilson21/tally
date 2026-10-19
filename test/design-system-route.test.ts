@@ -271,6 +271,49 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
+	it("shows the savings question with a blank money input and two forms, Save it and Not now (#721)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the refused state's (the question sits under the budgets ledger, with no error).
+		const section =
+			html
+				.split('id="first-page-budgets-savings"')[1]
+				?.split('id="first-page-budgets-savings-error"')[0] ?? "";
+		expect(section).toContain("Save some each month?");
+		expect(section.match(/<form[\s>]/g)?.length).toBe(2);
+		expect(section.indexOf('name="goal"')).toBeLessThan(
+			section.indexOf("Save it"),
+		);
+		expect(section.indexOf("Save it")).toBeLessThan(section.indexOf("Not now"));
+		expect(section).not.toContain('role="alert"');
+	});
+
+	it("shows Save it refused: its words in role=alert under the field, which keeps the $0 typed (#721)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the saved state's (the field is drawn again, with its error under it).
+		const section =
+			html
+				.split('id="first-page-budgets-savings-error"')[1]
+				?.split('id="first-page-budgets-saved"')[0] ?? "";
+		expect(section).toMatch(
+			/role="alert"[^>]*>\s*Enter an amount greater than \$0, or choose Not now\.\s*<\/p>/,
+		);
+		expect(section.match(/<input[^>]*name="goal"[^>]*>/)?.[0]).toContain(
+			'value="0"',
+		);
+	});
+
+	it("shows the savings question answered: the ruled-off total with its Savings line, and no question (#721)", async () => {
+		const { html } = await get("/design-system");
+		// The state's own page: from its id to the accounts group's (the saved state closes the first-week group).
+		const section =
+			html
+				.split('id="first-page-budgets-saved"')[1]
+				?.split('id="accounts"')[0] ?? "";
+		expect(section).toContain("Savings · $300 a month");
+		expect(section).toContain("border-double");
+		expect(section).not.toContain("Save some each month?");
+	});
+
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
 		const { html } = await get("/design-system");
 		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";

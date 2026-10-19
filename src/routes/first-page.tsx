@@ -471,7 +471,9 @@ firstPage.post("/first-page/savings", async (c) => {
 
 /**
  * A refused Save it: nothing is saved, and the question is drawn again with its error, the field holding what was typed.
- * htmx swaps it in with a toast; without JavaScript the whole page comes back at 422, as a refused budget's does.
+ * htmx swaps it in with a toast; without JavaScript the whole page comes back at 422, as a refused budget's does. A goal
+ * Home set after the page drew settles the step first (its stroke is drawn), so the question is no longer open: that
+ * reply is the finished page with Home's words, not the refusal (#721).
  */
 async function savingsRefused(
 	c: Context<App>,
@@ -480,7 +482,23 @@ async function savingsRefused(
 	error: string,
 	typed: string,
 ) {
+	const before = await readFirstTally(db);
+	const drawnBefore = STROKES.filter(
+		(stroke) => before?.strokes[stroke] !== undefined,
+	).length;
 	const model = await settleAndLoad(db, today);
+	if (!(await savingsOpen(db))) {
+		const kept = (await readFirstTally(db))?.savings;
+		return typeof kept === "number"
+			? answered(
+					c,
+					model,
+					homeSavingsWords(kept),
+					motionOf({ drawn: drawnBefore }, model, "savings"),
+					"info",
+				)
+			: stale(c, model);
+	}
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
 		return c.html(pageDocument(model, true, null, savingsError), 422);
