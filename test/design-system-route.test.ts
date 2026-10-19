@@ -106,6 +106,15 @@ describe("GET /design-system in the demo", () => {
 		expect(more).toContain("Tally v2026.10.12 · 9e5e14d");
 	});
 
+	it("shows the Your banks list in its three states, and the busy ring it draws (P140 A)", async () => {
+		const { html } = await get("/design-system");
+		expect(html).toContain('<section id="yourbanks"');
+		expect(html).toContain("90 days in · 412");
+		expect(html).toContain("Reading · 86 so far");
+		expect(html).toContain("Paused · 86 so far");
+		expect(html).toContain('<section id="busy-ring"');
+	});
+
 	it("shows every component in DESIGN.md's table", async () => {
 		const { html } = await get("/design-system");
 		const shown = specimens(html)

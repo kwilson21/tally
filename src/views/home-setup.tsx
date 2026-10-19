@@ -5,6 +5,7 @@
 import type { Child } from "hono/jsx";
 import type { NightCounts } from "../db/first-tally";
 import { nightCountWords, type SetupView } from "../first-tally/setup";
+import type { YourBank } from "../first-tally/your-banks";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
 import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
@@ -12,12 +13,13 @@ import { safeToSpendText } from "./home-top";
 import { Notebook } from "./notebook";
 import { TallySteps } from "./tally-steps";
 import { WhyLink } from "./why-link";
+import { YourBanks } from "./your-banks";
 
 const WORDS = ["None", "One", "Two", "Three", "Four", "Five"];
 const count = (n: number) => n.toLocaleString("en-US");
 
 /** The status sentence (serif italic) for the reading, ready and answered states. */
-function statusOf(view: SetupView, flagged: boolean): string {
+export function statusOf(view: SetupView, flagged: boolean): string {
 	if (view.phase === "answered") {
 		// While a bank is reading its history or needs signing in, the status says what it waits for, not tomorrow (#671).
 		if (view.answeredWaiting) {
@@ -32,9 +34,13 @@ function statusOf(view: SetupView, flagged: boolean): string {
 		return `Tally sorted ${count(view.total)} overnight. Three things to check, and Safe to spend is written in at the end.`;
 	}
 	const drawn = view.drawn > 0 ? `${WORDS[view.drawn] ?? view.drawn}. ` : "";
-	// The bank is named only with one connected: with two, neither is, so the line never names the wrong one.
+	// The bank is named only with one connected; with more, the count says how many (P140 A).
 	const from =
-		view.bankCount === 1 ? ` from ${view.bankName ?? "your bank"}` : "";
+		view.bankCount === 1
+			? ` from ${view.bankName ?? "your bank"}`
+			: view.bankCount > 1
+				? ` from ${count(view.bankCount)} banks`
+				: "";
 	const reading = `${drawn}Tally's reading your last 90 days${from}.`;
 	// Until every bank's 90-day history is in, no time is promised and no count is shown: the import isn't complete yet.
 	if (!view.historyIn) {
@@ -79,7 +85,7 @@ function FifthDay({
 }) {
 	const amount = safeToSpendText(safeToSpendCents);
 	return (
-		<section class="mt-2" aria-labelledby="setup-title">
+		<section id="first-week" class="mt-2" aria-labelledby="setup-title">
 			<h1 id="setup-title" class="sr-only">
 				Your first week
 			</h1>
@@ -134,11 +140,14 @@ export function HomeSetup({
 	linkBank,
 	bankLine,
 	fifthDay,
+	yourBanks,
 }: {
 	view: SetupView;
 	linkBank?: Child;
 	bankLine?: string[];
 	fifthDay?: { safeToSpendCents: number; needsHref?: string };
+	/** The connected banks' rows and today's date, drawn while the import is read (YourBanks). */
+	yourBanks?: { banks: YourBank[]; today: string; polls?: boolean };
 }) {
 	if (view.fifth && fifthDay) {
 		return (
@@ -154,7 +163,7 @@ export function HomeSetup({
 	const { phase } = view;
 	const before = phase === "before";
 	return (
-		<section class="mt-2" aria-labelledby="setup-title">
+		<section id="first-week" class="mt-2" aria-labelledby="setup-title">
 			{/* The picked drawing shows no title once a bank is linked: the heading is for screen readers, the notebook at the right. */}
 			<div
 				class={`flex items-center gap-4 ${before ? "justify-between" : "justify-end"}`}
@@ -181,12 +190,26 @@ export function HomeSetup({
 					>
 						{statusOf(view, Boolean(bankLine))}
 					</p>
-					{phase === "reading" && !bankLine && (
-						<p class="mt-2 text-muted">Nothing for you to do until then.</p>
-					)}
 				</>
 			)}
 			{bankLine && <BankBehind words={bankLine} />}
+			{phase === "reading" && yourBanks && (
+				<YourBanks
+					banks={yourBanks.banks}
+					today={yourBanks.today}
+					polls={yourBanks.polls}
+				/>
+			)}
+			{phase === "reading" && linkBank && (
+				<div class="mt-6">
+					<h2 class="text-lg font-semibold">Have more accounts?</h2>
+					<p class="mt-1 text-muted">
+						Link every bank and card you use now, so your first questions cover
+						them all.
+					</p>
+					<div class="mt-3">{linkBank}</div>
+				</div>
+			)}
 			<TallySteps steps={view.steps} />
 			{phase === "before" && linkBank && (
 				<div class="mt-6">

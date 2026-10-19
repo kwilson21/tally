@@ -757,6 +757,45 @@ describe("a request that timed out", () => {
 	});
 });
 
+describe("a list that polls itself (P140 A)", () => {
+	// The Your banks list is data-quiet while a bank is being read: a poll that fails says nothing, the next tick tries again.
+	const quietList = () => {
+		const list = new FakeNode("section");
+		list.setAttribute("data-quiet", "");
+		return list;
+	};
+
+	it("says nothing when a poll never reaches Tally", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: quietList(), request: { method: "GET" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("says nothing when a poll gets a 500", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:response:error", {
+			ctx: {
+				sourceElement: quietList(),
+				request: { method: "GET" },
+				response: { status: 500 },
+			},
+		});
+		expect(toasts.children).toHaveLength(0);
+	});
+
+	it("still says it couldn't load for a failed GET from anything else", async () => {
+		const { document, toasts } = await page();
+		fire(document, "htmx:error", {
+			ctx: { sourceElement: new FakeNode("div"), request: { method: "GET" } },
+			error: new TypeError("Failed to fetch"),
+		});
+		expect((toasts.children[0] as FakeNode).words()).toBe(COULDNT_LOAD);
+	});
+});
+
 describe("a reply from Tally's server", () => {
 	it("shows the toast for a 500, which an unhandled error sends", async () => {
 		const { document, toasts } = await page();

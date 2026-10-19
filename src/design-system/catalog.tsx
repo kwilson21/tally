@@ -16,6 +16,7 @@ import {
 	setupSteps,
 	strokesDrawn,
 } from "../first-tally/setup";
+import type { YourBank } from "../first-tally/your-banks";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -57,6 +58,7 @@ import {
 import { BottomSheet } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { BudgetSheet } from "../views/budget-sheet";
+import { BusyRing } from "../views/busy-ring";
 import { Button } from "../views/button";
 import { CashForm } from "../views/cash-form";
 import { CategoryIcon } from "../views/category";
@@ -168,6 +170,7 @@ import {
 } from "../views/trends";
 import { ViewLinks } from "../views/view-links";
 import { WhyLink } from "../views/why-link";
+import { YourBanks } from "../views/your-banks";
 import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import {
 	ADJUST_ROWS,
@@ -532,7 +535,7 @@ function Brand() {
 			>
 				<State label="Before a bank: none done, each line says how long it takes">
 					<TallySteps
-						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true)}
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true, 0)}
 					/>
 				</State>
 				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
@@ -543,6 +546,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							true,
+							1,
 						)}
 					/>
 				</State>
@@ -554,6 +558,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							false,
+							1,
 						)}
 					/>
 				</State>
@@ -565,6 +570,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							false,
+							1,
 						)}
 					/>
 				</State>
@@ -576,6 +582,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							true,
+							1,
 						)}
 					/>
 				</State>
@@ -595,6 +602,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							true,
+							1,
 						)}
 					/>
 				</State>
@@ -610,6 +618,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							false,
+							1,
 						)}
 					/>
 				</State>
@@ -630,8 +639,43 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							true,
+							1,
 						)}
 					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="yourbanks"
+				title="YourBanks"
+				tier="visual"
+				components={["YourBanks"]}
+				sentence="Home's Your banks list during a new family's first week (P140 A, decision 133): one ruled row per connected bank, in link order, with the bank icon, its name and how far Tally has got at the right. A bank whose 90-day history is still coming in shows the busy ring and 'Reading · 86 so far'; one linked over an hour ago shows its words with no ring. While any bank is being read the list refreshes itself every 5 seconds, a refresh that fails says nothing, and a bank that comes in is announced once. It stops once none is being read."
+			>
+				<State label="Two banks: one in, one being read with the ring">
+					<YourBanks
+						banks={[CHASE_IN, AMEX_READING]}
+						today={FIRST_WEEK_TODAY}
+					/>
+				</State>
+				<State label="A bank that needs signing in: Paused, with no ring">
+					<YourBanks banks={[CHASE_IN, AMEX_PAUSED]} today={FIRST_WEEK_TODAY} />
+				</State>
+				<State label="A bank linked over an hour ago, its history not in: Reading, with no ring">
+					<YourBanks banks={[AMEX_PAST_HOUR]} today={FIRST_WEEK_TODAY} />
+				</State>
+			</Specimen>
+			<Specimen
+				id="busy-ring"
+				title="BusyRing"
+				tier="visual"
+				components={["BusyRing"]}
+				sentence="The busy ring: a spinning arc that shows work in progress. A button's busy label and a bank being read in the Your banks list both draw it, and it stops under reduced motion (app.css's button-spinner)."
+			>
+				<State label="Spinning, beside the words it stands for">
+					<p class="flex items-center gap-2 text-sm text-muted">
+						<BusyRing />
+						Reading · 86 so far
+					</p>
 				</State>
 			</Specimen>
 			<Specimen
@@ -639,7 +683,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got. Once the questions are open, the Band says Three things to check."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got, from 2 banks when more than one is connected. Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once the questions are open, the Band says Three things to check."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
@@ -682,7 +726,7 @@ function Brand() {
 						})}
 					/>
 				</State>
-				<State label="Reading, two banks: the line names neither">
+				<State label="Reading, two banks: the status says from 2 banks, and the list shows each bank's state, then Have more accounts?">
 					<HomeSetup
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
@@ -690,9 +734,47 @@ function Brand() {
 							drawn: 1,
 							total: 40,
 						})}
+						linkBank={
+							<Button type="button" class="w-full">
+								Link a bank
+							</Button>
+						}
+						yourBanks={{
+							banks: [CHASE_IN, AMEX_READING],
+							today: FIRST_WEEK_TODAY,
+						}}
 					/>
 				</State>
-				<State label="Reading, with a bank that stopped updating: its line under the status, in place of 'Nothing for you to do'">
+				<State label="Reading, a bank that needs signing in: its line and Fix above the list, and Paused with no ring">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
+						})}
+						bankLine={["American Express needs signing in"]}
+						yourBanks={{
+							banks: [CHASE_IN, AMEX_PAUSED],
+							today: FIRST_WEEK_TODAY,
+						}}
+					/>
+				</State>
+				<State label="Reading, a bank linked over an hour ago: Reading with no ring">
+					<HomeSetup
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							bankCount: 2,
+							drawn: 1,
+							total: 40,
+						})}
+						yourBanks={{
+							banks: [CHASE_IN, AMEX_PAST_HOUR],
+							today: FIRST_WEEK_TODAY,
+						}}
+					/>
+				</State>
+				<State label="Reading, with a bank that stopped updating: its line under the status">
 					<HomeSetup
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
@@ -856,6 +938,7 @@ const firstWeek = (
 			view.bankName,
 			FIRST_WEEK_TODAY,
 			view.historyIn && view.fitsOneNight,
+			view.bankCount,
 		),
 	};
 };
@@ -880,6 +963,27 @@ const BANK_SYNCED: FirstTally = {
 	strokes: { bank: "2026-10-13" },
 	budgets: {},
 };
+/** The Your banks list's fake rows (P140 A): Chase is in, American Express is being read, and its two variants. */
+const CHASE_IN: YourBank = {
+	id: 3,
+	name: "Chase",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: "2026-10-13 09:00:00",
+	fresh: false,
+	count: 412,
+};
+const AMEX_READING: YourBank = {
+	id: 5,
+	name: "American Express",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: null,
+	fresh: true,
+	count: 86,
+};
+const AMEX_PAUSED: YourBank = { ...AMEX_READING, status: "needs_attention" };
+const AMEX_PAST_HOUR: YourBank = { ...AMEX_READING, fresh: false };
 
 /** More's fake banks: two connected, and one that needs signing in in its own state (P122 A). */
 const MORE_TODAY = "2026-10-14";
