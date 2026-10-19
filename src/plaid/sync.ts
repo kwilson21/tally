@@ -567,7 +567,9 @@ export async function syncItem(
 						access_token: accessToken,
 						// Pinned: each page is one D1 batch, sized for 100 rows (issue #418).
 						count: 100,
-						...(cursor === null ? {} : { cursor }),
+						// Plaid's cursor is empty until an Item's data is ready, and its reference documents only an omitted cursor
+						// (the entire history of updates), so an empty one is sent as none.
+						...(cursor ? { cursor } : {}),
 					},
 					fetchImpl,
 				);

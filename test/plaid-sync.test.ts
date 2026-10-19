@@ -1173,6 +1173,22 @@ describe("syncItem", () => {
 		).toEqual({ n: 1 });
 	});
 
+	it("sends an empty saved cursor, Plaid's answer before an Item's data was ready, as no cursor", async () => {
+		const id = await addItem();
+		await env.DB.prepare("UPDATE plaid_items SET sync_cursor = '' WHERE id = ?")
+			.bind(id)
+			.run();
+		const sentCursor: boolean[] = [];
+		const fetchImpl = plaidFetch((body) => {
+			sentCursor.push("cursor" in body);
+			return response(page());
+		});
+
+		await syncItem({ ...env, TOKEN_ENCRYPTION_KEY: KEY }, id, fetchImpl);
+
+		expect(sentCursor).toEqual([false]);
+	});
+
 	it("restarts mutated pagination, corrects re-added rows, and preserves decisions", async () => {
 		const id = await addItem();
 		await env.DB.prepare(
