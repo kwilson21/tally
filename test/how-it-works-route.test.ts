@@ -33,6 +33,17 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
+	it("lists the Cloudflare Workflows row after Cron Triggers, in the owner's words (decision 132)", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain("Cloudflare Workflows");
+		expect(html).toContain(
+			"Sorts transactions with Jev in small steps and keeps each answer for a few days, so a step that has to run again doesn't ask twice.",
+		);
+		expect(html.indexOf("Cloudflare Workflows")).toBeGreaterThan(
+			html.indexOf("Cron Triggers"),
+		);
+	});
+
 	it("describes bill payments as one matched payment, with more linked by hand for a bill paid in parts", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain("Tally matches each bill occurrence to one payment");
