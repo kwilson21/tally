@@ -6,8 +6,10 @@ import { listTransactions, pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestTransactionNotes } from "../src/suggest-names-pending";
 import { parseFilters } from "../src/transactions/filters";
+import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
+recordSorting({ sort: true });
 const BASE = "http://tally.test";
 const textOf = (html: string) =>
 	html
@@ -626,8 +628,10 @@ describe("transaction detail guesses", () => {
 		expect(rows.results.map((row) => row.details_asked)).toEqual([0, 0]);
 	});
 
-	it("loads household choices if details become enabled during a categorization pass", async () => {
-		const ids = [await charge(), await charge()];
+	it("loads household choices from the next group if details become enabled during a categorization pass", async () => {
+		// 26 rows make two groups of 25 and 1 (decision 132): the switches are read once a group.
+		const ids: number[] = [];
+		for (let i = 0; i < 26; i++) ids.push(await charge());
 		await db
 			.prepare("INSERT INTO household_people(name) VALUES('Morgan')")
 			.run();
@@ -636,51 +640,56 @@ describe("transaction detail guesses", () => {
 			.first<{ id: number }>();
 		await saveAiSwitches(db, { details: false });
 		let calls = 0;
-		let secondQuestions: Record<string, unknown> | undefined;
+		const questions: (Record<string, unknown> | undefined)[] = [];
 		await categorizePending(
-			{ DB: db, JEV_API_KEY: "test-key" },
+			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
 			async (_url, init) => {
 				calls += 1;
+				const body = JSON.parse(String(init?.body));
+				questions.push(body.questions);
 				if (calls === 1) await saveAiSwitches(db, { details: true });
-				else secondQuestions = JSON.parse(String(init?.body)).questions;
+				const detailsAsked = body.questions?.for_person !== undefined;
 				return Response.json({
 					answers: {
 						category: { choice: "Eating Out", confidence: 0.5 },
 						transfer: { noul: 0 },
 						reimbursement: { noul: 0 },
 						income: { noul: 0 },
-						...(calls === 1
-							? {}
-							: {
+						...(detailsAsked
+							? {
 									kind: { choice: "one_off", confidence: 0.99 },
 									for_person: {
 										choice: `person:${person?.id}`,
 										confidence: 0.99,
 									},
 									note_worth_writing: { noul: 0.95 },
-								}),
+								}
+							: {}),
 					},
 				});
 			},
 			{ onlyIds: ids },
 		);
-		if (!secondQuestions) throw new Error("second request was not sent");
+		// The first group (calls 1 to 25) was read with details off; the second (call 26) with them on.
 		expect(
-			(secondQuestions.for_person as { criteria: Record<string, unknown> })
-				.criteria[`person:${person?.id}`],
-		).toBe("Morgan");
-		expect(
-			await db
-				.prepare("SELECT details_asked FROM transactions WHERE id=?")
-				.bind(ids[1])
-				.first(),
-		).toEqual({ details_asked: 0 });
+			questions.slice(1, 25).some((q) => q?.for_person !== undefined),
+		).toBe(false);
+		const later = questions[25] as {
+			for_person: { criteria: Record<string, unknown> };
+		};
+		expect(later.for_person.criteria[`person:${person?.id}`]).toBe("Morgan");
 		expect(
 			await db
 				.prepare("SELECT details_asked FROM transactions WHERE id=?")
 				.bind(ids[0])
 				.first(),
 		).toEqual({ details_asked: 1 });
+		expect(
+			await db
+				.prepare("SELECT details_asked FROM transactions WHERE id=?")
+				.bind(ids[25])
+				.first(),
+		).toEqual({ details_asked: 0 });
 	});
 
 	it("shows a guessed note as the dashed caption beside Needs category", async () => {

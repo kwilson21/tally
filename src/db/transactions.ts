@@ -38,7 +38,7 @@ import { type OwnedRow, oneOffGuessesAgain } from "../transactions/rename";
 import { countedTransferSql } from "../transactions/rule-offer";
 import type { SplitPart } from "../transactions/split";
 import { tidyName } from "../transactions/tidy-name";
-import { JEV_ANSWER_LOG_SQL, KEPT_NAME_LOG_SQL } from "./ai-log";
+import { jevAnswerLogStatement, KEPT_NAME_LOG_SQL } from "./ai-log";
 import { readAiSwitches, STILL_ON_SQL, stillOnKeys } from "./ai-switches";
 import {
 	COUNTED_JOINS,
@@ -78,6 +78,7 @@ import {
 	splitPartMisfitSql,
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
+import { withTurnGuard } from "./sorting-turn";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
 const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
@@ -2643,12 +2644,15 @@ export async function pendingForJev(
 		details = false,
 		categoryAsked = true,
 		ids,
+		exceptIds,
 	}: {
 		categories?: boolean;
 		income?: boolean;
 		details?: boolean;
 		categoryAsked?: boolean;
 		ids?: number[];
+		/** Rows already sent to Jev in this sorting run (decision 132), left out of a later group. */
+		exceptIds?: number[];
 	} = {},
 ): Promise<
 	(JevInput & {
@@ -2683,6 +2687,7 @@ export async function pendingForJev(
 			)
 				AND (? = 1 OR NOT ${CATEGORY_ONLY})
 				${ids ? "AND t.id IN (SELECT value FROM json_each(?))" : ""}
+				${exceptIds ? "AND t.id NOT IN (SELECT value FROM json_each(?))" : ""}
 			-- Never-failed first, then longest-ago failures, so a failing one can't block the rest. With no active
 			-- category, credits come before purchases, so the newest purchases can't crowd out older credits.
 			ORDER BY t.jev_failed_at IS NOT NULL, t.jev_failed_at,
@@ -2697,6 +2702,7 @@ export async function pendingForJev(
 			details ? 1 : 0,
 			categories || details ? 1 : 0,
 			...(ids ? [JSON.stringify(ids)] : []),
+			...(exceptIds ? [JSON.stringify(exceptIds)] : []),
 			categoryAsked ? 1 : 0,
 			limit,
 		)
@@ -2863,14 +2869,25 @@ export async function merchantCategoryHistoryForJev(
 	return history;
 }
 
+/**
+ * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
+ * `turnId` guards it to the sorting turn (decision 132).
+ */
+export function markJevFailedStatement(
+	db: D1Database,
+	id: number,
+	turnId?: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		"UPDATE transactions SET jev_failed_at = datetime('now') WHERE id = ?",
+		turnId,
+	);
+	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
+}
+
 /** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
 export async function markJevFailed(db: D1Database, id: number): Promise<void> {
-	await db
-		.prepare(
-			"UPDATE transactions SET jev_failed_at = datetime('now') WHERE id = ?",
-		)
-		.bind(id)
-		.run();
+	await markJevFailedStatement(db, id).run();
 }
 
 /**
@@ -2878,7 +2895,7 @@ export async function markJevFailed(db: D1Database, id: number): Promise<void> {
  * person cleared (`kind_cleared`, `for_person_cleared`) is a deliberate empty choice, so Jev doesn't fill it (#304).
  * Jev's what-it-was answer (`note_worth_writing`, decision 103) is written with that first ask, and never again.
  */
-export async function saveJevDetails(
+export function saveJevDetailsStatement(
 	db: D1Database,
 	details: {
 		id: number;
@@ -2886,11 +2903,13 @@ export async function saveJevDetails(
 		forPersonId: number | null;
 		noteWorthWriting: number | null;
 	}[],
-): Promise<void> {
-	if (details.length === 0) return;
-	const result = await db
-		.prepare(
-			`WITH answers AS (
+	options: { stillOn?: string; turnId?: string } = {},
+): D1PreparedStatement | undefined {
+	if (details.length === 0) return undefined;
+	// The save is guarded by the switches it was asked under (`stillOn`, decision 132) and the sorting turn.
+	const still = options.stillOn === undefined ? "" : ` AND ${STILL_ON_SQL}`;
+	const guarded = withTurnGuard(
+		`WITH answers AS (
 				SELECT json_extract(value, '$.id') AS id,
 					json_extract(value, '$.kind') AS kind,
 					json_extract(value, '$.forPersonId') AS forPersonId,
@@ -2904,11 +2923,24 @@ export async function saveJevDetails(
 				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
 				note_worth_writing = (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id),
 				details_asked = 1, updated_at = datetime('now')
-			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)`,
-		)
-		.bind(JSON.stringify(details))
-		.run();
-	void result;
+			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still}`,
+		options.turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(
+			JSON.stringify(details),
+			...(options.stillOn === undefined ? [] : [options.stillOn]),
+			...guarded.binds,
+		);
+}
+
+/** Saves Jev's detail answers (see `saveJevDetailsStatement`), with no switch or sorting-turn guard. */
+export async function saveJevDetails(
+	db: D1Database,
+	details: Parameters<typeof saveJevDetailsStatement>[1],
+): Promise<void> {
+	await saveJevDetailsStatement(db, details)?.run();
 }
 
 /** The columns a note is checked against, read the way the list reads a row's name (#426, #412). */
@@ -3007,25 +3039,43 @@ export async function saveNoteAttempts(
 }
 
 /**
- * Saves one Jev answer and, when it applies a category or income Tally should count, its What AI did row, in
- * one D1 batch (spec §8.6), so the two land together or not at all. Returns whether the answer was written.
+ * The statements that save one Jev answer: its update, then its What AI did row when one applies (spec §8.6),
+ * the row right after the update, since it re-checks the source the update sets. `turnId` (decision 132) guards both.
  */
-async function saveJevAnswer(
+function answerStatements(
 	db: D1Database,
 	update: D1PreparedStatement,
 	id: number,
 	log: { day: string; category: boolean; income: boolean } | undefined,
-): Promise<boolean> {
-	if (!log || (!log.category && !log.income))
-		return (await update.run()).meta.changes > 0;
-	const [saved] = await db.batch([
+	turnId: string | undefined,
+): JevAnswerStatements {
+	if (!log || (!log.category && !log.income)) return { update };
+	return {
 		update,
-		db
-			.prepare(JEV_ANSWER_LOG_SQL)
-			.bind(log.day, id, log.category ? 1 : 0, log.income ? 1 : 0),
-	]);
-	return (saved?.meta.changes ?? 0) > 0;
+		log: jevAnswerLogStatement(
+			db,
+			{ day: log.day, id, category: log.category, income: log.income },
+			turnId,
+		),
+	};
 }
+
+/** The statements of one Jev answer's save: its update, and its What AI did row when one applies. */
+export type JevAnswerStatements = {
+	update: D1PreparedStatement;
+	log?: D1PreparedStatement;
+};
+
+/** How a Jev answer is saved: the switches it was asked under, and the sorting turn that guards the save. */
+export type JevAnswerSave = {
+	categoryOnly?: boolean;
+	categoryAsked?: boolean;
+	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
+	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
+	log?: { day: string; category: boolean; income: boolean };
+	/** The sorting group's turn (decision 132): the save writes only while this turn is held. */
+	turn?: string;
+};
 
 /**
  * Stores what code decided from Jev's answer. It only writes to a transaction that is still
@@ -3037,30 +3087,25 @@ async function saveJevAnswer(
  * with the edit panel's exclude toggle (#27); it never overrides a person's exclusion or income choice, and it never
  * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
  * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
- * waits for the next run. Returns whether it wrote the row.
+ * waits for the next run. Returns the statements that do it (the update, then its log row): a caller runs them in
+ * one batch, so a sorting group can save all of its answers together (decision 132).
  */
-export async function saveJevResult(
+export function saveJevResultStatements(
 	db: D1Database,
 	id: number,
 	d: Decision,
-	options: {
-		categoryOnly?: boolean;
-		categoryAsked?: boolean;
-		switches?: { income: boolean; categories?: boolean };
-		/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
-		log?: { day: string; category: boolean; income: boolean };
-	} = {},
-): Promise<boolean> {
+	options: JevAnswerSave = {},
+): JevAnswerStatements {
 	const stillOn = stillOnKeys({
 		categories: options.switches?.categories,
 		income: options.switches?.income,
+		sortOnArrival: options.switches?.sortOnArrival,
 	});
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.
-		const category = db
-			.prepare(
-				`UPDATE transactions SET
+		const guarded = withTurnGuard(
+			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
 					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0
@@ -3068,7 +3113,10 @@ export async function saveJevResult(
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
-			)
+			options.turn,
+		);
+		const category = db
+			.prepare(guarded.sql)
 			.bind(
 				options.categoryAsked === false ? null : d.categoryId,
 				options.categoryAsked === false || d.categoryId === null ? null : "jev",
@@ -3079,12 +3127,14 @@ export async function saveJevResult(
 				d.alsoCategoryId ?? null,
 				id,
 				stillOn,
+				...guarded.binds,
 			);
-		return saveJevAnswer(
+		return answerStatements(
 			db,
 			category,
 			id,
 			options.log && { ...options.log, income: false },
+			options.turn,
 		);
 	}
 	// A transfer or reimbursement flag excludes the transaction, unless a person decided otherwise. A payment
@@ -3098,9 +3148,8 @@ export async function saveJevResult(
 		: null;
 	// The Maybe range's edges (src/ai/maybe.ts), so this save and the review queue read the same bounds.
 	const { above, below } = unsureBounds();
-	const update = db
-		.prepare(
-			`UPDATE transactions SET
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET
 				-- A credit asked only for its income (its category confidence is set, decision 79) keeps its stored category answer.
 				category_id = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_id END,
 				category_source = CASE WHEN category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL THEN ? ELSE category_source END,
@@ -3129,44 +3178,62 @@ export async function saveJevResult(
 						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
 				)
 				AND ${STILL_ON_SQL}`,
-		)
-		.bind(
-			options.categoryAsked === false ? null : d.categoryId,
-			options.categoryAsked === false || d.categoryId === null ? null : "jev",
-			options.categoryAsked === false ? null : d.confidence,
-			incomeOn ? 1 : 0,
-			confidenceBasisPoints(incomeConfidence ?? 0),
-			below,
-			incomeConfidence ?? 0,
-			options.switches?.categories === false ? 0 : 1,
-			confidenceBasisPoints(
-				d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
-			),
-			below,
+		options.turn,
+	);
+	const update = db.prepare(guarded.sql).bind(
+		options.categoryAsked === false ? null : d.categoryId,
+		options.categoryAsked === false || d.categoryId === null ? null : "jev",
+		options.categoryAsked === false ? null : d.confidence,
+		incomeOn ? 1 : 0,
+		confidenceBasisPoints(incomeConfidence ?? 0),
+		below,
+		incomeConfidence ?? 0,
+		options.switches?.categories === false ? 0 : 1,
+		confidenceBasisPoints(
 			d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
-			d.categoryId !== null ? 1 : 0,
-			confidenceBasisPoints(d.confidence),
-			below,
-			incomeConfidence,
-			confidenceBasisPoints(incomeConfidence ?? 0),
-			above,
-			income ? 1 : 0,
-			options.categoryAsked === false ? null : d.suggestedCategoryId,
-			options.categoryAsked === false || !d.noneFit ? 0 : 1,
-			d.mixedProbability ?? null,
-			d.alsoCategoryId ?? null,
-			d.flags.transfer ? 1 : 0,
-			d.flags.reimbursement ? 1 : 0,
-			income ? 1 : 0,
-			income ? 1 : 0,
+		),
+		below,
+		d.flagConfidence?.transfer ?? (d.flags.transfer ? 1 : 0),
+		d.categoryId !== null ? 1 : 0,
+		confidenceBasisPoints(d.confidence),
+		below,
+		incomeConfidence,
+		confidenceBasisPoints(incomeConfidence ?? 0),
+		above,
+		income ? 1 : 0,
+		options.categoryAsked === false ? null : d.suggestedCategoryId,
+		options.categoryAsked === false || !d.noneFit ? 0 : 1,
+		d.mixedProbability ?? null,
+		d.alsoCategoryId ?? null,
+		d.flags.transfer ? 1 : 0,
+		d.flags.reimbursement ? 1 : 0,
+		income ? 1 : 0,
+		income ? 1 : 0,
 
-			excludes,
-			excludes,
-			id,
-			incomeOn ? 1 : 0,
-			stillOn,
-		);
-	return saveJevAnswer(db, update, id, options.log);
+		excludes,
+		excludes,
+		id,
+		incomeOn ? 1 : 0,
+		stillOn,
+		...guarded.binds,
+	);
+	return answerStatements(db, update, id, options.log, options.turn);
+}
+
+/**
+ * Saves one Jev answer on its own (one batch when it has a log row), and says whether the answer was written. Callers
+ * that save a group of answers at once use `saveJevResultStatements` instead.
+ */
+export async function saveJevResult(
+	db: D1Database,
+	id: number,
+	d: Decision,
+	options: JevAnswerSave = {},
+): Promise<boolean> {
+	const { update, log } = saveJevResultStatements(db, id, d, options);
+	if (!log) return (await update.run()).meta.changes > 0;
+	const [saved] = await db.batch([update, log]);
+	return (saved?.meta.changes ?? 0) > 0;
 }
 
 /**

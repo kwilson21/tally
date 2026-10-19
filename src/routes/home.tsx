@@ -4,7 +4,6 @@ import { addressOf } from "../address";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
-import { jevCallLimit } from "../categorize-pending";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
 import { bankSyncs } from "../db/accounts";
 import {
@@ -32,6 +31,7 @@ import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
 import { loadsPlaid } from "../security";
+import { jevCallLimit } from "../sort-groups";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";

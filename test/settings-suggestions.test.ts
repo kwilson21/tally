@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
-import { categorizePending } from "../src/categorize-pending";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { saveCategory, setArchived } from "../src/db/categories";
 import {
@@ -11,6 +10,7 @@ import {
 } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { settings } from "../src/routes/settings";
+import { recordSorting } from "./record-sorting";
 
 // Settings shows each suggested new category with the transactions behind it (spec §7, §8.3, P30 A, #51):
 // a dashed row under Categories, open to its transactions, each ticked to go in. A person creates the
@@ -18,6 +18,7 @@ import { settings } from "../src/routes/settings";
 // "Jev" (decision 64).
 
 const db = env.DB;
+const sorting = recordSorting({ sort: true });
 type TestApp = { Bindings: Env; Variables: { actor: string } };
 // The route-only harness supplies the actor that src/index.tsx sets after verifying Access.
 const routeHarness = new Hono<TestApp>();
@@ -604,64 +605,10 @@ describe("creating the category", () => {
 		expect(jev).toHaveBeenCalledTimes(3);
 	});
 
-	it("re-asks newest-first about at most 50 of 300 left-out transactions, leaving the rest for night", async () => {
+	it("hands all 300 left-out transactions to one sorting instance, with no cap (decision 132)", async () => {
 		const { id, ids } = await bulkSuggestion("Large Batch", 301);
 		const counted = countingDb();
-		const asked: string[] = [];
-		const jev = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-			asked.push(
-				JSON.parse(String(init?.body)).state.bank_description as string,
-			);
-			return Response.json({
-				answers: {
-					category: {
-						type: "choice",
-						choice: "None of these fit",
-						confidence: 0.5,
-					},
-					transfer: { type: "noul", noul: 0.01 },
-					reimbursement: { type: "noul", noul: 0.01 },
-					income: { type: "noul", noul: 0.01 },
-				},
-			});
-		});
-		vi.stubGlobal("fetch", jev);
-		const { res } = await post(
-			`/settings/suggestions/${id}/create`,
-			[
-				...ids.map((n): [string, string] => ["shown", String(n)]),
-				["ids", String(ids[0])],
-			],
-			{ bindings: { DB: counted.db, DEMO: "false", JEV_API_KEY: "jev-key" } },
-		);
-		expect(res.status).toBe(200);
-		expect(waitUntil).toHaveBeenCalledTimes(1);
-		await background();
-		expect(jev).toHaveBeenCalledTimes(50);
-		expect(counted.statements()).toBeLessThan(1000);
-		const rows = await db
-			.prepare(
-				"SELECT category_id, category_confidence FROM transactions WHERE raw_name LIKE 'Large Batch %'",
-			)
-			.all<{
-				category_id: number | null;
-				category_confidence: number | null;
-			}>();
-		expect(
-			rows.results.filter((row) => row.category_confidence === 0.5),
-		).toHaveLength(50);
-		expect(
-			rows.results.filter(
-				(row) => row.category_id === null && row.category_confidence === null,
-			),
-		).toHaveLength(250);
-		const newest = await db
-			.prepare(
-				"SELECT raw_name FROM transactions WHERE raw_name LIKE 'Large Batch %' AND category_confidence=0.5 ORDER BY date DESC, id DESC LIMIT 50",
-			)
-			.all<{ raw_name: string }>();
-		expect(asked).toEqual(newest.results.map((row) => row.raw_name));
-		const nightly = vi.fn(async () =>
+		const jev = vi.fn(async () =>
 			Response.json({
 				answers: {
 					category: {
@@ -675,11 +622,37 @@ describe("creating the category", () => {
 				},
 			}),
 		);
-		await categorizePending(
-			{ DB: db, DEMO: "false", JEV_API_KEY: "jev-key" },
-			nightly,
+		vi.stubGlobal("fetch", jev);
+		const { res } = await post(
+			`/settings/suggestions/${id}/create`,
+			[
+				...ids.map((n): [string, string] => ["shown", String(n)]),
+				["ids", String(ids[0])],
+			],
+			{ bindings: { DB: counted.db, DEMO: "false", JEV_API_KEY: "jev-key" } },
 		);
-		expect(nightly).toHaveBeenCalledTimes(250);
+		expect(res.status).toBe(200);
+		expect(waitUntil).toHaveBeenCalledTimes(1);
+		await background();
+		// One instance with every left-out row. The recorder sorts it here under the test's demo cap (40 a day).
+		expect(sorting.mock.calls).toHaveLength(1);
+		const params = sorting.mock.calls[0]?.[0].params;
+		expect(params).toEqual({
+			ids: expect.any(Array),
+			bySync: false,
+			rulesApplied: false,
+		});
+		expect(params?.ids).toHaveLength(300);
+		expect(jev).toHaveBeenCalledTimes(40);
+		expect(counted.statements()).toBeLessThan(1000);
+		const rows = await db
+			.prepare(
+				"SELECT category_confidence FROM transactions WHERE raw_name LIKE 'Large Batch %'",
+			)
+			.all<{ category_confidence: number | null }>();
+		expect(
+			rows.results.filter((row) => row.category_confidence === 0.5),
+		).toHaveLength(40);
 	});
 
 	it("asks Jev nothing when every transaction stays ticked", async () => {

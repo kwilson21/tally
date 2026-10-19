@@ -5,6 +5,9 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
 import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 import { plaid } from "../src/routes/plaid";
+import { recordSorting } from "./record-sorting";
+
+recordSorting({ sort: true });
 
 const BASE = "http://tally.test";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));

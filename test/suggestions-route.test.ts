@@ -7,6 +7,7 @@ import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
+import { recordSorting } from "./record-sorting";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
 // it, one item at a time in the order money first, then categories, new categories and names. A Yes
@@ -14,6 +15,7 @@ import { suggestions } from "../src/routes/suggestions";
 // line is kept; Something else only answers this one; Skip moves on and comes back at the end.
 
 const db = env.DB;
+recordSorting({ sort: true });
 const BASE = "http://tally.test";
 const VENMO = "VENMO PAYMENT";
 const CHASE = "CHASE CARD PAYMENT";

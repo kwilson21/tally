@@ -1,42 +1,35 @@
-import { AFTER_SYNC_BATCH, categorizePending } from "../categorize-pending";
+import { type SortParams, startSorting } from "../sort-start";
 import { type SyncResult, syncItem } from "./sync";
 
-type SortEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
+type SortEnv = {
+	DB: D1Database;
+	JEV_API_KEY?: string;
+	DEMO?: string;
+	SORT: Env["SORT"];
+};
 
 /**
- * Right after a sync that brought in or changed transactions, asks Jev about those transactions and
- * no others (spec §8.6, decision 68): the same pass as overnight, within the same day's cap, when
- * the household's "Sort new transactions as they arrive" switch is on and Jev is asked at all (the
- * pass checks both before each call, so turning either off stops it). It asks about at most
- * `AFTER_SYNC_BATCH` of them, newest first, since a big import has already spent most of its
- * invocation's queries; what it doesn't ask about, the older waiting ones included, waits for the
- * nightly run.
+ * Right after a sync that brought in or changed transactions, starts one sorting instance with those rows and no others
+ * (spec §8.6, decisions 68 and 132). Every row the sync added or changed goes to it, with no per-sync cap: Cloudflare
+ * Workflows sorts them in groups of 25 (src/sort-workflow.ts). It follows "Sort new transactions as they arrive": the
+ * instance stops sending once that switch is off, as every sync's run does. The instance applies merchant rules first,
+ * unless the sync's last step already did (`rulesApplied`).
  *
- * It never fails the sync it follows: any failure is logged by its name alone (never a transaction or
- * a token) and left for the nightly run, which also picks up the rows of a sync that failed part-way.
- * It's slow, so a request runs it in `waitUntil`; each answer is saved as it arrives, so a pass the
- * platform cuts short keeps its answers and the nightly run asks about the rest.
+ * It never fails the sync it follows: starting the instance never throws (startSorting logs the error's name only),
+ * and the rows of a sync that failed part-way wait for the nightly run.
  */
 export async function sortAfterSync(
 	env: SortEnv,
 	synced: { changedIds: number[] },
-	fetchImpl?: typeof fetch,
 	// Every sync's last step already applied merchant rules; pass false when that step failed.
 	{ rulesApplied = true }: { rulesApplied?: boolean } = {},
 ): Promise<void> {
-	if (synced.changedIds.length === 0 || !env.JEV_API_KEY) return;
-	try {
-		await categorizePending(env, fetchImpl, {
-			rulesApplied,
-			onlyIds: synced.changedIds,
-			bySync: true,
-			maxCalls: AFTER_SYNC_BATCH,
-		});
-	} catch (error) {
-		console.error(
-			`sort after sync failed ${error instanceof Error ? error.name : "unknown"}`,
-		);
-	}
+	const params: SortParams = {
+		ids: synced.changedIds,
+		bySync: true,
+		rulesApplied,
+	};
+	await startSorting(env, params);
 }
 
 /**
@@ -50,6 +43,6 @@ export async function syncItemAndSort(
 	{ historyComplete = false }: { historyComplete?: boolean } = {},
 ): Promise<SyncResult> {
 	const synced = await syncItem(env, itemRowId, fetchImpl, { historyComplete });
-	if (!("skipped" in synced)) await sortAfterSync(env, synced, fetchImpl);
+	if (!("skipped" in synced)) await sortAfterSync(env, synced);
 	return synced;
 }

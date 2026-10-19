@@ -14,6 +14,18 @@
 		"command": "npm run build",
 		"watch_dir": "src"
 	},
+	// Sorting runs as a Workflow (decision 132). Names are unique per account, one per environment.
+	"workflows": [
+		{
+			"binding": "SORT",
+			"name": "tally-sort",
+			"class_name": "SortWorkflow",
+			"default_retention": {
+				"success_retention": "3 days",
+				"error_retention": "3 days"
+			}
+		}
+	],
 	// Local-only placeholder ID. Each deployed environment names its own database below.
 	"d1_databases": [
 		{
@@ -52,6 +64,17 @@
 					"migrations_dir": "migrations"
 				}
 			],
+			"workflows": [
+				{
+					"binding": "SORT",
+					"name": "tally-demo-sort",
+					"class_name": "SortWorkflow",
+					"default_retention": {
+						"success_retention": "3 days",
+						"error_retention": "3 days"
+					}
+				}
+			],
 			// Workers AI suggests merchant names in the demo too (spec §4.1), after each nightly reset.
 			"ai": { "binding": "AI" }
 		},
@@ -84,6 +107,17 @@
 					"database_name": "tally-production",
 					"database_id": "97a4d15e-58a4-4067-b74e-6101195c6493",
 					"migrations_dir": "migrations"
+				}
+			],
+			"workflows": [
+				{
+					"binding": "SORT",
+					"name": "tally-production-sort",
+					"class_name": "SortWorkflow",
+					"default_retention": {
+						"success_retention": "3 days",
+						"error_retention": "3 days"
+					}
 				}
 			],
 			// Workers AI suggests merchant names (spec §7, #33), only through src/ai/suggest-name.ts. It needs no
