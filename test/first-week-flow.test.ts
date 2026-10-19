@@ -41,9 +41,13 @@ router.route("/", plaid);
 router.route("/", firstPage);
 
 const family = {
-	fetch(path: string, init?: RequestInit) {
+	fetch(
+		path: string,
+		init?: RequestInit,
+		waitUntil: (promise: Promise<unknown>) => void = () => {},
+	) {
 		return router.fetch(new Request(BASE + path, init), bindings, {
-			waitUntil() {},
+			waitUntil,
 			passThroughOnException() {},
 			props: {},
 		});
@@ -108,22 +112,48 @@ describe("the first week, from Home to the pay stroke", () => {
 		expect(fresh).toContain("Five strokes, and you're set up.");
 		expect(fresh).toContain("Link a bank");
 
-		// Linking draws stroke one on the household's day, in the exchange's own batch.
-		const plaidResponses: Record<string, unknown>[] = [
-			{ access_token: "access-private", item_id: "item-1" },
-			{ item: { institution_id: "ins-1" } },
-			{ institution: { name: "Chase" } },
-		];
-		vi.stubGlobal("fetch", async () => Response.json(plaidResponses.shift()));
-		const exchange = await family.fetch("/plaid/exchange", {
-			method: "POST",
-			headers: {
-				Origin: BASE,
-				"content-type": "application/x-www-form-urlencoded",
-			},
-			body: new URLSearchParams({ public_token: "public-private" }).toString(),
+		// Linking draws stroke one on the household's day, in the exchange's own batch. The first sync it starts gets
+		// Plaid's not-ready page, so the gate below is opened by hand.
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			const url = String(input);
+			if (url.endsWith("/item/public_token/exchange"))
+				return Response.json({
+					access_token: "access-private",
+					item_id: "item-1",
+				});
+			if (url.endsWith("/item/get"))
+				return Response.json({ item: { institution_id: "ins-1" } });
+			if (url.endsWith("/institutions/get_by_id"))
+				return Response.json({ institution: { name: "Chase" } });
+			if (url.endsWith("/accounts/get")) return Response.json({ accounts: [] });
+			if (url.endsWith("/transactions/sync"))
+				return Response.json({
+					added: [],
+					modified: [],
+					removed: [],
+					next_cursor: "",
+					has_more: false,
+					transactions_update_status: "NOT_READY",
+				});
+			throw new Error(`unrouted Plaid call ${url}`);
 		});
+		const promises: Promise<unknown>[] = [];
+		const exchange = await family.fetch(
+			"/plaid/exchange",
+			{
+				method: "POST",
+				headers: {
+					Origin: BASE,
+					"content-type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({
+					public_token: "public-private",
+				}).toString(),
+			},
+			(promise) => promises.push(promise),
+		);
 		expect(exchange.status).toBe(204);
+		await Promise.all(promises);
 		expect(
 			Object.keys(
 				JSON.parse(exchange.headers.get("HX-Trigger") ?? "{}"),

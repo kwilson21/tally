@@ -197,13 +197,15 @@ plaid.post("/plaid/exchange", async (c) => {
 		// announcement is said only while the first week is still to do. The read sits inside the try, so a failure
 		// there removes the Item too: Plaid's token is never stored.
 		let settingUp: boolean;
+		let itemId: number;
 		try {
 			settingUp = !isSetUp(await readFirstTally(c.env.DB));
 			const encrypted = await encryptToken(
 				exchanged.access_token,
 				c.env.TOKEN_ENCRYPTION_KEY as string,
 			);
-			await c.env.DB.batch([
+			// D1 returns the batch's results in statement order, so the first is the bank's insert and its last_row_id is the new row.
+			const [inserted] = await c.env.DB.batch([
 				c.env.DB.prepare(
 					"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id) VALUES (?, ?, ?, ?)",
 				).bind(encrypted, institution, actor(c), exchanged.item_id),
@@ -211,6 +213,7 @@ plaid.post("/plaid/exchange", async (c) => {
 				// A bank linked during setup takes the questions back (#578): the new bank's deposits and charges are asked again.
 				takeBackQuestionStrokes(c.env.DB, institution),
 			]);
+			itemId = Number(inserted?.meta.last_row_id);
 		} catch (error) {
 			try {
 				await removeItem(c.env, exchanged.access_token);
@@ -219,6 +222,12 @@ plaid.post("/plaid/exchange", async (c) => {
 			}
 			throw error;
 		}
+		// Plaid sends SYNC_UPDATES_AVAILABLE only after an Item's first /transactions/sync, so linking starts that sync (spec §10).
+		c.executionCtx.waitUntil(
+			syncItemAndSort(c.env, itemId).catch((error: unknown) => {
+				logPlaidRequestId(error);
+			}),
+		);
 
 		const message = settingUp
 			? `${institution} is linked. Tally's reading your last 90 days.`

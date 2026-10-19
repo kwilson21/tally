@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { app } from "../src/index";
 import { decryptToken, encryptToken } from "../src/plaid/token-crypto";
 import { plaid } from "../src/routes/plaid";
 
@@ -66,6 +67,61 @@ async function post(path: string, jwt?: string, body = "") {
 		},
 		body,
 	});
+}
+
+/** Plaid's answer before an Item's data is ready, which a new bank's first sync gets (spec §10). */
+const NOT_READY_PAGE = {
+	added: [],
+	modified: [],
+	removed: [],
+	next_cursor: "",
+	has_more: false,
+	transactions_update_status: "NOT_READY",
+};
+
+/**
+ * Answers the calls of a link by the URL each one ends with. The first sync's calls default to no accounts and
+ * Plaid's not-ready page; `answers` replaces either or adds a call. A `Response` answer is returned as it is.
+ */
+function routePlaid(jwk: object, answers: Record<string, unknown>) {
+	const routes: Record<string, unknown> = {
+		"/accounts/get": { accounts: [] },
+		"/transactions/sync": NOT_READY_PAGE,
+		...answers,
+	};
+	return async (input: string | URL | Request) => {
+		const url = String(input);
+		if (url.includes("cloudflareaccess.com"))
+			return Response.json({ keys: [jwk] });
+		const ending = Object.keys(routes).find((path) => url.endsWith(path));
+		if (ending === undefined) throw new Error(`unrouted Plaid call ${url}`);
+		const answer = routes[ending];
+		return answer instanceof Response ? answer : Response.json(answer);
+	};
+}
+
+/** Posts a public token to the real app, collecting the waitUntil promises its first sync starts (spec §10). */
+async function exchange(jwt: string, body: string) {
+	const promises: Promise<unknown>[] = [];
+	const response = await app.request(
+		`${BASE}/plaid/exchange`,
+		{
+			method: "POST",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+				"Cf-Access-Jwt-Assertion": jwt,
+			},
+			body,
+		},
+		env,
+		{
+			waitUntil: (promise: Promise<unknown>) => promises.push(promise),
+			passThroughOnException() {},
+			props: {},
+		},
+	);
+	return { response, promises };
 }
 
 describe("Plaid routes", () => {
@@ -478,24 +534,125 @@ describe("Plaid routes", () => {
 		);
 	});
 
-	it("stores only the encrypted access token and bank attribution", async () => {
+	it("starts the new bank's first sync in waitUntil, so Plaid's webhooks begin (spec §10)", async () => {
 		const { jwt, jwk } = await accessIdentity();
-		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-		const plaidResponses: Record<string, unknown>[] = [
-			{ access_token: "access-private", item_id: "item-1" },
-			{ item: { institution_id: "ins-1" } },
-			{ institution: { name: "First Bank" } },
-		];
-		vi.stubGlobal("fetch", async (input: string | URL | Request) =>
-			String(input).includes("cloudflareaccess.com")
-				? Response.json({ keys: [jwk] })
-				: Response.json(plaidResponses.shift()),
+		const route = routePlaid(jwk, {
+			"/item/public_token/exchange": {
+				access_token: "access-private",
+				item_id: "item-1",
+			},
+			"/item/get": { item: { institution_id: "ins-1" } },
+			"/institutions/get_by_id": { institution: { name: "First Bank" } },
+		});
+		const syncBodies: Record<string, unknown>[] = [];
+		vi.stubGlobal(
+			"fetch",
+			async (input: string | URL | Request, init?: RequestInit) => {
+				if (String(input).endsWith("/transactions/sync"))
+					syncBodies.push(
+						JSON.parse(String(init?.body)) as Record<string, unknown>,
+					);
+				return route(input);
+			},
 		);
-		const response = await post(
-			"/plaid/exchange",
+
+		const { response, promises } = await exchange(
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+
+		expect(response.status).toBe(204);
+		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
+			toast: {
+				message: "First Bank is linked. Tally's reading your last 90 days.",
+				type: "success",
+			},
+			announce: "First Bank is linked. Tally's reading your last 90 days.",
+		});
+		expect(promises).toHaveLength(1);
+		await Promise.all(promises);
+		expect(syncBodies).toHaveLength(1);
+		expect(syncBodies[0]).toMatchObject({ access_token: "access-private" });
+		expect(syncBodies[0]).not.toHaveProperty("cursor");
+		expect(
+			await env.DB.prepare(
+				"SELECT sync_lock_id, last_synced_at IS NOT NULL AS synced, history_complete_at, sync_cursor FROM plaid_items",
+			).first(),
+		).toEqual({
+			sync_lock_id: null,
+			synced: 1,
+			history_complete_at: null,
+			sync_cursor: "",
+		});
+	});
+
+	it("a first sync that fails still links the bank and logs only Plaid's request id", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal(
+			"fetch",
+			routePlaid(jwk, {
+				"/item/public_token/exchange": {
+					access_token: "access-private",
+					item_id: "item-1",
+				},
+				"/item/get": { item: { institution_id: "ins-1" } },
+				"/institutions/get_by_id": { institution: { name: "First Bank" } },
+				"/accounts/get": Response.json(
+					{
+						error_type: "API_ERROR",
+						error_code: "INTERNAL_SERVER_ERROR",
+						request_id: "req-first-sync",
+					},
+					{ status: 500 },
+				),
+			}),
+		);
+
+		const { response, promises } = await exchange(
+			jwt,
+			new URLSearchParams({ public_token: "public-private" }).toString(),
+		);
+
+		expect(response.status).toBe(204);
+		await expect(Promise.all(promises)).resolves.toHaveLength(1);
+		expect(errors).toHaveBeenCalledWith("plaid sync error req-first-sync");
+		expect(errors).toHaveBeenCalledWith("Plaid request failed", {
+			request_id: "req-first-sync",
+		});
+		expect(JSON.stringify(errors.mock.calls)).not.toMatch(
+			/access-private|public-private/,
+		);
+		expect(
+			await env.DB.prepare(
+				"SELECT institution_name, sync_lock_id, status FROM plaid_items",
+			).first(),
+		).toEqual({
+			institution_name: "First Bank",
+			sync_lock_id: null,
+			status: "ok",
+		});
+	});
+
+	it("stores only the encrypted access token and bank attribution", async () => {
+		const { jwt, jwk } = await accessIdentity();
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.stubGlobal(
+			"fetch",
+			routePlaid(jwk, {
+				"/item/public_token/exchange": {
+					access_token: "access-private",
+					item_id: "item-1",
+				},
+				"/item/get": { item: { institution_id: "ins-1" } },
+				"/institutions/get_by_id": { institution: { name: "First Bank" } },
+			}),
+		);
+		const { response, promises } = await exchange(
+			jwt,
+			new URLSearchParams({ public_token: "public-private" }).toString(),
+		);
+		await Promise.all(promises);
 		expect(response.status).toBe(204);
 		expect(JSON.stringify([...response.headers])).not.toMatch(/private/);
 		expect(await response.text()).not.toMatch(/private/);
@@ -550,22 +707,23 @@ describe("Plaid routes", () => {
 				}),
 			)
 			.run();
-		const plaidResponses: Record<string, unknown>[] = [
-			{ access_token: "access-private", item_id: "item-2" },
-			{ item: { institution_id: "ins-2" } },
-			{ institution: { name: "Second Bank" } },
-		];
-		vi.stubGlobal("fetch", async (input: string | URL | Request) =>
-			String(input).includes("cloudflareaccess.com")
-				? Response.json({ keys: [jwk] })
-				: Response.json(plaidResponses.shift()),
+		vi.stubGlobal(
+			"fetch",
+			routePlaid(jwk, {
+				"/item/public_token/exchange": {
+					access_token: "access-private",
+					item_id: "item-2",
+				},
+				"/item/get": { item: { institution_id: "ins-2" } },
+				"/institutions/get_by_id": { institution: { name: "Second Bank" } },
+			}),
 		);
 
-		const response = await post(
-			"/plaid/exchange",
+		const { response, promises } = await exchange(
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+		await Promise.all(promises);
 
 		expect(response.status).toBe(204);
 		const record = await env.DB.prepare(
@@ -581,29 +739,29 @@ describe("Plaid routes", () => {
 	it("stores the linked item with a fallback name when Plaid name lookup fails", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-		let plaidRequest = 0;
-		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-			if (String(input).includes("cloudflareaccess.com")) {
-				return Response.json({ keys: [jwk] });
-			}
-			plaidRequest += 1;
-			return plaidRequest === 1
-				? Response.json({ access_token: "access-private", item_id: "item-1" })
-				: Response.json(
-						{
-							error_type: "ITEM_ERROR",
-							error_code: "ITEM_NOT_FOUND",
-							request_id: "req-name-lookup",
-						},
-						{ status: 400 },
-					);
-		});
+		vi.stubGlobal(
+			"fetch",
+			routePlaid(jwk, {
+				"/item/public_token/exchange": {
+					access_token: "access-private",
+					item_id: "item-1",
+				},
+				"/item/get": Response.json(
+					{
+						error_type: "ITEM_ERROR",
+						error_code: "ITEM_NOT_FOUND",
+						request_id: "req-name-lookup",
+					},
+					{ status: 400 },
+				),
+			}),
+		);
 
-		const response = await post(
-			"/plaid/exchange",
+		const { response, promises } = await exchange(
 			jwt,
 			new URLSearchParams({ public_token: "public-private" }).toString(),
 		);
+		await Promise.all(promises);
 
 		expect(response.status).toBe(204);
 		expect(JSON.parse(response.headers.get("HX-Trigger") ?? "{}")).toEqual({
@@ -718,14 +876,14 @@ describe("Plaid routes", () => {
 			},
 		);
 
-		const response = await post(
-			"/plaid/exchange",
+		const { response, promises } = await exchange(
 			jwt,
 			"public_token=single-use",
 		);
 		await env.DB.exec("DROP TRIGGER fail_plaid_insert");
 
 		expect(response.status).toBe(502);
+		expect(promises).toHaveLength(0);
 		expect(plaidRequests.at(-1)).toEqual({
 			url: "https://sandbox.plaid.com/item/remove",
 			body: {
