@@ -87,7 +87,7 @@ Sources read in full:
 |---|---|---|
 | B1 | Phased plan: 1 camera/upload + OCR + review; 2 matching + auto-split; 3 email | Steps 1–3, plus step 4 from #21. |
 | B2 | Receipt model: user FK and ownership `clean()` | Not needed: one shared household (decision 5); demo and production never share data (§4.1). |
-| B3 | Receipt: transaction FK (SET_NULL), image, thumbnail, source camera/upload/email, `email_message_id` | `receipts.transaction_id`; the file in `documents`/R2; no thumbnail; `source` is `photo` or `email` (camera and library can't be told apart and don't need to be); `email_message_id` kept. |
+| B3 | Receipt: transaction FK (SET_NULL), image, thumbnail, source camera/upload/email, `email_message_id` | `receipts.transaction_id`; the file in `documents`/R2; no thumbnail; `source` is `upload` (a photo or PDF; camera and library can't be told apart and don't need to be) or `email`; `email_message_id` kept. |
 | B4 | Receipt: status, `error_message`, `ocr_raw_response`, overall `ocr_confidence` | Changed: three statuses; no error text stored (nothing from a receipt is logged); `read` keeps Clairic's answers with a confidence per value, not a raw dump. |
 | B5 | Receipt: merchant, total, subtotal, tax, tip, date, currency USD, Decimal(19,4) | Same fields, in integer cents (CLAUDE.md), plus discount, card last four, order number, and for bills the amount due and due date. Other currencies: **Later**. |
 | B6 | Receipt: `match_confidence`, `matched_at`, `auto_split_applied`, timestamps | Changed: `kept_by`, `kept_at`, `read_at`, `created_at`; a split shows on the transaction itself. |
@@ -119,7 +119,7 @@ Sources read in full:
 
 | # | Original | Where it went |
 |---|---|---|
-| C1 | Document source: camera, upload, email_forward, email_scan | `photo` and `email`; email_scan (reading the inbox) is **Later** (part E, E12). |
+| C1 | Document source: camera, upload, email_forward, email_scan | `upload` and `email`; email_scan (reading the inbox) is **Later** (part E, E12). |
 | C2 | Document type: receipt, invoice, bill, statement | `kind`: `receipt` or `bill` (an invoice still to pay is a bill; a paid one is a receipt). Statements stay on the Later list as a second transaction source. |
 | C3 | Match strategy: auto_match, standalone, manual_link | Card (waits for its charge), cash (a cash entry), and from a transaction's panel. |
 | C4 | Status: pending, processing, extracted, reviewed, applied, failed | `to_review`, `waiting`, `kept` (A47). |
