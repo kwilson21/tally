@@ -618,7 +618,7 @@ function Brand() {
 							"Chase",
 							FIRST_WEEK_TODAY,
 							false,
-							1,
+							2,
 						)}
 					/>
 				</State>

@@ -170,6 +170,41 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(trigger(res)?.announce).toBe("Solo Card is in: 1 transaction.");
 	});
 
+	it("sends no announcement when a refresh only moves a count, for a bank being read or one already in", async () => {
+		// A refresh that only moves a count says nothing: the list shows the count, and saying it every 5 seconds would drown
+		// out everything else (DESIGN.md, YourBanks).
+		await readingBanks();
+		await env.DB.prepare(
+			"INSERT INTO plaid_items (id, access_token_encrypted, institution_name, linked_by) VALUES (903, X'', 'Count Bank', 'test')",
+		).run();
+		await env.DB.prepare(
+			"INSERT INTO accounts (id, plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (993, 903, 'Card', '0000', 'credit', 'credit card', 1, 0)",
+		).run();
+		const addTransaction = (plaidId: string) =>
+			env.DB.prepare(
+				"INSERT INTO transactions (account_id, date, amount_cents, raw_name, plaid_transaction_id) VALUES (993, '2026-10-01', 500, 'SHOP', ?)",
+			)
+				.bind(plaidId)
+				.run();
+
+		await addTransaction("count-1");
+		await addTransaction("count-2");
+		const reading = await refresh();
+		expect(reading.html).toContain("Reading · 2 so far");
+		expect(trigger(reading.res)).toBeNull();
+
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now') WHERE id = 903",
+		).run();
+		// The page already draws this bank as in, so the refresh only has to move its count.
+		const arrived = await refresh("?in=903");
+		expect(trigger(arrived.res)).toBeNull();
+		await addTransaction("count-3");
+		const moved = await refresh("?in=903");
+		expect(moved.html).toContain("90 days in · 3");
+		expect(trigger(moved.res)).toBeNull();
+	});
+
 	it("ignores anything in ?in= that is not a positive whole number", async () => {
 		await readingBanks();
 		const [first] = await connectedIds();
@@ -201,9 +236,12 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 		const { res, html } = await refresh(
 			`?in=${(await connectedIds()).join(",")}`,
 		);
-		expect(res.headers.get("HX-Retarget")).toBe("#first-week");
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
 		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
-		expect(html).toContain('id="first-week"');
+		expect(html).toContain('id="setup-top"');
+		// The swap moves focus to the new status: the button that had it (Link a bank, a Fix) is gone with the old top.
+		const status = html.split('id="setup-status"')[1]?.split(">")[0] ?? "";
+		expect(status).toContain(" autofocus");
 		expect(html).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);

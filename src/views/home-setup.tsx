@@ -85,7 +85,7 @@ function FifthDay({
 }) {
 	const amount = safeToSpendText(safeToSpendCents);
 	return (
-		<section id="first-week" class="mt-2" aria-labelledby="setup-title">
+		<section id="setup-top" class="mt-2" aria-labelledby="setup-title">
 			<h1 id="setup-title" class="sr-only">
 				Your first week
 			</h1>
@@ -133,7 +133,10 @@ function FifthDay({
  * Home's top says it, with its Fix. Its words lead, so while one is drawn the reading's "Nothing for you to do until
  * then." is left out, since a bank that needs a fix is something to do. The status takes focus after Plaid redraws
  * Home (`data-link-bank-focus`, plaid-link.js). `fifthDay` is the money and the link the fifth-day view draws (Home's
- * Safe to spend, and where "See what needs you" goes); it is given only on the day stroke five is drawn.
+ * Safe to spend, and where "See what needs you" goes); it is given only on the day stroke five is drawn. `focusStatus` is
+ * given only by the refresh that redraws the top once the questions open (home.tsx): the status is autofocus there, so htmx
+ * moves focus to it once the swap lands, since the button that had it (Link a bank, a Fix) has been removed. A full load
+ * never sets it, so Home never takes focus on load.
  */
 export function HomeSetup({
 	view,
@@ -141,6 +144,7 @@ export function HomeSetup({
 	bankLine,
 	fifthDay,
 	yourBanks,
+	focusStatus = false,
 }: {
 	view: SetupView;
 	linkBank?: Child;
@@ -148,6 +152,7 @@ export function HomeSetup({
 	fifthDay?: { safeToSpendCents: number; needsHref?: string };
 	/** The connected banks' rows and today's date, drawn while the import is read (YourBanks). */
 	yourBanks?: { banks: YourBank[]; today: string; polls?: boolean };
+	focusStatus?: boolean;
 }) {
 	if (view.fifth && fifthDay) {
 		return (
@@ -163,7 +168,7 @@ export function HomeSetup({
 	const { phase } = view;
 	const before = phase === "before";
 	return (
-		<section id="first-week" class="mt-2" aria-labelledby="setup-title">
+		<section id="setup-top" class="mt-2" aria-labelledby="setup-title">
 			{/* The picked drawing shows no title once a bank is linked: the heading is for screen readers, the notebook at the right. */}
 			<div
 				class={`flex items-center gap-4 ${before ? "justify-between" : "justify-end"}`}
@@ -181,16 +186,15 @@ export function HomeSetup({
 				<Notebook strokes={view.drawn} ink size="size-24" />
 			</div>
 			{phase !== "before" && (
-				<>
-					<p
-						id="setup-status"
-						tabindex={-1}
-						data-link-bank-focus
-						class="mt-3 font-serif text-lg italic"
-					>
-						{statusOf(view, Boolean(bankLine))}
-					</p>
-				</>
+				<p
+					id="setup-status"
+					tabindex={-1}
+					data-link-bank-focus
+					{...(focusStatus ? { autofocus: true } : {})}
+					class="mt-3 font-serif text-lg italic"
+				>
+					{statusOf(view, Boolean(bankLine))}
+				</p>
 			)}
 			{bankLine && <BankBehind words={bankLine} />}
 			{phase === "reading" && yourBanks && (

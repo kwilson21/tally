@@ -5342,7 +5342,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			'<section id="p139-split-category"',
 			'<section id="p140-banks"',
 			// P140's A is the real HomeSetup, whose own section and Your banks section sit inside its picture.
-			'<section id="first-week"',
+			'<section id="setup-top"',
 			'<section id="your-banks"',
 		]);
 		expect(html.slice(open + 1, p136)).not.toContain(

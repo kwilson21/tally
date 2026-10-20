@@ -96,6 +96,8 @@ describe("Home during setup", () => {
 		expect(at("Have more accounts?")).toBeLessThan(at("Link a bank"));
 		expect(at("Link a bank")).toBeLessThan(at("Your first tally"));
 		expect(html).toContain(PLAID_MODULE);
+		// A full load never moves focus: only the retarget reply that redraws the top focuses its status.
+		expect(html).not.toContain("autofocus");
 	});
 
 	it("with Plaid off, the reading phase lists Your banks but has no prompt and loads no Plaid", async () => {
@@ -106,6 +108,45 @@ describe("Home during setup", () => {
 		});
 		const html = await page(family);
 		expect(html).toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+		expect(html).not.toContain(PLAID_MODULE);
+	});
+
+	it("in the ready phase, Home has no Your banks, no Have more accounts? and no Plaid Link", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, history_complete_at = datetime('now')",
+		).run();
+		// Stroke one drawn yesterday and every bank's history in: the questions are open, and none is answered.
+		await writeRecord({
+			strokes: { bank: daysBefore(todayIn(DEFAULT_TIME_ZONE), 1) },
+			budgets: {},
+		});
+		const html = await page(plaidFamily);
+		expect(html).toContain("Three things to check");
+		expect(html).not.toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+		expect(html).not.toContain(PLAID_MODULE);
+		expect(html).not.toContain("autofocus");
+	});
+
+	it("in the answered phase, Home has no Your banks and no Have more accounts?", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
+		const html = await page(plaidFamily);
+		expect(html).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(html).not.toContain("Your banks");
 		expect(html).not.toContain("Have more accounts?");
 		expect(html).not.toContain(PLAID_MODULE);
 	});

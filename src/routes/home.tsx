@@ -701,7 +701,7 @@ home.get("/home/banks", async (c) => {
 		const message = [said, statusOf(setup, flagged.length > 0)]
 			.filter(Boolean)
 			.join(" ");
-		c.header("HX-Retarget", "#first-week");
+		c.header("HX-Retarget", "#setup-top");
 		c.header("HX-Reswap", "outerHTML");
 		c.header(
 			"HX-Trigger",
@@ -711,6 +711,7 @@ home.get("/home/banks", async (c) => {
 			<HomeSetup
 				view={setup}
 				bankLine={homeBankNotice(flagged, today)?.words}
+				focusStatus
 			/>,
 		);
 	}

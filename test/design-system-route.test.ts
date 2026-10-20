@@ -115,6 +115,30 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('<section id="busy-ring"');
 	});
 
+	it("has one id=first-week on the page, the sidebar's group for a new family's first week (not Home's top)", async () => {
+		const { html } = await get("/design-system");
+		expect(html.split('id="first-week"').length - 1).toBe(1);
+		expect(html).toContain(
+			'<section id="first-week" aria-labelledby="first-week-title" class="mt-12">',
+		);
+		expect(html).toContain("A new family&#39;s first week</h2>");
+		// Home's top draws its own section as setup-top, so the sidebar's #first-week lands on the group.
+		expect(html).toContain('<section id="setup-top"');
+	});
+
+	it("its re-ask state shows step one as '2 banks, linked', since that state has two banks", async () => {
+		const { html } = await get("/design-system");
+		const state =
+			html
+				.split(
+					"A bank linked during setup: a line under step one says Tally asks again about the questions",
+				)[1]
+				?.split("All five drawn, each with its day")[0] ?? "";
+		expect(state).toContain("Tally asks again about pay, bills and budgets");
+		expect(state).toContain("2 banks, linked");
+		expect(state).not.toContain("Chase, linked");
+	});
+
 	it("shows every component in DESIGN.md's table", async () => {
 		const { html } = await get("/design-system");
 		const shown = specimens(html)
