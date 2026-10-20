@@ -37,7 +37,7 @@ const readShots = (dir, names) =>
 const files = await listed(AFTER);
 const changes = unavailable
 	? []
-	: changedShots({
+	: await changedShots({
 			after: await readShots(AFTER, files),
 			before: await readShots(BEFORE, await listed(BEFORE)),
 		});
