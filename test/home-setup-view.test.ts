@@ -16,6 +16,7 @@ const base: SetupView = {
 	total: 0,
 	fifth: null,
 	answeredWaiting: null,
+	emailed: false,
 };
 const top = async (
 	view: Partial<SetupView>,
@@ -367,5 +368,50 @@ describe("HomeSetup on the fifth day", () => {
 		const html = await fifthTop(-1999900);
 		expect(html).toContain("−$19,999");
 		expect(html).toMatch(/<div class="hidden shrink-0 sm:block"><svg/);
+	});
+});
+
+describe("HomeSetup's ready-email line", () => {
+	const reading = {
+		phase: "reading" as const,
+		drawn: 1,
+		bankName: "Chase",
+		total: 40,
+	};
+
+	it("reading, with no ready email reached anyone: the muted line sits right under the status", async () => {
+		const html = await top(reading);
+		expect(html).toContain("Tally will email you when they're ready.");
+		expect(html.indexOf('id="setup-status"')).toBeLessThan(
+			html.indexOf("Tally will email you when they're ready."),
+		);
+		expect(html).toContain(
+			'<p class="mt-2 text-muted">Tally will email you when they\'re ready.</p>',
+		);
+	});
+
+	it("reading, with a bank line too: the line still draws, before the bank's line", async () => {
+		const html = await top(reading, undefined, [
+			"Chase needs you to sign in again.",
+		]);
+		expect(html).toContain("Tally will email you when they're ready.");
+		expect(html).toContain("Chase needs you to sign in again.");
+		expect(
+			html.indexOf("Tally will email you when they're ready."),
+		).toBeLessThan(html.indexOf("Chase needs you to sign in again."));
+	});
+
+	it("reading, once the ready email has reached someone: no line", async () => {
+		const html = await top({ ...reading, emailed: true });
+		expect(html).not.toContain("Tally will email you when they're ready.");
+	});
+
+	it.each([
+		["before a bank", { phase: "before" as const, drawn: 0, bankName: null }],
+		["ready", { phase: "ready" as const, drawn: 3, historyIn: true }],
+		["answered", { phase: "answered" as const, drawn: 4 }],
+	])("%s: no line", async (_name, view) => {
+		const html = await top(view);
+		expect(html).not.toContain("Tally will email you when they're ready.");
 	});
 });

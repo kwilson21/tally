@@ -1,23 +1,13 @@
 import { daysBefore, householdTimeZone, todayIn } from "../dates";
 import { readBankSignInEmails } from "../db/reconnect";
+import { type DeliveryEnv, deliver, logDeliveries } from "./deliver";
 import { renderReconnectEmail } from "./email";
 
 const REMINDER_DAYS = 3;
-const FROM = "Tally <tally@notifs.thesuperhuman.us>";
 
-type ReminderEnv = {
+type ReminderEnv = DeliveryEnv & {
 	DB: D1Database;
 	DEMO?: string;
-	RESEND_API_KEY?: string;
-	EMAIL?: {
-		send(message: {
-			to: string;
-			from: string;
-			subject: string;
-			html: string;
-			text: string;
-		}): Promise<unknown>;
-	};
 };
 
 export function reconnectRecipients(db: D1Database) {
@@ -58,12 +48,12 @@ export async function runReconnectReminders(
 			) <= cutoff,
 	);
 	if (!banks.length) {
-		logRun(0, 0, new Set());
+		logDeliveries("reconnect reminders", 0, 0, new Set());
 		return;
 	}
 	const recipients = await reconnectRecipients(env.DB);
 	if (!recipients.results.length) {
-		logRun(0, 0, new Set());
+		logDeliveries("reconnect reminders", 0, 0, new Set());
 		return;
 	}
 	// Counts are per address and bank; the failure kinds name a provider status, never an address.
@@ -90,39 +80,19 @@ export async function runReconnectReminders(
 		const email = renderReconnectEmail(input, zone);
 		let sent = false;
 		for (const { email: recipient } of recipients.results) {
-			const kinds: string[] = [];
-			let delivered = false;
-			if (env.RESEND_API_KEY) {
-				const response = await fetchImpl("https://api.resend.com/emails", {
-					method: "POST",
-					signal: timeoutSignal(10_000),
-					headers: {
-						Authorization: `Bearer ${env.RESEND_API_KEY}`,
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({ from: FROM, to: recipient, ...email }),
-				}).catch(() => null);
-				delivered = response?.ok ?? false;
-				if (!delivered)
-					kinds.push(
-						response ? `resend ${response.status}` : "resend timeout or error",
-					);
-			}
-			if (!delivered && env.EMAIL) {
-				try {
-					await env.EMAIL.send({ to: recipient, from: FROM, ...email });
-					delivered = true;
-				} catch {
-					kinds.push("email fallback error");
-				}
-			}
-			if (delivered) {
+			const outcome = await deliver(
+				env,
+				recipient,
+				email,
+				fetchImpl,
+				timeoutSignal,
+			);
+			if (outcome.delivered) {
 				sentCount += 1;
 				sent = true;
 			} else {
 				failedCount += 1;
-				for (const kind of kinds.length ? kinds : ["no provider configured"])
-					failureKinds.add(kind);
+				for (const kind of outcome.kinds) failureKinds.add(kind);
 			}
 		}
 		if (!sent)
@@ -132,15 +102,5 @@ export async function runReconnectReminders(
 				.bind(bank.reconnect_emailed_at, bank.id, claimedAt)
 				.run();
 	}
-	logRun(sentCount, failedCount, failureKinds);
-}
-
-// One line per run that checks for banks: counts, and the provider statuses or error kinds that failed.
-function logRun(sent: number, failed: number, failureKinds: Set<string>) {
-	const failures = failureKinds.size
-		? ` (${[...failureKinds].join(", ")})`
-		: "";
-	const summary = `reconnect reminders: ${sent} sent, ${failed} failed${failures}`;
-	if (failed) console.error(summary);
-	else console.log(summary);
+	logDeliveries("reconnect reminders", sentCount, failedCount, failureKinds);
 }

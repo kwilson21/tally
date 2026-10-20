@@ -1096,6 +1096,7 @@ function banksView(): SetupView {
 		total: 498,
 		fifth: null,
 		answeredWaiting: null,
+		emailed: false,
 	};
 }
 

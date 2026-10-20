@@ -59,6 +59,11 @@ export type SetupView = {
 	 * status's clause after "Tally keeps count" ("once Chase's history is in."). Null when nothing is waiting.
 	 */
 	answeredWaiting: string | null;
+	/**
+	 * The ready email has reached someone: `readyEmailedTo` is not empty (decision 134). While the import is read and this is
+	 * false, Home says Tally will email when they're ready.
+	 */
+	emailed: boolean;
 };
 
 /** The five lines' names (spec §8.8). */
@@ -372,6 +377,7 @@ export function setupView({
 		fifth: fifthDay ? (record?.night ?? null) : null,
 		answeredWaiting:
 			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
+		emailed: (record?.readyEmailedTo ?? []).length > 0,
 	};
 }
 

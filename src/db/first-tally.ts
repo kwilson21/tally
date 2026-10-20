@@ -76,6 +76,12 @@ export type FirstTally = {
 	 * questions again) or when the last bank goes before setup is done (takeBackBankStrokes). Absent otherwise.
 	 */
 	reAsk?: { bank: string };
+	/**
+	 * The addresses the ready email (decision 134) has reached or is sending to. An address is added before its email goes
+	 * and taken off again if neither provider delivers, so each person gets it once (src/first-tally/ready-email.tsx).
+	 * Absent until one is added.
+	 */
+	readyEmailedTo?: string[];
 };
 
 const KEY = "first_tally";

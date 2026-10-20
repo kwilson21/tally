@@ -15,6 +15,7 @@ import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import { keepNightCounts, recordNightSync, utcDay } from "./first-tally/night";
+import { runReadyEmail } from "./first-tally/ready-email";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
 import { runReconnectReminders } from "./reconnect/reminders";
@@ -93,7 +94,8 @@ app.onError(serverErrorPage);
  *   200, then makes the night's names, up to 100.
  * - 09:40, the second sort run (`runSecondSort`): asks Jev about what is left, up to `MAX_CALLS_PER_RUN`,
  *   300. No names.
- * - 10:00, reconnect reminders (`runReconnectReminders`): its own query budget after sync and sorting.
+ * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`): their own
+ *   query budget after sync and sorting.
  *
  * Every step that makes calls has a time budget counted from the start of the run (src/run-budget.ts), so
  * a slow Jev or a slow Workers AI can't use up the run's time and leave the next step none, and a cron run
@@ -135,7 +137,7 @@ export async function runScheduled(
 	const synced = await syncAllItems(env, fetchImpl);
 	// The first night's sync (#586), kept for the second sort to decide. Production only: the demo has no banks.
 	if (env.DEMO === "false") {
-		await nightStep("sync", () =>
+		await runStep("first night: sync step", () =>
 			recordNightSync(env.DB, synced, utcDay(clockNow(time))),
 		);
 	}
@@ -273,7 +275,7 @@ export async function runSecondSort(
 		time: budgetsFor(time).run,
 	});
 	// The night's counts (#586) are kept here, once this run has sorted what the first sort left.
-	await nightStep("counts", () =>
+	await runStep("first night: counts step", () =>
 		keepNightCounts(env.DB, env, utcDay(clockNow(time))),
 	);
 }
@@ -282,15 +284,15 @@ export async function runSecondSort(
 const clockNow = (time?: RunClock) => (time?.now ?? Date.now)();
 
 /**
- * One of the night's steps (#586). A failure is logged by name and the run goes on, so the night's counts never stop a
- * run's own work.
+ * One of a run's steps. A failure is logged by name and the run goes on, so one step never stops the next: the night's counts
+ * (#586), and the 10:00 run's reconnect reminders and ready email.
  */
-async function nightStep(name: string, step: () => Promise<void>) {
+async function runStep(label: string, step: () => Promise<void>) {
 	try {
 		await step();
 	} catch (error) {
 		console.error(
-			`first night: ${name} step failed ${error instanceof Error ? error.name : "unknown"}`,
+			`${label} failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
 }
@@ -382,8 +384,9 @@ export default {
 	async scheduled(controller, env) {
 		if (controller.cron === FIRST_SORT_CRON) await runFirstSort(env);
 		else if (controller.cron === SECOND_SORT_CRON) await runSecondSort(env);
-		else if (controller.cron === RECONNECT_EMAIL_CRON)
-			await runReconnectReminders(env);
-		else await runScheduled(env);
+		else if (controller.cron === RECONNECT_EMAIL_CRON) {
+			await runStep("reconnect reminders", () => runReconnectReminders(env));
+			await runStep("ready email", () => runReadyEmail(env));
+		} else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
