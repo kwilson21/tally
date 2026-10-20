@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { enabled } from "../src/routes/plaid";
 
 // The Your banks list's refresh (P140 A, decision 133): GET /home/banks, polled every 5 seconds while a bank is being read.
 // It answers with the list and the status out of band, announces a bank that came in, redraws the whole first-week top once
@@ -62,6 +63,18 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(html).toContain("Tally's reading your last 90 days");
 		expect(html).not.toContain("<html");
 		expect(html).not.toContain('id="home"');
+	});
+
+	it("with Plaid off, still answers with the list: no reload, and no Have more accounts? prompt", async () => {
+		// The premise: no Plaid credentials, so Home draws no prompt. The fragment is not gated on Plaid (Home draws the list
+		// with Plaid off too), and it never carries the prompt, so the last assertion guards that rather than proving it.
+		expect(enabled(family)).toBe(false);
+		await readingBanks();
+		const { res, html } = await refresh();
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="your-banks"');
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(html).not.toContain("Have more accounts?");
 	});
 
 	it("keeps nothing focusable in the list, so a refresh never moves focus", async () => {
