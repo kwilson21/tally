@@ -1,5 +1,6 @@
 // The sorting loop (spec §8.6, decision 139). Jev is asked about waiting transactions in groups of 25: each group
-// reads D1 once, asks Jev about each row as a step of its own, and saves every answer in one D1 batch, all or none.
+// reads D1 once, reserves its calls in a step of its own, asks Jev about each row as a step of its own, and saves
+// every answer in one D1 batch, all or none.
 // The loop is the same in-process (categorizePending: the nightly runs and the tests, where a step just runs) and in
 // the Workflow (SortWorkflow: each step is a saved Workflows step, so a retry skips the steps that finished).
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
@@ -94,21 +95,29 @@ export type SortOptions = {
 
 type SortRow = Awaited<ReturnType<typeof pendingForJev>>[number];
 
-/** What one group reads once, so it can be asked and saved without another read. Plain JSON, for a step's result. */
-export type SortPlan = {
+/** What one group reads once, before its calls are reserved. Plain JSON, for the read step's result. */
+type ReadPlan = {
 	turnId: string;
 	day: string;
 	timeZone: string;
-	granted: number;
 	switches: AiSwitches;
 	bySync: boolean;
 	/** No ask starts after this (ms), the group's 2-minute budget. */
 	askUntil: number;
 	categories: { id: number; name: string }[];
 	people: { id: number; name: string }[];
+	/** Every waiting row the read found, at most GROUP_SIZE. */
 	rows: SortRow[];
 	/** Each merchant's recent categories, keyed by its merchant key. */
 	histories: Record<string, string[][]>;
+};
+
+/**
+ * A group's plan once its calls are reserved, so it can be asked and saved without another read. Plain JSON, for the
+ * write step. `rows` are the first `granted` of the read's rows: the ones this group asks.
+ */
+export type SortPlan = ReadPlan & {
+	granted: number;
 };
 
 /** What one row's ask came to. An ask step never throws: any failure is `failed`. */
@@ -129,6 +138,11 @@ export type AskResult =
 const STEP_SETTINGS = {
 	read: {
 		retries: { limit: 50, delay: "20 seconds", backoff: "constant" },
+		timeout: "1 minute",
+		sensitive: "output",
+	},
+	reserve: {
+		retries: { limit: 0, delay: 0 },
 		timeout: "1 minute",
 		sensitive: "output",
 	},
@@ -186,9 +200,10 @@ function askingStops(results: AskResult[], before: number): boolean {
 }
 
 /**
- * Takes the turn and reads what a group needs, with no Jev call: the switches once, the categories, the people (when
- * details are on), the time zone, its rows and their merchant histories, and its calls from the day's cap (reserved
- * last). Gives the turn back when there is nothing to ask. Any throw after the turn was taken gives it back first.
+ * Takes the turn and reads what a group needs, with no Jev call and no reservation: the switches once, the categories,
+ * the people (when details are on), the time zone, its rows and their merchant histories. Gives the turn back when
+ * there is nothing to ask. Any throw after the turn was taken gives it back first. The calls are reserved in their own
+ * step (reserveCalls), so a read that runs again never reserves twice.
  */
 async function readGroup(
 	env: SortEnv,
@@ -200,7 +215,7 @@ async function readGroup(
 		turnId: string;
 	},
 ): Promise<
-	{ kind: "busy" } | { kind: "none" } | { kind: "group"; plan: SortPlan }
+	{ kind: "busy" } | { kind: "none" } | { kind: "group"; plan: ReadPlan }
 > {
 	const db = env.DB;
 	if (!(await takeSortingTurn(db, options.turnId))) return { kind: "busy" };
@@ -238,27 +253,18 @@ async function readGroup(
 		const histories = switches.categories
 			? await merchantCategoryHistoryForJev(db, rows)
 			: new Map<string, string[][]>();
-		// Reserved last: nothing that can throw comes after it (the calls are not given back by a throw here).
-		const granted = await reserveJevCalls(
-			db,
-			day,
-			jevCallLimit(env),
-			rows.length,
-		);
-		if (granted === 0) return await none();
 		return {
 			kind: "group",
 			plan: {
 				turnId: options.turnId,
 				day,
 				timeZone,
-				granted,
 				switches,
 				bySync: options.bySync,
 				askUntil: Date.now() + ASK_BUDGET_MS,
 				categories,
 				people,
-				rows: rows.slice(0, granted),
+				rows,
 				histories: Object.fromEntries(histories),
 			},
 		};
@@ -266,6 +272,25 @@ async function readGroup(
 		await releaseSortingTurn(db, options.turnId);
 		throw error;
 	}
+}
+
+/**
+ * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A re-run (attempt > 1)
+ * grants nothing: its first attempt may already have reserved the calls, and they are never reserved twice.
+ */
+async function reserveCalls(
+	env: SortEnv,
+	plan: ReadPlan,
+	{ attempt }: { attempt: number },
+): Promise<{ granted: number }> {
+	if (attempt > 1) return { granted: 0 };
+	const granted = await reserveJevCalls(
+		env.DB,
+		plan.day,
+		jevCallLimit(env),
+		plan.rows.length,
+	);
+	return { granted };
 }
 
 /**
@@ -450,13 +475,15 @@ export async function writeGroup(
 		)
 			applied += 1;
 
-	// A group that asked nothing because its budget was already spent stops the run: its rows would be read again.
-	const askedNothingOutOfTime =
-		asked === 0 && results.at(-1)?.outcome === "out-of-time";
+	// A group whose budget ended its asking hands the rows it didn't reach to the next group, so a short group stops the
+	// run only when the asking wasn't cut short by the budget. A group that asked nothing because its budget was
+	// already spent stops the run: its rows would be read again.
+	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
+	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
 	const stop =
 		!asksJev(now) ||
 		(plan.bySync && !now.sortOnArrival) ||
-		plan.rows.length < GROUP_SIZE ||
+		(plan.rows.length < GROUP_SIZE && !endedOutOfTime) ||
 		askedNothingOutOfTime ||
 		runStops(results, failuresBefore);
 	return { asked, applied, stop };
@@ -464,9 +491,10 @@ export async function writeGroup(
 
 /**
  * Sorts the waiting transactions in groups of 25 through `runStep` (see StepRunner). Merchant rules first (unless the
- * caller applied them), then for each group: read (turn taken, calls reserved), ask each row (a step of its own), and
- * write (one batch, the turn released). The run ends when a group reads nothing, when a write says so, or when the
- * calls or (in-process) the deadline run out. In-process, a throw releases the turn this run still holds.
+ * caller applied them), then for each group: read (turn taken), reserve (the calls from the day's cap), ask each row (a
+ * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
+ * says so, or when the calls or (in-process) the deadline run out. In-process, a throw releases the turn this run
+ * still holds.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -511,8 +539,28 @@ export async function sortGroups(
 				},
 			);
 			if (read.kind === "busy" || read.kind === "none") break;
-			const { plan } = read;
+			const { plan: readPlan } = read;
 			held = turnId;
+			// The calls are reserved in a step of their own, so a read that runs again never reserves twice. A reserve
+			// that rejects grants nothing (its calls, if its batch had committed, stay charged for the day).
+			let granted = 0;
+			try {
+				granted = (
+					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, (ctx) =>
+						reserveCalls(env, readPlan, ctx),
+					)
+				).granted;
+			} catch (error) {
+				console.error(
+					`sorting: reserve step ${error instanceof Error ? error.name : "unknown"}`,
+				);
+			}
+			// With nothing granted there are no rows: the write gives the turn back, and as a short group it stops the run.
+			const plan: SortPlan = {
+				...readPlan,
+				granted,
+				rows: readPlan.rows.slice(0, granted),
+			};
 			const results: AskResult[] = [];
 			const before = streak;
 			let outOfTime = false;
@@ -522,11 +570,22 @@ export async function sortGroups(
 					outOfTime = true;
 					break;
 				}
-				results.push(
-					await runStep(`group-${n}-ask-${row.id}`, STEP_SETTINGS.ask, (ctx) =>
-						askOne(apiKey, plan, row, fetchImpl, ctx),
-					),
-				);
+				let answer: AskResult;
+				try {
+					answer = await runStep(
+						`group-${n}-ask-${row.id}`,
+						STEP_SETTINGS.ask,
+						(ctx) => askOne(apiKey, plan, row, fetchImpl, ctx),
+					);
+				} catch (error) {
+					// The step itself rejected (its timeout, or a runtime failure). Its call may have been made, so it
+					// counts as asked, and it stops the group's asking; the write still saves the answers before it.
+					console.error(
+						`sorting: ask step ${error instanceof Error ? error.name : "unknown"}`,
+					);
+					answer = { id: row.id, outcome: "lost" };
+				}
+				results.push(answer);
 				if (askingStops(results, before)) break;
 			}
 			const written = await runStep(
