@@ -62,7 +62,7 @@ Each answer was scored by `decide` (`src/ai/decide.ts`) at Tally's 0.80 cutoff, 
 
   No model raised a flag it shouldn't have.
 - **Speed:** middle times from this machine were 131 ms for Jev, 287 ms for Clef and 363 ms for Clef-flash. Clef's times include Wrangler's remote-binding hop, so they are rough.
-- **Size and cost:** Jev's first call used 925 input tokens, and Clef's used 1,197. At the input prices found on Oct 19 ($0.042 per million for Jev, from Better Stack's comparison; $0.240 for Clef and $0.038 for Clef-flash, from Cloudflare's changelog), a night's 500-call cap costs about $0.02 on Jev, $0.14 on Clef and $0.02 on Clef-flash.
+- **Size and cost:** the report keeps only each model's first call's size, and that call asks with the 7 categories. Jev's used 925 input tokens, and Clef's used 1,197. At the input prices found on Oct 19 ($0.042 per million for Jev, from Better Stack's comparison; $0.240 for Clef and $0.038 for Clef-flash, from Cloudflare's changelog), 500 calls that size cost about $0.02 on Jev, $0.14 on Clef and $0.02 on Clef-flash. A call with 50 categories lists every name twice, so it is larger. For a household near that limit, these figures are a floor, not a night's real cost.
 
 ## Why Jev stays
 
@@ -77,11 +77,11 @@ Switching to Clef would need a new confidence cutoff, or Tally would stop sortin
 
 ## Measuring again
 
-From a checkout of `main`:
-1. Start the Worker. The env file needs `JEV_API_KEY`, the path must be absolute, and the run needs `wrangler login`:
+From the root of the checkout that holds your `.dev.vars` (a fresh worktree has none):
+1. Start the Worker. The env file needs `JEV_API_KEY`, and the run needs `wrangler login`. The path must be absolute, because Wrangler resolves it from the config's folder, so `$(pwd)` builds it:
 
    ```bash
-   npx wrangler dev --config scripts/compare-models/wrangler.jsonc --env-file /Users/kazon/repos/tally/.dev.vars --port 8799
+   npx wrangler dev --config scripts/compare-models/wrangler.jsonc --env-file "$(pwd)/.dev.vars" --port 8799
    ```
 
 2. Fetch the report:
