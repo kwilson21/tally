@@ -76,6 +76,12 @@ export type FirstTally = {
 	 * questions again) or when the last bank goes before setup is done (takeBackBankStrokes). Absent otherwise.
 	 */
 	reAsk?: { bank: string };
+	/**
+	 * The savings question's answer (decision 135, #721): the goal's cents the household kept, or "skipped" for Not now. Set
+	 * once, when the question is answered or when stroke four is drawn with a goal above $0 (savingsCopyStatement); a
+	 * take-back keeps it, as it keeps the budgets. Absent until then.
+	 */
+	savings?: number | "skipped";
 };
 
 const KEY = "first_tally";

@@ -196,3 +196,31 @@ export function needsTail(count: number, meanCents: number | null): string {
 /** The ruled-off total's status line, once the budgets stroke is drawn (the fourth stroke, spec §8.8). */
 export const RULED_STATUS =
 	"Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
+
+/**
+ * The savings question at the end of the budgets step (spec §8.8, decision 135, #721): its ledger line, the replies, and
+ * the refused amount's words. "Savings · $300 a month" in ink; cents show when there are some (dollarsWords).
+ */
+export function savingsLedgerLine(cents: number): string {
+	return `Savings · ${dollarsWords(cents)} a month`;
+}
+
+/** The reply to Save it: "Saved the savings goal: $300 a month.", the same words the toast and the announcer use. */
+export function savedSavingsWords(cents: number): string {
+	return `Saved the savings goal: ${dollarsWords(cents)} a month.`;
+}
+
+/** The reply to Not now: "No savings goal for now.", which writes no ledger line. */
+export const SKIPPED_SAVINGS_WORDS = "No savings goal for now.";
+
+/**
+ * The reply when a goal Home set after the page drew wins over the answer: the goal it kept, and its amount ("Home already
+ * has a savings goal: $200 a month.").
+ */
+export function homeSavingsWords(cents: number): string {
+	return `Home already has a savings goal: ${dollarsWords(cents)} a month.`;
+}
+
+/** The refused amount's words for Save it with a blank amount or $0 (parseBudgetAmount's own errors are used otherwise). */
+export const SAVINGS_BLANK_WORDS =
+	"Enter an amount greater than $0, or choose Not now.";
