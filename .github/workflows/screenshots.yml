@@ -65,25 +65,38 @@ jobs:
           dir="pr-${PR}/${SHA::7}"
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git fetch --depth=1 origin screenshots; then
-            git worktree add --detach shots FETCH_HEAD
-          else
-            git worktree add --detach shots
-            git -C shots switch --orphan screenshots
-          fi
-          # A re-run of the same commit starts its folder afresh, so images it no longer shows are removed (#756).
-          rm -rf "shots/$dir"
-          mkdir -p "shots/$dir"
           # Only the images the description shows (#756), staged by scripts/changed-shots.mjs as the
           # folder's layout: changed pages' after images at the top, their before images in before/.
-          cp -r screenshots/shown/. "shots/$dir/"
-          git -C shots add .
-          # A rerun of the same commit can produce identical images; nothing to commit is fine.
-          git -C shots diff --cached --quiet || git -C shots commit -m "chore: screenshots for #${PR} at ${SHA::7}"
-          # Each run writes its own folder, so a rebase after a race never conflicts.
+          stage="${RUNNER_TEMP:?}/stage"
+          rm -rf "$stage"
+          mkdir -p "$stage/$dir"
+          cp -r screenshots/shown/. "$stage/$dir/"
+          # The commit is built from the branch's file list in a scratch index, so the images already on
+          # the branch are never downloaded (#759): only the new ones are pushed. The filtered fetch makes
+          # origin a blob-less remote for the rest of this job, and GIT_NO_LAZY_FETCH turns any command that
+          # would quietly download an existing image into a failure instead.
+          export GIT_INDEX_FILE="$RUNNER_TEMP/shots.index"
+          export GIT_NO_LAZY_FETCH=1
+          empty=$(git hash-object -t tree /dev/null)
           for i in 1 2 3; do
-            if git -C shots push origin HEAD:screenshots; then pushed=1; break; fi
-            git -C shots fetch origin screenshots && git -C shots rebase FETCH_HEAD
+            rm -f "$GIT_INDEX_FILE"
+            if git fetch --depth=1 --filter=blob:none origin screenshots; then
+              base=$(git rev-parse FETCH_HEAD)
+              git read-tree "$base"
+            else
+              base=""
+            fi
+            # A re-run of the same commit replaces its folder, so images it no longer shows are removed (#756).
+            git rm -r -q -f --cached --ignore-unmatch -- "$dir"
+            if [ -n "$(find "$stage/$dir" -type f -print -quit)" ]; then
+              git --work-tree="$stage" add -- "$dir"
+            fi
+            tree=$(git write-tree --missing-ok)
+            # Nothing new (no changed page, or a re-run with the same images): the branch stays as it is.
+            if [ "$tree" = "$(git rev-parse "${base:-$empty}^{tree}")" ]; then pushed=1; break; fi
+            commit=$(git commit-tree "$tree" ${base:+-p "$base"} -m "chore: screenshots for #${PR} at ${SHA::7}")
+            # A push that loses a race to another run starts again from the branch's new tip.
+            if git push origin "$commit:refs/heads/screenshots"; then pushed=1; break; fi
           done
           [ -n "${pushed:-}" ] || { echo "Could not push screenshots"; exit 1; }
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
