@@ -88,7 +88,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - Read with a small character state machine for RFC 4180 quoting.
   - Strip a leading `﻿`.
   - Read the header line with the same reader and compare its fields with `APPLE_COLUMNS`, optionally followed by `Purchased By`.
-  - Amount: refuse any `$`, then call `toCents`, which throws on anything else. Turn `-0` into `0`.
+  - Amount: refuse any `$`, then call `toCents`, which throws on anything else, then refuse a result that isn't `Number.isSafeInteger`, as the cash parser does (`src/transactions/cash.ts:38-40`). Turn `-0` into `0`. Test: a 20-digit amount gives the row's amount error.
   - Dates: `M/D/YYYY`, month first, with one or two digits each, checked as a real calendar day. A first number over 12 is an unreadable date.
 - [ ] **Step 4:** Run `npx vitest run test/apple-card-csv.test.ts`. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat: read Apple Card's CSV export into rows (#731)`.
@@ -157,8 +157,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `function importAppleCard(db: D1Database, rows: AppleRow[], opts: { by: string; today: string; balanceCents: number | null }): Promise<ImportResult>`
   - `function historyStart(db: D1Database, today: string): Promise<string>`:
     - `MIN(t.date)` over transactions on accounts with a non-null `plaid_item_id`, so a disconnected bank's kept rows are included.
-    - When a bank is linked but no such row exists yet, `daysBefore(today, 90)` (`src/dates.ts:143`).
-    - With no bank linked (no `plaid_items` row that isn't disconnected), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
+    - While any connected bank (`plaid_items` not disconnected) has `history_complete_at` unset, or there are no such rows yet, it's the earlier of that date and `daysBefore(today, 90)` (`src/dates.ts:143`), so rows aren't left out while the first sync is still bringing older pages (`src/plaid/sync.ts:1116-1131`).
+    - With no connected bank **and** no transaction on a Plaid account, `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
   - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT`, `removed_at TEXT` and `counted_from TEXT`.
@@ -183,7 +183,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `removed_at` becomes NULL, and the kept rows count as held.
     - `balance_on` is cleared unless this upload typed a balance.
   - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_on`, the balance and the rows are all unchanged.
-  - **`historyStart`:** the seed's earliest date on a Plaid account, with the 90-day fallback when a bank is linked but has no rows yet. With no bank linked, nothing is saved and the words are returned.
+  - **`historyStart`:** the seed's earliest date on a Plaid account; the earlier of that and the 90-day fallback while a connected bank's `history_complete_at` is unset; the kept rows' earliest date after the last bank is disconnected with its rows kept, so uploads still work then. With no connected bank and no kept bank history, nothing is saved and the words are returned.
   - **`saves a typed balance`:**
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
     - A second upload the same day replaces the row.
@@ -197,7 +197,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - **`gives Jev Apple's category as the hint`:** `pendingForJev`'s `plaidCategory` is `"Gas"` for an Apple row.
   - **`stores 250 rows in one call`.**
   - **`sets uploaded_on`** to the household's today (`opts.today`), and **`returns the added ids`**.
-  - **Export:** the export test's key lists include `uploaded_on`, `balance_on`, `removed_at`, `apple_category`, `upload_key` and `upload_twin`.
+  - **Export:** the export test's key lists include `uploaded_on`, `balance_on`, `removed_at`, `counted_from`, `apple_category`, `upload_key` and `upload_twin`.
 - [ ] **Step 3:** Run `npx vitest run test/apple-card-import.test.ts`. Expected: FAIL.
 - [ ] **Step 4:** Implement `importAppleCard` in `src/apple-card/import.ts`:
   1. Read `historyStart`, then call `planImport`.
@@ -284,7 +284,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - The form keeps Savings' double-tap guard (`hx-disable`).
   - **POST refusals.** Each returns 422 with the sheet `still`, a `role="alert"`, the typed balance kept, and nothing saved:
     - Not Apple's file: `NOT_APPLE`.
-    - No bank linked: "Link a bank first. Tally's history starts with your bank's."
+    - No bank connected and no bank history kept: "Link a bank first. Tally's history starts with your bank's." With a disconnected bank's rows kept, uploads, Accounts' Upload and Home's nudge all still work.
     - A bad row: its words.
     - No file (an empty-named `File`).
     - A bad balance.
@@ -307,7 +307,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - [ ] **Step 4: Implement.**
   - Model the routes on Home's `/savings-goal` GET and POST (`src/routes/home.tsx:772-845`).
   - Parse with `c.req.parseBody()`. The file field arrives as a `File` (Hono 4.13.8).
-  - Parse the balance with its own parser: blank means no balance; otherwise `toCents`, with a leading minus allowed.
+  - Parse the balance with its own parser: blank means no balance; otherwise `toCents`, with a leading minus allowed, and a result that isn't `Number.isSafeInteger` gets the bad-balance error.
 - [ ] **Step 5:** Run the tests, then every gate. Expected: PASS.
 - [ ] **Step 6:** Commit: `feat: Accounts uploads Apple Card's file in a sheet (P141 B)`.
 
