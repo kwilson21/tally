@@ -230,6 +230,90 @@ describe("sortGroups with a fake step runner", () => {
 		).toBe(2);
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
+
+	it("a group whose first ask is already past its 2-minute budget asks nothing and ends the run", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
+		const ids = await addWaiting(25);
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				if (name.startsWith("group-1-ask-"))
+					vi.setSystemTime(Date.now() + 3 * 60_000);
+			},
+		});
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-budget-first",
+		});
+		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(fetchImpl).not.toHaveBeenCalled();
+		// The group stops the run, so the same rows aren't read again by a second group in this run.
+		expect(fake.names()).not.toContain("group-2-read");
+		const turn = await db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM household_settings WHERE key = 'sorting_turn'",
+			)
+			.first<{ n: number }>();
+		expect(turn?.n).toBe(0);
+		const used = await db
+			.prepare(
+				"SELECT value FROM household_settings WHERE key = 'jev_calls_2026-09-22'",
+			)
+			.first<{ value: string }>();
+		expect(Number(used?.value ?? 0)).toBe(0);
+	});
+
+	it("failures carry across groups: two at the end of one group and one at the start of the next stop the run", async () => {
+		const ids = await addWaiting(50);
+		let calls = 0;
+		const fetchImpl = vi.fn(async () => {
+			calls += 1;
+			return calls >= 24 && calls <= 26
+				? new Response("{}", { status: 400 })
+				: reply(0.9);
+		});
+		const fake = fakeSteps();
+		await sortGroups(
+			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
+			fake.runStep,
+			fetchImpl,
+			{ rulesApplied: true, onlyIds: ids, runId: "run-streak" },
+		);
+		expect(fetchImpl).toHaveBeenCalledTimes(26);
+		expect(fake.names()).toContain("group-2-write");
+		expect(fake.names()).not.toContain("group-3-read");
+	});
+
+	it("a group's 2-minute budget ending after two failures keeps the streak: the next group's first failure stops the run", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
+		const ids = await addWaiting(50);
+		let calls = 0;
+		const fetchImpl = vi.fn(async () => {
+			calls += 1;
+			return calls === 1 ? reply(0.9) : new Response("{}", { status: 400 });
+		});
+		let asks = 0;
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				// The fourth ask of group 1 finds its 2-minute budget spent: it makes no call.
+				if (name.startsWith("group-1-ask-") && ++asks === 4)
+					vi.setSystemTime(Date.now() + 3 * 60_000);
+			},
+		});
+		await sortGroups(
+			{ DB: db, JEV_API_KEY: "test-key", DEMO: "false" },
+			fake.runStep,
+			fetchImpl,
+			{ rulesApplied: true, onlyIds: ids, runId: "run-streak-budget" },
+		);
+		// Calls 2 and 3 (group 1) and call 4 (group 2) fail in a row: the run stops after the fourth call.
+		expect(fetchImpl).toHaveBeenCalledTimes(4);
+		expect(fake.names()).toContain("group-2-write");
+		expect(fake.names()).not.toContain("group-3-read");
+	});
 });
 
 describe("the sorting turn", () => {

@@ -66,7 +66,7 @@ export type StepConfig = {
  * Runs one named step and returns its result: `fn({ attempt: 1 })` in-process, `step.do(name, config, fn)` in the
  * Workflow. A step that finished is returned from its cache, and its callback doesn't run again.
  */
-export type StepRunner = <T>(
+export type StepRunner = <T extends Rpc.Serializable<T>>(
 	name: string,
 	config: StepConfig,
 	fn: (ctx: { attempt: number }) => Promise<T>,
@@ -123,7 +123,7 @@ export type AskResult =
 	  }
 	| {
 			id: number;
-			outcome: "lost" | "date-changed" | "out-of-time" | "skipped";
+			outcome: "lost" | "date-changed" | "out-of-time";
 	  };
 
 const STEP_SETTINGS = {
@@ -155,29 +155,34 @@ function serviceWide(status: number | null): boolean {
 	);
 }
 
-/** Failures in a row at the end of a group's answers, not counting a service-wide one (which ends it at once). */
-function trailingFailures(results: AskResult[]): number {
+/**
+ * Failures in a row at the end of the run's calls, not counting a service-wide one (which ends the run at once). An
+ * out-of-time row made no call, so it doesn't break the row. `before` is the row the earlier groups ended with: it
+ * counts when none of this group's calls succeeded.
+ */
+function trailingFailures(results: AskResult[], before: number): number {
 	let n = 0;
 	for (let i = results.length - 1; i >= 0; i--) {
 		const r = results[i];
-		if (r?.outcome !== "failed" || r.serviceWide) break;
+		if (r?.outcome === "out-of-time") continue;
+		if (r?.outcome !== "failed" || r.serviceWide) return n;
 		n += 1;
 	}
-	return n;
+	return n + before;
 }
 
-/** Whether a group's asking ends the run: Jev down or a bad key, a date change, a lost ask, or three failures in a row. */
-function runStops(results: AskResult[]): boolean {
+/** Whether the run's asking ends here: Jev down or a bad key, a date change, a lost ask, or three failures in a row. */
+function runStops(results: AskResult[], before: number): boolean {
 	const last = results.at(-1);
 	if (!last) return false;
 	if (last.outcome === "date-changed" || last.outcome === "lost") return true;
 	if (last.outcome === "failed" && last.serviceWide) return true;
-	return trailingFailures(results) >= MAX_FAILURES_IN_A_ROW;
+	return trailingFailures(results, before) >= MAX_FAILURES_IN_A_ROW;
 }
 
 /** Whether a group stops asking after these answers: the run stops, or only the group's 2-minute budget is spent. */
-function askingStops(results: AskResult[]): boolean {
-	return results.at(-1)?.outcome === "out-of-time" || runStops(results);
+function askingStops(results: AskResult[], before: number): boolean {
+	return results.at(-1)?.outcome === "out-of-time" || runStops(results, before);
 }
 
 /**
@@ -282,8 +287,6 @@ async function askOne(
 		if (todayIn(plan.timeZone) !== plan.day)
 			return { id, outcome: "date-changed" };
 		if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
-		if (row.categoryOnly && !plan.switches.categories && !plan.switches.details)
-			return { id, outcome: "skipped" };
 		const detailRequested = plan.switches.details && !row.detailsAsked;
 		const result = await askJev(
 			{
@@ -332,13 +335,15 @@ async function askOne(
  * Saves a group's answers in one D1 batch, all or none (decision 136): each answer's update and log row, each failed
  * row's mark, the details, the calls given back, and the turn released last. Every statement is guarded by the turn,
  * so a save retried after it committed, or by a group that lost the turn, or after a demo reset, changes nothing.
- * Returns how many calls the group used (answered, failed and lost; not out-of-time, date-changed or skipped), how
- * many categories it applied, and whether the run stops here.
+ * Returns how many calls the group used (answered, failed and lost; not out-of-time or date-changed), how many
+ * categories it applied, and whether the run stops here. `failuresBefore` is the failures in a row the earlier
+ * groups ended with (see sortGroups).
  */
 export async function writeGroup(
 	env: SortEnv,
 	plan: SortPlan,
 	results: AskResult[],
+	failuresBefore: number,
 ): Promise<{ asked: number; applied: number; stop: boolean }> {
 	const db = env.DB;
 	const now = await readAiSwitches(db);
@@ -445,11 +450,15 @@ export async function writeGroup(
 		)
 			applied += 1;
 
+	// A group that asked nothing because its budget was already spent stops the run: its rows would be read again.
+	const askedNothingOutOfTime =
+		asked === 0 && results.at(-1)?.outcome === "out-of-time";
 	const stop =
 		!asksJev(now) ||
 		(plan.bySync && !now.sortOnArrival) ||
 		plan.rows.length < GROUP_SIZE ||
-		runStops(results);
+		askedNothingOutOfTime ||
+		runStops(results, failuresBefore);
 	return { asked, applied, stop };
 }
 
@@ -472,6 +481,8 @@ export async function sortGroups(
 	const apiKey = env.JEV_API_KEY;
 	const maxCalls = options.maxCalls ?? Number.POSITIVE_INFINITY;
 	const askedIds = new Set<number>();
+	// The failures in a row the groups so far ended with, from their cached answers, so a replayed run counts the same.
+	let streak = 0;
 	let held: string | undefined;
 	try {
 		// Merchant rules are the household's own, so they apply whatever the AI switches say.
@@ -503,6 +514,7 @@ export async function sortGroups(
 			const { plan } = read;
 			held = turnId;
 			const results: AskResult[] = [];
+			const before = streak;
 			let outOfTime = false;
 			for (const row of plan.rows) {
 				if (pastDeadline(options.time)) {
@@ -515,14 +527,15 @@ export async function sortGroups(
 						askOne(apiKey, plan, row, fetchImpl, ctx),
 					),
 				);
-				if (askingStops(results)) break;
+				if (askingStops(results, before)) break;
 			}
 			const written = await runStep(
 				`group-${n}-write`,
 				STEP_SETTINGS.write,
-				() => writeGroup(env, plan, results),
+				() => writeGroup(env, plan, results, before),
 			);
 			held = undefined;
+			streak = trailingFailures(results, before);
 			done.asked += written.asked;
 			done.applied += written.applied;
 			for (const result of results)
