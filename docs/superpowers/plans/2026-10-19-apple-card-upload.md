@@ -161,7 +161,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - With no bank linked (no `plaid_items` row that isn't disconnected), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
-  - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT` and `removed_at TEXT`.
+  - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT`, `removed_at TEXT` and `counted_from TEXT`.
   - `CREATE UNIQUE INDEX accounts_one_apple_card ON accounts(subtype) WHERE subtype = 'apple_card';`
   - `ALTER TABLE transactions ADD COLUMN apple_category TEXT`, `upload_key TEXT` and `upload_twin INTEGER`.
   - `CREATE UNIQUE INDEX transactions_upload_twin ON transactions(account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL;`
@@ -188,6 +188,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
     - A second upload the same day replaces the row.
     - `-1200` (a credit) is stored as `-1200`.
+    - `counted_from` is set to today with the first balance typed while `balance_on` is NULL (the first one, or the first after a reopen), and left alone after that.
     - `null` leaves the balance as it was.
   - **`suggests Apple's Merchant as the store's name`:**
     - Only for added rows whose Merchant isn't the Description or `tidyName(Description)` (`src/transactions/tidy-name.ts:43`), as `plaidNameToSuggest` filters (`sync.ts:115-122`).
@@ -224,7 +225,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `src/db/balance-history.ts:29-65`
   - `src/db/first-tally.ts`: a per-account version of `forgetPayDeposits`, which today works per Plaid bank (`:190-212`)
   - `src/views/money-input.tsx`: `allowCredit`, `hint` and `noRound` props
-  - `public/js/money.js`: a leading minus only where `data-allow-credit` is set
+  - `public/js/money.js`: a leading minus only where `data-allow-credit` is set, and on those fields `nudged()` and `showCents()` (`:28-49`) work on negative values: no clamp at 0, and cents formatted from the absolute value. Test both, as the existing money input tests do
   - `src/routes/how-it-works.tsx:255-257`: the net-worth example counts the card
   - `src/views/contents-list.tsx:35-45`: More's Accounts count
   - `src/design-system/catalog.tsx`
@@ -241,7 +242,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `type AppleCardAccount = { id: number; balanceCents: number; balanceOn: string | null; uploadedOn: string | null; removedAt: string | null; through: string | null }`
     - `through` is `MAX(date)` of the card's rows.
     - It is read **in the same batch as** `accountsWithHistory` (`src/db/balance-history.ts:53`), which gains `appleCard: AppleCardAccount | null`. That keeps the headline and the chart in step.
-  - The card counts in net worth when `balanceOn !== null && removedAt === null`. Its id joins the chart's id list then. The chart's SQL keeps `a.plaid_item_id IS NOT NULL OR a.subtype = 'apple_card'`, so Cash stays out.
+  - The card counts in net worth when `balanceOn !== null && removedAt === null`. Its id joins the chart's id list then. The chart's SQL keeps `a.plaid_item_id IS NOT NULL OR a.subtype = 'apple_card'`, so Cash stays out, and reads the card's `balance_history` only on or after its `counted_from`, so `netWorthSeries` (`src/net-worth.ts:47-75`) never carries a pre-removal balance through the gap.
 
 **The picked look and words** (P141 B, pictures in #731). They are in §8.10; copy them exactly:
 - **The group:**
@@ -287,10 +288,12 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - A bad row: its words.
     - No file (an empty-named `File`).
     - A bad balance.
-    - Over 1 MB: refused from `Content-Length` > 1,100,000 **before** the body is read, and from `file.size > 1_000_000` after it.
+    - Over 1 MB: a request with no `Content-Length`, or one over 1,100,000, is refused **before** the body is read; `file.size > 1_000_000` is refused after. The demo's POST never reads its body.
   - **Cancel** links to `/accounts?focus=apple-card`, which puts focus on "Upload a file" or "Add Apple Card".
   - **Net worth** (Review Focus 5):
     - The headline, the chart and How Tally works' example count the card once `balance_on` is set, and not before that or while it's removed.
+    - A reopened card with a new balance adds nothing to the chart for the days it was removed.
+    - With a credit balance, How Tally works' example (`src/how-it-works/examples.ts:99-116`) counts the credit with the accounts, never as a negative amount owed, so it never reads "− -$12 owed".
     - More's Accounts count (`src/views/contents-list.tsx:30-45`) counts accounts, not balances: it counts a card that isn't removed from its first upload, balance or not.
     - A credit adds to net worth.
   - **Accounts with only a card and no bank** shows net worth and the group, not the empty state.
@@ -402,7 +405,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - Disconnect's SQL (`src/routes/accounts.tsx:332-357`).
   - `secondary` is the outlined button (`src/views/button.tsx:8-9`).
   - The chart's id filter (`src/db/balance-history.ts:62-65`).
-- Unknown: whether `money.js`'s minus support needs more than the `data-allow-credit` check. Read `public/js/money.js` first.
+- Verified: `nudged()` clamps at 0 and `showCents()` assumes a non-negative value (`public/js/money.js:28-49`), so both change on credit fields.
 
 **Task 5: 8.**
 - Verified: `BankBehind` hard-codes its icon and Fix (`src/views/bank-line.tsx:21-23`), and is drawn at `home-top.tsx:91` and `home-setup.tsx:121, 199`.
