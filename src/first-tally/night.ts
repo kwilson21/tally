@@ -1,6 +1,7 @@
-// The first night after stroke four (P125 E, spec §5, §8.8, #586): its counts, kept across the cron runs. Nothing carries
-// state between the runs except the first_tally record. The 09:00 run keeps its sync result (recordNightSync); the 09:40
-// run, the second sort, keeps the counts once the night's sorting and names have all finished (keepNightCounts).
+// The first night after stroke four (P125 E, spec §5, §8.8, #586): its counts, kept across the runs. Nothing carries
+// state between the runs except the first_tally record. The 09:00 run keeps its sync result (recordNightSync); the
+// night's Workflow keeps the counts as its last step, once the night's sorting and names have all finished
+// (keepNightCounts).
 
 import { type AiSwitches, readAiSwitches } from "../db/ai-switches";
 import { COUNTED_JOINS, INCLUDED } from "../db/counted-month";
@@ -28,7 +29,7 @@ export const utcDay = (ms: number): string =>
 	new Date(ms).toISOString().slice(0, 10);
 
 /**
- * The 09:00 run's sync result, kept for the second sort to decide (#586). The run is clean when nothing failed or was
+ * The 09:00 run's sync result, kept for the night's Workflow to decide (#586). The run is clean when nothing failed or was
  * skipped, Plaid was on, and the household-wide step after the banks ran; nightSyncStatement adds that no connected bank
  * needs signing in, since a bank that needs it is never synced and the counts can't see it.
  */
@@ -46,7 +47,7 @@ export async function recordNightSync(
 }
 
 /**
- * The second sort's end (#586): keeps the night's counts when the 09:00 sync for `on` was ok and nothing waits: no
+ * The night's Workflow's last step (#586): keeps the night's counts when the 09:00 sync for `on` was ok and nothing waits: no
  * transaction is waiting for Jev's answer, and (with Workers AI bound and the names switch on) no bank text is waiting for
  * its name. A name that failed counts as done (namesStillAsked). Nothing is kept on a night that didn't finish, and the
  * next 09:00 run replaces the sync.

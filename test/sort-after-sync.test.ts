@@ -6,10 +6,12 @@ import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
-import { runFirstSort, runScheduled } from "../src/index";
+import { runScheduled } from "../src/index";
 import { sortAfterSync, syncItemAndSort } from "../src/plaid/sort-after-sync";
 import { encryptToken } from "../src/plaid/token-crypto";
-import { recordSorting } from "./record-sorting";
+import { runSortInstance } from "../src/sort-instance";
+import { fakeSteps } from "./fake-sort-steps";
+import { recordSorting, sortInProcess } from "./record-sorting";
 
 // Spec §8.6, decision 68: right after a sync that brought in or changed transactions, Jev sorts what
 // is still unsorted, when the household's "Sort new transactions as they arrive" switch is on, within
@@ -294,7 +296,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		expect(flaky.asked.length + nightly.asked.length).toBe(40);
 	});
 
-	it("counts production's 09:20 sort run, through runFirstSort, against the same day", async () => {
+	it("counts the night's sort against the same day", async () => {
 		quiet();
 		// 495 of production's 500 were spent at syncs earlier today.
 		const today = await householdToday(db);
@@ -305,9 +307,11 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 			.bind(`jev_calls_${today}`)
 			.run();
 		const jev = fakeJev();
-		await runFirstSort(
-			{ ...env, DEMO: "false", JEV_API_KEY: "jev" },
-			jev.fetchImpl,
+		await runSortInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "false" },
+			fakeSteps().runStep,
+			{ bySync: false, rulesApplied: false, night: "2026-10-13" },
+			{ runId: crypto.randomUUID(), fetchImpl: jev.fetchImpl },
 		);
 		expect(jev.asked).toHaveLength(5);
 		expect(await callsUsed()).toBe(500);
@@ -318,10 +322,11 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		// 35 of the demo's 40 were spent earlier today; the reset seeds twelve unsorted ones again.
 		await reserveJevCalls(db, await householdToday(db), 40, 35);
 		const jev = fakeJev();
-		await runScheduled(
-			{ ...env, DEMO: "true", JEV_API_KEY: "jev" },
-			jev.fetchImpl,
-		);
+		const demo = { ...env, DEMO: "true", JEV_API_KEY: "jev" };
+		await runScheduled({
+			...demo,
+			SORT: sortInProcess(demo, { fetchImpl: jev.fetchImpl }).SORT,
+		});
 		expect(jev.asked).toHaveLength(5);
 		expect(await callsUsed()).toBe(40);
 	});

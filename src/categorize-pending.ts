@@ -1,21 +1,12 @@
 // The in-process sorting run (spec §7): merchant rules first, then Jev for what they left, in the same groups of
-// 25 as the Workflow (src/sort-groups.ts, decision 139). The nightly runs (09:20, 09:40) and the tests call it;
-// every daytime trigger starts a Workflow instance instead (startSorting, src/sort-workflow.ts).
+// 25 as the Workflow (src/sort-groups.ts, decision 139). The tests call it; every trigger, the 09:00 run included,
+// starts a Workflow instance instead (startSorting, src/sort-start.ts).
 import { readAiSwitches } from "./db/ai-switches";
 import type { Deadline } from "./run-budget";
 import { type SortEnv, type StepRunner, sortGroups } from "./sort-groups";
 import { startSorting } from "./sort-start";
 
-/**
- * The most calls one nightly run makes, whatever the day's cap still allows; what's left waits for the next run. D1
- * allows 1,000 queries in one invocation, and a call costs three of them (the switches read before it, and the answer
- * saved with its log row in one batch), plus a few for setup and one merchant-history read: 300 calls is about 901
- * queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first pass (09:20,
- * where 100 names and 200 calls are about the same) are runs of their own.
- */
-export const MAX_CALLS_PER_RUN = 300;
-
-/** What a run is asked to do, beyond the default of a nightly run. */
+/** What a run is asked to do, beyond sorting everything waiting. */
 export type PassOptions = {
 	// The demo's one run may have just applied merchant rules after a sync; without banks (the demo)
 	// or when that step failed, this run applies them itself. Production's sorting runs always do.
@@ -23,16 +14,16 @@ export type PassOptions = {
 	/**
 	 * Ask only about these transaction rows (their ids), and only the ones still unsorted once the
 	 * rules have run: what one sync just brought in, or the one transaction a person added a note to.
-	 * Everything else waits for the nightly runs, which have no list.
+	 * Everything else waits for the night's instance, which has no list.
 	 */
 	onlyIds?: number[];
 	/** The run was started by a sync, so it also stops when "sort as they arrive" is turned off. */
 	bySync?: boolean;
-	/** Ask about at most this many (newest first), fewer than the most a run may; the rest wait. */
+	/** Ask about at most this many (newest first); with none, up to the day's cap. */
 	maxCalls?: number;
 	/**
 	 * Start no new call once this deadline has passed (src/run-budget.ts), so a slow Jev can't use up the
-	 * rest of the run. What it didn't ask is given back to the day, and waits for the next run.
+	 * rest of the run. What it didn't ask is given back to the day, and waits for the next sort.
 	 */
 	time?: Deadline;
 };
@@ -51,7 +42,7 @@ export async function categorizePending(
 		rulesApplied = false,
 		onlyIds,
 		bySync = false,
-		maxCalls = MAX_CALLS_PER_RUN,
+		maxCalls,
 		time,
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {

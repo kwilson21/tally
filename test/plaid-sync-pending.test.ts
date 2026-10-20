@@ -831,13 +831,13 @@ describe("when the posted transaction is already stored as the link arrives", ()
 		const item = await addItem();
 		const ids = await bothStored(item);
 		await env.DB.prepare(
-			"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-06 09:20:00' WHERE id = ?",
+			"UPDATE transactions SET details_asked = 1, note_worth_writing = 1, note_failed_at = '2026-10-06 09:25:00' WHERE id = ?",
 		)
 			.bind(ids.pending)
 			.run();
 		await post(item, {});
 		expect(await row("posted-1")).toMatchObject({
-			note_failed_at: "2026-10-06 09:20:00",
+			note_failed_at: "2026-10-06 09:25:00",
 			note_tried_at: null,
 			details_asked: 1,
 			note_worth_writing: 1,

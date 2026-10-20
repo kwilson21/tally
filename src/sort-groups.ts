@@ -1,8 +1,8 @@
 // The sorting loop (spec §8.6, decision 139). Jev is asked about waiting transactions in groups of 25: each group
 // reads D1 once, reserves its calls in a step of its own, asks Jev about each row as a step of its own, and saves
 // every answer in one D1 batch, all or none.
-// The loop is the same in-process (categorizePending: the nightly runs and the tests, where a step just runs) and in
-// the Workflow (SortWorkflow: each step is a saved Workflows step, so a retry skips the steps that finished).
+// The loop is the same in-process (categorizePending: the tests, where a step just runs) and in the Workflow
+// (runSortInstance in sort-instance.ts: each step is a saved Workflows step, so a retry skips the steps that finished).
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
 // randomness is read outside a step (the Workflow's loop itself reads none).
 
@@ -33,8 +33,7 @@ import { type Deadline, pastDeadline } from "./run-budget";
 
 /**
  * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few. The count is
- * the household's whole day, midnight to midnight in its time zone, shared by every sorting group and the nightly
- * runs (db/jev-calls.ts).
+ * the household's whole day, midnight to midnight in its time zone, shared by every sorting group (db/jev-calls.ts).
  */
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
@@ -80,7 +79,7 @@ export type SortOptions = {
 	onlyIds?: number[];
 	/** The run was started by a sync, so it also stops when "sort as they arrive" is turned off. */
 	bySync?: boolean;
-	/** Ask about at most this many in the run (in-process: the nightly runs' cap). */
+	/** Ask about at most this many in the run (in-process: a test's cap). */
 	maxCalls?: number;
 	/** In-process only: start no new call once this deadline has passed (src/run-budget.ts). */
 	time?: Deadline;

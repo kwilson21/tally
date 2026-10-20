@@ -242,7 +242,7 @@ describe("data exports", () => {
 			"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 50000)",
 		).run();
 		await env.DB.prepare(
-			"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('FAILED SHOP', '2026-10-01 09:20:00')",
+			"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('FAILED SHOP', '2026-10-01 09:25:00')",
 		).run();
 		await env.DB.batch([
 			env.DB.prepare("DELETE FROM bill_payments"),

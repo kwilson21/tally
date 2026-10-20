@@ -17,6 +17,8 @@ export type RecordedStep = {
 export function fakeSteps(
 	options: {
 		throws?: Record<string, number>;
+		/** Steps that throw on every attempt, so they reject after their config's retries, as a step that ran out of them. */
+		fails?: string[];
 		beforeAttempt?: (name: string, attempt: number) => Promise<void>;
 		/** Steps whose callback runs once more after it succeeded, as when Workflows loses the result of a committed step. */
 		replayAfter?: string[];
@@ -41,7 +43,10 @@ export function fakeSteps(
 			record.attempts = attempt;
 			try {
 				await options.beforeAttempt?.(name, attempt);
-				if ((options.throws?.[name] ?? 0) >= attempt)
+				if (
+					options.fails?.includes(name) ||
+					(options.throws?.[name] ?? 0) >= attempt
+				)
 					throw new Error(`fake failure in ${name}`);
 				const result = await fn({ attempt });
 				cache.set(name, result);
