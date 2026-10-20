@@ -370,6 +370,9 @@
 	// The guarded button each failed request sent, keyed by the request's ctx.
 	const guardedButtons = new WeakMap();
 	function failed(ctx) {
+		// A request from an element that is data-quiet says nothing when it fails: the Your banks list polls every 5 seconds
+		// while a bank is read, and its next tick tries again (P140 A). Every other failed load still says so.
+		if (ctx?.sourceElement?.hasAttribute?.("data-quiet")) return;
 		// A switch whose auto-save failed goes back to how the page drew it (#606): its form opts in with
 		// data-switches-revert, and reset() puts each control back to its drawn (default) state. Other forms keep what
 		// was typed (decision 72). The request's form is set by htmx; a switch's closest form covers a request without one.

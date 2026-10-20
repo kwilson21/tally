@@ -27,6 +27,11 @@ import { setSavingsGoal } from "../db/savings-goals";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { readSetup } from "../first-tally/setup";
+import {
+	bankState,
+	readYourBanks,
+	type YourBank,
+} from "../first-tally/your-banks";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
@@ -39,7 +44,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
-import { HomeSetup } from "../views/home-setup";
+import { HomeSetup, statusOf } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
@@ -50,6 +55,7 @@ import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { ProgressRow } from "../views/progress-row";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
+import { YourBanks } from "../views/your-banks";
 import { enabled } from "./plaid";
 
 type App = { Bindings: Env };
@@ -285,6 +291,9 @@ async function renderHome(
 		current && !demo
 			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
 			: null;
+	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
+	const yourBanks =
+		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
 	// The fifth day's "See what needs you" (#586, #714) is read only when its link renders: a night that left something for a person.
 	const fifthNeeds =
 		setup?.fifth && setup.fifth.needYou > 0
@@ -293,7 +302,9 @@ async function renderHome(
 	// Link a bank is Plaid Link's button only on a full load of Home: Plaid's script loads only there (loadsPlaid, security.ts),
 	// and an htmx swap loads no script. Every other response, an htmx re-render of Home included, links to Home with a plain
 	// link, which loads Home in full, where the button is (#678).
-	const bankToLink = setup?.phase === "before" && enabled(c.env);
+	// The reading phase keeps Plaid's button too (Have more accounts?), so a family can link every bank before the questions open.
+	const bankToLink =
+		(setup?.phase === "before" || setup?.phase === "reading") && enabled(c.env);
 	const plaidButton =
 		bankToLink && loadsPlaid(c) && !c.req.header("HX-Request");
 	const linkBank = bankToLink ? (
@@ -334,6 +345,7 @@ async function renderHome(
 								view={setup}
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
+								yourBanks={{ banks: yourBanks, today }}
 								fifthDay={
 									setup.fifth
 										? {
@@ -633,6 +645,89 @@ home.get("/", async (c) => {
 		focusId: Number.isInteger(focus) && focus > 0 ? focus : undefined,
 		adjusting: viewMonth === currentMonth && c.req.query("adjust") === "1",
 	});
+});
+
+/** "3,5" as the ids of the banks a page already shows as in: positive whole numbers, anything else ignored. */
+const idsIn = (raw: string | undefined) =>
+	new Set(
+		(raw ?? "")
+			.split(",")
+			.filter((part) => /^[1-9]\d*$/.test(part))
+			.map(Number),
+	);
+
+/** "Chase is in: 412 transactions.", the sentence a bank that came in is announced with. */
+const inSentence = (bank: YourBank) =>
+	`${bank.name} is in: ${bank.count.toLocaleString("en-US")} ${bank.count === 1 ? "transaction" : "transactions"}.`;
+
+/**
+ * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while a bank is being
+ * read. It answers with the list, and the status out of band (so the focused status is never replaced). A bank that came in
+ * since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
+ * HX-Retarget. With no setup to draw (the demo, a set-up family, or the fifth day, which Home draws in full), it asks for a
+ * reload, so Home draws as it is.
+ */
+home.get("/home/banks", async (c) => {
+	const reload = () => {
+		c.header("HX-Refresh", "true");
+		return c.body(null);
+	};
+	if (c.env.DEMO === "true") return reload();
+	const today = await householdToday(c.env.DB);
+	const banks = await readYourBanks(c.env.DB);
+	const flagged = flaggedBanks(
+		banks.map((bank) => ({
+			name: bank.name,
+			needsAttention: bank.status === "needs_attention",
+			lastSyncedAt: bank.lastSyncedAt,
+		})),
+		today,
+	);
+	const setup = await readSetup(c.env.DB, {
+		today,
+		cap: jevCallLimit(c.env),
+		flagged,
+	});
+	// The fifth day's view has its own Safe to spend and link, and before a bank Home carries Link a bank; neither is read
+	// here, so Home draws them in full.
+	if (!setup || setup.fifth || setup.phase === "before") return reload();
+	const shown = idsIn(c.req.query("in"));
+	const arrived = banks
+		.filter((bank) => bankState(bank, today) === "in" && !shown.has(bank.id))
+		.map(inSentence);
+	const said = arrived.join(" ");
+	if (setup.phase !== "reading") {
+		// The questions are open or answered: the whole top is redrawn once, and its status is said.
+		const message = [said, statusOf(setup, flagged.length > 0)]
+			.filter(Boolean)
+			.join(" ");
+		c.header("HX-Retarget", "#setup-top");
+		c.header("HX-Reswap", "outerHTML");
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
+		);
+		return c.html(
+			<HomeSetup
+				view={setup}
+				bankLine={homeBankNotice(flagged, today)?.words}
+				focusStatus
+			/>,
+		);
+	}
+	if (said)
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message: said, type: "info" }, announce: said }),
+		);
+	return c.html(
+		<>
+			<YourBanks banks={banks} today={today} />
+			<p id="setup-status" hx-swap-oob="innerHTML">
+				{statusOf(setup, flagged.length > 0)}
+			</p>
+		</>,
+	);
 });
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.

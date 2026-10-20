@@ -297,10 +297,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							);
 							return;
 						}
-						// The refresh drew a new button, or on Home the status line; focus that, not the one clicked.
+						// The refresh drew a new button, or on Home the status line; focus that, not the one clicked. Home's status
+						// wins over its own Link a bank (the reading phase keeps one, for Have more accounts?).
 						(
-							document.querySelector("[data-link-bank]") ??
-							document.querySelector("[data-link-bank-focus]")
+							document.querySelector("[data-link-bank-focus]") ??
+							document.querySelector("[data-link-bank]")
 						)?.focus();
 					} catch {
 						showFailure();
