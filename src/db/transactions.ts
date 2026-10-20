@@ -2758,6 +2758,7 @@ export async function pendingForJev(
 				suggestionStatus,
 				amountCents: transaction.amountCents,
 				accountId,
+				accountType: transaction.accountType,
 				plaidCategory: transaction.plaidCategory ?? null,
 				note: transaction.note ?? null,
 				kind: transaction.kind ?? null,
@@ -2915,6 +2916,8 @@ export type JevSeen = {
 	suggestionStatus: string | null;
 	amountCents: number;
 	accountId: number;
+	/** The account's type, which Jev is told as `account_type`: a Plaid sync rewrites it on the same account (decision 143). */
+	accountType: string;
 	plaidCategory: string | null;
 	note: string | null;
 	kind: string | null;
@@ -2936,6 +2939,7 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND ${merchantColumnSql("transactions", "suggestion_status")} IS ${value("suggestionStatus")}
 		AND transactions.amount_cents = ${value("amountCents")}
 		AND transactions.account_id = ${value("accountId")}
+		AND (SELECT type FROM accounts WHERE id = transactions.account_id) IS ${value("accountType")}
 		AND transactions.plaid_category IS ${value("plaidCategory")}
 		AND transactions.note IS ${value("note")}
 		AND transactions.kind IS ${value("kind")}

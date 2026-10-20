@@ -976,7 +976,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 });
 
 describe("a changed row keeps no answer (decision 143)", () => {
-	// Each change runs between the read and the first save. A change with a third entry first sets up the row (its person).
+	// Each change runs between the read and the first save. A change with a third entry first sets up the row (its person or its account).
 	const CHANGES: [string, string, string?][] = [
 		[
 			"bank text",
@@ -1022,6 +1022,13 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			"person it's for",
 			"DELETE FROM household_people WHERE id = 1",
 			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
+		],
+		// The account's type Jev was told, rewritten by a Plaid sync on the same account. The row moves to account 2
+		// first, so the type change leaves the other rows (on account 1) alone.
+		[
+			"account type",
+			"UPDATE accounts SET type = 'credit' WHERE id = 2",
+			"UPDATE transactions SET account_id = 2 WHERE id = ?",
 		],
 	];
 
@@ -1179,6 +1186,42 @@ describe("a changed row keeps no answer (decision 143)", () => {
 				rulesApplied: true,
 				onlyIds: ids,
 				runId: "run-person-details",
+			},
+		);
+		const detailsAsked = async (id: number) =>
+			(
+				await db
+					.prepare("SELECT details_asked AS d FROM transactions WHERE id = ?")
+					.bind(id)
+					.first<{ d: number }>()
+			)?.d;
+		expect(await detailsAsked(target)).toBe(0);
+		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await categoryOf(target)).toBeNull();
+	});
+
+	it("a row whose account type changed keeps its details waiting too", async () => {
+		await saveAiSwitches(db, { details: true });
+		const ids = await addWaiting(3);
+		const target = ids[1] as number;
+		await changeRow(
+			"UPDATE transactions SET account_id = 2 WHERE id = ?",
+			target,
+		);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 1)
+					await changeRow("UPDATE accounts SET type = 'credit' WHERE id = 2");
+			},
+		});
+		await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => replyWithDetails()),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-account-type-details",
 			},
 		);
 		const detailsAsked = async (id: number) =>
