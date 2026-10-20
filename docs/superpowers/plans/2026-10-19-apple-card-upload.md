@@ -158,8 +158,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `function historyStart(db: D1Database, today: string): Promise<string>`:
     - `MIN(t.date)` over transactions on accounts with a non-null `plaid_item_id`, so a disconnected bank's kept rows are included.
     - While any connected bank (`plaid_items` not disconnected) has `history_complete_at` unset, or there are no such rows yet, it's the earlier of that date and `daysBefore(today, 90)` (`src/dates.ts:143`), so rows aren't left out while the first sync is still bringing older pages (`src/plaid/sync.ts:1116-1131`).
-    - With no connected bank and no transaction on a Plaid account, it's the Apple Card's own earliest row, so uploads keep working after the last bank's history is deleted.
-    - With none of those (no bank, no bank history, no card rows), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
+    - With no connected bank and no transaction on a Plaid account, it's the Apple Card's own earliest row, or `daysBefore(today, 90)` while the card has none, so a card that exists keeps uploading whatever happens to the banks.
+    - Only with no Apple Card account yet, no connected bank and no bank history does `importAppleCard` save nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
   - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT`, `removed_at TEXT` and `counted_from TEXT`.
@@ -265,7 +265,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - No file: "Choose the CSV file Apple exported."
 - Too big: "This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file."
 - A bad balance: "Enter the balance as dollars, like 1,240.18, or with a minus for a credit."
-- The demo sheet: "In the demo, Tally uses a sample file." with "Add the sample" in place of the file field.
+- The demo sheet: "In the demo, Tally uses a sample file." with "Add the sample" in place of the file field and the balance field. The sample brings its own balance (`APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018`), so the demo's card counts in net worth.
 
 - [ ] **Step 1: Catalog first.**
   - `FileField` (Visual): empty, and with an error under it (`role="alert"`). Give it its full use spec in DESIGN.md.
@@ -303,7 +303,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `delete=yes` calls the per-account pay cleanup first, then deletes the card's transactions, its `balance_history` and the account.
     - Remove isn't offered in the demo: it returns 404, and the group has no Manage there, as with Disconnect.
   - **The first week:** an upload draws no stroke. The first week's waiting count still counts Plaid rows only (`src/first-tally/setup.ts:~417`, `src/db/transactions.ts:2759`).
-  - **Demo (`DEMO: "true"`):** the POST ignores any file sent and imports `appleCardSample(today)` (Task 6).
+  - **Demo (`DEMO: "true"`):** the sheet has no file or balance field; the POST never reads its body and imports `appleCardSample(today)` with `APPLE_CARD_SAMPLE_BALANCE_CENTS` (Task 6), and the demo's card counts in net worth.
+  - **A card with no rows** (its first upload held only uncleared or older rows, or none), after the last bank and its history are deleted: an upload still works, starting 90 days back.
 - [ ] **Step 3:** Run `npx vitest run test/apple-card-route.test.ts`. Expected: FAIL.
 - [ ] **Step 4: Implement.**
   - Model the routes on Home's `/savings-goal` GET and POST (`src/routes/home.tsx:772-845`).
@@ -355,7 +356,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - Test: `test/apple-card-sample.test.ts`, plus the existing export test
 
 **Interfaces:**
-- Produces: `function appleCardSample(today: string): string`. It's a made-up CSV in Apple's 8-column header, dated relative to `today` within the seed's history, with 12–16 rows:
+- Produces: `const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018` and `function appleCardSample(today: string): string`. It's a made-up CSV in Apple's 8-column header, dated relative to `today` within the seed's history, with 12–16 rows:
   - purchases at the Riveras' usual stores
   - one pair of twins
   - one Payment
