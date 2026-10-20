@@ -161,7 +161,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - With no bank linked (no `plaid_items` row that isn't disconnected), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
-  - `ALTER TABLE accounts ADD COLUMN uploaded_at TEXT`, `balance_on TEXT` and `removed_at TEXT`.
+  - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT` and `removed_at TEXT`.
   - `CREATE UNIQUE INDEX accounts_one_apple_card ON accounts(subtype) WHERE subtype = 'apple_card';`
   - `ALTER TABLE transactions ADD COLUMN apple_category TEXT`, `upload_key TEXT` and `upload_twin INTEGER`.
   - `CREATE UNIQUE INDEX transactions_upload_twin ON transactions(account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL;`
@@ -182,7 +182,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - **`reopens a removed account`** (Review Focus 5):
     - `removed_at` becomes NULL, and the kept rows count as held.
     - `balance_on` is cleared unless this upload typed a balance.
-  - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_at`, the balance and the rows are all unchanged.
+  - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_on`, the balance and the rows are all unchanged.
   - **`historyStart`:** the seed's earliest date on a Plaid account, with the 90-day fallback when a bank is linked but has no rows yet. With no bank linked, nothing is saved and the words are returned.
   - **`saves a typed balance`:**
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
@@ -195,14 +195,14 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - **`never asks Workers AI about Apple rows`:** `merchantsToAsk` leaves them out, including a row with a blank Merchant.
   - **`gives Jev Apple's category as the hint`:** `pendingForJev`'s `plaidCategory` is `"Gas"` for an Apple row.
   - **`stores 250 rows in one call`.**
-  - **`sets uploaded_at`** to `datetime('now')`, and **`returns the added ids`**.
-  - **Export:** the export test's key lists include `uploaded_at`, `balance_on`, `removed_at`, `apple_category`, `upload_key` and `upload_twin`.
+  - **`sets uploaded_on`** to the household's today (`opts.today`), and **`returns the added ids`**.
+  - **Export:** the export test's key lists include `uploaded_on`, `balance_on`, `removed_at`, `apple_category`, `upload_key` and `upload_twin`.
 - [ ] **Step 3:** Run `npx vitest run test/apple-card-import.test.ts`. Expected: FAIL.
 - [ ] **Step 4:** Implement `importAppleCard` in `src/apple-card/import.ts`:
   1. Read `historyStart`, then call `planImport`.
   2. Write **one batch**, in this order:
      1. `INSERT … ON CONFLICT(subtype) WHERE subtype = 'apple_card' DO NOTHING` the account, as `src/transactions/cash.ts:116-121` does for Cash.
-     2. `UPDATE` that account: `uploaded_at = datetime('now')`, `removed_at = NULL`, and the typed balance with `balance_on`. With no balance, clear `balance_on` if the account was removed. End with `RETURNING id`.
+     2. `UPDATE` that account: `uploaded_on = ?` (`opts.today`), `removed_at = NULL`, and the typed balance with `balance_on`. With no balance, clear `balance_on` if the account was removed. End with `RETURNING id`.
      3. The row inserts in statements of up to 500 rows each. Each is `INSERT … SELECT … FROM json_each(?) WHERE 1 ON CONFLICT (account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL DO NOTHING RETURNING id`, with the account id read as `(SELECT id FROM accounts WHERE subtype = 'apple_card')`. `WHERE 1` avoids SQLite's upsert parsing ambiguity, as `src/db/merchant-names.ts:96-143` does.
      4. The `balance_history` upsert, as `sync.ts:386` writes it.
      5. `suggestBankNamesSql("1")`, with the names filtered as above.
@@ -238,7 +238,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `afterSync(db)` (`src/plaid/after-sync.ts:13`)
   - `sortAfterSync(env, { changedIds }, undefined, { rulesApplied })` (`src/plaid/sort-after-sync.ts:20`)
 - Produces:
-  - `type AppleCardAccount = { id: number; balanceCents: number; balanceOn: string | null; uploadedAt: string | null; removedAt: string | null; through: string | null }`
+  - `type AppleCardAccount = { id: number; balanceCents: number; balanceOn: string | null; uploadedOn: string | null; removedAt: string | null; through: string | null }`
     - `through` is `MAX(date)` of the card's rows.
     - It is read **in the same batch as** `accountsWithHistory` (`src/db/balance-history.ts:53`), which gains `appleCard: AppleCardAccount | null`. That keeps the headline and the chart in step.
   - The card counts in net worth when `balanceOn !== null && removedAt === null`. Its id joins the chart's id list then. The chart's SQL keeps `a.plaid_item_id IS NOT NULL OR a.subtype = 'apple_card'`, so Cash stays out.
@@ -290,8 +290,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - Over 1 MB: refused from `Content-Length` > 1,100,000 **before** the body is read, and from `file.size > 1_000_000` after it.
   - **Cancel** links to `/accounts?focus=apple-card`, which puts focus on "Upload a file" or "Add Apple Card".
   - **Net worth** (Review Focus 5):
-    - The headline, the chart, More's count and How Tally works' example all count the card once `balance_on` is set.
-    - None of them count it before that, or while it's removed.
+    - The headline, the chart and How Tally works' example count the card once `balance_on` is set, and not before that or while it's removed.
+    - More's Accounts count (`src/views/contents-list.tsx:30-45`) counts accounts, not balances: it counts a card that isn't removed from its first upload, balance or not.
     - A credit adds to net worth.
   - **Accounts with only a card and no bank** shows net worth and the group, not the empty state.
   - **Remove, GET and POST `/accounts/apple-card/remove`,** as Disconnect's confirm (`src/routes/accounts.tsx:332-357`):
@@ -324,7 +324,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 **Interfaces:**
 - Produces:
   - `const APPLE_STALE_AFTER_DAYS = 7`
-  - `function appleCardNotice(card: AppleCardAccount | null, today: string): { words: string; since: string } | null`. `since` is `YYYY-MM-DD`: the upload's first 10 characters, as `stale-bank.ts` reads `last_synced_at`.
+  - `function appleCardNotice(card: AppleCardAccount | null, today: string): { words: string; since: string } | null`. `since` is the card's `uploaded_on`, the household day of its last upload, so the 7 days count in household days.
 
 - [ ] **Step 1: Write the failing tests:**
   - **When it shows:**
