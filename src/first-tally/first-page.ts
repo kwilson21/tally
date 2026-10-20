@@ -38,6 +38,7 @@ import {
 import { PERSON_INCOME_SET_SQL } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { merchantDisplayNames } from "../db/merchant-names";
+import { currentGoalSql } from "../db/savings-goals";
 import { payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
@@ -47,6 +48,7 @@ import {
 	type BudgetAsk,
 	budgetsLedgerLine,
 	type NothingAsked,
+	savingsLedgerLine,
 } from "./budgets";
 import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
 
@@ -287,6 +289,18 @@ function budgetsLedger(
 }
 
 /**
+ * The ledger line of the savings answer, from its record (first_tally's `savings`): "Savings · $300 a month" for a goal kept,
+ * and null for Not now, which writes no line (decision 135).
+ */
+function savingsLedger(
+	savings: number | "skipped" | undefined,
+): { id: string; text: string } | null {
+	return typeof savings === "number"
+		? { id: "savings", text: savingsLedgerLine(savings) }
+		: null;
+}
+
+/**
  * True when a budget applies to the category row `alias` names in `month`: one set from that month or an earlier one, since
  * a budget takes effect from its month on. `month` is code (YYYY-MM), checked here.
  */
@@ -307,13 +321,86 @@ export function budgetAskedSql(alias: string, month: string): string {
 }
 
 /**
- * The guard of the budgets stroke, as SQL: the pay and bills strokes are drawn, and no category is left to ask
- * (budgetAskedSql), so the stroke can't be drawn while a question is still asked. Pay is checked too, so budgets is the
- * last of the three questions drawn, and its write is the one that takes the re-ask marker away (strokeStatement).
+ * The live half of the pay and budget questions' guards, as SQL: no pay question is left (NO_PAY_LEFT_SQL, read when the
+ * write runs, since a deposit can arrive after the strokes were drawn), and no category is left to ask (budgetAskedSql).
+ * The budgets stroke's guard and the savings answer's guard both check it, so they can't drift apart. `month` is code (YYYY-MM).
+ */
+function noPayOrBudgetLeftSql(month: string): string {
+	return `${NO_PAY_LEFT_SQL} AND NOT EXISTS (SELECT 1 FROM categories c WHERE ${budgetAskedSql("c", month)})`;
+}
+
+/**
+ * The guard of the budgets stroke, as SQL: the pay and bills strokes are drawn, and no pay or budget question is left
+ * (noPayOrBudgetLeftSql), so the stroke can't be drawn while a question is still asked. Pay is checked too, so budgets is
+ * the last of the three questions drawn, and its write is the one that takes the re-ask marker away (strokeStatement).
  */
 export function budgetsStrokeGuard(month: string): string {
 	return `EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.strokes.pay') IS NOT NULL AND json_type(h.value, '$.strokes.bills') IS NOT NULL)
-		AND NOT EXISTS (SELECT 1 FROM categories c WHERE ${budgetAskedSql("c", month)})`;
+		AND ${noPayOrBudgetLeftSql(month)}
+		AND (EXISTS (SELECT 1 FROM household_settings h WHERE h.key = 'first_tally' AND json_type(h.value, '$.savings') IS NOT NULL) OR ${currentGoalSql(month)} IS NOT NULL)`;
+}
+
+/**
+ * The record's side of the savings question, as SQL on the record's JSON (decision 135, #721): pay and bills are drawn,
+ * budgets isn't, and no savings answer is kept yet. Each savings write checks it, with noPayOrBudgetLeftSql.
+ */
+const SAVINGS_RECORD_SQL = `json_type(value, '$.strokes.pay') IS NOT NULL AND json_type(value, '$.strokes.bills') IS NOT NULL
+	AND json_type(value, '$.strokes.budgets') IS NULL AND json_type(value, '$.savings') IS NULL`;
+
+/**
+ * The savings question is open: its record side (SAVINGS_RECORD_SQL), and no pay or budget question is left
+ * (noPayOrBudgetLeftSql). A pay deposit that arrives after the page's read is caught here, in the write's own statement.
+ */
+function savingsOpenSql(month: string): string {
+	return `${SAVINGS_RECORD_SQL} AND ${noPayOrBudgetLeftSql(month)}`;
+}
+
+/**
+ * True while the record has no savings answer and its budgets stroke isn't drawn. The savings route reads this before its
+ * writes, and only the writes check the pay and category questions, so a category added since the page drew gets its own
+ * words, and an answer already kept gets the page as it is now.
+ */
+export async function savingsOpen(db: D1Database): Promise<boolean> {
+	const row = await db
+		.prepare(
+			`SELECT EXISTS (SELECT 1 FROM household_settings WHERE key = 'first_tally' AND ${SAVINGS_RECORD_SQL}) AS open`,
+		)
+		.first<{ open: number }>();
+	return row?.open === 1;
+}
+
+/**
+ * The record's copy of a current goal above $0 (decision 135, #721): the goal's cents become `savings` while the question is
+ * open. With no goal above $0 it writes nothing, so the question still asks. It runs before the budgets stroke, in the same
+ * batch wherever the stroke is drawn on a goal, so the stroke's guard sees the answer.
+ */
+export function savingsCopyStatement(
+	db: D1Database,
+	month: string,
+): D1PreparedStatement {
+	return db.prepare(
+		`UPDATE household_settings SET value = json_set(value, '$.savings', ${currentGoalSql(month)})
+		WHERE key = 'first_tally' AND ${savingsOpenSql(month)} AND ${currentGoalSql(month)} IS NOT NULL`,
+	);
+}
+
+/**
+ * The record's write of the savings answer (decision 135, #721): Save it's cents, or "skipped" for Not now, as `savings`,
+ * while the question is open. COALESCE keeps a goal above $0 that Home set since the page drew in its place, so the record
+ * always holds the goal the table holds. It is the first write of the answer's batch: the goal's write checks that it
+ * landed (changes()), so a stale answer writes no goal.
+ */
+export function savingsAnswerStatement(
+	db: D1Database,
+	month: string,
+	answer: number | "skipped",
+): D1PreparedStatement {
+	return db
+		.prepare(
+			`UPDATE household_settings SET value = json_set(value, '$.savings', COALESCE(${currentGoalSql(month)}, ?1))
+			WHERE key = 'first_tally' AND ${savingsOpenSql(month)}`,
+		)
+		.bind(answer);
 }
 
 /**
@@ -516,7 +603,9 @@ export async function keepBudgetAnswers(
 			);
 		}
 	}
+	// A current goal above $0 answers the savings question (decision 135): it is copied before the stroke, so its guard sees it.
 	statements.push(
+		savingsCopyStatement(db, month),
 		strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
 	);
 	const results = await db.batch(statements);
@@ -534,6 +623,33 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
 }
 
 /**
+ * The pay and bills steps as the page reads them, with no writes: the pay merchants still to ask, the charges to keep and
+ * the ones that wait, and `done` once neither step has anything left to ask. The page asks pay first, then bills.
+ */
+async function payAndBills(db: D1Database, today: string) {
+	const pay = await payMerchants(db);
+	const split =
+		pay.length === 0
+			? splitKeepable(
+					await loadBillSuggestions(db, today),
+					await activeBillNames(db),
+				)
+			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
+	return { pay, split, done: pay.length === 0 && split.keep.length === 0 };
+}
+
+/**
+ * True when the budgets step is the one the page shows: pay and bills have nothing left to ask (payAndBills). It reads only,
+ * so a goal Home set after the page drew isn't copied and drawn here; the savings answer's own write keeps that goal (#721).
+ */
+export async function budgetsStepShown(
+	db: D1Database,
+	today: string,
+): Promise<boolean> {
+	return (await payAndBills(db, today)).done;
+}
+
+/**
  * Draws the strokes whose steps have nothing left to ask (an empty step counts as done, P125 E), then reads the page.
  * The pay stroke waits for the last pay answer; the bills stroke waits for pay, since the page asks pay first. What the
  * bills step kept is recorded by keepBills, as each bill is kept, so this read adds no count.
@@ -543,33 +659,29 @@ export async function settleAndLoad(
 	today: string,
 	{ oneAtATime = false }: { oneAtATime?: boolean } = {},
 ): Promise<FirstPageModel> {
-	const pay = await payMerchants(db);
+	const { pay, split, done } = await payAndBills(db, today);
 	if (pay.length === 0) await markStroke(db, "pay", today, NO_PAY_LEFT_SQL);
-	const split =
-		pay.length === 0
-			? splitKeepable(
-					await loadBillSuggestions(db, today),
-					await activeBillNames(db),
-				)
-			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
-	const done = pay.length === 0 && split.keep.length === 0;
 	if (done) await markStroke(db, "bills", today, NO_PAY_LEFT_SQL);
-	// The budgets stroke waits for the bills stroke (budgetsStrokeGuard), and is drawn when no budget question is left.
-	if (done)
-		await markStroke(
-			db,
-			"budgets",
-			today,
-			budgetsStrokeGuard(today.slice(0, 7)),
-		);
+	// The budgets stroke waits for the bills stroke (budgetsStrokeGuard), and is drawn when no budget question is left and the
+	// savings question is answered, or a goal above $0 answers it. The goal's copy and the stroke are one batch, so the
+	// stroke's guard reads the copy and no other write lands between them (decision 135).
+	if (done) {
+		const month = today.slice(0, 7);
+		await db.batch([
+			savingsCopyStatement(db, month),
+			strokeStatement(db, "budgets", today, budgetsStrokeGuard(month)),
+		]);
+	}
 	const record = await readFirstTally(db);
 	const payLines = await payLedger(db, record?.pay);
 	const billLine = billsLedger(record?.bills);
 	const budgetLine = budgetsLedger(record?.budgets);
+	const savingsLine = savingsLedger(record?.savings);
 	const ledger = [
 		...payLines,
 		...(billLine ? [billLine] : []),
 		...(budgetLine ? [budgetLine] : []),
+		...(savingsLine ? [savingsLine] : []),
 	];
 	const head = ledger.length === 0 ? await bankHead(db) : null;
 	return {

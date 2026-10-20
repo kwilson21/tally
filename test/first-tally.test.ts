@@ -773,6 +773,8 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 
 	it("the budgets stroke's guard waits for pay as well as bills, so budgets is always the last question drawn", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
+		// The demo's unanswered deposits would keep a pay question open, which the guard checks live; this test is about the record.
+		await db.prepare("UPDATE transactions SET income_source = 'user'").run();
 		await markStroke(db, "bank", "2026-10-12");
 		await markStroke(db, "bills", "2026-10-13");
 		await strokeStatement(
@@ -783,6 +785,50 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 		).run();
 		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
 		await markStroke(db, "pay", "2026-10-13");
+		await strokeStatement(
+			db,
+			"budgets",
+			"2026-10-13",
+			budgetsStrokeGuard("2026-10"),
+		).run();
+		// With no savings answer and no goal above $0, the savings question is still to answer, so the stroke waits (#721).
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+		await db
+			.prepare(
+				"UPDATE household_settings SET value = json_set(value, '$.savings', 'skipped') WHERE key = 'first_tally'",
+			)
+			.run();
+		await strokeStatement(
+			db,
+			"budgets",
+			"2026-10-13",
+			budgetsStrokeGuard("2026-10"),
+		).run();
+		expect((await readFirstTally(db))?.strokes.budgets).toBe("2026-10-13");
+	});
+
+	it("the budgets stroke's guard also passes on a current goal above $0, and not on a $0 one (#721)", async () => {
+		await db.prepare("UPDATE categories SET archived = 1").run();
+		// As above: the demo's unanswered deposits would keep a pay question open, so this test sets them aside.
+		await db.prepare("UPDATE transactions SET income_source = 'user'").run();
+		await markStroke(db, "bank", "2026-10-12");
+		await markStroke(db, "bills", "2026-10-13");
+		await markStroke(db, "pay", "2026-10-13");
+		await db
+			.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES ('2026-10', 0)",
+			)
+			.run();
+		await strokeStatement(
+			db,
+			"budgets",
+			"2026-10-13",
+			budgetsStrokeGuard("2026-10"),
+		).run();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+		await db
+			.prepare("UPDATE savings_goal_amounts SET amount_cents = 30000")
+			.run();
 		await strokeStatement(
 			db,
 			"budgets",

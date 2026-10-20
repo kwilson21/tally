@@ -24,6 +24,7 @@ import {
 	questionsOpen,
 	readGateInputs,
 } from "./gate";
+import { dollarsWords } from "./pay";
 
 /**
  * before: no connected bank yet (Link a bank). reading: a bank is linked and the questions are shut (the import is
@@ -268,8 +269,14 @@ export function doneNote(
 			const set = Object.values(record.budgets).filter(
 				(answer) => answer.cents !== null,
 			).length;
-			if (set === 0) return "no budgets to set";
-			return `${count(set)} ${set === 1 ? "budget" : "budgets"}`;
+			const budgetsWords =
+				set === 0
+					? "no budgets to set"
+					: `${count(set)} ${set === 1 ? "budget" : "budgets"}`;
+			// The savings answer (decision 135, #721): a goal kept is named; Not now adds nothing.
+			return typeof record.savings === "number"
+				? `${budgetsWords}, saving ${dollarsWords(record.savings)} a month`
+				: budgetsWords;
 		}
 		case "count":
 			// The line's own joiner (#714): "3 new transactions, 1 needs you", where the fifth-day sentence uses "; ".
