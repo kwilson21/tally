@@ -1863,7 +1863,13 @@ describe("categorizePending", () => {
 		}
 		/** Counts n calls against today's cap, as earlier runs the same day would have. */
 		async function spend(n: number, cap = 40) {
-			await reserveJevCalls(db, await householdToday(db), cap, n);
+			await reserveJevCalls(
+				db,
+				await householdToday(db),
+				cap,
+				n,
+				crypto.randomUUID(),
+			);
 		}
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
@@ -2054,9 +2060,11 @@ describe("categorizePending", () => {
 				.run();
 			try {
 				const jev = fakeJev(() => new Response("{}", { status: 503 }));
-				await expect(
-					categorizePending(withKey, jev.fetchImpl),
-				).rejects.toThrow();
+				// The save fails and so does its save again: the run ends and logs the error's name alone.
+				await categorizePending(withKey, jev.fetchImpl);
+				expect(JSON.stringify(errors.mock.calls)).toContain(
+					"sorting: save step Error",
+				);
 				// The save is one batch, so nothing in it landed; the reserved calls stay counted: never over-spent.
 				expect(await callsUsed()).toBe(10);
 				expect(JSON.stringify(errors.mock.calls)).not.toContain("nope");

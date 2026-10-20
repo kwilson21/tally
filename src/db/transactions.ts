@@ -2663,6 +2663,8 @@ export async function pendingForJev(
 		/** The transaction's source before this run, so the log counts only what Tally applies now (spec §8.6). */
 		categorySource: string | null;
 		incomeSource: string | null;
+		/** The fields Jev's question was built from, which a save checks before it applies the answer (decision 142). */
+		seen: JevSeen;
 	})[]
 > {
 	const { results } = await db
@@ -2671,6 +2673,8 @@ export async function pendingForJev(
 				${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
+				${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
+				t.account_id AS accountId, t.for_person_id AS forPersonId,
 				t.details_asked AS detailsAsked,
 				t.category_source AS categorySource, t.income_source AS incomeSource,
 				${CATEGORY_ONLY} AS categoryOnly
@@ -2716,10 +2720,22 @@ export async function pendingForJev(
 				incomeSource: string | null;
 				suggestedNames: string | null;
 				suggestionStatus: string | null;
+				ownName: string | null;
+				merchantName: string | null;
+				accountId: number;
+				forPersonId: number | null;
 			}
 		>();
 	return results.map(
-		({ suggestedNames, suggestionStatus, ...transaction }) => ({
+		({
+			suggestedNames,
+			suggestionStatus,
+			ownName,
+			merchantName,
+			accountId,
+			forPersonId,
+			...transaction
+		}) => ({
 			...transaction,
 			// With no name chosen, Jev is told the bank's own store name, never a name Tally guessed (decision 103).
 			displayName:
@@ -2733,6 +2749,18 @@ export async function pendingForJev(
 				null,
 			categoryOnly: transaction.categoryOnly === 1,
 			detailsAsked: transaction.detailsAsked === 1,
+			seen: {
+				rawName: transaction.rawName,
+				ownName,
+				merchantKey: transaction.merchantKey,
+				merchantName,
+				amountCents: transaction.amountCents,
+				accountId,
+				plaidCategory: transaction.plaidCategory ?? null,
+				note: transaction.note ?? null,
+				kind: transaction.kind ?? null,
+				forPersonId,
+			},
 		}),
 	);
 }
@@ -2870,6 +2898,54 @@ export async function merchantCategoryHistoryForJev(
 }
 
 /**
+ * The fields of a transaction that Jev's question was built from, read with the row by `pendingForJev` (decision 142).
+ * A save applies its answer only while the transaction still reads as these: an answer about a changed transaction is
+ * never written, so the transaction waits and is asked afresh.
+ */
+export type JevSeen = {
+	rawName: string;
+	ownName: string | null;
+	merchantKey: string;
+	merchantName: string | null;
+	amountCents: number;
+	accountId: number;
+	plaidCategory: string | null;
+	note: string | null;
+	kind: string | null;
+	forPersonId: number | null;
+};
+
+/**
+ * The guard that holds while a transaction still reads as Jev was asked (decision 142), for an UPDATE of `transactions`.
+ * `value(field)` is the SQL that holds a field's seen value. A nullable column matches with IS, a NOT NULL one with =.
+ */
+function seenMatchSql(value: (field: keyof JevSeen) => string): string {
+	return `(transactions.raw_name = ${value("rawName")}
+		AND ${ownNameSql("transactions")} IS ${value("ownName")}
+		AND ${merchantKeySql("transactions")} = ${value("merchantKey")}
+		AND ${merchantColumnSql("transactions", "display_name")} IS ${value("merchantName")}
+		AND transactions.amount_cents = ${value("amountCents")}
+		AND transactions.account_id = ${value("accountId")}
+		AND transactions.plaid_category IS ${value("plaidCategory")}
+		AND transactions.note IS ${value("note")}
+		AND transactions.kind IS ${value("kind")}
+		AND transactions.for_person_id IS ${value("forPersonId")})`;
+}
+
+/** A save's guard for `seen`: its values are bound in the order the guard takes them. */
+function seenSaveGuard(seen: JevSeen): {
+	sql: string;
+	binds: (string | number | null)[];
+} {
+	const binds: (string | number | null)[] = [];
+	const sql = seenMatchSql((field) => {
+		binds.push(seen[field]);
+		return "?";
+	});
+	return { sql, binds };
+}
+
+/**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
  * `turnId` guards it to the sorting turn (decision 139).
  */
@@ -2897,18 +2973,25 @@ export function saveJevDetailsStatement(
 		kind: string | null;
 		forPersonId: number | null;
 		noteWorthWriting: number | null;
+		/** What the row read as when Jev was asked (decision 142). Without it the row's details are applied as before. */
+		seen?: JevSeen;
 	}[],
 	options: { stillOn?: string; turnId?: string } = {},
 ): D1PreparedStatement | undefined {
 	if (details.length === 0) return undefined;
 	// The save is guarded by the switches it was asked under (`stillOn`, decision 139) and the sorting turn.
 	const still = options.stillOn === undefined ? "" : ` AND ${STILL_ON_SQL}`;
+	// A row's details are applied only while it still reads as its `seen` (decision 142). Jev's own kind and
+	// forPersonId sit beside `seen` in each answer, so the seen values are read from `$.seen`.
+	const seenIntact = `NOT EXISTS (SELECT 1 FROM answers a WHERE a.id = transactions.id AND a.seen IS NOT NULL
+		AND NOT ${seenMatchSql((field) => `json_extract(a.seen, '$.${field}')`)})`;
 	const guarded = withTurnGuard(
 		`WITH answers AS (
 				SELECT json_extract(value, '$.id') AS id,
 					json_extract(value, '$.kind') AS kind,
 					json_extract(value, '$.forPersonId') AS forPersonId,
-					json_extract(value, '$.noteWorthWriting') AS noteWorthWriting
+					json_extract(value, '$.noteWorthWriting') AS noteWorthWriting,
+					json_extract(value, '$.seen') AS seen
 				FROM json_each(?)
 			)
 			UPDATE transactions SET
@@ -2918,7 +3001,7 @@ export function saveJevDetailsStatement(
 				for_person_guessed = CASE WHEN for_person_id IS NULL AND for_person_cleared = 0 AND EXISTS (SELECT 1 FROM household_people WHERE id = (SELECT forPersonId FROM answers WHERE answers.id = transactions.id)) THEN 1 ELSE for_person_guessed END,
 				note_worth_writing = (SELECT noteWorthWriting FROM answers WHERE answers.id = transactions.id),
 				details_asked = 1, updated_at = datetime('now')
-			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still}`,
+			WHERE details_asked = 0 AND id IN (SELECT id FROM answers)${still} AND ${seenIntact}`,
 		options.turnId,
 	);
 	return db
@@ -3062,6 +3145,8 @@ export type JevAnswerSave = {
 	log?: { day: string; category: boolean; income: boolean };
 	/** The sorting group's turn (decision 139): the save writes only while this turn is held. */
 	turn?: string;
+	/** The fields Jev was asked from (decision 142): the save writes only while they still read as they did. */
+	seen?: JevSeen;
 };
 
 /**
@@ -3088,6 +3173,10 @@ export function saveJevResultStatements(
 		income: options.switches?.income,
 		sortOnArrival: options.switches?.sortOnArrival,
 	});
+	// The answer is applied only while the transaction still reads as Jev was asked (decision 142). A caller without
+	// `seen` (a plan cached before that, or a test) skips the guard.
+	const seenGuard = options.seen ? seenSaveGuard(options.seen) : undefined;
+	const seenSql = seenGuard ? ` AND ${seenGuard.sql}` : "";
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.
@@ -3099,7 +3188,7 @@ export function saveJevResultStatements(
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}${seenSql}`,
 			options.turn,
 		);
 		const category = db
@@ -3114,6 +3203,7 @@ export function saveJevResultStatements(
 				d.alsoCategoryId ?? null,
 				id,
 				stillOn,
+				...(seenGuard?.binds ?? []),
 				...guarded.binds,
 			);
 		return answerStatements(
@@ -3164,7 +3254,7 @@ export function saveJevResultStatements(
 					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
 						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
 				)
-				AND ${STILL_ON_SQL}`,
+				AND ${STILL_ON_SQL}${seenSql}`,
 		options.turn,
 	);
 	const update = db.prepare(guarded.sql).bind(
@@ -3202,6 +3292,7 @@ export function saveJevResultStatements(
 		id,
 		incomeOn ? 1 : 0,
 		stillOn,
+		...(seenGuard?.binds ?? []),
 		...guarded.binds,
 	);
 	return answerStatements(db, update, id, options.log, options.turn);
