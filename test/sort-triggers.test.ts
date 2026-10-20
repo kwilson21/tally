@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { askAgain, askAgainMany } from "../src/categorize-pending";
 import { resetDemo } from "../src/demo/reset";
 import { sortAfterSync } from "../src/plaid/sort-after-sync";
+import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -13,25 +14,15 @@ const sortEnv = (withKey = true) => ({
 	JEV_API_KEY: withKey ? "test-key" : undefined,
 });
 
-/**
- * Swaps the Workflows binding for a recorder, so a test sees each daytime trigger's one `create`
- * without a real instance running. The real binding is put back after each test.
- */
-let realSort: typeof env.SORT;
-function recordSorting() {
-	const create = vi.fn(async () => ({ id: "fake" }));
-	(env as { SORT: unknown }).SORT = { create };
-	return create;
-}
+// Each daytime trigger's one `create`, recorded without a real instance (test/record-sorting.ts).
+const create = recordSorting();
 
 beforeEach(async () => {
-	realSort = env.SORT;
 	await resetDemo(db, TODAY);
 	vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
-	(env as { SORT: unknown }).SORT = realSort;
 	vi.restoreAllMocks();
 });
 
@@ -40,7 +31,6 @@ const ids = (n: number, from = 1) =>
 
 describe("a sync hands all of its rows to one Workflow instance", () => {
 	it("80 changed rows make one create with all 80, sorted as a sync's", async () => {
-		const create = recordSorting();
 		await sortAfterSync(
 			sortEnv(),
 			{ changedIds: ids(80) },
@@ -53,7 +43,6 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 	});
 
 	it("3,000 changed rows are still one create, and its params stay under 1 MiB", async () => {
-		const create = recordSorting();
 		await sortAfterSync(sortEnv(), { changedIds: ids(3000) });
 		expect(create).toHaveBeenCalledTimes(1);
 		const params = (create.mock.calls[0] as unknown as [{ params: unknown }])[0]
@@ -62,7 +51,6 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 	});
 
 	it("with no Jev key, or no changed rows, nothing is started", async () => {
-		const create = recordSorting();
 		await sortAfterSync(sortEnv(false), { changedIds: ids(5) });
 		await sortAfterSync(sortEnv(), { changedIds: [] });
 		expect(create).not.toHaveBeenCalled();
@@ -71,7 +59,6 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 
 describe("ask again hands its rows to one Workflow instance, with no cap", () => {
 	it("clears the left-out marks and makes one create with every id, bySync off", async () => {
-		const create = recordSorting();
 		// Three unsorted rows that Jev was unsure of: the marks that keep them from being asked.
 		const rows = (
 			await db.batch(
@@ -99,7 +86,6 @@ describe("ask again hands its rows to one Workflow instance, with no cap", () =>
 	});
 
 	it("ask again for one row passes that one id", async () => {
-		const create = recordSorting();
 		await askAgain({ ...sortEnv() }, 7);
 		expect(create).toHaveBeenCalledWith({
 			params: { ids: [7], bySync: false, rulesApplied: false },
@@ -109,10 +95,7 @@ describe("ask again hands its rows to one Workflow instance, with no cap", () =>
 
 describe("a create that fails", () => {
 	it("is logged by its error name only, and the request still succeeds", async () => {
-		const create = vi.fn(async () => {
-			throw new TypeError("secret transaction text");
-		});
-		(env as { SORT: unknown }).SORT = { create };
+		create.mockRejectedValueOnce(new TypeError("secret transaction text"));
 		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 		await expect(
 			sortAfterSync(sortEnv(), { changedIds: ids(3) }),

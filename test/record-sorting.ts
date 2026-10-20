@@ -38,7 +38,9 @@ export function recordSorting(options: { sort?: boolean } = {}) {
 		create.mockClear();
 		(env as { SORT: unknown }).SORT = { create };
 	});
-	afterEach(() => {
+	afterEach(async () => {
+		// Let the queued instances finish first, so none of them runs after the real binding is back.
+		await queue.catch(() => {});
 		(env as { SORT: unknown }).SORT = real;
 	});
 	return create;

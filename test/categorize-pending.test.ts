@@ -2431,8 +2431,15 @@ describe("categorizePending", () => {
 			const jev = jevWith(async (call) => {
 				if (call === 1) await switchTo({ categories: false, income: false });
 			});
-			await categorizePending(withKey, jev.fetchImpl, await bySync());
+			const waiting = await needsCategoryCount(db, MONTH);
+			const result = await categorizePending(
+				withKey,
+				jev.fetchImpl,
+				await bySync(),
+			);
 			expect(jev.calls()).toBe(10);
+			expect(result.applied).toBe(0);
+			expect(await needsCategoryCount(db, MONTH)).toBe(waiting);
 		});
 	});
 
