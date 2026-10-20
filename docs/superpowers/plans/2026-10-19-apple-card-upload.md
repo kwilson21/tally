@@ -158,7 +158,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `function historyStart(db: D1Database, today: string): Promise<string>`:
     - `MIN(t.date)` over transactions on accounts with a non-null `plaid_item_id`, so a disconnected bank's kept rows are included.
     - While any connected bank (`plaid_items` not disconnected) has `history_complete_at` unset, or there are no such rows yet, it's the earlier of that date and `daysBefore(today, 90)` (`src/dates.ts:143`), so rows aren't left out while the first sync is still bringing older pages (`src/plaid/sync.ts:1116-1131`).
-    - With no connected bank **and** no transaction on a Plaid account, `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
+    - With no connected bank and no transaction on a Plaid account, it's the Apple Card's own earliest row, so uploads keep working after the last bank's history is deleted.
+    - With none of those (no bank, no bank history, no card rows), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
   - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT`, `removed_at TEXT` and `counted_from TEXT`.
@@ -183,7 +184,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `removed_at` becomes NULL, and the kept rows count as held.
     - `balance_on` is cleared unless this upload typed a balance.
   - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_on`, the balance and the rows are all unchanged.
-  - **`historyStart`:** the seed's earliest date on a Plaid account; the earlier of that and the 90-day fallback while a connected bank's `history_complete_at` is unset; the kept rows' earliest date after the last bank is disconnected with its rows kept, so uploads still work then. With no connected bank and no kept bank history, nothing is saved and the words are returned.
+  - **`historyStart`:** the seed's earliest date on a Plaid account; the earlier of that and the 90-day fallback while a connected bank's `history_complete_at` is unset; the kept rows' earliest date after the last bank is disconnected with its rows kept, so uploads still work then. With no bank history at all, the card's own earliest row. With no bank, no bank history and no card rows, nothing is saved and the words are returned.
   - **`saves a typed balance`:**
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
     - A second upload the same day replaces the row.
@@ -237,7 +238,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - Consumes:
   - `parseAppleCsv`, `importAppleCard` and `importWords`
   - `afterSync(db)` (`src/plaid/after-sync.ts:13`)
-  - `sortAfterSync(env, { changedIds }, undefined, { rulesApplied })` (`src/plaid/sort-after-sync.ts:20`)
+  - `sortAfterSync(env, { changedIds }, { rulesApplied })` (`src/plaid/sort-after-sync.ts:21`; since #735 it starts one SortWorkflow instance with all the rows, and `env` needs the `SORT` binding)
 - Produces:
   - `type AppleCardAccount = { id: number; balanceCents: number; balanceOn: string | null; uploadedOn: string | null; removedAt: string | null; through: string | null }`
     - `through` is `MAX(date)` of the card's rows.
@@ -280,11 +281,11 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - **POST `/accounts/apple-card`, success:**
     - With HX, it returns the redrawn `#accounts-summary`, `HX-Push-Url: /accounts`, focus on "Upload a file", and an `HX-Trigger` toast and announce of `importWords(…)`.
     - Without HX, it answers 303 to `/accounts`.
-    - It runs `afterSync` (a merchant rule applies to a new row) inside try/catch, then `waitUntil(sortAfterSync(env, { changedIds: addedIds }, undefined, { rulesApplied: !afterSyncFailed }))`, as Sync now does (`src/routes/accounts.tsx:159-164`).
+    - It runs `afterSync` (a merchant rule applies to a new row) inside try/catch, then `waitUntil(sortAfterSync(env, { changedIds: addedIds }, { rulesApplied: !afterSyncFailed }))`, which hands every added row to the sorting Workflow (decision 139), as Sync now does (`src/routes/accounts.tsx:159-164`).
     - The form keeps Savings' double-tap guard (`hx-disable`).
   - **POST refusals.** Each returns 422 with the sheet `still`, a `role="alert"`, the typed balance kept, and nothing saved:
     - Not Apple's file: `NOT_APPLE`.
-    - No bank connected and no bank history kept: "Link a bank first. Tally's history starts with your bank's." With a disconnected bank's rows kept, uploads, Accounts' Upload and Home's nudge all still work.
+    - No bank, no bank history and no card rows (a first upload before any bank): "Link a bank first. Tally's history starts with your bank's." With a disconnected bank's rows kept, uploads, Accounts' Upload and Home's nudge all still work.
     - A bad row: its words.
     - No file (an empty-named `File`).
     - A bad balance.
