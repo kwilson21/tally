@@ -89,7 +89,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - Strip a leading `﻿`.
   - Read the header line with the same reader and compare its fields with `APPLE_COLUMNS`, optionally followed by `Purchased By`.
   - Amount: refuse any `$`, then call `toCents`, which throws on anything else. Turn `-0` into `0`.
-  - Dates: `M/D/YYYY` with one or two digits each, checked as a real calendar day.
+  - Dates: `M/D/YYYY`, month first, with one or two digits each, checked as a real calendar day. A first number over 12 is an unreadable date.
 - [ ] **Step 4:** Run `npx vitest run test/apple-card-csv.test.ts`. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat: read Apple Card's CSV export into rows (#731)`.
 
@@ -157,7 +157,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `function importAppleCard(db: D1Database, rows: AppleRow[], opts: { by: string; today: string; balanceCents: number | null }): Promise<ImportResult>`
   - `function historyStart(db: D1Database, today: string): Promise<string>`:
     - `MIN(t.date)` over transactions on accounts with a non-null `plaid_item_id`, so a disconnected bank's kept rows are included.
-    - When there is no such row, `daysBefore(today, 90)` (`src/dates.ts:143`).
+    - When a bank is linked but no such row exists yet, `daysBefore(today, 90)` (`src/dates.ts:143`).
+    - With no bank linked (no `plaid_items` row that isn't disconnected), `importAppleCard` saves nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
   - `ALTER TABLE accounts ADD COLUMN uploaded_at TEXT`, `balance_on TEXT` and `removed_at TEXT`.
@@ -182,7 +183,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `removed_at` becomes NULL, and the kept rows count as held.
     - `balance_on` is cleared unless this upload typed a balance.
   - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_at`, the balance and the rows are all unchanged.
-  - **`historyStart`:** the seed's earliest date on a Plaid account, with the 90-day fallback when none exists.
+  - **`historyStart`:** the seed's earliest date on a Plaid account, with the 90-day fallback when a bank is linked but has no rows yet. With no bank linked, nothing is saved and the words are returned.
   - **`saves a typed balance`:**
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
     - A second upload the same day replaces the row.
@@ -256,7 +257,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   3. `FileField` "Apple Card file (CSV)", with "On card.apple.com or in Wallet: Export Transactions, pick the dates, then CSV." under it.
   4. `MoneyInput` "Balance in Wallet", with `allowCredit`, `noRound`, and the hint "Optional. Left blank, Oct 12's balance stays. For a credit, type a minus first." While no balance counts, the hint is "Optional. For a credit, type a minus first."
   5. Cancel and Upload, in Savings' grid.
-- **Before the first upload:** "Add Apple Card" (`secondary`) beside Link a bank, both in the empty state and under the banks. The empty state shows only when there are no banks **and** no card (`src/routes/accounts.tsx:53`).
+- **Before the first upload:** "Add Apple Card" (`secondary`) beside Link a bank, under the banks, once a bank is linked. With no bank linked, the empty state offers only Link a bank, as today. The empty state shows only when there are no banks **and** no card (`src/routes/accounts.tsx:53`).
 
 **Words decided here (not the owner's):**
 - No file: "Choose the CSV file Apple exported."
@@ -282,6 +283,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - The form keeps Savings' double-tap guard (`hx-disable`).
   - **POST refusals.** Each returns 422 with the sheet `still`, a `role="alert"`, the typed balance kept, and nothing saved:
     - Not Apple's file: `NOT_APPLE`.
+    - No bank linked: "Link a bank first. Tally's history starts with your bank's."
     - A bad row: its words.
     - No file (an empty-named `File`).
     - A bad balance.
