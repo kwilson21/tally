@@ -1,10 +1,47 @@
 import { describe, expect, it } from "vitest";
 import {
 	type BankSync,
+	bankFlag,
 	flaggedBanks,
 	homeBankNotice,
 	STALE_AFTER_DAYS,
 } from "../src/stale-bank";
+
+describe("bankFlag", () => {
+	const bank = (overrides: Partial<BankSync> = {}): BankSync => ({
+		name: "Chase",
+		needsAttention: false,
+		lastSyncedAt: "2026-10-04 08:00:00",
+		...overrides,
+	});
+
+	it("flags a bank that needs signing in, with its sync date when it has one", () => {
+		expect(bankFlag(bank({ needsAttention: true }), TODAY)).toEqual({
+			name: "Chase",
+			reason: "sign-in",
+			since: "2026-10-04",
+		});
+		expect(
+			bankFlag(bank({ needsAttention: true, lastSyncedAt: null }), TODAY),
+		).toEqual({ name: "Chase", reason: "sign-in" });
+	});
+
+	it("flags a bank whose last sync is 3 days back, and not one synced yesterday", () => {
+		expect(
+			bankFlag(bank({ lastSyncedAt: "2026-10-02 23:59:59" }), TODAY),
+		).toEqual({ name: "Chase", reason: "stale", since: "2026-10-02" });
+		expect(
+			bankFlag(bank({ lastSyncedAt: "2026-10-04 00:00:00" }), TODAY),
+		).toBeNull();
+	});
+
+	it("never flags a bank with no sync time, or a disconnected one", () => {
+		expect(bankFlag(bank({ lastSyncedAt: null }), TODAY)).toBeNull();
+		expect(
+			bankFlag(bank({ disconnected: true, needsAttention: true }), TODAY),
+		).toBeNull();
+	});
+});
 
 // A bank that stopped syncing means Safe to spend may be too high (spec §8.5, decision 72 P37 A).
 // Pure date logic: "today" is the household's date, passed in; a sync time is `plaid_items.last_synced_at`

@@ -58,27 +58,26 @@ export function homeBankNotice(
 }
 
 /**
- * The connected banks Home flags, in the order given. A bank that needs signing in says so, even
- * if it also hasn't synced. One with no readable sync time has nothing true to say, so only a bank
- * that needs attention is flagged then.
+ * One bank's flag, or null when it is fine. A bank that needs signing in says so, even if it also hasn't synced. One with
+ * no readable sync time has nothing true to say, so only a bank that needs attention is flagged then. A disconnected bank
+ * is never flagged. Home's bank line (flaggedBanks) and the Your banks list (src/first-tally/your-banks.ts) both read it.
  */
+export function bankFlag(bank: BankSync, today: string): FlaggedBank | null {
+	if (bank.disconnected) return null;
+	const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+	if (bank.needsAttention)
+		return {
+			name: bank.name,
+			reason: "sign-in",
+			...(since && { since }),
+		};
+	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
+	if (since !== undefined && since <= daysBefore(today, STALE_AFTER_DAYS))
+		return { name: bank.name, reason: "stale", since };
+	return null;
+}
+
+/** The connected banks Home flags, in the order given (bankFlag). */
 export function flaggedBanks(banks: BankSync[], today: string): FlaggedBank[] {
-	const staleSince = daysBefore(today, STALE_AFTER_DAYS);
-	const flagged: FlaggedBank[] = [];
-	for (const bank of banks) {
-		if (bank.disconnected) continue;
-		const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-		if (bank.needsAttention) {
-			flagged.push({
-				name: bank.name,
-				reason: "sign-in",
-				...(since && { since }),
-			});
-			continue;
-		}
-		// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
-		if (since !== undefined && since <= staleSince)
-			flagged.push({ name: bank.name, reason: "stale", since });
-	}
-	return flagged;
+	return banks.flatMap((bank) => bankFlag(bank, today) ?? []);
 }

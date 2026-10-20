@@ -183,8 +183,23 @@ describe("setupView: which setup state Home shows", () => {
 		});
 		expect(two?.bankCount).toBe(2);
 		expect(two?.bankName).toBe("Chase");
-		expect(two?.steps[0]?.note).toBe("Chase, linked");
+		expect(two?.steps[0]?.note).toBe("2 banks, linked");
 		expect(view({ record, banks: [BANK] })?.bankCount).toBe(1);
+		expect(view({ record, banks: [BANK] })?.steps[0]?.note).toBe(
+			"Chase, linked",
+		);
+	});
+
+	it("says '2 banks, linked' on step one in the ready phase too, and keeps the first bank's name in the done note", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const ready = view({
+			record,
+			banks: [BANK, { ...BANK, name: "Northline" }],
+			waiting: 0,
+			total: 10,
+		});
+		expect(ready?.phase).toBe("ready");
+		expect(ready?.steps[0]?.note).toBe("2 banks, linked");
 	});
 
 	it("stays in reading while a bank's history is still coming", () => {
@@ -289,7 +304,7 @@ describe("setupView: which setup state Home shows", () => {
 		expect(reading?.steps[0]).toEqual({
 			name: "Link your bank",
 			done: true,
-			note: "Chase, linked",
+			note: "2 banks, linked",
 			reAsk:
 				"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
 		});
@@ -308,7 +323,7 @@ describe("setupView: which setup state Home shows", () => {
 				{ name: "Chase", lastSyncedAt: null, historyCompleteAt: null },
 			],
 		});
-		expect(reading?.steps[0]?.note).toBe("Chase, linked");
+		expect(reading?.steps[0]?.note).toBe("2 banks, linked");
 		expect(reading?.steps[0]?.reAsk).toBe(
 			`O'Brien "Savings" linked: Tally asks again about pay, bills and budgets.`,
 		);
@@ -329,7 +344,7 @@ describe("setupView: which setup state Home shows", () => {
 		expect(early?.steps[0]).toEqual({
 			name: "Link your bank",
 			done: true,
-			note: "Chase, linked",
+			note: "2 banks, linked",
 		});
 	});
 
@@ -351,7 +366,7 @@ describe("setupView: which setup state Home shows", () => {
 				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
 			],
 		});
-		expect(midPay?.steps[0]?.note).toBe("Chase, linked");
+		expect(midPay?.steps[0]?.note).toBe("2 banks, linked");
 	});
 
 	it("names the done lines by their day, and an undated stroke has no day", () => {
@@ -731,6 +746,6 @@ describe("the re-ask note (P125 E, #578)", () => {
 				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
 			],
 		});
-		expect(v?.steps[0]?.note).toBe("Chase, linked");
+		expect(v?.steps[0]?.note).toBe("2 banks, linked");
 	});
 });
