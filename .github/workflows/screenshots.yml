@@ -71,6 +71,8 @@ jobs:
             git worktree add --detach shots
             git -C shots switch --orphan screenshots
           fi
+          # A re-run of the same commit starts its folder afresh, so images it no longer shows are removed (#756).
+          rm -rf "shots/$dir"
           mkdir -p "shots/$dir"
           # Only the images the description shows (#756), staged by scripts/changed-shots.mjs as the
           # folder's layout: changed pages' after images at the top, their before images in before/.
