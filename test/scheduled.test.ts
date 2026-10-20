@@ -1,7 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { summarizeMonth } from "../src/budget";
-import { jevCallLimit } from "../src/categorize-pending";
 import { categoryCallLimit } from "../src/category-suggestions-pending";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
@@ -17,6 +16,7 @@ import handler, {
 } from "../src/index";
 import type { SyncAllResult } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { jevCallLimit } from "../src/sort-groups";
 import {
 	nameCallLimit,
 	suggestMerchantNames,

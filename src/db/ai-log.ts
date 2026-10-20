@@ -4,6 +4,7 @@
 // here. The log has no amounts, and a person's later change is never written: "you changed" is read from
 // the transaction as it stands (`category_source`, and a split's parts).
 import { monthsBefore } from "../dates";
+import { turnHeldSql } from "./sorting-turn";
 
 /** One month's counts for the tally (spec §8.6). `changed` is the categories a person changed. */
 export type AiTallyCounts = {
@@ -73,11 +74,29 @@ export async function readAiTally(
  * answer's save (saveJevResult), so the two land together or not at all. A row is written only while the answer
  * is still in place (`category_source` and `income_source` are 'jev'), so a person's choice made meanwhile is
  * never counted; a row that is already logged is ignored (the unique indexes), so a repeat writes nothing twice.
+ * With a sorting turn (decision 139) each arm also needs that turn to be held (db/sorting-turn.ts).
  */
-export const JEV_ANSWER_LOG_SQL = `INSERT OR IGNORE INTO ai_log (kind, transaction_id, household_day)
-	SELECT 'category', id, ?1 FROM transactions WHERE id = ?2 AND ?3 = 1 AND category_source = 'jev'
+export function jevAnswerLogStatement(
+	db: D1Database,
+	log: { day: string; id: number; category: boolean; income: boolean },
+	turnId?: string,
+): D1PreparedStatement {
+	const held = turnId === undefined ? "" : ` AND ${turnHeldSql("?5")}`;
+	return db
+		.prepare(
+			`INSERT OR IGNORE INTO ai_log (kind, transaction_id, household_day)
+	SELECT 'category', id, ?1 FROM transactions WHERE id = ?2 AND ?3 = 1 AND category_source = 'jev'${held}
 	UNION ALL
-	SELECT 'income', id, ?1 FROM transactions WHERE id = ?2 AND ?4 = 1 AND income_source = 'jev'`;
+	SELECT 'income', id, ?1 FROM transactions WHERE id = ?2 AND ?4 = 1 AND income_source = 'jev'${held}`,
+		)
+		.bind(
+			log.day,
+			log.id,
+			log.category ? 1 : 0,
+			log.income ? 1 : 0,
+			...(turnId === undefined ? [] : [turnId]),
+		);
+}
 
 /**
  * When a kept name is logged, on a merchant row `m`: the merchant is still pending and not yet named, and the

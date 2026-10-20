@@ -93,6 +93,10 @@ const PARTS: [string, string][] = [
 		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. A separate 10:00 UTC run sends due reconnect reminders and the first week's ready email. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions.",
 	],
 	[
+		"Cloudflare Workflows",
+		"Sorts transactions with Jev in small steps and keeps each answer for a few days, so a step that has to run again doesn't ask twice.",
+	],
+	[
 		"Cloudflare Access",
 		"A login wall with the family's emails in front of the family app; the app has no login code of its own.",
 	],

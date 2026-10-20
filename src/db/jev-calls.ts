@@ -4,9 +4,11 @@
 // `jev_calls_<date>`; the date is the household's own (decision 67), so a new day starts at zero.
 //
 // A run takes the calls it wants in one step before it starts (`reserveJevCalls`) and returns the ones
-// it didn't use when it ends (`giveBackJevCalls`), so a call costs no query of its own: D1 allows 1,000
+// it didn't use when it ends (`giveBackJevCallsStatement`), so a call costs no query of its own: D1 allows 1,000
 // queries in one invocation, and a night's 500 calls must fit in them. A run cut off before it gives
 // back loses the unused part for that day, which only ever leaves the day with fewer calls, never more.
+
+import { withTurnGuard } from "./sorting-turn";
 
 const keyFor = (day: string) => `jev_calls_${day}`;
 
@@ -53,16 +55,17 @@ export async function reserveJevCalls(
  * Returns calls a run reserved and didn't use, to the day it reserved them on. One statement, and the
  * count never goes below zero.
  */
-export async function giveBackJevCalls(
+export function giveBackJevCallsStatement(
 	db: D1Database,
 	day: string,
 	unused: number,
-): Promise<void> {
-	if (unused < 1) return;
-	await db
-		.prepare(
-			"UPDATE household_settings SET value = CAST(CAST(MAX(0, CAST(value AS INTEGER) - ?) AS INTEGER) AS TEXT) WHERE key = ?",
-		)
-		.bind(unused, keyFor(day))
-		.run();
+	turnId?: string,
+): D1PreparedStatement | undefined {
+	if (unused < 1) return undefined;
+	// A sorting group gives back in its save, only while it holds the turn (decision 139).
+	const guarded = withTurnGuard(
+		"UPDATE household_settings SET value = CAST(CAST(MAX(0, CAST(value AS INTEGER) - ?) AS INTEGER) AS TEXT) WHERE key = ?",
+		turnId,
+	);
+	return db.prepare(guarded.sql).bind(unused, keyFor(day), ...guarded.binds);
 }
