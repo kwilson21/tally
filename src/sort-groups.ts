@@ -1,6 +1,7 @@
 // The sorting loop (spec §8.6, decision 139). Jev is asked about waiting transactions in groups of 25: each group
 // reads D1 once, reserves its calls in a step of its own, asks Jev about each row as a step of its own, and saves
-// every answer in one D1 batch, all or none.
+// every answer in one D1 batch, all or none. A save that fails is tried again with the same answers, about once a
+// minute for up to a day (decision 143).
 // The loop is the same in-process (categorizePending: the tests, where a step just runs) and in the Workflow
 // (runSortInstance in sort-instance.ts: each step is a saved Workflows step, so a retry skips the steps that finished).
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
@@ -15,11 +16,17 @@ import {
 	readAiSwitches,
 	stillOnKeys,
 } from "./db/ai-switches";
-import { giveBackJevCallsStatement, reserveJevCalls } from "./db/jev-calls";
+import {
+	dropReservedJevCallsStatement,
+	giveBackReservedJevCallsStatement,
+	reservedKeyFor,
+	reserveJevCalls,
+} from "./db/jev-calls";
 import {
 	releaseSortingTurn,
 	releaseSortingTurnStatement,
 	takeSortingTurn,
+	takeSortingTurnStatement,
 } from "./db/sorting-turn";
 import {
 	applyMerchantRules,
@@ -150,9 +157,17 @@ const STEP_SETTINGS = {
 		timeout: "1 minute",
 		sensitive: "output",
 	},
-	write: {
+	rules: {
 		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 		timeout: "1 minute",
+		sensitive: "output",
+	},
+	// A save that fails is tried about once a minute for up to a day, taking the group's turn back each time it is free,
+	// with the answers its group kept (decision 143). A D1 batch of about 55 statements finishes well inside 30 seconds,
+	// so 960 tries of 30 seconds and a minute apart are at most 24 hours.
+	write: {
+		retries: { limit: 960, delay: "1 minute", backoff: "constant" },
+		timeout: "30 seconds",
 		sensitive: "output",
 	},
 } satisfies Record<string, StepConfig>;
@@ -274,20 +289,25 @@ async function readGroup(
 }
 
 /**
- * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A re-run (attempt > 1)
- * grants nothing: its first attempt may already have reserved the calls, and they are never reserved twice.
+ * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A group's grant is kept under
+ * its name (decision 143): a reserve that runs again gets that grant back, and reserves nothing more.
  */
 async function reserveCalls(
 	env: SortEnv,
 	plan: ReadPlan,
-	{ attempt }: { attempt: number },
 ): Promise<{ granted: number }> {
-	if (attempt > 1) return { granted: 0 };
+	const kept = await env.DB.prepare(
+		"SELECT value FROM household_settings WHERE key = ?",
+	)
+		.bind(reservedKeyFor(plan.day, plan.turnId))
+		.first<{ value: string }>();
+	if (kept) return { granted: Number(kept.value) };
 	const granted = await reserveJevCalls(
 		env.DB,
 		plan.day,
 		jevCallLimit(env),
 		plan.rows.length,
+		plan.turnId,
 	);
 	return { granted };
 }
@@ -373,10 +393,16 @@ export async function writeGroup(
 	const now = await readAiSwitches(db);
 	const sw = plan.switches;
 	const turn = plan.turnId;
-	// The log rows are dated with the household's day as the answers are saved (spec §8.6).
-	const saveDay = todayIn(plan.timeZone);
+	// The log rows are dated with the household's day as the answers are saved (spec §8.6), in the zone the household has
+	// now: a save retried after the zone changed dates them by it (decision 143). The reservation keeps the read's day.
+	const saveDay = todayIn(await householdTimeZone(db));
 	const byId = new Map(plan.rows.map((row) => [row.id, row]));
-	const statements: D1PreparedStatement[] = [];
+	const reservedKey = reservedKeyFor(plan.day, turn);
+	// The turn is taken back first, while the group's record exists (decision 143): a save that already went through
+	// finds no record and takes nothing.
+	const statements: D1PreparedStatement[] = [
+		takeSortingTurnStatement(db, turn, reservedKey),
+	];
 	const applies: { index: number; categoryId: number | null }[] = [];
 	const details: Parameters<typeof saveJevDetailsStatement>[1] = [];
 	let asked = 0;
@@ -413,6 +439,7 @@ export async function writeGroup(
 						income: row.incomeSource !== "jev",
 					},
 					turn,
+					seen: row.seen,
 				});
 				statements.push(answer.update);
 				if (answer.log) statements.push(answer.log);
@@ -436,6 +463,7 @@ export async function writeGroup(
 				const worth = result.answer.noteWorthWriting;
 				details.push({
 					id: row.id,
+					seen: row.seen,
 					kind: kindValue,
 					forPersonId: personValue,
 					noteWorthWriting:
@@ -456,16 +484,30 @@ export async function writeGroup(
 		turnId: turn,
 	});
 	if (detailsStatement) statements.push(detailsStatement);
-	const giveBack = giveBackJevCallsStatement(
-		db,
-		plan.day,
-		plan.granted - asked,
-		turn,
+	// What the group reserved and didn't ask goes back, then its record goes, and the turn is released last (decision 143).
+	statements.push(
+		giveBackReservedJevCallsStatement(db, {
+			day: plan.day,
+			planned: plan.granted,
+			asked,
+			turnId: turn,
+		}),
+		dropReservedJevCallsStatement(db, plan.day, turn),
+		releaseSortingTurnStatement(db, turn),
 	);
-	if (giveBack) statements.push(giveBack);
-	statements.push(releaseSortingTurnStatement(db, turn));
 
 	const saved = await db.batch(statements);
+	// The release is the batch's last statement. Changing no row means the turn wasn't this group's when the batch ran.
+	// Its record gone means the save already went through, so there is nothing to save. Its record still there means
+	// another group holds the turn: the step throws, so it is tried again.
+	if ((saved.at(-1)?.meta.changes ?? 0) === 0) {
+		const record = await db
+			.prepare("SELECT key FROM household_settings WHERE key = ?")
+			.bind(reservedKey)
+			.first();
+		if (record) throw new Error("sorting turn taken");
+		return { asked, applied: 0, stop: true };
+	}
 	let applied = 0;
 	for (const apply of applies)
 		if (
@@ -492,8 +534,8 @@ export async function writeGroup(
  * Sorts the waiting transactions in groups of 25 through `runStep` (see StepRunner). Merchant rules first (unless the
  * caller applied them), then for each group: read (turn taken), reserve (the calls from the day's cap), ask each row (a
  * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
- * says so, or when the calls or (in-process) the deadline run out. In-process, a throw releases the turn this run
- * still holds.
+ * says so, when a write fails for good (its tries ran out, logged by name), or when the calls or (in-process) the
+ * deadline run out. In-process, a throw releases the turn this run still holds.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -514,7 +556,7 @@ export async function sortGroups(
 	try {
 		// Merchant rules are the household's own, so they apply whatever the AI switches say.
 		if (!options.rulesApplied)
-			await runStep("rules", STEP_SETTINGS.write, async () => {
+			await runStep("rules", STEP_SETTINGS.rules, async () => {
 				await applyMerchantRules(env.DB);
 				return true;
 			});
@@ -541,12 +583,12 @@ export async function sortGroups(
 			const { plan: readPlan } = read;
 			held = turnId;
 			// The calls are reserved in a step of their own, so a read that runs again never reserves twice. A reserve
-			// that rejects grants nothing (its calls, if its batch had committed, stay charged for the day).
+			// that rejects grants nothing here; if its batch had committed, its record gives the calls back at the save.
 			let granted = 0;
 			try {
 				granted = (
-					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, (ctx) =>
-						reserveCalls(env, readPlan, ctx),
+					await runStep(`group-${n}-reserve`, STEP_SETTINGS.reserve, () =>
+						reserveCalls(env, readPlan),
 					)
 				).granted;
 			} catch (error) {
@@ -587,11 +629,22 @@ export async function sortGroups(
 				results.push(answer);
 				if (askingStops(results, before)) break;
 			}
-			const written = await runStep(
-				`group-${n}-write`,
-				STEP_SETTINGS.write,
-				() => writeGroup(env, plan, results, before),
-			);
+			let written: Awaited<ReturnType<typeof writeGroup>>;
+			try {
+				written = await runStep(`group-${n}-write`, STEP_SETTINGS.write, () =>
+					writeGroup(env, plan, results, before),
+				);
+			} catch (error) {
+				// The save ran out of its tries (about a day). Its rows wait for the next run, and the calls it reserved stay
+				// in its record until the cleanup two days on clears it (decision 143). `held` stays set, so the in-process
+				// finally below releases the turn.
+				console.error(
+					`sorting: save step ${error instanceof Error ? error.name : "unknown"}`,
+				);
+				break;
+			}
+			// A save has returned, so the turn is no longer this run's to release. Until then `held` stays set, so the
+			// in-process finally below releases the turn if a save throws.
 			held = undefined;
 			streak = trailingFailures(results, before);
 			done.asked += written.asked;

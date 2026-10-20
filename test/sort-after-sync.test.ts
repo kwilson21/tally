@@ -240,7 +240,7 @@ describe("sortAfterSync", () => {
 			sortAfterSync(withKey, { changedIds: await waitingIds() }),
 		).resolves.toBeUndefined();
 		const logged = JSON.stringify(errors.mock.calls);
-		expect(logged).toContain("sorting: couldn't start Error");
+		expect(logged).toContain("sorting: save step Error");
 		expect(logged).not.toContain("nope");
 		expect(logged).not.toContain("FARMERS");
 		expect(logged).not.toContain("jev-key");
@@ -320,7 +320,7 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 	it("keeps the day's count through the demo's nightly reset, so a second run can't spend the cap again", async () => {
 		quiet();
 		// 35 of the demo's 40 were spent earlier today; the reset seeds twelve unsorted ones again.
-		await reserveJevCalls(db, await householdToday(db), 40, 35);
+		await reserveJevCalls(db, await householdToday(db), 40, 35, "earlier:1");
 		const jev = fakeJev();
 		const demo = { ...env, DEMO: "true", JEV_API_KEY: "jev" };
 		await runScheduled({
@@ -583,9 +583,7 @@ describe("syncItemAndSort", () => {
 		expect(
 			await db.prepare("SELECT COUNT(*) AS n FROM transactions").first(),
 		).toEqual({ n: 1 });
-		expect(JSON.stringify(errors.mock.calls)).toContain(
-			"sorting: couldn't start",
-		);
+		expect(JSON.stringify(errors.mock.calls)).toContain("sorting: save step");
 	});
 
 	it("asks about this sync's three new transactions only, and an older one waits for the night", async () => {
@@ -615,7 +613,7 @@ describe("syncItemAndSort", () => {
 	it("with room for 2 of 5 new transactions, asks 2 and leaves 3 for the night", async () => {
 		quiet();
 		// The demo's cap is 40 (this sort runs under the test env's demo setting); 38 are spent earlier in the day.
-		await reserveJevCalls(db, await householdToday(db), 40, 38);
+		await reserveJevCalls(db, await householdToday(db), 40, 38, "earlier:2");
 		const { fetchImpl, asked } = fakes(["A", "B", "C", "D", "E"]);
 		await syncItemAndSort(plaidEnv, itemId, fetchImpl);
 		expect(asked).toHaveLength(2);

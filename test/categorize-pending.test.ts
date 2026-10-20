@@ -1863,7 +1863,13 @@ describe("categorizePending", () => {
 		}
 		/** Counts n calls against today's cap, as earlier runs the same day would have. */
 		async function spend(n: number, cap = 40) {
-			await reserveJevCalls(db, await householdToday(db), cap, n);
+			await reserveJevCalls(
+				db,
+				await householdToday(db),
+				cap,
+				n,
+				crypto.randomUUID(),
+			);
 		}
 		const quiet = () => {
 			vi.spyOn(console, "log").mockImplementation(() => {});
@@ -2054,9 +2060,11 @@ describe("categorizePending", () => {
 				.run();
 			try {
 				const jev = fakeJev(() => new Response("{}", { status: 503 }));
-				await expect(
-					categorizePending(withKey, jev.fetchImpl),
-				).rejects.toThrow();
+				// The save fails (in-process, a step runs once): the run ends and logs the error's name alone.
+				await categorizePending(withKey, jev.fetchImpl);
+				expect(JSON.stringify(errors.mock.calls)).toContain(
+					"sorting: save step Error",
+				);
 				// The save is one batch, so nothing in it landed; the reserved calls stay counted: never over-spent.
 				expect(await callsUsed()).toBe(10);
 				expect(JSON.stringify(errors.mock.calls)).not.toContain("nope");
@@ -2154,7 +2162,7 @@ describe("categorizePending", () => {
 				expect(tally.sorted).toBe(1);
 			});
 
-			it("reads the household's zone once, not for every call", async () => {
+			it("reads the household's zone once for the group's read and once for its save, not for every call", async () => {
 				quiet();
 				const zoneReads = countingDb();
 				const spy = vi.spyOn(zoneReads.db, "prepare");
@@ -2165,7 +2173,8 @@ describe("categorizePending", () => {
 				const reads = spy.mock.calls.filter(([sql]) =>
 					String(sql).includes("key = 'time_zone'"),
 				);
-				expect(reads).toHaveLength(1);
+				// One group: its read, then its save (which dates the log rows in the zone as it is now, decision 143).
+				expect(reads).toHaveLength(2);
 			});
 		});
 	});
