@@ -36,7 +36,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - The upload form has `enctype="multipart/form-data"` and `hx-encoding="multipart/form-data"`.
 - HTMX feedback is `HX-Trigger` with `toast` and `announce`, via `hxTrigger` (`src/htmx.ts:6`). Errors use `role="alert"`.
 - Accessibility: labeled fields, focus-visible rings, 44px targets, and every swap announced.
-- UI uses DESIGN.md tokens and components. The new `FileField` goes into DESIGN.md and the catalog in the same PR, catalog first.
+- UI uses DESIGN.md tokens and components. The new `FileField` goes into DESIGN.md and the catalog in the same PR, catalog first. It is also receipts' file input (§8.9, decision 137): if receipts has shipped it, use it instead of adding another.
 - Never log a row, a file or an amount. The uploaded file is never stored. Test fixtures are made-up rows in Apple's layout, never the family's export.
 - The demo never takes a file.
 - Migrations are plain SQL, numbered. The next is `0058`.
