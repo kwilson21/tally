@@ -1,4 +1,4 @@
-// The sorting loop (spec §8.6, decision 136). Jev is asked about waiting transactions in groups of 25: each group
+// The sorting loop (spec §8.6, decision 139). Jev is asked about waiting transactions in groups of 25: each group
 // reads D1 once, asks Jev about each row as a step of its own, and saves every answer in one D1 batch, all or none.
 // The loop is the same in-process (categorizePending: the nightly runs and the tests, where a step just runs) and in
 // the Workflow (SortWorkflow: each step is a saved Workflows step, so a retry skips the steps that finished).
@@ -38,10 +38,10 @@ import { type Deadline, pastDeadline } from "./run-budget";
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
 
-/** Transactions per group: one read and one write each (decision 136). */
+/** Transactions per group: one read and one write each (decision 139). */
 export const GROUP_SIZE = 25;
 
-/** How long one group may keep asking Jev; what it doesn't reach waits for the next group (decision 136). */
+/** How long one group may keep asking Jev; what it doesn't reach waits for the next group (decision 139). */
 const ASK_BUDGET_MS = 2 * 60_000;
 
 /** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
@@ -269,7 +269,7 @@ async function readGroup(
 }
 
 /**
- * Asks Jev about one row (decision 136). It never throws: any failure is a `failed` answer that counts against the
+ * Asks Jev about one row (decision 139). It never throws: any failure is a `failed` answer that counts against the
  * day. A retried ask (attempt > 1) makes no call, since the first attempt may have made it: it is `lost`.
  */
 async function askOne(
@@ -332,7 +332,7 @@ async function askOne(
 }
 
 /**
- * Saves a group's answers in one D1 batch, all or none (decision 136): each answer's update and log row, each failed
+ * Saves a group's answers in one D1 batch, all or none (decision 139): each answer's update and log row, each failed
  * row's mark, the details, the calls given back, and the turn released last. Every statement is guarded by the turn,
  * so a save retried after it committed, or by a group that lost the turn, or after a demo reset, changes nothing.
  * Returns how many calls the group used (answered, failed and lost; not out-of-time or date-changed), how many

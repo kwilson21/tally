@@ -158,6 +158,7 @@ export function setupSteps(
 	bankName: string | null,
 	today: string,
 	byMorning: boolean,
+	bankCount: number,
 ): StepLine[] {
 	// The line the family acts on now says "Next": the first stroke not yet drawn once the questions are open. Before a
 	// bank no line says Next (each says how long it takes), and while the import is read, or once the three questions are
@@ -180,7 +181,7 @@ export function setupSteps(
 		if (drawn) {
 			note =
 				i === 0
-					? `${bankName ?? "Your bank"}, linked`
+					? stepOneNote(bankName, bankCount)
 					: day
 						? dayLabel(day, today)
 						: "";
@@ -194,6 +195,16 @@ export function setupSteps(
 }
 
 const count = (n: number) => n.toLocaleString("en-US");
+
+/** Step one's note: the one connected bank's name, or the count of connected banks once there are several (P140 A). */
+export function stepOneNote(
+	bankName: string | null,
+	bankCount: number,
+): string {
+	return bankCount > 1
+		? `${count(bankCount)} banks, linked`
+		: `${bankName ?? "Your bank"}, linked`;
+}
 
 /** The line under step one when a bank linked during setup took the questions back (#578). */
 export function reAskNote(bank: string): string {
@@ -350,6 +361,7 @@ export function setupView({
 			bankName,
 			today,
 			historyIn && fitsOneNight,
+			banks.length,
 		),
 		bankName,
 		bankCount: banks.length,

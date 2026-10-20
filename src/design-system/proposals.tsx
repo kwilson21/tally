@@ -8,6 +8,7 @@ import { AuditRoundTwoPicks } from "./proposals-audit-2";
 import { AuditRoundThreeProposals } from "./proposals-audit-3";
 import {
 	AuditFollowupProposals,
+	BanksProposal,
 	SplitCategoryProposal,
 } from "./proposals-audit-followups";
 import { AutofillProposals } from "./proposals-autofill";
@@ -568,6 +569,12 @@ export const DECIDED: readonly {
 			"Option A: each part picks its category in a folded row like the edit panel (P120 B): the two-column category grid shows until a category is chosen, then the row folds to one line naming it; each part's radios have their own group, read by part (decision 131).",
 		issue: 660,
 	},
+	{
+		title: "P140 · A new family's banks",
+		outcome:
+			"Option A: Your banks lists each connected bank's state under the status (90 days in · 412, or Reading · 86 so far with the busy ring), and Have more accounts? with Link a bank sits under it while the import is read; the list refreshes every 5 seconds while a bank is read (decision 133).",
+		issue: 719,
+	},
 ];
 
 /** The proposals page body. */
@@ -595,6 +602,16 @@ export function Proposals() {
 					Drawn Oct 17. The owner's pick, marked Picked, is decision 131: A.
 				</p>
 				<SplitCategoryProposal />
+			</section>
+
+			<section aria-labelledby="p140-title" class="mt-12">
+				<h2 id="p140-title" class="font-serif text-3xl font-semibold">
+					Picked: Home's first week with two banks
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 19. The owner's pick, marked Picked, is decision 133: A.
+				</p>
+				<BanksProposal />
 			</section>
 
 			<section aria-labelledby="followups-picks-title" class="mt-12">

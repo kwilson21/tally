@@ -14,7 +14,7 @@
 		"command": "npm run build",
 		"watch_dir": "src"
 	},
-	// Sorting runs as a Workflow (decision 136). Names are unique per account, one per environment.
+	// Sorting runs as a Workflow (decision 139). Names are unique per account, one per environment.
 	"workflows": [
 		{
 			"binding": "SORT",

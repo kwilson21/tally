@@ -1,4 +1,4 @@
-// Sorting as a Cloudflare Workflow (spec §8.6, decision 136). Every daytime trigger stops sorting inside its request
+// Sorting as a Cloudflare Workflow (spec §8.6, decision 139). Every daytime trigger stops sorting inside its request
 // and starts one instance with all its rows (`startSorting`, sort-start.ts); the instance runs the sorting groups
 // (sort-groups.ts) as saved steps, so a retry skips the steps that finished and Jev's answers are kept for a few days
 // (sensitive steps, so Cloudflare's dashboard and logs never show them).

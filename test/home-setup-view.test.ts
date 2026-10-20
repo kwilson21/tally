@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SetupView } from "../src/first-tally/setup";
+import type { YourBank } from "../src/first-tally/your-banks";
 import { HomeSetup } from "../src/views/home-setup";
 
 // Home's setup top (P125 E): each state's words, from the view it's given.
@@ -55,7 +56,7 @@ describe("HomeSetup", () => {
 		expect(html).toContain(
 			"One. Tally's reading your last 90 days from Chase. Your questions will usually be ready by the morning.",
 		);
-		expect(html).toContain("Nothing for you to do until then.");
+		expect(html).not.toContain("Nothing for you to do until then.");
 	});
 
 	it("reading, with two connected banks: the evening line names neither bank", async () => {
@@ -69,7 +70,7 @@ describe("HomeSetup", () => {
 			sorted: 0,
 		});
 		expect(html).toContain(
-			"One. Tally's reading your last 90 days. Your questions will usually be ready by the morning.",
+			"One. Tally's reading your last 90 days from 2 banks. Your questions will usually be ready by the morning.",
 		);
 		expect(html).not.toContain("from Chase");
 	});
@@ -90,7 +91,7 @@ describe("HomeSetup", () => {
 		);
 		expect(html).not.toContain("by the morning");
 		expect(html).not.toContain("Tally's sorted");
-		expect(html).toContain("Nothing for you to do until then.");
+		expect(html).not.toContain("Nothing for you to do until then.");
 	});
 
 	it("reading, with the history still coming in and the import bigger than one night: still no time and no count", async () => {
@@ -122,7 +123,7 @@ describe("HomeSetup", () => {
 			total: 40,
 		});
 		expect(html).toContain(
-			"One. Tally's reading your last 90 days. Your questions will be ready once it has read them all and sorted them.",
+			"One. Tally's reading your last 90 days from 2 banks. Your questions will be ready once it has read them all and sorted them.",
 		);
 		expect(html).not.toContain("from Chase");
 	});
@@ -140,7 +141,7 @@ describe("HomeSetup", () => {
 			"Tally's sorted 900 of 1,500. Your questions will be ready when it's done, usually in a night or two.",
 		);
 		expect(html).not.toContain("One. Tally's reading");
-		expect(html).toContain("Nothing for you to do until then.");
+		expect(html).not.toContain("Nothing for you to do until then.");
 	});
 
 	it("ready: the sorted count, the three things to check, and the band to the question page", async () => {
@@ -251,6 +252,95 @@ describe("HomeSetup", () => {
 
 // The fifth day's notebook (P125 E, #586): it sits beside Safe to spend, so it follows the amount's length as Home's
 // notebook does (decision 116), and a phone under 390px never sees it over a long amount.
+// Your banks and Have more accounts? (P140 A, decision 133): under the status while the import is read, in page order.
+describe("HomeSetup while banks are read", () => {
+	const TODAY = "2026-10-05";
+	const chase: YourBank = {
+		id: 3,
+		name: "Chase",
+		status: "ok",
+		lastSyncedAt: "2026-10-05 08:00:00",
+		historyCompleteAt: "2026-10-05 08:00:00",
+		fresh: false,
+		count: 412,
+	};
+	const amex: YourBank = {
+		id: 5,
+		name: "American Express",
+		status: "ok",
+		lastSyncedAt: "2026-10-05 08:00:00",
+		historyCompleteAt: null,
+		fresh: true,
+		count: 86,
+	};
+	const reading = {
+		...base,
+		phase: "reading" as const,
+		drawn: 1,
+		bankCount: 2,
+		historyIn: false,
+		total: 500,
+		steps: [
+			{ name: "Link your bank", done: true, note: "2 banks, linked" },
+			{ name: "Your pay", done: false, note: "When it's done" },
+		],
+	};
+	const page = async (
+		props: { linkBank?: string; banks?: (typeof chase)[] } = {},
+	) =>
+		String(
+			await HomeSetup({
+				view: reading,
+				linkBank: props.linkBank,
+				yourBanks: { banks: props.banks ?? [chase, amex], today: TODAY },
+			}),
+		).replaceAll("&#39;", "'");
+
+	it("lists each bank's state under the status, then the prompt, then the five lines", async () => {
+		const html = await page({ linkBank: "<button>Link a bank</button>" });
+		const at = (text: string) => html.indexOf(text);
+		expect(html).toContain("Your banks");
+		expect(html).toContain("90 days in · 412");
+		expect(html).toContain("Reading · 86 so far");
+		expect(html).toContain("Have more accounts?");
+		expect(html).toContain(
+			"Link every bank and card you use now, so your first questions cover them all.",
+		);
+		expect(at("setup-status")).toBeLessThan(at("Your banks"));
+		expect(at("Your banks")).toBeLessThan(at("Have more accounts?"));
+		expect(at("Have more accounts?")).toBeLessThan(at("Link a bank"));
+		expect(at("Link a bank")).toBeLessThan(at("Your first tally"));
+	});
+
+	it("with Plaid off, the list is drawn with no prompt", async () => {
+		const html = await page();
+		expect(html).toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+	});
+
+	it("draws the ring only for a bank being read, and a paused bank says Paused with no ring", async () => {
+		const html = await page({
+			banks: [chase, { ...amex, status: "needs_attention" }],
+		});
+		expect(html).toContain("Paused · 86 so far");
+		expect(html.match(/button-spinner/g)?.length ?? 0).toBe(0);
+		const fresh = await page();
+		expect(fresh.match(/button-spinner/g)?.length ?? 0).toBe(1);
+	});
+
+	it("polls the list only while a bank is being read, and never swaps a 4xx or 5xx in", async () => {
+		const reading = await page();
+		expect(reading).toContain('hx-trigger="every 5s"');
+		expect(reading).toContain('hx-get="/home/banks?in=3"');
+		expect(reading).toContain('hx-status:4xx="swap:none"');
+		expect(reading).toContain('hx-status:5xx="swap:none"');
+		expect(reading).toContain("data-quiet");
+		const done = await page({ banks: [chase] });
+		expect(done).not.toContain("hx-trigger");
+		expect(done).not.toContain("data-quiet");
+	});
+});
+
 describe("HomeSetup on the fifth day", () => {
 	const fifthTop = async (safeToSpendCents: number) =>
 		String(

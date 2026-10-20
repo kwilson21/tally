@@ -1,4 +1,5 @@
 import type { Child, JSX } from "hono/jsx";
+import { BusyRing } from "./busy-ring";
 
 type Kind = "primary" | "secondary" | "text" | "quiet";
 
@@ -31,17 +32,7 @@ function Content({
 		<>
 			<span class="contents [.htmx-request_&]:hidden">{children}</span>
 			<span class="hidden [.htmx-request_&]:inline-flex items-center gap-2">
-				<svg
-					class="button-spinner size-4"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="3"
-					aria-hidden="true"
-				>
-					<circle cx="12" cy="12" r="9" opacity="0.25" />
-					<path d="M12 3a9 9 0 0 1 9 9" stroke-linecap="round" />
-				</svg>
+				<BusyRing />
 				{busyLabel}
 			</span>
 		</>

@@ -1,4 +1,4 @@
-// Starting a sorting instance from a daytime trigger (spec §8.6, decision 136). Kept apart from the Workflow class
+// Starting a sorting instance from a daytime trigger (spec §8.6, decision 139). Kept apart from the Workflow class
 // (sort-workflow.ts), which imports `cloudflare:workers`, so the in-process code and the Node verification run can
 // import it too.
 

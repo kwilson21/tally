@@ -1,4 +1,4 @@
-// The sorting turn (decision 136): one `household_settings` row, `sorting_turn`, that names the sorting group
+// The sorting turn (decision 139): one `household_settings` row, `sorting_turn`, that names the sorting group
 // holding the household's turn and when the turn ends. One group sorts at a time, so two runs never ask Jev
 // about the same transaction. A group takes the turn when it reads, every statement of its save checks it, and
 // the save gives it back. The turn's until is 15 minutes after it was taken, so a save with its retries

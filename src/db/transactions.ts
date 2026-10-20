@@ -2651,7 +2651,7 @@ export async function pendingForJev(
 		details?: boolean;
 		categoryAsked?: boolean;
 		ids?: number[];
-		/** Rows already sent to Jev in this sorting run (decision 136), left out of a later group. */
+		/** Rows already sent to Jev in this sorting run (decision 139), left out of a later group. */
 		exceptIds?: number[];
 	} = {},
 ): Promise<
@@ -2871,7 +2871,7 @@ export async function merchantCategoryHistoryForJev(
 
 /**
  * The statement that records Jev failed on this one transaction, so the next run asks about it last (decision 31).
- * `turnId` guards it to the sorting turn (decision 136).
+ * `turnId` guards it to the sorting turn (decision 139).
  */
 export function markJevFailedStatement(
 	db: D1Database,
@@ -2901,7 +2901,7 @@ export function saveJevDetailsStatement(
 	options: { stillOn?: string; turnId?: string } = {},
 ): D1PreparedStatement | undefined {
 	if (details.length === 0) return undefined;
-	// The save is guarded by the switches it was asked under (`stillOn`, decision 136) and the sorting turn.
+	// The save is guarded by the switches it was asked under (`stillOn`, decision 139) and the sorting turn.
 	const still = options.stillOn === undefined ? "" : ` AND ${STILL_ON_SQL}`;
 	const guarded = withTurnGuard(
 		`WITH answers AS (
@@ -3027,7 +3027,7 @@ export async function saveNoteAttempts(
 
 /**
  * The statements that save one Jev answer: its update, then its What AI did row when one applies (spec §8.6),
- * the row right after the update, since it re-checks the source the update sets. `turnId` (decision 136) guards both.
+ * the row right after the update, since it re-checks the source the update sets. `turnId` (decision 139) guards both.
  */
 function answerStatements(
 	db: D1Database,
@@ -3060,7 +3060,7 @@ export type JevAnswerSave = {
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
 	log?: { day: string; category: boolean; income: boolean };
-	/** The sorting group's turn (decision 136): the save writes only while this turn is held. */
+	/** The sorting group's turn (decision 139): the save writes only while this turn is held. */
 	turn?: string;
 };
 
@@ -3075,7 +3075,7 @@ export type JevAnswerSave = {
  * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
  * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
  * waits for the next run. Returns the statements that do it (the update, then its log row): a caller runs them in
- * one batch, so a sorting group can save all of its answers together (decision 136).
+ * one batch, so a sorting group can save all of its answers together (decision 139).
  */
 export function saveJevResultStatements(
 	db: D1Database,

@@ -74,7 +74,7 @@ export async function readAiTally(
  * answer's save (saveJevResult), so the two land together or not at all. A row is written only while the answer
  * is still in place (`category_source` and `income_source` are 'jev'), so a person's choice made meanwhile is
  * never counted; a row that is already logged is ignored (the unique indexes), so a repeat writes nothing twice.
- * With a sorting turn (decision 136) each arm also needs that turn to be held (db/sorting-turn.ts).
+ * With a sorting turn (decision 139) each arm also needs that turn to be held (db/sorting-turn.ts).
  */
 export function jevAnswerLogStatement(
 	db: D1Database,

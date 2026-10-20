@@ -605,7 +605,7 @@ describe("creating the category", () => {
 		expect(jev).toHaveBeenCalledTimes(3);
 	});
 
-	it("hands all 300 left-out transactions to one sorting instance, with no cap (decision 136)", async () => {
+	it("hands all 300 left-out transactions to one sorting instance, with no cap (decision 139)", async () => {
 		const { id, ids } = await bulkSuggestion("Large Batch", 301);
 		const counted = countingDb();
 		const jev = vi.fn(async () =>
