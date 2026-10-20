@@ -1,6 +1,6 @@
 # Receipts: the original app's design, line by line (Oct 19 review)
 
-The owner asked that receipts come off the Later list "as thorough as possible", skipping no detail of the original app's feature (`kwilson21/superhuman-personal-finance`). This review lists every part of it and where each one went in Tally, so nothing is lost. Decision 136 and spec §8.9 are the result.
+The owner asked that receipts come off the Later list "as thorough as possible", skipping no detail of the original app's feature (`kwilson21/superhuman-personal-finance`). This review lists every part of it and where each one went in Tally, so nothing is lost. Decision 137 and spec §8.9 are the result.
 
 Sources read in full:
 - `docs/designs/RECEIPT-01-user-flows.md` (Feb 7, 2026, draft);
@@ -9,7 +9,7 @@ Sources read in full:
 - issues #21 (Epic: Document Ingestion Pipeline), #8 (Email invoice scanning for transaction context) and #23 (Reduce friction for cash entry);
 - and, for the owner's second ask, how the Fetch app takes in purchases (part E).
 
-**Where it went** uses these words: **Step 1–6** is a step of Phase 6 (§8.9: read a receipt; split from items; email; bills and invoices; Amazon's order file; connected store accounts, asking Knot first). **Same** means Tally does it as the original said. **Changed** says how and why. **Later** is on the spec's Later list (§12). **Not picked** and **Not needed** give the reason. **The owner's pick** marks one of the four choices the owner made with decision 136 (Oct 19).
+**Where it went** uses these words: **Step 1–6** is a step of Phase 6 (§8.9: read a receipt; split from items; email; bills and invoices; Amazon's order file; connected store accounts, asking Knot first). **Same** means Tally does it as the original said. **Changed** says how and why. **Later** is on the spec's Later list (§12). **Not picked** and **Not needed** give the reason. **The owner's pick** marks one of the four choices the owner made with decision 137 (Oct 19).
 
 ## A. RECEIPT-01 user flows
 
@@ -74,7 +74,7 @@ Sources read in full:
 | A57 | Phase 2 out: automatic matching, background re-matching, threshold tuning UI, unmatch | Same for automatic matching. Changed: waiting receipts are checked after each sync (that is the point of waiting), and a receipt can be moved or removed. No tuning screen. |
 | A58 | Phase 3 out: OAuth inbox access, push, retailer parsers beyond five, auto-confirm, email replies | Inbox access: **Later**; forwarding covers new mail (part E, E12). Push and replies: same, none. Retailer parsers: Not needed, since Clairic reads any layout. Auto-confirm: same, never. |
 | A59 | Open question 1: production image storage | R2 (`tally-prod-docs`, already made). |
-| A60 | Open question 2: OCR provider | Clairic (decision 136). Claude Vision, the original's pick, is not picked: its JSON has to be parsed and checked, and its numbers aren't tied to the receipt or scored, while Clairic's answers are typed, scored and tied to their place in the text, on the platform Tally already runs on. |
+| A60 | Open question 2: OCR provider | Clairic (decision 137). Claude Vision, the original's pick, is not picked: its JSON has to be parsed and checked, and its numbers aren't tied to the receipt or scored, while Clairic's answers are typed, scored and tied to their place in the text, on the platform Tally already runs on. |
 | A61 | Open question 3: retention (indefinite / 1 year / 90 days for images) | Kept with its receipt, as decision 66's Later entry said ("attach a photo or PDF of a receipt to a transaction"); reading then deleting it is not picked. |
 | A62 | Open question 4: group splits by category | Same: one part per category. |
 | A63 | Open question 5: a RECEIPT_OCR transaction source | Changed: a cash entry from a receipt is an ordinary cash entry; the receipt row records where it came from. |

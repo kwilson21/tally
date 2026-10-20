@@ -8,6 +8,8 @@
 // /plans/1 (Lawn service, $90, and its payment candidates). Pictures are drawn at their full height, so none is cut.
 
 import type { Child } from "hono/jsx";
+import { type SetupView, setupSteps } from "../first-tally/setup";
+import type { YourBank } from "../first-tally/your-banks";
 import { FORECAST_START_DAY } from "../home-forecast";
 import { budgetExample } from "../how-it-works/examples";
 import { formatCents } from "../money";
@@ -17,12 +19,14 @@ import { CategoryIcon } from "../views/category";
 import { CategoryGrid } from "../views/category-grid";
 import { Chip } from "../views/chip";
 import { FoldedRow } from "../views/folded-row";
+import { HomeSetup } from "../views/home-setup";
 import { BudgetDiagram } from "../views/how-diagrams";
 import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 import { SplitLine } from "../views/split-form";
-import { Choice, Choices, Shot } from "./proposals-polish-4";
+import { TallySteps } from "../views/tally-steps";
+import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
 // ---------------------------------------------------------------------------------------------
@@ -1048,6 +1052,175 @@ export function SplitCategoryProposal() {
 						mode="grid"
 						parts={AFTER_PART_ONE}
 					/>
+				</Choice>
+			</Choices>
+		</Specimen>
+	);
+}
+
+// P140 (#719, decision 133): Home's first week while two banks are read. Today is the reading phase as it was; A, the owner's
+// pick, is the real HomeSetup with Your banks and Have more accounts?; B nests the banks under Link your bank. Drawn at 390 px:
+// a 1280 px picture would draw HomeSetup's fixed ids a second time on this page.
+const BANKS_TODAY = "2026-10-14";
+const BANKS_RECORD = { strokes: { bank: "2026-10-13" }, budgets: {} };
+const BANKS_CHASE: YourBank = {
+	id: 3,
+	name: "Chase",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: "2026-10-13 09:00:00",
+	fresh: false,
+	count: 412,
+};
+const BANKS_AMEX: YourBank = {
+	id: 5,
+	name: "American Express",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: null,
+	fresh: true,
+	count: 86,
+};
+
+/** Two banks, one reading: the status names neither bank's count, and the list and the prompt sit under it (A). */
+function banksView(): SetupView {
+	return {
+		phase: "reading",
+		drawn: 1,
+		steps: setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, false, 2),
+		bankName: "Chase",
+		bankCount: 2,
+		historyIn: false,
+		fitsOneNight: true,
+		sorted: 0,
+		total: 498,
+		fifth: null,
+		answeredWaiting: null,
+	};
+}
+
+/** Today: the reading phase as it is drawn now, with one line naming neither bank, and no button. */
+function BanksToday() {
+	return (
+		<section class="mt-2">
+			<h1 class="sr-only">Your first week</h1>
+			<p class="font-serif text-lg italic">
+				One. Tally's reading your last 90 days. Your questions will be ready
+				once it has read them all and sorted them.
+			</p>
+			<p class="mt-2 text-muted">Nothing for you to do until then.</p>
+			<TallySteps
+				steps={setupSteps(
+					BANKS_RECORD,
+					"reading",
+					"Chase",
+					BANKS_TODAY,
+					false,
+					1,
+				)}
+			/>
+		</section>
+	);
+}
+
+/** B: the banks nested under step one, with "+ Link another bank" as an accent link. */
+function BanksB() {
+	return (
+		<section class="mt-2">
+			<h1 class="sr-only">Your first week</h1>
+			<p class="font-serif text-lg italic">
+				One. Tally's reading your last 90 days from 2 banks. Your questions will
+				be ready once it has read them all and sorted them.
+			</p>
+			<div class="mt-4">
+				<p class="text-sm text-muted">Your first tally · 1 of 5</p>
+				<ul class="mt-2 border-t border-rule">
+					<li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule">
+						<span class="min-w-0 flex-1 py-2 text-base">Link your bank</span>
+						<span class="shrink-0 text-sm text-muted">2 banks, linked</span>
+						<ul class="basis-full space-y-1 pb-2 pl-6 text-sm">
+							<li class="flex justify-between gap-3">
+								<span>Chase</span>
+								<span class="text-muted">90 days in · 412</span>
+							</li>
+							<li class="flex justify-between gap-3">
+								<span>American Express</span>
+								<span class="text-muted">Reading · 86 so far</span>
+							</li>
+						</ul>
+					</li>
+					<li class="flex min-h-11 items-center gap-3 border-b border-rule">
+						<span class="min-w-0 flex-1 py-2 text-base text-muted">
+							Your pay
+						</span>
+						<span class="shrink-0 text-sm text-muted">When it's done</span>
+					</li>
+				</ul>
+				<p class="mt-3">
+					<a
+						href="/"
+						class="inline-flex min-h-11 items-center text-accent underline"
+					>
+						+ Link another bank
+					</a>
+				</p>
+			</div>
+			<p class="mt-3 text-muted">Nothing else for you to do until then.</p>
+		</section>
+	);
+}
+
+/** P140 (#719, decision 133): the banks under Home's status while the import is read, drawn for the owner's pick. */
+export function BanksProposal() {
+	return (
+		<Specimen
+			id="p140-banks"
+			title="P140 · A new family's banks"
+			tier="visual"
+			sentence="Home's first week while two banks are read, at 390 px: Today, then A (picked) with Your banks under the status and Have more accounts? with Link a bank beneath it, and B with the banks nested under Link your bank."
+		>
+			<Choices>
+				<Choice
+					name="Today"
+					note="The reading phase as it is drawn now: one line names neither bank, Nothing for you to do until then. sits under the status, and there is no button."
+					width="w-[392px]"
+				>
+					<Phone label="Today, two banks being read" demo={false} tab="home">
+						<BanksToday />
+					</Phone>
+				</Choice>
+				<Choice
+					name="A · Your banks under the status"
+					note="Under the status, one ruled row per bank with its state at the right: 90 days in · 412 once its history is in, and Reading · 86 so far with the busy ring while it is read. Under the list, Have more accounts?, then Link a bank, the same full-width button as before the first bank."
+					why="Each bank's state is one row, and the status says from 2 banks without naming either."
+					picked
+					width="w-[392px]"
+				>
+					<Phone label="A, two banks being read" demo={false} tab="home">
+						<HomeSetup
+							view={banksView()}
+							linkBank={
+								<Button type="button" class="w-full">
+									Link a bank
+								</Button>
+							}
+							yourBanks={{
+								banks: [BANKS_CHASE, BANKS_AMEX],
+								today: BANKS_TODAY,
+								polls: false,
+							}}
+						/>
+					</Phone>
+				</Choice>
+				<Choice
+					name="B · The banks under Link your bank"
+					note="The banks sit under step one, and + Link another bank is an accent link under them. The status names neither bank, and no list sits above the five lines."
+					cost="Each bank's state is one line deeper in the five lines, where the list is not a list of its own."
+					width="w-[392px]"
+				>
+					<Phone label="B, two banks being read" demo={false} tab="home">
+						<BanksB />
+					</Phone>
 				</Choice>
 			</Choices>
 		</Specimen>

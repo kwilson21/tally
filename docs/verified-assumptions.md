@@ -51,7 +51,7 @@ Checked on: 2026-09-22
 
 Sources for all items above are cited inline in the table and notes; Context7 (Cloudflare D1, Cloudflare Workers, Hono) and official docs (developers.cloudflare.com, plaid.com/docs, hono.dev, docs.typesafe.ai) were used throughout, as directed. No claim in this file was guessed — anything not confirmed is marked UNVERIFIED (see item 7, exact numeric Jev rate limits).
 
-## Checked on 2026-10-19 (receipts, decision 136, spec §13 item 10)
+## Checked on 2026-10-19 (receipts, decision 137, spec §13 item 10)
 
 | # | Assumption | Result | Source | Spec change needed? |
 |---|---|---|---|---|

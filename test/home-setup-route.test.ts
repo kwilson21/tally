@@ -65,10 +65,103 @@ describe("Home during setup", () => {
 		expect(html).not.toContain(PLAID_MODULE);
 	});
 
-	it("loads Plaid Link on Home only while no bank is linked", async () => {
+	it("loads Plaid Link on Home while the import is read (its Have more accounts? button), and not once the questions are answered", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		await writeRecord({ strokes: { bank: "2026-10-13" }, budgets: {} });
+		expect(await page(plaidFamily)).toContain(PLAID_MODULE);
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
 		expect(await page(plaidFamily)).not.toContain(PLAID_MODULE);
+	});
+
+	it("while the import is read, Home lists Your banks, then Have more accounts? and its button, then the five lines", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const html = await page(plaidFamily);
+		const at = (text: string) => html.indexOf(text);
+		expect(html).toContain("Your banks");
+		expect(html).toContain("Have more accounts?");
+		expect(html).toContain("Link every bank and card you use now");
+		expect(at("Your banks")).toBeLessThan(at("Have more accounts?"));
+		expect(at("Have more accounts?")).toBeLessThan(at("Link a bank"));
+		expect(at("Link a bank")).toBeLessThan(at("Your first tally"));
+		expect(html).toContain(PLAID_MODULE);
+		// A full load never moves focus: only the retarget reply that redraws the top focuses its status.
+		expect(html).not.toContain("autofocus");
+	});
+
+	it("with Plaid off, the reading phase lists Your banks but has no prompt and loads no Plaid", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const html = await page(family);
+		expect(html).toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+		expect(html).not.toContain(PLAID_MODULE);
+	});
+
+	it("in the ready phase, Home has no Your banks, no Have more accounts? and no Plaid Link", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, history_complete_at = datetime('now')",
+		).run();
+		// Stroke one drawn yesterday and every bank's history in: the questions are open, and none is answered.
+		await writeRecord({
+			strokes: { bank: daysBefore(todayIn(DEFAULT_TIME_ZONE), 1) },
+			budgets: {},
+		});
+		const html = await page(plaidFamily);
+		expect(html).toContain("Three things to check");
+		expect(html).not.toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+		expect(html).not.toContain(PLAID_MODULE);
+		expect(html).not.toContain("autofocus");
+	});
+
+	it("in the answered phase, Home has no Your banks and no Have more accounts?", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
+		const html = await page(plaidFamily);
+		expect(html).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(html).not.toContain("Your banks");
+		expect(html).not.toContain("Have more accounts?");
+		expect(html).not.toContain(PLAID_MODULE);
+	});
+
+	it("polls the Your banks list only while a bank is being read (linked within the hour, history not in)", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		expect(await page(family)).toContain('hx-trigger="every 5s"');
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		expect(await page(family)).not.toContain("every 5s");
 	});
 
 	it("the demo never shows setup, even with no first_tally record", async () => {
@@ -107,7 +200,7 @@ describe("Home during setup", () => {
 		const html = await page(family);
 		expect(html).toContain("Your first week");
 		expect(html).toContain(`from ${bank?.name}. Your questions will be ready`);
-		expect(html).toContain("Nothing for you to do until then.");
+		expect(html).not.toContain("Nothing for you to do until then.");
 		expect(html).not.toContain("Three things to check");
 		expect(html).not.toContain("Link a bank");
 	});
@@ -119,7 +212,7 @@ describe("Home during setup", () => {
 			budgets: {},
 		});
 		const html = await page(family);
-		expect(html).toContain("Tally's reading your last 90 days.");
+		expect(html).toContain("Tally's reading your last 90 days from 2 banks.");
 		expect(html).not.toContain("from First Harbor Bank");
 		expect(html).not.toContain("from Northline Card Services");
 	});
@@ -169,7 +262,7 @@ describe("Home during setup", () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		const html = await page(family);
 		expect(html).toContain("Your first week");
-		expect(html).toContain("Nothing for you to do until then.");
+		expect(html).not.toContain("Nothing for you to do until then.");
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();

@@ -5,6 +5,7 @@ const genericFailure = "Couldn't link the bank. Try again.";
 
 function harness({
 	linkBank = true,
+	redrawKeepsLinkButton = false,
 	dataset,
 	tokenResponse = {
 		ok: true,
@@ -23,6 +24,7 @@ function harness({
 	},
 }: {
 	linkBank?: boolean;
+	redrawKeepsLinkButton?: boolean;
 	dataset?: Record<string, string>;
 	tokenResponse?: {
 		ok: boolean;
@@ -108,12 +110,13 @@ function harness({
 		replaceWith: vi.fn(),
 	};
 	const parsedSummaries: Array<{ version: string }> = [];
-	// Home's #page holds Link a bank, so the refresh that swaps it in also takes the button away.
+	// Home's #page holds Link a bank, so the refresh that swaps it in also takes the button away. A reading-phase Home
+	// redraws its own Have more accounts? button, so the refresh keeps one (redrawKeepsLinkButton).
 	let linkButtonGone = false;
 	const currentPage = {
 		version: "old",
 		replaceWith: vi.fn(() => {
-			linkButtonGone = true;
+			linkButtonGone = !redrawKeepsLinkButton;
 		}),
 	};
 	const parsedPages: Array<{ version: string }> = [];
@@ -131,7 +134,9 @@ function harness({
 			if (selector === "[data-link-bank-error]") return liveErrorRegion;
 			if (selector === "#accounts-summary") return currentSummary;
 			if (selector === "#page") return currentPage;
-			if (selector === "[data-link-bank-focus]") return status;
+			// Only Home has the status line (home-setup.tsx), and Home is the refresh that targets #page.
+			if (selector === "[data-link-bank-focus]")
+				return dataset?.linkBankTarget === "#page" ? status : undefined;
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')
 				return liveRepairError;
 		},
@@ -500,6 +505,26 @@ describe("plaid-link.js", () => {
 		expect(h.process).toHaveBeenCalledWith(h.parsedPages[0]);
 		expect(h.currentSummary.replaceWith).not.toHaveBeenCalled();
 		expect(h.children).toHaveLength(0);
+		expect(h.status.focus).toHaveBeenCalledOnce();
+		expect(h.button.focus).not.toHaveBeenCalled();
+	});
+
+	it("on Home while the import is read, the redrawn page still has Link a bank, and focus still goes to the status line, not the button", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				const ctx = { response: { status: 204 }, text: "" };
+				h.button.dispatchRequest("htmx:after:request", ctx);
+				h.button.dispatchRequest("htmx:finally:request", ctx);
+			}
+		});
+		const h = harness({
+			ajax,
+			redrawKeepsLinkButton: true,
+			dataset: { linkBankRefresh: "/", linkBankTarget: "#page" },
+		});
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+		expect(h.currentPage.replaceWith).toHaveBeenCalledWith(h.parsedPages[0]);
 		expect(h.status.focus).toHaveBeenCalledOnce();
 		expect(h.button.focus).not.toHaveBeenCalled();
 	});
