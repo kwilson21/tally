@@ -523,7 +523,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - **Unit tests (most tests):** cents parsing and formatting, budget math, the bill status rules, split validation, and category priority.
 - **Route tests:** run in Cloudflare's local Workers runtime against a real local D1 database. Plaid, Jev, and Workers AI are faked at the `fetch` or binding boundary.
 - **E2E (Playwright), critical flows only:** recategorize, split, exclude, and change a budget amount.
-- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, fails if a page logs a console error, and puts in the PR description only the pages the PR adds or changes, before and after (decision 140).
+- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, fails if a page logs a console error, and puts in the PR description only the pages the PR adds or changes, before and after (decision 141).
 - **CI (GitHub Actions):** type-check, lint, and tests on every push. A failing check blocks the merge.
 - **Deploy:** manual at first, with `npx wrangler deploy --env demo` or `--env production`, documented in the README.
 
@@ -539,7 +539,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - Joining one store's uneven Apple Card names (a store number on some rows and not others) into one merchant
 - A household's second, separate Apple Card (Apple's CSV doesn't say which card it came from, so an upload would have to ask)
 - Linking several banks in one Plaid window (Plaid's Multi-Item Link). Today each bank is its own Plaid window, with Have more accounts? on Home's first week (decision 133); one window needs Plaid's `/user/create` and its new banks' tokens delivered by webhook, so linking moves to the server
-- Replacing Jev with Clef, Cloudflare's decision model on Workers AI (decision 136). It is measured against Jev on the demo seed first (`scripts/compare-models/`, #729), and a switch is its own decision
+- Replacing Jev with Clef, Cloudflare's decision model on Workers AI. It was measured against Jev on the demo seed on Oct 19 (decision 136, #729) and not taken: Jev stays (decision 140; evidence in `docs/reviews/clef-vs-jev-2026-10-19.md`). Measure it again with `scripts/compare-models/` when Clef changes
 - ~~Receipts~~ Now Phase 6 (decision 137, §8.9). What it leaves here, each with its reason in `docs/reviews/receipts-original-coverage.md`:
   - Reading the family's inbox for older receipts (Gmail's API as an unverified personal-use app, an Apps Script in the owner's account posting labelled mail to the Worker, Microsoft Graph for Outlook, or IMAP with an app password). Forwarding (step 3) covers new mail without any of them.
   - A shelf of stored PDFs and statements on their own (the old feature 8, P27/P28; decision 66)
