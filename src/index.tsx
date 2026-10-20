@@ -75,6 +75,8 @@ type ScheduledEnv = PlaidEnv & {
 	FEEDBACK_DIAGNOSTICS_ENABLED?: string;
 	FEEDBACK_SCREENSHOT_PREVIEW_ENABLED?: string;
 };
+
+export { SortWorkflow } from "./sort-workflow";
 export const app = new Hono<App>();
 
 // The app's own 404 and 500 pages (spec §8.5, decision 72); Hono's plain-text ones never show.

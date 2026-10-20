@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { giveBackJevCalls, reserveJevCalls } from "../src/db/jev-calls";
+import {
+	giveBackJevCallsStatement,
+	reserveJevCalls,
+} from "../src/db/jev-calls";
 import { resetDemo } from "../src/demo/reset";
 
 // The day's Jev count (spec §8.6): one number per household date that every run, at a sync or
@@ -123,35 +126,35 @@ describe("reserving Jev's calls for the day", () => {
 describe("giving back what a run didn't use", () => {
 	it("takes the unused part off the day's count", async () => {
 		await reserveJevCalls(db, "2026-10-06", 40, 30);
-		await giveBackJevCalls(db, "2026-10-06", 22);
+		await giveBackJevCallsStatement(db, "2026-10-06", 22)?.run();
 		expect(await used("2026-10-06")).toBe(8);
 	});
 
 	it("leaves room for the next run, up to the cap", async () => {
 		await reserveJevCalls(db, "2026-10-06", 40, 40);
-		await giveBackJevCalls(db, "2026-10-06", 15);
+		await giveBackJevCallsStatement(db, "2026-10-06", 15)?.run();
 		expect(await reserveJevCalls(db, "2026-10-06", 40, 40)).toBe(15);
 	});
 
 	it("never takes the count below zero, whatever it's told", async () => {
 		await reserveJevCalls(db, "2026-10-06", 40, 5);
-		await giveBackJevCalls(db, "2026-10-06", 9);
+		await giveBackJevCallsStatement(db, "2026-10-06", 9)?.run();
 		expect(await used("2026-10-06")).toBe(0);
 	});
 
 	it("does nothing when nothing is unused, or the day has no row", async () => {
-		await giveBackJevCalls(db, "2026-10-06", 0);
-		await giveBackJevCalls(db, "2026-10-06", 4);
+		await giveBackJevCallsStatement(db, "2026-10-06", 0)?.run();
+		await giveBackJevCallsStatement(db, "2026-10-06", 4)?.run();
 		expect(await rows()).toEqual([]);
 		await reserveJevCalls(db, "2026-10-06", 40, 5);
-		await giveBackJevCalls(db, "2026-10-06", 0);
+		await giveBackJevCallsStatement(db, "2026-10-06", 0)?.run();
 		expect(await used("2026-10-06")).toBe(5);
 	});
 
 	it("gives back to the day it reserved from, not the day it is now", async () => {
 		await reserveJevCalls(db, "2026-10-05", 40, 10);
 		await reserveJevCalls(db, "2026-10-06", 40, 10);
-		await giveBackJevCalls(db, "2026-10-05", 10);
+		await giveBackJevCallsStatement(db, "2026-10-05", 10)?.run();
 		expect(await used("2026-10-06")).toBe(10);
 	});
 });

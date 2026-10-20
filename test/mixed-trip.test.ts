@@ -17,11 +17,13 @@ import {
 	firstRuleOfferAmong,
 	ruleOfferForTransaction,
 } from "../src/transactions/rule-offer";
+import { recordSorting } from "./record-sorting";
 
 // Mixed trips (#233, decision 113): Jev's "spans more than one category" answer and the other category it named
 // are kept with the transaction, read by one SQL rule, and gate the split line and the rule questions.
 
 const db = env.DB;
+recordSorting({ sort: true });
 const today = todayIn(DEFAULT_TIME_ZONE);
 const JEV_KEY = { JEV_API_KEY: "jev-key" };
 
@@ -195,7 +197,8 @@ describe("saveJevResult stores and clears the mixed-trip answer (#233)", () => {
 			}),
 		);
 		const failing = vi.fn(async () => new Response("{}", { status: 503 }));
-		await askAgain({ DB: db, ...JEV_KEY }, id, failing);
+		vi.stubGlobal("fetch", failing);
+		await askAgain({ DB: db, ...JEV_KEY, SORT: env.SORT }, id);
 		expect(await rowOf(id)).toMatchObject({
 			jev_mixed: null,
 			jev_also_category_id: null,

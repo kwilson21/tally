@@ -158,7 +158,7 @@ accounts.post("/accounts/sync", async (c) => {
 		// those only. When the rules step failed, the pass applies them itself, as the nightly run does.
 		if (result.changedIds.length > 0)
 			c.executionCtx.waitUntil(
-				sortAfterSync(c.env, result, undefined, {
+				sortAfterSync(c.env, result, {
 					rulesApplied: !result.afterSyncFailed,
 				}),
 			);
