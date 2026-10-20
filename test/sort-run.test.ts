@@ -1,9 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	categorizePending,
-	MAX_CALLS_PER_RUN,
-} from "../src/categorize-pending";
+import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
@@ -114,13 +111,9 @@ describe("sorting in groups of 25, in one process", () => {
 	it("600 waiting against the 500 cap asks 500 and leaves 100; the demo's 40 cap asks 25 then 15", async () => {
 		const ids = await addWaiting(600);
 		const fetchImpl = vi.fn(async () => reply(0.9));
-		// One run asks at most MAX_CALLS_PER_RUN (the D1 query limit); the runs share the day's 500.
+		// One run asks about the day's 500 and leaves the other 100 for the next day: no per-run cap.
 		const first = await categorizePending(withKey, fetchImpl, { onlyIds: ids });
-		expect(first.asked).toBe(MAX_CALLS_PER_RUN);
-		const second = await categorizePending(withKey, fetchImpl, {
-			onlyIds: ids,
-		});
-		expect(second.asked).toBe(500 - MAX_CALLS_PER_RUN);
+		expect(first.asked).toBe(500);
 		expect(await categorizedIn(ids)).toBe(500);
 		expect(await callsUsed()).toBe(500);
 		expect(

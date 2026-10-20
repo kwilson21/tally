@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { askAgain, askAgainMany } from "../src/categorize-pending";
 import { resetDemo } from "../src/demo/reset";
 import { sortAfterSync } from "../src/plaid/sort-after-sync";
+import { startSorting } from "../src/sort-start";
 import { recordSorting } from "./record-sorting";
 
 const db = env.DB;
@@ -53,6 +54,27 @@ describe("a sync hands all of its rows to one Workflow instance", () => {
 	it("with no Jev key, or no changed rows, nothing is started", async () => {
 		await sortAfterSync(sortEnv(false), { changedIds: ids(5) });
 		await sortAfterSync(sortEnv(), { changedIds: [] });
+		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe("the night's instance starts with no Jev key, and a daytime trigger still needs one", () => {
+	it("starts one instance with the night's params, with no Jev key", async () => {
+		await startSorting(
+			{ SORT: env.SORT },
+			{ bySync: false, rulesApplied: false, night: "2026-10-13" },
+		);
+		expect(create).toHaveBeenCalledTimes(1);
+		expect(create).toHaveBeenCalledWith({
+			params: { bySync: false, rulesApplied: false, night: "2026-10-13" },
+		});
+	});
+
+	it("a daytime start with no Jev key starts nothing", async () => {
+		await startSorting(
+			{ SORT: env.SORT },
+			{ ids: [1], bySync: true, rulesApplied: false },
+		);
 		expect(create).not.toHaveBeenCalled();
 	});
 });

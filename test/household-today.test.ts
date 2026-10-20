@@ -5,6 +5,10 @@ import { loadBillRows } from "../src/bills/rows";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { runScheduled } from "../src/index";
+import { recordSorting } from "./record-sorting";
+
+// The 09:00 run starts the night's Workflow; a recorder stands in for it (test/record-sorting.ts).
+recordSorting();
 
 // "Today" is the household's date, so the month and bill status change at midnight Eastern, not UTC.
 // Only Date is faked: the Workers runtime and D1 keep their real timers.

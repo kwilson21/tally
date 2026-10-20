@@ -13,6 +13,10 @@ import {
 	reconnectRecipients,
 	runReconnectReminders,
 } from "../src/reconnect/reminders";
+import { recordSorting } from "./record-sorting";
+
+// Every scheduled call here runs with a stand-in sorting binding, so no real instance starts (test/record-sorting.ts).
+recordSorting();
 
 const BASE = "http://tally.test";
 const post = async (path: string, fields: Record<string, string>) => {
