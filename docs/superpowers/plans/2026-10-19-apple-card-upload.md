@@ -182,14 +182,14 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - **`an upload never changes a row it holds`** (Review Focus 4).
   - **`reopens a removed account`** (Review Focus 5):
     - `removed_at` becomes NULL, and the kept rows count as held.
-    - `balance_on` is cleared unless this upload typed a balance.
+    - Set up as Remove leaves it (`removed_at` set and `balance_on` NULL): reopening with a typed balance sets `balance_on` and `counted_from` to today; reopening without one leaves both as Remove left them.
   - **`saves nothing when a statement fails`:** force the insert to fail, then check that `uploaded_on`, the balance and the rows are all unchanged.
   - **`historyStart`:** the seed's earliest date on a Plaid account; the earlier of that and the 90-day fallback while a connected bank's `history_complete_at` is unset; the kept rows' earliest date after the last bank is disconnected with its rows kept, so uploads still work then. With no bank history at all, the card's own earliest row. With no bank, no bank history and no card rows, nothing is saved and the words are returned.
   - **`saves a typed balance`:**
     - `balance_cents`, `balance_on` = today, and that day's `balance_history` row.
     - A second upload the same day replaces the row.
     - `-1200` (a credit) is stored as `-1200`.
-    - `counted_from` is set to today with the first balance typed while `balance_on` is NULL (the first one, or the first after a reopen), and left alone after that.
+    - `counted_from` is set to today with any balance typed while `balance_on` is NULL (the first one, or the first after Remove cleared it), and left alone after that.
     - `null` leaves the balance as it was.
   - **`suggests Apple's Merchant as the store's name`:**
     - Only for added rows whose Merchant isn't the Description or `tidyName(Description)` (`src/transactions/tidy-name.ts:43`), as `plaidNameToSuggest` filters (`sync.ts:115-122`).
@@ -204,7 +204,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   1. Read `historyStart`, then call `planImport`.
   2. Write **one batch**, in this order:
      1. `INSERT … ON CONFLICT(subtype) WHERE subtype = 'apple_card' DO NOTHING` the account, as `src/transactions/cash.ts:116-121` does for Cash.
-     2. `UPDATE` that account: `uploaded_on = ?` (`opts.today`), `removed_at = NULL`, and the typed balance with `balance_on`. With no balance, clear `balance_on` if the account was removed. End with `RETURNING id`.
+     2. `UPDATE` that account: `uploaded_on = ?` (`opts.today`), `removed_at = NULL`, and the typed balance with `balance_on`, setting `counted_from` to today in the same statement when the old `balance_on` was NULL. End with `RETURNING id`.
      3. The row inserts in statements of up to 500 rows each. Each is `INSERT … SELECT … FROM json_each(?) WHERE 1 ON CONFLICT (account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL DO NOTHING RETURNING id`, with the account id read as `(SELECT id FROM accounts WHERE subtype = 'apple_card')`. `WHERE 1` avoids SQLite's upsert parsing ambiguity, as `src/db/merchant-names.ts:96-143` does.
      4. The `balance_history` upsert, as `sync.ts:386` writes it.
      5. `suggestBankNamesSql("1")`, with the names filtered as above.
@@ -299,7 +299,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - A credit adds to net worth.
   - **Accounts with only a card and no bank** shows net worth and the group, not the empty state.
   - **Remove, GET and POST `/accounts/apple-card/remove`,** as Disconnect's confirm (`src/routes/accounts.tsx:332-357`):
-    - Keeping rows sets `removed_at`, and Add Apple Card shows again.
+    - Keeping rows sets `removed_at` and clears `balance_on`, so the card leaves net worth and any later balance restarts its chart history; Add Apple Card shows again.
     - `delete=yes` calls the per-account pay cleanup first, then deletes the card's transactions, its `balance_history` and the account.
     - Remove isn't offered in the demo: it returns 404, and the group has no Manage there, as with Disconnect.
   - **The first week:** an upload draws no stroke. The first week's waiting count still counts Plaid rows only (`src/first-tally/setup.ts:~417`, `src/db/transactions.ts:2759`).
