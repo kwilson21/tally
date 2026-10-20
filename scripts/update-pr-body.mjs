@@ -1,4 +1,4 @@
-// Writes the before-and-after and screenshot tables into the PR description.
+// Writes the before-and-after table into the PR description.
 // Env: GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, DIR, SHA (GITHUB_API_URL is set by Actions).
 import { readFile } from "node:fs/promises";
 import { screenshotSection, withScreenshots } from "./pr-body.mjs";
@@ -13,16 +13,10 @@ const headers = {
 };
 const raw = `https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/screenshots/${DIR}`;
 // Written by scripts/changed-shots.mjs.
-const { changes, unavailable, files } = JSON.parse(
+const { changes, unavailable } = JSON.parse(
 	await readFile("screenshots/changes.json", "utf8"),
 );
-const section = screenshotSection({
-	sha: SHA,
-	raw,
-	changes,
-	unavailable,
-	files,
-});
+const section = screenshotSection({ sha: SHA, raw, changes, unavailable });
 
 const current = await fetch(url, { headers });
 if (!current.ok) throw new Error(`GET PR failed: ${current.status}`);

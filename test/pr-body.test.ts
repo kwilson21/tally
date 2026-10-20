@@ -161,9 +161,8 @@ describe("screenshotSection", () => {
 			'<img src="https://raw.example/pr-9/abc1234/transaction-edit-phone.png"',
 		);
 		expect(section).toContain("`/transactions/110?uncategorized=1` (phone)");
-		expect(section.indexOf("## Before and after")).toBeLessThan(
-			section.indexOf("## Screenshots"),
-		);
+		expect(section).not.toContain("## Screenshots");
+		expect(section.split("<img").length - 1).toBe(2);
 	});
 
 	it("marks a page that didn't exist before as new", () => {
@@ -178,13 +177,16 @@ describe("screenshotSection", () => {
 		const section = screenshotSection({ ...base, changes: [] });
 		expect(section).toContain("No page looks different from `main`.");
 		expect(section).not.toContain("/before/");
+		expect(section).not.toContain("<img");
+		expect(section).not.toContain("## Screenshots");
 	});
 
-	it("keeps the full table of every page, and the markers withScreenshots looks for", () => {
+	it("keeps the markers withScreenshots looks for, and no table of every page", () => {
 		const section = screenshotSection({ ...base, changes: [] });
 		expect(section.startsWith("<!-- screenshots:start -->")).toBe(true);
 		expect(section.endsWith("<!-- screenshots:end -->")).toBe(true);
-		for (const page of PAGES) expect(section).toContain(`\`${page.path}\``);
+		expect(section).not.toContain("`/settings/people`");
+		expect(section).not.toContain("## Screenshots");
 	});
 });
 
@@ -213,28 +215,6 @@ describe("comparisonProblem", () => {
 
 describe("screenshotSection for a page taken in slices (#580)", () => {
 	const base = { sha: "abc1234def", raw: "https://raw.example/pr-9/abc1234" };
-	// Written in order by scripts/screenshots.mjs; listed out of order to check the sort.
-	const files = [
-		"design-system-proposals-phone-02.png",
-		"design-system-proposals-phone-01.png",
-		"design-system-proposals-desktop-01.png",
-		"design-system-proposals-desktop-02.png",
-		"settings-phone.png",
-	];
-
-	it("stacks every part of the page in order, at the same width as a whole page", () => {
-		const section = screenshotSection({ ...base, changes: [], files });
-		const first = section.indexOf(
-			'<img src="https://raw.example/pr-9/abc1234/design-system-proposals-phone-01.png" width="180"',
-		);
-		const second = section.indexOf(
-			'<img src="https://raw.example/pr-9/abc1234/design-system-proposals-phone-02.png" width="180"',
-		);
-		expect(first).toBeGreaterThan(-1);
-		expect(second).toBeGreaterThan(first);
-		expect(section).not.toContain("design-system-proposals-phone.png");
-	});
-
 	it("labels a changed part with its number and keeps the phone width", () => {
 		const section = screenshotSection({
 			...base,
@@ -255,11 +235,8 @@ describe("screenshotSection when a page's capture changed shape (#580)", () => {
 	const base = { sha: "abc1234def", raw: "https://raw.example/pr-9/abc1234" };
 	const img = (path: string, alt: string) =>
 		`<img src="https://raw.example/pr-9/abc1234/${path}" width="180" alt="${alt}">`;
-	// Only the before-and-after part, so the full Screenshots table can't match these rows.
-	const changedRows = (changes: { before: string[]; after: string[] }[]) => {
-		const section = screenshotSection({ ...base, changes });
-		return section.slice(0, section.indexOf("## Screenshots"));
-	};
+	const changedRows = (changes: { before: string[]; after: string[] }[]) =>
+		screenshotSection({ ...base, changes });
 
 	it("puts a page whole on main and in two parts here in one row, with both parts after", () => {
 		const section = changedRows([
@@ -311,7 +288,7 @@ describe("screenshotSection when a page's capture changed shape (#580)", () => {
 });
 
 describe("screenshotSection when there's nothing to compare", () => {
-	it("gives the reason, shows no before-and-after rows, and keeps the full table", () => {
+	it("gives the reason, and shows no images", () => {
 		const section = screenshotSection({
 			sha: "abc1234",
 			raw: "https://raw.example/x",
@@ -322,6 +299,7 @@ describe("screenshotSection when there's nothing to compare", () => {
 			"No before-and-after this time: The screenshots of `main` didn't finish.",
 		);
 		expect(section).not.toContain("No page looks different");
-		expect(section).toContain("## Screenshots");
+		expect(section).not.toContain("<img");
+		expect(section).not.toContain("## Screenshots");
 	});
 });

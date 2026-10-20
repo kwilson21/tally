@@ -191,20 +191,13 @@ export function comparisonProblem(after, before) {
 }
 
 /**
- * The PR description's screenshot section: before and after for every changed row, then every
- * page at both sizes. `raw` is the URL of this run's folder; "before" images sit in `before/`.
- * `unavailable` is why there's no comparison this time (see comparisonProblem). `files` is every
- * screenshot in this run, so a page taken in slices shows every slice (#580).
- * @param {{ sha: string, raw: string, changes: { before: string[], after: string[] }[], unavailable?: string | null, files?: string[] }} options
+ * The PR description's screenshot section: the before-and-after table, one row per changed page
+ * (a new page is a "New page" row). `raw` is the URL of this run's folder; "before" images sit in
+ * `before/`. `unavailable` is why there's no comparison this time (see comparisonProblem).
+ * @param {{ sha: string, raw: string, changes: { before: string[], after: string[] }[], unavailable?: string | null }} options
  * @returns {string}
  */
-export function screenshotSection({
-	sha,
-	raw,
-	changes,
-	unavailable = null,
-	files = [],
-}) {
+export function screenshotSection({ sha, raw, changes, unavailable = null }) {
 	const [desktop, phone] = VIEWPORTS;
 	const img = (path, alt, width) =>
 		`<img src="${raw}/${path}" width="${width}" alt="${alt}">`;
@@ -239,32 +232,6 @@ export function screenshotSection({
 				: "";
 		return `| ${label(after[0], onePart)}${note} | ${beforeCell(before)} | ${afterCell(after)} |`;
 	};
-	// The files of one page at one size, in order: its slices, or its one whole-page file.
-	const shotsOf = (page, viewport) => {
-		const found = files
-			.map((file) => ({ file, shot: parseShot(file) }))
-			.filter(
-				({ shot }) =>
-					shot?.page === page.name && shot.viewport === viewport.name,
-			)
-			.sort((a, b) => (a.shot.part ?? 0) - (b.shot.part ?? 0))
-			.map(({ file }) => file);
-		return found.length > 0 ? found : shotNames(page.name, viewport.name, 1);
-	};
-	// A page taken in slices stacks all of them in one cell.
-	const cell = (page, viewport) => {
-		const parts = shotsOf(page, viewport);
-		return parts
-			.map((file, i) =>
-				img(
-					file,
-					`${page.name}, ${viewport.name}${parts.length > 1 ? `, part ${i + 1}` : ""}`,
-					width(file),
-				),
-			)
-			.join("<br>");
-	};
-
 	const beforeAfter = unavailable
 		? [`No before-and-after this time: ${unavailable}`]
 		: changes.length === 0
@@ -278,18 +245,9 @@ export function screenshotSection({
 	return [
 		START,
 		"## Before and after",
-		`_Every screenshot that differs from \`main\`'s, taken by CI at ${sha.slice(0, 7)} on the seeded demo data._`,
+		`_Only the pages this PR adds or changes, taken by CI at ${sha.slice(0, 7)} on the seeded demo data. Desktop ${desktop.width}×${desktop.height}, phone ${phone.width}×${phone.height}._`,
 		"",
 		...beforeAfter,
-		"",
-		"## Screenshots",
-		`_Every page. Desktop ${desktop.width}×${desktop.height}, phone ${phone.width}×${phone.height}._`,
-		"",
-		"| Page | Desktop | Phone |",
-		"|---|---|---|",
-		...PAGES.map(
-			(p) => `| \`${p.path}\` | ${cell(p, desktop)} | ${cell(p, phone)} |`,
-		),
 		END,
 	].join("\n");
 }

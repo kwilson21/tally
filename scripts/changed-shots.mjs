@@ -48,7 +48,7 @@ for (const { before } of changes)
 		await copyFile(`${BEFORE}/${file}`, `${AFTER}/before/${file}`);
 await writeFile(
 	`${AFTER}/changes.json`,
-	JSON.stringify({ changes, unavailable, files }),
+	JSON.stringify({ changes, unavailable }),
 );
 console.log(
 	unavailable ??
