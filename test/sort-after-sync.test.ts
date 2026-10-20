@@ -112,7 +112,7 @@ describe("sortAfterSync", () => {
 		expect(await callsUsed()).toBe(0);
 	});
 
-	it("hands all of a sync's rows to one sorting instance, with no per-sync cap (decision 132)", async () => {
+	it("hands all of a sync's rows to one sorting instance, with no per-sync cap (decision 136)", async () => {
 		quiet();
 		fakeJev();
 		const ids = await waitingIds();

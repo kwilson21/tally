@@ -33,7 +33,7 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
-	it("lists the Cloudflare Workflows row after Cron Triggers, in the owner's words (decision 132)", async () => {
+	it("lists the Cloudflare Workflows row after Cron Triggers, in the owner's words (decision 136)", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain("Cloudflare Workflows");
 		expect(html).toContain(

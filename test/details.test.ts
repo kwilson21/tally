@@ -629,7 +629,7 @@ describe("transaction detail guesses", () => {
 	});
 
 	it("loads household choices from the next group if details become enabled during a categorization pass", async () => {
-		// 26 rows make two groups of 25 and 1 (decision 132): the switches are read once a group.
+		// 26 rows make two groups of 25 and 1 (decision 136): the switches are read once a group.
 		const ids: number[] = [];
 		for (let i = 0; i < 26; i++) ids.push(await charge());
 		await db

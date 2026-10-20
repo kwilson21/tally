@@ -1,5 +1,5 @@
 // The in-process sorting run (spec §7): merchant rules first, then Jev for what they left, in the same groups of
-// 25 as the Workflow (src/sort-groups.ts, decision 132). The nightly runs (09:20, 09:40) and the tests call it;
+// 25 as the Workflow (src/sort-groups.ts, decision 136). The nightly runs (09:20, 09:40) and the tests call it;
 // every daytime trigger starts a Workflow instance instead (startSorting, src/sort-workflow.ts).
 import { readAiSwitches } from "./db/ai-switches";
 import type { Deadline } from "./run-budget";
@@ -40,7 +40,7 @@ export type PassOptions = {
 /**
  * Merchant rules, then Jev for what they leave, honoring the household's saved AI switches (spec §8.6,
  * decision 73). The sorting groups run here, in this process: each step simply runs (sortGroups), and the
- * groups keep the rules of decision 132 (the switches read once a group and checked by its save, one group
+ * groups keep the rules of decision 136 (the switches read once a group and checked by its save, one group
  * at a time through the sorting turn, every answer saved in one batch or none). Every call counts against the
  * household's day (decisions 56, 68 and 79), and the run stops when the household's date changes under it.
  */

@@ -10,7 +10,7 @@ type SortEnv = {
 
 /**
  * Right after a sync that brought in or changed transactions, starts one sorting instance with those rows and no others
- * (spec §8.6, decisions 68 and 132). Every row the sync added or changed goes to it, with no per-sync cap: Cloudflare
+ * (spec §8.6, decisions 68 and 136). Every row the sync added or changed goes to it, with no per-sync cap: Cloudflare
  * Workflows sorts them in groups of 25 (src/sort-workflow.ts). It follows "Sort new transactions as they arrive": the
  * instance stops sending once that switch is off, as every sync's run does. The instance applies merchant rules first,
  * unless the sync's last step already did (`rulesApplied`).

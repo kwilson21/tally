@@ -62,7 +62,7 @@ export function giveBackJevCallsStatement(
 	turnId?: string,
 ): D1PreparedStatement | undefined {
 	if (unused < 1) return undefined;
-	// A sorting group gives back in its save, only while it holds the turn (decision 132).
+	// A sorting group gives back in its save, only while it holds the turn (decision 136).
 	const guarded = withTurnGuard(
 		"UPDATE household_settings SET value = CAST(CAST(MAX(0, CAST(value AS INTEGER) - ?) AS INTEGER) AS TEXT) WHERE key = ?",
 		turnId,
