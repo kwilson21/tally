@@ -442,6 +442,78 @@ describe("the ready email: a question answered during a run", () => {
 	});
 });
 
+describe("the ready email: the gate and the members, checked before each address", () => {
+	it("stops once a bank is linked whose history is not in yet: the next address is not sent", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		const { fetchImpl, sent } = resendFake();
+		// While the email to Dana is delivered, a bank is linked and its 90-day history is still loading.
+		const linkedDuringDana = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				if (to === DANA) await addBank(2, "Ally", { history: false });
+				return fetchImpl(url, init);
+			},
+		);
+		await runReadyEmail(production(), linkedDuringDana, NOW);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("sends the next address the words of the banks as they are then, when a bank is linked with its history in", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		const { fetchImpl, sent } = resendFake();
+		const linkedDuringDana = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				if (to === DANA) await addBank(2, "Ally");
+				return fetchImpl(url, init);
+			},
+		);
+		await runReadyEmail(production(), linkedDuringDana, NOW);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
+		expect(sent[0]?.text).toContain("from Chase.");
+		expect(sent[1]?.text).toContain("from Chase and Ally.");
+		expect(await storedList()).toEqual([DANA, RILEY]);
+	});
+
+	it("never sends to a member removed while an earlier send was waiting, and never records her as reached", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		const { fetchImpl, sent } = resendFake();
+		// While the email to Dana is delivered, Riley leaves the family in Settings. Her turn is then skipped.
+		const removedDuringDana = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				if (to === DANA)
+					await env.DB.prepare(
+						"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
+					)
+						.bind(RILEY)
+						.run();
+				return fetchImpl(url, init);
+			},
+		);
+		await runReadyEmail(production(), removedDuringDana, NOW);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("the claim changes no row for a member who was removed", async () => {
+		await openHousehold({ members: [] });
+		await addMember(DANA, { removed: true });
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		expect(claim.meta.changes).toBe(0);
+		expect(await storedList()).toBeUndefined();
+	});
+
+	it("the claim changes no row for a member not seen in 90 days", async () => {
+		await openHousehold({ members: [] });
+		await addMember(DANA, { seen: "2020" });
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		expect(claim.meta.changes).toBe(0);
+		expect(await storedList()).toBeUndefined();
+	});
+});
+
 describe("the ready email: delivery", () => {
 	it("keeps the address when Cloudflare's email delivers after Resend fails", async () => {
 		await openHousehold();

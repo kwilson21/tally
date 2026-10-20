@@ -45,12 +45,14 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 
 // Claims an address before its email is sent. It changes no row when the address is in the list already, so a second claim
 // of one address (an earlier run, or one still going) sends nothing. It changes no row either once a question is answered,
-// so a run that overlaps a person's answer sends nothing to the addresses after it.
+// or when the address is no longer one the email goes to (removed, or not seen in 90 days: reconnectRecipients' rule). A
+// refused address is skipped; runReadyEmail reads the gate again before the next one, so a question answered meanwhile ends it.
 export const CLAIM_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyEmailedTo',
 		json_insert(COALESCE(json_extract(household_settings.value, '$.readyEmailedTo'), json('[]')), '$[#]', ?1))
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
-		SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)`;
+		SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)
+		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days'))`;
 
 // Takes an address back off the list when neither provider delivered it, so the next morning's run tries it again.
 const RELEASE_SQL = `UPDATE household_settings
@@ -106,22 +108,16 @@ export function renderReadyEmail(read: string): Mail {
 }
 
 /**
- * The 10:00 run's ready email. It sends only while the first week's questions are open (questionsOpen, the gate) and pay,
- * bills and budgets are all undrawn, so a household set up before this shipped, or one that has answered, gets none. It
- * goes to each household address not yet in readyEmailedTo, whatever the bank sign-in switch says. The demo never sends.
- * A question answered while the run is going ends it at the next address (the claim checks the questions too), so nothing
- * more is sent once a person has answered.
+ * The email's words as the gate reads them now, or null while the questions are not open to the email: stroke one's day has
+ * passed, every connected bank's history is in, nothing waits for Jev, and no question is answered. The facts are the ones
+ * the gate reads (gate.ts), read again at each address's turn so a change during the run is seen.
  */
-export async function runReadyEmail(
-	env: DeliveryEnv & { DB: D1Database; DEMO?: string },
-	fetchImpl: typeof fetch = fetch,
-	now: Date = new Date(),
-	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
-) {
-	if (env.DEMO === "true") return;
+async function currentRead(
+	env: { DB: D1Database },
+	today: string,
+): Promise<string | null> {
 	const record = await readFirstTally(env.DB);
-	if (answeredQuestion(record)) return;
-	const today = await householdToday(env.DB, now);
+	if (answeredQuestion(record)) return null;
 	const { banks, waiting } = await readGateInputs(env.DB);
 	if (
 		!questionsOpen({
@@ -131,28 +127,45 @@ export async function runReadyEmail(
 			waiting,
 		})
 	)
-		return;
-	const reached = new Set(record?.readyEmailedTo ?? []);
-	const recipients = (await reconnectRecipients(env.DB)).results
-		.map((row) => row.email)
-		.filter((email) => !reached.has(email));
+		return null;
 	const total =
 		(await env.DB.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
-	const email = renderReadyEmail(readLine(banks, total));
+	return readLine(banks, total);
+}
+
+/**
+ * The 10:00 run's ready email. It sends only while the first week's questions are open (questionsOpen, the gate) and pay,
+ * bills and budgets are all undrawn, so a household set up before this shipped, or one that has answered, gets none. It
+ * goes to each household address not yet in readyEmailedTo, whatever the bank sign-in switch says. The demo never sends.
+ * Before each address the gate is read again and the email is built from that read, so its words are true when it goes.
+ * A closed gate (a question answered, a bank linked with its history still loading, the last bank removed, a sort waiting)
+ * ends the run there, and nothing more is sent. Another bank linked or removed changes the words from then on. An address
+ * no longer a member is skipped on its own (CLAIM_SQL).
+ */
+export async function runReadyEmail(
+	env: DeliveryEnv & { DB: D1Database; DEMO?: string },
+	fetchImpl: typeof fetch = fetch,
+	now: Date = new Date(),
+	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
+) {
+	if (env.DEMO === "true") return;
+	const today = await householdToday(env.DB, now);
+	if ((await currentRead(env, today)) === null) return;
+	const recipients = (await reconnectRecipients(env.DB)).results;
 	let sentCount = 0;
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
-	for (const recipient of recipients) {
+	for (const { email: recipient } of recipients) {
+		const read = await currentRead(env, today);
+		if (read === null) break;
 		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient).run();
-		if (!claim.meta.changes) {
-			// Either the address is in the list already (skip it), or a question was answered since the read (send nothing more).
-			if (answeredQuestion(await readFirstTally(env.DB))) break;
-			continue;
-		}
+		// No row changed: the address was reached already (an earlier run, or one still going), or it is no longer a member.
+		// Either way it is skipped. A question answered after the read above is caught by the next address's read.
+		if (!claim.meta.changes) continue;
 		const outcome = await deliver(
 			env,
 			recipient,
-			email,
+			renderReadyEmail(read),
 			fetchImpl,
 			timeoutSignal,
 		);
