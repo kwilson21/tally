@@ -25,7 +25,7 @@ export type NightCounts = {
 };
 
 /**
- * The 09:00 run's sync, kept until the second sort's run decides the night (#586): how many transactions the sync
+ * The 09:00 run's sync, kept until the night's Workflow decides the night (#586): how many transactions the sync
  * brought in, the UTC date of that run (the run's own night, not a household day), and whether every bank synced cleanly
  * (no failure, no skipped bank, no bank that needs signing in, and the household-wide step after the banks ran).
  */
@@ -59,7 +59,7 @@ export type FirstTally = {
 	strokes: Partial<Record<Stroke, string | null>>;
 	/** The budgets step's answers so far, by category id. */
 	budgets: Record<string, BudgetAnswer>;
-	/** The 09:00 run's sync, until the second sort keeps the night's counts (or the next 09:00 run replaces it). */
+	/** The 09:00 run's sync, until the night's Workflow keeps the night's counts (or the next 09:00 run replaces it). */
 	nightSync?: NightSync;
 	/** The first night after stroke four, kept once that night's sorting has all finished. */
 	night?: NightCounts;
@@ -263,7 +263,7 @@ export function nightSyncStatement(
 }
 
 /**
- * The statement that keeps the first night's counts at the end of the second sort (#586), once its sorting and names
+ * The statement that keeps the first night's counts as the night's Workflow's last step (#586), once its sorting and names
  * have all finished (the caller checks those): it keeps `brought` from the 09:00 sync and `needYou`, then removes
  * `nightSync`. It writes only when that sync is for `on` and was ok, and the night is open, so a night is kept once.
  */

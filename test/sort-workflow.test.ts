@@ -90,4 +90,35 @@ describe("SortWorkflow", () => {
 			expect.stringMatching(/^sorting: stopped/),
 		);
 	});
+
+	it("runs the night's instance to completion with no Jev key, and logs no stop or failure", async () => {
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		const introspector = await introspectWorkflow(env.SORT);
+		try {
+			await introspector.modifyAll(async (m) => {
+				await m.disableRetryDelays();
+			});
+			const instance = await env.SORT.create({
+				params: { bySync: false, rulesApplied: false, night: TODAY },
+			});
+			let status = await instance.status();
+			for (
+				let i = 0;
+				i < 100 && status.status !== "complete" && status.status !== "errored";
+				i++
+			) {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				status = await instance.status();
+			}
+			expect({ status: status.status, error: status.error?.name }).toEqual({
+				status: "complete",
+				error: undefined,
+			});
+		} finally {
+			await introspector.dispose();
+		}
+		expect(errors).not.toHaveBeenCalledWith(
+			expect.stringMatching(/stopped|failed/),
+		);
+	});
 });

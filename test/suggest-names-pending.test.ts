@@ -418,7 +418,7 @@ describe("suggestMerchantNames", () => {
 		await addTransactions([{ rawName: RAW }]);
 		await db
 			.prepare(
-				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2026-10-01 09:20:00')",
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES (?, '2026-10-01 09:25:00')",
 			)
 			.bind(RAW)
 			.run();
@@ -438,10 +438,10 @@ describe("suggestMerchantNames", () => {
 		]);
 		await db.batch([
 			db.prepare(
-				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('RECENT FAIL', '2026-10-06 09:20:00')",
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('RECENT FAIL', '2026-10-06 09:25:00')",
 			),
 			db.prepare(
-				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('OLD FAIL', '2026-10-01 09:20:00')",
+				"INSERT INTO merchant_name_failures (raw_name, failed_at) VALUES ('OLD FAIL', '2026-10-01 09:25:00')",
 			),
 		]);
 		const ai = fakeAi(() => ({ response: "A Name" }));

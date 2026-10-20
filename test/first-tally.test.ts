@@ -625,7 +625,7 @@ describe("the first night's counts (P125 E, #586)", () => {
 		});
 	});
 
-	it("keeps the 09:00 sync's result as ok false too, so the second sort keeps nothing", async () => {
+	it("keeps the 09:00 sync's result as ok false too, so the night's Workflow keeps nothing", async () => {
 		await answeredQuestions("2026-10-12");
 		await nightSyncStatement(db, {
 			brought: 2,
@@ -641,7 +641,7 @@ describe("the first night's counts (P125 E, #586)", () => {
 		expect((await readFirstTally(db))?.night).toBeUndefined();
 	});
 
-	it("keeps nothing at the second sort when the 09:00 sync was for another day", async () => {
+	it("keeps nothing in the night's Workflow when the 09:00 sync was for another day", async () => {
 		await answeredQuestions("2026-10-12");
 		await nightSyncStatement(db, {
 			brought: 3,

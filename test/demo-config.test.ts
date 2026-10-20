@@ -92,10 +92,10 @@ describe("production environment config (#23)", () => {
 		expect(JSON.stringify(production)).not.toContain("finance.");
 	});
 
-	// Each run has its own D1 query budget; reconnect reminders have a dedicated invocation after sync and sorting.
-	it("runs sync at 09:00 UTC, Jev and names at 09:20 and 09:40, then reconnect reminders at 10:00", () => {
+	// Decision 139: the night is one Workflow that the 09:00 run starts; reconnect reminders have a dedicated invocation.
+	it("runs the sync and the night's Workflow at 09:00 UTC, then reconnect reminders at 10:00, with no sort runs between them (decision 139)", () => {
 		expect(production.triggers).toEqual({
-			crons: ["0 9 * * *", "20 9 * * *", "40 9 * * *", "0 10 * * *"],
+			crons: ["0 9 * * *", "0 10 * * *"],
 		});
 	});
 
