@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import { readFirstTally } from "../src/db/first-tally";
+import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { runReadyEmail } from "../src/first-tally/ready-email";
+import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
 import handler from "../src/index";
 
 // The ready email (P140, decision 134, spec §8.8): one email per person, sent by the 10:00 UTC run once a new family's first
@@ -387,6 +387,58 @@ describe("the ready email: a run that overlaps another", () => {
 		expect(second.sent.map((mail) => mail.to)).toEqual([RILEY]);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA, RILEY]);
+	});
+});
+
+describe("the ready email: a question answered during a run", () => {
+	it("sends nothing more once a question is answered: the address being sent to is kept, and the next is not sent", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		const { fetchImpl, sent } = resendFake();
+		// While the email to Dana is delivered, the family answers the pay question. Riley is then never sent to, nor reached.
+		const answeredDuringDana = vi.fn(
+			async (url: RequestInfo | URL, init?: RequestInit) => {
+				const to = (JSON.parse(String(init?.body)) as Sent).to;
+				if (to === DANA) await markStroke(env.DB, "pay", "2026-10-14");
+				return fetchImpl(url, init);
+			},
+		);
+		await runReadyEmail(production(), answeredDuringDana, NOW);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("the claim changes one row while the questions are open", async () => {
+		await openHousehold();
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		expect(claim.meta.changes).toBe(1);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it.each(["pay", "bills", "budgets"] as const)(
+		"the claim changes no row once the %s question is answered",
+		async (stroke) => {
+			await openHousehold({
+				record: {
+					strokes: { bank: STROKE_ONE, [stroke]: "2026-10-14" },
+					budgets: {},
+				},
+			});
+			const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+			expect(claim.meta.changes).toBe(0);
+			expect(await storedList()).toBeUndefined();
+		},
+	);
+
+	it("the claim changes no row for a question drawn with no day (a migrated record's null)", async () => {
+		await openHousehold({
+			record: {
+				strokes: { bank: STROKE_ONE, pay: null },
+				budgets: {},
+			},
+		});
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		expect(claim.meta.changes).toBe(0);
+		expect(await storedList()).toBeUndefined();
 	});
 });
 

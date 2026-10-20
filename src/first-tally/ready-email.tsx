@@ -3,7 +3,7 @@
 // claimed in the record's readyEmailedTo before its email goes, and released if neither provider delivers, so it is tried
 // again the next morning and no one gets it twice. It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import { householdToday } from "../dates";
-import { readFirstTally } from "../db/first-tally";
+import { type FirstTally, readFirstTally } from "../db/first-tally";
 import {
 	type DeliveryEnv,
 	deliver,
@@ -24,6 +24,19 @@ const FOOT = "Tally sends this once, to everyone in your family who uses it.";
 // The three questions' strokes: once any is drawn, the questions have been answered and nothing is sent.
 const QUESTION_STROKES = ["pay", "bills", "budgets"] as const;
 
+// True once any of the questions is drawn. A stroke is drawn when its key is present, so a migrated record's null counts.
+function answeredQuestion(record: FirstTally | null): boolean {
+	return QUESTION_STROKES.some(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	);
+}
+
+// The same test in SQL. json_type is NULL only when the key is absent (a null value reads 'null'), as the rest of the code tests it.
+const QUESTIONS_UNDRAWN_SQL = QUESTION_STROKES.map(
+	(stroke) =>
+		`json_type(household_settings.value, '$.strokes.${stroke}') IS NULL`,
+).join(" AND ");
+
 // The transactions the connected banks sent: Plaid's own. A split part or a manual entry has no Plaid id, so it is left out.
 const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	JOIN accounts a ON a.id = t.account_id
@@ -31,11 +44,12 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
 // Claims an address before its email is sent. It changes no row when the address is in the list already, so a second claim
-// of one address (an earlier run, or one still going) sends nothing.
-const CLAIM_SQL = `UPDATE household_settings
+// of one address (an earlier run, or one still going) sends nothing. It changes no row either once a question is answered,
+// so a run that overlaps a person's answer sends nothing to the addresses after it.
+export const CLAIM_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyEmailedTo',
 		json_insert(COALESCE(json_extract(household_settings.value, '$.readyEmailedTo'), json('[]')), '$[#]', ?1))
-	WHERE key = 'first_tally' AND NOT EXISTS (
+	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
 		SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)`;
 
 // Takes an address back off the list when neither provider delivered it, so the next morning's run tries it again.
@@ -95,6 +109,8 @@ export function renderReadyEmail(read: string): Mail {
  * The 10:00 run's ready email. It sends only while the first week's questions are open (questionsOpen, the gate) and pay,
  * bills and budgets are all undrawn, so a household set up before this shipped, or one that has answered, gets none. It
  * goes to each household address not yet in readyEmailedTo, whatever the bank sign-in switch says. The demo never sends.
+ * A question answered while the run is going ends it at the next address (the claim checks the questions too), so nothing
+ * more is sent once a person has answered.
  */
 export async function runReadyEmail(
 	env: DeliveryEnv & { DB: D1Database; DEMO?: string },
@@ -104,8 +120,7 @@ export async function runReadyEmail(
 ) {
 	if (env.DEMO === "true") return;
 	const record = await readFirstTally(env.DB);
-	if (QUESTION_STROKES.some((stroke) => record?.strokes[stroke] !== undefined))
-		return;
+	if (answeredQuestion(record)) return;
 	const today = await householdToday(env.DB, now);
 	const { banks, waiting } = await readGateInputs(env.DB);
 	if (
@@ -129,7 +144,11 @@ export async function runReadyEmail(
 	const failureKinds = new Set<string>();
 	for (const recipient of recipients) {
 		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient).run();
-		if (!claim.meta.changes) continue;
+		if (!claim.meta.changes) {
+			// Either the address is in the list already (skip it), or a question was answered since the read (send nothing more).
+			if (answeredQuestion(await readFirstTally(env.DB))) break;
+			continue;
+		}
 		const outcome = await deliver(
 			env,
 			recipient,
