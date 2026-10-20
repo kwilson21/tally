@@ -4,7 +4,7 @@
 // `jev_calls_<date>`; the date is the household's own (decision 67), so a new day starts at zero.
 //
 // A run takes the calls it wants in one step before it starts (`reserveJevCalls`) and returns the ones
-// it didn't use when it ends (`giveBackJevCalls`), so a call costs no query of its own: D1 allows 1,000
+// it didn't use when it ends (`giveBackJevCallsStatement`), so a call costs no query of its own: D1 allows 1,000
 // queries in one invocation, and a night's 500 calls must fit in them. A run cut off before it gives
 // back loses the unused part for that day, which only ever leaves the day with fewer calls, never more.
 
@@ -68,12 +68,4 @@ export function giveBackJevCallsStatement(
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(unused, keyFor(day), ...guarded.binds);
-}
-
-export async function giveBackJevCalls(
-	db: D1Database,
-	day: string,
-	unused: number,
-): Promise<void> {
-	await giveBackJevCallsStatement(db, day, unused)?.run();
 }

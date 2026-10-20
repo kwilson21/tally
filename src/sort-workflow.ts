@@ -15,13 +15,9 @@ export class SortWorkflow extends WorkflowEntrypoint<Env, SortParams> {
 		event: Readonly<WorkflowEvent<SortParams>>,
 		step: WorkflowStep,
 	): Promise<null> {
-		// Workflows types a step's result as serializable; every result here is plain JSON (decision 136).
-		const runStep: StepRunner = (name, config, fn) =>
-			step.do(
-				name,
-				config,
-				fn as Parameters<typeof step.do>[2],
-			) as Promise<never>;
+		// Each step's result is checked against Workflows' serializable type (StepRunner), so a non-serializable one fails
+		// the typecheck here rather than at runtime.
+		const runStep: StepRunner = (name, config, fn) => step.do(name, config, fn);
 		try {
 			await sortGroups(this.env, runStep, undefined, {
 				rulesApplied: event.payload.rulesApplied,

@@ -2885,11 +2885,6 @@ export function markJevFailedStatement(
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
 }
 
-/** Records that Jev failed on this one transaction, so the next run asks about it last (decision 31). */
-export async function markJevFailed(db: D1Database, id: number): Promise<void> {
-	await markJevFailedStatement(db, id).run();
-}
-
 /**
  * Stores only Jev's valid detail choices, and records that this transaction was asked once. A Kind or For a
  * person cleared (`kind_cleared`, `for_person_cleared`) is a deliberate empty choice, so Jev doesn't fill it (#304).
@@ -2933,14 +2928,6 @@ export function saveJevDetailsStatement(
 			...(options.stillOn === undefined ? [] : [options.stillOn]),
 			...guarded.binds,
 		);
-}
-
-/** Saves Jev's detail answers (see `saveJevDetailsStatement`), with no switch or sorting-turn guard. */
-export async function saveJevDetails(
-	db: D1Database,
-	details: Parameters<typeof saveJevDetailsStatement>[1],
-): Promise<void> {
-	await saveJevDetailsStatement(db, details)?.run();
 }
 
 /** The columns a note is checked against, read the way the list reads a row's name (#426, #412). */
@@ -3222,7 +3209,8 @@ export function saveJevResultStatements(
 
 /**
  * Saves one Jev answer on its own (one batch when it has a log row), and says whether the answer was written. Callers
- * that save a group of answers at once use `saveJevResultStatements` instead.
+ * that save a group of answers at once use `saveJevResultStatements` instead. Production sorting saves through the
+ * group's turn-guarded batch (sort-groups.ts writeGroup); this one is for tests.
  */
 export async function saveJevResult(
 	db: D1Database,
