@@ -611,6 +611,33 @@ async function activeBillNames(db: D1Database): Promise<string[]> {
 }
 
 /**
+ * The pay and bills steps as the page reads them, with no writes: the pay merchants still to ask, the charges to keep and
+ * the ones that wait, and `done` once neither step has anything left to ask. The page asks pay first, then bills.
+ */
+async function payAndBills(db: D1Database, today: string) {
+	const pay = await payMerchants(db);
+	const split =
+		pay.length === 0
+			? splitKeepable(
+					await loadBillSuggestions(db, today),
+					await activeBillNames(db),
+				)
+			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
+	return { pay, split, done: pay.length === 0 && split.keep.length === 0 };
+}
+
+/**
+ * True when the budgets step is the one the page shows: pay and bills have nothing left to ask (payAndBills). It reads only,
+ * so a goal Home set after the page drew isn't copied and drawn here; the savings answer's own write keeps that goal (#721).
+ */
+export async function budgetsStepShown(
+	db: D1Database,
+	today: string,
+): Promise<boolean> {
+	return (await payAndBills(db, today)).done;
+}
+
+/**
  * Draws the strokes whose steps have nothing left to ask (an empty step counts as done, P125 E), then reads the page.
  * The pay stroke waits for the last pay answer; the bills stroke waits for pay, since the page asks pay first. What the
  * bills step kept is recorded by keepBills, as each bill is kept, so this read adds no count.
@@ -620,16 +647,8 @@ export async function settleAndLoad(
 	today: string,
 	{ oneAtATime = false }: { oneAtATime?: boolean } = {},
 ): Promise<FirstPageModel> {
-	const pay = await payMerchants(db);
+	const { pay, split, done } = await payAndBills(db, today);
 	if (pay.length === 0) await markStroke(db, "pay", today, NO_PAY_LEFT_SQL);
-	const split =
-		pay.length === 0
-			? splitKeepable(
-					await loadBillSuggestions(db, today),
-					await activeBillNames(db),
-				)
-			: { keep: [] as BillSuggestion[], waiting: [] as BillSuggestion[] };
-	const done = pay.length === 0 && split.keep.length === 0;
 	if (done) await markStroke(db, "bills", today, NO_PAY_LEFT_SQL);
 	// The budgets stroke waits for the bills stroke (budgetsStrokeGuard), and is drawn when no budget question is left and the
 	// savings question is answered, or a goal above $0 answers it (its cents are copied first, decision 135).

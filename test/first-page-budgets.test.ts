@@ -1861,6 +1861,75 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(textOf(html)).toContain(`Do you want a ${archived.name} budget?`);
 		expect(await goalRows()).toBe(0);
 		expect(await savingsOf()).toBeUndefined();
+		// A blank or $0 Save it is caught by the same reply: the budget is still asked, so the answer is refused with the moved-on
+		// words, not the amount's error.
+		for (const goal of ["", "0"]) {
+			const refused = await post("/first-page/savings", [
+				["answer", "save"],
+				["goal", goal],
+			]);
+			expect(refused.res.status).toBe(200);
+			const moved =
+				"Nothing saved. The categories changed since the page drew, so the next one is asked below.";
+			expect(trigger(refused.res).toast).toEqual({
+				message: moved,
+				type: "info",
+			});
+			expect(trigger(refused.res).announce).toBe(moved);
+			expect(textOf(refused.html)).toContain(
+				`Do you want a ${archived.name} budget?`,
+			);
+			expect(refused.html).not.toContain('role="alert"');
+			expect(refused.html).not.toContain(BLANK);
+			expect(await goalRows()).toBe(0);
+			expect(await savingsOf()).toBeUndefined();
+		}
+	});
+
+	it("writes nothing for a Save it that comes while a pay question shows, and gets the stale reply", async () => {
+		await skipAll();
+		// A new deposit brings the pay question back after the savings question drew (the same rows as a pay test's deposit).
+		await spend(null, -245000, TODAY, {
+			flag_income: 1,
+			raw_name: "NEW PAYER",
+		});
+		expect((await get("/first-page")).html).toContain("Is this your pay?");
+		const { res, html } = await post("/first-page/savings", [
+			["answer", "save"],
+			["goal", "300"],
+		]);
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+		expect(html).toContain("Is this your pay?");
+		expect(await goalRows()).toBe(0);
+		expect(await savingsOf()).toBeUndefined();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+	});
+
+	it("writes nothing for a Save it that comes while a bills question shows, and gets the stale reply", async () => {
+		await skipAll();
+		// Two charges a month apart with the same amount: Possible bills asks to keep the repeat as a bill.
+		await spend(A, 1549, daysBefore(TODAY, 30), { raw_name: "NETFLIX" });
+		await spend(A, 1549, TODAY, { raw_name: "NETFLIX" });
+		expect((await get("/first-page")).html).toContain(
+			"Keep this one as a bill?",
+		);
+		const { res, html } = await post("/first-page/savings", [
+			["answer", "save"],
+			["goal", "300"],
+		]);
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+		expect(html).toContain("Keep this one as a bill?");
+		expect(await goalRows()).toBe(0);
+		expect(await savingsOf()).toBeUndefined();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
 	});
 
 	it("keeps the answer through a take-back, and the re-ask draws stroke four with no second question", async () => {

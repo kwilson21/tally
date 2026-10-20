@@ -28,6 +28,7 @@ import {
 } from "../first-tally/budgets";
 import {
 	answerPay,
+	budgetsStepShown,
 	budgetsStrokeGuard,
 	type FirstPageModel,
 	keepBills,
@@ -380,7 +381,8 @@ firstPage.post("/first-page/budgets", async (c) => {
 /**
  * The savings question's answers (spec §8.8, decision 135, #721). Save it keeps the goal from this month on, with its line;
  * Not now keeps "skipped" and writes no line. The question is checked before anything draws the page, so a goal Home set
- * after the page drew is the answer's competitor, not a copy the page already made. Then one batch: the record's answer
+ * after the page drew is the answer's competitor, not a copy the page already made. A pay or bills question back on the
+ * page is asked first, so an answer while one shows gets the page as it is now. Then one batch: the record's answer
  * (it lands only while the question is open), the goal (only when that landed and no goal above $0 is set), and the
  * budgets stroke. A goal Home set wins over either answer: the record keeps its amount, and the reply says so.
  */
@@ -394,9 +396,10 @@ firstPage.post("/first-page/savings", async (c) => {
 	if (answer !== "save" && answer !== "skip")
 		return c.text("Choose an answer.", 400);
 	const month = today.slice(0, 7);
-	// A question already answered gets the page as it is now, with nothing written. A category added since the page drew
-	// is caught by the write below, which then says so.
-	if (!(await savingsOpen(db))) return stale(c, await settleAndLoad(db, today));
+	// A question already answered, or a pay or bills question back on the page, gets the page as it is now, with nothing
+	// written. A category added since the page drew is caught by the write below, which then says so.
+	if (!(await budgetsStepShown(db, today)) || !(await savingsOpen(db)))
+		return stale(c, await settleAndLoad(db, today));
 	// A form drawn in another household month writes nothing, as the budgets question's does.
 	if (form.get("month") !== month)
 		return answered(
@@ -473,7 +476,8 @@ firstPage.post("/first-page/savings", async (c) => {
  * A refused Save it: nothing is saved, and the question is drawn again with its error, the field holding what was typed.
  * htmx swaps it in with a toast; without JavaScript the whole page comes back at 422, as a refused budget's does. A goal
  * Home set after the page drew settles the step first (its stroke is drawn), so the question is no longer open: that
- * reply is the finished page with Home's words, not the refusal (#721).
+ * reply is the finished page with Home's words, not the refusal (#721). A category asked since the page drew means the
+ * savings question isn't the one on the page: that reply is the moved-on words, not the refusal (#721).
  */
 async function savingsRefused(
 	c: Context<App>,
@@ -499,6 +503,8 @@ async function savingsRefused(
 				)
 			: stale(c, model);
 	}
+	if (askedIds(model).size > 0)
+		return answered(c, model, budgetsMovedOnWords(), NO_MOTION, "info");
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
 		return c.html(pageDocument(model, true, null, savingsError), 422);
