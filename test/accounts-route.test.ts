@@ -8,6 +8,9 @@ import { resetDemo } from "../src/demo/reset";
 import { chartStart } from "../src/net-worth";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { accounts } from "../src/routes/accounts";
+import { recordSorting } from "./record-sorting";
+
+recordSorting({ sort: true });
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -366,7 +369,7 @@ describe("POST /accounts/sync feedback", () => {
 		const response = await accounts.request(
 			"/accounts/sync",
 			{ method: "POST", headers: { "HX-Request": "true" } },
-			{ ...plaidEnabled, ...bindings },
+			{ ...plaidEnabled, SORT: env.SORT, ...bindings },
 			ctx(),
 		);
 		const trigger = response.headers.get("HX-Trigger");
@@ -702,7 +705,7 @@ describe("POST /accounts/sync feedback", () => {
 			// The pass applied the rules itself, which failed again, so Jev wasn't asked.
 			expect(jevCalls(fetchImpl)).toHaveLength(0);
 			expect(JSON.stringify(vi.spyOn(console, "error").mock.calls)).toContain(
-				"sort after sync failed",
+				"sorting: couldn't start",
 			);
 		} finally {
 			await env.DB.prepare("DROP TRIGGER fail_rules").run();

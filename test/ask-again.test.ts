@@ -8,12 +8,14 @@ import { pendingSuggestions } from "../src/db/category-suggestions";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
 import { tidyName } from "../src/transactions/tidy-name";
+import { recordSorting } from "./record-sorting";
 
 // Spec §7, decision 79: when a person adds a clearer name or a note to a transaction that still needs
 // a category, Tally asks Jev again right away, after the page has answered (so a save never waits for
 // it), as for a note in decision 64. A transaction that already has a category asks nothing.
 
 const db = env.DB;
+recordSorting({ sort: true });
 let waitUntil: ReturnType<typeof vi.fn<(promise: Promise<unknown>) => void>>;
 const ctx = () => ({ waitUntil, passThroughOnException() {}, props: {} });
 /** The background work a save handed to waitUntil, finished. */

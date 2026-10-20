@@ -9,12 +9,14 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { noneFitTransactions } from "../src/db/category-suggestions";
 import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { recordSorting } from "./record-sorting";
 
 // Spec §5, §7 (#51): when Jev says none of the categories fit, Tally keeps that as a fact of its own
 // (`transactions.jev_none_fit`), so an answer given while "Guess categories" was off, which stores a
 // confidence and no pick, is never mistaken for it.
 
 const db = env.DB;
+recordSorting({ sort: true });
 const JEV_KEY = { JEV_API_KEY: "jev-key" };
 
 /** A fake Jev answering every call with `choice` at `confidence`. */
@@ -196,7 +198,9 @@ describe("categorizePending marks what Jev said", () => {
 			.run();
 		const jev = fakeJev("Gas", 0.9);
 		vi.stubGlobal("fetch", jev);
-		await Promise.all(ids.map((id) => askAgain({ DB: db, ...JEV_KEY }, id)));
+		await Promise.all(
+			ids.map((id) => askAgain({ DB: db, ...JEV_KEY, SORT: env.SORT }, id)),
+		);
 		expect(jev).toHaveBeenCalledTimes(2);
 		for (const id of ids)
 			expect(await marked(id)).toMatchObject({
@@ -216,7 +220,7 @@ describe("categorizePending marks what Jev said", () => {
 			.run();
 		const jev = fakeJev("Gas", 0.9);
 		vi.stubGlobal("fetch", jev);
-		await askAgain({ DB: db, ...JEV_KEY }, id);
+		await askAgain({ DB: db, ...JEV_KEY, SORT: env.SORT }, id);
 		expect(jev).toHaveBeenCalledTimes(1);
 		expect(await marked(id)).toMatchObject({ category_id: 3 });
 	});
@@ -230,7 +234,7 @@ describe("categorizePending marks what Jev said", () => {
 			.bind(id)
 			.run();
 		await saveAiSwitches(db, { categories: false, income: false });
-		await askAgain({ DB: db, ...JEV_KEY }, id);
+		await askAgain({ DB: db, ...JEV_KEY, SORT: env.SORT }, id);
 		expect(await marked(id)).toMatchObject({ category_confidence: null });
 		await saveAiSwitches(db, { categories: true, income: true });
 		const jev = fakeJev("Gas", 0.9);

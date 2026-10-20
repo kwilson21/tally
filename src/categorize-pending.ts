@@ -1,51 +1,19 @@
-// The nightly categorization step (spec §7): merchant rules first, then Jev for the rest. Production
-// makes it twice a morning, in two runs of their own (src/index.tsx); the demo makes it once.
-import { askJev, JEV_THRESHOLD } from "./ai/categorize";
-import { decide } from "./ai/decide";
-import { householdTimeZone, todayIn } from "./dates";
-import { asksJev, readAiSwitches } from "./db/ai-switches";
-import { giveBackJevCalls, reserveJevCalls } from "./db/jev-calls";
-import {
-	applyMerchantRules,
-	markJevFailed,
-	merchantCategoryHistoryForJev,
-	pendingForJev,
-	saveJevDetails,
-	saveJevResult,
-} from "./db/transactions";
-import { type Deadline, pastDeadline } from "./run-budget";
+// The in-process sorting run (spec §7): merchant rules first, then Jev for what they left, in the same groups of
+// 25 as the Workflow (src/sort-groups.ts, decision 139). The nightly runs (09:20, 09:40) and the tests call it;
+// every daytime trigger starts a Workflow instance instead (startSorting, src/sort-workflow.ts).
+import { readAiSwitches } from "./db/ai-switches";
+import type { Deadline } from "./run-budget";
+import { type SortEnv, type StepRunner, sortGroups } from "./sort-groups";
+import { startSorting } from "./sort-start";
 
 /**
- * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few.
- * Production's 500 lets a new bank's backfill be sorted in a day or two; each answer is saved as it
- * arrives, so a run cut short keeps its work, and the rest wait for the next run. The count is the household's
- * whole day, midnight to midnight in its time zone, shared by the runs right after a sync and the
- * nightly runs (db/jev-calls.ts).
- */
-export const jevCallLimit = (env: { DEMO?: string }) =>
-	env.DEMO === "false" ? 500 : 40;
-
-/**
- * The most calls one run makes, whatever the day's cap still allows; what's left waits for the next
- * run. D1 allows 1,000 queries in one invocation, and a call costs three of them (the switches read before it, and
- * the answer saved with its log row in one batch), plus a few for setup and one merchant-history read:
- * 300 calls is about 901 queries. So production's 09:40 run does nothing else, and the sync (09:00) and
- * the names with the first pass (09:20, where 100 names and 200 calls are about the same) are runs of
- * their own.
+ * The most calls one nightly run makes, whatever the day's cap still allows; what's left waits for the next run. D1
+ * allows 1,000 queries in one invocation, and a call costs three of them (the switches read before it, and the answer
+ * saved with its log row in one batch), plus a few for setup and one merchant-history read: 300 calls is about 901
+ * queries. So production's 09:40 run does nothing else, and the sync (09:00) and the names with the first pass (09:20,
+ * where 100 names and 200 calls are about the same) are runs of their own.
  */
 export const MAX_CALLS_PER_RUN = 300;
-
-/**
- * The most transactions the run right after a sync asks about, newest first among that sync's own.
- * A sync that imports a lot of rows has already spent most of its invocation's 1,000 queries saving
- * them, so this run stays small (50 calls is about 151 queries including merchant history); the rest wait for the nightly runs.
- */
-export const AFTER_SYNC_BATCH = 50;
-
-/** Failures in a row that point at every call (say, a changed API) rather than one transaction. */
-const MAX_FAILURES_IN_A_ROW = 3;
-
-type CategorizeEnv = { DB: D1Database; JEV_API_KEY?: string; DEMO?: string };
 
 /** What a run is asked to do, beyond the default of a nightly run. */
 export type PassOptions = {
@@ -64,30 +32,20 @@ export type PassOptions = {
 	maxCalls?: number;
 	/**
 	 * Start no new call once this deadline has passed (src/run-budget.ts), so a slow Jev can't use up the
-	 * rest of the run. What it didn't ask is given back to the day, and waits for the next run. The syncs'
-	 * runs and the re-ask have none.
+	 * rest of the run. What it didn't ask is given back to the day, and waits for the next run.
 	 */
 	time?: Deadline;
 };
 
 /**
- * Merchant rules, then Jev for what they left, honoring the household's saved AI switches (spec
- * §8.6, decision 73), so the nightly runs and a run after a sync agree: with categories and income
- * both off Jev isn't asked at all, with categories off its category and its transfer and
- * reimbursement flags are dropped, and with income off its income answer is. The switches can be
- * saved while a run is going, so they are read before each call, and the save checks that the switches
- * the call was asked under are still on: an answer that comes back after one of them went off is thrown
- * away, and its transaction waits for the next run. A run started by a sync stops sending once "sort as
- * they arrive" is off, and keeps the answer already on its way.
- *
- * Every call counts against the household's day (decisions 56, 68 and 79). The run reserves the calls
- * it wants in one step before it starts, gives back what it didn't use when it ends (db/jev-calls.ts),
- * and stops when the household's date changes under it, so nothing after midnight is charged to the
- * day before. One run asks about at most `MAX_CALLS_PER_RUN`, and the one after a sync about at most
- * `AFTER_SYNC_BATCH`, so it stays inside D1's query limit; what's left waits for the next run.
+ * Merchant rules, then Jev for what they leave, honoring the household's saved AI switches (spec §8.6,
+ * decision 73). The sorting groups run here, in this process: each step simply runs (sortGroups), and the
+ * groups keep the rules of decision 139 (the switches read once a group and checked by its save, one group
+ * at a time through the sorting turn, every answer saved in one batch or none). Every call counts against the
+ * household's day (decisions 56, 68 and 79), and the run stops when the household's date changes under it.
  */
 export async function categorizePending(
-	env: CategorizeEnv,
+	env: SortEnv,
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
 	{
 		rulesApplied = false,
@@ -97,210 +55,42 @@ export async function categorizePending(
 		time,
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {
-	const done = { asked: 0, applied: 0 };
-	if (!env.JEV_API_KEY || onlyIds?.length === 0) return done;
-
-	// Merchant rules are the household's own, so they apply whatever the AI switches say.
-	if (!rulesApplied) await applyMerchantRules(env.DB);
-
-	const start = await readAiSwitches(env.DB);
-	if (!asksJev(start) || (bySync && !start.sortOnArrival)) return done;
-
-	const { results: categories } = await env.DB.prepare(
-		"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
-	).all<{ id: number; name: string }>();
-	// Sent even when only income is on: the one call asks everything together (spec §7), and a row is
-	// marked as asked by the category confidence the answer carries (decision 27). With no active category,
-	// the run still goes on while any of the three switches is on, because pendingForJev picks only what
-	// those switches can answer: a credit's income answer (income on) or an outgoing purchase's transfer
-	// answer (categories on) marks it asked instead. A credit whose category Jev already answered is still asked for its
-	// income while income is on, and its income confidence marks that answer (decision 79).
-	const names = categories.map((c) => c.name);
-	let people = start.details
-		? await env.DB.prepare(
-				"SELECT id, name FROM household_people ORDER BY id",
-			).all<{ id: number; name: string }>()
-		: { results: [] as { id: number; name: string }[] };
-	let peopleLoaded = start.details;
-
-	// The household's zone is read once; each call then works out the date from it, with no query.
-	const timeZone = await householdTimeZone(env.DB);
-	const day = todayIn(timeZone);
-	const cap = jevCallLimit(env);
-	// The run asks about no more than the query limit allows, and reserves no more than that.
-	const waiting = await pendingForJev(env.DB, Math.min(cap, maxCalls), {
-		categories: start.categories,
-		categoryAsked: categories.length > 0,
-		income: start.income,
-		details: start.details,
-		ids: onlyIds,
+	const done = await sortGroups(env, inProcess, fetchImpl, {
+		rulesApplied,
+		onlyIds,
+		bySync,
+		maxCalls,
+		time,
+		runId: crypto.randomUUID(),
 	});
-	if (waiting.length === 0 || pastDeadline(time)) return done;
-	// The day's cap is shared with every other run: take what's wanted and left in one step.
-	const granted = await reserveJevCalls(env.DB, day, cap, waiting.length);
-	if (granted === 0) return done;
-
-	let failuresInARow = 0;
-	const detailsAnswers: {
-		id: number;
-		kind: string | null;
-		forPersonId: number | null;
-		noteWorthWriting: number | null;
-	}[] = [];
-	try {
-		const histories = start.categories
-			? await merchantCategoryHistoryForJev(env.DB, waiting)
-			: new Map<string, string[][]>();
-		for (const tx of waiting.slice(0, granted)) {
-			// Past the household's midnight the calls belong to the next day, which this run didn't reserve.
-			if (todayIn(timeZone) !== day) return done;
-			// Out of time: the calls not asked are given back below, and the next run asks about them.
-			if (pastDeadline(time)) {
-				console.log("jev: stopped at the time budget");
-				return done;
-			}
-			// Someone may have turned a switch off since the last call, so the switches are read before each one.
-			// That is one D1 statement a call, with the answer's save (two) inside the 1,000 a run may make.
-			const before = await readAiSwitches(env.DB);
-			if (!asksJev(before) || (bySync && !before.sortOnArrival)) return done;
-			// A credit a person reviewed, or an excluded payment that pays a bill, is asked about only for its category.
-			if (tx.categoryOnly && !before.categories && !before.details) continue;
-			if (before.details && !peopleLoaded) {
-				people = await env.DB.prepare(
-					"SELECT id, name FROM household_people ORDER BY id",
-				).all<{ id: number; name: string }>();
-				peopleLoaded = true;
-			}
-			const detailRequested = before.details && !tx.detailsAsked;
-			done.asked += 1;
-			const result = await askJev(
-				{
-					...tx,
-					merchantCategoryHistory: before.categories
-						? histories.get(tx.merchantKey)
-						: undefined,
-				},
-				names,
-				env.JEV_API_KEY,
-				fetchImpl,
-				{
-					details: detailRequested,
-					people: detailRequested ? people.results : undefined,
-				},
-			);
-			if (!result.ok) {
-				// Status and request id only: never the key or anything about the transaction.
-				console.error(
-					`jev: ${result.status ?? "no response"} ${result.requestId ?? ""}`.trim(),
-				);
-				// Jev down, rate-limited, or a bad key would fail every call: stop, and retry next night.
-				// Anything else is about this one transaction: skip it (it stays pending) and carry on,
-				// unless it keeps happening, which means it isn't about one transaction after all.
-				if (serviceWide(result.status)) return done;
-				// Asked last from now on, so it can't hold up the others.
-				await markJevFailed(env.DB, tx.id);
-				failuresInARow += 1;
-				if (failuresInARow >= MAX_FAILURES_IN_A_ROW) return done;
-				continue;
-			}
-			failuresInARow = 0;
-			// The answer is saved only while the switches it was asked under are still on (saveJevResult checks).
-			if (
-				(before.categories || before.income) &&
-				(!tx.categoryOnly || before.categories)
-			) {
-				const decision = decide(result.answer, categories, JEV_THRESHOLD, {
-					categories: before.categories,
-				});
-				// The log row for what this answer applies (spec §8.6) is saved in the same batch, dated with the
-				// household's day when the answer is saved: work finished after midnight counts in the day it was
-				// applied. Only a transaction that had no Jev category or income before the run is counted, and the
-				// log checks the answer is still in place.
-				const written = await saveJevResult(env.DB, tx.id, decision, {
-					categoryOnly: tx.categoryOnly,
-					categoryAsked: categories.length > 0,
-					switches: { income: before.income, categories: before.categories },
-					log: {
-						day: todayIn(timeZone),
-						category:
-							decision.categoryId !== null && tx.categorySource === null,
-						income: tx.incomeSource !== "jev",
-					},
-				});
-				if (written && decision.categoryId !== null) done.applied += 1;
-			}
-			if (detailRequested) {
-				const kind = result.answer.kind;
-				const kindValue =
-					kind &&
-					kind.confidence >= JEV_THRESHOLD &&
-					kind.label !== "None of these"
-						? kind.label
-						: null;
-				const person = result.answer.forPerson;
-				const personValue =
-					person &&
-					person.confidence >= JEV_THRESHOLD &&
-					person.label.startsWith("person:")
-						? Number(person.label.slice("person:".length)) || null
-						: null;
-				// Jev's yes is kept only when it's likely (the same threshold as the other answers); a missing or unclear answer is a no (decision 103).
-				const worth = result.answer.noteWorthWriting;
-				detailsAnswers.push({
-					id: tx.id,
-					kind: kindValue,
-					forPersonId: personValue,
-					noteWorthWriting:
-						worth !== undefined && worth >= JEV_THRESHOLD ? 1 : 0,
-				});
-			}
-		}
-	} finally {
-		try {
-			if ((await readAiSwitches(env.DB)).details)
-				await saveJevDetails(env.DB, detailsAnswers);
-		} catch {
-			console.error("jev: couldn't save transaction details");
-		}
-		// What was reserved and not asked goes back to the day it came from. Should this fail, or the run
-		// be cut off before it gets here, those calls are only lost for the day, never over-spent.
-		try {
-			await giveBackJevCalls(env.DB, day, granted - done.asked);
-		} catch {
-			console.error("jev: couldn't give back unused calls");
-		}
-	}
-
-	console.log(`jev: asked ${done.asked}, applied ${done.applied}`);
+	if (done.asked > 0)
+		console.log(`jev: asked ${done.asked}, applied ${done.applied}`);
 	return done;
 }
 
+/** The step runner in-process: a step just runs, since nothing retries it here. */
+const inProcess: StepRunner = (_name, _config, fn) => fn({ attempt: 1 });
+
+type CategorizeEnv = SortEnv & { SORT: Env["SORT"] };
+
 /**
  * A person added a clearer name or a note to a transaction that still needs a category (spec §7,
- * decision 79): ask Jev about it again, right away. Its stored confidence, which means "Jev looked and
- * wasn't sure" (decision 27), would keep it from being asked, so that mark is cleared first; should the
- * call then not happen (Jev down, the day's cap used, the switches off), the transaction is simply
- * asked about at night. A merchant rule is applied first, as in every run: if one matches, its
- * category is used and Jev isn't asked.
- *
- * It runs after the page has answered, in `waitUntil`, so a save never waits for it, and it never
- * fails the save: any failure is logged by its name alone. It honors the same switches and the same
- * daily cap as every other run, but not the sync-only "sort as they arrive" switch.
+ * decision 79), or unticked a suggested category: ask Jev about it again, right away, as a sorting instance of its
+ * own. Its stored confidence, which means "Jev looked and wasn't sure" (decision 27), would keep it from being
+ * asked, so that mark is cleared first (askAgainMany). It never fails the save: any failure is logged by its name.
+ * As before, it ignores the sync-only "sort as they arrive" switch, and honors the others.
  */
-export async function askAgain(
-	env: CategorizeEnv,
-	id: number,
-	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
-): Promise<void> {
-	return askAgainMany(env, [id], 1, fetchImpl);
+export async function askAgain(env: CategorizeEnv, id: number): Promise<void> {
+	return askAgainMany(env, [id]);
 }
 
-/** Clear every left-out answer, then re-ask a bounded newest-first batch; the rest wait for night. */
+/**
+ * Clears the left-out marks of these rows, then starts one sorting instance with all of them (no cap). The instance
+ * applies merchant rules first, as every run does.
+ */
 export async function askAgainMany(
 	env: CategorizeEnv,
 	ids: number[],
-	maxCalls = AFTER_SYNC_BATCH,
-	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
 ): Promise<void> {
 	if (!env.JEV_API_KEY || !ids.length) return;
 	try {
@@ -310,8 +100,7 @@ export async function askAgainMany(
 		)
 			.bind(JSON.stringify(ids))
 			.run();
-		// Merchant rules come first (spec §7); categorizePending reserves against the household's daily cap.
-		await categorizePending(env, fetchImpl, { onlyIds: ids, maxCalls });
+		await startSorting(env, { ids, bySync: false, rulesApplied: false });
 	} catch (error) {
 		console.error(
 			`ask again failed ${error instanceof Error ? error.name : "unknown"}`,
@@ -334,7 +123,7 @@ export async function askAgainLeftOut(
 	// waitUntil starts a promise at once; yield this turn so the page can answer first.
 	waitUntil(
 		new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
-			askAgainMany(env, ids, AFTER_SYNC_BATCH),
+			askAgainMany(env, ids),
 		),
 	);
 }
@@ -344,15 +133,4 @@ export function leftOutSentence(count: number): string {
 	return count
 		? `The ${count} you left out ${count === 1 ? "goes" : "go"} back to Tally to sort again.`
 		: "";
-}
-
-/** Failures that would hit every call, not just this transaction's. */
-function serviceWide(status: number | null): boolean {
-	return (
-		status === null ||
-		status === 401 ||
-		status === 403 ||
-		status === 429 ||
-		status >= 500
-	);
 }

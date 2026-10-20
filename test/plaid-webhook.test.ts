@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import { app } from "../src/index";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { recordSorting } from "./record-sorting";
+
+recordSorting({ sort: true });
 
 const KEY = btoa("01234567890123456789012345678901");
 const encoder = new TextEncoder();

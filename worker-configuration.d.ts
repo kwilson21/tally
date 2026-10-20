@@ -6,6 +6,7 @@ interface __BaseEnv_Env {
 	ASSETS: Fetcher;
 	DEMO: "true";
 	FEEDBACK_GITHUB_TOKEN?: string;
+	SORT: Workflow<Parameters<import("./src/index").SortWorkflow['run']>[0]['payload']>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

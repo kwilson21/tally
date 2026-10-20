@@ -4,7 +4,6 @@ import type { Decision } from "../src/ai/decide";
 import { summarizeMonth } from "../src/budget";
 import {
 	categorizePending,
-	jevCallLimit,
 	MAX_CALLS_PER_RUN,
 } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
@@ -24,6 +23,7 @@ import {
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { jevCallLimit } from "../src/sort-groups";
 
 const db = env.DB;
 const TODAY = "2026-09-22";
@@ -679,7 +679,7 @@ describe("categorizePending", () => {
 		expect(on.sent?.state.merchant_category_history).toEqual([["Groceries"]]);
 	});
 
-	it("omits history when category guessing is turned off between calls", async () => {
+	it("keeps the history for every call of the group under way, since the switches are read once a group", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await switchTo({ categories: true, income: true });
 		await db.batch([
@@ -719,7 +719,7 @@ describe("categorizePending", () => {
 			},
 			{ rulesApplied: true, onlyIds: targets.map(({ id }) => id) },
 		);
-		expect(histories).toEqual([[["Groceries"]], undefined]);
+		expect(histories).toEqual([[["Groceries"]], [["Groceries"]]]);
 	});
 
 	it("returns five chosen category names newest first, using id to break date ties", async () => {
@@ -2112,7 +2112,7 @@ describe("categorizePending", () => {
 			expect(await callsUsed()).toBe(0);
 		});
 
-		it("loses the unused part for the day, and still ends well, when giving it back fails", async () => {
+		it("rolls the group's save back when giving the unused calls back fails, and the calls stay counted for the day", async () => {
 			const errors = quiet();
 			await db
 				.prepare(
@@ -2124,8 +2124,8 @@ describe("categorizePending", () => {
 				const jev = fakeJev(() => new Response("{}", { status: 503 }));
 				await expect(
 					categorizePending(withKey, jev.fetchImpl),
-				).resolves.toEqual({ asked: 1, applied: 0 });
-				// Lost, never over-spent: all twelve stay counted.
+				).rejects.toThrow();
+				// The save is one batch, so nothing in it landed; the reserved calls stay counted: never over-spent.
 				expect(await callsUsed()).toBe(10);
 				expect(JSON.stringify(errors.mock.calls)).not.toContain("nope");
 			} finally {
@@ -2382,7 +2382,7 @@ describe("categorizePending", () => {
 			expect(await callsUsed()).toBe(0);
 		});
 
-		it("stops sending once the switch is turned off mid-run, keeping what it saved", async () => {
+		it("finishes the group under way once the switch is turned off mid-run, and applies none of it", async () => {
 			quiet();
 			const jev = jevWith(async (call) => {
 				if (call === 2) await switchTo({ sortOnArrival: false });
@@ -2392,15 +2392,14 @@ describe("categorizePending", () => {
 				jev.fetchImpl,
 				await bySync(),
 			);
-			// The second call was on its way when it went off, so its answer is kept; no third goes out.
-			expect(jev.calls()).toBe(2);
-			expect(result).toEqual({ asked: 2, applied: 2 });
-			expect(await needsCategoryCount(db, MONTH)).toBe(8);
-			// And the ten it didn't ask about are free for the night.
-			expect(await callsUsed()).toBe(2);
+			// The group under way was read with the switch on, so all ten are asked; its save applies none of them.
+			expect(jev.calls()).toBe(10);
+			expect(result).toEqual({ asked: 10, applied: 0 });
+			expect(await needsCategoryCount(db, MONTH)).toBe(10);
+			expect(await callsUsed()).toBe(10);
 		});
 
-		it("sends no call after the switch is turned off while an answer is being saved, and gives back the rest", async () => {
+		it("keeps its group's answers when the switch goes off while they are saved, and starts nothing after", async () => {
 			quiet();
 			const jev = fakeJev(() => reply(0.95));
 			const result = await categorizePending(
@@ -2411,10 +2410,10 @@ describe("categorizePending", () => {
 				jev.fetchImpl,
 				await bySync(),
 			);
-			expect(jev.calls()).toBe(1);
-			expect(result.asked).toBe(1);
-			// The nine reserved calls it didn't use are given back to the day, leaving the one it made.
-			expect(await callsUsed()).toBe(1);
+			// The group was saved in one batch before the switch went off, so all ten answers are kept.
+			expect(jev.calls()).toBe(10);
+			expect(result).toEqual({ asked: 10, applied: 10 });
+			expect(await callsUsed()).toBe(10);
 		});
 
 		it("is not what stops the nightly run, which has no such switch", async () => {
@@ -2427,13 +2426,20 @@ describe("categorizePending", () => {
 			expect(result.asked).toBe(10);
 		});
 
-		it("still stops for the switches every run honors", async () => {
+		it("asks the group under way, and applies none of it, once the Jev switches are off", async () => {
 			quiet();
 			const jev = jevWith(async (call) => {
 				if (call === 1) await switchTo({ categories: false, income: false });
 			});
-			await categorizePending(withKey, jev.fetchImpl, await bySync());
-			expect(jev.calls()).toBe(1);
+			const waiting = await needsCategoryCount(db, MONTH);
+			const result = await categorizePending(
+				withKey,
+				jev.fetchImpl,
+				await bySync(),
+			);
+			expect(jev.calls()).toBe(10);
+			expect(result.applied).toBe(0);
+			expect(await needsCategoryCount(db, MONTH)).toBe(waiting);
 		});
 	});
 
@@ -2844,7 +2850,7 @@ describe("the AI switches", () => {
 			};
 		}
 
-		it("stops sending once both Jev switches are off, and saves nothing from the answer on its way back", async () => {
+		it("finishes the group under way once both Jev switches are off, and saves nothing from it", async () => {
 			const before = await snapshot();
 			const jev = jevWith(
 				async (call) => {
@@ -2854,13 +2860,13 @@ describe("the AI switches", () => {
 				() => reply(0.95),
 			);
 			const result = await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(1);
+			expect(jev.calls()).toBe(10);
 			expect(result.applied).toBe(0);
 			expect(await snapshot()).toEqual(before);
 			expect(await needsCategoryCount(db, MONTH)).toBe(10);
 		});
 
-		it("sends no call after the switches are turned off while an answer is being saved", async () => {
+		it("keeps the group's answers when the switches go off while they are saved, and starts nothing after", async () => {
 			const jev = fakeJev(() => reply(0.95));
 			const result = await categorizePending(
 				{
@@ -2872,13 +2878,13 @@ describe("the AI switches", () => {
 				},
 				jev.fetchImpl,
 			);
-			// The first answer was saved under the switches it was asked under; the next call is never sent.
-			expect(jev.calls()).toBe(1);
-			expect(result).toEqual({ asked: 1, applied: 1 });
-			expect(await needsCategoryCount(db, MONTH)).toBe(9);
+			// The group was saved in one batch under the switches it was read with, before they went off.
+			expect(jev.calls()).toBe(10);
+			expect(result).toEqual({ asked: 10, applied: 10 });
+			expect(await needsCategoryCount(db, MONTH)).toBe(0);
 		});
 
-		it("keeps what it saved before they went off, and sends nothing after", async () => {
+		it("finishes the group under way, and applies none of it once the switches are off", async () => {
 			const jev = jevWith(
 				async (call) => {
 					if (call === 2)
@@ -2887,13 +2893,13 @@ describe("the AI switches", () => {
 				() => reply(0.95),
 			);
 			const result = await categorizePending(withKey, jev.fetchImpl);
-			// The first answer was saved; the second arrived with the switches off, and no third went out.
-			expect(jev.calls()).toBe(2);
-			expect(result.applied).toBe(1);
-			expect(await needsCategoryCount(db, MONTH)).toBe(9);
+			// The group under way was read with the switches on: all ten are asked, and its save applies none of them.
+			expect(jev.calls()).toBe(10);
+			expect(result.applied).toBe(0);
+			expect(await needsCategoryCount(db, MONTH)).toBe(10);
 		});
 
-		it("throws away an answer that arrives after categories went off, and carries on for income", async () => {
+		it("throws away the group's answers once categories went off, since they were asked under categories", async () => {
 			const asked = (await pendingForJev(db, 40)).map((t) => t.id);
 			const jev = jevWith(
 				async (call) => {
@@ -2910,10 +2916,9 @@ describe("the AI switches", () => {
 					)
 					.all()
 			).results;
-			// Only the first answer, which arrived while categories were on, was applied. The second was asked
-			// under categories, so it was thrown away whole: its row is still unsorted.
-			expect(rows.filter((r) => r.category_id !== null)).toHaveLength(1);
-			expect(rows.filter((r) => r.jev_category_id !== null)).toHaveLength(1);
+			// The group was asked under categories, so once they went off its save applies none of its answers.
+			expect(rows.filter((r) => r.category_id !== null)).toHaveLength(0);
+			expect(rows.filter((r) => r.jev_category_id !== null)).toHaveLength(0);
 			expect(
 				await db
 					.prepare("SELECT category_confidence FROM transactions WHERE id = ?")
@@ -3010,7 +3015,7 @@ describe("the AI switches", () => {
 			});
 		});
 
-		it("skips a credit a person reviewed once categories are off, since only its category could be asked", async () => {
+		it("asks the group under way, both credits included, once categories are off", async () => {
 			await db.batch([
 				db.prepare(
 					"UPDATE transactions SET category_confidence = 0.5 WHERE id NOT IN (1, 2)",
@@ -3030,7 +3035,7 @@ describe("the AI switches", () => {
 				() => reply(0.97),
 			);
 			await categorizePending(withKey, jev.fetchImpl);
-			expect(jev.calls()).toBe(1);
+			expect(jev.calls()).toBe(2);
 		});
 	});
 });

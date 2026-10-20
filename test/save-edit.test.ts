@@ -7,7 +7,7 @@ import {
 	listTransactions,
 	needsCategoryCount,
 	saveEdit,
-	saveJevDetails,
+	saveJevDetailsStatement,
 	saveJevResult,
 } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -402,7 +402,7 @@ describe("saveEdit", () => {
 				.first(),
 		).toEqual({ kind_cleared: 1, for_person_cleared: 1 });
 
-		await saveJevDetails(db, [
+		await saveJevDetailsStatement(db, [
 			{ id, kind: "subscription", forPersonId: 1, noteWorthWriting: null },
 			{
 				id: untouched,
@@ -410,7 +410,7 @@ describe("saveEdit", () => {
 				forPersonId: 1,
 				noteWorthWriting: null,
 			},
-		]);
+		])?.run();
 		const details =
 			"SELECT kind, kind_guessed, for_person_id, for_person_guessed FROM transactions WHERE id = ?";
 		expect(await db.prepare(details).bind(id).first()).toEqual({
