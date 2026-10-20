@@ -196,6 +196,9 @@ export function HomeSetup({
 					{statusOf(view, Boolean(bankLine))}
 				</p>
 			)}
+			{phase === "reading" && !view.emailed && (
+				<p class="mt-2 text-muted">Tally will email you when they're ready.</p>
+			)}
 			{bankLine && <BankBehind words={bankLine} />}
 			{phase === "reading" && yourBanks && (
 				<YourBanks

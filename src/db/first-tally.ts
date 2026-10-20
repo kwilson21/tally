@@ -77,6 +77,12 @@ export type FirstTally = {
 	 */
 	reAsk?: { bank: string };
 	/**
+	 * The addresses the ready email (decision 134) has reached or is sending to. An address is added before its email goes
+	 * and taken off again if neither provider delivers, so each person gets it once (src/first-tally/ready-email.tsx).
+	 * Absent until one is added.
+	 */
+	readyEmailedTo?: string[];
+	/**
 	 * The savings question's answer (decision 135, #721): the goal's cents the household kept, or "skipped" for Not now. Set
 	 * once, when the question is answered or when stroke four is drawn with a goal above $0 (savingsCopyStatement); a
 	 * take-back keeps it, as it keeps the budgets. Absent until then.

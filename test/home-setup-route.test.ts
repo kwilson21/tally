@@ -205,6 +205,23 @@ describe("Home during setup", () => {
 		expect(html).not.toContain("Link a bank");
 	});
 
+	it("says Tally will email you when they're ready while the import is read, until the ready email has reached someone", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		await writeRecord({ strokes: { bank: today }, budgets: {} });
+		expect(await page(family)).toContain(
+			"Tally will email you when they're ready.",
+		);
+		await writeRecord({
+			strokes: { bank: today },
+			budgets: {},
+			readyEmailedTo: ["dana@example.com"],
+		});
+		expect(await page(family)).not.toContain(
+			"Tally will email you when they're ready.",
+		);
+	});
+
 	it("with two connected banks, reads the import and names neither", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		await writeRecord({

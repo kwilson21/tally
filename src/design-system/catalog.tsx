@@ -683,7 +683,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got, from 2 banks when more than one is connected. Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once the questions are open, the Band says Three things to check."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got, from 2 banks when more than one is connected. Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Until the ready email has reached someone, a muted line under the status says Tally will email you when they're ready (decision 134). Once the questions are open, the Band says Three things to check."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
@@ -922,6 +922,7 @@ const firstWeek = (
 		drawn: strokesDrawn(record),
 		fifth: null,
 		answeredWaiting: null,
+		emailed: false,
 		bankName: null,
 		bankCount: 1,
 		historyIn: true,

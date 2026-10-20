@@ -6,6 +6,7 @@ import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
 import { recordNightSync, utcDay } from "./first-tally/night";
+import { runReadyEmail } from "./first-tally/ready-email";
 import type { PlaidEnv } from "./plaid/client";
 import { syncAllItems } from "./plaid/sync-all";
 import { runReconnectReminders } from "./reconnect/reminders";
@@ -80,7 +81,7 @@ app.onError(serverErrorPage);
  *   starts the night's Workflow and retries feedback. The Workflow (src/sort-instance.ts) sorts everything waiting in
  *   groups of 25, then makes the night's notes and names, then new-category suggestions, then keeps the first night's
  *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
- * - 10:00, reconnect reminders (`runReconnectReminders`).
+ * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`).
  *
  * The demo has the one 09:00 run: it resets, then starts the same Workflow (with no counts) and retries feedback.
  *
@@ -112,7 +113,9 @@ export async function runScheduled(
 	const night = utcDay(clockNow(time));
 	// The first night's sync (#586), kept for the night's Workflow to decide. Production only: the demo has no banks.
 	if (env.DEMO === "false") {
-		await nightStep("sync", () => recordNightSync(env.DB, synced, night));
+		await runStep("first night: sync step", () =>
+			recordNightSync(env.DB, synced, night),
+		);
 	}
 	// The night's Workflow (decision 139): it sorts everything waiting, then makes the night's names and new-category
 	// suggestions, then (production only) keeps the first night's counts for `night`, the day the sync was kept for.
@@ -132,15 +135,15 @@ type RunClock = {
 const clockNow = (time?: RunClock) => (time?.now ?? Date.now)();
 
 /**
- * One of the night's steps (#586). A failure is logged by name and the run goes on, so the night's counts never stop a
- * run's own work.
+ * One of a run's steps. A failure is logged by name and the run goes on, so one step never stops the next: the 09:00 run's
+ * sync result, and the 10:00 run's reconnect reminders and ready email.
  */
-async function nightStep(name: string, step: () => Promise<void>) {
+async function runStep(label: string, step: () => Promise<void>) {
 	try {
 		await step();
 	} catch (error) {
 		console.error(
-			`first night: ${name} step failed ${error instanceof Error ? error.name : "unknown"}`,
+			`${label} failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
 }
@@ -230,8 +233,9 @@ app.route("/", webhooks);
 export default {
 	fetch: app.fetch,
 	async scheduled(controller, env) {
-		if (controller.cron === RECONNECT_EMAIL_CRON)
-			await runReconnectReminders(env);
-		else await runScheduled(env);
+		if (controller.cron === RECONNECT_EMAIL_CRON) {
+			await runStep("reconnect reminders", () => runReconnectReminders(env));
+			await runStep("ready email", () => runReadyEmail(env));
+		} else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
