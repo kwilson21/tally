@@ -14,8 +14,8 @@ A family budgeting app on Cloudflare Workers, with a public demo at tally-demo.t
 - Server owns all state. Hono JSX + HTMX. No client-side framework. Only custom JS: Plaid Link, the toast listener, the money input's money.js (decision 39), the catalog-only ds.js (decision 44), the feedback form's feedback-privacy.js and feedback-diagnostics.js (decision 61), and keyboard.js and the sheet script sheet.js (decision 109).
 - Money is integer cents. Never floats. Format to dollars only for display.
 - Plaid sign convention: positive = money out. Dates are Plaid's YYYY-MM-DD strings, never converted; only "today" uses the household's time zone (decision 67).
-- AI suggests, code calculates, people decide. Jev only via src/ai/categorize.ts; Workers AI only via src/ai/suggest-name.ts (and the never-deployed scripts/compare-models/ Worker that measures Clef against Jev, decision 136).
-- Call Plaid and Jev with plain fetch; no SDKs. One Jev call per transaction (category + all flags together).
+- AI suggests, code calculates, people decide. Jev only via src/ai/categorize.ts; Workers AI only via src/ai/suggest-name.ts (names) and src/ai/read-receipt.ts (Clairic and toMarkdown, decision 137), and the never-deployed scripts/compare-models/ Worker that measures Clef against Jev (decision 136).
+- Call Plaid and Jev with plain fetch; no SDKs. One Jev call per transaction (category + all flags together), and one per receipt for its items' categories (decision 137).
 - Identity: read the user from the verified Cloudflare Access JWT (Cf-Access-Jwt-Assertion), never the plain Cf-Access-Authenticated-User-Email header.
 - The demo environment never gets Plaid secrets or production bindings.
 - Secrets only via `wrangler secret put` (owner runs it). Never commit .dev.vars. Never log tokens or transaction details.
