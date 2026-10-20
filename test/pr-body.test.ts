@@ -6,6 +6,7 @@ import {
 	PAGES,
 	pixelsAlike,
 	screenshotSection,
+	shownFiles,
 	withScreenshots,
 } from "../scripts/pr-body.mjs";
 import { SIDEBAR_ITEMS } from "../src/views/nav";
@@ -155,6 +156,87 @@ describe("changedShots", () => {
 				before: [{ file: "home-phone.png", png: fromBase64(ALPHA) }],
 			}),
 		).toEqual([{ before: ["home-phone.png"], after: ["home-phone.png"] }]);
+	});
+});
+
+describe("shownFiles", () => {
+	it("is empty when no page changed", () => {
+		expect(shownFiles([])).toEqual({ after: [], before: [] });
+	});
+
+	it("keeps the after images of every row and the before images of the changed pages", () => {
+		expect(
+			shownFiles([
+				{ before: ["settings-phone.png"], after: ["settings-phone.png"] },
+				{ before: [], after: ["feedback-desktop.png"] },
+			]),
+		).toEqual({
+			after: ["settings-phone.png", "feedback-desktop.png"],
+			before: ["settings-phone.png"],
+		});
+	});
+
+	it("keeps every part of a page taken differently, and its one before file", () => {
+		expect(
+			shownFiles([
+				{
+					before: ["design-system-proposals-phone.png"],
+					after: [
+						"design-system-proposals-phone-01.png",
+						"design-system-proposals-phone-02.png",
+					],
+				},
+			]),
+		).toEqual({
+			after: [
+				"design-system-proposals-phone-01.png",
+				"design-system-proposals-phone-02.png",
+			],
+			before: ["design-system-proposals-phone.png"],
+		});
+	});
+
+	it("never lists a file twice, even when two rows give the same one", () => {
+		expect(
+			shownFiles([
+				{ before: ["settings-phone.png"], after: ["settings-phone.png"] },
+				{ before: ["settings-phone.png"], after: ["settings-phone.png"] },
+			]),
+		).toEqual({
+			after: ["settings-phone.png"],
+			before: ["settings-phone.png"],
+		});
+	});
+
+	it("stores exactly the images the description links", () => {
+		const raw = "https://raw.example/pr-9/abc1234";
+		const changes = [
+			{ before: ["settings-phone.png"], after: ["settings-phone.png"] },
+			{ before: [], after: ["feedback-desktop.png"] },
+			{
+				before: ["design-system-proposals-phone.png"],
+				after: [
+					"design-system-proposals-phone-01.png",
+					"design-system-proposals-phone-02.png",
+				],
+			},
+		];
+		const section = screenshotSection({
+			sha: "abc1234def",
+			raw,
+			changes,
+		});
+		const linked = [...section.matchAll(/src="([^"]+)"/g)]
+			.map((match) => match[1])
+			.sort();
+		const shown = shownFiles(changes);
+		const stored = [
+			...shown.after,
+			...shown.before.map((file) => `before/${file}`),
+		]
+			.map((path) => `${raw}/${path}`)
+			.sort();
+		expect(linked).toEqual(stored);
 	});
 });
 
