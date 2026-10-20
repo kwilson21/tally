@@ -2,8 +2,9 @@
 // holding the household's turn and when the turn ends. One group sorts at a time, so two runs never ask Jev
 // about the same transaction. A group takes the turn when it reads, every statement of its save checks it, and
 // the save gives it back. The turn's until is 15 minutes after it was taken, and a turn with no until can't block
-// forever. A save that failed and is tried again takes the turn back in its own batch, but only while its group's
-// reservation record exists (decision 142), so a save that already went through takes nothing.
+// forever. A save that failed is tried again, about once a minute for up to a day, and takes the turn back in its
+// own batch while its group's reservation record exists (decision 143). A save that already went through finds no
+// record, so it takes nothing.
 
 export const SORTING_TURN_MS = 15 * 60_000;
 
@@ -56,7 +57,7 @@ export async function takeSortingTurn(
 /**
  * The statement a save puts first in its batch: it takes the turn back as `takeSortingTurn` does, but only while the
  * group's reservation record (`reservedKey`) exists. Without the record the save has already gone through (or never
- * reserved anything), so it takes nothing, and the turn is left to whoever holds it (decision 142).
+ * reserved anything), so it takes nothing, and the turn is left to whoever holds it (decision 143).
  */
 export const takeSortingTurnStatement = (
 	db: D1Database,

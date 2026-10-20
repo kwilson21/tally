@@ -2060,7 +2060,7 @@ describe("categorizePending", () => {
 				.run();
 			try {
 				const jev = fakeJev(() => new Response("{}", { status: 503 }));
-				// The save fails and so does its save again: the run ends and logs the error's name alone.
+				// The save fails (in-process, a step runs once): the run ends and logs the error's name alone.
 				await categorizePending(withKey, jev.fetchImpl);
 				expect(JSON.stringify(errors.mock.calls)).toContain(
 					"sorting: save step Error",

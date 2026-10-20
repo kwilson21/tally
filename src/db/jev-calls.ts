@@ -4,7 +4,7 @@
 // `jev_calls_<date>`; the date is the household's own (decision 67), so a new day starts at zero.
 //
 // A sorting group takes the calls it wants in one step before it starts (`reserveJevCalls`) and keeps its grant
-// under its own name, `jev_reserved_<date>_<turn>`, in the same batch (decision 142). A reserve step that runs again
+// under its own name, `jev_reserved_<date>_<turn>`, in the same batch (decision 143). A reserve step that runs again
 // gets that grant back; its save gives back what it didn't ask and removes the record. A call costs no query of its
 // own: D1 allows 1,000 queries in one invocation, and a night's 500 calls must fit in them. A run cut off before it
 // gives back loses the unused part for that day, which only ever leaves the day with fewer calls, never more.
@@ -14,7 +14,7 @@ import { withTurnGuard } from "./sorting-turn";
 
 const keyFor = (day: string) => `jev_calls_${day}`;
 
-/** The key of the record of the calls one sorting group reserved for a day (decision 142). */
+/** The key of the record of the calls one sorting group reserved for a day (decision 143). */
 export const reservedKeyFor = (day: string, turnId: string) =>
 	`jev_reserved_${day}_${turnId}`;
 
@@ -87,7 +87,7 @@ export function giveBackJevCallsStatement(
 }
 
 /**
- * A sorting save gives back what its group reserved less what it asked (decision 142). The group's record holds its
+ * A sorting save gives back what its group reserved less what it asked (decision 143). The group's record holds its
  * grant, which a reserve step that ran after its batch committed left there; `planned` is the grant the plan says, used
  * when there is no record. Never below zero. It changes only while the group holds the turn, and it must run before
  * the record is dropped (dropReservedJevCallsStatement).

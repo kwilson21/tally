@@ -245,14 +245,14 @@ describe("a failing step never stops the next", () => {
 		);
 	});
 
-	it("a save that fails again after its save again logs its name only, and the night's steps still run", async () => {
+	it("a save that fails every try logs its name only, and the night's steps still run", async () => {
 		await onlyCharges(["SHOP A"]);
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const steps = await runInstance(
 			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: aiThatHears() },
 			night,
 			{
-				fails: ["group-1-write", "group-1-save-again"],
+				fails: ["group-1-write"],
 				fetchImpl: vi.fn(async () => jevAnswer()),
 			},
 		);

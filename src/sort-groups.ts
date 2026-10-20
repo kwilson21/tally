@@ -1,6 +1,7 @@
 // The sorting loop (spec §8.6, decision 139). Jev is asked about waiting transactions in groups of 25: each group
 // reads D1 once, reserves its calls in a step of its own, asks Jev about each row as a step of its own, and saves
-// every answer in one D1 batch, all or none. A save that fails is tried again with the same answers (decision 142).
+// every answer in one D1 batch, all or none. A save that fails is tried again with the same answers, about once a
+// minute for up to a day (decision 143).
 // The loop is the same in-process (categorizePending: the tests, where a step just runs) and in the Workflow
 // (runSortInstance in sort-instance.ts: each step is a saved Workflows step, so a retry skips the steps that finished).
 // Rules: a group saves only while it holds the sorting turn; a Jev call is never made twice; no clock or
@@ -161,15 +162,10 @@ const STEP_SETTINGS = {
 		timeout: "1 minute",
 		sensitive: "output",
 	},
-	// A save that fails is tried about once a minute while the group holds its 15-minute turn (decision 142).
+	// A save that fails is tried about once a minute for up to a day, taking the group's turn back each time it is free,
+	// with the answers its group kept (decision 143).
 	write: {
-		retries: { limit: 9, delay: "1 minute", backoff: "constant" },
-		timeout: "1 minute",
-		sensitive: "output",
-	},
-	// Then the same instance takes the turn back and tries every 15 minutes, for up to a day.
-	saveAgain: {
-		retries: { limit: 96, delay: "15 minutes", backoff: "constant" },
+		retries: { limit: 1440, delay: "1 minute", backoff: "constant" },
 		timeout: "1 minute",
 		sensitive: "output",
 	},
@@ -293,7 +289,7 @@ async function readGroup(
 
 /**
  * Reserves the group's calls from the day's cap, for the day its read used (decision 139). A group's grant is kept under
- * its name (decision 142): a reserve that runs again gets that grant back, and reserves nothing more.
+ * its name (decision 143): a reserve that runs again gets that grant back, and reserves nothing more.
  */
 async function reserveCalls(
 	env: SortEnv,
@@ -400,7 +396,7 @@ export async function writeGroup(
 	const saveDay = todayIn(plan.timeZone);
 	const byId = new Map(plan.rows.map((row) => [row.id, row]));
 	const reservedKey = reservedKeyFor(plan.day, turn);
-	// The turn is taken back first, while the group's record exists (decision 142): a save that already went through
+	// The turn is taken back first, while the group's record exists (decision 143): a save that already went through
 	// finds no record and takes nothing.
 	const statements: D1PreparedStatement[] = [
 		takeSortingTurnStatement(db, turn, reservedKey),
@@ -486,7 +482,7 @@ export async function writeGroup(
 		turnId: turn,
 	});
 	if (detailsStatement) statements.push(detailsStatement);
-	// What the group reserved and didn't ask goes back, then its record goes, and the turn is released last (decision 142).
+	// What the group reserved and didn't ask goes back, then its record goes, and the turn is released last (decision 143).
 	statements.push(
 		giveBackReservedJevCallsStatement(db, {
 			day: plan.day,
@@ -536,8 +532,8 @@ export async function writeGroup(
  * Sorts the waiting transactions in groups of 25 through `runStep` (see StepRunner). Merchant rules first (unless the
  * caller applied them), then for each group: read (turn taken), reserve (the calls from the day's cap), ask each row (a
  * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
- * says so, or when the calls or (in-process) the deadline run out. In-process, a throw releases the turn this run
- * still holds.
+ * says so, when a write fails for good (its tries ran out, logged by name), or when the calls or (in-process) the
+ * deadline run out. In-process, a throw releases the turn this run still holds.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -632,28 +628,18 @@ export async function sortGroups(
 				if (askingStops(results, before)) break;
 			}
 			let written: Awaited<ReturnType<typeof writeGroup>>;
-			let savedAgain = false;
 			try {
 				written = await runStep(`group-${n}-write`, STEP_SETTINGS.write, () =>
 					writeGroup(env, plan, results, before),
 				);
-			} catch {
-				// The save ran out of its retries. The same instance saves again with the same answers, which takes the
-				// turn back (decision 142), and that is this run's last save either way.
-				savedAgain = true;
-				try {
-					written = await runStep(
-						`group-${n}-save-again`,
-						STEP_SETTINGS.saveAgain,
-						() => writeGroup(env, plan, results, before),
-					);
-				} catch (error) {
-					// Its rows wait for the next run. The calls it reserved stay in its record until a later reserve clears it.
-					console.error(
-						`sorting: save step ${error instanceof Error ? error.name : "unknown"}`,
-					);
-					break;
-				}
+			} catch (error) {
+				// The save ran out of its tries (about a day). Its rows wait for the next run, and the calls it reserved stay
+				// in its record until the cleanup two days on clears it (decision 143). `held` stays set, so the in-process
+				// finally below releases the turn.
+				console.error(
+					`sorting: save step ${error instanceof Error ? error.name : "unknown"}`,
+				);
+				break;
 			}
 			// A save has returned, so the turn is no longer this run's to release. Until then `held` stays set, so the
 			// in-process finally below releases the turn if a save throws.
@@ -663,7 +649,7 @@ export async function sortGroups(
 			done.applied += written.applied;
 			for (const result of results)
 				if (result.outcome !== "out-of-time") askedIds.add(result.id);
-			if (savedAgain || written.stop || outOfTime) break;
+			if (written.stop || outOfTime) break;
 		}
 	} finally {
 		// In-process, a throw must not leave this run's turn held for the next run (the Workflow's turn expires).

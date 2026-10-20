@@ -25,7 +25,7 @@ const reply = (confidence: number) =>
 	);
 
 /** A Jev reply that answers the details questions too, as a run that asks for details needs. */
-const replyWithDetails = () =>
+const replyWithDetails = (person = "none") =>
 	new Response(
 		JSON.stringify({
 			answers: {
@@ -34,7 +34,7 @@ const replyWithDetails = () =>
 				reimbursement: { type: "noul", noul: 0.01 },
 				income: { type: "noul", noul: 0.01 },
 				kind: { type: "choice", choice: "one_off", confidence: 0.9 },
-				for_person: { type: "choice", choice: "none", confidence: 0.9 },
+				for_person: { type: "choice", choice: person, confidence: 0.9 },
 				note_worth_writing: { type: "noul", noul: 0.01 },
 			},
 		}),
@@ -113,12 +113,7 @@ const RULES = {
 	sensitive: "output",
 };
 const WRITE = {
-	retries: { limit: 9, delay: "1 minute", backoff: "constant" },
-	timeout: "1 minute",
-	sensitive: "output",
-};
-const SAVE_AGAIN = {
-	retries: { limit: 96, delay: "15 minutes", backoff: "constant" },
+	retries: { limit: 1440, delay: "1 minute", backoff: "constant" },
 	timeout: "1 minute",
 	sensitive: "output",
 };
@@ -541,7 +536,7 @@ describe("the household's day", () => {
 	});
 });
 
-/** The reservation record a group keeps for its calls (decision 142). */
+/** The reservation record a group keeps for its calls (decision 143). */
 const recordOf = async (turnId: string) =>
 	(
 		await db
@@ -586,10 +581,29 @@ const changeRow = (sql: string, ...binds: unknown[]) =>
 		.bind(...binds)
 		.run();
 
-describe("a save that fails keeps Jev's answers (decision 142)", () => {
-	it("a save that runs out of its retries is saved again with the kept answers, and Jev isn't asked again", async () => {
+describe("a save that fails keeps Jev's answers (decision 143)", () => {
+	const attemptsOf = (fake: ReturnType<typeof fakeSteps>, name: string) =>
+		fake.steps.find((step) => step.name === name)?.attempts;
+
+	/** Each row's details as a save leaves them: whether they were asked, and Jev's kind and who it's for. */
+	const detailsOf = async (ids: number[]) =>
+		(
+			await db
+				.prepare(
+					"SELECT id, details_asked AS detailsAsked, kind, for_person_id AS forPersonId FROM transactions WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
+				)
+				.bind(JSON.stringify(ids))
+				.all<{
+					id: number;
+					detailsAsked: number;
+					kind: string | null;
+					forPersonId: number | null;
+				}>()
+		).results;
+
+	it("a save that fails is tried again with the kept answers, and Jev isn't asked again", async () => {
 		const ids = await addWaiting(3);
-		const fake = fakeSteps({ fails: ["group-1-write"] });
+		const fake = fakeSteps({ throws: { "group-1-write": 2 } });
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
@@ -598,7 +612,7 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 		});
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
-		expect(fake.names()).toContain("group-1-save-again");
+		expect(attemptsOf(fake, "group-1-write")).toBe(3);
 		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
 		expect(await logged(ids)).toBe(3);
 		expect(await callsUsed()).toBe(3);
@@ -606,9 +620,48 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 		expect(await turnRow()).toBeNull();
 	});
 
-	it("the write tries about once a minute, then the save again tries every 15 minutes for up to 96 tries", async () => {
-		const ids = await addWaiting(1);
+	it("a save that fails many times, then goes through, applies the kept answers without asking Jev again", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps({ throws: { "group-1-write": 40 } });
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-many-tries",
+		});
+		expect(done).toEqual({ asked: 3, applied: 3 });
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+		expect(attemptsOf(fake, "group-1-write")).toBe(41);
+		expect(await logged(ids)).toBe(3);
+		expect(await callsUsed()).toBe(3);
+	});
+
+	it("a save that fails every try ends the run, logs the save step's name only, and leaves its rows waiting", async () => {
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		const ids = await addWaiting(3);
 		const fake = fakeSteps({ fails: ["group-1-write"] });
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-never-saved",
+		});
+		expect(attemptsOf(fake, "group-1-write")).toBe(1441);
+		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
+			"sorting: save step Error",
+		]);
+		expect(fake.names()).not.toContain("group-2-read");
+		expect(await logged(ids)).toBe(0);
+		for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+		// The save never gave the calls back, so they stay counted for the day (decision 143).
+		expect(await callsUsed()).toBe(3);
+		expect(await turnRow()).toBeNull();
+	});
+
+	it("the save is tried about once a minute for up to a day, and no second save step follows it", async () => {
+		const ids = await addWaiting(1);
+		const fake = fakeSteps();
 		await sortGroups(
 			withKey,
 			fake.runStep,
@@ -619,22 +672,26 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 				runId: "run-config",
 			},
 		);
-		const config = (name: string) =>
-			fake.steps.find((step) => step.name === name)?.config;
-		expect(config("group-1-write")).toEqual(WRITE);
-		expect(config("group-1-save-again")).toEqual(SAVE_AGAIN);
+		expect(
+			fake.steps.find((step) => step.name === "group-1-write")?.config,
+		).toEqual(WRITE);
+		expect(fake.names().some((name) => name.includes("save-again"))).toBe(
+			false,
+		);
 	});
 
 	it.each([
 		["the save", { replayAfter: ["group-1-write"] }],
 		[
-			"the save again",
-			{ fails: ["group-1-write"], replayAfter: ["group-1-save-again"] },
+			"a save that was tried again",
+			{ throws: { "group-1-write": 2 }, replayAfter: ["group-1-write"] },
 		],
 	])(
-		"replaying %s after it went through changes nothing: one log row, the unused calls given back once, the record gone",
+		"replaying %s after it went through changes nothing: one log row, the unused calls given back once, the details as the first save left them, the record gone",
 		async (_label, replay) => {
+			await saveAiSwitches(db, { details: true });
 			const ids = await addWaiting(3);
+			let afterFirstSave: Awaited<ReturnType<typeof detailsOf>> | undefined;
 			const fake = fakeSteps({
 				...replay,
 				// The second row's ask times out, so two calls are used and one is given back.
@@ -642,10 +699,18 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 					if (name === `group-1-ask-${ids[1]}`) throw new Error("timeout");
 				},
 			});
+			const runStep = (async (name, config, fn) =>
+				fake.runStep(name, config, async (ctx) => {
+					const result = await fn(ctx);
+					// Read as the first save returns, before any replay of it runs.
+					if (name === "group-1-write" && afterFirstSave === undefined)
+						afterFirstSave = await detailsOf(ids);
+					return result;
+				})) as StepRunner;
 			await sortGroups(
 				withKey,
-				fake.runStep,
-				vi.fn(async () => reply(0.9)),
+				runStep,
+				vi.fn(async () => replyWithDetails("person:1")),
 				{
 					rulesApplied: true,
 					onlyIds: ids,
@@ -656,6 +721,14 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 			expect(await callsUsed()).toBe(2);
 			expect(await recordOf("run-replay:1")).toBeNull();
 			expect(await turnRow()).toBeNull();
+			// The answered row's details were saved once: asked, Jev's kind and who it's for.
+			expect(afterFirstSave?.find((row) => row.id === ids[2])).toEqual({
+				id: ids[2],
+				detailsAsked: 1,
+				kind: "one_off",
+				forPersonId: 1,
+			});
+			expect(await detailsOf(ids)).toEqual(afterFirstSave);
 		},
 	);
 
@@ -692,12 +765,11 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 		expect(JSON.parse((await turnValue()) ?? "{}").id).toBe("other:1");
 	});
 
-	it("a save again that finds another group holding the turn waits, then takes the turn back and saves", async () => {
+	it("a save that finds another group holding the turn waits, then takes the turn back and saves", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({
-			fails: ["group-1-write"],
 			beforeAttempt: async (name, attempt) => {
-				if (name !== "group-1-save-again") return;
+				if (name !== "group-1-write") return;
 				if (attempt === 1)
 					await db
 						.prepare(
@@ -723,9 +795,7 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 				runId: "run-turn-wait",
 			},
 		);
-		expect(
-			fake.steps.find((step) => step.name === "group-1-save-again")?.attempts,
-		).toBe(2);
+		expect(attemptsOf(fake, "group-1-write")).toBe(2);
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(await logged(ids)).toBe(3);
 		expect(await turnRow()).toBeNull();
@@ -772,7 +842,7 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 		}
 	});
 
-	it("a person's category set between the read and the save again wins", async () => {
+	it("a person's category set between a failed save and its next try wins", async () => {
 		const ids = await addWaiting(3);
 		const personal = (
 			await db
@@ -782,9 +852,9 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 				.first<{ id: number }>()
 		)?.id as number;
 		const fake = fakeSteps({
-			fails: ["group-1-write"],
+			throws: { "group-1-write": 1 },
 			beforeAttempt: async (name, attempt) => {
-				if (name === "group-1-save-again" && attempt === 1)
+				if (name === "group-1-write" && attempt === 2)
 					await changeRow(
 						"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
 						personal,
@@ -807,14 +877,14 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 		expect(done.asked).toBe(3);
 	});
 
-	it("a save again on the next household day dates its log rows with that day and gives back to the read's day", async () => {
+	it("a save on the next household day dates its log rows with that day and gives back to the read's day", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
 		const ids = await addWaiting(2);
 		const fake = fakeSteps({
-			fails: ["group-1-write"],
-			beforeAttempt: async (name) => {
-				if (name === "group-1-save-again")
+			throws: { "group-1-write": 1 },
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 2)
 					vi.setSystemTime(new Date("2026-09-23T15:00:00Z"));
 			},
 		});
@@ -841,7 +911,7 @@ describe("a save that fails keeps Jev's answers (decision 142)", () => {
 	});
 });
 
-describe("a changed row keeps no answer (decision 142)", () => {
+describe("a changed row keeps no answer (decision 143)", () => {
 	const CHANGES: [string, string][] = [
 		[
 			"bank text",
@@ -868,6 +938,15 @@ describe("a changed row keeps no answer (decision 142)", () => {
 		["note", "UPDATE transactions SET note = 'A new note' WHERE id = ?"],
 		["kind", "UPDATE transactions SET kind = 'one_off' WHERE id = ?"],
 		["who it's for", "UPDATE transactions SET for_person_id = 1 WHERE id = ?"],
+		// The bank-name suggestion Jev is told when a row has no name of its own or a chosen merchant name.
+		[
+			"suggested name",
+			"INSERT INTO merchants (raw_name, suggested_name) VALUES ('SORT STEP 1', '[\"Corner shop\"]') ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name",
+		],
+		[
+			"suggestion status",
+			"INSERT INTO merchants (raw_name, suggestion_status) VALUES ('SORT STEP 1', 'pending') ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = excluded.suggestion_status",
+		],
 	];
 
 	it.each(CHANGES)(
@@ -1081,7 +1160,7 @@ describe("a changed row keeps no answer (decision 142)", () => {
 	});
 });
 
-describe("the reservation record (decision 142)", () => {
+describe("the reservation record (decision 143)", () => {
 	it("a reserve that throws before its batch reserves normally when it runs again", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps({ throws: { "group-1-reserve": 1 } });

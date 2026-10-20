@@ -151,7 +151,7 @@ describe("sorting in groups of 25, in one process", () => {
 				`CREATE TRIGGER sort_test_fail BEFORE INSERT ON ai_log WHEN NEW.transaction_id = ${tenth} BEGIN SELECT RAISE(ABORT, 'test: the tenth answer fails'); END`,
 			)
 			.run();
-		// The save fails and so does its save again: the run ends without throwing, and nothing in the batch landed.
+		// The save fails (in-process, a step runs once): the run ends without throwing, and nothing in the batch landed.
 		await categorizePending(
 			withKey,
 			vi.fn(async () => reply(0.9)),

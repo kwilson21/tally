@@ -2663,7 +2663,7 @@ export async function pendingForJev(
 		/** The transaction's source before this run, so the log counts only what Tally applies now (spec §8.6). */
 		categorySource: string | null;
 		incomeSource: string | null;
-		/** The fields Jev's question was built from, which a save checks before it applies the answer (decision 142). */
+		/** The fields Jev's question was built from, which a save checks before it applies the answer (decision 143). */
 		seen: JevSeen;
 	})[]
 > {
@@ -2754,6 +2754,8 @@ export async function pendingForJev(
 				ownName,
 				merchantKey: transaction.merchantKey,
 				merchantName,
+				suggestedNames,
+				suggestionStatus,
 				amountCents: transaction.amountCents,
 				accountId,
 				plaidCategory: transaction.plaidCategory ?? null,
@@ -2898,7 +2900,7 @@ export async function merchantCategoryHistoryForJev(
 }
 
 /**
- * The fields of a transaction that Jev's question was built from, read with the row by `pendingForJev` (decision 142).
+ * The fields of a transaction that Jev's question was built from, read with the row by `pendingForJev` (decision 143).
  * A save applies its answer only while the transaction still reads as these: an answer about a changed transaction is
  * never written, so the transaction waits and is asked afresh.
  */
@@ -2907,6 +2909,9 @@ export type JevSeen = {
 	ownName: string | null;
 	merchantKey: string;
 	merchantName: string | null;
+	/** The merchant's bank-name suggestion, which Jev is told when no name is set (usableSuggestedNames). */
+	suggestedNames: string | null;
+	suggestionStatus: string | null;
 	amountCents: number;
 	accountId: number;
 	plaidCategory: string | null;
@@ -2916,7 +2921,7 @@ export type JevSeen = {
 };
 
 /**
- * The guard that holds while a transaction still reads as Jev was asked (decision 142), for an UPDATE of `transactions`.
+ * The guard that holds while a transaction still reads as Jev was asked (decision 143), for an UPDATE of `transactions`.
  * `value(field)` is the SQL that holds a field's seen value. A nullable column matches with IS, a NOT NULL one with =.
  */
 function seenMatchSql(value: (field: keyof JevSeen) => string): string {
@@ -2924,6 +2929,8 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND ${ownNameSql("transactions")} IS ${value("ownName")}
 		AND ${merchantKeySql("transactions")} = ${value("merchantKey")}
 		AND ${merchantColumnSql("transactions", "display_name")} IS ${value("merchantName")}
+		AND ${merchantColumnSql("transactions", "suggested_name")} IS ${value("suggestedNames")}
+		AND ${merchantColumnSql("transactions", "suggestion_status")} IS ${value("suggestionStatus")}
 		AND transactions.amount_cents = ${value("amountCents")}
 		AND transactions.account_id = ${value("accountId")}
 		AND transactions.plaid_category IS ${value("plaidCategory")}
@@ -2973,7 +2980,7 @@ export function saveJevDetailsStatement(
 		kind: string | null;
 		forPersonId: number | null;
 		noteWorthWriting: number | null;
-		/** What the row read as when Jev was asked (decision 142). Without it the row's details are applied as before. */
+		/** What the row read as when Jev was asked (decision 143). Without it the row's details are applied as before. */
 		seen?: JevSeen;
 	}[],
 	options: { stillOn?: string; turnId?: string } = {},
@@ -2981,7 +2988,7 @@ export function saveJevDetailsStatement(
 	if (details.length === 0) return undefined;
 	// The save is guarded by the switches it was asked under (`stillOn`, decision 139) and the sorting turn.
 	const still = options.stillOn === undefined ? "" : ` AND ${STILL_ON_SQL}`;
-	// A row's details are applied only while it still reads as its `seen` (decision 142). Jev's own kind and
+	// A row's details are applied only while it still reads as its `seen` (decision 143). Jev's own kind and
 	// forPersonId sit beside `seen` in each answer, so the seen values are read from `$.seen`.
 	const seenIntact = `NOT EXISTS (SELECT 1 FROM answers a WHERE a.id = transactions.id AND a.seen IS NOT NULL
 		AND NOT ${seenMatchSql((field) => `json_extract(a.seen, '$.${field}')`)})`;
@@ -3145,7 +3152,7 @@ export type JevAnswerSave = {
 	log?: { day: string; category: boolean; income: boolean };
 	/** The sorting group's turn (decision 139): the save writes only while this turn is held. */
 	turn?: string;
-	/** The fields Jev was asked from (decision 142): the save writes only while they still read as they did. */
+	/** The fields Jev was asked from (decision 143): the save writes only while they still read as they did. */
 	seen?: JevSeen;
 };
 
@@ -3173,7 +3180,7 @@ export function saveJevResultStatements(
 		income: options.switches?.income,
 		sortOnArrival: options.switches?.sortOnArrival,
 	});
-	// The answer is applied only while the transaction still reads as Jev was asked (decision 142). A caller without
+	// The answer is applied only while the transaction still reads as Jev was asked (decision 143). A caller without
 	// `seen` (a plan cached before that, or a test) skips the guard.
 	const seenGuard = options.seen ? seenSaveGuard(options.seen) : undefined;
 	const seenSql = seenGuard ? ` AND ${seenGuard.sql}` : "";

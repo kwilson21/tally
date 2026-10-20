@@ -194,7 +194,7 @@ describe("the demo's nightly reset", () => {
 	});
 });
 
-// A group's reservation is kept under its name, the day and its turn, in the same batch as the count (decision 142).
+// A group's reservation is kept under its name, the day and its turn, in the same batch as the count (decision 143).
 describe("a group's reservation is kept under its name", () => {
 	const recorded = async (day: string, turnId: string) =>
 		(
