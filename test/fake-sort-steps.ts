@@ -22,6 +22,11 @@ export function fakeSteps(
 		beforeAttempt?: (name: string, attempt: number) => Promise<void>;
 		/** Steps whose callback runs once more after it succeeded, as when Workflows loses the result of a committed step. */
 		replayAfter?: string[];
+		/**
+		 * How many retries a step gets in this test, in place of its config's limit. The recorded config keeps the real
+		 * limit; a test uses this so a step that runs out of its retries takes a handful of attempts, not all of them.
+		 */
+		limits?: Record<string, number>;
 	} = {},
 ) {
 	const cache = new Map<string, unknown>();
@@ -35,10 +40,9 @@ export function fakeSteps(
 		steps.push(record);
 		// A step that throws is retried up to its limit, and at least as often as it was made to throw (a re-run after a
 		// crash, which Workflows does even for a step with no retries).
-		const limit = Math.max(
-			config.retries?.limit ?? 5,
-			options.throws?.[name] ?? 0,
-		);
+		const limit =
+			options.limits?.[name] ??
+			Math.max(config.retries?.limit ?? 5, options.throws?.[name] ?? 0);
 		for (let attempt = 1; ; attempt++) {
 			record.attempts = attempt;
 			try {

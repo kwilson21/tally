@@ -113,8 +113,8 @@ const RULES = {
 	sensitive: "output",
 };
 const WRITE = {
-	retries: { limit: 1440, delay: "1 minute", backoff: "constant" },
-	timeout: "1 minute",
+	retries: { limit: 960, delay: "1 minute", backoff: "constant" },
+	timeout: "30 seconds",
 	sensitive: "output",
 };
 const RESERVE = {
@@ -620,9 +620,9 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		expect(await turnRow()).toBeNull();
 	});
 
-	it("a save that fails many times, then goes through, applies the kept answers without asking Jev again", async () => {
+	it("a save that fails four times, then goes through, applies the kept answers without asking Jev again", async () => {
 		const ids = await addWaiting(3);
-		const fake = fakeSteps({ throws: { "group-1-write": 40 } });
+		const fake = fakeSteps({ throws: { "group-1-write": 4 } });
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
 			rulesApplied: true,
@@ -631,7 +631,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		});
 		expect(done).toEqual({ asked: 3, applied: 3 });
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
-		expect(attemptsOf(fake, "group-1-write")).toBe(41);
+		expect(attemptsOf(fake, "group-1-write")).toBe(5);
 		expect(await logged(ids)).toBe(3);
 		expect(await callsUsed()).toBe(3);
 	});
@@ -639,24 +639,49 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 	it("a save that fails every try ends the run, logs the save step's name only, and leaves its rows waiting", async () => {
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		const ids = await addWaiting(3);
-		const fake = fakeSteps({ fails: ["group-1-write"] });
-		const fetchImpl = vi.fn(async () => reply(0.9));
-		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
-			rulesApplied: true,
-			onlyIds: ids,
-			runId: "run-never-saved",
+		let turnAsRead: string | null = null;
+		const fake = fakeSteps({
+			// Three tries stand for the save's 960. Each one is a real batch that fails, so each is rolled back.
+			limits: { "group-1-write": 2 },
+			beforeAttempt: async (name, attempt) => {
+				if (name !== "group-1-write") return;
+				if (attempt === 1) {
+					turnAsRead = await turnValue();
+					await db
+						.prepare(
+							"CREATE TRIGGER fail_log BEFORE INSERT ON ai_log BEGIN SELECT RAISE(ABORT, 'nope'); END",
+						)
+						.run();
+				}
+			},
 		});
-		expect(attemptsOf(fake, "group-1-write")).toBe(1441);
-		expect(done).toEqual({ asked: 0, applied: 0 });
-		expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
-			"sorting: save step Error",
-		]);
-		expect(fake.names()).not.toContain("group-2-read");
-		expect(await logged(ids)).toBe(0);
-		for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
-		// The save never gave the calls back, so they stay counted for the day (decision 143).
-		expect(await callsUsed()).toBe(3);
-		expect(await turnRow()).toBeNull();
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		try {
+			const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-never-saved",
+				waitForTurn: true,
+			});
+			expect(attemptsOf(fake, "group-1-write")).toBe(3);
+			expect(
+				fake.steps.find((step) => step.name === "group-1-write")?.config,
+			).toEqual(WRITE);
+			expect(done).toEqual({ asked: 0, applied: 0 });
+			expect(errors.mock.calls.map((call) => call.join(" "))).toEqual([
+				"sorting: save step Error",
+			]);
+			expect(fake.names()).not.toContain("group-2-read");
+			expect(await logged(ids)).toBe(0);
+			for (const id of ids) expect(await categoryOf(id as number)).toBeNull();
+			// The save never gave the calls back, so they stay counted for the day (decision 143).
+			expect(await callsUsed()).toBe(3);
+			// Each failed batch rolled its take back, so the turn is as the read left it.
+			expect(turnAsRead).not.toBeNull();
+			expect(await turnValue()).toBe(turnAsRead);
+		} finally {
+			await db.prepare("DROP TRIGGER fail_log").run();
+		}
 	});
 
 	it("the save is tried about once a minute for up to a day, and no second save step follows it", async () => {
@@ -805,6 +830,7 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		const ids = await addWaiting(3);
 		const expired = JSON.stringify({ id: "run-rollback:1", until: 0 });
 		const fake = fakeSteps({
+			limits: { "group-1-write": 2 },
 			beforeAttempt: async (name, attempt) => {
 				if (name === "group-1-write" && attempt === 1) {
 					// The turn ran out between the read and the save. A save that fails must not extend it.
@@ -1157,6 +1183,160 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			expect(body).not.toContain("seen");
 			expect(body).not.toContain("merchantKey");
 		}
+	});
+});
+
+type Answer = { choice: string; confidence: number; also?: string };
+
+/** A Jev reply with a category answer, and the other category it names when `also` is given (the mixed trip, #233). */
+const answerReply = ({ choice, confidence, also }: Answer) =>
+	new Response(
+		JSON.stringify({
+			answers: {
+				category: { type: "choice", choice, confidence },
+				...(also
+					? {
+							mixed: { type: "noul", noul: 0.9 },
+							also_category: { type: "choice", choice: also, confidence: 0.9 },
+						}
+					: {}),
+				transfer: { type: "noul", noul: 0.01 },
+				reimbursement: { type: "noul", noul: 0.01 },
+				income: { type: "noul", noul: 0.01 },
+			},
+		}),
+		{ status: 200 },
+	);
+
+describe("a category archived since the read keeps no answer (decision 143)", () => {
+	/** Jev's answer for the row whose bank text is `bank`, and `others` for every other row. */
+	const perRow = (bank: string, answer: Answer, others: Answer) =>
+		vi.fn(async (_url: string, init?: RequestInit) => {
+			const sent = JSON.parse(String(init?.body)) as {
+				state: { bank_description: string };
+			};
+			return answerReply(
+				sent.state.bank_description === bank ? answer : others,
+			);
+		});
+
+	/** What Jev's answer stored on a row: its suggested category and its category confidence (null when none). */
+	const storedAnswer = (id: number) =>
+		db
+			.prepare(
+				"SELECT jev_category_id AS suggested, category_confidence AS confidence FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ suggested: number | null; confidence: number | null }>();
+
+	const GROCERIES: Answer = { choice: "Groceries", confidence: 0.9 };
+	// The row whose answer names the archived category is the second one (bank text "SORT STEP 1"); the others name
+	// Groceries, which stays active.
+	const CASES: [string, Answer, string][] = [
+		[
+			"Jev's chosen category",
+			{ choice: "Eating Out", confidence: 0.9 },
+			"Eating Out",
+		],
+		[
+			"Jev's suggestion",
+			{ choice: "Eating Out", confidence: 0.3 },
+			"Eating Out",
+		],
+		[
+			"Jev's also category",
+			{ choice: "Groceries", confidence: 0.9, also: "Eating Out" },
+			"Eating Out",
+		],
+	];
+
+	it.each(CASES)(
+		"a row whose answer names %s, archived between the read and the save, keeps no answer and no log row, and the rest of the group is saved",
+		async (_label, answer, archived) => {
+			const ids = await addWaiting(3);
+			const target = ids[1] as number;
+			const fake = fakeSteps({
+				beforeAttempt: async (name, attempt) => {
+					if (name === "group-1-write" && attempt === 1)
+						await changeRow(
+							"UPDATE categories SET archived = 1 WHERE name = ?",
+							archived,
+						);
+				},
+			});
+			const done = await sortGroups(
+				withKey,
+				fake.runStep,
+				perRow("SORT STEP 1", answer, GROCERIES),
+				{ rulesApplied: true, onlyIds: ids, runId: "run-archived" },
+			);
+			expect(done).toEqual({ asked: 3, applied: 2 });
+			expect(await categoryOf(target)).toBeNull();
+			expect(await storedAnswer(target)).toEqual({
+				suggested: null,
+				confidence: null,
+			});
+			expect(await logged([target])).toBe(0);
+			expect(await categoryOf(ids[0] as number)).not.toBeNull();
+			expect(await categoryOf(ids[2] as number)).not.toBeNull();
+			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await callsUsed()).toBe(3);
+		},
+	);
+
+	it("a credit asked only for its category keeps no answer when its category was archived since the read", async () => {
+		const ids = await addWaiting(3);
+		const credit = ids[2] as number;
+		await changeRow(
+			"UPDATE transactions SET amount_cents = -1200, income_source = 'user', credit_reviewed = 1, credit_reviewed_by = 'user' WHERE id = ?",
+			credit,
+		);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 1)
+					await changeRow(
+						"UPDATE categories SET archived = 1 WHERE name = 'Eating Out'",
+					);
+			},
+		});
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			perRow(
+				"SORT STEP 2",
+				{ choice: "Eating Out", confidence: 0.9 },
+				GROCERIES,
+			),
+			{ rulesApplied: true, onlyIds: ids, runId: "run-archived-credit" },
+		);
+		expect(await categoryOf(credit)).toBeNull();
+		expect(await logged([credit])).toBe(0);
+		expect(done).toEqual({ asked: 3, applied: 2 });
+	});
+
+	it("a category archived and restored before the save still applies", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 1) {
+					await changeRow(
+						"UPDATE categories SET archived = 1 WHERE name = 'Eating Out'",
+					);
+					await changeRow(
+						"UPDATE categories SET archived = 0 WHERE name = 'Eating Out'",
+					);
+				}
+			},
+		});
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{ rulesApplied: true, onlyIds: ids, runId: "run-restored" },
+		);
+		expect(done).toEqual({ asked: 3, applied: 3 });
+		for (const id of ids) expect(await categoryOf(id as number)).not.toBeNull();
+		expect(await logged(ids)).toBe(3);
 	});
 });
 

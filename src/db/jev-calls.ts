@@ -68,25 +68,6 @@ export async function reserveJevCalls(
 }
 
 /**
- * Returns calls a run reserved and didn't use, to the day it reserved them on. One statement, and the
- * count never goes below zero.
- */
-export function giveBackJevCallsStatement(
-	db: D1Database,
-	day: string,
-	unused: number,
-	turnId?: string,
-): D1PreparedStatement | undefined {
-	if (unused < 1) return undefined;
-	// A sorting group gives back in its save, only while it holds the turn (decision 139).
-	const guarded = withTurnGuard(
-		"UPDATE household_settings SET value = CAST(CAST(MAX(0, CAST(value AS INTEGER) - ?) AS INTEGER) AS TEXT) WHERE key = ?",
-		turnId,
-	);
-	return db.prepare(guarded.sql).bind(unused, keyFor(day), ...guarded.binds);
-}
-
-/**
  * A sorting save gives back what its group reserved less what it asked (decision 143). The group's record holds its
  * grant, which a reserve step that ran after its batch committed left there; `planned` is the grant the plan says, used
  * when there is no record. Never below zero. It changes only while the group holds the turn, and it must run before

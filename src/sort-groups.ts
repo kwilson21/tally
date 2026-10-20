@@ -163,10 +163,11 @@ const STEP_SETTINGS = {
 		sensitive: "output",
 	},
 	// A save that fails is tried about once a minute for up to a day, taking the group's turn back each time it is free,
-	// with the answers its group kept (decision 143).
+	// with the answers its group kept (decision 143). A D1 batch of about 55 statements finishes well inside 30 seconds,
+	// so 960 tries of 30 seconds and a minute apart are at most 24 hours.
 	write: {
-		retries: { limit: 1440, delay: "1 minute", backoff: "constant" },
-		timeout: "1 minute",
+		retries: { limit: 960, delay: "1 minute", backoff: "constant" },
+		timeout: "30 seconds",
 		sensitive: "output",
 	},
 } satisfies Record<string, StepConfig>;

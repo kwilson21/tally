@@ -3167,7 +3167,8 @@ export type JevAnswerSave = {
  * clears or takes over an income flag Plaid set at sync (decision 67; the flag keeps `income_source` null). It writes
  * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
  * waits for the next run. Returns the statements that do it (the update, then its log row): a caller runs them in
- * one batch, so a sorting group can save all of its answers together (decision 139).
+ * one batch, so a sorting group can save all of its answers together (decision 139). A save from sorting (given `seen` or
+ * a turn) also writes only while no category the answer names was archived since Jev was asked (decision 143).
  */
 export function saveJevResultStatements(
 	db: D1Database,
@@ -3184,6 +3185,20 @@ export function saveJevResultStatements(
 	// `seen` (a plan cached before that, or a test) skips the guard.
 	const seenGuard = options.seen ? seenSaveGuard(options.seen) : undefined;
 	const seenSql = seenGuard ? ` AND ${seenGuard.sql}` : "";
+	// What the answer writes to its categories: none when the category question wasn't asked.
+	const categoryWritten = options.categoryAsked === false ? null : d.categoryId;
+	const suggestionWritten =
+		options.categoryAsked === false ? null : d.suggestedCategoryId;
+	const alsoWritten = d.alsoCategoryId ?? null;
+	// A save from sorting also writes only while no category the answer names was archived since Jev was asked (decision
+	// 143): one NOT EXISTS over the archived categories. A null names none, so it never blocks.
+	const fromSorting = options.seen !== undefined || options.turn !== undefined;
+	const activeSql = fromSorting
+		? " AND NOT EXISTS (SELECT 1 FROM categories WHERE archived = 1 AND id IN (?, ?, ?))"
+		: "";
+	const activeBinds = fromSorting
+		? [categoryWritten, suggestionWritten, alsoWritten]
+		: [];
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.
@@ -3195,22 +3210,23 @@ export function saveJevResultStatements(
 					AND ((amount_cents < 0 AND credit_reviewed = 1 AND (income_source = 'user' OR credit_reviewed_by = 'user'))
 						OR (excluded = 1 AND ${PAYS_A_BILL_OR_PLAN}))
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}${seenSql}`,
+					AND ${INCLUDED_ROW} AND is_split = 0 AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 			options.turn,
 		);
 		const category = db
 			.prepare(guarded.sql)
 			.bind(
-				options.categoryAsked === false ? null : d.categoryId,
+				categoryWritten,
 				options.categoryAsked === false || d.categoryId === null ? null : "jev",
 				options.categoryAsked === false ? null : d.confidence,
-				options.categoryAsked === false ? null : d.suggestedCategoryId,
+				suggestionWritten,
 				options.categoryAsked === false || !d.noneFit ? 0 : 1,
 				d.mixedProbability ?? null,
-				d.alsoCategoryId ?? null,
+				alsoWritten,
 				id,
 				stillOn,
 				...(seenGuard?.binds ?? []),
+				...activeBinds,
 				...guarded.binds,
 			);
 		return answerStatements(
@@ -3261,11 +3277,11 @@ export function saveJevResultStatements(
 					OR (amount_cents < 0 AND COALESCE(credit_reviewed, 0) = 0
 						AND credit_reviewed_by IS NULL AND COALESCE(income_source, '') != 'user')
 				)
-				AND ${STILL_ON_SQL}${seenSql}`,
+				AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
 		options.turn,
 	);
 	const update = db.prepare(guarded.sql).bind(
-		options.categoryAsked === false ? null : d.categoryId,
+		categoryWritten,
 		options.categoryAsked === false || d.categoryId === null ? null : "jev",
 		options.categoryAsked === false ? null : d.confidence,
 		incomeOn ? 1 : 0,
@@ -3285,10 +3301,10 @@ export function saveJevResultStatements(
 		confidenceBasisPoints(incomeConfidence ?? 0),
 		above,
 		income ? 1 : 0,
-		options.categoryAsked === false ? null : d.suggestedCategoryId,
+		suggestionWritten,
 		options.categoryAsked === false || !d.noneFit ? 0 : 1,
 		d.mixedProbability ?? null,
-		d.alsoCategoryId ?? null,
+		alsoWritten,
 		d.flags.transfer ? 1 : 0,
 		d.flags.reimbursement ? 1 : 0,
 		income ? 1 : 0,
@@ -3300,6 +3316,7 @@ export function saveJevResultStatements(
 		incomeOn ? 1 : 0,
 		stillOn,
 		...(seenGuard?.binds ?? []),
+		...activeBinds,
 		...guarded.binds,
 	);
 	return answerStatements(db, update, id, options.log, options.turn);
