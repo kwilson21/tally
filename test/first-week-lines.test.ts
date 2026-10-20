@@ -157,3 +157,35 @@ describe("doneNote: the count line", () => {
 		expect(doneNote("count", EMPTY, names)).toBeNull();
 	});
 });
+
+describe("doneNote: the savings part of the budgets line (#721)", () => {
+	const twelve: FirstTally["budgets"] = {};
+	for (let id = 1; id <= 12; id++) {
+		twelve[String(id)] = { kind: "suggested", cents: 10000 };
+	}
+
+	it("adds the kept goal to the budgets words: 12 budgets, saving $300 a month", () => {
+		expect(
+			doneNote("budgets", { ...EMPTY, budgets: twelve, savings: 30000 }, names),
+		).toBe("12 budgets, saving $300 a month");
+	});
+
+	it("adds it to no budgets to set too", () => {
+		expect(doneNote("budgets", { ...EMPTY, savings: 30000 }, names)).toBe(
+			"no budgets to set, saving $300 a month",
+		);
+	});
+
+	it("keeps the cents of a goal that has them", () => {
+		expect(doneNote("budgets", { ...EMPTY, savings: 30050 }, names)).toBe(
+			"no budgets to set, saving $300.50 a month",
+		);
+	});
+
+	it("adds nothing for a skip, or before the question is answered", () => {
+		expect(doneNote("budgets", { ...EMPTY, savings: "skipped" }, names)).toBe(
+			"no budgets to set",
+		);
+		expect(doneNote("budgets", EMPTY, names)).toBe("no budgets to set");
+	});
+});
