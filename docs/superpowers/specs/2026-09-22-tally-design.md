@@ -523,7 +523,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - **Unit tests (most tests):** cents parsing and formatting, budget math, the bill status rules, split validation, and category priority.
 - **Route tests:** run in Cloudflare's local Workers runtime against a real local D1 database. Plaid, Jev, and Workers AI are faked at the `fetch` or binding boundary.
 - **E2E (Playwright), critical flows only:** recategorize, split, exclude, and change a budget amount.
-- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, puts them in the PR description, and fails if a page logs a console error.
+- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, fails if a page logs a console error, and puts in the PR description only the pages the PR adds or changes, before and after (decision 140).
 - **CI (GitHub Actions):** type-check, lint, and tests on every push. A failing check blocks the merge.
 - **Deploy:** manual at first, with `npx wrangler deploy --env demo` or `--env production`, documented in the README.
 
