@@ -232,6 +232,20 @@ export async function changedShots({ after, before }) {
 }
 
 /**
+ * The files a PR description shows (#756): every changed row's after images, and its before
+ * images, each list without repeats and in the order the rows give them. Only these are stored on
+ * the screenshots branch.
+ * @param {{ before: string[], after: string[] }[]} changes
+ * @returns {{ after: string[], before: string[] }}
+ */
+export function shownFiles(changes) {
+	return {
+		after: [...new Set(changes.flatMap((row) => row.after))],
+		before: [...new Set(changes.flatMap((row) => row.before))],
+	};
+}
+
+/**
  * Why this PR's screenshots can't be compared with the base branch's, or null when they can.
  * Each run records the UTC dates it started and finished on; the base's record is missing if its
  * run died. The demo data follows the date, so runs on different days would differ everywhere.

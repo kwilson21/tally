@@ -523,7 +523,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - **Unit tests (most tests):** cents parsing and formatting, budget math, the bill status rules, split validation, and category priority.
 - **Route tests:** run in Cloudflare's local Workers runtime against a real local D1 database. Plaid, Jev, and Workers AI are faked at the `fetch` or binding boundary.
 - **E2E (Playwright), critical flows only:** recategorize, split, exclude, and change a budget amount.
-- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, fails if a page logs a console error, and puts in the PR description only the pages the PR adds or changes, before and after (decision 141).
+- **Screenshots:** on every pull request from this repo, CI screenshots each page at 1280×800 and 390×844, fails if a page logs a console error, and puts in the PR description only the pages the PR adds or changes, before and after (decision 141), and stores only those images on the `screenshots` branch (decision 142).
 - **CI (GitHub Actions):** type-check, lint, and tests on every push. A failing check blocks the merge.
 - **Deploy:** manual at first, with `npx wrangler deploy --env demo` or `--env production`, documented in the README.
 
@@ -556,7 +556,7 @@ Each phase is a GitHub milestone with issues. A phase ends with a review of what
 - A tapped row gliding into its sheet's title, and pages sliding by direction (P74 B, decision 76): they need a small script of their own to know which row was tapped and which way a page goes
 - Interaction sounds (the owner's pick, Oct 5): a soft cue on a toggle, a save or an error, as in Cuelume (synthesized with Web Audio, no audio files). It needs its own allowed-JS decision and an off switch, and comes after motion (P74)
 - A "More…" category chip when a household has more categories than the edit panel fits
-- Pruning old PR screenshots from the screenshots branch
+- Pruning old PR screenshots from the screenshots branch automatically (decision 142 pruned it once, by hand)
 - A remembered bank-text-to-store-name table, so a store's Never suggest line keeps covering its bank text's older unnamed charges after Plaid drops or renames the only charge linking them (#470). It would change how every store-identity reader decides what one store is (Remove, Settings, merchant rules, bill matching), so it needs its own decision
 - An offline banner the moment the phone loses its connection (#73). Today a failed save already says "Couldn't save. Check your connection and try again." and keeps what was typed (decision 72); a banner needs its own allowed-JS decision
 - A close (×) button on the demo's Things to try block, remembered with a cookie

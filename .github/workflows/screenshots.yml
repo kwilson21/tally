@@ -71,10 +71,12 @@ jobs:
             git worktree add --detach shots
             git -C shots switch --orphan screenshots
           fi
+          # A re-run of the same commit starts its folder afresh, so images it no longer shows are removed (#756).
+          rm -rf "shots/$dir"
           mkdir -p "shots/$dir"
-          cp screenshots/*.png "shots/$dir/"
-          # "Before" images, only for the pages that changed (scripts/changed-shots.mjs).
-          cp -r screenshots/before "shots/$dir/"
+          # Only the images the description shows (#756), staged by scripts/changed-shots.mjs as the
+          # folder's layout: changed pages' after images at the top, their before images in before/.
+          cp -r screenshots/shown/. "shots/$dir/"
           git -C shots add .
           # A rerun of the same commit can produce identical images; nothing to commit is fine.
           git -C shots diff --cached --quiet || git -C shots commit -m "chore: screenshots for #${PR} at ${SHA::7}"
