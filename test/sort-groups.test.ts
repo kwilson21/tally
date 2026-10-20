@@ -49,6 +49,22 @@ const categoryOf = async (id: number) =>
 			.first<{ c: number | null }>()
 	)?.c ?? null;
 
+/** Jev calls reserved for today (the household's day), as the sorting groups count them. */
+const callsUsed = async () =>
+	Number(
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(`jev_calls_${await householdToday(db)}`)
+				.first<{ value: string }>()
+		)?.value ?? 0,
+	);
+
+const turnRow = () =>
+	db
+		.prepare("SELECT value FROM household_settings WHERE key = 'sorting_turn'")
+		.first<{ value: string }>();
+
 beforeEach(async () => {
 	await resetDemo(db, TODAY);
 	await saveAiSwitches(db, { details: false });
@@ -79,9 +95,14 @@ const WRITE = {
 	timeout: "1 minute",
 	sensitive: "output",
 };
+const RESERVE = {
+	retries: { limit: 0, delay: 0 },
+	timeout: "1 minute",
+	sensitive: "output",
+};
 
 describe("sortGroups with a fake step runner", () => {
-	it("runs the steps in order, each with its config (rules, read, one ask per row, write)", async () => {
+	it("runs the steps in order, each with its config (rules, read, reserve, one ask per row, write)", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
 		const fetchImpl = vi.fn(async () => reply(0.9));
@@ -93,6 +114,7 @@ describe("sortGroups with a fake step runner", () => {
 		expect(fake.names()).toEqual([
 			"rules",
 			"group-1-read",
+			"group-1-reserve",
 			`group-1-ask-${ids[2]}`,
 			`group-1-ask-${ids[1]}`,
 			`group-1-ask-${ids[0]}`,
@@ -102,6 +124,7 @@ describe("sortGroups with a fake step runner", () => {
 			fake.steps.find((step) => step.name === name)?.config;
 		expect(config("rules")).toEqual(WRITE);
 		expect(config("group-1-read")).toEqual(READ);
+		expect(config("group-1-reserve")).toEqual(RESERVE);
 		expect(config("group-1-write")).toEqual(WRITE);
 		expect(config(`group-1-ask-${ids[2]}`)).toEqual(ASK);
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -313,6 +336,133 @@ describe("sortGroups with a fake step runner", () => {
 		expect(fetchImpl).toHaveBeenCalledTimes(4);
 		expect(fake.names()).toContain("group-2-write");
 		expect(fake.names()).not.toContain("group-3-read");
+	});
+
+	it("a read whose result is lost after its turn was taken reserves no calls again", async () => {
+		const ids = await addWaiting(3);
+		// The read's callback runs once more after it succeeded, as when Workflows loses its result: that run takes the
+		// same turn and must not reserve the day's calls a second time.
+		const fake = fakeSteps({ replayAfter: ["group-1-read"] });
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{ rulesApplied: true, onlyIds: ids, runId: "run-read-replay" },
+		);
+		expect(done.asked).toBe(3);
+		expect(await callsUsed()).toBe(3);
+	});
+
+	it("a reserve re-run after its calls were reserved reserves no calls again", async () => {
+		const ids = await addWaiting(3);
+		const fake = fakeSteps({ replayAfter: ["group-1-reserve"] });
+		await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{ rulesApplied: true, onlyIds: ids, runId: "run-reserve-replay" },
+		);
+		expect(fake.names()).toContain("group-1-reserve");
+		expect(await callsUsed()).toBe(3);
+	});
+
+	it("a reserve step that rejects grants nothing: the write releases the turn and the run stops", async () => {
+		const ids = await addWaiting(3);
+		// A step that rejects fails with no retry (its config's limit is 0), so its callback never runs.
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				if (name === "group-1-reserve") throw new Error("timeout");
+			},
+		});
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-reserve-reject",
+		});
+		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(fake.names()).toContain("group-1-write");
+		expect(fake.names()).not.toContain("group-2-read");
+		expect(await turnRow()).toBeNull();
+		expect(await callsUsed()).toBe(0);
+	});
+
+	it("an ask step that rejects mid-group saves the answers before it, gives back the unused calls, and stops the run", async () => {
+		const ids = await addWaiting(3);
+		// Rows are asked newest first: the first ask answers ids[2], and the second one rejects (its timeout).
+		const second = `group-1-ask-${ids[1]}`;
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				if (name === second) throw new Error("timeout");
+			},
+		});
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-ask-reject",
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(done.asked).toBe(2);
+		expect(await categoryOf(ids[2] as number)).not.toBeNull();
+		expect(await categoryOf(ids[1] as number)).toBeNull();
+		expect(await categoryOf(ids[0] as number)).toBeNull();
+		// Three calls were reserved and two were used (one answer, one lost), so one is given back.
+		expect(await callsUsed()).toBe(2);
+		expect(await turnRow()).toBeNull();
+		expect(fake.names()).toContain("group-1-write");
+		expect(fake.names()).not.toContain(`group-1-ask-${ids[0]}`);
+		expect(fake.names()).not.toContain("group-2-read");
+	});
+
+	it("a short group that runs out of its 2-minute budget after 4 asks leaves 6 rows, and the next group asks them", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
+		const ids = await addWaiting(10);
+		let asks = 0;
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				// The fifth ask of group 1 finds its 2-minute budget spent.
+				if (name.startsWith("group-1-ask-") && ++asks === 5)
+					vi.setSystemTime(Date.now() + 3 * 60_000);
+			},
+		});
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-short-budget",
+		});
+		expect(
+			fake.names().filter((name) => name.startsWith("group-2-ask-")),
+		).toHaveLength(6);
+		expect(fetchImpl).toHaveBeenCalledTimes(10);
+		expect(done).toEqual({ asked: 10, applied: 10 });
+		expect(fake.names()).not.toContain("group-3-read");
+	});
+
+	it("a short group whose first ask is already past its budget asks nothing and ends the run", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
+		const ids = await addWaiting(10);
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				if (name.startsWith("group-1-ask-"))
+					vi.setSystemTime(Date.now() + 3 * 60_000);
+			},
+		});
+		const fetchImpl = vi.fn(async () => reply(0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId: "run-short-budget-first",
+		});
+		expect(done).toEqual({ asked: 0, applied: 0 });
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(fake.names()).not.toContain("group-2-read");
+		expect(await turnRow()).toBeNull();
+		expect(await callsUsed()).toBe(0);
 	});
 });
 
