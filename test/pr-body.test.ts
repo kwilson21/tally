@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	changedShots,
 	comparisonProblem,
+	looksAlike,
 	PAGES,
+	pixelsAlike,
 	screenshotSection,
 	withScreenshots,
 } from "../scripts/pr-body.mjs";
 import { SIDEBAR_ITEMS } from "../src/views/nav";
+import { ALPHA, FILTERED, fromBase64, PLAIN } from "./png-fixtures";
 
 const SECTION =
 	"<!-- screenshots:start -->\n## Screenshots\nnew\n<!-- screenshots:end -->";
@@ -48,9 +51,9 @@ describe("changedShots", () => {
 		png: new TextEncoder().encode(text),
 	});
 
-	it("lists images that differ from the base or are new, and leaves out identical ones", () => {
+	it("lists images that differ from the base or are new, and leaves out identical ones", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [
 					shot("home-phone.png", "a"),
 					shot("settings-phone.png", "b"),
@@ -64,9 +67,9 @@ describe("changedShots", () => {
 		]);
 	});
 
-	it("puts a page taken whole on main and in slices here in one row with both lists", () => {
+	it("puts a page taken whole on main and in slices here in one row with both lists", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [shot("p-phone-01.png", "a"), shot("p-phone-02.png", "b")],
 				before: [shot("p-phone.png", "a")],
 			}),
@@ -78,9 +81,9 @@ describe("changedShots", () => {
 		]);
 	});
 
-	it("puts a page sliced on main and taken whole here in one row with both lists", () => {
+	it("puts a page sliced on main and taken whole here in one row with both lists", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [shot("p-phone.png", "a")],
 				before: [shot("p-phone-01.png", "a"), shot("p-phone-02.png", "b")],
 			}),
@@ -92,25 +95,25 @@ describe("changedShots", () => {
 		]);
 	});
 
-	it("compares slices part by part when both sides are sliced the same way", () => {
+	it("compares slices part by part when both sides are sliced the same way", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [shot("p-phone-01.png", "a"), shot("p-phone-02.png", "c")],
 				before: [shot("p-phone-01.png", "a"), shot("p-phone-02.png", "b")],
 			}),
 		).toEqual([{ before: ["p-phone-02.png"], after: ["p-phone-02.png"] }]);
 	});
 
-	it("keeps every slice on both sides when the slice counts differ, both ways", () => {
+	it("keeps every slice on both sides when the slice counts differ, both ways", async () => {
 		const two = [shot("p-phone-01.png", "a"), shot("p-phone-02.png", "b")];
 		const three = [...two, shot("p-phone-03.png", "c")];
-		expect(changedShots({ after: three, before: two })).toEqual([
+		expect(await changedShots({ after: three, before: two })).toEqual([
 			{
 				before: ["p-phone-01.png", "p-phone-02.png"],
 				after: ["p-phone-01.png", "p-phone-02.png", "p-phone-03.png"],
 			},
 		]);
-		expect(changedShots({ after: two, before: three })).toEqual([
+		expect(await changedShots({ after: two, before: three })).toEqual([
 			{
 				before: ["p-phone-01.png", "p-phone-02.png", "p-phone-03.png"],
 				after: ["p-phone-01.png", "p-phone-02.png"],
@@ -118,22 +121,193 @@ describe("changedShots", () => {
 		]);
 	});
 
-	it("makes a new sliced page one row, its slices in part order whatever order they came in", () => {
+	it("makes a new sliced page one row, its slices in part order whatever order they came in", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [shot("p-phone-02.png", "b"), shot("p-phone-01.png", "a")],
 				before: [shot("home-phone.png", "x")],
 			}),
 		).toEqual([{ before: [], after: ["p-phone-01.png", "p-phone-02.png"] }]);
 	});
 
-	it("treats a file it can't read as a whole page of its own", () => {
+	it("treats a file it can't read as a whole page of its own", async () => {
 		expect(
-			changedShots({
+			await changedShots({
 				after: [shot("notes.png", "b")],
 				before: [shot("notes.png", "a")],
 			}),
 		).toEqual([{ before: ["notes.png"], after: ["notes.png"] }]);
+	});
+
+	it("leaves out a page whose PNGs differ in bytes but not in pixels", async () => {
+		expect(
+			await changedShots({
+				after: [{ file: "home-phone.png", png: fromBase64(FILTERED) }],
+				before: [{ file: "home-phone.png", png: fromBase64(PLAIN) }],
+			}),
+		).toEqual([]);
+	});
+
+	it("keeps a page whose PNG changed size or kind", async () => {
+		expect(
+			await changedShots({
+				after: [{ file: "home-phone.png", png: fromBase64(FILTERED) }],
+				before: [{ file: "home-phone.png", png: fromBase64(ALPHA) }],
+			}),
+		).toEqual([{ before: ["home-phone.png"], after: ["home-phone.png"] }]);
+	});
+});
+
+describe("pixelsAlike", () => {
+	// An 11×10 picture (110 pixels, enough for the 100 and 101 cases), where channel `channel` of
+	// pixel `pixel` is value(pixel, channel).
+	const picture = (
+		channels: number,
+		value: (pixel: number, channel: number) => number,
+		width = 11,
+		height = 10,
+	) => {
+		const data = new Uint8Array(width * height * channels);
+		for (let i = 0; i < data.length; i++)
+			data[i] = value(Math.floor(i / channels), i % channels);
+		return { width, height, channels, data };
+	};
+
+	it("says identical pictures are alike", () => {
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				picture(3, () => 50),
+			),
+		).toBe(true);
+	});
+
+	it("counts one channel of one pixel off by 49 as a change", () => {
+		const b = picture(3, (pixel, channel) =>
+			pixel === 0 && channel === 0 ? 99 : 50,
+		);
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				b,
+			),
+		).toBe(false);
+	});
+
+	it("lets one channel of one pixel off by 48 pass", () => {
+		const b = picture(3, (pixel, channel) =>
+			pixel === 0 && channel === 0 ? 98 : 50,
+		);
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				b,
+			),
+		).toBe(true);
+	});
+
+	it("lets 100 pixels off by 3 pass, counting each pixel once across its channels", () => {
+		// All three channels of each pixel change, so counting bytes would reach 300.
+		const b = picture(3, (pixel) => (pixel < 100 ? 53 : 50));
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				b,
+			),
+		).toBe(true);
+	});
+
+	it("counts 101 pixels off by 3 as a change, counting each pixel once", () => {
+		// As above: counting bytes would reach 303.
+		const b = picture(3, (pixel) => (pixel < 101 ? 53 : 50));
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				b,
+			),
+		).toBe(false);
+	});
+
+	it("lets every pixel off by 2 pass", () => {
+		expect(
+			pixelsAlike(
+				picture(3, () => 50),
+				picture(3, () => 52),
+			),
+		).toBe(true);
+	});
+
+	it("counts a different width, height or channel count as a change", () => {
+		const a = picture(3, () => 50);
+		expect(
+			pixelsAlike(
+				a,
+				picture(3, () => 50, 12, 10),
+			),
+		).toBe(false);
+		expect(
+			pixelsAlike(
+				a,
+				picture(3, () => 50, 11, 11),
+			),
+		).toBe(false);
+		expect(
+			pixelsAlike(
+				a,
+				picture(4, () => 50),
+			),
+		).toBe(false);
+	});
+
+	it("counts only the alpha channel of one pixel off by 49 as a change", () => {
+		const b = picture(4, (pixel, channel) =>
+			pixel === 0 && channel === 3 ? 99 : 50,
+		);
+		expect(
+			pixelsAlike(
+				picture(4, () => 50),
+				b,
+			),
+		).toBe(false);
+	});
+});
+
+describe("looksAlike", () => {
+	const text = (s: string) => new TextEncoder().encode(s);
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("says equal bytes look alike", async () => {
+		expect(await looksAlike(text("same"), text("same"))).toBe(true);
+	});
+
+	it("says PNGs that differ only in how they are filtered look alike", async () => {
+		expect(await looksAlike(fromBase64(FILTERED), fromBase64(PLAIN))).toBe(
+			true,
+		);
+	});
+
+	it("says PNGs of a different size or kind don't", async () => {
+		expect(await looksAlike(fromBase64(FILTERED), fromBase64(ALPHA))).toBe(
+			false,
+		);
+	});
+
+	it("says different bytes that aren't PNGs don't, without a warning", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		expect(await looksAlike(text("a"), text("b"))).toBe(false);
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("warns with the reason, then says they don't look alike, when a PNG can't be read", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const broken = fromBase64(FILTERED).subarray(0, 50);
+		expect(await looksAlike(broken, fromBase64(PLAIN))).toBe(false);
+		expect(warn).toHaveBeenCalledWith(
+			expect.stringContaining("Truncated PNG chunk."),
+		);
 	});
 });
 

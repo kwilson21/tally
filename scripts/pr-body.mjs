@@ -1,4 +1,5 @@
 // What CI screenshots, and how the images go into a PR description. Pure; used by the scripts next to it.
+import { NOT_A_PNG, readPng } from "./png.mjs";
 
 /** Every page in the app. test/pr-body.test.ts fails if a nav destination is missing. */
 export const PAGES = [
@@ -132,19 +133,80 @@ function groupShots(shots) {
 	return groups;
 }
 
+// Pixel thresholds, from the 491 same-size before/after pairs of PRs #700-#752 (#753). Rendering
+// noise between two runs never moved a pixel by more than 30, and at most 17 pixels moved by more
+// than 2. Real changes always had a pixel that moved by at least 177; the smallest touched 44 pixels.
+/** A pixel whose largest channel difference is above this is a change on its own. */
+export const CLEAR_DIFFERENCE = 48;
+/** A difference up to this is rounding, and never counts. */
+export const FAINT_DIFFERENCE = 2;
+/** More pixels than this differing by more than FAINT_DIFFERENCE is a change, so a faint change over an area still counts. */
+export const FAINT_PIXELS = 100;
+
+/** Whether two byte arrays hold the same bytes. */
+function sameBytes(a, b) {
+	return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/**
+ * Whether two decoded pictures look the same (#753): the same size and channels, no pixel above
+ * CLEAR_DIFFERENCE in its largest channel difference, and no more than FAINT_PIXELS pixels above
+ * FAINT_DIFFERENCE. Each pixel counts once, however many of its channels differ.
+ * @param {import("./png.mjs").Png} a
+ * @param {import("./png.mjs").Png} b
+ * @returns {boolean}
+ */
+export function pixelsAlike(a, b) {
+	if (a.width !== b.width || a.height !== b.height || a.channels !== b.channels)
+		return false;
+	let faint = 0;
+	for (let p = 0; p < a.width * a.height; p++) {
+		let largest = 0;
+		for (let c = 0; c < a.channels; c++) {
+			const i = p * a.channels + c;
+			largest = Math.max(largest, Math.abs(a.data[i] - b.data[i]));
+		}
+		if (largest > CLEAR_DIFFERENCE) return false;
+		if (largest > FAINT_DIFFERENCE) faint++;
+		if (faint > FAINT_PIXELS) return false;
+	}
+	return true;
+}
+
+/**
+ * Whether two screenshots look the same (#753). Equal bytes do, without decoding. Otherwise both
+ * are decoded and compared with pixelsAlike. A file that can't be decoded is compared byte for
+ * byte, so it counts as different; a PNG the decoder breaks on is logged, so it isn't silent.
+ * @param {Uint8Array} a
+ * @param {Uint8Array} b
+ * @returns {Promise<boolean>}
+ */
+export async function looksAlike(a, b) {
+	if (sameBytes(a, b)) return true;
+	try {
+		return pixelsAlike(await readPng(a), await readPng(b));
+	} catch (error) {
+		if (error.message !== NOT_A_PNG)
+			console.warn(
+				`Could not decode a screenshot (${error.message}), so it is compared byte for byte.`,
+			);
+		return false;
+	}
+}
+
 /**
  * The screenshots that differ from the base branch's, as rows for the before-and-after table.
  * A page with no files on the `before` side is one row with `before: []`, however many slices it
  * has. Otherwise, when both sides have the same files (a whole page on both, or the same slices),
- * each part whose bytes differ is its own row. Any other pairing (whole on one side and in slices
+ * each part that doesn't look alike is its own row (looksAlike: rendering noise between runs doesn't
+ * count, #753). Any other pairing (whole on one side and in slices
  * on the other, or a different number of slices) is one row with every file of both sides, counted
  * as changed without comparing bytes: the parts wouldn't line up, and no slice is dropped. Pages
  * only `before` has are left out. Rows come in the order their pages first appear in `after`.
  * @param {{ after: { file: string, png: Uint8Array }[], before: { file: string, png: Uint8Array }[] }} shots
- * @returns {{ before: string[], after: string[] }[]}
+ * @returns {Promise<{ before: string[], after: string[] }[]>}
  */
-export function changedShots({ after, before }) {
-	const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+export async function changedShots({ after, before }) {
 	const beforeGroups = groupShots(before);
 	const rows = [];
 	for (const [key, parts] of groupShots(after)) {
@@ -163,7 +225,7 @@ export function changedShots({ after, before }) {
 			continue;
 		}
 		for (const [i, part] of parts.entries())
-			if (!same(part.png, old[i].png))
+			if (!(await looksAlike(part.png, old[i].png)))
 				rows.push({ before: [old[i].file], after: [part.file] });
 	}
 	return rows;
