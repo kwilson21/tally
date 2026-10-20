@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatReport } from "../scripts/compare-models/report";
 import {
 	buildCases,
@@ -797,6 +797,15 @@ describe("runComparison", () => {
 });
 
 describe("the Worker's routes", () => {
+	// The Worker builds the demo for the clock's day, so pin the clock to TODAY (noon UTC is that day in New York).
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("runs only the asked-for model and list for ?model=clef&list=demo", async () => {
 		const ai = fakeAi();
 		const response = await worker.fetch(
