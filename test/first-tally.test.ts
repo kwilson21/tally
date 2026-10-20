@@ -773,6 +773,8 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 
 	it("the budgets stroke's guard waits for pay as well as bills, so budgets is always the last question drawn", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
+		// The demo's unanswered deposits would keep a pay question open, which the guard checks live; this test is about the record.
+		await db.prepare("UPDATE transactions SET income_source = 'user'").run();
 		await markStroke(db, "bank", "2026-10-12");
 		await markStroke(db, "bills", "2026-10-13");
 		await strokeStatement(
@@ -807,6 +809,8 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 
 	it("the budgets stroke's guard also passes on a current goal above $0, and not on a $0 one (#721)", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
+		// As above: the demo's unanswered deposits would keep a pay question open, so this test sets them aside.
+		await db.prepare("UPDATE transactions SET income_source = 'user'").run();
 		await markStroke(db, "bank", "2026-10-12");
 		await markStroke(db, "bills", "2026-10-13");
 		await markStroke(db, "pay", "2026-10-13");

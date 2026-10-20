@@ -1946,4 +1946,74 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(30000);
 		expect(textOf(html)).toContain("Savings · $300 a month");
 	});
+
+	it("writes nothing when a pay deposit arrives after the page read and before the Save it batch (#721 review)", async () => {
+		await skipAll();
+		// The deposit lands after the page's pre-read and before the answer's batch, so the savings write must see it.
+		const racing = raceBeforeBatch(() =>
+			spend(null, -245000, TODAY, { flag_income: 1, raw_name: "NEW PAYER" }),
+		);
+		const { res, html } = await post(
+			"/first-page/savings",
+			[
+				["answer", "save"],
+				["goal", "300"],
+			],
+			true,
+			racing,
+		);
+		expect(trigger(res).toast).toEqual({
+			message: "That one is already answered.",
+			type: "info",
+		});
+		expect(html).toContain("Is this your pay?");
+		expect(await goalRows()).toBe(0);
+		expect(await savingsOf()).toBeUndefined();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+	});
+
+	it("draws no budgets stroke when Not now races a new pay deposit with a Home goal set (#721 review)", async () => {
+		await skipAll();
+		// With Home's goal set, the budgets stroke's goal check passes, so only its pay check keeps the stroke undrawn.
+		await db
+			.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 20000)",
+			)
+			.bind(CUR)
+			.run();
+		const racing = raceBeforeBatch(() =>
+			spend(null, -245000, TODAY, { flag_income: 1, raw_name: "NEW PAYER" }),
+		);
+		const { html } = await post(
+			"/first-page/savings",
+			[["answer", "skip"]],
+			true,
+			racing,
+		);
+		expect(html).toContain("Is this your pay?");
+		expect(await savingsOf()).toBeUndefined();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+	});
+
+	it("copies a Home goal and draws the budgets stroke in one batch, so the record and the stroke agree (#721 review)", async () => {
+		await skipAll();
+		// Home sets the goal after the question drew, so the page's own read copies it and draws the stroke.
+		await db
+			.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 30000)",
+			)
+			.bind(CUR)
+			.run();
+		const batch = vi.spyOn(db, "batch");
+		try {
+			await settleAndLoad(db, TODAY);
+			// The page's own reads may batch too; the goal's copy and the budgets stroke are one batch of exactly two statements.
+			const sizes = batch.mock.calls.map(([statements]) => statements.length);
+			expect(sizes.filter((size) => size === 2)).toHaveLength(1);
+		} finally {
+			batch.mockRestore();
+		}
+		expect(await savingsOf()).toBe(30000);
+		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
+	});
 });
