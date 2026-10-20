@@ -2762,6 +2762,7 @@ export async function pendingForJev(
 				note: transaction.note ?? null,
 				kind: transaction.kind ?? null,
 				forPersonId,
+				forPersonName: transaction.forPerson ?? null,
 			},
 		}),
 	);
@@ -2918,6 +2919,8 @@ export type JevSeen = {
 	note: string | null;
 	kind: string | null;
 	forPersonId: number | null;
+	/** The name of that person, which Jev is told as `for_person`: a rename since the read changes the question. */
+	forPersonName: string | null;
 };
 
 /**
@@ -2936,7 +2939,8 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND transactions.plaid_category IS ${value("plaidCategory")}
 		AND transactions.note IS ${value("note")}
 		AND transactions.kind IS ${value("kind")}
-		AND transactions.for_person_id IS ${value("forPersonId")})`;
+		AND transactions.for_person_id IS ${value("forPersonId")}
+		AND (SELECT name FROM household_people WHERE id = transactions.for_person_id) IS ${value("forPersonName")})`;
 }
 
 /** A save's guard for `seen`: its values are bound in the order the guard takes them. */
@@ -3168,7 +3172,8 @@ export type JevAnswerSave = {
  * only while every switch the answer was asked under is still on, so a late answer is thrown away and the transaction
  * waits for the next run. Returns the statements that do it (the update, then its log row): a caller runs them in
  * one batch, so a sorting group can save all of its answers together (decision 139). A save from sorting (given `seen` or
- * a turn) also writes only while no category the answer names was archived since Jev was asked (decision 143).
+ * a turn) also writes only while every category the answer names is still active (decision 143): one archived or removed
+ * since Jev was asked is left waiting, so the batch never breaks on a missing category.
  */
 export function saveJevResultStatements(
 	db: D1Database,
@@ -3190,14 +3195,24 @@ export function saveJevResultStatements(
 	const suggestionWritten =
 		options.categoryAsked === false ? null : d.suggestedCategoryId;
 	const alsoWritten = d.alsoCategoryId ?? null;
-	// A save from sorting also writes only while no category the answer names was archived since Jev was asked (decision
-	// 143): one NOT EXISTS over the archived categories. A null names none, so it never blocks.
+	// A save from sorting also writes only while every category the answer names is still there and active (decision 143):
+	// a category archived or removed since Jev was asked leaves the transaction waiting. A null names none, so it never
+	// blocks. Each name's two binds are its id, once for the null test and once for the lookup.
 	const fromSorting = options.seen !== undefined || options.turn !== undefined;
+	const activeNamed =
+		"(? IS NULL OR EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0))";
 	const activeSql = fromSorting
-		? " AND NOT EXISTS (SELECT 1 FROM categories WHERE archived = 1 AND id IN (?, ?, ?))"
+		? ` AND ${activeNamed} AND ${activeNamed} AND ${activeNamed}`
 		: "";
 	const activeBinds = fromSorting
-		? [categoryWritten, suggestionWritten, alsoWritten]
+		? [
+				categoryWritten,
+				categoryWritten,
+				suggestionWritten,
+				suggestionWritten,
+				alsoWritten,
+				alsoWritten,
+			]
 		: [];
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.

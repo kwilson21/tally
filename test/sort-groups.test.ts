@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { makeCategory } from "../src/db/categories";
 import { takeSortingTurn } from "../src/db/sorting-turn";
 import { resetDemo } from "../src/demo/reset";
 import { type StepRunner, sortGroups } from "../src/sort-groups";
@@ -935,10 +936,48 @@ describe("a save that fails keeps Jev's answers (decision 143)", () => {
 		expect(await countText("2026-09-22")).toBe("2");
 		expect(await countText("2026-09-23")).toBeNull();
 	});
+
+	it("a save after the household's time zone changed dates its log rows in the new zone, and gives back to the read's day", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		// 15:00 UTC is still the 22nd in New York (the read's zone) and already the 23rd in Kiritimati (UTC+14).
+		vi.setSystemTime(new Date("2026-09-22T15:00:00Z"));
+		const ids = await addWaiting(2);
+		const fake = fakeSteps({
+			throws: { "group-1-write": 1 },
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 2)
+					await changeRow(
+						"UPDATE household_settings SET value = 'Pacific/Kiritimati' WHERE key = 'time_zone'",
+					);
+			},
+		});
+		const done = await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => reply(0.9)),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-zone-changed",
+			},
+		);
+		expect(done).toEqual({ asked: 2, applied: 2 });
+		const days = await db
+			.prepare(
+				"SELECT DISTINCT household_day AS d FROM ai_log WHERE transaction_id IN (SELECT value FROM json_each(?))",
+			)
+			.bind(JSON.stringify(ids))
+			.all<{ d: string }>();
+		expect(days.results.map((row) => row.d)).toEqual(["2026-09-23"]);
+		// The calls were reserved on the read's day, and that is still the day they are given back to.
+		expect(await countText("2026-09-22")).toBe("2");
+		expect(await countText("2026-09-23")).toBeNull();
+	});
 });
 
 describe("a changed row keeps no answer (decision 143)", () => {
-	const CHANGES: [string, string][] = [
+	// Each change runs between the read and the first save. A change with a third entry first sets up the row (its person).
+	const CHANGES: [string, string, string?][] = [
 		[
 			"bank text",
 			"UPDATE transactions SET raw_name = 'CHANGED TEXT' WHERE id = ?",
@@ -973,13 +1012,25 @@ describe("a changed row keeps no answer (decision 143)", () => {
 			"suggestion status",
 			"INSERT INTO merchants (raw_name, suggestion_status) VALUES ('SORT STEP 1', 'pending') ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = excluded.suggestion_status",
 		],
+		// The person Jev was told the row is for (decision 143): renamed, or removed (its row then has no person).
+		[
+			"person's name",
+			"UPDATE household_people SET name = 'Renamed person' WHERE id = 1",
+			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
+		],
+		[
+			"person it's for",
+			"DELETE FROM household_people WHERE id = 1",
+			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
+		],
 	];
 
 	it.each(CHANGES)(
 		"a row whose %s changed after the read keeps no answer, and the rest of the group is saved",
-		async (_label, sql) => {
+		async (_label, sql, before) => {
 			const ids = await addWaiting(3);
 			const target = ids[1] as number;
+			if (before) await changeRow(before, target);
 			const fake = fakeSteps({
 				beforeAttempt: async (name, attempt) => {
 					if (name === "group-1-write" && attempt === 1)
@@ -1104,6 +1155,44 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		expect(await categoryOf(target)).toBeNull();
 	});
 
+	it("a row whose person was renamed keeps its details waiting too", async () => {
+		await saveAiSwitches(db, { details: true });
+		const ids = await addWaiting(3);
+		const target = ids[1] as number;
+		await changeRow(
+			"UPDATE transactions SET for_person_id = 1 WHERE id = ?",
+			target,
+		);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name === "group-1-write" && attempt === 1)
+					await changeRow(
+						"UPDATE household_people SET name = 'Renamed person' WHERE id = 1",
+					);
+			},
+		});
+		await sortGroups(
+			withKey,
+			fake.runStep,
+			vi.fn(async () => replyWithDetails()),
+			{
+				rulesApplied: true,
+				onlyIds: ids,
+				runId: "run-person-details",
+			},
+		);
+		const detailsAsked = async (id: number) =>
+			(
+				await db
+					.prepare("SELECT details_asked AS d FROM transactions WHERE id = ?")
+					.bind(id)
+					.first<{ d: number }>()
+			)?.d;
+		expect(await detailsAsked(target)).toBe(0);
+		expect(await detailsAsked(ids[0] as number)).toBe(1);
+		expect(await categoryOf(target)).toBeNull();
+	});
+
 	it("a plan cached before this deploy, with no seen fields, saves as it always did", async () => {
 		const ids = await addWaiting(3);
 		const fake = fakeSteps();
@@ -1208,7 +1297,7 @@ const answerReply = ({ choice, confidence, also }: Answer) =>
 		{ status: 200 },
 	);
 
-describe("a category archived since the read keeps no answer (decision 143)", () => {
+describe("a category archived or removed since the read keeps no answer (decision 143)", () => {
 	/** Jev's answer for the row whose bank text is `bank`, and `others` for every other row. */
 	const perRow = (bank: string, answer: Answer, others: Answer) =>
 		vi.fn(async (_url: string, init?: RequestInit) => {
@@ -1270,6 +1359,55 @@ describe("a category archived since the read keeps no answer (decision 143)", ()
 				perRow("SORT STEP 1", answer, GROCERIES),
 				{ rulesApplied: true, onlyIds: ids, runId: "run-archived" },
 			);
+			expect(done).toEqual({ asked: 3, applied: 2 });
+			expect(await categoryOf(target)).toBeNull();
+			expect(await storedAnswer(target)).toEqual({
+				suggested: null,
+				confidence: null,
+			});
+			expect(await logged([target])).toBe(0);
+			expect(await categoryOf(ids[0] as number)).not.toBeNull();
+			expect(await categoryOf(ids[2] as number)).not.toBeNull();
+			expect(await logged([ids[0] as number, ids[2] as number])).toBe(2);
+			expect(await callsUsed()).toBe(3);
+		},
+	);
+
+	// A category made for one test and used by nothing, so removing it is what unmakeCategory does to an unused one.
+	const PROBE = "Probe";
+	const REMOVED: [string, Answer][] = [
+		["Jev's chosen category", { choice: PROBE, confidence: 0.9 }],
+		["Jev's suggestion", { choice: PROBE, confidence: 0.3 }],
+		[
+			"Jev's also category",
+			{ choice: "Groceries", confidence: 0.9, also: PROBE },
+		],
+	];
+
+	it.each(REMOVED)(
+		"a row whose answer names %s, removed between the read and the save, keeps no answer and no log row, and the rest of the group is saved",
+		async (_label, answer) => {
+			expect((await makeCategory(db, { name: PROBE })).ok).toBe(true);
+			const ids = await addWaiting(3);
+			const target = ids[1] as number;
+			// Two tries at most: before the fix the batch fails on the removed category's foreign key every time.
+			const fake = fakeSteps({
+				limits: { "group-1-write": 2 },
+				beforeAttempt: async (name, attempt) => {
+					if (name === "group-1-write" && attempt === 1)
+						await changeRow("DELETE FROM categories WHERE name = ?", PROBE);
+				},
+			});
+			const done = await sortGroups(
+				withKey,
+				fake.runStep,
+				perRow("SORT STEP 1", answer, GROCERIES),
+				{ rulesApplied: true, onlyIds: ids, runId: "run-removed" },
+			);
+			// The save went through on its first try: the removed category's answer was left out, not failed.
+			expect(
+				fake.steps.find((step) => step.name === "group-1-write")?.attempts,
+			).toBe(1);
 			expect(done).toEqual({ asked: 3, applied: 2 });
 			expect(await categoryOf(target)).toBeNull();
 			expect(await storedAnswer(target)).toEqual({

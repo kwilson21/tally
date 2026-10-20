@@ -2162,7 +2162,7 @@ describe("categorizePending", () => {
 				expect(tally.sorted).toBe(1);
 			});
 
-			it("reads the household's zone once, not for every call", async () => {
+			it("reads the household's zone once for the group's read and once for its save, not for every call", async () => {
 				quiet();
 				const zoneReads = countingDb();
 				const spy = vi.spyOn(zoneReads.db, "prepare");
@@ -2173,7 +2173,8 @@ describe("categorizePending", () => {
 				const reads = spy.mock.calls.filter(([sql]) =>
 					String(sql).includes("key = 'time_zone'"),
 				);
-				expect(reads).toHaveLength(1);
+				// One group: its read, then its save (which dates the log rows in the zone as it is now, decision 143).
+				expect(reads).toHaveLength(2);
 			});
 		});
 	});

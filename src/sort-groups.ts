@@ -393,8 +393,9 @@ export async function writeGroup(
 	const now = await readAiSwitches(db);
 	const sw = plan.switches;
 	const turn = plan.turnId;
-	// The log rows are dated with the household's day as the answers are saved (spec §8.6).
-	const saveDay = todayIn(plan.timeZone);
+	// The log rows are dated with the household's day as the answers are saved (spec §8.6), in the zone the household has
+	// now: a save retried after the zone changed dates them by it (decision 143). The reservation keeps the read's day.
+	const saveDay = todayIn(await householdTimeZone(db));
 	const byId = new Map(plan.rows.map((row) => [row.id, row]));
 	const reservedKey = reservedKeyFor(plan.day, turn);
 	// The turn is taken back first, while the group's record exists (decision 143): a save that already went through
