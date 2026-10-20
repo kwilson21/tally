@@ -7877,6 +7877,10 @@ const FIRST_WEEK_BUDGETS_LEDGER = {
 	id: "budgets",
 	text: "Budgets · 2 kept, $750 a month",
 };
+const FIRST_WEEK_SAVINGS_ENTRY = {
+	id: "savings",
+	text: "Savings · $300 a month",
+};
 
 function FirstWeekGroup() {
 	const page = (over: Partial<FirstPageModel>): FirstPageModel => ({
@@ -8063,10 +8067,10 @@ function FirstWeekGroup() {
 			</Specimen>
 			<Specimen
 				id="first-page-budgets"
-				title="BudgetsQuestion, RuledTotal"
+				title="BudgetsQuestion, SavingsQuestion, RuledTotal"
 				tier="interactive"
-				components={["BudgetsQuestion", "RuledTotal"]}
-				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask says why above that rule: every category already budgeted on Home, or no categories to budget yet."
+				components={["BudgetsQuestion", "SavingsQuestion", "RuledTotal"]}
+				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the step ends with the savings question (decision 135): Save some each month? with a blank money input, Save it or Not now. Then the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask says why above that rule: every category already budgeted on Home, or no categories to budget yet."
 			>
 				<State label="Keep all: the suggestions as a list, the total in the question, and One at a time">
 					<FirstPageBody
@@ -8223,6 +8227,79 @@ function FirstWeekGroup() {
 								FIRST_WEEK_PAY_ENTRY,
 								FIRST_WEEK_BILLS_ENTRY,
 								FIRST_WEEK_BUDGETS_LEDGER,
+							],
+							payAnswered: true,
+							pay: [],
+							budgets: { done: true, safeCents: 70000, nothingAsked: null },
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="The savings question: Save some each month?, a blank money input from October on, then Save it and Not now">
+					<FirstPageBody
+						id="first-page-budgets-savings"
+						model={page({
+							drawn: 3,
+							ledger: [
+								FIRST_WEEK_PAY_ENTRY,
+								FIRST_WEEK_BILLS_ENTRY,
+								FIRST_WEEK_BUDGETS_LEDGER,
+							],
+							payAnswered: true,
+							pay: [],
+							budgets: {
+								done: false,
+								firstDate: "2026-08-01",
+								month: "2026-10",
+								asks: [],
+								keepAllOpen: false,
+								needs: null,
+							},
+						})}
+						focus={false}
+					/>
+				</State>
+				<State label="Save it refused: the field keeps the $0 typed, with its error under it, and takes focus">
+					{/* The field takes focus when it's refused, so the sample is a picture here, inert like Picture's. */}
+					<div inert>
+						<FirstPageBody
+							id="first-page-budgets-savings-error"
+							model={page({
+								drawn: 3,
+								ledger: [
+									FIRST_WEEK_PAY_ENTRY,
+									FIRST_WEEK_BILLS_ENTRY,
+									FIRST_WEEK_BUDGETS_LEDGER,
+								],
+								payAnswered: true,
+								pay: [],
+								budgets: {
+									done: false,
+									firstDate: "2026-08-01",
+									month: "2026-10",
+									asks: [],
+									keepAllOpen: false,
+									needs: null,
+								},
+							})}
+							focus={false}
+							savingsError={{
+								text: "Enter an amount greater than $0, or choose Not now.",
+								typed: "0",
+							}}
+						/>
+					</div>
+				</State>
+				<State label="Saved: the ruled-off Safe to spend, with the Savings line in the ledger as the goal's amount">
+					<FirstPageBody
+						id="first-page-budgets-saved"
+						model={page({
+							drawn: 4,
+							ledger: [
+								FIRST_WEEK_PAY_ENTRY,
+								FIRST_WEEK_BILLS_ENTRY,
+								FIRST_WEEK_BUDGETS_LEDGER,
+								FIRST_WEEK_SAVINGS_ENTRY,
 							],
 							payAnswered: true,
 							pay: [],

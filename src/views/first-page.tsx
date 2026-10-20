@@ -4,7 +4,7 @@
 // (FirstPage, SmallNotebook, LedgerLine), so the drawing and the app can't drift.
 import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
-import { shortDay, shortMonthName } from "../dates";
+import { monthName, shortDay, shortMonthName } from "../dates";
 import {
 	billsMutedLine,
 	keepHeading,
@@ -600,6 +600,74 @@ export function BudgetsQuestion({
 	);
 }
 
+/** The savings question's forms: each posts its answer and swaps the page, as the budgets forms do. */
+const savingsForm = {
+	method: "post",
+	action: "/first-page/savings",
+	"hx-post": "/first-page/savings",
+	"hx-target": "#first-page",
+	"hx-swap": "outerHTML",
+} as const;
+
+/**
+ * The savings question at the end of the budgets step (spec §8.8, decision 135, #721): "Save some each month?", what Safe
+ * to spend does with it, and the money input from the page's month on, blank. Save it and Not now are two forms, so Enter
+ * in the field presses Save it. A refused amount keeps what was typed under its error, and takes focus in the field.
+ */
+export function SavingsQuestion({
+	month,
+	focus,
+	error,
+}: {
+	month: string;
+	focus: boolean;
+	/** A refused Save it: its words and what was typed, kept in the field. */
+	error: BudgetError | null;
+}) {
+	const shownMonth = <input type="hidden" name="month" value={month} />;
+	return (
+		<section>
+			<h2
+				tabindex={-1}
+				autofocus={focus && error === null}
+				class="mt-6 font-serif text-2xl font-semibold"
+			>
+				Save some each month?
+			</h2>
+			<p class="mt-2 text-base text-muted">
+				Safe to spend sets it aside from the 1st, before anything else. You can
+				change it on Home any time.
+			</p>
+			<form {...savingsForm}>
+				{shownMonth}
+				<div class="mt-4">
+					<MoneyInput
+						id="first-savings"
+						name="goal"
+						label={`Save each month, from ${monthName(month)} on`}
+						value={error?.typed ?? ""}
+						error={error?.text}
+						autofocus={error !== null}
+					/>
+				</div>
+				<div class="mt-4">
+					<Button type="submit" name="answer" value="save" class="w-full">
+						Save it
+					</Button>
+				</div>
+			</form>
+			<form {...savingsForm}>
+				{shownMonth}
+				<div class="mt-1">
+					<Button kind="text" type="submit" name="answer" value="skip">
+						Not now
+					</Button>
+				</div>
+			</form>
+		</section>
+	);
+}
+
 /**
  * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
  * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says why above the rule.
@@ -649,6 +717,7 @@ export function FirstPageBody({
 	id = "first-page",
 	budgetError = null,
 	budgetAmountOpen = false,
+	savingsError = null,
 }: {
 	model: FirstPageModel;
 	focus: boolean;
@@ -660,6 +729,8 @@ export function FirstPageBody({
 	budgetError?: BudgetError | null;
 	/** Another amount drawn open with no error, for the catalog's picture of it (the page never sends this). */
 	budgetAmountOpen?: boolean;
+	/** A refused Save it in the savings question: its words and what was typed. */
+	savingsError?: BudgetError | null;
 }) {
 	const billsAnswered = model.ledger.some((line) => line.id === "bills");
 	const budgets = model.budgets;
@@ -701,6 +772,13 @@ export function FirstPageBody({
 									safeCents={budgets.safeCents}
 									focus={focus}
 									nothingAsked={budgets.nothingAsked}
+								/>
+							) : budgets.asks.length === 0 ? (
+								// No category left to ask: the step's last question is the savings question (decision 135).
+								<SavingsQuestion
+									month={budgets.month}
+									focus={focus}
+									error={savingsError}
 								/>
 							) : (
 								<BudgetsQuestion
