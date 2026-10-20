@@ -797,9 +797,7 @@ describe("the 10:00 run", () => {
 			},
 		);
 		expect(fetchStub).toHaveBeenCalledOnce();
-		expect(log).toHaveBeenCalledWith(
-			"first night: reconnect reminders step failed Error",
-		);
+		expect(log).toHaveBeenCalledWith("reconnect reminders failed Error");
 		vi.unstubAllGlobals();
 		log.mockRestore();
 	});

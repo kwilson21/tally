@@ -113,7 +113,9 @@ export async function runScheduled(
 	const night = utcDay(clockNow(time));
 	// The first night's sync (#586), kept for the night's Workflow to decide. Production only: the demo has no banks.
 	if (env.DEMO === "false") {
-		await nightStep("sync", () => recordNightSync(env.DB, synced, night));
+		await runStep("first night: sync step", () =>
+			recordNightSync(env.DB, synced, night),
+		);
 	}
 	// The night's Workflow (decision 139): it sorts everything waiting, then makes the night's names and new-category
 	// suggestions, then (production only) keeps the first night's counts for `night`, the day the sync was kept for.
@@ -133,15 +135,15 @@ type RunClock = {
 const clockNow = (time?: RunClock) => (time?.now ?? Date.now)();
 
 /**
- * One of the night's steps (#586). A failure is logged by name and the run goes on, so the night's counts never stop a
- * run's own work.
+ * One of a run's steps. A failure is logged by name and the run goes on, so one step never stops the next: the 09:00 run's
+ * sync result, and the 10:00 run's reconnect reminders and ready email.
  */
-async function nightStep(name: string, step: () => Promise<void>) {
+async function runStep(label: string, step: () => Promise<void>) {
 	try {
 		await step();
 	} catch (error) {
 		console.error(
-			`first night: ${name} step failed ${error instanceof Error ? error.name : "unknown"}`,
+			`${label} failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
 }
@@ -232,8 +234,8 @@ export default {
 	fetch: app.fetch,
 	async scheduled(controller, env) {
 		if (controller.cron === RECONNECT_EMAIL_CRON) {
-			await nightStep("reconnect reminders", () => runReconnectReminders(env));
-			await nightStep("ready email", () => runReadyEmail(env));
+			await runStep("reconnect reminders", () => runReconnectReminders(env));
+			await runStep("ready email", () => runReadyEmail(env));
 		} else await runScheduled(env);
 	},
 } satisfies ExportedHandler<Env>;
