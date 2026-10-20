@@ -1,0 +1,14 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "tally-compare-models",
+	"main": "worker.ts",
+	// The same date as the app's. This Worker is run locally and never deployed.
+	"compatibility_date": "2026-09-22",
+	// Remote on purpose: a local AI binding can't reach Clef, so each call goes to Cloudflare and is billed.
+	"ai": { "binding": "AI", "remote": true },
+	// Jev's key, from the env file. Wrangler warns when it's missing. Never set it here.
+	"secrets": { "required": ["JEV_API_KEY"] },
+	// Never deployed: no route, no workers.dev address, no preview URLs.
+	"workers_dev": false,
+	"preview_urls": false
+}
