@@ -32,7 +32,7 @@ One command prints a side-by-side report of Jev, Clef and Clef-flash answering T
   - `"$schema": "../../node_modules/wrangler/config-schema.json"`
   - `name: "tally-compare-models"`, `main: "worker.ts"`, `compatibility_date: "2026-09-22"`
   - `ai: { binding: "AI", remote: true }`
-  - `secrets: { required: ["JEV_API_KEY"] }`, so the env file gives the Worker only that key, and Wrangler warns when it's missing
+  - `secrets: { required: ["JEV_API_KEY"] }`, so the env file gives the Worker only that key, and Wrangler warns when it's missing (wrangler-dist/cli.js:185422-185438)
   - `workers_dev: false`, `preview_urls: false`
   - no D1, no assets, no routes, no crons.
 
@@ -152,7 +152,7 @@ Once tests pass, ask: is there a simpler way than what you just wrote? Reuse the
 ## Running it (after the fresh verifier passes, not by the builder)
 
 1. A fresh Haiku 5.5 subagent starts the two commands above from the verified head. It never creates a `.env` or copies `.dev.vars`.
-2. It checks that Wrangler printed "Using secrets defined in". If Wrangler warns "Missing required secrets", it stops and says so.
+2. It checks that Wrangler printed "Using secrets defined in" followed by a path ending in `.dev.vars`. Wrangler also prints that line for `process.env` whenever `secrets` is set, and that one doesn't count (wrangler-dist/cli.js:185359-185368, :185417). If Wrangler warns "Missing required secrets", it stops and says so.
 3. It returns the report. If the full request dies, it runs the six slices instead.
 
 The report goes on the issue and in the PR description, and is run again if a review changes the script. If every Clef call is unreadable, stop: the main session reads the kept body and decides what the adapter maps. `src/ai/categorize.ts` stays as it is.
