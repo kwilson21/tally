@@ -121,4 +121,60 @@ describe("SortWorkflow", () => {
 			expect.stringMatching(/stopped|failed/),
 		);
 	});
+
+	it("waits out a busy Jev through a real step.sleep: a 429, then the answer, with two Jev calls", async () => {
+		const row = await db
+			.prepare(
+				"INSERT INTO transactions(account_id,date,amount_cents,raw_name) VALUES(1,?,-500,'WORKFLOW BUSY') RETURNING id",
+			)
+			.bind(TODAY)
+			.first<{ id: number }>();
+		const id = Number(row?.id);
+		(env as { JEV_API_KEY?: string }).JEV_API_KEY = "test-key";
+		let call = 0;
+		const fetchJev = vi.fn(async () => {
+			call += 1;
+			return call === 1
+				? new Response("{}", { status: 429, headers: { "retry-after": "5" } })
+				: jevReply();
+		});
+		vi.stubGlobal("fetch", fetchJev);
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		const introspector = await introspectWorkflow(env.SORT);
+		try {
+			await introspector.modifyAll(async (m) => {
+				await m.disableRetryDelays();
+				await m.disableSleeps();
+			});
+			const instance = await env.SORT.create({
+				params: { ids: [id], bySync: false, rulesApplied: false },
+			});
+			let status = await instance.status();
+			for (
+				let i = 0;
+				i < 100 && status.status !== "complete" && status.status !== "errored";
+				i++
+			) {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				status = await instance.status();
+			}
+			expect({ status: status.status, error: status.error?.name }).toEqual({
+				status: "complete",
+				error: undefined,
+			});
+		} finally {
+			await introspector.dispose();
+		}
+		expect(fetchJev).toHaveBeenCalledTimes(2);
+		const sorted = await db
+			.prepare(
+				"SELECT category_source AS source FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ source: string | null }>();
+		expect(sorted?.source).toBe("jev");
+		expect(errors).not.toHaveBeenCalledWith(
+			expect.stringMatching(/^sorting: stopped/),
+		);
+	});
 });

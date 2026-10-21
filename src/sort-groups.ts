@@ -95,6 +95,11 @@ export type SortOptions = {
 	 * a busy turn just ends the run.
 	 */
 	waitForTurn?: boolean;
+	/**
+	 * The Workflow waits (step.sleep) before a group asks again after a busy Jev (decision 145). Unset in-process, where a
+	 * busy Jev ends the run as before.
+	 */
+	sleep?: (name: string, ms: number) => Promise<void>;
 	/** Names this run's turns, `${runId}:${group}`: the Workflow's instance id, or a random id in-process. */
 	runId: string;
 };
@@ -135,6 +140,8 @@ export type AskResult =
 			status: number | null;
 			requestId: string | null;
 			serviceWide: boolean;
+			/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
+			retryAfterMs?: number;
 	  }
 	| {
 			id: number;
@@ -184,9 +191,9 @@ function serviceWide(status: number | null): boolean {
 }
 
 /**
- * Failures in a row at the end of the run's calls, not counting a service-wide one (which ends the run at once). An
- * out-of-time row made no call, so it doesn't break the row. `before` is the row the earlier groups ended with: it
- * counts when none of this group's calls succeeded.
+ * Failures in a row at the end of the run's calls, not counting a service-wide one (which ends the run at once, or waits
+ * first in the Workflow, decision 145). An out-of-time row made no call, so it doesn't break the row. `before` is the
+ * row the earlier groups ended with: it counts when none of this group's calls succeeded.
  */
 function trailingFailures(results: AskResult[], before: number): number {
 	let n = 0;
@@ -199,7 +206,10 @@ function trailingFailures(results: AskResult[], before: number): number {
 	return n + before;
 }
 
-/** Whether the run's asking ends here: Jev down or a bad key, a date change, a lost ask, or three failures in a row. */
+/**
+ * Whether the run's asking ends here: Jev down or a bad key, a date change, a lost ask, or three failures in a row. A
+ * busy Jev doesn't end it in the Workflow: writeGroup leaves this out while the run waits (decision 145).
+ */
 function runStops(results: AskResult[], before: number): boolean {
 	const last = results.at(-1);
 	if (!last) return false;
@@ -208,9 +218,68 @@ function runStops(results: AskResult[], before: number): boolean {
 	return trailingFailures(results, before) >= MAX_FAILURES_IN_A_ROW;
 }
 
-/** Whether a group stops asking after these answers: the run stops, or only the group's 2-minute budget is spent. */
+/**
+ * Whether a group stops asking after these answers: the run stops (or, for a busy Jev in the Workflow, waits), or only
+ * the group's 2-minute budget is spent.
+ */
 function askingStops(results: AskResult[], before: number): boolean {
 	return results.at(-1)?.outcome === "out-of-time" || runStops(results, before);
+}
+
+/** The first wait after a busy Jev, in ms (decision 145). Each wait after the next doubles it. */
+const FIRST_WAIT_MS = 30_000;
+/** Waits in a row before a run gives up: 30 s, 1 min, 2 min, 4 min, 8 min, 16 min (decision 145). */
+const MAX_WAITS_IN_A_ROW = 6;
+/** The longest wait Jev may ask for (its retry-after) and still be waited for (decision 145). */
+const MAX_RETRY_AFTER_MS = 30 * 60_000;
+/** The most one run waits in all, over its groups (decision 145). */
+const MAX_WAITED_MS = 60 * 60_000;
+
+/**
+ * Whether a result is a busy Jev that a run waits out (decision 145): a failure that would hit every call and may pass
+ * with time, a 429, a 5xx or no response. A 401 or 403 is not one; it ends the run at once.
+ */
+function retryable(result: AskResult | undefined): boolean {
+	return (
+		result?.outcome === "failed" &&
+		result.serviceWide &&
+		(result.status === null || result.status === 429 || result.status >= 500)
+	);
+}
+
+/**
+ * The wait before the next ask, given the run's groups so far (each group's ask results, in order), or null to stop
+ * waiting (decision 145). It is pure: it reads only the groups' cached answers, so a replayed run waits the same. It
+ * returns null unless the last group's last result is retryable; otherwise the wait doubles for each group in a row that
+ * ended on one, or is Jev's retry-after when that is longer. It stops after six waits in a row, when Jev asks for more
+ * than 30 minutes, and when the run's waits would pass 60 minutes in all.
+ */
+export function nextWait(groups: AskResult[][]): number | null {
+	// The waits the earlier groups already returned, by the same rule on each earlier prefix. The rule itself
+	// (waitAfter) takes those waits as a number, so this doesn't recurse.
+	let waited = 0;
+	for (let i = 1; i < groups.length; i++)
+		waited += waitAfter(groups.slice(0, i), waited) ?? 0;
+	return waitAfter(groups, waited);
+}
+
+/** The wait after the last of these groups, given the waits the run already returned for the groups before it. */
+function waitAfter(groups: AskResult[][], waitedBefore: number): number | null {
+	const last = groups.at(-1)?.at(-1);
+	if (!retryable(last)) return null;
+	// The trailing groups that ended on a busy Jev, counting back to the first of them that answered some rows (it counts).
+	let streak = 0;
+	for (let i = groups.length - 1; i >= 0; i--) {
+		const group = groups[i] ?? [];
+		if (!retryable(group.at(-1))) break;
+		streak += 1;
+		if (group.some((result) => result.outcome === "answered")) break;
+	}
+	// The last result is a retryable failure, so it may carry the wait Jev asked for.
+	const askedMs = last?.outcome === "failed" ? (last.retryAfterMs ?? 0) : 0;
+	if (streak > MAX_WAITS_IN_A_ROW || askedMs > MAX_RETRY_AFTER_MS) return null;
+	const wanted = Math.max(askedMs, FIRST_WAIT_MS * 2 ** (streak - 1));
+	return waitedBefore + wanted > MAX_WAITED_MS ? null : wanted;
 }
 
 /**
@@ -314,7 +383,8 @@ async function reserveCalls(
 
 /**
  * Asks Jev about one row (decision 139). It never throws: any failure is a `failed` answer that counts against the
- * day. A retried ask (attempt > 1) makes no call, since the first attempt may have made it: it is `lost`.
+ * day, and a busy one carries the wait Jev asked for, when it sent one (decision 145). A retried ask (attempt > 1) makes
+ * no call, since the first attempt may have made it: it is `lost`.
  */
 async function askOne(
 	apiKey: string,
@@ -358,6 +428,9 @@ async function askOne(
 				status: result.status,
 				requestId: result.requestId,
 				serviceWide: serviceWide(result.status),
+				...(result.retryAfterMs === undefined
+					? {}
+					: { retryAfterMs: result.retryAfterMs }),
 			};
 		}
 		return { id, outcome: "answered", answer: result.answer };
@@ -388,6 +461,11 @@ export async function writeGroup(
 	plan: SortPlan,
 	results: AskResult[],
 	failuresBefore: number,
+	/**
+	 * The group's last ask was a busy Jev that the run waits out (decision 145): the short-group rule and runStops don't
+	 * stop the run here. The other stops still do.
+	 */
+	waitsOnBusy: boolean,
 ): Promise<{ asked: number; applied: number; stop: boolean }> {
 	const db = env.DB;
 	const now = await readAiSwitches(db);
@@ -517,16 +595,16 @@ export async function writeGroup(
 			applied += 1;
 
 	// A group whose budget ended its asking hands the rows it didn't reach to the next group, so a short group stops the
-	// run only when the asking wasn't cut short by the budget. A group that asked nothing because its budget was
-	// already spent stops the run: its rows would be read again.
+	// run only when the asking wasn't cut short by the budget, nor waits out a busy Jev (decision 145). A group that
+	// asked nothing because its budget was already spent stops the run: its rows would be read again.
 	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
 	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
 	const stop =
 		!asksJev(now) ||
 		(plan.bySync && !now.sortOnArrival) ||
-		(plan.rows.length < GROUP_SIZE && !endedOutOfTime) ||
+		(!waitsOnBusy && plan.rows.length < GROUP_SIZE && !endedOutOfTime) ||
 		askedNothingOutOfTime ||
-		runStops(results, failuresBefore);
+		(!waitsOnBusy && runStops(results, failuresBefore));
 	return { asked, applied, stop };
 }
 
@@ -535,7 +613,8 @@ export async function writeGroup(
  * caller applied them), then for each group: read (turn taken), reserve (the calls from the day's cap), ask each row (a
  * step of its own), and write (one batch, the turn released). The run ends when a group reads nothing, when a write
  * says so, when a write fails for good (its tries ran out, logged by name), or when the calls or (in-process) the
- * deadline run out. In-process, a throw releases the turn this run still holds.
+ * deadline run out. In the Workflow, a busy Jev (a 429, a 5xx or no response) waits and asks again, until nextWait
+ * says stop (decision 145). In-process, a throw releases the turn this run still holds.
  */
 export async function sortGroups(
 	env: SortEnv,
@@ -550,6 +629,8 @@ export async function sortGroups(
 	const apiKey = env.JEV_API_KEY;
 	const maxCalls = options.maxCalls ?? Number.POSITIVE_INFINITY;
 	const askedIds = new Set<number>();
+	// Each group's ask results so far, from the cached steps: the input to nextWait (decision 145).
+	const groups: AskResult[][] = [];
 	// The failures in a row the groups so far ended with, from their cached answers, so a replayed run counts the same.
 	let streak = 0;
 	let held: string | undefined;
@@ -629,10 +710,13 @@ export async function sortGroups(
 				results.push(answer);
 				if (askingStops(results, before)) break;
 			}
+			// A busy Jev's group waits before its next ask, and doesn't stop the run here (decision 145). The wait comes from
+			// the cached answers only, so a replayed run takes the same path.
+			const wait = options.sleep ? nextWait([...groups, results]) : null;
 			let written: Awaited<ReturnType<typeof writeGroup>>;
 			try {
 				written = await runStep(`group-${n}-write`, STEP_SETTINGS.write, () =>
-					writeGroup(env, plan, results, before),
+					writeGroup(env, plan, results, before, wait !== null),
 				);
 			} catch (error) {
 				// The save ran out of its tries (about a day). Its rows wait for the next run, and the calls it reserved stay
@@ -649,9 +733,16 @@ export async function sortGroups(
 			streak = trailingFailures(results, before);
 			done.asked += written.asked;
 			done.applied += written.applied;
+			// The busy row isn't asked off: the next group reads it again, under its own step names (decision 145).
+			const busyRow =
+				wait !== null && !written.stop ? results.at(-1)?.id : undefined;
 			for (const result of results)
-				if (result.outcome !== "out-of-time") askedIds.add(result.id);
+				if (result.outcome !== "out-of-time" && result.id !== busyRow)
+					askedIds.add(result.id);
+			groups.push(results);
 			if (written.stop || outOfTime) break;
+			if (wait !== null && options.sleep)
+				await options.sleep(`wait-${n}`, wait);
 		}
 	} finally {
 		// In-process, a throw must not leave this run's turn held for the next run (the Workflow's turn expires).

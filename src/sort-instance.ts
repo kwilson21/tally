@@ -1,7 +1,8 @@
 // What one sorting instance does (spec §7, §8.6, decision 139): it sorts its rows in groups of 25 (sort-groups.ts), and the
 // night's instance then makes the night's notes and names, then new-category suggestions, then, in production, keeps the
 // first night's counts. Each is a step of its own; one that fails is logged by its error's name and the next still runs.
-// SortWorkflow (sort-workflow.ts) runs it with Workflows' steps; the tests run it with a fake step runner.
+// SortWorkflow (sort-workflow.ts) runs it with Workflows' steps, and waits out a busy Jev with step.sleep (decision 145);
+// the tests run it with a fake step runner.
 
 import {
 	categoryCallLimit,
@@ -50,6 +51,8 @@ export async function runSortInstance(
 		fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
 		/** The clock the Workers AI steps' deadlines read, inside their steps; the Workflow passes none (Date.now). */
 		now?: () => number;
+		/** The wait before a busy Jev is asked again (decision 145): the Workflow's step.sleep; the tests pass a fake. */
+		sleep?: (name: string, ms: number) => Promise<void>;
 	},
 ): Promise<void> {
 	try {
@@ -59,6 +62,7 @@ export async function runSortInstance(
 			bySync: params.bySync,
 			runId: options.runId,
 			waitForTurn: true,
+			sleep: options.sleep,
 		});
 	} catch (error) {
 		// A step that ran out of retries ends the sort quietly; the rows it didn't save wait for the next sort.

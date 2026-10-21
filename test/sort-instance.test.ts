@@ -423,3 +423,32 @@ describe("the counts step keeps the night named by params.night", () => {
 		});
 	});
 });
+
+describe("runSortInstance passes its sleep to the sorting groups (decision 145)", () => {
+	it("a 429 waits through the sleep it was given, then the rows are sorted", async () => {
+		await onlyCharges(["SHOP A", "SHOP B"]);
+		const ids = (
+			await db
+				.prepare("SELECT id FROM transactions ORDER BY id")
+				.all<{ id: number }>()
+		).results.map((row) => row.id);
+		let call = 0;
+		const fetchImpl = vi.fn(async () => {
+			call += 1;
+			return call === 1
+				? new Response("{}", { status: 429, headers: { "retry-after": "5" } })
+				: jevAnswer();
+		});
+		const sleep = vi.fn(async (_name: string, _ms: number) => {});
+		const steps = fakeSteps();
+		await runSortInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "false" },
+			steps.runStep,
+			{ ids, bySync: false, rulesApplied: true },
+			{ runId: crypto.randomUUID(), fetchImpl, sleep },
+		);
+		expect(sleep).toHaveBeenCalledTimes(1);
+		expect(sleep).toHaveBeenCalledWith("wait-1", 30_000);
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+	});
+});
