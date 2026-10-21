@@ -207,7 +207,7 @@ describe("Home during setup", () => {
 		expect(html).not.toContain("Link a bank");
 	});
 
-	it("says Tally will email you when they're ready while the import is read, until the ready email has reached someone", async () => {
+	it("says Tally will email you the moment they're ready while the import is read, until the ready email has reached someone", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		await writeRecord({ strokes: { bank: today }, budgets: {} });
