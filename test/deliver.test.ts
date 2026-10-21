@@ -248,3 +248,81 @@ describe("deliver: the reconnect email (no key) is unchanged", () => {
 		expect(email.send).toHaveBeenCalledOnce();
 	});
 });
+
+// A try Resend may hold (decision 146): with onlyResend, Cloudflare's email is never used, and every answer that isn't a
+// success (or no answer) comes back held, so the caller keeps its words and tries again with the same key.
+describe("deliver: onlyResend, for a kept try Resend may hold (decision 146)", () => {
+	const networkError = () =>
+		vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+			throw new TypeError("network");
+		});
+
+	it.each([
+		["a timeout", () => timedOut()],
+		["a network error", () => networkError()],
+		[
+			"a 409 invalid_idempotent_request",
+			() => resendAnswer(409, "invalid_idempotent_request"),
+		],
+		[
+			"a 409 concurrent_idempotent_requests",
+			() => resendAnswer(409, "concurrent_idempotent_requests"),
+		],
+		["a 422", () => resendAnswer(422, "validation_error")],
+		["a 429", () => resendAnswer(429, "rate_limit_exceeded")],
+		["a 500", () => resendAnswer(500)],
+		["a 503", () => resendAnswer(503)],
+	])(
+		"holds %s, and never sends it through Cloudflare's email",
+		async (_label, answer) => {
+			const email = cloudflareEmail();
+			const outcome = await deliver(
+				{ RESEND_API_KEY: "test-key", EMAIL: email },
+				"reader@example.com",
+				MAIL,
+				answer(),
+				timeout,
+				"ready-email-abc",
+				{ onlyResend: true },
+			);
+			expect(outcome.delivered).toBe(false);
+			expect(outcome.held).toBe(true);
+			expect(email.send).not.toHaveBeenCalled();
+		},
+	);
+
+	it("delivers through Resend when it answers with success, and sends the key", async () => {
+		const fetchImpl = resendOk();
+		const email = cloudflareEmail();
+		const outcome = await deliver(
+			{ RESEND_API_KEY: "test-key", EMAIL: email },
+			"reader@example.com",
+			MAIL,
+			fetchImpl,
+			timeout,
+			"ready-email-abc",
+			{ onlyResend: true },
+		);
+		expect(outcome.delivered).toBe(true);
+		expect(outcome.held).toBeUndefined();
+		expect(headersOf(fetchImpl)["Idempotency-Key"]).toBe("ready-email-abc");
+		expect(email.send).not.toHaveBeenCalled();
+	});
+
+	it("holds it with no Resend key, since no answer can show it was never sent, and never uses Cloudflare's email", async () => {
+		const email = cloudflareEmail();
+		const outcome = await deliver(
+			{ EMAIL: email },
+			"reader@example.com",
+			MAIL,
+			resendOk(),
+			timeout,
+			"ready-email-abc",
+			{ onlyResend: true },
+		);
+		expect(outcome.delivered).toBe(false);
+		expect(outcome.held).toBe(true);
+		expect(outcome.kinds).toEqual(["no provider configured"]);
+		expect(email.send).not.toHaveBeenCalled();
+	});
+});

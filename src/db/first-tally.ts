@@ -83,10 +83,11 @@ export type FirstTally = {
 	 */
 	readyEmailedTo?: string[];
 	/**
-	 * The read line a ready email kept for an address whose last try Resend may hold (decision 146), keyed by the SHA-256 in
-	 * hex of the lower-cased address, so the next try sends the same words under the same key. Absent until one is kept.
+	 * The kept tries of the ready email (decision 146), keyed by the SHA-256 in hex of the lower-cased address: the read line a
+	 * try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The next try sends the same line
+	 * under the same key, through Resend only, until Resend answers or the entry is a day old. Absent until one is kept.
 	 */
-	heldReadyEmail?: Record<string, string>;
+	heldReadyEmail?: Record<string, { line: string; at: string }>;
 	/**
 	 * The savings question's answer (decision 135, #721): the goal's cents the household kept, or "skipped" for Not now. Set
 	 * once, when the question is answered or when stroke four is drawn with a goal above $0 (savingsCopyStatement); a
