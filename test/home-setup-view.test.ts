@@ -499,7 +499,7 @@ describe("HomeSetup's presence check-in", () => {
 	const CHECK_IN = 'hx-post="/home/seen"';
 	const night = { brought: 12, needYou: 0 };
 
-	it("is drawn while the history is read and while the questions are ready", async () => {
+	it("is drawn while the history is read by a page that refreshes, and while the questions are ready", async () => {
 		expect(
 			await top({
 				phase: "reading",
@@ -507,6 +507,7 @@ describe("HomeSetup's presence check-in", () => {
 				bankCount: 1,
 				sorted: 0,
 				total: 0,
+				refreshes: true,
 			}),
 		).toContain(CHECK_IN);
 		expect(
@@ -514,8 +515,47 @@ describe("HomeSetup's presence check-in", () => {
 		).toContain(CHECK_IN);
 	});
 
+	it("is not drawn while the page no longer refreshes (slow, or stale), so its person counts as away (decision 146)", async () => {
+		// The page cannot show the change itself, so it stops checking in and the ready email reaches the person.
+		expect(
+			await top({
+				phase: "reading",
+				drawn: 1,
+				bankCount: 1,
+				sorting: true,
+				slow: true,
+				refreshes: false,
+				sorted: 192,
+				total: 222,
+			}),
+		).not.toContain(CHECK_IN);
+		expect(
+			await top({
+				phase: "reading",
+				drawn: 1,
+				bankCount: 1,
+				refreshes: false,
+			}),
+		).not.toContain(CHECK_IN);
+	});
+
+	it("draws the check-in with an id, so a poll that stops refreshing can take it out of the page", async () => {
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankCount: 1,
+			refreshes: true,
+		});
+		expect(html).toContain(`<div id="home-seen" hidden`);
+	});
+
 	it("is hidden, polls on load and every 30 seconds, and swaps nothing", async () => {
-		const html = await top({ phase: "reading", drawn: 1, bankCount: 1 });
+		const html = await top({
+			phase: "reading",
+			drawn: 1,
+			bankCount: 1,
+			refreshes: true,
+		});
 		const tag = html.slice(
 			html.indexOf(CHECK_IN) - 80,
 			html.indexOf(CHECK_IN) + 200,

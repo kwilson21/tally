@@ -45,6 +45,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
+import { HOME_SEEN_ID } from "../views/home-seen";
 import {
 	HomeSetup,
 	setupNextLine,
@@ -669,11 +670,12 @@ const inSentence = (bank: YourBank) =>
 	`${bank.name} is in: ${bank.count.toLocaleString("en-US")} ${bank.count === 1 ? "transaction" : "transactions"}.`;
 
 /**
- * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while a bank is being
- * read. It answers with the list, and the status out of band (so the focused status is never replaced). A bank that came in
- * since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
- * HX-Retarget. With no setup to draw (the demo, a set-up family, or the fifth day, which Home draws in full), it asks for a
- * reload, so Home draws as it is.
+ * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while the page refreshes
+ * (decision 146). It answers with the list, and the status out of band (so the focused status is never replaced). A bank that
+ * came in since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
+ * HX-Retarget. Once the page stops refreshing, the answer takes the presence check-in out of the page, so the person counts as
+ * away. With no setup to draw (the demo, a set-up family, or the fifth day, which Home draws in full), it asks for a reload,
+ * so Home draws as it is.
  */
 const SETUP_STEPS = ["reading", "sorting", "slow"] as const;
 
@@ -752,6 +754,9 @@ home.get("/home/banks", async (c) => {
 			<p id="setup-next" hx-swap-oob="innerHTML">
 				{setupNextLine(setup, bankLine)}
 			</p>
+			{/* This poll stops refreshing the page once the sort is slow or the import stale, so the page stops checking in too: its
+			    person counts as away, and the ready email reaches them (decision 146). */}
+			{!setup.refreshes && <div id={HOME_SEEN_ID} hx-swap-oob="delete" />}
 		</>,
 	);
 });

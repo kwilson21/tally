@@ -298,9 +298,12 @@ export function HomeSetup({
 					</p>
 				</div>
 			)}
-			{polls && (phase === "reading" || phase === "ready") && (
-				<HomeSeenCheckIn />
-			)}
+			{/* The check-in says the person is still here (decision 146). A reading page that no longer refreshes draws none, so
+			    its person counts as away and the ready email reaches them: it can't show the questions appearing. */}
+			{polls &&
+				(phase === "ready" || (phase === "reading" && view.refreshes)) && (
+					<HomeSeenCheckIn />
+				)}
 		</section>
 	);
 }

@@ -1,7 +1,7 @@
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email to each person on the household list once a new
 // family's first questions are open, while pay, bills and budgets are all undrawn. The minute run sends it (the 10:00 run
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
-// still on Home's setup or the questions page sees the questions there instead. An address is claimed in the record's
+// still on Home's setup (while it refreshes) or the questions page sees the questions there instead. An address is claimed in the record's
 // readyEmailedTo before its email goes, and released if neither provider delivers, so it is tried again on a later minute
 // while the questions stay open, and no one gets it twice. It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import {

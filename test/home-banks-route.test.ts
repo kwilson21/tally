@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
+import { runReadyEmail } from "../src/first-tally/ready-email";
 import { home } from "../src/routes/home";
 import { enabled } from "../src/routes/plaid";
 
@@ -117,6 +118,15 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(html).toContain('id="your-banks"');
 		expect(html).not.toContain("every 5s");
 		expect(html).not.toContain("data-quiet");
+		// The page stops refreshing, so it stops checking in: the check-in is taken out of the page (decision 146).
+		expect(html).toContain('<div id="home-seen" hx-swap-oob="delete">');
+	});
+
+	it("keeps the check-in while the list still refreshes", async () => {
+		await readingBanks();
+		const { html } = await refresh();
+		expect(html).toContain('hx-trigger="every 5s"');
+		expect(html).not.toContain('id="home-seen"');
 	});
 
 	it("announces a bank that came in, with its count, once", async () => {
@@ -324,5 +334,60 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 		expect(res.headers.get("HX-Refresh")).toBe("true");
 		const demoRes = await refresh("", demo);
 		expect(demoRes.res.headers.get("HX-Refresh")).toBe("true");
+	});
+});
+
+describe("a page that stops refreshing: its check-in and the ready email (decision 146)", () => {
+	const DANA = "dana@example.com";
+	const production = {
+		...env,
+		DEMO: "false",
+		RESEND_API_KEY: "test-key",
+		EMAIL: undefined,
+	} as never;
+
+	it("a slow page drops its check-in, so its person, last checked in a minute ago, is emailed once the questions open", async () => {
+		await readingBanks();
+		await env.DB.prepare("DELETE FROM household_members").run();
+		await env.DB.prepare(
+			"INSERT INTO household_members (email, last_seen_at, home_seen_at) VALUES (?, datetime('now'), datetime('now', '-1 minutes'))",
+		)
+			.bind(DANA)
+			.run();
+		// Every history came in two hours ago and one transaction still waits for Jev: Tally is sorting, and slow.
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-chain', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now', '-2 hours')",
+		).run();
+		const slow = await refresh();
+		expect(slow.html).toContain("Sorting is taking longer than usual");
+		expect(slow.html).toContain('<div id="home-seen" hx-swap-oob="delete">');
+
+		// The sort finishes and the questions open. The page has stopped checking in, and its last check-in is a minute old,
+		// so this minute is too soon for the email.
+		await saveAiSwitches(env.DB, { categories: false, income: false });
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE plaid_transaction_id = 'waiting-chain'",
+		).run();
+		const sent: string[] = [];
+		const fetchImpl = vi.fn(
+			async (_url: RequestInfo | URL, init?: RequestInit) => {
+				sent.push((JSON.parse(String(init?.body)) as { to: string }).to);
+				return new Response("{}", { status: 200 });
+			},
+		);
+		await runReadyEmail(production, fetchImpl);
+		expect(sent).toEqual([]);
+
+		// Ten minutes after its last check-in, the person counts as away and is emailed.
+		await env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now', '-11 minutes') WHERE email = ?",
+		)
+			.bind(DANA)
+			.run();
+		await runReadyEmail(production, fetchImpl);
+		expect(sent).toEqual([DANA]);
 	});
 });
