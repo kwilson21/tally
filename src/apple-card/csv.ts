@@ -40,8 +40,12 @@ export function cleanText(text: string): string {
 	return text.normalize("NFC").trim();
 }
 
-/** Splits CSV text into records of fields. A quoted field may hold commas, line breaks and doubled quotes. */
-function records(text: string): string[][] {
+/**
+ * Splits CSV text into records of fields. A quoted field may hold commas, line breaks and doubled quotes. When the text
+ * ends inside a quoted field, `open` is that record's number (counted as a spreadsheet counts records, the header 1), and
+ * the record is left out of `out`: its text can't be read.
+ */
+function records(text: string): { out: string[][]; open: number | null } {
 	const out: string[][] = [];
 	let record: string[] = [];
 	let field = "";
@@ -67,11 +71,12 @@ function records(text: string): string[][] {
 			if (char === "\r" && text.charAt(i + 1) === "\n") i++;
 		} else field += char;
 	}
+	if (quoted) return { out, open: out.length + 1 };
 	if (field !== "" || record.length > 0) {
 		record.push(field);
 		out.push(record);
 	}
-	return out;
+	return { out, open: null };
 }
 
 /** Integer cents for Apple's amount text, or null. A dollar sign is refused, and so is anything toCents rejects. */
@@ -105,11 +110,13 @@ function isoDate(text: string): string | null {
 
 type RowResult = { ok: true; row: AppleRow } | { ok: false; error: string };
 
+/** The words for a record that can't be read. Nothing from it is saved, and the upload says which record it was. */
+function unreadableWords(line: number): string {
+	return `Row ${line} can't be read. Nothing was added.`;
+}
+
 function readRow(fields: string[], line: number, width: number): RowResult {
-	const unreadable = {
-		ok: false as const,
-		error: `Row ${line} can't be read. Nothing was added.`,
-	};
+	const unreadable = { ok: false as const, error: unreadableWords(line) };
 	if (fields.length !== width) return unreadable;
 	// A U+FFFD means the file was re-saved in another encoding; a field over the cap can't be stored safely.
 	if (fields.some((field) => field.includes("�"))) return unreadable;
@@ -163,12 +170,13 @@ function readRow(fields: string[], line: number, width: number): RowResult {
 /**
  * Reads Apple's CSV text. The first record must be Apple's header, exactly. Every later record must have the header's
  * number of fields and read cleanly; the first one that doesn't refuses the whole file, and the error names its row.
- * A byte-order mark is removed, and blank records (a trailing blank line, or a record of empty fields) are skipped.
+ * A quote left open at the end of the text refuses the file too, naming the record it was in. A byte-order mark is
+ * removed, and blank records (a trailing blank line, or a record of empty fields) are skipped.
  */
 export function parseAppleCsv(
 	text: string,
 ): { ok: true; rows: AppleRow[] } | { ok: false; error: string } {
-	const all = records(text.replace(/^﻿/, ""));
+	const { out: all, open } = records(text.replace(/^﻿/, ""));
 	const header = (all[0] ?? []).map(cleanText);
 	const withPurchasedBy = [...APPLE_COLUMNS, PURCHASED_BY];
 	const isApple =
@@ -187,5 +195,8 @@ export function parseAppleCsv(
 		if (!result.ok) return { ok: false, error: result.error };
 		rows.push(result.row);
 	}
+	// A quote still open at the end of the text took the rest of the file into its record, so that record can't be read,
+	// even when its fields count right (its last field is the one left open).
+	if (open !== null) return { ok: false, error: unreadableWords(open) };
 	return { ok: true, rows };
 }

@@ -222,6 +222,32 @@ describe("parseAppleCsv", () => {
 		expect(rows.map((row) => row.line)).toEqual([2, 3]);
 	});
 
+	it("refuses a file that ends inside a quoted field: its last amount, or its last column, has no closing quote", () => {
+		// Seven columns, so the amount is the last field: "12.00 reads as 12.00 unless the open quote is refused.
+		const good7 = GREENLEAF.slice(0, GREENLEAF.lastIndexOf(","));
+		const openAmount =
+			'09/25/2026,09/26/2026,"OPEN AMOUNT","Open","Gas","Purchase","12.00';
+		expect(errorOf(`${HEADER7}\n${good7}\n${openAmount}`)).toBe(
+			"Row 3 can't be read. Nothing was added.",
+		);
+		expect(errorOf(`${HEADER7}\n${good7}\n${openAmount}\n`)).toBe(
+			"Row 3 can't be read. Nothing was added.",
+		);
+		const openColumn =
+			'09/25/2026,09/26/2026,"OPEN COLUMN","Open","Gas","Purchase","1.00","Pat Rivera';
+		expect(errorOf(`${HEADER8}\n${GREENLEAF}\n${openColumn}`)).toBe(
+			"Row 3 can't be read. Nothing was added.",
+		);
+	});
+
+	it("refuses an unclosed quote in the middle of a file, which swallows the rest of it into one field", () => {
+		const openColumn =
+			'09/25/2026,09/26/2026,"OPEN ROW","Open","Gas","Purchase","1.00","Pat Rivera';
+		expect(
+			errorOf(file(HEADER8, GREENLEAF, openColumn, GREENLEAF, GREENLEAF)),
+		).toBe("Row 3 can't be read. Nothing was added.");
+	});
+
 	it("refuses a row with a U+FFFD (a file re-saved in another encoding)", () => {
 		const bad =
 			'09/25/2026,09/26/2026,"BAD � TEXT","Bad","Gas","Purchase","1.00","Pat Rivera"';
