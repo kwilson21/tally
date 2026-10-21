@@ -29,6 +29,10 @@ const writeRecord = (value: unknown) =>
 		.bind(JSON.stringify(value))
 		.run();
 
+/** The opening tag of the element with this id, as the page draws it. */
+const openingTag = (html: string, id: string) =>
+	html.match(new RegExp(`<[a-z]+ id="${id}"[^>]*>`))?.[0] ?? "";
+
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await env.DB.prepare(
@@ -110,6 +114,27 @@ describe("Home during setup", () => {
 		expect(html).toContain("Your banks");
 		expect(html).not.toContain("Have more accounts?");
 		expect(html).not.toContain(PLAID_MODULE);
+	});
+
+	it("marks the Your banks poll and the check-in while the import is read, and the check-in in the ready phase, so a Plaid Link window pauses them (decision 146)", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const reading = await page(plaidFamily);
+		expect(openingTag(reading, "your-banks")).toContain("data-waits-for-link");
+		expect(openingTag(reading, "home-seen")).toContain("data-waits-for-link");
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		await writeRecord({
+			strokes: { bank: daysBefore(todayIn(DEFAULT_TIME_ZONE), 1) },
+			budgets: {},
+		});
+		const ready = await page(plaidFamily);
+		expect(ready).toContain("Set up your budget");
+		expect(openingTag(ready, "home-seen")).toContain("data-waits-for-link");
 	});
 
 	it("in the ready phase, Home has no Your banks, no Have more accounts? and no Plaid Link", async () => {

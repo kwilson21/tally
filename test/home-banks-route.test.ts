@@ -31,6 +31,10 @@ const trigger = (res: Response) => {
 	return header ? JSON.parse(header) : null;
 };
 
+/** The opening tag of the element with this id, as the page draws it. */
+const openingTag = (html: string, id: string) =>
+	html.match(new RegExp(`<[a-z]+ id="${id}"[^>]*>`))?.[0] ?? "";
+
 // Every connected bank, with one "in" and the rest reading: the reading phase, with the list polling.
 const readingBanks = async () => {
 	await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
@@ -120,6 +124,12 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(html).not.toContain("data-quiet");
 		// The page stops refreshing, but its person is still there: the poll never takes the check-in out (decision 146).
 		expect(html).not.toContain('hx-swap-oob="delete"');
+	});
+
+	it("marks the poll so a Plaid Link window pauses it while it is open (decision 146)", async () => {
+		await readingBanks();
+		const { html } = await refresh();
+		expect(openingTag(html, "your-banks")).toContain("data-waits-for-link");
 	});
 
 	it("leaves the check-in alone while the step it shows has not changed", async () => {

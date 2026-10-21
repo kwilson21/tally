@@ -68,6 +68,10 @@ const writeRecord = (value: unknown) =>
 		.bind(JSON.stringify(value))
 		.run();
 
+/** The opening tag of the element with this id, as the page draws it. */
+const openingTag = (html: string, id: string) =>
+	html.match(new RegExp(`<[a-z]+ id="${id}"[^>]*>`))?.[0] ?? "";
+
 /** The HX-Trigger header's announce, or null when the answer carries none. */
 const announced = (res: Response) => {
 	const header = res.headers.get("HX-Trigger");
@@ -242,6 +246,40 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(html).not.toContain('id="setup-top"');
 		expect(announced(res)).toContain("Sorting your last 90 days:");
 		expect(await seenOf(PERSON)).not.toBeNull();
+	});
+
+	it("swaps the Your banks list out of band too, drawn with the step it shows and polling while Tally sorts, so its next poll names that step (decision 146)", async () => {
+		await sorting();
+		const res = await checkIn(family, ORIGIN, "reading");
+		const html = await res.text();
+		const list = openingTag(html, "your-banks");
+		expect(list).toContain('hx-swap-oob="outerHTML"');
+		expect(list).toContain('hx-trigger="every 5s"');
+		expect(list).toContain("step=sorting");
+		expect(list).toContain("data-waits-for-link");
+	});
+
+	it("a poll with the list's own URL, sent after that check-in, announces nothing: the step was announced once (decision 146)", async () => {
+		await sorting();
+		const html = await (await checkIn(family, ORIGIN, "reading")).text();
+		const url =
+			/hx-get="([^"]+)"/
+				.exec(openingTag(html, "your-banks"))?.[1]
+				?.replaceAll("&amp;", "&") ?? "";
+		expect(url).toContain("/home/banks?");
+		const poll = await home.request(url, {}, family);
+		expect(poll.status).toBe(200);
+		expect(poll.headers.get("HX-Trigger")).toBeNull();
+	});
+
+	it("a check-in that finds the sort back from slow puts the list's poll back on, so the count keeps up (decision 146)", async () => {
+		// The page drew slow, then the sort picked up again: every history came in just now, and something still waits.
+		await sorting();
+		const res = await checkIn(family, ORIGIN, "slow");
+		expect(res.status).toBe(200);
+		const list = openingTag(await res.text(), "your-banks");
+		expect(list).toContain('hx-trigger="every 5s"');
+		expect(list).toContain("data-waits-for-link");
 	});
 
 	it("redraws the top once the page showed ready and the questions close again, so the bank's list and Link come back", async () => {

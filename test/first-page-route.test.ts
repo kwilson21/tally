@@ -1089,6 +1089,12 @@ describe("the presence check-in on the page (decision 146)", () => {
 		expect(html).toContain(CHECK_IN);
 	});
 
+	it("is marked, so a Plaid Link window on Home pauses it wherever it is drawn (decision 146)", async () => {
+		const { html } = await get("/first-page");
+		const tag = html.match(/<[a-z]+ id="home-seen"[^>]*>/)?.[0] ?? "";
+		expect(tag).toContain("data-waits-for-link");
+	});
+
 	it("is not drawn once a question is answered", async () => {
 		await markStroke(db, "pay", TODAY);
 		const { res, html } = await get("/first-page");

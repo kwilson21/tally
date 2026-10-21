@@ -711,6 +711,27 @@ function shownStepOf(setup: SetupView | null): ShownStep | null {
 }
 
 /**
+ * The Your banks list as the reading page draws it (decision 146). The poll's answer and the presence check-in's out-of-band
+ * swap both draw it here, so they name the same step and keep polling by the same rule: while Tally refreshes (setup.refreshes),
+ * and while a bank is being read. `oob` swaps it in for the list the page shows.
+ */
+function readingBanksList(
+	read: { banks: YourBank[]; today: string },
+	setup: SetupView,
+	oob = false,
+) {
+	return (
+		<YourBanks
+			banks={read.banks}
+			today={read.today}
+			keepPolling={setup.refreshes}
+			step={setupStep(setup)}
+			oob={oob}
+		/>
+	);
+}
+
+/**
  * Link a bank as a plain link to Home. An htmx redraw of Home draws this one, since Plaid's script loads only on a full load of
  * Home (#678, renderHome's linkBank).
  */
@@ -811,12 +832,7 @@ home.get("/home/banks", async (c) => {
 	const bankLine = Boolean(homeBankNotice(flagged, today));
 	return c.html(
 		<>
-			<YourBanks
-				banks={banks}
-				today={today}
-				keepPolling={setup.refreshes}
-				step={stepNow}
-			/>
+			{readingBanksList(read, setup)}
 			<p id="setup-status" hx-swap-oob="innerHTML">
 				{statusOf(setup, flagged.length > 0)}
 			</p>
@@ -837,7 +853,8 @@ home.get("/home/banks", async (c) => {
  * step its page shows. While that step is still the step now, the answer is 204 with no body. Once it has moved on, the page
  * is answered as the Your banks poll answers (redrawFirstWeek), and never reloaded: the questions opened, or the phase left
  * reading, redraws the top, and a sort that started or stopped being slow, while still reading, swaps the status, the next
- * line and the check-in out of band and announces the new step once. The questions page sends no step, so its answer is
+ * line, the Your banks list (which names the new step and polls again while Tally refreshes) and the check-in out of band, and
+ * announces the new step once. The questions page sends no step, so its answer is
  * always 204.
  */
 home.post("/home/seen", async (c) => {
@@ -856,8 +873,9 @@ home.post("/home/seen", async (c) => {
 	// The questions opened or closed, the phase left reading, or the page drew the questions open: the top is redrawn once.
 	if (setup?.phase !== "reading" || shown === "ready")
 		return redrawFirstWeek(c, read);
-	// Still reading, and the page drew reading: the status and the next line change in place, the check-in moves to the new
-	// step, and the new status is announced once (as the poll announces it).
+	// Still reading, and the page drew reading: the status, the next line and the list change in place (the list names the
+	// step it shows, and polls while Tally refreshes, as the poll draws it), the check-in moves to the new step, and the new
+	// status is announced once (as the poll announces it).
 	const message = statusOf(setup, flagged.length > 0);
 	c.header(
 		"HX-Trigger",
@@ -871,6 +889,7 @@ home.post("/home/seen", async (c) => {
 			<p id="setup-next" hx-swap-oob="innerHTML">
 				{setupNextLine(setup, Boolean(homeBankNotice(flagged, today)))}
 			</p>
+			{readingBanksList(read, setup, true)}
 			<HomeSeenCheckIn step={setupStep(setup)} oob />
 		</>,
 	);

@@ -31,6 +31,8 @@ export function HomeSeenCheckIn({
 		"hx-status:4xx": "swap:none",
 		"hx-status:5xx": "swap:none",
 		"data-quiet": true,
+		// A Plaid Link window pauses the check-in too (plaid-link.js, decision 146), so its answer can't redraw Home mid-link.
+		"data-waits-for-link": true,
 		...(step ? { "hx-vals": JSON.stringify({ step }) } : {}),
 	};
 	return (
