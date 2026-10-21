@@ -709,6 +709,88 @@ describe("the ready email: delivery", () => {
 	});
 });
 
+describe("the ready email: a try that Resend may have accepted never goes to Cloudflare's email (decision 146)", () => {
+	const conflict = (name: string) =>
+		vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ name, statusCode: 409 }), {
+					status: 409,
+				}),
+		);
+
+	it("keeps the address reached when Resend answers 409 invalid_idempotent_request: the send was already accepted, and Cloudflare's email sends nothing", async () => {
+		await openHousehold();
+		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+		await runReadyEmail(
+			production({ EMAIL: { send } }),
+			conflict("invalid_idempotent_request"),
+		);
+		expect(send).not.toHaveBeenCalled();
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("releases the address on a timeout even with Cloudflare's email set, so no fallback sends and the next minute retries with the same key", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const timedOut = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				},
+			);
+			await runReadyEmail(production({ EMAIL: { send } }), timedOut);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([]);
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (resend timeout or error)",
+			);
+			const next = resendFake();
+			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+			expect(next.keys).toEqual([await keyFor(DANA)]);
+			expect(send).not.toHaveBeenCalled();
+		} finally {
+			log.mockRestore();
+		}
+	});
+
+	it("keeps the address reached once a retry with the same key is answered 409 invalid_idempotent_request, so the first send is not sent again", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await runReadyEmail(
+				production(),
+				vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				}),
+			);
+			await runReadyEmail(production(), conflict("invalid_idempotent_request"));
+			expect(await storedList()).toEqual([DANA]);
+		} finally {
+			log.mockRestore();
+		}
+	});
+
+	it("tries again on a 409 concurrent_idempotent_requests: the first send may still fail, so nothing is kept reached and nothing is sent by Cloudflare", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			await runReadyEmail(
+				production({ EMAIL: { send } }),
+				conflict("concurrent_idempotent_requests"),
+			);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([]);
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (resend 409)",
+			);
+		} finally {
+			log.mockRestore();
+		}
+	});
+});
+
 describe("the ready email: one Idempotency-Key per address (Resend)", () => {
 	it("gives the email the key the address defines, the same for every try", async () => {
 		await openHousehold();

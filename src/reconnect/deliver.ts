@@ -21,11 +21,30 @@ export type DeliveryEnv = {
 };
 
 /**
+ * The error name Resend gives an error answer (its body's `name`, such as invalid_idempotent_request), or null when the body
+ * has none. A body that can't be read is no name.
+ */
+async function errorName(response: Response): Promise<string | null> {
+	try {
+		const body = (await response.json()) as { name?: unknown };
+		return typeof body.name === "string" ? body.name : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Sends one email to one address. Resend gets it first, with a 10 second timeout; Cloudflare's email only when Resend didn't
  * deliver. `kinds` names each failed attempt by its provider status or error kind (never the address), and is "no provider
  * configured" when neither provider is set up. `idempotencyKey` is sent to Resend only, as its Idempotency-Key header, so
  * a retry of the same email (one Resend already accepted, answered late) is answered from Resend's record and not sent again.
  * Cloudflare's email has no such key, so the fallback never carries one.
+ *
+ * With a key (the ready email, decision 146) Resend may already hold the send, so the fallback is not used when Resend's
+ * answer can't say it didn't: a 409 invalid_idempotent_request means the key was already used, so the send is delivered
+ * (Resend's docs: the key was used on a request with a different payload); a 409 concurrent_idempotent_requests, another
+ * 409, or no answer at all (a timeout or a network error) is a failed try with no fallback, and the caller tries again with
+ * the same key. Any other Resend failure still falls back, as it does without a key.
  */
 export async function deliver(
 	env: DeliveryEnv,
@@ -49,6 +68,23 @@ export async function deliver(
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);
 		delivered = response?.ok ?? false;
+		if (
+			!delivered &&
+			idempotencyKey &&
+			(!response || response.status === 409)
+		) {
+			if (
+				response &&
+				(await errorName(response)) === "invalid_idempotent_request"
+			)
+				return { delivered: true, kinds: [] };
+			return {
+				delivered: false,
+				kinds: [
+					response ? `resend ${response.status}` : "resend timeout or error",
+				],
+			};
+		}
 		if (!delivered)
 			kinds.push(
 				response ? `resend ${response.status}` : "resend timeout or error",
