@@ -93,8 +93,8 @@ export type FirstPageModel = {
 	budgets: BudgetsStep | null;
 	/**
 	 * True while no question is answered in the record once the page has settled its own draws (anyQuestionAnswered): the
-	 * check-in an answer's reply keeps (decision 146). A page's first visit reads its own value before it settles, since
-	 * settling draws a pay question with nothing to ask (routes/first-page.tsx).
+	 * check-in a page or an answer's reply keeps (decision 146). Settling draws the pay step when there is no paycheck to
+	 * ask about, so that page draws no check-in.
 	 */
 	watching: boolean;
 };

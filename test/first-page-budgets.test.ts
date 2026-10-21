@@ -1077,9 +1077,9 @@ describe("keep all's count of what changed (#590 review)", () => {
 });
 
 describe("a refused amount without JavaScript (#590 review)", () => {
-	it("keeps the presence check-in on the page it returns while no question was drawn before the page settled (decision 146)", async () => {
-		// Nothing is drawn but the bank: the first visit's rule, so the check-in stays until a question is drawn. The refused
-		// page is the same page as a redraw with JavaScript, so it draws the check-in as the first visit does.
+	it("draws no presence check-in on the page it returns: its settle drew the pay step (no paycheck), so a question is answered, as with a redraw (decision 146)", async () => {
+		// Nothing is drawn but the bank before this request. The refused page is the same page as a redraw with JavaScript, which
+		// reads the check-in after the settle, so it draws none: the settle drew the pay step, and an answered question ends it.
 		const res = await post(
 			"/first-page/budgets",
 			[
@@ -1090,7 +1090,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 			false,
 		);
 		expect(res.res.status).toBe(422);
-		expect(res.html).toContain('hx-post="/home/seen"');
+		expect(res.html).not.toContain('hx-post="/home/seen"');
 	});
 
 	it("draws the page at 422 with its error, the typed amount, and Another amount open", async () => {

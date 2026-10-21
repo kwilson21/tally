@@ -1083,13 +1083,35 @@ describe("Keep keeps what the page showed", () => {
 describe("the presence check-in on the page (decision 146)", () => {
 	const CHECK_IN = 'hx-post="/home/seen"';
 
-	it("is drawn while no question is answered", async () => {
+	/**
+	 * The HTML of the element whose opening tag starts at `start`, through its matching close (nested divs counted), so a test
+	 * can tell what sits inside the root an answer swaps.
+	 */
+	function elementAt(html: string, start: number): string {
+		const tag = /<\/?div\b[^>]*>/g;
+		tag.lastIndex = start;
+		let depth = 0;
+		for (let m = tag.exec(html); m; m = tag.exec(html)) {
+			depth += m[0].startsWith("</") ? -1 : 1;
+			if (depth === 0) return html.slice(start, m.index + m[0].length);
+		}
+		throw new Error("the element is never closed");
+	}
+
+	it("is drawn once while no question is answered, inside the #first-page that an answer swaps", async () => {
+		// One payroll merchant: its question is asked, not drawn, so no question is answered.
+		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const { res, html } = await get("/first-page");
 		expect(res.status).toBe(200);
 		expect(html).toContain(CHECK_IN);
+		expect(html.match(/id="home-seen"/g)).toHaveLength(1);
+		const root = html.indexOf('<div id="first-page"');
+		expect(root).toBeGreaterThanOrEqual(0);
+		expect(elementAt(html, root)).toContain('id="home-seen"');
 	});
 
 	it("is marked, so a Plaid Link window on Home pauses it wherever it is drawn (decision 146)", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
 		const { html } = await get("/first-page");
 		const tag = html.match(/<[a-z]+ id="home-seen"[^>]*>/)?.[0] ?? "";
 		expect(tag).toContain("data-waits-for-link");
@@ -1102,6 +1124,15 @@ describe("the presence check-in on the page (decision 146)", () => {
 		expect(html).not.toContain(CHECK_IN);
 	});
 
+	it("is not drawn for a household with no paycheck: the page draws the pay step itself, so the first question is answered (decision 146)", async () => {
+		const { res, html } = await get("/first-page");
+		expect(res.status).toBe(200);
+		expect((await readFirstTally(db))?.strokes.pay).toBe(TODAY);
+		expect(html).not.toContain(CHECK_IN);
+		// A reload of the same page draws none either.
+		expect((await get("/first-page")).html).not.toContain(CHECK_IN);
+	});
+
 	it("is drawn inside the swapped #first-page of a pay answer that leaves a question open, so the page keeps checking in", async () => {
 		// Two payroll merchants: answering the first leaves the second to ask, so the pay step is not drawn yet.
 		await deposits("ACME CORP PAYROLL", 245000, 2);
@@ -1110,6 +1141,8 @@ describe("the presence check-in on the page (decision 146)", () => {
 		expect(res.status).toBe(200);
 		expect(html).toContain('id="first-page"');
 		expect(html).toContain(CHECK_IN);
+		const root = html.indexOf('<div id="first-page"');
+		expect(elementAt(html, root)).toContain(CHECK_IN);
 	});
 
 	it("is not drawn in a pay answer's #first-page once the answer draws the pay step, so the swap takes away the one the page drew", async () => {
