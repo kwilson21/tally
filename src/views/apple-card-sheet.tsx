@@ -112,7 +112,7 @@ export function AppleCardSheet({
 						class="w-full"
 						busyLabel={demo ? "Adding…" : "Uploading…"}
 					>
-						{demo ? "Add the sample" : "Upload a file"}
+						{demo ? "Add the sample" : "Upload"}
 					</Button>
 				</div>
 			</form>

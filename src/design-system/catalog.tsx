@@ -1177,7 +1177,7 @@ const APPLE_CARD_SHEET_SPEC: UseSpecText = {
 	purpose:
 		"Upload the file Apple exports, and optionally the balance in Wallet, from Accounts. In the demo it adds the sample file instead.",
 	affordance:
-		"A sheet over Accounts, titled Apple Card with the card icon: the file field, the balance field, then Cancel and Upload a file. On a phone it rises from the bottom; on a desktop it is a panel on the right.",
+		"A sheet over Accounts, titled Apple Card with the card icon: the file field, the balance field, then Cancel and Upload. On a phone it rises from the bottom; on a desktop it is a panel on the right.",
 	states:
 		"Empty, before the first upload. Each refusal keeps the sheet open with its error under its field: the file's words under the file field, the balance's under the balance. Both wrong: both show and focus goes to the file. Uploading: the submit reads “Uploading…”. The demo: no fields, and the submit reads “Add the sample”.",
 	feedback:

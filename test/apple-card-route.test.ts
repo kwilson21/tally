@@ -103,6 +103,12 @@ async function postUnread(contentLength: string, htmx = false) {
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
 }
 
+/** The submit's own label: its first span holds it, and the second holds the busy label. */
+const submitLabel = (html: string) =>
+	html.match(
+		/<button[^>]*id="apple-card-upload"[^>]*>\s*<span class="contents[^"]*">([^<]*)<\/span>/,
+	)?.[1];
+
 const cardRows = () =>
 	env.DB.prepare(
 		"SELECT COUNT(*) AS n FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
@@ -136,7 +142,9 @@ describe("Apple Card's upload sheet (#766)", () => {
 			expect(html).toContain('id="apple-card-file"');
 			expect(html).toContain("Apple Card file (CSV)");
 			expect(html).toContain("Balance in Wallet");
-			expect(html).toContain("Upload a file");
+			// The submit says Upload (spec §8.10: Cancel and Upload). "Upload a file" is the group's button that opens this sheet.
+			expect(submitLabel(html)).toBe("Upload");
+			expect(html).not.toContain("Upload a file");
 			expect(html).toContain('enctype="multipart/form-data"');
 			expect(html).toContain('hx-encoding="multipart/form-data"');
 			expect(html).toContain("hx-disable=");

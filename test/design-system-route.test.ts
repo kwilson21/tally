@@ -1750,4 +1750,23 @@ describe("GET /design-system: Apple Card's group, file field and sheet (#766)", 
 		expect(sheet).toContain("In the demo, Tally uses a sample file.");
 		expect(sheet).toContain("Optional. Left blank, Oct 18's balance stays.");
 	});
+
+	it("names the submit Upload, as the spec's Cancel and Upload does, and the demo's Add the sample; DESIGN.md says the same", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		const labels = [
+			...sheet.matchAll(
+				/<button[^>]*id="apple-card-upload"[^>]*>\s*<span class="contents[^"]*">([^<]*)<\/span>/g,
+			),
+		].map((match) => match[1]);
+		expect(labels).toContain("Upload");
+		expect(labels).toContain("Add the sample");
+		for (const label of labels) {
+			expect(["Upload", "Add the sample"]).toContain(label);
+		}
+		expect(sheet).toContain("then Cancel and Upload. On a phone");
+		expect(design).toContain('then Cancel and "Upload"; the demo');
+	});
 });
