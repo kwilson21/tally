@@ -1,5 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseAppleCsv } from "../src/apple-card/csv";
+import { importAppleCard } from "../src/apple-card/import";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { makeCategory } from "../src/db/categories";
@@ -587,6 +589,54 @@ const changeRow = (sql: string, ...binds: unknown[]) =>
 		.bind(...binds)
 		.run();
 
+describe("an uploaded Apple Card row is sorted with Apple's category as the hint (#731, decision 143)", () => {
+	it("saves its category from one Jev call that carries Apple's category, and a second sort calls Jev no more", async () => {
+		// A made-up row in Apple's layout, for the Rivera family.
+		const text = [
+			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
+			'09/21/2026,09/22/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","45.25","Pat Rivera"',
+		].join("\n");
+		const parsed = parseAppleCsv(text);
+		if (!parsed.ok) throw new Error(parsed.error);
+		const imported = await importAppleCard(db, parsed.rows, {
+			by: "pat@example.test",
+			today: TODAY,
+			balanceCents: null,
+		});
+		if (!imported.ok) throw new Error(imported.error);
+		const [id] = imported.addedIds;
+		const fake = fakeSteps();
+		const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
+			reply(0.9),
+		);
+		await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: false,
+			onlyIds: [Number(id)],
+			runId: "run-apple-1",
+		});
+		expect(await categoryOf(Number(id))).not.toBeNull();
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+		expect(body.state).toMatchObject({ plaid_category: "Grocery" });
+
+		// A fresh runner, so the second sort really reads the row again. The first runner's cached steps would replay
+		// its answer, and Jev would never be asked again whether or not the save applied.
+		const again = fakeSteps();
+		await sortGroups(withKey, again.runStep, fetchImpl, {
+			rulesApplied: false,
+			onlyIds: [Number(id)],
+			runId: "run-apple-2",
+		});
+		expect(
+			again.steps.find((step) => step.name === "group-1-read")?.cached,
+		).toBe(false);
+		expect(again.names().some((name) => name.startsWith("group-1-ask-"))).toBe(
+			false,
+		);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("a save that fails keeps Jev's answers (decision 143)", () => {
 	const attemptsOf = (fake: ReturnType<typeof fakeSteps>, name: string) =>
 		fake.steps.find((step) => step.name === name)?.attempts;
@@ -1004,6 +1054,11 @@ describe("a changed row keeps no answer (decision 143)", () => {
 		[
 			"Plaid category",
 			"UPDATE transactions SET plaid_category = 'FOOD_AND_DRINK' WHERE id = ?",
+		],
+		// Apple's category is Jev's hint for an uploaded row (decision 143), so changing it after the read blocks the save too.
+		[
+			"Apple category",
+			"UPDATE transactions SET apple_category = 'Dining' WHERE id = ?",
 		],
 		["note", "UPDATE transactions SET note = 'A new note' WHERE id = ?"],
 		["kind", "UPDATE transactions SET kind = 'one_off' WHERE id = ?"],
