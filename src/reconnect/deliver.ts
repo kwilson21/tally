@@ -47,8 +47,8 @@ async function errorName(response: Response): Promise<string | null> {
  * - a 409 invalid_idempotent_request says the key was used with a different payload, so this body was never sent under it, and
  *   the try is a failed Resend try that falls back like any other;
  * - a 409 concurrent_idempotent_requests (another request with the key is in progress; Resend says it is safe to retry later),
- *   any other 409, and no answer at all (a timeout or a network error) are failed tries with no fallback, and the caller tries
- *   again with the same key;
+ *   any other 409, and no answer at all (a timeout or a network error) are failed tries with no fallback, and come back `held`
+ *   so the caller keeps its words and tries again with the same key;
  * - any other Resend failure falls back, as it does without a key.
  * Without a key (the reconnect email) nothing here changes.
  */
@@ -59,7 +59,7 @@ export async function deliver(
 	fetchImpl: typeof fetch,
 	timeoutSignal: (milliseconds: number) => AbortSignal,
 	idempotencyKey?: string,
-): Promise<{ delivered: boolean; kinds: string[] }> {
+): Promise<{ delivered: boolean; kinds: string[]; held?: true }> {
 	const kinds: string[] = [];
 	let delivered = false;
 	if (env.RESEND_API_KEY) {
@@ -83,11 +83,13 @@ export async function deliver(
 				!response ||
 				(response.status === 409 && conflict !== "invalid_idempotent_request")
 			)
+				// `held`: Resend may already hold this send, so the caller keeps its words and tries again with the same key.
 				return {
 					delivered: false,
 					kinds: [
 						response ? `resend ${response.status}` : "resend timeout or error",
 					],
+					held: true,
 				};
 		}
 		if (!delivered)

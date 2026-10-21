@@ -3,8 +3,9 @@
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
 // still on Home's setup (while it refreshes) or the questions page sees the questions there instead. An address is claimed in the record's
 // readyEmailedTo before its email goes, and released unless the email is delivered. A try Resend may already have accepted (no
-// answer, or a 409 other than invalid_idempotent_request, deliver.ts) is released too, and tried again on a later minute with the
-// same key, so it is never sent twice; the questions staying open is what lets it be tried again. It is drawn like the bank sign-in email (src/reconnect/email.tsx).
+// answer, or a 409 other than invalid_idempotent_request, deliver.ts) is released too, keeping its words, and the next try sends
+// those same words under the same key, so it is never sent twice; the questions staying open is what lets it be tried again.
+// It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
 	QUESTION_STROKES,
@@ -54,11 +55,17 @@ export const CLAIM_SQL = `UPDATE household_settings
 		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
 			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${EMAIL_AWAY_AFTER_MS / 1000} seconds')))`;
 
-// Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again.
+// Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
+// address's hash and ?3 the read line a try Resend may hold keeps (decision 146), or NULL when none is kept: a definite failure
+// keeps no words, so it removes any line kept before (json_patch takes a null away), and the next try uses fresh ones.
 const RELEASE_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value, '$.readyEmailedTo',
-		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)))
+	SET value = json_set(household_settings.value,
+		'$.readyEmailedTo', json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)),
+		'$.heldReadyEmail', json(json_patch(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), json_object(?2, ?3))))
 	WHERE key = 'first_tally'`;
+
+// The read line kept for an address (RELEASE_SQL), or null when none is.
+const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM household_settings WHERE key = 'first_tally'`;
 
 /**
  * The Idempotency-Key the ready email carries to Resend (decision 146): "ready-email-" and the SHA-256 in hex of the JSON of
@@ -71,21 +78,34 @@ export async function readyEmailKey(
 	address: string,
 	mail: Mail,
 ): Promise<string> {
+	return `ready-email-${await sha256Hex(JSON.stringify([address.toLowerCase(), mail.subject, mail.html, mail.text]))}`;
+}
+
+/** SHA-256 in hex of a text. */
+async function sha256Hex(text: string): Promise<string> {
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
-		new TextEncoder().encode(
-			JSON.stringify([
-				address.toLowerCase(),
-				mail.subject,
-				mail.html,
-				mail.text,
-			]),
-		),
+		new TextEncoder().encode(text),
 	);
-	const hex = [...new Uint8Array(digest)]
+	return [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
-	return `ready-email-${hex}`;
+}
+
+/** The hash of the lower-cased address: the key a kept read line is stored under, so the address itself is never stored. */
+const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
+
+/**
+ * The read line kept for an address whose last try Resend may hold (RELEASE_SQL), or null when none is kept. The next try
+ * sends these words, so that try is the same email under the same key (decision 146).
+ */
+async function heldLineOf(db: D1Database, address: string) {
+	const row = await db.prepare(HELD_SQL).first<{ held: string | null }>();
+	if (!row?.held) return null;
+	const line = (JSON.parse(row.held) as Record<string, unknown>)[
+		await addressHashOf(address)
+	];
+	return typeof line === "string" ? line : null;
 }
 
 /**
@@ -166,7 +186,8 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
  * the gate is read again and the email is built from that read, so its words are true when it goes. A closed gate (a question
  * answered, a bank linked with its history still loading, the last bank removed, a sort waiting) ends the run there, and
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
- * skipped on its own (CLAIM_SQL). The log line is written only when an address was claimed, so a quiet minute logs nothing.
+ * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its words for the address's next try, which sends them again
+ * under the same key (decision 146). The log line is written only when an address was claimed, so a quiet minute logs nothing.
  */
 export async function runReadyEmail(
 	env: DeliveryEnv & { DB: D1Database; DEMO?: string },
@@ -174,8 +195,11 @@ export async function runReadyEmail(
 	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
 ) {
 	if (env.DEMO === "true") return;
-	// The minute's first read: a family whose questions are answered (or set up before this shipped) stops here.
-	if (anyQuestionAnswered(await readFirstTally(env.DB))) return;
+	// The minute's first read: a family whose questions are answered (or set up before this shipped), or with no stroke one day
+	// (which questionsOpen needs, so nothing could be sent), stops here. Everyone else costs one read each minute.
+	const record = await readFirstTally(env.DB);
+	if (anyQuestionAnswered(record) || (record?.strokes.bank ?? null) === null)
+		return;
 	if ((await currentRead(env)) === null) return;
 	const recipients = (await reconnectRecipients(env.DB)).results;
 	let claimedCount = 0;
@@ -191,8 +215,10 @@ export async function runReadyEmail(
 		// the next address's read.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		// One Mail for this address: its words give the key and are the body Resend is sent (decision 146).
-		const mail = renderReadyEmail(read);
+		// The words a try Resend held kept for this address, or this read's (decision 146). One Mail for this address: its words
+		// give the key and are the body Resend is sent.
+		const words = (await heldLineOf(env.DB, recipient)) ?? read;
+		const mail = renderReadyEmail(words);
 		const outcome = await deliver(
 			env,
 			recipient,
@@ -207,7 +233,14 @@ export async function runReadyEmail(
 		}
 		failedCount += 1;
 		for (const kind of outcome.kinds) failureKinds.add(kind);
-		await env.DB.prepare(RELEASE_SQL).bind(recipient).run();
+		// A send Resend may hold keeps these words for the next try; any other failure keeps none (RELEASE_SQL).
+		await env.DB.prepare(RELEASE_SQL)
+			.bind(
+				recipient,
+				await addressHashOf(recipient),
+				outcome.held ? words : null,
+			)
+			.run();
 	}
 	if (claimedCount > 0)
 		logDeliveries("ready email", sentCount, failedCount, failureKinds);

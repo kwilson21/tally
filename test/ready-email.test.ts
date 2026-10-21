@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
@@ -483,6 +483,29 @@ describe("the ready email: who is still there (decision 146)", () => {
 		expect(statements).toHaveLength(1);
 		expect(sent).toEqual([]);
 	});
+
+	it("a household with no first week record costs one read and sends nothing", async () => {
+		await clearHousehold();
+		await addBank(1, "Chase");
+		await addMember(DANA);
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
+	});
+
+	it("a household whose stroke one has no day costs one read and sends nothing", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: { strokes: { bank: null }, budgets: {} },
+		});
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
+	});
 });
 
 describe("the ready email: recipients", () => {
@@ -812,6 +835,141 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 		} finally {
 			log.mockRestore();
 		}
+	});
+});
+
+describe("the ready email: a try Resend may hold keeps its words (decision 146)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	/** A Resend that times out: no answer at all, so the send may be held by Resend. */
+	const timesOut = () =>
+		vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+			throw new Error("timeout");
+		});
+
+	/** A Resend that answers 409 concurrent_idempotent_requests: another request with the key is still in progress. */
+	const concurrent = () =>
+		vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(
+					JSON.stringify({
+						name: "concurrent_idempotent_requests",
+						statusCode: 409,
+					}),
+					{ status: 409 },
+				),
+		);
+
+	/** The email a try sent to Resend, as the request carried it. */
+	const bodyOf = (init: RequestInit | undefined) =>
+		JSON.parse(String(init?.body)) as Sent;
+
+	/** SHA-256 in hex of the lower-cased address: the key a held try's words are kept under (ready-email.tsx). */
+	async function addressHashOf(address: string) {
+		const digest = await crypto.subtle.digest(
+			"SHA-256",
+			new TextEncoder().encode(address.toLowerCase()),
+		);
+		return [...new Uint8Array(digest)]
+			.map((byte) => byte.toString(16).padStart(2, "0"))
+			.join("");
+	}
+
+	/** The read lines kept for held tries, by the address's hash; {} when none is kept. */
+	const heldLinesOf = async () =>
+		(
+			(await readFirstTally(env.DB)) as
+				| (Record<string, unknown> & {
+						heldReadyEmail?: Record<string, string>;
+				  })
+				| null
+		)?.heldReadyEmail ?? {};
+
+	it("a try that times out keeps its words, so the next try sends the same email under the same key, though the count has changed", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const first = timesOut();
+		await runReadyEmail(production(), first);
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		const sentFirst = bodyOf(first.mock.calls[0]?.[1]);
+		expect(next.sent).toEqual([
+			{
+				to: DANA,
+				subject: sentFirst.subject,
+				html: sentFirst.html,
+				text: sentFirst.text,
+			},
+		]);
+		expect(next.sent[0]?.text).toContain(
+			"Tally has read your last 90 days from Chase.",
+		);
+		expect(next.sent[0]?.text).not.toContain("sorted 1 transaction");
+		expect(next.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("a 409 concurrent_idempotent_requests keeps its words too, so the next try sends the first words under the same key", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const first = concurrent();
+		await runReadyEmail(production(), first);
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		const sentFirst = bodyOf(first.mock.calls[0]?.[1]);
+		expect(next.sent.map((mail) => mail.text)).toEqual([sentFirst.text]);
+		expect(next.sent[0]?.html).toBe(sentFirst.html);
+		expect(next.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+	});
+
+	it("keeps the words under the address's hash, never the address itself", async () => {
+		await openHousehold({ members: [DANA] });
+		await runReadyEmail(production(), timesOut());
+		const held = await heldLinesOf();
+		expect(Object.keys(held)).toEqual([await addressHashOf(DANA)]);
+		expect(Object.values(held)).toEqual([
+			"Tally has read your last 90 days from Chase.",
+		]);
+		expect(JSON.stringify(held)).not.toContain(DANA);
+	});
+
+	it("a definite failure keeps no words, so the next try sends the new words under a new key", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const refused = resendFake(500);
+		await runReadyEmail(production(), refused.fetchImpl);
+		expect(await storedList()).toEqual([]);
+		expect(await heldLinesOf()).toEqual({});
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.sent[0]?.text).toContain(
+			"Tally has read your last 90 days from Chase and sorted 1 transaction.",
+		);
+		expect(next.keys).toEqual([await keyFor(DANA, firstMail(next.sent))]);
+	});
+
+	it("a definite failure after a held try drops the kept words, so the next try uses fresh ones", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		await runReadyEmail(production(), timesOut());
+		await addTransactions(accountId, 1);
+		await runReadyEmail(production(), resendFake(500).fetchImpl);
+		expect(await heldLinesOf()).toEqual({});
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.sent[0]?.text).toContain("and sorted 1 transaction.");
+	});
+
+	it("a closed gate still ends the run: a question answered after a held try sends nothing more", async () => {
+		await openHousehold({ members: [DANA] });
+		await runReadyEmail(production(), timesOut());
+		await writeRecord({
+			strokes: { bank: STROKE_ONE, pay: STROKE_ONE },
+			budgets: {},
+		});
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.fetchImpl).not.toHaveBeenCalled();
+		expect(next.sent).toEqual([]);
 	});
 });
 
