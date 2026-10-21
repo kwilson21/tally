@@ -14,7 +14,11 @@ import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
 import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
-import { accountsByBank } from "../db/accounts";
+import {
+	appleCardAccount,
+	countedAccounts,
+	accountsByBank,
+} from "../db/accounts";
 import { readAiTally } from "../db/ai-log";
 import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
@@ -257,7 +261,10 @@ howItWorks.get("/how-it-works", async (c) => {
 		)
 		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
 	const netWorthText = netWorthExample(
-		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
+		countedAccounts(
+			await accountsByBank(c.env.DB),
+			await appleCardAccount(c.env.DB),
+		),
 	);
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(

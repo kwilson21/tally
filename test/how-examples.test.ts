@@ -427,3 +427,28 @@ describe("billStatusExamples", () => {
 		).toBe("For example: Gym, due Jan 25, 2027.");
 	});
 });
+
+describe("netWorthExample with a credit balance (Apple Card, #766)", () => {
+	it("adds a credit to what's held, so it never reads as an amount owed", () => {
+		expect(
+			netWorthExample([
+				{ balanceCents: 500000, isLiability: false },
+				{ balanceCents: -1200, isLiability: true },
+			]),
+		).toBe(
+			"$5,012.00 in accounts and nothing owed, so net worth is $5,012.00.",
+		);
+	});
+
+	it("keeps held minus owed equal to the headline when a credit and an amount owed are both there", () => {
+		const text = netWorthExample([
+			{ balanceCents: 500000, isLiability: false },
+			{ balanceCents: 124018, isLiability: true },
+			{ balanceCents: -1200, isLiability: true },
+		]);
+		expect(text).toBe(
+			"$5,012.00 in accounts − $1,240.18 owed = $3,771.82 net worth.",
+		);
+		expect(text).not.toContain("-$");
+	});
+});

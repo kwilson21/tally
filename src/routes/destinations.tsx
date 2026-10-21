@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { addressOf } from "../address";
 import { householdToday } from "../dates";
-import { accountsByBank } from "../db/accounts";
+import { accountsByBank, appleCardAccount } from "../db/accounts";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { Colophon, ContentsList, contentsPlaces } from "../views/contents-list";
 import { KeysDetails } from "../views/keys";
@@ -46,10 +46,11 @@ for (const item of PLACEHOLDERS) {
 // More is a contents page (P122 A, decision 111): each place with its icon, what it holds and a live count.
 destinations.get("/more", async (c) => {
 	const demo = c.env.DEMO === "true";
-	const [banks, queue, today] = await Promise.all([
+	const [banks, queue, today, appleCard] = await Promise.all([
 		accountsByBank(c.env.DB),
 		suggestionQueue(c.env.DB),
 		householdToday(c.env.DB),
+		appleCardAccount(c.env.DB),
 	]);
 	return c.html(
 		<Layout
@@ -60,7 +61,13 @@ destinations.get("/more", async (c) => {
 		>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ContentsList
-				places={contentsPlaces({ demo, banks, today, toCheck: queue.length })}
+				places={contentsPlaces({
+					demo,
+					banks,
+					today,
+					toCheck: queue.length,
+					appleCard,
+				})}
 			>
 				{/* Below lg the keys' row ends the list (decision 118); from lg the foot of a page has them. */}
 				<li class="lg:hidden">

@@ -1,5 +1,5 @@
 import type { Child } from "hono/jsx";
-import type { Bank } from "../db/accounts";
+import type { AppleCardAccount, Bank } from "../db/accounts";
 import { flaggedBanks } from "../stale-bank";
 import { TallyMark } from "./brand";
 import { Icon, type IconName, ROW_OPENS } from "./icons";
@@ -32,13 +32,21 @@ function sidebarPlace(key: NavKey, desc: string, folio?: Folio): Place {
  * linked yet before any bank is linked (Accounts' own empty state), else the count of the accounts of the
  * banks that aren't disconnected, which Accounts lists too.
  */
-function accountsFolio(banks: Bank[], today: string): Folio {
+function accountsFolio(
+	banks: Bank[],
+	today: string,
+	appleCard: AppleCardAccount | null,
+): Folio {
 	if (flaggedBanks(banks, today).some((bank) => bank.reason === "sign-in"))
 		return { text: "Needs attention", tone: "attention" };
-	if (banks.length === 0) return { text: "None linked yet", tone: "muted" };
-	const count = banks
-		.filter((bank) => !bank.disconnected)
-		.reduce((total, bank) => total + bank.accounts.length, 0);
+	// The Apple Card counts from its first upload, balance or not, until it is removed (spec §8.10).
+	const card = appleCard && appleCard.removedAt === null ? 1 : 0;
+	if (banks.length === 0 && card === 0)
+		return { text: "None linked yet", tone: "muted" };
+	const count =
+		banks
+			.filter((bank) => !bank.disconnected)
+			.reduce((total, bank) => total + bank.accounts.length, 0) + card;
 	return {
 		text: count === 1 ? "1 account" : `${count} accounts`,
 		tone: "muted",
@@ -54,6 +62,7 @@ export function contentsPlaces({
 	banks,
 	today,
 	toCheck,
+	appleCard,
 }: {
 	demo: boolean;
 	/** The banks Accounts lists, each with its accounts. */
@@ -62,12 +71,14 @@ export function contentsPlaces({
 	today: string;
 	/** The suggestions waiting for a person, as Settings' Band counts them. */
 	toCheck: number;
+	/** The household's Apple Card account, or null before its first upload (More counts it from then, spec §8.10). */
+	appleCard?: AppleCardAccount | null;
 }): Place[] {
 	return [
 		sidebarPlace(
 			"accounts",
 			"Balances, net worth and your banks",
-			accountsFolio(banks, today),
+			accountsFolio(banks, today, appleCard ?? null),
 		),
 		sidebarPlace(
 			"settings",

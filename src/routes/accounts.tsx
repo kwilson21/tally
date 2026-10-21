@@ -1,7 +1,12 @@
 import { type Context, Hono } from "hono";
 import { addressOf } from "../address";
 import { householdToday } from "../dates";
-import { accountsByBank, type Bank, netWorthCents } from "../db/accounts";
+import {
+	accountsByBank,
+	type Bank,
+	countedAccounts,
+	netWorthCents,
+} from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
 import { forgetPayDeposits, takeBackBankStrokes } from "../db/first-tally";
 import { hxTrigger } from "../htmx";
@@ -40,7 +45,10 @@ const SyncNow = () => (
 async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 	const today = await householdToday(env.DB);
 	// One read for the headline's accounts and the line's balances, so they agree.
-	const { banks, points, waiting } = await accountsWithHistory(env.DB, today);
+	const { banks, points, waiting, appleCard } = await accountsWithHistory(
+		env.DB,
+		today,
+	);
 	const history = netWorthView(points, today, waiting);
 	const plaidEnabled = enabled(env);
 	return (
@@ -68,7 +76,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 			) : (
 				<>
 					<AccountsTop
-						netWorthCents={netWorthCents(banks.flatMap((b) => b.accounts))}
+						netWorthCents={netWorthCents(countedAccounts(banks, appleCard))}
 						history={history}
 						action={plaidEnabled && <SyncNow />}
 					/>

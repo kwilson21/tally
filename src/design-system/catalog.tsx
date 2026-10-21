@@ -1041,7 +1041,7 @@ function MoreSketch({
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ContentsList
-				places={contentsPlaces({ demo, banks, today: MORE_TODAY, toCheck })}
+				places={contentsPlaces({ demo, banks, today: MORE_TODAY, toCheck, appleCard: null })}
 			/>
 			<Colophon demo={demo} version={version} />
 		</>
