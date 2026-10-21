@@ -508,7 +508,8 @@ describe("readSetup", () => {
 			today: TODAY,
 			flagged: [],
 		});
-		// Stroke one is drawn today, so the questions open tomorrow at the earliest: the setup is reading, not set up.
+		// Stroke one is drawn today, but the setup is reading, not set up: the connected banks' 90-day history isn't in yet
+		// (the demo seed's banks carry no history mark), so the questions stay shut until it is.
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.steps[0]?.done).toBe(true);
 		const stored = await env.DB.prepare(
