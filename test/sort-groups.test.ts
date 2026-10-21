@@ -5,7 +5,12 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { makeCategory } from "../src/db/categories";
 import { takeSortingTurn } from "../src/db/sorting-turn";
 import { resetDemo } from "../src/demo/reset";
-import { type StepRunner, sortGroups } from "../src/sort-groups";
+import {
+	type AskResult,
+	nextWait,
+	type StepRunner,
+	sortGroups,
+} from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
 
 const db = env.DB;
@@ -1580,5 +1585,375 @@ describe("the reservation record (decision 143)", () => {
 		);
 		expect(await recordOf("run-record-gone:1")).toBeNull();
 		expect(await callsUsed()).toBe(3);
+	});
+});
+
+describe("nextWait: when a busy Jev is asked again (decision 145)", () => {
+	const ANSWER = {
+		category: { label: "Eating Out", confidence: 0.9 },
+		flags: { transfer: 0.01, reimbursement: 0.01, income: 0.01 },
+	};
+	const answered = (id: number): AskResult => ({
+		id,
+		outcome: "answered",
+		answer: ANSWER,
+	});
+	const failed = (status: number | null, retryAfterMs?: number): AskResult => ({
+		id: 99,
+		outcome: "failed",
+		status,
+		requestId: null,
+		serviceWide: true,
+		...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+	});
+	/** Groups that each only failed, one after another. */
+	const failedGroups = (n: number): AskResult[][] =>
+		Array.from({ length: n }, () => [failed(429)]);
+
+	it("gives no wait with no groups, or after a clean group", () => {
+		expect(nextWait([])).toBeNull();
+		expect(nextWait([[answered(1), answered(2)]])).toBeNull();
+	});
+
+	it("waits 30 seconds after the first failure, for a 429, a 5xx or no response", () => {
+		expect(nextWait([[failed(429)]])).toBe(30_000);
+		expect(nextWait([[failed(503)]])).toBe(30_000);
+		expect(nextWait([[failed(529)]])).toBe(30_000);
+		expect(nextWait([[failed(null)]])).toBe(30_000);
+	});
+
+	it("doubles the wait for each group in a row that only failed: 30 s, 1 min, 2 min, 4 min, 8 min, 16 min", () => {
+		expect([1, 2, 3, 4, 5, 6].map((n) => nextWait(failedGroups(n)))).toEqual([
+			30_000, 60_000, 120_000, 240_000, 480_000, 960_000,
+		]);
+	});
+
+	it("stops at the seventh failed group in a row", () => {
+		expect(nextWait(failedGroups(7))).toBeNull();
+	});
+
+	it("starts again at 30 seconds after a group that answered some rows before it failed", () => {
+		expect(nextWait([...failedGroups(2), [answered(1), failed(429)]])).toBe(
+			30_000,
+		);
+	});
+
+	it("a group that doesn't end on a failure breaks the streak", () => {
+		expect(nextWait([[failed(429)], [answered(1)], [failed(429)]])).toBe(
+			30_000,
+		);
+	});
+
+	it("honours retry-after in seconds when it is longer than the backoff, and not when shorter", () => {
+		expect(nextWait([[failed(429, 90_000)]])).toBe(90_000);
+		expect(nextWait([[failed(429, 5_000)]])).toBe(30_000);
+		expect(nextWait([...failedGroups(1), [failed(429, 90_000)]])).toBe(90_000);
+	});
+
+	it("stops when Jev asks for more than 30 minutes, and waits exactly 30 minutes", () => {
+		expect(nextWait([[failed(429, 1_800_001)]])).toBeNull();
+		expect(nextWait([[failed(429, 1_800_000)]])).toBe(1_800_000);
+	});
+
+	it("stops when the waits already returned plus the next would pass 60 minutes, and allows exactly 60", () => {
+		expect(nextWait([[failed(429, 1_500_000)], [failed(429, 1_500_000)]])).toBe(
+			1_500_000,
+		);
+		expect(
+			nextWait([
+				[failed(429, 1_500_000)],
+				[failed(429, 1_500_000)],
+				[failed(429, 1_500_000)],
+			]),
+		).toBeNull();
+		expect(nextWait([[failed(429, 1_800_000)], [failed(429, 1_800_000)]])).toBe(
+			1_800_000,
+		);
+		expect(
+			nextWait([
+				[failed(429, 1_800_000)],
+				[failed(429, 1_800_000)],
+				[failed(429, 1_800_000)],
+			]),
+		).toBeNull();
+	});
+
+	it("a 401 or a 403 is not retryable", () => {
+		expect(nextWait([[failed(401)]])).toBeNull();
+		expect(nextWait([[failed(403)]])).toBeNull();
+	});
+
+	it("gives no wait when the group's last result isn't a failure", () => {
+		expect(nextWait([[failed(429), answered(2)]])).toBeNull();
+		expect(nextWait([[{ id: 1, outcome: "out-of-time" }]])).toBeNull();
+	});
+});
+
+describe("sortGroups waits out a busy Jev (decision 145)", () => {
+	/** Records each wait the run asks for, in order. The sleep returns at once. */
+	function recordingSleep() {
+		const sleeps: [string, number][] = [];
+		return {
+			sleeps,
+			sleep: async (name: string, ms: number) => {
+				sleeps.push([name, ms]);
+			},
+		};
+	}
+
+	/** A Jev fetch: the calls numbered in `busy` answer with their response, every other call a Jev reply. */
+	function jevBusyAt(busy: Record<number, () => Response>) {
+		let call = 0;
+		return vi.fn(async () => {
+			call += 1;
+			return busy[call]?.() ?? reply(0.9);
+		});
+	}
+
+	const rateLimit = (retryAfter?: string) =>
+		new Response("{}", {
+			status: 429,
+			headers: retryAfter === undefined ? {} : { "retry-after": retryAfter },
+		});
+
+	/** How many of these transactions Jev sorted. */
+	const sortedByJev = async (ids: number[]) =>
+		Number(
+			(
+				await db
+					.prepare(
+						"SELECT COUNT(*) AS n FROM transactions WHERE id IN (SELECT value FROM json_each(?)) AND category_source = 'jev'",
+					)
+					.bind(JSON.stringify(ids))
+					.first<{ n: number }>()
+			)?.n ?? 0,
+		);
+
+	/** How many of these transactions Jev failed on for good. */
+	const failedForGood = async (ids: number[]) =>
+		Number(
+			(
+				await db
+					.prepare(
+						"SELECT COUNT(*) AS n FROM transactions WHERE id IN (SELECT value FROM json_each(?)) AND jev_failed_at IS NOT NULL",
+					)
+					.bind(JSON.stringify(ids))
+					.first<{ n: number }>()
+			)?.n ?? 0,
+		);
+
+	const sortWith = (
+		fake: ReturnType<typeof fakeSteps>,
+		fetchImpl: Parameters<typeof sortGroups>[2],
+		ids: number[],
+		runId: string,
+		sleep?: (name: string, ms: number) => Promise<void>,
+	) =>
+		sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			onlyIds: ids,
+			runId,
+			...(sleep ? { sleep } : {}),
+		});
+
+	it("waits out a 429 and asks the row again: the 26th call answers 429, all 30 are sorted, one 30 s wait", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 26: () => rateLimit("5") });
+		const done = await sortWith(fake, fetchImpl, ids, "run-busy-1", sleep);
+		expect(sleeps).toEqual([["wait-2", 30_000]]);
+		// The row that got the 429 is read again, under the next group's step name.
+		expect(fake.names()).toContain(`group-3-ask-${ids[4]}`);
+		expect(done.asked).toBe(31);
+		expect(fetchImpl).toHaveBeenCalledTimes(31);
+		expect(await sortedByJev(ids)).toBe(30);
+		expect(await failedForGood(ids)).toBe(0);
+		// 30 answers and the one 429, each a call of the day.
+		expect(await callsUsed()).toBe(31);
+	});
+
+	it("honours a longer retry-after: a 429 with retry-after 90 waits 90 s", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		await sortWith(
+			fakeSteps(),
+			jevBusyAt({ 26: () => rateLimit("90") }),
+			ids,
+			"run-busy-90",
+			sleep,
+		);
+		expect(sleeps).toEqual([["wait-2", 90_000]]);
+	});
+
+	it("waits after a group that answered some rows before its 429, then asks the rest", async () => {
+		const ids = await addWaiting(3);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 2: () => rateLimit("5") });
+		const done = await sortWith(
+			fake,
+			fetchImpl,
+			ids,
+			"run-busy-partial",
+			sleep,
+		);
+		expect(sleeps).toEqual([["wait-1", 30_000]]);
+		expect(fake.names()).toContain(`group-2-ask-${ids[1]}`);
+		expect(fetchImpl).toHaveBeenCalledTimes(4);
+		expect(done.asked).toBe(4);
+		expect(await sortedByJev(ids)).toBe(3);
+	});
+
+	it("backs off 30 s, 1 min, 2 min, 4 min, 8 min, 16 min, then gives up: no row is failed and all wait", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = vi.fn(async () => new Response("{}", { status: 503 }));
+		await sortWith(fake, fetchImpl, ids, "run-busy-backoff", sleep);
+		expect(sleeps).toEqual([
+			["wait-1", 30_000],
+			["wait-2", 60_000],
+			["wait-3", 120_000],
+			["wait-4", 240_000],
+			["wait-5", 480_000],
+			["wait-6", 960_000],
+		]);
+		expect(fetchImpl).toHaveBeenCalledTimes(7);
+		expect(fake.names()).not.toContain("group-8-read");
+		expect(await failedForGood(ids)).toBe(0);
+		expect(await callsUsed()).toBe(7);
+	});
+
+	it("a retry-after over 30 minutes stops the run with no wait", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 1: () => rateLimit("3600") });
+		await sortWith(fake, fetchImpl, ids, "run-busy-long", sleep);
+		expect(sleeps).toEqual([]);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(fake.names()).not.toContain("group-2-read");
+	});
+
+	it("a 401 still ends the run at once, with no wait", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = vi.fn(async () => new Response("{}", { status: 401 }));
+		await sortWith(fake, fetchImpl, ids, "run-busy-401", sleep);
+		expect(sleeps).toEqual([]);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(fake.names()).not.toContain("group-2-read");
+	});
+
+	it("when the write stops the run (both Guess categories and Spot paychecks off), a 429 group waits for nothing", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps({
+			beforeAttempt: async (name) => {
+				if (name === "group-1-write")
+					await saveAiSwitches(db, { categories: false, income: false });
+			},
+		});
+		const fetchImpl = jevBusyAt({ 1: () => rateLimit("5") });
+		await sortWith(fake, fetchImpl, ids, "run-busy-off-write", sleep);
+		expect(sleeps).toEqual([]);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(fake.names()).not.toContain("group-2-read");
+	});
+
+	it("switches turned off during the wait end the run after the sleep, with no further call", async () => {
+		const ids = await addWaiting(30);
+		const sleeps: [string, number][] = [];
+		const sleep = async (name: string, ms: number) => {
+			sleeps.push([name, ms]);
+			await saveAiSwitches(db, { categories: false, income: false });
+		};
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 1: () => rateLimit("5") });
+		await sortWith(fake, fetchImpl, ids, "run-busy-off-wait", sleep);
+		expect(sleeps).toEqual([["wait-1", 30_000]]);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		// The next group's read finds nothing to ask (the switches are off), so it reserves and asks nothing.
+		expect(fake.names()).toContain("group-2-read");
+		expect(fake.names()).not.toContain("group-2-reserve");
+		expect(fake.names().some((name) => name.startsWith("group-2-ask-"))).toBe(
+			false,
+		);
+	});
+
+	it("without a sleeper a 429 stops the run as before (in-process)", async () => {
+		const ids = await addWaiting(30);
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 2: () => rateLimit("5") });
+		const done = await sortWith(fake, fetchImpl, ids, "run-busy-inproc");
+		expect(done.asked).toBe(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fake.names()).not.toContain("group-2-read");
+	});
+
+	it("a request that never got a response waits like a 429", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		let call = 0;
+		const fetchImpl = vi.fn(async () => {
+			call += 1;
+			if (call === 1) throw new TypeError("network down");
+			return reply(0.9);
+		});
+		await sortWith(fakeSteps(), fetchImpl, ids, "run-busy-none", sleep);
+		expect(sleeps).toEqual([["wait-1", 30_000]]);
+		expect(await sortedByJev(ids)).toBe(30);
+	});
+
+	it("two 429s in a row give two waits with distinct names, and every row is asked again until answered", async () => {
+		const ids = await addWaiting(30);
+		const { sleeps, sleep } = recordingSleep();
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({
+			26: () => rateLimit("5"),
+			27: () => rateLimit("5"),
+		});
+		await sortWith(fake, fetchImpl, ids, "run-busy-twice", sleep);
+		expect(sleeps).toEqual([
+			["wait-2", 30_000],
+			["wait-3", 60_000],
+		]);
+		const names = fake.names();
+		expect(new Set(names).size).toBe(names.length);
+		expect(fetchImpl).toHaveBeenCalledTimes(32);
+		expect(await sortedByJev(ids)).toBe(30);
+	});
+
+	it("a replayed run takes the same path: the same waits and step names, and no Jev call", async () => {
+		const ids = await addWaiting(30);
+		const fake = fakeSteps();
+		const fetchImpl = jevBusyAt({ 26: () => rateLimit("5") });
+		const first = recordingSleep();
+		const done = await sortWith(
+			fake,
+			fetchImpl,
+			ids,
+			"run-busy-replay",
+			first.sleep,
+		);
+		const before = fake.steps.length;
+		const second = recordingSleep();
+		const again = await sortWith(
+			fake,
+			fetchImpl,
+			ids,
+			"run-busy-replay",
+			second.sleep,
+		);
+		expect(second.sleeps).toEqual(first.sleeps);
+		expect(again).toEqual(done);
+		expect(fetchImpl).toHaveBeenCalledTimes(31);
+		const replayed = fake.steps.slice(before);
+		expect(replayed.every((step) => step.cached)).toBe(true);
+		expect(replayed.map((step) => step.name)).toEqual(
+			fake.steps.slice(0, before).map((step) => step.name),
+		);
 	});
 });

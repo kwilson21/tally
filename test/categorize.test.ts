@@ -247,18 +247,15 @@ describe("askJev", () => {
 			["7", 7000],
 			["0", 0],
 			["90", 90_000],
-		])(
-			"reads retry-after %s as whole seconds: %i ms",
-			async (header, ms) => {
-				const { fetchImpl } = rateLimited({ "retry-after": header });
-				expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
-					ok: false,
-					status: 429,
-					requestId: null,
-					retryAfterMs: ms,
-				});
-			},
-		);
+		])("reads retry-after %s as whole seconds: %i ms", async (header, ms) => {
+			const { fetchImpl } = rateLimited({ "retry-after": header });
+			expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
+				ok: false,
+				status: 429,
+				requestId: null,
+				retryAfterMs: ms,
+			});
+		});
 
 		it.each([
 			["an HTTP-date", "Wed, 21 Oct 2026 07:28:00 GMT"],

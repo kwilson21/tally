@@ -2,7 +2,8 @@
 // one instance with its rows (`startSorting`, sort-start.ts); the instance runs the sorting groups (sort-groups.ts) as
 // saved steps, so a retry skips the steps that finished and Jev's answers are kept for a few days (sensitive steps, so
 // Cloudflare's dashboard and logs never show them). The 09:00 run's instance (with `night`) also makes the night's names
-// and suggestions and keeps the first night's counts (sort-instance.ts).
+// and suggestions and keeps the first night's counts (sort-instance.ts). A busy Jev (a rate limit, an overload, a server
+// error or no response) is waited out with a saved sleep, for up to an hour, before its group asks again (decision 145).
 import {
 	WorkflowEntrypoint,
 	type WorkflowEvent,
@@ -22,6 +23,8 @@ export class SortWorkflow extends WorkflowEntrypoint<Env, SortParams> {
 		const runStep: StepRunner = (name, config, fn) => step.do(name, config, fn);
 		await runSortInstance(this.env, runStep, event.payload, {
 			runId: event.instanceId,
+			// A busy Jev's group waits here, as a saved step, before it asks again (decision 145).
+			sleep: (name, ms) => step.sleep(name, ms),
 		});
 		return null;
 	}
