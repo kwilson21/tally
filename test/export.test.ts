@@ -346,22 +346,27 @@ describe("data exports", () => {
 			merchant_name_failures: ["failed_at", "raw_name"],
 			accounts: [
 				"balance_cents",
+				"balance_on",
 				"bank",
 				"bank_disconnected",
+				"counted_from",
 				"id",
 				"is_liability",
 				"mask",
 				"name",
 				"plaid_account_id",
 				"plaid_item_id",
+				"removed_at",
 				"subtype",
 				"type",
 				"updated_at",
+				"uploaded_on",
 			],
 			balance_history: ["account_id", "balance_cents", "date"],
 			transactions: [
 				"account_id",
 				"amount_cents",
+				"apple_category",
 				"category_confidence",
 				"category_id",
 				"category_source",
@@ -413,6 +418,8 @@ describe("data exports", () => {
 				"transfer_confidence",
 				"updated_at",
 				"updated_by",
+				"upload_key",
+				"upload_twin",
 			],
 			bills: [
 				"active",
@@ -573,5 +580,43 @@ describe("data exports", () => {
 		expect(first?.bank_disconnected).toBe(1);
 		expect(typeof first?.bank).toBe("string");
 		if (other) expect(other.bank_disconnected).toBe(0);
+	});
+
+	it("names Apple Card as an uploaded card's bank, which can't be disconnected, and leaves Plaid's accounts as they were (spec §8.10)", async () => {
+		type ExportedAccount = {
+			plaid_item_id: number | null;
+			subtype: string | null;
+			bank: string | null;
+			bank_disconnected: number | null;
+		};
+		const accounts = async () =>
+			(
+				(await (
+					await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+				).json()) as { accounts: ExportedAccount[] }
+			).accounts;
+		const plaidBefore = (await accounts()).find((a) => a.plaid_item_id === 1);
+		// Inserted as import.ts does: no plaid_item_id, so the bank comes from the card's own name.
+		await env.DB.prepare(
+			"INSERT INTO accounts (name, type, subtype, is_liability) VALUES ('Apple Card', 'credit', 'apple_card', 1)",
+		).run();
+		const afterInsert = await accounts();
+		expect(afterInsert.find((a) => a.plaid_item_id === 1)).toEqual(plaidBefore);
+		expect(afterInsert.find((a) => a.subtype === "apple_card")).toMatchObject({
+			bank: "Apple Card",
+			bank_disconnected: 0,
+		});
+
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id = 1",
+		).run();
+		const afterDisconnect = await accounts();
+		expect(afterDisconnect.find((a) => a.plaid_item_id === 1)).toMatchObject({
+			bank: plaidBefore?.bank,
+			bank_disconnected: 1,
+		});
+		expect(
+			afterDisconnect.find((a) => a.subtype === "apple_card"),
+		).toMatchObject({ bank: "Apple Card", bank_disconnected: 0 });
 	});
 });

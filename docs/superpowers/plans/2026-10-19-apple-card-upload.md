@@ -19,13 +19,14 @@ After the write, the same steps a Plaid sync starts run on the new rows. The UI 
 - **PR 1 (#731): Tasks 1–3.** Reading, planning and storing. Screens don't change.
 - **PR 2: Tasks 4–6.** The sheet, Accounts, Home, the demo, the export's bank name, and How Tally works. Its issue is opened when PR 1 merges.
 
-**Gate before PR 1's brief:** the owner's export of a month that has a payment and a refund. It confirms:
-- Apple's Type words (`Payment` is expected)
-- whether a Payment or Interest row has a blank Merchant
-- Apple's quoting
-- whether dates are zero-padded
+**Gate before PR 1's brief: met on 2026-10-21.** The owner's export, from Jul 1 to Oct 21, 2026 (never committed or copied into a test), confirmed:
+- the 8-column header, with `Purchased By`
+- Apple's Type words `Purchase`, `Payment`, `Interest` and `Other`. No refund was in the file, so a refund's word is still unconfirmed; it counts by its sign whatever it is, so nothing depends on it
+- a Payment row's Category is `Payment`, its Merchant is filled in and its amount is negative; an Interest row's Category is `Interest`, its Merchant is filled in and its amount is positive; a bounced payment is an `Other` row, money out, whose Description says REVERSAL (decision 144)
+- no row had a blank Merchant or a blank Clearing Date
+- the format: UTF-8 with one non-ASCII character in a Description, no byte-order mark, LF line endings, no newline after the last row, every field quoted except the two dates, and dates zero-padded `MM/DD/YYYY`
 
-Line numbers below were read on main after #730 and #732 merged. A builder checks them first.
+Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 
 ## Global Constraints
 
@@ -39,7 +40,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - UI uses DESIGN.md tokens and components. The new `FileField` goes into DESIGN.md and the catalog in the same PR, catalog first. It is also receipts' file input (§8.9, decision 137): if receipts has shipped it, use it instead of adding another.
 - Never log a row, a file or an amount. The uploaded file is never stored. Test fixtures are made-up rows in Apple's layout, never the family's export.
 - The demo never takes a file.
-- Migrations are plain SQL, numbered. The next is `0058`.
+- Migrations are plain SQL, numbered. `0058` is PR 1's; the next is `0059`.
+- PR 2 decodes the uploaded file with `new TextDecoder("utf-8", { fatal: true })`, so a file in another encoding is refused before the reader sees it.
 
 ## Review Focus
 
@@ -68,9 +70,9 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - `line` is the row's number as a spreadsheet shows it: the header is 1, and the first transaction is 2.
 
 - [ ] **Step 1: Write the failing tests** (`describe("parseAppleCsv")`):
-  - **`reads one purchase`:** `09/25/2026,09/26/2026,"KROGER FUEL #3401 4404 MAIN ST ROANOKE 24018 VA USA","Kroger Fuel #3401","Gas","Purchase","45.25","Pat Rivera"` gives `{ line: 2, transactionDate: "2026-09-25", clearingDate: "2026-09-26", merchant: "Kroger Fuel #3401", category: "Gas", type: "Purchase", amountCents: 4525 }`.
+  - **`reads one purchase`:** `10/03/2026,10/04/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40","Pat Rivera"` gives `{ line: 2, transactionDate: "2026-10-03", clearingDate: "2026-10-04", description: "GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA", merchant: "Greenleaf Market #12", category: "Grocery", type: "Purchase", amountCents: 3840 }`.
   - **`reads both headers`:** the 7-column file and the 8-column file give the same rows. Purchased By is ignored.
-  - **`keeps a comma inside quotes`:** a Description like `"10 ANSON ROAD, #26-03 SINGAPORE"` stays one field.
+  - **`keeps a comma inside quotes`:** a Description like `"GREENLEAF MARKET, UNIT 3 EXAMPLE TOWN"` stays one field.
   - **`keeps a doubled quote`:** `"PAT ""THE"" CAFE"` reads as `PAT "THE" CAFE`.
   - **`reads a spreadsheet's re-save`:** a byte-order mark, CRLF, the header and every field quoted, a trailing blank line, and `9/5/2026` dates.
   - **`reads money in`:** `"-12.00"` gives `-1200`.
@@ -110,6 +112,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
     - `twin` is the row's rank, from 1, among rows with the same key, in file order, after the skips.
     - Task 3's unique index skips the ranks Tally already holds. Held twins are always 1 to h: uploaded rows are never deleted one by one, and split parts never carry `upload_key` (`src/db/transactions.ts:2236, 2466`).
   - `function importWords(counts: { added: number; already: number; notCleared: number; beforeHistory: number }, historyStart: string, today: string): string`
+  - `function leftOut(row: AppleRow): boolean` (decision 144): true for `type === "Payment"`, or for `type === "Other"` with money out (`amountCents > 0`) and `REVERSAL` anywhere in the Description, in any case. A money-in row that says REVERSAL counts by its sign. Each `ImportPlan.add` item gains `excluded: boolean` (`leftOut(row)`), which Task 3 binds.
 
 - [ ] **Step 1: Write the failing tests:**
   - **`numbers twins`:** two identical rows give twins 1 and 2 with the same key. A third identical row later in the file gives twin 3.
@@ -141,13 +144,13 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 - Modify:
   - `src/db/merchant-names.ts`:
     - Move `suggestPlaidNamesSql` here from `src/plaid/sync.ts:207` as `export const suggestBankNamesSql = (guard: string) => …`, body unchanged.
-    - `NAME_ASKED_SQL` (`:33-35`) also skips accounts with `subtype = 'apple_card'`.
+    - `NAME_ASKED_SQL` (`:34-36`) also skips accounts with `subtype = 'apple_card'`.
   - `src/plaid/sync.ts:989`: import the moved builder and pass `OWNS_LOCK`. Fix the comments at `:238` and `:951`.
-  - `src/db/transactions.ts:2669`: `COALESCE(t.plaid_category, t.apple_category) AS plaidCategory`.
+  - `src/db/transactions.ts:2675`: `COALESCE(t.plaid_category, t.apple_category) AS plaidCategory`, through one shared helper that the save guard (`seenMatchSql`, `:2943`) also uses (correction 2 below).
   - `src/settings/export.ts:14-19`: the new account and transaction columns.
 - Test:
   - `test/apple-card-import.test.ts`
-  - `test/export.test.ts`: the key lists at `:58-71` and `~302-400`
+  - `test/export.test.ts`: the key lists at `:58-71` and `:317-458`
   - the existing sync and merchant-name tests, which must pass unchanged
 
 **Interfaces:**
@@ -157,9 +160,19 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `function importAppleCard(db: D1Database, rows: AppleRow[], opts: { by: string; today: string; balanceCents: number | null }): Promise<ImportResult>`
   - `function historyStart(db: D1Database, today: string): Promise<string>`:
     - `MIN(t.date)` over transactions on accounts with a non-null `plaid_item_id`, so a disconnected bank's kept rows are included.
-    - While any connected bank (`plaid_items` not disconnected) has `history_complete_at` unset, or there are no such rows yet, it's the earlier of that date and `daysBefore(today, 90)` (`src/dates.ts:143`), so rows aren't left out while the first sync is still bringing older pages (`src/plaid/sync.ts:1116-1131`).
+    - While any connected bank (`plaid_items` not disconnected) has `history_complete_at` unset, or there are no such rows yet, it's the earlier of that date and `daysBefore(today, 90)` (`src/dates.ts:143`), so rows aren't left out while the first sync is still bringing older pages (`src/plaid/sync.ts:1116-1130`).
     - With no connected bank and no transaction on a Plaid account, it's the Apple Card's own earliest row, or `daysBefore(today, 90)` while the card has none, so a card that exists keeps uploading whatever happens to the banks.
     - Only with no Apple Card account yet, no connected bank and no bank history does `importAppleCard` save nothing and returns `{ ok: false, error: "Link a bank first. Tally's history starts with your bank's." }`. So `importAppleCard` returns `ImportResult | { ok: false; error: string }`.
+
+**Corrections (2026-10-21, from the PR 1 brief):**
+- **Decision 144 (a bounced payment).** The insert binds `excluded` 1 and `excluded_source 'plaid'` for each `ImportPlan.add` item whose `excluded` is true. Tests: a Payment and a bounced payment (an `Other` row with REVERSAL, money out) are both stored excluded, so the pair adds nothing to the month; an `Other` row with money in that says REVERSAL is not excluded.
+- **Correction 2 (Jev sees Apple's category on both sides of decision 143's guard).** `src/db/transactions.ts:2675` reads `COALESCE(t.plaid_category, t.apple_category)` through one helper, `jevCategoryHintSql(alias)`, which `seenMatchSql` (`:2943`) also uses. No other reader changes: `src/db/category-suggestions.ts`, `src/bills/find.ts`, `src/transactions/rule-offer.ts`, `src/db/income.ts` and `src/plaid/pending-merge.ts` keep `plaid_category` alone. Do not add a field to `JevSeen`; its `plaidCategory` comment says it holds Plaid's category, or Apple's for an uploaded row. Tests: an end-to-end sort in `test/sort-groups.test.ts`, and an Apple row in that file's `CHANGES` table.
+- **Correction 6 (the upload key is permanent).** `rowKey` builds the key from NFC-normalized, trimmed fields and a golden test pins its exact text. A row with U+FFFD in any field is unreadable, and each field is capped at 1,000 characters. `line` counts records, not physical lines.
+- **Correction 7 (money words never leak).** `parseAppleCsv` catches the `toCents` error and returns only the row's words; nothing rethrows or logs the amount text.
+- **Correction 8 (chunks by size too).** Each row insert is at most 500 rows or about 500,000 characters of JSON, whichever comes first, and the `RETURNING` ids are gathered across statements. Tests cover 250 rows, 1,001 rows (three or more statements) and 500 long rows (two or more).
+- **Correction 9 (names in the same batch).** The name suggestions use `suggestBankNamesSql("1")`, moved from `sync.ts`, in the upload's own batch, built from `plan.add`'s merchants. The upsert leaves named and decided merchants alone.
+- **Correction 10 (narrowing).** `ImportResult` has `ok: true`, so `ImportResult | { ok: false; error: string }` narrows in the tests.
+- **Historical start.** `historyStart` returns `string | null`: null when there is no card and no bank to start from. Then `importAppleCard` returns the "Link a bank first" error and saves nothing.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
   - `ALTER TABLE accounts ADD COLUMN uploaded_on TEXT`, `balance_on TEXT`, `removed_at TEXT` and `counted_from TEXT`.
@@ -205,8 +218,8 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   2. Write **one batch**, in this order:
      1. `INSERT … ON CONFLICT(subtype) WHERE subtype = 'apple_card' DO NOTHING` the account, as `src/transactions/cash.ts:116-121` does for Cash.
      2. `UPDATE` that account: `uploaded_on = ?` (`opts.today`), `removed_at = NULL`, and the typed balance with `balance_on`, setting `counted_from` to today in the same statement when the old `balance_on` was NULL. End with `RETURNING id`.
-     3. The row inserts in statements of up to 500 rows each. Each is `INSERT … SELECT … FROM json_each(?) WHERE 1 ON CONFLICT (account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL DO NOTHING RETURNING id`, with the account id read as `(SELECT id FROM accounts WHERE subtype = 'apple_card')`. `WHERE 1` avoids SQLite's upsert parsing ambiguity, as `src/db/merchant-names.ts:96-143` does.
-     4. The `balance_history` upsert, as `sync.ts:386` writes it.
+     3. The row inserts in statements of up to 500 rows each. Each is `INSERT … SELECT … FROM json_each(?) WHERE 1 ON CONFLICT (account_id, upload_key, upload_twin) WHERE upload_key IS NOT NULL DO NOTHING RETURNING id`, with the account id read as `(SELECT id FROM accounts WHERE subtype = 'apple_card')`. `WHERE 1` avoids SQLite's upsert parsing ambiguity, as `src/db/merchant-names.ts:96-117` does.
+     4. The `balance_history` upsert, as `sync.ts:397-399` writes it.
      5. `suggestBankNamesSql("1")`, with the names filtered as above.
   3. `added` is the count of returned row ids, and `already = plan.add.length - added`.
 - [ ] **Step 5:** Run `npx vitest run test/apple-card-import.test.ts test/export.test.ts`, then every gate (CLAUDE.md). Expected: PASS.
@@ -360,6 +373,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - purchases at the Riveras' usual stores
   - one pair of twins
   - one Payment
+  - one bounced payment (an `Other` row whose Description says REVERSAL, money out, with its payment)
   - one Credit refund
   - one Interest row
   - one row with a blank Clearing Date
@@ -368,7 +382,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
   - `parseAppleCsv(appleCardSample("2026-09-22"))` is ok and holds every kind listed above.
   - After a demo POST, the nightly `resetDemo` leaves no Apple Card account (`src/demo/reset.ts:24-47`).
   - The export's `bank` is `"Apple Card"` for that account.
-  - How Tally works says "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card is left out on both sides, so it never counts as spending."
+  - How Tally works says "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending."
 - [ ] **Step 2:** Run. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run. Expected: PASS. Then run every gate, the e2e included.
@@ -378,7 +392,7 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 
 **Task 1: 7.**
 - Verified: `toCents` accepts `$`, thousands commas and 1–2 decimals and throws otherwise (`src/money.ts:5-16`).
-- Assumed until the owner's export: Apple's quoting, date padding, its Type words, and blank Merchants on Payment or Interest rows.
+- Verified from the owner's export (2026-10-21), the gate in the header: the 8-column header; Apple's Type words `Purchase`, `Payment`, `Interest` and `Other` (a refund's word is still unconfirmed, and it counts by its sign); Payment and Interest rows with a Merchant; no blank Merchant or Clearing Date; UTF-8 with no byte-order mark, LF line endings and no newline after the last row; every field quoted except the two dates, which are zero-padded `MM/DD/YYYY`.
 
 **Task 2: 8.**
 - Verified: `shortDay` (`src/dates.ts:130-134`) and `daysBefore` (`:143`).
@@ -386,14 +400,14 @@ Line numbers below were read on main after #730 and #732 merged. A builder check
 
 **Task 3: 7.**
 - Verified:
-  - An upsert-SELECT with `WHERE 1` and `RETURNING` inside a batch (`src/db/merchant-names.ts:96-143`).
+  - An upsert-SELECT with `WHERE 1` and `RETURNING` inside a batch (`src/db/merchant-names.ts:96-144`).
   - A partial-index conflict target (`src/transactions/cash.ts:116-121`, migrations 0014 and 0019).
   - The move is safe: one call site (`src/plaid/sync.ts:989`) and no test imports it.
-  - Seed accounts carry `plaid_item_id` (`src/demo/reset.ts:134-149`).
+  - Seed accounts carry `plaid_item_id` (`src/demo/reset.ts:135-150`).
   - `excluded_source = 'plaid'` readers are safe for Apple rows:
     - `src/transactions/edit.ts:251`
     - `src/db/counted-month.ts:112`
-    - `src/db/transactions.ts:1396-1408`
+    - `src/db/transactions.ts:1396-1409`
     - `src/bills/find.ts:145`, which needs LOAN_PAYMENTS
     - `src/plaid/pending-merge.ts:257`, Plaid only
     - `rule-offer.ts:19`
