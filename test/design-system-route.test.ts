@@ -781,7 +781,12 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
-	it.each(["not-budgeted-row", "transactions-button"])(
+	it.each([
+		"not-budgeted-row",
+		"transactions-button",
+		"file-field",
+		"apple-card-sheet",
+	])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
 			const { html } = await get("/design-system");
@@ -1684,5 +1689,65 @@ describe("app pages", () => {
 			const csp = res.headers.get("content-security-policy") ?? "";
 			expect(csp).toContain("form-action 'self'");
 		}
+	});
+});
+
+describe("GET /design-system: Apple Card's group, file field and sheet (#766)", () => {
+	it("draws the group as a bank's is: the date line, the card's balance, Upload a file and Manage", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const group =
+			html.split('id="apple-card-group"')[1]?.split('id="file-field"')[0] ?? "";
+		expect(group).toContain("Updated through Oct 18");
+		expect(group).toContain("Balance as of Oct 18");
+		expect(group).toContain("-$1,240.18");
+		expect(group).toContain("Upload a file");
+		expect(group).toContain("Remove Apple Card");
+		expect(group).toContain("isn't in net worth yet.");
+	});
+
+	it("draws the removed group with no amount, no Upload and no Manage, and the demo's with no Manage", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const group =
+			html.split('id="apple-card-group"')[1]?.split('id="file-field"')[0] ?? "";
+		const removed =
+			group.split("and no Manage</p>")[1]?.split("</section>")[0] ?? "";
+		expect(removed).toContain("Removed</p>");
+		expect(removed).not.toContain("Upload a file");
+		expect(removed).not.toContain("Manage");
+		expect(removed).not.toMatch(/tabular-nums">-?\$/);
+		const demo = group.split("the same group, with no Manage</p>")[1] ?? "";
+		expect(demo).toContain("Upload a file");
+		expect(demo).not.toContain("Manage");
+		expect(demo).not.toContain("Remove Apple Card");
+	});
+
+	it("puts FileField's error in role=alert, named by the field's description", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		expect(html).toMatch(
+			/<input [^>]*id="ds-apple-card-file-error"[^>]*aria-describedby="ds-apple-card-file-error-hint ds-apple-card-file-error-error"[^>]*>/,
+		);
+		expect(html).toMatch(/<p id="ds-apple-card-file-error-error" role="alert"/);
+	});
+
+	it("draws the sheet's errors under their fields and the demo's sheet without fields", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		expect(sheet).toContain(
+			"This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV.",
+		);
+		expect(sheet).toContain(
+			"Row 14's amount can't be read. Nothing was added.",
+		);
+		expect(sheet).toContain(
+			"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
+		);
+		expect(sheet).toContain("Add the sample");
+		expect(sheet).toContain("In the demo, Tally uses a sample file.");
+		expect(sheet).toContain("Optional. Left blank, Oct 18's balance stays.");
 	});
 });
