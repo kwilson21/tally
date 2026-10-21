@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { type Stroke, STROKES, markStroke } from "../src/db/first-tally";
+import { markStroke, STROKES, type Stroke } from "../src/db/first-tally";
 import { dailyJevCap } from "../src/sort-groups";
 
 // The day's Jev cap (spec §8.6, decision 146): until the three questions are answered in production, each connected bank

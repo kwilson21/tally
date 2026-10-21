@@ -16,13 +16,13 @@ import {
 	readAiSwitches,
 	stillOnKeys,
 } from "./db/ai-switches";
+import { questionsAnswered, readFirstTally } from "./db/first-tally";
 import {
 	dropReservedJevCallsStatement,
 	giveBackReservedJevCallsStatement,
 	reservedKeyFor,
 	reserveJevCalls,
 } from "./db/jev-calls";
-import { questionsAnswered, readFirstTally } from "./db/first-tally";
 import {
 	releaseSortingTurn,
 	releaseSortingTurnStatement,
