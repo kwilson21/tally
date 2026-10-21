@@ -86,7 +86,7 @@ const PARTS: [string, string][] = [
 	],
 	[
 		"Resend",
-		"Sends bank sign-in reminder emails and the first week's ready email; Cloudflare Email Service is the best-effort fallback for destinations verified in Cloudflare Email Routing (decision 86).",
+		"Sends bank sign-in reminder emails and the first week's ready email; Cloudflare Email Service is the best-effort fallback for destinations verified in Cloudflare Email Routing (decision 86), except for a ready email Resend may already have accepted (decision 146).",
 	],
 	[
 		"Cron Triggers",
