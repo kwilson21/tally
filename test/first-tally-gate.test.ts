@@ -29,7 +29,7 @@ describe("questionsOpen, one condition at a time", () => {
 		expect(questionsOpen({ ...open, strokeOneDay: TODAY })).toBe(true);
 	});
 
-	it("stays shut with no stroke one day to measure from", () => {
+	it("stays shut with no stroke one day", () => {
 		expect(questionsOpen({ ...open, strokeOneDay: null })).toBe(false);
 	});
 
@@ -361,7 +361,8 @@ describe("readQuestionsGate", () => {
 	});
 
 	it("opens on stroke one's own day once history is in and nothing waits", async () => {
-		await markStroke(db, "bank", TODAY);
+		// The household's real today, not a fixed date: stroke one is drawn today in the household's time zone.
+		await markStroke(db, "bank", todayIn(DEFAULT_TIME_ZONE));
 		await addBank("gate-bank-1");
 		expect(await readQuestionsGate(db)).toBe(true);
 	});

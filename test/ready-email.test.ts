@@ -1,9 +1,14 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
+import {
+	CLAIM_SQL,
+	readyEmailKey,
+	runReadyEmail,
+} from "../src/first-tally/ready-email";
 import handler from "../src/index";
 
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email per person, sent by the minute run once a new
@@ -25,9 +30,15 @@ const scheduledWith = handler as unknown as {
 
 type Sent = { to: string; subject: string; html: string; text: string };
 
-/** Resend's fake: answers `status` and records each request's recipient and words. */
+/** The Idempotency-Key a request carried, or null when it carried none. */
+const keyOf = (init: RequestInit | undefined) =>
+	(init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"] ??
+	null;
+
+/** Resend's fake: answers `status` and records each request's recipient, words and Idempotency-Key. */
 function resendFake(status = 200) {
 	const sent: Sent[] = [];
+	const keys: (string | null)[] = [];
 	const fetchImpl = vi.fn(
 		async (_url: RequestInfo | URL, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body)) as Sent;
@@ -37,10 +48,23 @@ function resendFake(status = 200) {
 				html: body.html,
 				text: body.text,
 			});
+			keys.push(keyOf(init));
 			return new Response("{}", { status });
 		},
 	);
-	return { fetchImpl, sent };
+	return { fetchImpl, sent, keys };
+}
+
+/** The key a ready email carries for an address, written out from its definition: SHA-256 of the lower-cased address. */
+async function keyFor(address: string) {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(address.toLowerCase()),
+	);
+	const hex = [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+	return `ready-email-${hex}`;
 }
 
 /** The production environment: Resend on, Cloudflare's email off unless a test gives it. */
@@ -243,7 +267,7 @@ describe("the ready email: who gets it, and when", () => {
 	it("sends on stroke one's own day once every bank's history is in and nothing waits", async () => {
 		await openHousehold({
 			members: [DANA],
-			record: { strokes: { bank: "2026-10-14" }, budgets: {} },
+			record: { strokes: { bank: todayIn(DEFAULT_TIME_ZONE) }, budgets: {} },
 		});
 		const { fetchImpl, sent } = resendFake();
 		await runReadyEmail(production(), fetchImpl);
@@ -636,7 +660,7 @@ describe("the ready email: delivery", () => {
 		expect(await storedList()).toEqual([DANA]);
 	});
 
-	it("releases the address when neither provider delivers, so the next morning sends it again", async () => {
+	it("releases the address when neither provider delivers, so the next minute sends it again", async () => {
 		await openHousehold();
 		const email = {
 			send: vi.fn(async () => {
@@ -682,6 +706,43 @@ describe("the ready email: delivery", () => {
 			"ready email: 0 sent, 1 failed (resend timeout or error)",
 		);
 		log.mockRestore();
+	});
+});
+
+describe("the ready email: one Idempotency-Key per address (Resend)", () => {
+	it("gives the email the key the address defines, the same for every try", async () => {
+		await openHousehold();
+		const { fetchImpl, keys } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(keys).toEqual([await keyFor(DANA)]);
+		expect(await readyEmailKey(DANA)).toBe(await keyFor(DANA));
+	});
+
+	it("derives the key from the lower-cased address, so a capital letter sends the same key", async () => {
+		expect(await readyEmailKey("Dana@Example.com")).toBe(
+			await readyEmailKey("dana@example.com"),
+		);
+		expect(await readyEmailKey(DANA)).toMatch(/^ready-email-[0-9a-f]{64}$/);
+	});
+
+	it("tries a timed-out send again next minute with the same key, so Resend answers the first send instead of sending twice", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const timedOut = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				},
+			);
+			await runReadyEmail(production(), timedOut);
+			const next = resendFake();
+			await runReadyEmail(production(), next.fetchImpl);
+			expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
+			expect(keyOf(timedOut.mock.calls[0]?.[1])).toBe(await keyFor(DANA));
+			expect(next.keys).toEqual([await keyFor(DANA)]);
+		} finally {
+			log.mockRestore();
+		}
 	});
 });
 

@@ -23,7 +23,9 @@ export type DeliveryEnv = {
 /**
  * Sends one email to one address. Resend gets it first, with a 10 second timeout; Cloudflare's email only when Resend didn't
  * deliver. `kinds` names each failed attempt by its provider status or error kind (never the address), and is "no provider
- * configured" when neither provider is set up.
+ * configured" when neither provider is set up. `idempotencyKey` is sent to Resend only, as its Idempotency-Key header, so
+ * a retry of the same email (one Resend already accepted, answered late) is answered from Resend's record and not sent again.
+ * Cloudflare's email has no such key, so the fallback never carries one.
  */
 export async function deliver(
 	env: DeliveryEnv,
@@ -31,6 +33,7 @@ export async function deliver(
 	email: Mail,
 	fetchImpl: typeof fetch,
 	timeoutSignal: (milliseconds: number) => AbortSignal,
+	idempotencyKey?: string,
 ): Promise<{ delivered: boolean; kinds: string[] }> {
 	const kinds: string[] = [];
 	let delivered = false;
@@ -41,6 +44,7 @@ export async function deliver(
 			headers: {
 				Authorization: `Bearer ${env.RESEND_API_KEY}`,
 				"Content-Type": "application/json",
+				...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
 			},
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);

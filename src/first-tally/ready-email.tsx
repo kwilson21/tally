@@ -53,11 +53,27 @@ export const CLAIM_SQL = `UPDATE household_settings
 		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
 			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${EMAIL_AWAY_AFTER_MS / 1000} seconds')))`;
 
-// Takes an address back off the list when neither provider delivered it, so the next morning's run tries it again.
+// Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again.
 const RELEASE_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value, '$.readyEmailedTo',
 		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)))
 	WHERE key = 'first_tally'`;
+
+/**
+ * The Idempotency-Key the ready email carries to Resend, the same for every try at one address (decision 146): SHA-256 of the
+ * lower-cased address, in hex, after "ready-email-". Resend keeps a key for 24 hours, so a try that came after one Resend had
+ * already accepted (answered past deliver's timeout) gets Resend's answer for that send and nothing is sent twice.
+ */
+export async function readyEmailKey(address: string): Promise<string> {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(address.toLowerCase()),
+	);
+	const hex = [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+	return `ready-email-${hex}`;
+}
 
 /**
  * The read line: the connected banks by name, each once and in link order, joined with "and"; more than three names give the
@@ -168,6 +184,7 @@ export async function runReadyEmail(
 			renderReadyEmail(read),
 			fetchImpl,
 			timeoutSignal,
+			await readyEmailKey(recipient),
 		);
 		if (outcome.delivered) {
 			sentCount += 1;
