@@ -9,7 +9,7 @@ import { enabled } from "../src/routes/plaid";
 
 // The Your banks list's refresh (P140 A, decision 133): GET /home/banks, polled every 5 seconds while a bank is being read.
 // It answers with the list and the status out of band, announces a bank that came in, redraws the whole first-week top once
-// the questions open, and asks for a reload when there is no setup to draw.
+// the questions open, and redraws Home in full, without a reload, when there is no setup to draw (decision 146).
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const demo = { ...env, DEMO: "true" } as unknown as Env;
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
@@ -338,7 +338,7 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 		});
 	});
 
-	it("asks for a reload when no setup is drawn: set up, or the demo", async () => {
+	it("redraws Home in full, with no reload, when no setup is drawn: set up, or the fifth day (decision 146)", async () => {
 		await writeRecord({
 			strokes: {
 				bank: "2026-10-13",
@@ -349,10 +349,17 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 			},
 			budgets: {},
 		});
-		const { res } = await refresh();
-		expect(res.headers.get("HX-Refresh")).toBe("true");
-		const demoRes = await refresh("", demo);
-		expect(demoRes.res.headers.get("HX-Refresh")).toBe("true");
+		const { res, html } = await refresh();
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(res.headers.get("HX-Reselect")).toBe("#page");
+		expect(html).toContain('id="page"');
+	});
+
+	it("answers 204 in the demo, which draws no setup to poll for, and never reloads", async () => {
+		const { res } = await refresh("", demo);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Refresh")).toBeNull();
 	});
 });
 

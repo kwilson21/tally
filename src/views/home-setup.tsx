@@ -298,8 +298,8 @@ export function HomeSetup({
 					</p>
 				</div>
 			)}
-			{/* The check-in says the person is still here (decision 146), and names the step this page shows, so /home/seen reloads
-			    the page once that step has moved on. A page that no longer refreshes checks in too. */}
+			{/* The check-in says the person is still here (decision 146), and names the step this page shows, so /home/seen redraws
+			    the top once that step has moved on, with no reload. A page that no longer refreshes checks in too. */}
 			{polls && (phase === "reading" || phase === "ready") && (
 				<HomeSeenCheckIn step={phase === "ready" ? "ready" : setupStep(view)} />
 			)}

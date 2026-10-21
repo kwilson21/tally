@@ -48,6 +48,7 @@ import { HomeForecast } from "../views/home-forecast";
 import { HomeSeenCheckIn, type ShownStep } from "../views/home-seen";
 import {
 	HomeSetup,
+	nightSentence,
 	setupNextLine,
 	setupStep,
 	statusOf,
@@ -316,12 +317,7 @@ async function renderHome(
 		plaidButton ? (
 			<LinkBank class="w-full" refresh="/" target="#page" />
 		) : (
-			<a
-				href="/"
-				class="inline-flex min-h-11 w-full items-center justify-center text-accent underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-			>
-				Link a bank on Home
-			</a>
+			linkBankOnHome()
 		)
 	) : undefined;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
@@ -715,47 +711,90 @@ function shownStepOf(setup: SetupView | null): ShownStep | null {
 }
 
 /**
+ * Link a bank as a plain link to Home. An htmx redraw of Home draws this one, since Plaid's script loads only on a full load of
+ * Home (#678, renderHome's linkBank).
+ */
+function linkBankOnHome() {
+	return (
+		<a
+			href="/"
+			class="inline-flex min-h-11 w-full items-center justify-center text-accent underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+		>
+			Link a bank on Home
+		</a>
+	);
+}
+
+/**
+ * Answers a first-week page whose step has moved on, without a reload (decision 146). The Your banks poll and the presence
+ * check-in both answer through here, so they can't drift. A reload would close Plaid Link's window, which the page's own Link
+ * a bank opens. While the top can be drawn in place, the whole top (#setup-top) is redrawn once, its status takes focus, and
+ * `said` (the banks the poll says came in) is announced with the status. With no setup to draw in place (set up, before a bank,
+ * or the fifth day), Home is drawn in full into #page, and what it says (`said`, and the fifth day's sentence) is announced.
+ */
+async function redrawFirstWeek(
+	c: Context<App>,
+	read: Awaited<ReturnType<typeof readHomeSetup>>,
+	said = "",
+) {
+	const { today, banks, flagged, setup } = read;
+	if (!setup || setup.fifth || setup.phase === "before") {
+		c.header("HX-Retarget", "#page");
+		c.header("HX-Reswap", "outerHTML");
+		c.header("HX-Reselect", "#page");
+		// What the page says as it is redrawn: a bank that came in, and on the fifth day, what the night did.
+		const message = [said, setup?.fifth ? nightSentence(setup.fifth) : ""]
+			.filter(Boolean)
+			.join(" ");
+		if (message)
+			c.header(
+				"HX-Trigger",
+				hxTrigger({ toast: { message, type: "info" }, announce: message }),
+			);
+		return renderHome(c, today);
+	}
+	const message = [said, statusOf(setup, flagged.length > 0)]
+		.filter(Boolean)
+		.join(" ");
+	c.header("HX-Retarget", "#setup-top");
+	c.header("HX-Reswap", "outerHTML");
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ toast: { message, type: "info" }, announce: message }),
+	);
+	const reading = setup.phase === "reading";
+	return c.html(
+		<HomeSetup
+			view={setup}
+			bankLine={homeBankNotice(flagged, today)?.words}
+			linkBank={reading && enabled(c.env) ? linkBankOnHome() : undefined}
+			yourBanks={
+				reading ? { banks, today, keepPolling: setup.refreshes } : undefined
+			}
+			focusStatus
+		/>,
+	);
+}
+
+/**
  * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while the page refreshes
  * (decision 146). It answers with the list, and the status out of band (so the focused status is never replaced). A bank that
  * came in since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
  * HX-Retarget. A step change (reading, sorting, taking longer than usual) is announced once, and the presence check-in is
- * swapped to the new step, so the page doesn't reload for a change it shows (decision 146). With no setup to draw (the demo,
- * a set-up family, or the fifth day, which Home draws in full), it asks for a reload, so Home draws as it is.
+ * swapped to the new step (decision 146). Nothing here reloads the page: a phase that leaves reading, or no setup to draw, is
+ * answered by redrawFirstWeek. The demo draws no setup, so it answers 204.
  */
 home.get("/home/banks", async (c) => {
-	const reload = () => {
-		c.header("HX-Refresh", "true");
-		return c.body(null);
-	};
-	if (c.env.DEMO === "true") return reload();
-	const { today, banks, flagged, setup } = await readHomeSetup(c.env.DB);
-	// The fifth day's view has its own Safe to spend and link, and before a bank Home carries Link a bank; neither is read
-	// here, so Home draws them in full.
-	if (!setup || setup.fifth || setup.phase === "before") return reload();
+	if (c.env.DEMO === "true") return c.body(null, 204);
+	const read = await readHomeSetup(c.env.DB);
+	const { today, banks, flagged, setup } = read;
 	const shown = idsIn(c.req.query("in"));
 	const arrived = banks
 		.filter((bank) => bankState(bank, today) === "in" && !shown.has(bank.id))
 		.map(inSentence);
 	const said = arrived.join(" ");
-	if (setup.phase !== "reading") {
-		// The questions are open or answered: the whole top is redrawn once, and its status is said.
-		const message = [said, statusOf(setup, flagged.length > 0)]
-			.filter(Boolean)
-			.join(" ");
-		c.header("HX-Retarget", "#setup-top");
-		c.header("HX-Reswap", "outerHTML");
-		c.header(
-			"HX-Trigger",
-			hxTrigger({ toast: { message, type: "info" }, announce: message }),
-		);
-		return c.html(
-			<HomeSetup
-				view={setup}
-				bankLine={homeBankNotice(flagged, today)?.words}
-				focusStatus
-			/>,
-		);
-	}
+	// The questions are open or answered, or no setup is drawn: the top is redrawn once, and its status is said.
+	if (setup?.phase !== "reading") return redrawFirstWeek(c, read, said);
 	// A step change is announced once, with its status: the poll names the step the page shows (decision 146). A count that
 	// ticks on within the step is never announced alone.
 	const shownStep = SETUP_STEPS.find((step) => step === c.req.query("step"));
@@ -795,9 +834,11 @@ home.get("/home/banks", async (c) => {
  * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, every
  * 30 seconds (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds
  * old, so the page's repeats write once in each window. The demo writes nothing and answers 204. Home's check-in sends the
- * step its page shows: once that step has moved on (the questions opened, sorting started or stopped being slow, the phase
- * became answered, or setup is gone), the answer is 200 with HX-Refresh, so the page reloads and shows it; otherwise 204 with
- * no body. The questions page sends no step, so its answer is always 204.
+ * step its page shows. While that step is still the step now, the answer is 204 with no body. Once it has moved on, the page
+ * is answered as the Your banks poll answers (redrawFirstWeek), and never reloaded: the questions opened, or the phase left
+ * reading, redraws the top, and a sort that started or stopped being slow, while still reading, swaps the status, the next
+ * line and the check-in out of band and announces the new step once. The questions page sends no step, so its answer is
+ * always 204.
  */
 home.post("/home/seen", async (c) => {
 	if (c.env.DEMO === "true") return c.body(null, 204);
@@ -809,10 +850,30 @@ home.post("/home/seen", async (c) => {
 	const form = await c.req.parseBody();
 	const shown = SHOWN_STEPS.find((step) => step === form.step);
 	if (shown === undefined) return c.body(null, 204);
-	const { setup } = await readHomeSetup(c.env.DB);
+	const read = await readHomeSetup(c.env.DB);
+	const { today, flagged, setup } = read;
 	if (shownStepOf(setup) === shown) return c.body(null, 204);
-	c.header("HX-Refresh", "true");
-	return c.body(null);
+	// The questions opened or closed, the phase left reading, or the page drew the questions open: the top is redrawn once.
+	if (setup?.phase !== "reading" || shown === "ready")
+		return redrawFirstWeek(c, read);
+	// Still reading, and the page drew reading: the status and the next line change in place, the check-in moves to the new
+	// step, and the new status is announced once (as the poll announces it).
+	const message = statusOf(setup, flagged.length > 0);
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ toast: { message, type: "info" }, announce: message }),
+	);
+	return c.html(
+		<>
+			<p id="setup-status" hx-swap-oob="innerHTML">
+				{message}
+			</p>
+			<p id="setup-next" hx-swap-oob="innerHTML">
+				{setupNextLine(setup, Boolean(homeBankNotice(flagged, today)))}
+			</p>
+			<HomeSeenCheckIn step={setupStep(setup)} oob />
+		</>,
+	);
 });
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.

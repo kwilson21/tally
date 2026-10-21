@@ -9,8 +9,10 @@ import { sameOrigin } from "../src/security";
 
 // The presence check-in (decision 146): POST /home/seen, posted every 30 seconds while Home's first-week setup or the
 // questions page is open. It writes the signed-in member's own home_seen_at, at most once in each 30 seconds. It answers
-// 204 with no body, except when Home's check-in shows a step that has moved on: then 200 with HX-Refresh, so the page
-// reloads and shows the change. The router mounts sameOrigin and the Access identity as src/index.tsx does.
+// 204 with no body while the step the page shows is still the step now. Once that step has moved on, it answers without a
+// reload (a reload would close Plaid Link's window): the top is redrawn once, or, while still reading, only its status,
+// next line and check-in are swapped out of band; with no top to draw (set up, before a bank, the fifth day), Home is drawn
+// in full into #page. The router mounts sameOrigin and the Access identity as src/index.tsx does.
 const PERSON = "person@example.com";
 const RILEY = "riley@example.com";
 const ORIGIN = "http://localhost";
@@ -65,6 +67,12 @@ const writeRecord = (value: unknown) =>
 	)
 		.bind(JSON.stringify(value))
 		.run();
+
+/** The HX-Trigger header's announce, or null when the answer carries none. */
+const announced = (res: Response) => {
+	const header = res.headers.get("HX-Trigger");
+	return header ? (JSON.parse(header) as { announce?: string }).announce : null;
+};
 
 // Every connected bank still reading its history: the reading step.
 const reading = async () => {
@@ -167,7 +175,7 @@ describe("POST /home/seen: the presence check-in", () => {
 	});
 });
 
-describe("POST /home/seen: a page whose step has moved on reloads itself (decision 146)", () => {
+describe("POST /home/seen: a page whose step has moved on redraws itself, never reloads (decision 146)", () => {
 	it("answers 204 while the step it shows is still the step now", async () => {
 		await reading();
 		const res = await checkIn(family, ORIGIN, "reading");
@@ -183,7 +191,7 @@ describe("POST /home/seen: a page whose step has moved on reloads itself (decisi
 		expect(res.headers.get("HX-Refresh")).toBeNull();
 	});
 
-	it("answers 200 with HX-Refresh once a slow page's questions open, and still writes its check-in", async () => {
+	it("redraws the top, with no reload, once a slow page's questions open, and still writes its check-in", async () => {
 		await sorting();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now', '-2 hours')",
@@ -193,19 +201,62 @@ describe("POST /home/seen: a page whose step has moved on reloads itself (decisi
 		await ready();
 		const res = await checkIn(family, ORIGIN, "slow");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBe("true");
-		expect(await res.text()).toBe("");
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
+		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
+		const html = await res.text();
+		expect(html).toContain('id="setup-top"');
+		expect(html).toContain("Set up your budget");
+		expect(announced(res)).toContain(
+			"Now answer three quick questions to set up your budget.",
+		);
 		expect(await seenOf(PERSON)).not.toBeNull();
 	});
 
-	it("answers HX-Refresh when the page showed reading and the sort has begun", async () => {
+	it("redraws the top once the sort the page shows has finished and the questions open", async () => {
+		await sorting();
+		await saveAiSwitches(env.DB, { categories: false, income: false });
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE plaid_transaction_id = 'waiting-seen'",
+		).run();
+		const res = await checkIn(family, ORIGIN, "sorting");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
+		expect(await res.text()).toContain("Set up your budget");
+	});
+
+	it("swaps the status, the next line and the check-in out of band, with no reload, while still reading, and announces the new step once", async () => {
 		await sorting();
 		const res = await checkIn(family, ORIGIN, "reading");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBe("true");
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBeNull();
+		const html = await res.text();
+		expect(html).toContain('<p id="setup-status" hx-swap-oob="innerHTML"');
+		expect(html).toContain('<p id="setup-next" hx-swap-oob="innerHTML"');
+		expect(html).toContain(
+			'<div id="home-seen" hx-swap-oob="outerHTML" hidden',
+		);
+		expect(html).toContain('hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"');
+		expect(html).not.toContain('id="setup-top"');
+		expect(announced(res)).toContain("Sorting your last 90 days:");
+		expect(await seenOf(PERSON)).not.toBeNull();
 	});
 
-	it("answers HX-Refresh when the page showed ready and the questions are answered", async () => {
+	it("redraws the top once the page showed ready and the questions close again, so the bank's list and Link come back", async () => {
+		await ready();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = NULL",
+		).run();
+		const res = await checkIn(family, ORIGIN, "ready");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
+		expect(await res.text()).toContain('id="your-banks"');
+	});
+
+	it("redraws the top to the answered phase once the questions are answered, and announces its status", async () => {
 		await ready();
 		await writeRecord({
 			strokes: { bank: TODAY, pay: TODAY, bills: TODAY, budgets: TODAY },
@@ -213,10 +264,14 @@ describe("POST /home/seen: a page whose step has moved on reloads itself (decisi
 		});
 		const res = await checkIn(family, ORIGIN, "ready");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBe("true");
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
+		expect(announced(res)).toBe(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
 	});
 
-	it("answers HX-Refresh when the setup is done and no longer drawn", async () => {
+	it("redraws Home in full, with no reload, once the setup is done and no longer drawn", async () => {
 		await reading();
 		await writeRecord({
 			strokes: {
@@ -229,14 +284,49 @@ describe("POST /home/seen: a page whose step has moved on reloads itself (decisi
 			budgets: {},
 		});
 		const res = await checkIn(family, ORIGIN, "reading");
-		expect(res.headers.get("HX-Refresh")).toBe("true");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(res.headers.get("HX-Reselect")).toBe("#page");
+		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
+		expect(await res.text()).toContain('id="page"');
 	});
 
-	it("answers 204 while the questions are still open and the page shows ready", async () => {
-		await ready();
-		const res = await checkIn(family, ORIGIN, "ready");
-		expect(res.status).toBe(204);
+	it("redraws Home in full on the fifth day, with its view and the night announced, and no reload", async () => {
+		await reading();
+		await writeRecord({
+			strokes: {
+				bank: TODAY,
+				pay: TODAY,
+				bills: TODAY,
+				budgets: TODAY,
+				count: TODAY,
+			},
+			budgets: {},
+			night: { brought: 3, needYou: 0 },
+		});
+		const res = await checkIn(family, ORIGIN, "reading");
+		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(announced(res)).toBe(
+			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
+		);
+		expect(await res.text()).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+	});
+
+	it("redraws Home in full, with no reload, once the last connected bank is disconnected (before a bank)", async () => {
+		await reading();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+		const res = await checkIn(family, ORIGIN, "reading");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Refresh")).toBeNull();
+		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(await res.text()).toContain('id="page"');
 	});
 
 	it("never answers HX-Refresh to the questions page's check-in, which sends no step", async () => {

@@ -1,7 +1,8 @@
 // The presence check-in (decision 146): Home's first-week setup and the questions page post to /home/seen every 30 seconds
 // while they are open, so Tally knows who is still there and emails only the people who have left (ready-email.tsx). Home's
-// check-in also sends the step its page shows (`step`), so /home/seen reloads the page once that step has moved on, and
-// someone watching sees the questions appear. It is a hidden element that swaps nothing and announces nothing, so it is
+// check-in also sends the step its page shows (`step`), so /home/seen redraws the page's first-week top once that step has
+// moved on, and someone watching sees the questions appear (it never reloads the page). It is a hidden element that swaps
+// nothing and announces nothing, so it is
 // not a live region. It is plain htmx, no script.
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 

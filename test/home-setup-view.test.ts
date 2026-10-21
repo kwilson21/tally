@@ -517,7 +517,7 @@ describe("HomeSetup's presence check-in", () => {
 
 	it("is still drawn while the page no longer refreshes (slow, or stale), so its person is still there (decision 146)", async () => {
 		// The check-in is what tells Tally the person is still here, so a page that stops refreshing keeps checking in too. The
-		// page reloads itself once its step moves on (/home/seen), so someone watching sees the questions appear.
+		// page redraws its top once its step moves on (/home/seen), with no reload, so someone watching sees the questions appear.
 		expect(
 			await top({
 				phase: "reading",
