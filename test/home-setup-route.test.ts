@@ -122,7 +122,7 @@ describe("Home during setup", () => {
 			budgets: {},
 		});
 		const html = await page(plaidFamily);
-		expect(html).toContain("Three things to check");
+		expect(html).toContain("Set up your budget");
 		expect(html).not.toContain("Your banks");
 		expect(html).not.toContain("Have more accounts?");
 		expect(html).not.toContain(PLAID_MODULE);
@@ -199,7 +199,9 @@ describe("Home during setup", () => {
 		await writeRecord({ strokes: { bank: today }, budgets: {} });
 		const html = await page(family);
 		expect(html).toContain("Your first week");
-		expect(html).toContain(`from ${bank?.name}. Your questions will be ready`);
+		expect(html).toContain(
+			`Tally's reading your last 90 days from ${bank?.name}.`,
+		);
 		expect(html).not.toContain("Nothing for you to do until then.");
 		expect(html).not.toContain("Three things to check");
 		expect(html).not.toContain("Link a bank");
@@ -210,7 +212,7 @@ describe("Home during setup", () => {
 		const today = todayIn(DEFAULT_TIME_ZONE);
 		await writeRecord({ strokes: { bank: today }, budgets: {} });
 		expect(await page(family)).toContain(
-			"Tally will email you when they're ready.",
+			"Tally will email you the moment they're ready.",
 		);
 		await writeRecord({
 			strokes: { bank: today },
@@ -218,7 +220,7 @@ describe("Home during setup", () => {
 			readyEmailedTo: ["dana@example.com"],
 		});
 		expect(await page(family)).not.toContain(
-			"Tally will email you when they're ready.",
+			"Tally will email you the moment they're ready.",
 		);
 	});
 
@@ -234,7 +236,10 @@ describe("Home during setup", () => {
 		expect(html).not.toContain("from Northline Card Services");
 	});
 
-	it("with one bank's history in, says the questions come by the morning", async () => {
+	it("with one bank's history in and transactions still waiting, says the sort is under way and counts it", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-route', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
@@ -248,8 +253,10 @@ describe("Home during setup", () => {
 		});
 		const html = await page(family);
 		expect(html).toContain(
-			"Your questions will usually be ready by the morning.",
+			"Your three questions open the moment it's done, usually in a few minutes.",
 		);
+		expect(html).toContain("Sorting your last 90 days:");
+		expect(html).not.toContain("by the morning");
 		expect(html).not.toContain("When it's done");
 	});
 

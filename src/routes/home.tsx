@@ -38,7 +38,6 @@ import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
 import { loadsPlaid } from "../security";
-import { jevCallLimit } from "../sort-groups";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
@@ -46,7 +45,12 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
-import { HomeSetup, statusOf } from "../views/home-setup";
+import {
+	HomeSetup,
+	setupNextLine,
+	setupStep,
+	statusOf,
+} from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
@@ -290,9 +294,7 @@ async function renderHome(
 	// The first week's setup (P125 E, spec §8.8): the family app only, on the current month, until all five strokes are
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
-		current && !demo
-			? await readSetup(c.env.DB, { today, cap: jevCallLimit(c.env), flagged })
-			: null;
+		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
@@ -347,7 +349,11 @@ async function renderHome(
 								view={setup}
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
-								yourBanks={{ banks: yourBanks, today }}
+								yourBanks={{
+									banks: yourBanks,
+									today,
+									keepPolling: setup.refreshes,
+								}}
 								fifthDay={
 									setup.fifth
 										? {
@@ -669,6 +675,8 @@ const inSentence = (bank: YourBank) =>
  * HX-Retarget. With no setup to draw (the demo, a set-up family, or the fifth day, which Home draws in full), it asks for a
  * reload, so Home draws as it is.
  */
+const SETUP_STEPS = ["reading", "sorting", "slow"] as const;
+
 home.get("/home/banks", async (c) => {
 	const reload = () => {
 		c.header("HX-Refresh", "true");
@@ -687,7 +695,6 @@ home.get("/home/banks", async (c) => {
 	);
 	const setup = await readSetup(c.env.DB, {
 		today,
-		cap: jevCallLimit(c.env),
 		flagged,
 	});
 	// The fifth day's view has its own Safe to spend and link, and before a bank Home carries Link a bank; neither is read
@@ -717,16 +724,33 @@ home.get("/home/banks", async (c) => {
 			/>,
 		);
 	}
-	if (said)
+	// A step change is announced once, with its status: the poll names the step the page shows (decision 146). A count that
+	// ticks on within the step is never announced alone.
+	const shownStep = SETUP_STEPS.find((step) => step === c.req.query("step"));
+	const stepNow = setupStep(setup);
+	const stepChanged = shownStep !== undefined && shownStep !== stepNow;
+	const message = [said, stepChanged ? statusOf(setup, flagged.length > 0) : ""]
+		.filter(Boolean)
+		.join(" ");
+	if (message)
 		c.header(
 			"HX-Trigger",
-			hxTrigger({ toast: { message: said, type: "info" }, announce: said }),
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
+	const bankLine = Boolean(homeBankNotice(flagged, today));
 	return c.html(
 		<>
-			<YourBanks banks={banks} today={today} />
+			<YourBanks
+				banks={banks}
+				today={today}
+				keepPolling={setup.refreshes}
+				step={stepNow}
+			/>
 			<p id="setup-status" hx-swap-oob="innerHTML">
 				{statusOf(setup, flagged.length > 0)}
+			</p>
+			<p id="setup-next" hx-swap-oob="innerHTML">
+				{setupNextLine(setup, bankLine)}
 			</p>
 		</>,
 	);

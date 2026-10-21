@@ -4,10 +4,12 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import type { FirstTally } from "../src/db/first-tally";
 import { readFirstTally, takeBackBankStrokes } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { readSetup, setupView } from "../src/first-tally/setup";
+import { readSetup, setupView, storedTimeMs } from "../src/first-tally/setup";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
+/** Noon on TODAY, in UTC: the clock the sort's "recent" and "over an hour" are read against. */
+const NOW = Date.parse("2026-10-14T12:00:00Z");
 
 /**
  * The test database with `hook` awaited just before readSetup's repair writes stroke one (its only INSERT into the record):
@@ -48,9 +50,12 @@ function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
 }
 const BANK = {
 	name: "Chase",
+	linkedAt: "2026-10-13 09:00:00",
 	lastSyncedAt: "2026-10-13",
 	historyCompleteAt: "2026-10-13",
 };
+/** A bank whose history came in half an hour before NOW: the sort is recent. */
+const RECENT = { ...BANK, historyCompleteAt: "2026-10-14 11:30:00" };
 const ALL_DRAWN: FirstTally = {
 	strokes: { bank: null, pay: null, bills: null, budgets: null, count: null },
 	budgets: {},
@@ -63,8 +68,8 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 		flagged: [],
 		waiting: 0,
 		total: 0,
-		cap: 500,
 		today: TODAY,
+		nowMs: NOW,
 		...input,
 	});
 
@@ -111,37 +116,85 @@ describe("setupView: which setup state Home shows", () => {
 		expect(reading?.steps[1]).toEqual({
 			name: "Your pay",
 			done: false,
-			note: "When it's done",
+			note: "After sorting",
 		});
 		expect(reading?.steps.slice(1, 4).map((s) => s.note)).toEqual([
-			"When it's done",
-			"When it's done",
-			"When it's done",
+			"After sorting",
+			"After sorting",
+			"After sorting",
 		]);
 		expect(reading?.steps[4]?.note).toBe("Later");
 	});
 
-	it("says the import fits one night when what Jev owes fits the day's cap", () => {
+	it("is sorting once every history is in and something waits, counting the sorted ones (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const fits = view({
+		const sorting = view({
 			record,
-			banks: [BANK],
+			banks: [RECENT],
 			waiting: 500,
 			total: 1500,
-			cap: 500,
 		});
-		expect(fits?.phase).toBe("reading");
-		expect(fits?.fitsOneNight).toBe(true);
-		const catchUp = view({
+		expect(sorting?.phase).toBe("reading");
+		expect(sorting?.sorting).toBe(true);
+		expect(sorting?.slow).toBe(false);
+		expect(sorting?.sorted).toBe(1000);
+		expect(sorting?.total).toBe(1500);
+		expect(sorting?.refreshes).toBe(true);
+	});
+
+	it("is slow once the newest bank's history came in over an hour ago, and then stops refreshing", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const slow = view({
 			record,
-			banks: [BANK],
-			waiting: 600,
+			banks: [{ ...RECENT, historyCompleteAt: "2026-10-14 10:30:00" }],
+			waiting: 500,
 			total: 1500,
-			cap: 500,
 		});
-		expect(catchUp?.fitsOneNight).toBe(false);
-		expect(catchUp?.sorted).toBe(900);
-		expect(catchUp?.total).toBe(1500);
+		expect(slow?.sorting).toBe(true);
+		expect(slow?.slow).toBe(true);
+		expect(slow?.refreshes).toBe(false);
+	});
+
+	it("refreshes while a bank was linked in the last hour, even with its history still coming", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const linking = view({
+			record,
+			banks: [
+				{ ...BANK, linkedAt: "2026-10-14 11:30:00", historyCompleteAt: null },
+			],
+			total: 10,
+		});
+		expect(linking?.phase).toBe("reading");
+		expect(linking?.sorting).toBe(false);
+		expect(linking?.refreshes).toBe(true);
+	});
+
+	it("stops refreshing once nothing has been linked or read for an hour", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const quiet = view({
+			record,
+			banks: [
+				{ ...BANK, linkedAt: "2026-10-14 09:00:00", historyCompleteAt: null },
+			],
+			total: 10,
+		});
+		expect(quiet?.refreshes).toBe(false);
+	});
+
+	it("never counts a missing or unreadable time as recent", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const unknown = view({
+			record,
+			banks: [{ ...BANK, linkedAt: null, historyCompleteAt: null }],
+			total: 10,
+		});
+		expect(unknown?.refreshes).toBe(false);
+		const garbled = view({
+			record,
+			banks: [{ ...BANK, linkedAt: "last Tuesday", historyCompleteAt: null }],
+			total: 10,
+		});
+		expect(garbled?.refreshes).toBe(false);
 	});
 
 	it("is ready once the gate is open: every bank synced and its history in, and nothing waiting", () => {
@@ -156,6 +209,7 @@ describe("setupView: which setup state Home shows", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const second = {
 			name: "Northline",
+			linkedAt: "2026-10-13 09:00:00",
 			lastSyncedAt: "2026-10-13",
 			historyCompleteAt: null,
 		};
@@ -164,7 +218,6 @@ describe("setupView: which setup state Home shows", () => {
 			banks: [BANK, second],
 			waiting: 500,
 			total: 1500,
-			cap: 500,
 		});
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
@@ -210,32 +263,29 @@ describe("setupView: which setup state Home shows", () => {
 		).toBe("reading");
 	});
 
-	it("gives the catch-up lines no time: an import bigger than one night says 'When it's done', as the status does", () => {
+	it("reads 'After sorting' on lines two to four while the import is read, and 'Later' on the fifth (decision 146)", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const catchUp = view({
-			record,
-			banks: [BANK],
-			waiting: 600,
-			total: 1500,
-			cap: 500,
-		});
-		expect(catchUp?.fitsOneNight).toBe(false);
-		expect(catchUp?.steps.slice(1).map((s) => s.note)).toEqual([
-			"When it's done",
-			"When it's done",
-			"When it's done",
+		const reading = view({ record, banks: [BANK], waiting: 600, total: 1500 });
+		expect(reading?.steps.slice(1).map((s) => s.note)).toEqual([
+			"After sorting",
+			"After sorting",
+			"After sorting",
 			"Later",
 		]);
 	});
 
-	it("keeps 'Tomorrow morning' on the lines when the import fits one night", () => {
+	it("gives no time on the lines even when every history is in and the sort is under way", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const fits = view({ record, banks: [BANK], waiting: 500, cap: 500 });
-		expect(fits?.historyIn).toBe(true);
-		expect(fits?.steps.slice(1).map((s) => s.note)).toEqual([
-			"Tomorrow morning",
-			"Tomorrow morning",
-			"Tomorrow morning",
+		const sorting = view({
+			record,
+			banks: [RECENT],
+			waiting: 500,
+			total: 1500,
+		});
+		expect(sorting?.steps.slice(1).map((s) => s.note)).toEqual([
+			"After sorting",
+			"After sorting",
+			"After sorting",
 			"Later",
 		]);
 	});
@@ -296,7 +346,12 @@ describe("setupView: which setup state Home shows", () => {
 			record,
 			banks: [
 				BANK,
-				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+				{
+					name: "Wells Fargo",
+					linkedAt: "2026-10-13 09:00:00",
+					lastSyncedAt: null,
+					historyCompleteAt: null,
+				},
 			],
 		});
 		expect(reading?.phase).toBe("reading");
@@ -320,7 +375,12 @@ describe("setupView: which setup state Home shows", () => {
 			record,
 			banks: [
 				BANK,
-				{ name: "Chase", lastSyncedAt: null, historyCompleteAt: null },
+				{
+					name: "Chase",
+					linkedAt: "2026-10-13 09:00:00",
+					lastSyncedAt: null,
+					historyCompleteAt: null,
+				},
 			],
 		});
 		expect(reading?.steps[0]?.note).toBe("2 banks, linked");
@@ -338,7 +398,12 @@ describe("setupView: which setup state Home shows", () => {
 			record,
 			banks: [
 				BANK,
-				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+				{
+					name: "Wells Fargo",
+					linkedAt: "2026-10-13 09:00:00",
+					lastSyncedAt: null,
+					historyCompleteAt: null,
+				},
 			],
 		});
 		expect(early?.steps[0]).toEqual({
@@ -363,7 +428,12 @@ describe("setupView: which setup state Home shows", () => {
 			record,
 			banks: [
 				BANK,
-				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+				{
+					name: "Wells Fargo",
+					linkedAt: "2026-10-13 09:00:00",
+					lastSyncedAt: null,
+					historyCompleteAt: null,
+				},
 			],
 		});
 		expect(midPay?.steps[0]?.note).toBe("2 banks, linked");
@@ -386,6 +456,35 @@ describe("setupView: which setup state Home shows", () => {
 	});
 });
 
+describe("storedTimeMs: the times the setup reads (decision 146)", () => {
+	it("reads D1's UTC 'YYYY-MM-DD HH:MM:SS' as that UTC moment", () => {
+		expect(storedTimeMs("2026-10-14 11:30:00")).toBe(
+			Date.parse("2026-10-14T11:30:00Z"),
+		);
+	});
+
+	it("reads an ISO time that ends in Z", () => {
+		expect(storedTimeMs("2026-10-14T11:30:00Z")).toBe(
+			Date.parse("2026-10-14T11:30:00Z"),
+		);
+		expect(storedTimeMs("2026-10-14T11:30:00.250Z")).toBe(
+			Date.parse("2026-10-14T11:30:00.250Z"),
+		);
+	});
+
+	it("reads a bare date as midnight UTC", () => {
+		expect(storedTimeMs("2026-10-13")).toBe(Date.parse("2026-10-13T00:00:00Z"));
+	});
+
+	it("is null for no time, and for anything else, so it never counts as recent", () => {
+		expect(storedTimeMs(null)).toBeNull();
+		expect(storedTimeMs("")).toBeNull();
+		expect(storedTimeMs("last Tuesday")).toBeNull();
+		expect(storedTimeMs("2026-10-14T11:30:00")).toBeNull();
+		expect(storedTimeMs("2026-13-45 99:99:99")).toBeNull();
+	});
+});
+
 describe("readSetup", () => {
 	beforeEach(async () => {
 		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
@@ -400,16 +499,13 @@ describe("readSetup", () => {
 		)
 			.bind(JSON.stringify(ALL_DRAWN))
 			.run();
-		expect(
-			await readSetup(env.DB, { today: TODAY, cap: 500, flagged: [] }),
-		).toBeNull();
+		expect(await readSetup(env.DB, { today: TODAY, flagged: [] })).toBeNull();
 	});
 
 	it("draws stroke one today for a connected bank that has none (linked before the first week shipped)", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		const setup = await readSetup(env.DB, {
 			today: TODAY,
-			cap: 500,
 			flagged: [],
 		});
 		// Stroke one is drawn today, so the questions open tomorrow at the earliest: the setup is reading, not set up.
@@ -429,7 +525,7 @@ describe("readSetup", () => {
 				"UPDATE plaid_items SET disconnected_at = datetime('now')",
 			).run(),
 		);
-		await readSetup(racing, { today: TODAY, cap: 500, flagged: [] });
+		await readSetup(racing, { today: TODAY, flagged: [] });
 		expect((await readFirstTally(env.DB))?.strokes.bank).toBeUndefined();
 	});
 
@@ -438,7 +534,7 @@ describe("readSetup", () => {
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		expect(
-			(await readSetup(env.DB, { today: TODAY, cap: 500, flagged: [] }))?.phase,
+			(await readSetup(env.DB, { today: TODAY, flagged: [] }))?.phase,
 		).toBe("before");
 	});
 });
@@ -561,7 +657,7 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("is not drawn on the budgets stroke's own day, even with the night kept", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: budgetsDay, cap: 500, flagged: [] });
+		await readSetup(env.DB, { today: budgetsDay, flagged: [] });
 		expect(await countOf()).toBeUndefined();
 	});
 
@@ -569,7 +665,6 @@ describe("the fifth day (P125 E, #586)", () => {
 		await seedHousehold({ ...fourDrawn, night });
 		const view = await readSetup(env.DB, {
 			today: later,
-			cap: 500,
 			flagged: [],
 		});
 		expect(await countOf()).toBe(later);
@@ -583,10 +678,9 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("keeps the first day it was drawn, so loading Home again the same day changes nothing", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		await readSetup(env.DB, { today: later, flagged: [] });
 		const again = await readSetup(env.DB, {
 			today: later,
-			cap: 500,
 			flagged: [],
 		});
 		expect(await countOf()).toBe(later);
@@ -595,16 +689,16 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("is Home again from the next household day: no set-up view, and the record stays", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		await readSetup(env.DB, { today: later, flagged: [] });
 		expect(
-			await readSetup(env.DB, { today: "2026-10-15", cap: 500, flagged: [] }),
+			await readSetup(env.DB, { today: "2026-10-15", flagged: [] }),
 		).toBeNull();
 		expect(await countOf()).toBe(later);
 	});
 
 	it("is not drawn while no night has been kept", async () => {
 		await seedHousehold(fourDrawn);
-		await readSetup(env.DB, { today: later, cap: 500, flagged: [] });
+		await readSetup(env.DB, { today: later, flagged: [] });
 		expect(await countOf()).toBeUndefined();
 	});
 
@@ -619,9 +713,7 @@ describe("the fifth day (P125 E, #586)", () => {
 			},
 			budgets: {},
 		});
-		expect(
-			await readSetup(env.DB, { today: later, cap: 500, flagged: [] }),
-		).toBeNull();
+		expect(await readSetup(env.DB, { today: later, flagged: [] })).toBeNull();
 	});
 
 	it("is shown by setupView only on the day stroke five is drawn", () => {
@@ -651,11 +743,13 @@ describe("the answered wait (P125 E, #671)", () => {
 	};
 	const reading = {
 		name: "Chase",
+		linkedAt: "2026-10-13 09:00:00",
 		lastSyncedAt: null,
 		historyCompleteAt: null,
 	};
 	const wells = {
 		name: "Wells Fargo",
+		linkedAt: "2026-10-13 09:00:00",
 		lastSyncedAt: "2026-10-13",
 		historyCompleteAt: "2026-10-13",
 	};
@@ -743,7 +837,12 @@ describe("the re-ask note (P125 E, #578)", () => {
 			record,
 			banks: [
 				BANK,
-				{ name: "Wells Fargo", lastSyncedAt: null, historyCompleteAt: null },
+				{
+					name: "Wells Fargo",
+					linkedAt: "2026-10-13 09:00:00",
+					lastSyncedAt: null,
+					historyCompleteAt: null,
+				},
 			],
 		});
 		expect(v?.steps[0]?.note).toBe("2 banks, linked");

@@ -28,14 +28,22 @@ export function YourBanks({
 	banks,
 	today,
 	polls = true,
+	keepPolling = false,
+	step,
 }: {
 	banks: YourBank[];
 	today: string;
 	/** False for a picture on the proposals page, which fires nothing by itself (#448): the rows draw, the list doesn't poll. */
 	polls?: boolean;
+	/** Poll while Tally sorts too, not only while a bank is read (decision 146). */
+	keepPolling?: boolean;
+	/** The step Home shows (sorting, slow, reading), sent with the poll so a change is announced once. */
+	step?: string;
 }) {
 	const states = banks.map((bank) => ({ bank, state: bankState(bank, today) }));
-	const polling = polls && states.some(({ state }) => state === "being-read");
+	const polling =
+		polls &&
+		(keepPolling || states.some(({ state }) => state === "being-read"));
 	const inIds = states
 		.filter(({ state }) => state === "in")
 		.map(({ bank }) => bank.id);
@@ -46,7 +54,7 @@ export function YourBanks({
 			aria-labelledby="your-banks-label"
 			{...(polling
 				? {
-						"hx-get": `/home/banks?in=${inIds.join(",")}`,
+						"hx-get": `/home/banks?in=${inIds.join(",")}${step ? `&step=${step}` : ""}`,
 						"hx-trigger": "every 5s",
 						"hx-swap": "outerHTML",
 						"hx-status:4xx": "swap:none",

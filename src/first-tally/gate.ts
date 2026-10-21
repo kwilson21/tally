@@ -40,7 +40,11 @@ export function questionsOpen(facts: QuestionsFacts): boolean {
 }
 
 /** A connected bank as the gate and Home's setup read it: its name, and the two sync marks the gate needs. */
-export type GateBank = QuestionsFacts["banks"][number] & { name: string };
+export type GateBank = QuestionsFacts["banks"][number] & {
+	name: string;
+	/** When the bank was linked (plaid_items.created_at, UTC `YYYY-MM-DD HH:MM:SS`). */
+	linkedAt: string | null;
+};
 
 /**
  * True while a bank is connected, as SQL for a write's guard (markStroke): the same predicate readGateInputs reads the banks
@@ -59,7 +63,7 @@ export async function readGateInputs(
 ): Promise<{ banks: GateBank[]; waiting: number }> {
 	const { results: banks } = await db
 		.prepare(
-			"SELECT institution_name AS name, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
+			"SELECT institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
 		)
 		.all<GateBank>();
 	const switches = await readAiSwitches(db);

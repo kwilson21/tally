@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 import { enabled } from "../src/routes/plaid";
@@ -95,17 +96,21 @@ describe("GET /home/banks: the list while a bank is read", () => {
 			.bind(first)
 			.run();
 		const { html } = await refresh(`?in=${first}`);
-		expect(html).toContain(`hx-get="/home/banks?in=${first}"`);
+		expect(html).toContain(`hx-get="/home/banks?in=${first}&amp;step=reading"`);
 		expect(html).toContain('hx-trigger="every 5s"');
 		expect(html).toContain('hx-status:4xx="swap:none"');
 		expect(html).toContain('hx-status:5xx="swap:none"');
 		expect(html).toContain("data-quiet");
 	});
 
-	it("stops polling once no bank is being read, with no trigger and no quiet flag", async () => {
+	it("stops polling once the sort has gone quiet for an hour, with no trigger and no quiet flag (decision 146)", async () => {
 		await readingBanks();
 		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-quiet', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
+		// Every history came in two hours ago: Tally is still sorting, but taking longer than usual, so the list stops.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now', '-2 hours')",
 		).run();
 		const { res, html } = await refresh();
 		expect(res.headers.get("HX-Refresh")).toBeNull();
@@ -228,6 +233,42 @@ describe("GET /home/banks: the list while a bank is read", () => {
 			.run();
 		const { res } = await refresh("?in=abc,-2,0,2.5,");
 		expect(trigger(res)?.announce).toContain(" is in: ");
+	});
+});
+
+describe("GET /home/banks: a step change is announced once (decision 146)", () => {
+	it("announces the sorting status once, when the poll that named reading finds the sort begun", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-step', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
+		await readingBanks();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		const ids = (await connectedIds()).join(",");
+		const first = await refresh(`?in=${ids}&step=reading`);
+		expect(trigger(first.res)?.announce).toContain(
+			"Sorting your last 90 days:",
+		);
+		// The page now shows sorting, so the next poll names it: the status ticks on silently.
+		const again = await refresh(`?in=${ids}&step=sorting`);
+		expect(trigger(again.res)).toBeNull();
+		expect(again.html).toContain("Sorting your last 90 days:");
+	});
+
+	it("announces the ready status and redraws the top once the questions open from a sort (reading to ready)", async () => {
+		await readingBanks();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		// Nothing left to sort: the questions open, and the top redraws with the ready status.
+		await saveAiSwitches(env.DB, { categories: false, income: false });
+		const ids = (await connectedIds()).join(",");
+		const { res } = await refresh(`?in=${ids}&step=sorting`);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
+		expect(trigger(res)?.announce).toContain(
+			"Now answer three quick questions to set up your budget.",
+		);
 	});
 });
 

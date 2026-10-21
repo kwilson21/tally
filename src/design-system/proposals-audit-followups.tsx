@@ -1087,11 +1087,13 @@ function banksView(): SetupView {
 	return {
 		phase: "reading",
 		drawn: 1,
-		steps: setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, false, 2),
+		steps: setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, 2),
 		bankName: "Chase",
 		bankCount: 2,
 		historyIn: false,
-		fitsOneNight: true,
+		sorting: false,
+		slow: false,
+		refreshes: false,
 		sorted: 0,
 		total: 498,
 		fifth: null,
@@ -1111,14 +1113,7 @@ function BanksToday() {
 			</p>
 			<p class="mt-2 text-muted">Nothing for you to do until then.</p>
 			<TallySteps
-				steps={setupSteps(
-					BANKS_RECORD,
-					"reading",
-					"Chase",
-					BANKS_TODAY,
-					false,
-					1,
-				)}
+				steps={setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, 1)}
 			/>
 		</section>
 	);
@@ -1200,6 +1195,7 @@ export function BanksProposal() {
 					<Phone label="A, two banks being read" demo={false} tab="home">
 						<HomeSetup
 							view={banksView()}
+							polls={false}
 							linkBank={
 								<Button type="button" class="w-full">
 									Link a bank

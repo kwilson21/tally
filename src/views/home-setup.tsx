@@ -16,8 +16,63 @@ import { TallySteps } from "./tally-steps";
 import { WhyLink } from "./why-link";
 import { YourBanks } from "./your-banks";
 
-const WORDS = ["None", "One", "Two", "Three", "Four", "Five"];
 const count = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * The ready status (decision 146): every transaction the banks sent is sorted, and the three questions are next. The count
+ * reads as a sentence: "Your 1 transaction", "Everything" when there are none.
+ */
+export function readyStatus(total: number): string {
+	const sorted =
+		total === 1
+			? "Your 1 transaction is sorted."
+			: total === 0
+				? "Everything is sorted."
+				: `All ${count(total)} transactions are sorted.`;
+	return `${sorted} Now answer three quick questions to set up your budget.`;
+}
+
+/**
+ * The step the reading phase shows (decision 146): sorting once every history is in and something waits, slow once the
+ * newest history is over an hour old, otherwise reading. The banks refresh's poll names it, so a change is announced once.
+ */
+export function setupStep(view: SetupView): "reading" | "sorting" | "slow" {
+	return view.slow ? "slow" : view.sorting ? "sorting" : "reading";
+}
+
+/**
+ * The line under the status in the reading phase (decision 146): what Tally does next, and whether this page updates as it
+ * goes and whether an email comes. A sort says its own line, and a slow sort says that Tally keeps trying on its own, with no
+ * time promised. "Nothing for you to do." is left out while a bank line with its Fix is drawn (bankLine).
+ */
+export function setupNextLine(view: SetupView, bankLine: boolean): string {
+	if (view.slow) {
+		const email = view.emailed
+			? "."
+			: " and will email you the moment your questions are ready.";
+		return `Tally keeps trying on its own${email}${bankLine ? "" : " Nothing for you to do."}`;
+	}
+	if (view.sorting) {
+		const stay =
+			view.refreshes && !view.emailed
+				? " Stay here, or Tally will email you."
+				: "";
+		return `Your three questions open the moment it's done, usually in a few minutes.${stay}`;
+	}
+	const sentences = [
+		"Next it sorts them, then you answer three quick questions and your budget is ready.",
+	];
+	const updates = view.refreshes;
+	const email = !view.emailed;
+	if (updates && email)
+		sentences.push(
+			"This page updates as it goes, and Tally will email you the moment they're ready.",
+		);
+	else if (updates) sentences.push("This page updates as it goes.");
+	else if (email)
+		sentences.push("Tally will email you the moment they're ready.");
+	return sentences.join(" ");
+}
 
 /** The status sentence (serif italic) for the reading, ready and answered states. */
 export function statusOf(view: SetupView, flagged: boolean): string {
@@ -31,10 +86,11 @@ export function statusOf(view: SetupView, flagged: boolean): string {
 			? "Four."
 			: "Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
 	}
-	if (view.phase === "ready") {
-		return `Tally sorted ${count(view.total)} overnight. Three things to check, and Safe to spend is written in at the end.`;
-	}
-	const drawn = view.drawn > 0 ? `${WORDS[view.drawn] ?? view.drawn}. ` : "";
+	if (view.phase === "ready") return readyStatus(view.total);
+	if (view.slow)
+		return `Sorting is taking longer than usual: ${count(view.sorted)} of ${count(view.total)}.`;
+	if (view.sorting)
+		return `Sorting your last 90 days: ${count(view.sorted)} of ${count(view.total)} done.`;
 	// The bank is named only with one connected; with more, the count says how many (P140 A).
 	const from =
 		view.bankCount === 1
@@ -42,15 +98,7 @@ export function statusOf(view: SetupView, flagged: boolean): string {
 			: view.bankCount > 1
 				? ` from ${count(view.bankCount)} banks`
 				: "";
-	const reading = `${drawn}Tally's reading your last 90 days${from}.`;
-	// Until every bank's 90-day history is in, no time is promised and no count is shown: the import isn't complete yet.
-	if (!view.historyIn) {
-		return `${reading} Your questions will be ready once it has read them all and sorted them.`;
-	}
-	if (!view.fitsOneNight) {
-		return `Tally's sorted ${count(view.sorted)} of ${count(view.total)}. Your questions will be ready when it's done, usually in a night or two.`;
-	}
-	return `${reading} Your questions will usually be ready by the morning.`;
+	return `Tally's reading your last 90 days${from}.`;
 }
 
 /**
@@ -131,8 +179,8 @@ function FifthDay({
 /**
  * The setup top. `linkBank` is Home's Link a bank (before a bank, and only when Plaid is on): the one button, with its
  * error region. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), said as
- * Home's top says it, with its Fix. Its words lead, so while one is drawn the reading's "Nothing for you to do until
- * then." is left out, since a bank that needs a fix is something to do. The status takes focus after Plaid redraws
+ * Home's top says it, with its Fix. Its words lead, so while one is drawn the slow line leaves out "Nothing for you to do.", since a bank that needs a fix
+ * is something to do. The status takes focus after Plaid redraws
  * Home (`data-link-bank-focus`, plaid-link.js). `fifthDay` is the money and the link the fifth-day view draws (Home's
  * Safe to spend, and where "See what needs you" goes); it is given only on the day stroke five is drawn. `focusStatus` is
  * given only by the refresh that redraws the top once the questions open (home.tsx): the status is autofocus there, so htmx
@@ -146,14 +194,23 @@ export function HomeSetup({
 	fifthDay,
 	yourBanks,
 	focusStatus = false,
+	polls = true,
 }: {
 	view: SetupView;
 	linkBank?: Child;
 	bankLine?: string[];
 	fifthDay?: { safeToSpendCents: number; needsHref?: string };
 	/** The connected banks' rows and today's date, drawn while the import is read (YourBanks). */
-	yourBanks?: { banks: YourBank[]; today: string; polls?: boolean };
+	yourBanks?: {
+		banks: YourBank[];
+		today: string;
+		polls?: boolean;
+		/** Poll while Tally sorts too, within the hour (decision 146). */
+		keepPolling?: boolean;
+	};
 	focusStatus?: boolean;
+	/** False draws no presence check-in: a drawing (the catalog, the proposals) fires nothing by itself (decision 146). */
+	polls?: boolean;
 }) {
 	if (view.fifth && fifthDay) {
 		return (
@@ -197,8 +254,20 @@ export function HomeSetup({
 					{statusOf(view, Boolean(bankLine))}
 				</p>
 			)}
-			{phase === "reading" && !view.emailed && (
-				<p class="mt-2 text-muted">Tally will email you when they're ready.</p>
+			{phase === "ready" && (
+				<div class="mt-4">
+					<Band
+						href="/first-page"
+						detail="Your pay, your bills and your budgets. About three minutes."
+					>
+						Set up your budget
+					</Band>
+				</div>
+			)}
+			{phase === "reading" && (
+				<p id="setup-next" class="mt-2 text-muted">
+					{setupNextLine(view, Boolean(bankLine))}
+				</p>
 			)}
 			{bankLine && <BankBehind words={bankLine} />}
 			{phase === "reading" && yourBanks && (
@@ -206,6 +275,8 @@ export function HomeSetup({
 					banks={yourBanks.banks}
 					today={yourBanks.today}
 					polls={yourBanks.polls}
+					keepPolling={yourBanks.keepPolling}
+					step={setupStep(view)}
 				/>
 			)}
 			{phase === "reading" && linkBank && (
@@ -227,17 +298,9 @@ export function HomeSetup({
 					</p>
 				</div>
 			)}
-			{phase === "ready" && (
-				<div class="mt-4">
-					<Band
-						href="/first-page"
-						detail="Your pay, your bills and your budgets. About three minutes."
-					>
-						Three things to check
-					</Band>
-				</div>
+			{polls && (phase === "reading" || phase === "ready") && (
+				<HomeSeenCheckIn />
 			)}
-			{(phase === "reading" || phase === "ready") && <HomeSeenCheckIn />}
 		</section>
 	);
 }
