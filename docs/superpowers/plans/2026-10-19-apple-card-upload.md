@@ -244,7 +244,7 @@ Line numbers below were read on main at `9a7c3dd`. A builder checks them first.
   - `src/views/file-field.tsx` (`FileField`, built on `FormField`)
   - `src/views/apple-card-group.tsx` (`AppleCardGroup`)
   - `src/views/apple-card-sheet.tsx` (`AppleCardSheet`)
-  - `src/views/apple-card-remove.tsx`
+  - (no separate Remove file: the Remove page is drawn in `src/routes/accounts.tsx`, beside Disconnect's page)
 - Modify:
   - `src/routes/accounts.tsx`
   - `src/db/accounts.ts`
@@ -378,12 +378,11 @@ Line numbers below were read on main at `9a7c3dd`. A builder checks them first.
 **Files:**
 - Create: `src/demo/apple-card-sample.ts`
 - Modify:
-  - `src/settings/export.ts:14-17`: `bank` is `'Apple Card'` for that account
   - `src/routes/how-it-works.tsx:300-307`
-- Test: `test/apple-card-sample.test.ts`, plus the existing export test
+- Test: `test/apple-card-sample.test.ts`
 
 **Interfaces:**
-- Produces: `const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018` and `function appleCardSample(today: string): string`. It's a made-up CSV in Apple's 8-column header, dated relative to `today` within the seed's history, with 12–16 rows:
+- Produces: `const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018` and `function appleCardSample(anchor: string): string`. It's a made-up CSV in Apple's 8-column header, dated back from `anchor` (the seeded bank's latest transaction date) within the seed's history, with 12–16 rows:
   - purchases at the Riveras' usual stores
   - one pair of twins
   - one Payment
@@ -395,12 +394,11 @@ Line numbers below were read on main at `9a7c3dd`. A builder checks them first.
 - [ ] **Step 1: Write the failing tests:**
   - `parseAppleCsv(appleCardSample("2026-09-22"))` is ok and holds every kind listed above.
   - After a demo POST, the nightly `resetDemo` leaves no Apple Card account (`src/demo/reset.ts:24-47`).
-  - The export's `bank` is `"Apple Card"` for that account.
   - How Tally works says "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending."
 - [ ] **Step 2:** Run. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run. Expected: PASS. Then run every gate, the e2e included.
-- [ ] **Step 5:** Commit: `feat: the demo's Apple Card sample, its export bank name, and How Tally works' line`.
+- [ ] **Step 5:** Commit: `feat: the demo's Apple Card sample, and How Tally works' line (#766)`.
 
 ## Confidence
 
@@ -442,4 +440,4 @@ Line numbers below were read on main at `9a7c3dd`. A builder checks them first.
 - Verified: `contents-list.tsx:36` uses `flaggedBanks` for sign-in only.
 
 **Task 6: 8.**
-- Verified: the demo reset clears accounts, transactions and balance history (`src/demo/reset.ts:24-47`), and the export's bank comes from a Plaid subquery (`src/settings/export.ts:14-17`).
+- Verified: the demo reset clears accounts, transactions and balance history (`src/demo/reset.ts:24-47`).
