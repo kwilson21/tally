@@ -356,7 +356,6 @@ export function setupView({
 			: questionsAnswered(record)
 				? "answered"
 				: questionsOpen({
-							today,
 							strokeOneDay: record?.strokes.bank ?? null,
 							banks,
 							waiting,
