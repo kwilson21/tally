@@ -1,8 +1,14 @@
 import { type Context, Hono } from "hono";
+import type { Child } from "hono/jsx";
 import { addressOf } from "../address";
+import { type AppleRow, parseAppleCsv } from "../apple-card/csv";
+import { historyStart, importAppleCard } from "../apple-card/import";
+import { importWords } from "../apple-card/plan";
 import { householdToday } from "../dates";
 import {
+	type AppleCardAccount,
 	accountsByBank,
+	appleCardAccount,
 	type Bank,
 	countedAccounts,
 	netWorthCents,
@@ -10,21 +16,31 @@ import {
 import { accountsWithHistory } from "../db/balance-history";
 import { forgetPayDeposits, takeBackBankStrokes } from "../db/first-tally";
 import { hxTrigger } from "../htmx";
+import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
+import { afterSync } from "../plaid/after-sync";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { sortAfterSync } from "../plaid/sort-after-sync";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
 import { AccountsTop } from "../views/accounts-top";
+import { AppleCardGroup, type AppleCardView } from "../views/apple-card-group";
+import { AppleCardSheet } from "../views/apple-card-sheet";
 import { BankGroup } from "../views/bank-group";
+import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Chip } from "../views/chip";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
-import { LinkBank, plaidScripts } from "../views/link-bank";
+import {
+	LinkBank,
+	LinkBankButton,
+	LinkBankError,
+	plaidScripts,
+} from "../views/link-bank";
 import { enabled } from "./plaid";
 
-type App = { Bindings: Env };
+type App = { Bindings: Env; Variables: { actor: string } };
 export const accounts = new Hono<App>();
 
 const SyncNow = () => (
@@ -42,15 +58,106 @@ const SyncNow = () => (
 	</form>
 );
 
-async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
+/** Apple Card's words (spec §8.10). The errors go under the field they are about; the size gate's go in a toast when htmx asks. */
+const NO_FILE = "Choose the CSV file Apple exported.";
+const TOO_BIG =
+	"This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file.";
+const COULDNT_TELL =
+	"Tally couldn't tell how big this file is. Try the upload again.";
+const BAD_BALANCE =
+	"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.";
+/** The request's most bytes, checked before its body is read: the file's cap and its form fields. */
+const REQUEST_CAP = 1_100_000;
+/** The file's most bytes, checked after it's read (a year of one card is far smaller). */
+const FILE_CAP = 1_000_000;
+
+/** Cancel and the backdrop: back to Accounts with focus on the Apple Card action, and a toast with htmx. */
+const CANCEL_ATTRS = {
+	"hx-get": "/accounts?focus=apple-card",
+	"hx-target": "#accounts-summary",
+	"hx-select": "#accounts-summary",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/accounts",
+};
+
+/** What a refused upload keeps in the sheet: the typed balance, and the words under each field. */
+type SheetForm = {
+	balance?: string;
+	fileError?: string;
+	balanceError?: string;
+	focus?: "file" | "balance";
+};
+
+/** The card as its group draws it. */
+function cardView(card: AppleCardAccount): AppleCardView {
+	return {
+		balanceCents: card.balanceCents,
+		balanceOn: card.balanceOn,
+		through: card.through,
+		removed: card.removedAt !== null,
+	};
+}
+
+/**
+ * The upload sheet, in its `#sheet`: opened (not still), or drawn again with its errors (still, so it doesn't play its
+ * arrival again). Its balance hint names the day of the balance that counts now.
+ */
+async function uploadSheet(
+	env: Env,
+	today: string,
+	form: SheetForm = {},
+	still = false,
+) {
+	const card = await appleCardAccount(env.DB);
+	return (
+		<div id="sheet">
+			<BottomSheet
+				labelledBy="apple-card-sheet-title"
+				closeHref="/accounts?focus=apple-card"
+				closeAttrs={CANCEL_ATTRS}
+				still={still}
+			>
+				<AppleCardSheet
+					demo={env.DEMO === "true"}
+					balance={form.balance}
+					balanceOn={card?.balanceOn ?? null}
+					today={today}
+					fileError={form.fileError}
+					balanceError={form.balanceError}
+					focus={form.focus}
+					closeHref="/accounts?focus=apple-card"
+					closeAttrs={CANCEL_ATTRS}
+				/>
+			</BottomSheet>
+		</div>
+	);
+}
+
+async function AccountsSummary({
+	env,
+	alert,
+	sheet,
+	focus,
+}: {
+	env: Env;
+	alert?: string;
+	/** The upload sheet's `#sheet`, open or closed (`uploadSheet`). */
+	sheet?: Child;
+	/** Focus goes to the Apple Card action: Upload a file, or Add Apple Card while there's no card. */
+	focus?: "apple-card";
+}) {
 	const today = await householdToday(env.DB);
-	// One read for the headline's accounts and the line's balances, so they agree.
+	// One read for the headline's accounts, the line's balances and the Apple Card, so they agree.
 	const { banks, points, waiting, appleCard } = await accountsWithHistory(
 		env.DB,
 		today,
 	);
 	const history = netWorthView(points, today, waiting);
 	const plaidEnabled = enabled(env);
+	const demo = env.DEMO === "true";
+	const cardKept = appleCard !== null && appleCard.removedAt === null;
+	// Add Apple Card waits for the card to be off (none, or removed), and for Tally's history to have a start.
+	const addCard = !cardKept && (await historyStart(env.DB, today)) !== null;
 	return (
 		<div id="accounts-summary">
 			{alert && (
@@ -58,7 +165,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 					{alert}
 				</p>
 			)}
-			{banks.length === 0 ? (
+			{banks.length === 0 && !cardKept ? (
 				<>
 					<h1 class="font-serif text-5xl font-semibold tracking-tight">
 						Accounts
@@ -78,7 +185,7 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 					<AccountsTop
 						netWorthCents={netWorthCents(countedAccounts(banks, appleCard))}
 						history={history}
-						action={plaidEnabled && <SyncNow />}
+						action={plaidEnabled && banks.length > 0 && <SyncNow />}
 					/>
 					<div id="accounts-banks">
 						{banks.map((b) => (
@@ -102,17 +209,46 @@ async function AccountsSummary({ env, alert }: { env: Env; alert?: string }) {
 							/>
 						))}
 					</div>
-					{plaidEnabled && <LinkBank class="mt-8" />}
+					{appleCard && (
+						<AppleCardGroup
+							card={cardView(appleCard)}
+							today={today}
+							demo={demo}
+							focusUpload={focus === "apple-card" && cardKept}
+						/>
+					)}
+					{(plaidEnabled || addCard) && (
+						<div class="mt-8 flex flex-wrap items-center gap-3">
+							{plaidEnabled && <LinkBankButton />}
+							{addCard && (
+								<Button
+									kind="secondary"
+									href="/accounts/apple-card"
+									autofocus={focus === "apple-card" && !cardKept}
+									{...sheetAttrs("/accounts/apple-card")}
+								>
+									Add Apple Card
+								</Button>
+							)}
+						</div>
+					)}
+					{plaidEnabled && <LinkBankError />}
 				</>
 			)}
+			<div id="sheet">{sheet}</div>
 		</div>
 	);
 }
 
 // More → Accounts (spec §8): net worth, each linked bank, then the Plaid Link action when configured.
 // Before any bank is linked there's nothing to add up, so no $0: the add empty state instead (decision 55).
-/** The whole Accounts page; `alert` is a failed no-JavaScript Sync now. */
-function accountsPage(c: Context<App>, alert?: string) {
+/** The whole Accounts page; `alert` is a failed no-JavaScript Sync now, and `extra` the sheet and focus. */
+function accountsPage(
+	c: Context<App>,
+	alert?: string,
+	extra: { sheet?: Child; focus?: "apple-card" } = {},
+	status = 200,
+) {
 	const plaidEnabled = enabled(c.env);
 	return c.html(
 		<Layout
@@ -122,12 +258,191 @@ function accountsPage(c: Context<App>, alert?: string) {
 			demo={c.env.DEMO === "true"}
 			{...plaidScripts(plaidEnabled)}
 		>
-			<AccountsSummary env={c.env} alert={alert} />
+			<AccountsSummary
+				env={c.env}
+				alert={alert}
+				sheet={extra.sheet}
+				focus={extra.focus}
+			/>
 		</Layout>,
+		status as 200,
 	);
 }
 
-accounts.get("/accounts", (c) => accountsPage(c));
+accounts.get("/accounts", (c) => {
+	const focus =
+		c.req.query("focus") === "apple-card" ? "apple-card" : undefined;
+	// Cancel from the upload sheet: say so, and put focus back on the action the sheet opened from.
+	if (focus && c.req.header("HX-Request")) {
+		const message = "Apple Card upload cancelled.";
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
+		);
+	}
+	return accountsPage(c, undefined, { focus });
+});
+
+/** The upload sheet: Upload a file and Add Apple Card open it in #sheet; without JavaScript it is the whole page. */
+accounts.get("/accounts/apple-card", async (c) => {
+	const sheet = await uploadSheet(c.env, await householdToday(c.env.DB));
+	if (!c.req.header("HX-Request")) return accountsPage(c, undefined, { sheet });
+	return c.html(sheet);
+});
+
+/** The body's fields, or none when it can't be read as a form (the upload then says there's no file). */
+async function readForm(c: Context<App>) {
+	try {
+		return await c.req.parseBody();
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * A balance as integer cents: blank is no balance, a leading minus is a credit, and anything else (or a value that isn't
+ * a safe whole number of cents) is null. toCents names the text it refused, so the text is dropped, never rethrown.
+ */
+function parseBalance(text: string): { cents: number | null } | null {
+	const trimmed = text.trim();
+	if (trimmed === "") return { cents: null };
+	try {
+		const cents = toCents(trimmed);
+		return Number.isSafeInteger(cents)
+			? { cents: cents === 0 ? 0 : cents }
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/** A refused size gate: htmx keeps the page with one error toast, and a plain browser gets the page with the sheet open. */
+async function sizeRefused(
+	c: Context<App>,
+	today: string,
+	words: string,
+	isHtmx: boolean,
+) {
+	if (isHtmx) {
+		c.header("HX-Reswap", "none");
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message: words, type: "error" }, announce: words }),
+		);
+		return c.body(null, 422);
+	}
+	const sheet = await uploadSheet(
+		c.env,
+		today,
+		{ fileError: words, focus: "file" },
+		true,
+	);
+	return accountsPage(c, undefined, { sheet }, 422);
+}
+
+/** A refused upload, after its body was read: the sheet again, with its errors and the typed balance; nothing saved. */
+async function uploadRefused(
+	c: Context<App>,
+	today: string,
+	form: SheetForm,
+	isHtmx: boolean,
+) {
+	const sheet = await uploadSheet(c.env, today, form, true);
+	if (isHtmx) return c.html(<AccountsSummary env={c.env} sheet={sheet} />, 422);
+	return accountsPage(c, undefined, { sheet }, 422);
+}
+
+/** A saved upload: Accounts again with a toast and focus on the Apple Card action; a plain browser is redirected. */
+function uploadDone(c: Context<App>, message: string, isHtmx: boolean) {
+	if (!isHtmx) return c.redirect("/accounts", 303);
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
+	);
+	c.header("HX-Push-Url", "/accounts");
+	return c.html(<AccountsSummary env={c.env} focus="apple-card" />);
+}
+
+/**
+ * Apple Card's upload (spec §8.10, decision 138). The request's size is checked before anything is read; then the file
+ * and the balance are checked, and a refusal shows both errors; then the rows are stored in one batch, and the rows
+ * added go through the same steps a sync's do. Nothing is saved on a refusal, and no file, row, amount or balance is logged.
+ */
+accounts.post("/accounts/apple-card", async (c) => {
+	const isHtmx = c.req.header("HX-Request") === "true";
+	const today = await householdToday(c.env.DB);
+	// The request's length, before its body is read: a length that isn't digits, or one over the cap, is refused.
+	const declared = c.req.header("content-length") ?? "";
+	if (!/^\d+$/.test(declared))
+		return sizeRefused(c, today, COULDNT_TELL, isHtmx);
+	if (Number(declared) > REQUEST_CAP)
+		return sizeRefused(c, today, TOO_BIG, isHtmx);
+
+	const form = await readForm(c);
+	const file = form.file;
+	const balanceText = typeof form.balance === "string" ? form.balance : "";
+	let fileError: string | undefined;
+	let rows: AppleRow[] | null = null;
+	if (!(file instanceof File) || file.name === "") fileError = NO_FILE;
+	else if (file.size > FILE_CAP) fileError = TOO_BIG;
+	else {
+		const read = parseAppleCsv(
+			new TextDecoder("utf-8").decode(await file.arrayBuffer()),
+		);
+		if (read.ok) rows = read.rows;
+		else fileError = read.error;
+	}
+	const balance = parseBalance(balanceText);
+	const balanceError = balance === null ? BAD_BALANCE : undefined;
+	if (
+		fileError !== undefined ||
+		balanceError !== undefined ||
+		rows === null ||
+		balance === null
+	)
+		return uploadRefused(
+			c,
+			today,
+			{
+				balance: balanceText,
+				fileError,
+				balanceError,
+				focus: fileError !== undefined ? "file" : "balance",
+			},
+			isHtmx,
+		);
+
+	const result = await importAppleCard(c.env.DB, rows, {
+		by: c.get("actor"),
+		today,
+		balanceCents: balance.cents,
+	});
+	if (!result.ok)
+		return uploadRefused(
+			c,
+			today,
+			{ balance: balanceText, fileError: result.error, focus: "file" },
+			isHtmx,
+		);
+
+	// The same steps a sync's rows get: merchant rules and bill matching now, then the sorting in the background.
+	let rulesFailed = false;
+	try {
+		await afterSync(c.env.DB);
+	} catch {
+		rulesFailed = true;
+		console.error("apple card rules failed");
+	}
+	if (result.addedIds.length > 0)
+		c.executionCtx.waitUntil(
+			sortAfterSync(
+				c.env,
+				{ changedIds: result.addedIds },
+				{ rulesApplied: !rulesFailed },
+			),
+		);
+	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
+});
 
 /** What a manual sync did, in words, or an alert when a bank failed. */
 function syncOutcome(

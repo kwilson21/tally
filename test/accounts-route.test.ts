@@ -791,10 +791,11 @@ describe("Link a bank", () => {
 		expect(banks).toBeGreaterThan(heading);
 		expect(button).toBeGreaterThan(banks);
 		expect(errorRegion).toBeGreaterThan(button);
-		// Both sit inside the summary, so a refresh redraws them where they belong.
+		// Both sit inside the summary, so a refresh redraws them where they belong. The upload sheet's #sheet comes
+		// last (#766), after the error region that sits under the buttons.
 		const summaryEnd = html.indexOf("</main>");
 		expect(html.slice(summaryStart, summaryEnd)).toMatch(
-			/data-link-bank-error[^>]*><\/div><\/div>\s*$/,
+			/data-link-bank-error[^>]*><\/div><div id="sheet"><\/div><\/div>\s*$/,
 		);
 	});
 

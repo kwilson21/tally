@@ -201,7 +201,9 @@ export function MoneyInput({
 						<Check />
 						<span data-roundup-label class="tabular-nums">
 							Round to{" "}
-							{hasCents ? formatCents(roundedCents, { wholeDollars: true }) : ""}
+							{hasCents
+								? formatCents(roundedCents, { wholeDollars: true })
+								: ""}
 						</span>
 					</button>
 				)}

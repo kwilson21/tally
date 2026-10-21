@@ -6,6 +6,31 @@ import { Button } from "./button";
  * say what Plaid Link's success redraws, the page's URL and the element it swaps in (Accounts uses its defaults; Home
  * redraws its own #page, decision 114).
  */
+/** The Link a bank button: it opens Plaid Link (public/js/plaid-link.js). */
+export const LinkBankButton = ({
+	class: layout,
+	refresh,
+	target,
+}: {
+	class?: string;
+	refresh?: string;
+	target?: string;
+}) => (
+	<Button
+		type="button"
+		class={layout}
+		busyLabel="Linking…"
+		data-link-bank
+		data-link-bank-refresh={refresh}
+		data-link-bank-target={target}
+	>
+		Link a bank
+	</Button>
+);
+
+/** Where Plaid Link's errors go: under every button that opens it, Accounts' pair included. */
+export const LinkBankError = () => <div data-link-bank-error class="mt-3" />;
+
 export const LinkBank = ({
 	class: layout,
 	refresh,
@@ -16,17 +41,8 @@ export const LinkBank = ({
 	target?: string;
 }) => (
 	<>
-		<Button
-			type="button"
-			class={layout}
-			busyLabel="Linking…"
-			data-link-bank
-			data-link-bank-refresh={refresh}
-			data-link-bank-target={target}
-		>
-			Link a bank
-		</Button>
-		<div data-link-bank-error class="mt-3" />
+		<LinkBankButton class={layout} refresh={refresh} target={target} />
+		<LinkBankError />
 	</>
 );
 

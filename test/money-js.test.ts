@@ -218,7 +218,9 @@ function control(dataset: Record<string, string> = {}): Control {
 
 /** A money box with its field, the four steps, Round to (offering `offer` cents) and one Last month chip. */
 function widget(text: string, offer = "", credit = false) {
-	const input = control(credit ? { moneyInput: "", allowCredit: "" } : { moneyInput: "" });
+	const input = control(
+		credit ? { moneyInput: "", allowCredit: "" } : { moneyInput: "" },
+	);
 	input.value = text;
 	const minus = control({ nudge: "-100" });
 	const plus = control({ nudge: "100" });
@@ -702,9 +704,7 @@ describe("credit balances (allowCredit: a leading minus, and no floor at $0)", (
 			const { root, input } = widget("12.00", "", true);
 			set(root, "-12.34");
 			expect(input.value).toBe("-12.34");
-			expect(browser.region.textContent).toBe(
-				formatCents(-1234),
-			);
+			expect(browser.region.textContent).toBe(formatCents(-1234));
 		} finally {
 			vi.unstubAllGlobals();
 			browser.region.textContent = "";
