@@ -58,7 +58,7 @@ describe("planImport", () => {
 		]);
 	});
 
-	it("counts skipped rows out of the twin numbering", () => {
+	it("counts a row not cleared and a row before history apart from the rows it adds", () => {
 		const plan = planImport(
 			[
 				row({ clearingDate: null }),
@@ -67,7 +67,11 @@ describe("planImport", () => {
 			],
 			"2026-07-21",
 		);
-		expect(plan.add[0]?.twin).toBe(1);
+		expect(plan.notCleared).toBe(1);
+		expect(plan.beforeHistory).toBe(1);
+		expect(
+			plan.add.map((item) => ({ line: item.row.line, twin: item.twin })),
+		).toEqual([{ line: 4, twin: 1 }]);
 	});
 
 	it("marks a Payment as left out, and nothing else", () => {
