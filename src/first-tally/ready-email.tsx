@@ -3,10 +3,11 @@
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
 // still on Home's setup (while it refreshes) or the questions page sees the questions there instead. An address is claimed in
 // the record's readyEmailedTo before its email goes, and released unless the email is delivered. A try Resend may already
-// have accepted (no answer, or any answer but a success, deliver.ts) is kept: its read line and the UTC time of that first
-// try are stored, and every later try sends those same words through Resend only, under the same key, until Resend answers,
-// for up to HELD_DROP_AFTER_MS. After that the address stays reached and nothing more is sent (decision 146). It is drawn
-// like the bank sign-in email (src/reconnect/email.tsx).
+// have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried (subject, HTML and
+// text) and the UTC time of that first try are stored, and every later try sends that same stored email through Resend
+// only, under the same key, until Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a
+// deploy that changes the words cannot change the key. After that the address stays reached and nothing more is sent
+// (decision 146). It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
 	QUESTION_STROKES,
@@ -57,8 +58,8 @@ export const CLAIM_SQL = `UPDATE household_settings
 			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${EMAIL_AWAY_AFTER_MS / 1000} seconds')))`;
 
 // Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
-// address's hash and ?3 the kept try as JSON ({"line", "at"}, decision 146), or NULL when none is kept: a definite failure keeps
-// no try, so it removes any kept before (json_patch takes a null away), and the next try uses fresh words.
+// address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
+// keeps no try, so it removes any kept before (json_patch takes a null away), and the next try uses fresh words.
 const RELEASE_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value,
 		'$.readyEmailedTo', json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)),
@@ -75,10 +76,10 @@ const DROP_HELD_SQL = `UPDATE household_settings
 const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM household_settings WHERE key = 'first_tally'`;
 
 /**
- * A try Resend may hold, kept for its address (decision 146): the read line it sent, and the UTC time of the first such try
+ * A try Resend may hold, kept for its address (decision 146): the whole email it tried, and the UTC time of the first such try
  * as `YYYY-MM-DDTHH:MM:SSZ`, which later held tries never change.
  */
-type KeptTry = { line: string; at: string };
+type KeptTry = { mail: Mail; at: string };
 
 /**
  * A kept try older than this is not tried again: Resend keeps an Idempotency-Key for 24 hours (its docs, dashboard/emails/
@@ -121,8 +122,8 @@ async function sha256Hex(text: string): Promise<string> {
 const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
 
 /**
- * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its line, so that try is the same
- * email under the same key (decision 146). An entry that isn't a line and a time is no kept try.
+ * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is
+ * the same email under the same key (decision 146). An entry that isn't a stored email and a time is no kept try.
  */
 async function keptTryOf(
 	db: D1Database,
@@ -134,9 +135,14 @@ async function keptTryOf(
 		await addressHashOf(address)
 	];
 	if (typeof entry !== "object" || entry === null) return null;
-	const { line, at } = entry as Record<string, unknown>;
-	return typeof line === "string" && typeof at === "string"
-		? { line, at }
+	const { mail, at } = entry as Record<string, unknown>;
+	if (typeof at !== "string" || typeof mail !== "object" || mail === null)
+		return null;
+	const { subject, html, text } = mail as Record<string, unknown>;
+	return typeof subject === "string" &&
+		typeof html === "string" &&
+		typeof text === "string"
+		? { mail: { subject, html, text }, at }
 		: null;
 }
 
@@ -227,9 +233,9 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
  * the gate is read again and the email is built from that read, so its words are true when it goes. A closed gate (a question
  * answered, a bank linked with its history still loading, the last bank removed, a sort waiting) ends the run there, and
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
- * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its line and the time of that first try (KeptTry). The next try
- * sends that line again under the same key, through Resend only, until Resend answers (decision 146). A kept try a day old
- * is dropped, and the address stays reached. The log line is written only when an address was claimed, so a quiet minute
+ * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
+ * next try sends that stored email again under the same key, through Resend only, until Resend answers (decision 146). A
+ * kept try a day old is dropped, and the address stays reached. The log line is written only when an address was claimed, so a quiet minute
  * logs nothing.
  */
 export async function runReadyEmail(
@@ -259,8 +265,8 @@ export async function runReadyEmail(
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
 		const hash = await addressHashOf(recipient);
-		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its line is sent again, through
-		// Resend only; otherwise this read's words go out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
+		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its stored email is sent again, through
+		// Resend only; otherwise this read's email goes out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
 		const kept = await keptTryOf(env.DB, recipient);
 		if (kept && keptTooOld(kept, Date.now())) {
 			// Resend keeps the key for a day, so a later try could be a new send: nothing more is sent. The address stays reached.
@@ -269,9 +275,9 @@ export async function runReadyEmail(
 			failureKinds.add(HELD_OVER_A_DAY);
 			continue;
 		}
-		const words = kept?.line ?? read;
-		// One Mail for this address: its words give the key and are the body Resend is sent.
-		const mail = renderReadyEmail(words);
+		// One Mail for this address: its words give the key and are the body Resend is sent. A kept try's stored Mail is that
+		// email, so its key never changes with the code.
+		const mail = kept ? kept.mail : renderReadyEmail(read);
 		const outcome = await deliver(
 			env,
 			recipient,
@@ -289,10 +295,10 @@ export async function runReadyEmail(
 		}
 		failedCount += 1;
 		for (const kind of outcome.kinds) failureKinds.add(kind);
-		// A try Resend may hold keeps its line and the time of its first such try, which a later held try never moves. Any other
-		// failure keeps nothing.
+		// A try Resend may hold keeps its whole email and the time of its first such try, which a later held try never moves. Any
+		// other failure keeps nothing.
 		const keep = outcome.held
-			? JSON.stringify({ line: words, at: kept?.at ?? isoSecond(Date.now()) })
+			? JSON.stringify({ mail, at: kept?.at ?? isoSecond(Date.now()) })
 			: null;
 		await env.DB.prepare(RELEASE_SQL).bind(recipient, hash, keep).run();
 	}

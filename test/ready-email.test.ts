@@ -875,12 +875,12 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			.join("");
 	}
 
-	/** The entries kept for held tries, by the address's hash: each its read line and the time of its first held try; {} when none is kept. */
-	const heldLinesOf = async () =>
+	/** The entries kept for held tries, by the address's hash: each its whole email and the time of its first held try; {} when none is kept. */
+	const heldOf = async () =>
 		(
 			(await readFirstTally(env.DB)) as
 				| (Record<string, unknown> & {
-						heldReadyEmail?: Record<string, { line: string; at: string }>;
+						heldReadyEmail?: Record<string, { mail: Mail; at: string }>;
 				  })
 				| null
 		)?.heldReadyEmail ?? {};
@@ -925,10 +925,10 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 	it("keeps the words under the address's hash, never the address itself", async () => {
 		await openHousehold({ members: [DANA] });
 		await runReadyEmail(production(), timesOut());
-		const held = await heldLinesOf();
+		const held = await heldOf();
 		expect(Object.keys(held)).toEqual([await addressHashOf(DANA)]);
-		expect(Object.values(held).map((entry) => entry.line)).toEqual([
-			"Tally has read your last 90 days from Chase.",
+		expect(Object.values(held).map((entry) => entry.mail)).toEqual([
+			renderReadyEmail("Tally has read your last 90 days from Chase."),
 		]);
 		expect(Object.values(held)[0]?.at).toMatch(
 			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
@@ -941,7 +941,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 		const refused = resendFake(500);
 		await runReadyEmail(production(), refused.fetchImpl);
 		expect(await storedList()).toEqual([]);
-		expect(await heldLinesOf()).toEqual({});
+		expect(await heldOf()).toEqual({});
 		await addTransactions(accountId, 1);
 		const next = resendFake();
 		await runReadyEmail(production(), next.fetchImpl);
@@ -958,8 +958,8 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 		const EMAIL_SENDER = () =>
 			vi.fn(async (_message: Record<string, unknown>) => ({}));
 
-		/** A household whose DANA has a kept try: its line, and the time of its first held try `ageMs` ago. Returns that time. */
-		async function openKept(line: string, ageMs: number, at?: string) {
+		/** A household whose DANA has a kept try: its whole email, and the time of its first held try `ageMs` ago. Returns that time. */
+		async function openKept(mail: Mail, ageMs: number, at?: string) {
 			const firstHeld = at ?? new Date(Date.now() - ageMs).toISOString();
 			await openHousehold({
 				members: [DANA],
@@ -967,7 +967,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 					strokes: { bank: STROKE_ONE },
 					budgets: {},
 					heldReadyEmail: {
-						[await addressHashOf(DANA)]: { line, at: firstHeld },
+						[await addressHashOf(DANA)]: { mail, at: firstHeld },
 					},
 				},
 			});
@@ -982,12 +982,12 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 				const send = EMAIL_SENDER();
 				const first = timesOut();
 				await runReadyEmail(production({ EMAIL: { send } }), first);
-				const kept = (await heldLinesOf())[await addressHashOf(DANA)];
+				const kept = (await heldOf())[await addressHashOf(DANA)];
 				const again = resendFake(status);
 				await runReadyEmail(production({ EMAIL: { send } }), again.fetchImpl);
 				expect(send).not.toHaveBeenCalled();
 				expect(again.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
-				expect((await heldLinesOf())[await addressHashOf(DANA)]).toEqual(kept);
+				expect((await heldOf())[await addressHashOf(DANA)]).toEqual(kept);
 				// A held try releases the address, as a timeout always has; the kept entry is what carries on.
 				expect(await storedList()).toEqual([]);
 				expect(log).toHaveBeenLastCalledWith(
@@ -996,16 +996,40 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			},
 		);
 
-		it("a later held try keeps the first line and time, since it is the same email", async () => {
-			const at = await openKept(HELD_LINE, 5 * HOUR_MS);
+		it("a later held try keeps the first email and time, since it is the same email", async () => {
+			const at = await openKept(renderReadyEmail(HELD_LINE), 5 * HOUR_MS);
 			await runReadyEmail(production(), timesOut());
-			expect(await heldLinesOf()).toEqual({
-				[await addressHashOf(DANA)]: { line: HELD_LINE, at },
+			expect(await heldOf()).toEqual({
+				[await addressHashOf(DANA)]: {
+					mail: renderReadyEmail(HELD_LINE),
+					at,
+				},
 			});
 		});
 
+		it("sends the email the first try stored, under the key that email gives, not an email built from the words now", async () => {
+			// Words the email as it is built now never gives: a kept try sends what its first try sent, whatever the code builds (decision 146).
+			const stored: Mail = {
+				subject: "Words as first tried",
+				html: "<p>Words as first tried</p>",
+				text: "Words as first tried",
+			};
+			await openKept(stored, HOUR_MS);
+			const next = resendFake();
+			await runReadyEmail(production(), next.fetchImpl);
+			expect(next.sent).toEqual([
+				{
+					to: DANA,
+					subject: stored.subject,
+					html: stored.html,
+					text: stored.text,
+				},
+			]);
+			expect(next.keys).toEqual([await readyEmailKey(DANA, stored)]);
+		});
+
 		it("an entry 22 hours old is still retried: it sends the kept line, not the read now, under the key those words give, and drops the entry once delivered", async () => {
-			await openKept(HELD_LINE, 22 * HOUR_MS);
+			await openKept(renderReadyEmail(HELD_LINE), 22 * HOUR_MS);
 			const send = EMAIL_SENDER();
 			const next = resendFake();
 			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
@@ -1017,11 +1041,11 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			]);
 			expect(send).not.toHaveBeenCalled();
 			expect(await storedList()).toEqual([DANA]);
-			expect(await heldLinesOf()).toEqual({});
+			expect(await heldOf()).toEqual({});
 		});
 
 		it("an entry 23 hours and 1 minute old is not sent: the address stays reached, the entry is dropped, and the run logs 'held over a day'", async () => {
-			await openKept(HELD_LINE, 23 * HOUR_MS + 60_000);
+			await openKept(renderReadyEmail(HELD_LINE), 23 * HOUR_MS + 60_000);
 			const log = vi.spyOn(console, "error").mockImplementation(() => {});
 			const send = EMAIL_SENDER();
 			const next = resendFake();
@@ -1029,7 +1053,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			expect(next.fetchImpl).not.toHaveBeenCalled();
 			expect(send).not.toHaveBeenCalled();
 			expect(await storedList()).toEqual([DANA]);
-			expect(await heldLinesOf()).toEqual({});
+			expect(await heldOf()).toEqual({});
 			expect(log).toHaveBeenCalledWith(
 				"ready email: 0 sent, 1 failed (held over a day)",
 			);
@@ -1041,12 +1065,12 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 		});
 
 		it("an entry whose time cannot be read is dropped, not sent", async () => {
-			await openKept(HELD_LINE, 0, "last Tuesday");
+			await openKept(renderReadyEmail(HELD_LINE), 0, "last Tuesday");
 			const log = vi.spyOn(console, "error").mockImplementation(() => {});
 			const next = resendFake();
 			await runReadyEmail(production(), next.fetchImpl);
 			expect(next.fetchImpl).not.toHaveBeenCalled();
-			expect(await heldLinesOf()).toEqual({});
+			expect(await heldOf()).toEqual({});
 			expect(log).toHaveBeenCalledWith(
 				"ready email: 0 sent, 1 failed (held over a day)",
 			);
@@ -1061,7 +1085,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			);
 			expect(send).toHaveBeenCalledOnce();
 			expect(await storedList()).toEqual([DANA]);
-			expect(await heldLinesOf()).toEqual({});
+			expect(await heldOf()).toEqual({});
 		});
 	});
 
