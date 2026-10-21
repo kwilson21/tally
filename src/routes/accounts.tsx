@@ -14,7 +14,12 @@ import {
 	netWorthCents,
 } from "../db/accounts";
 import { accountsWithHistory } from "../db/balance-history";
-import { forgetPayDeposits, takeBackBankStrokes } from "../db/first-tally";
+import {
+	APPLE_CARD_KEPT,
+	forgetCardPayDeposits,
+	forgetPayDeposits,
+	takeBackBankStrokes,
+} from "../db/first-tally";
 import { hxTrigger } from "../htmx";
 import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
@@ -698,5 +703,148 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 		deleteHistory
 			? `Disconnected ${item.institution_name} and deleted its history.`
 			: `Disconnected ${item.institution_name}.`,
+	);
+});
+
+/** The card's transactions a person can see: split parts don't count (as Disconnect's page counts them). */
+async function cardTransactionCount(db: D1Database, accountId: number) {
+	const row = await db
+		.prepare(
+			"SELECT COUNT(CASE WHEN t.is_split = 0 THEN 1 END) AS n FROM transactions t WHERE t.account_id = ?",
+		)
+		.bind(accountId)
+		.first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
+/** Remove Apple Card's page, as Disconnect's is (spec §8.10): the card leaves net worth, and its rows stay unless ticked. */
+function RemovePage({
+	count,
+	deleteHistory = false,
+	error,
+	address,
+}: {
+	count: number;
+	deleteHistory?: boolean;
+	error?: string;
+	/** The address the page was asked for, with its query, so the keys sheet can open over it. */
+	address?: string;
+}) {
+	const url = "/accounts/apple-card/remove";
+	return (
+		<Layout
+			title="Remove Apple Card? · Tally"
+			active="accounts"
+			demo={false}
+			currentPath={address}
+			{...plaidScripts(false)}
+		>
+			<h1 class="font-serif text-4xl font-semibold tracking-tight">
+				Remove Apple Card?
+			</h1>
+			<p class="mt-4 max-w-xl text-muted">
+				Tally leaves it out of net worth. Its {count}{" "}
+				{count === 1 ? "transaction" : "transactions"} stay, so past months
+				still add up, unless you tick the box below.
+			</p>
+			{error && (
+				<p role="alert" class="mt-4 text-over">
+					{error}
+				</p>
+			)}
+			{/* htmx swaps Accounts in with a toast; without JavaScript it posts and is redirected there. */}
+			<form
+				method="post"
+				action={url}
+				class="mt-8"
+				hx-post={url}
+				hx-disable="findAll button[type=submit]"
+				hx-target="#main"
+				hx-select="#main"
+				hx-swap="outerHTML"
+			>
+				<Chip
+					type="checkbox"
+					name="delete"
+					value="yes"
+					checked={deleteHistory}
+					describedBy="delete-hint"
+				>
+					Also delete its transactions
+				</Chip>
+				<p id="delete-hint" class="mt-2 text-muted">
+					This deletes them for good.
+				</p>
+				<div class="mt-6 flex items-center gap-3">
+					<Button type="submit">Remove</Button>
+					<Button kind="text" href="/accounts">
+						Cancel
+					</Button>
+				</div>
+			</form>
+		</Layout>
+	);
+}
+
+// Remove Apple Card: a card that isn't kept (none, or already removed) has nothing to remove, so the page is not found.
+accounts.get("/accounts/apple-card/remove", async (c) => {
+	if (c.env.DEMO === "true") return c.notFound();
+	const card = await appleCardAccount(c.env.DB);
+	if (!card || card.removedAt !== null) return c.notFound();
+	return c.html(
+		<RemovePage
+			count={await cardTransactionCount(c.env.DB, card.id)}
+			address={addressOf(c)}
+		/>,
+	);
+});
+
+accounts.post("/accounts/apple-card/remove", async (c) => {
+	if (c.env.DEMO === "true") return c.notFound();
+	const card = await appleCardAccount(c.env.DB);
+	if (!card) return c.notFound();
+	const already = "Apple Card is already removed.";
+	if (card.removedAt !== null) return backToAccounts(c, already);
+	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
+	// Keeping the rows only marks the card removed and clears its balance, so it leaves net worth until a balance is typed.
+	// Deleting runs the pay cleanup first (it finds the card's rows), then the rows, their balances, and the account last,
+	// so the account's changes say whether this removal went through. Each statement needs the card still kept.
+	const statements = deleteHistory
+		? [
+				forgetCardPayDeposits(c.env.DB),
+				c.env.DB.prepare(
+					`DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card') AND ${APPLE_CARD_KEPT}`,
+				),
+				c.env.DB.prepare(
+					`DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card') AND ${APPLE_CARD_KEPT}`,
+				),
+				c.env.DB.prepare(
+					"DELETE FROM accounts WHERE subtype = 'apple_card' AND removed_at IS NULL",
+				),
+			]
+		: [
+				c.env.DB.prepare(
+					"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card' AND removed_at IS NULL",
+				),
+			];
+	let results: D1Result[];
+	try {
+		results = await c.env.DB.batch(statements);
+	} catch {
+		return c.html(
+			<RemovePage
+				count={await cardTransactionCount(c.env.DB, card.id)}
+				deleteHistory={deleteHistory}
+				error="Couldn't remove Apple Card. Try again."
+			/>,
+			502,
+		);
+	}
+	if (results.at(-1)?.meta.changes === 0) return backToAccounts(c, already);
+	return backToAccounts(
+		c,
+		deleteHistory
+			? "Removed Apple Card and deleted its transactions."
+			: "Removed Apple Card.",
 	);
 });
