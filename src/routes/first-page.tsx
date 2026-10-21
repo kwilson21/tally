@@ -3,6 +3,7 @@ import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
 import {
+	anyQuestionAnswered,
 	type BudgetAnswer,
 	type PayAnswer,
 	readFirstTally,
@@ -47,6 +48,7 @@ import {
 	type Motion,
 	NO_MOTION,
 } from "../views/first-page";
+import { HomeSeenCheckIn } from "../views/home-seen";
 import { Layout } from "../views/layout";
 
 // The question page (P125 E, spec §8.8, decision 114): the family app only, opened once the gate is open. Each answer
@@ -128,6 +130,8 @@ function pageDocument(
 	focus: boolean,
 	budgetError: BudgetError | null = null,
 	savingsError: BudgetError | null = null,
+	/** True while no question is answered: the page checks in, so Tally knows someone is still here (decision 146). */
+	watching = false,
 ) {
 	return (
 		<Layout
@@ -142,6 +146,7 @@ function pageDocument(
 					budgetError={budgetError}
 					savingsError={savingsError}
 				/>
+				{watching && <HomeSeenCheckIn />}
 			</div>
 		</Layout>
 	);
@@ -153,8 +158,11 @@ firstPage.get("/first-page", async (c) => {
 	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
 	const oneAtATime = c.req.query("budgets") === "one";
+	// Read before the page settles its own questions: settleAndLoad draws a pay question that has nothing to ask, which would
+	// end the check-in on the first visit (decision 146).
+	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
 	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
-	return c.html(pageDocument(model, oneAtATime));
+	return c.html(pageDocument(model, oneAtATime, null, null, watching));
 });
 
 /**

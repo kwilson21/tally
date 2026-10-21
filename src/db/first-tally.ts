@@ -121,6 +121,16 @@ export function questionsAnswered(record: FirstTally | null): boolean {
 	);
 }
 
+/** The three questions' strokes, in the order the first page asks them. */
+export const QUESTION_STROKES = ["pay", "bills", "budgets"] as const;
+
+/** True once any of the three questions is drawn (a migrated record's null counts). The first page's check-in stops then. */
+export function anyQuestionAnswered(record: FirstTally | null): boolean {
+	return QUESTION_STROKES.some(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	);
+}
+
 // Each setter is one upsert, so the json_* change is applied to what is stored when the write happens. Two writes that
 // overlap then keep each other's fields, where a read-then-write of the whole record would lose one of them.
 

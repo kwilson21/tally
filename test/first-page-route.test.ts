@@ -1078,6 +1078,25 @@ describe("Keep keeps what the page showed", () => {
 	});
 });
 
+// The presence check-in (decision 146): the questions page checks in every 30 seconds while no question is answered, so
+// Tally knows someone is still on it. Once one is answered the page draws no check-in.
+describe("the presence check-in on the page (decision 146)", () => {
+	const CHECK_IN = 'hx-post="/home/seen"';
+
+	it("is drawn while no question is answered", async () => {
+		const { res, html } = await get("/first-page");
+		expect(res.status).toBe(200);
+		expect(html).toContain(CHECK_IN);
+	});
+
+	it("is not drawn once a question is answered", async () => {
+		await markStroke(db, "pay", TODAY);
+		const { res, html } = await get("/first-page");
+		expect(res.status).toBe(200);
+		expect(html).not.toContain(CHECK_IN);
+	});
+});
+
 describe("empty steps", () => {
 	it("says no paycheck was spotted, and counts the pay step done", async () => {
 		const { html } = await get("/first-page");

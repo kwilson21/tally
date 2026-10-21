@@ -446,6 +446,7 @@ describe("data exports", () => {
 				"last_seen_at",
 				"session_issued_at",
 				"removed_at",
+				"home_seen_at",
 			],
 			household_people: ["id", "name"],
 			never_suggest_rules: [

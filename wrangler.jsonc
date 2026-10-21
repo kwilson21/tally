@@ -90,9 +90,11 @@
 			"preview_urls": false,
 			// Two runs a morning (decision 139): 09:00 the daily catch-up sync (spec §4), at the demo's hour, which then starts
 			// the night's Workflow (sort everything waiting, then names and suggestions, then the first night's counts) and
-			// retries feedback; 10:00 the reconnect reminders, in their own invocation. src/index.tsx routes by these exact strings.
+			// retries feedback; 10:00 the reconnect reminders, in their own invocation, then the ready email as a backstop. Each minute the
+			// ready email alone (decision 146): a new family's email goes out once its person has left the first-week pages.
+			// src/index.tsx routes by these exact strings.
 			"triggers": {
-				"crons": ["0 9 * * *", "0 10 * * *"]
+				"crons": ["0 9 * * *", "0 10 * * *", "* * * * *"]
 			},
 			// Not the demo: no banner, and the nightly reset can never run (decision 25).
 			"vars": {

@@ -9,6 +9,7 @@ import type { YourBank } from "../first-tally/your-banks";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
 import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
+import { HomeSeenCheckIn } from "./home-seen";
 import { safeToSpendText } from "./home-top";
 import { Notebook } from "./notebook";
 import { TallySteps } from "./tally-steps";
@@ -236,6 +237,7 @@ export function HomeSetup({
 					</Band>
 				</div>
 			)}
+			{(phase === "reading" || phase === "ready") && <HomeSeenCheckIn />}
 		</section>
 	);
 }

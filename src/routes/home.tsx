@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
+import { actor } from "../actor";
 import { addressOf } from "../address";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
@@ -25,6 +26,7 @@ import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
+import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup } from "../first-tally/setup";
 import {
 	bankState,
@@ -728,6 +730,20 @@ home.get("/home/banks", async (c) => {
 			</p>
 		</>,
 	);
+});
+
+// The presence check-in (decision 146): a person whose Home setup is open says they are still there, every 30 seconds
+// (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds old, so
+// the page's repeats write once in each window. The demo writes nothing. The answer is 204 with no body: nothing swaps.
+home.post("/home/seen", async (c) => {
+	if (c.env.DEMO !== "true") {
+		await c.env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now') WHERE email = ? AND removed_at IS NULL AND (home_seen_at IS NULL OR home_seen_at < datetime('now', ?))",
+		)
+			.bind(actor(c), `-${HOME_SEEN_EVERY_MS / 1000} seconds`)
+			.run();
+	}
+	return c.body(null, 204);
 });
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.

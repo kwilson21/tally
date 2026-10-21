@@ -336,9 +336,10 @@ describe("HomeSetup while banks are read", () => {
 		expect(reading).toContain('hx-status:4xx="swap:none"');
 		expect(reading).toContain('hx-status:5xx="swap:none"');
 		expect(reading).toContain("data-quiet");
+		// Every bank is in: the list stops polling. (The presence check-in polls too, from its own element, decision 146.)
 		const done = await page({ banks: [chase] });
-		expect(done).not.toContain("hx-trigger");
-		expect(done).not.toContain("data-quiet");
+		expect(done).not.toContain('hx-trigger="every 5s"');
+		expect(done).not.toContain('hx-get="/home/banks');
 	});
 });
 
@@ -413,5 +414,59 @@ describe("HomeSetup's ready-email line", () => {
 	])("%s: no line", async (_name, view) => {
 		const html = await top(view);
 		expect(html).not.toContain("Tally will email you when they're ready.");
+	});
+});
+
+// The presence check-in (decision 146): Home's first-week setup posts to /home/seen every 30 seconds while the reading and
+// the ready phases are open, so Tally knows the person is still there. It is hidden and swaps nothing.
+describe("HomeSetup's presence check-in", () => {
+	const CHECK_IN = 'hx-post="/home/seen"';
+	const night = { brought: 12, needYou: 0 };
+
+	it("is drawn while the history is read and while the questions are ready", async () => {
+		expect(
+			await top({
+				phase: "reading",
+				drawn: 1,
+				bankCount: 1,
+				sorted: 0,
+				total: 0,
+			}),
+		).toContain(CHECK_IN);
+		expect(
+			await top({ phase: "ready", drawn: 5, sorted: 222, total: 222 }),
+		).toContain(CHECK_IN);
+	});
+
+	it("is hidden, polls on load and every 30 seconds, and swaps nothing", async () => {
+		const html = await top({ phase: "reading", drawn: 1, bankCount: 1 });
+		const tag = html.slice(
+			html.indexOf(CHECK_IN) - 80,
+			html.indexOf(CHECK_IN) + 200,
+		);
+		expect(tag).toContain("hidden");
+		expect(tag).toContain('hx-trigger="load, every 30s"');
+		expect(tag).toContain('hx-swap="none"');
+	});
+
+	it("is not drawn once the questions are answered", async () => {
+		expect(
+			await top({
+				phase: "answered",
+				drawn: 3,
+				answeredWaiting: null,
+				fifth: null,
+			}),
+		).not.toContain(CHECK_IN);
+	});
+
+	it("is not drawn on the fifth day", async () => {
+		const html = String(
+			await HomeSetup({
+				view: { ...base, phase: "answered", drawn: 5, fifth: night },
+				fifthDay: { safeToSpendCents: 12345 },
+			}),
+		);
+		expect(html).not.toContain(CHECK_IN);
 	});
 });

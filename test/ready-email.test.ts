@@ -6,13 +6,10 @@ import { resetDemo } from "../src/demo/reset";
 import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
 import handler from "../src/index";
 
-// The ready email (P140, decision 134, spec §8.8): one email per person, sent by the 10:00 UTC run once a new family's first
-// questions are open, and never again to an address it has reached.
+// The ready email (P140, decision 134, decision 146, spec §8.8): one email per person, sent by the minute run once a new
+// family's first questions are open (the 10:00 run is the backstop), and never again to an address it has reached. A person
+// whose page has checked in within the last 10 minutes is not sent to yet: someone still watching sees the questions there.
 
-// The household's Oct 14, 9:00 in New York. Stroke one was drawn the day before, so the questions can open today.
-const NOW = new Date("2026-10-14T13:00:00Z");
-// 02:00 UTC on Oct 14 is still Oct 13 in New York: the same household day as stroke one, so the questions are shut.
-const SAME_DAY = new Date("2026-10-14T02:00:00Z");
 const STROKE_ONE = "2026-10-13";
 const SUBJECT = "Three questions to finish setting up";
 const NEXT =
@@ -143,7 +140,7 @@ async function clearHousehold() {
 }
 
 /**
- * A family whose questions are open on NOW's day: one Chase bank with its history in and no transactions, stroke one drawn
+ * A family whose questions are open: one Chase bank with its history in and no transactions, stroke one drawn
  * the day before, and the given members. The Jev switches are off, so no transaction waits for an answer unless a test
  * turns them on. Returns the bank's account id.
  */
@@ -185,7 +182,7 @@ describe("the ready email: who gets it, and when", () => {
 	it("sends each household address the email once, with the words, and records each address as reached", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
 		for (const mail of sent) {
 			expect(mail.subject).toBe(SUBJECT);
@@ -212,7 +209,7 @@ describe("the ready email: who gets it, and when", () => {
 		await openHousehold({ members: [DANA] });
 		const before = await readFirstTally(env.DB);
 		expect(before?.readyEmailedTo).toBeUndefined();
-		await runReadyEmail(production(), resendFake().fetchImpl, NOW);
+		await runReadyEmail(production(), resendFake().fetchImpl);
 		expect(await storedList()).toEqual([DANA]);
 	});
 
@@ -228,7 +225,7 @@ describe("the ready email: who gets it, and when", () => {
 				return new Response("{}", { status: 200 });
 			},
 		);
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(reachedAtSend).toEqual([true]);
 	});
 
@@ -238,16 +235,19 @@ describe("the ready email: who gets it, and when", () => {
 			"UPDATE plaid_items SET history_complete_at = NULL",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 		expect(await storedList()).toBeUndefined();
 	});
 
-	it("does not send on stroke one's own household day, though it is already the next day in UTC", async () => {
-		await openHousehold();
+	it("sends on stroke one's own day once every bank's history is in and nothing waits", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: { strokes: { bank: "2026-10-14" }, budgets: {} },
+		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, SAME_DAY);
-		expect(sent).toEqual([]);
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 	});
 
 	it("does not send with no connected bank", async () => {
@@ -256,7 +256,7 @@ describe("the ready email: who gets it, and when", () => {
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
@@ -269,7 +269,7 @@ describe("the ready email: who gets it, and when", () => {
 			.bind(accountId)
 			.run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
@@ -283,7 +283,7 @@ describe("the ready email: who gets it, and when", () => {
 				},
 			});
 			const { fetchImpl, sent } = resendFake();
-			await runReadyEmail(production(), fetchImpl, NOW);
+			await runReadyEmail(production(), fetchImpl);
 			expect(sent).toEqual([]);
 		},
 	);
@@ -302,21 +302,21 @@ describe("the ready email: who gets it, and when", () => {
 			},
 		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
 	it("does not send in the demo", async () => {
 		await openHousehold();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production({ DEMO: "true" }), fetchImpl, NOW);
+		await runReadyEmail(production({ DEMO: "true" }), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
 	it("does not send to an empty household list", async () => {
 		await openHousehold({ members: [] });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 		expect(await storedList()).toBeUndefined();
 	});
@@ -327,8 +327,117 @@ describe("the ready email: who gets it, and when", () => {
 			"INSERT INTO household_settings (key, value) VALUES ('bank_sign_in_emails', 'off')",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+});
+
+describe("the ready email: who is still there (decision 146)", () => {
+	/** Sets a person's last check-in to a SQLite time modifier from now, such as '-30 seconds'. */
+	const checkedInAt = (email: string, when: string) =>
+		env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now', ?) WHERE email = ?",
+		)
+			.bind(when, email)
+			.run();
+
+	/** A database whose prepared statements are counted, so a run's reads can be counted. */
+	function countingDb() {
+		const statements: string[] = [];
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						statements.push(sql);
+						return target.prepare(sql);
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		return { db, statements };
+	}
+
+	it.each(["-30 seconds", "-9 minutes"])(
+		"gives no email to a person whose page checked in %s, and tries them on a later minute",
+		async (when) => {
+			await openHousehold({ members: [DANA] });
+			await checkedInAt(DANA, when);
+			const first = resendFake();
+			await runReadyEmail(production(), first.fetchImpl);
+			expect(first.sent).toEqual([]);
+			expect(await storedList()).toBeUndefined();
+			await checkedInAt(DANA, "-11 minutes");
+			const later = resendFake();
+			await runReadyEmail(production(), later.fetchImpl);
+			expect(later.sent.map((mail) => mail.to)).toEqual([DANA]);
+		},
+	);
+
+	it("gives the email to a person whose page last checked in 11 minutes ago", async () => {
+		await openHousehold({ members: [DANA] });
+		await checkedInAt(DANA, "-11 minutes");
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+
+	it("of two people, emails only the one who has left", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		await checkedInAt(DANA, "-30 seconds");
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([RILEY]);
+		expect(await storedList()).toEqual([RILEY]);
+	});
+
+	it("gives the email to a person whose page has never checked in", async () => {
+		await openHousehold({ members: [DANA] });
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+
+	it("sends nothing once a question is answered, even to a person who has left", async () => {
+		await openHousehold({ members: [DANA] });
+		await writeRecord({
+			strokes: { bank: STROKE_ONE, pay: STROKE_ONE },
+			budgets: {},
+		});
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent).toEqual([]);
+	});
+
+	it("logs nothing on a minute when no address is claimed", async () => {
+		await openHousehold({ members: [DANA] });
+		await checkedInAt(DANA, "-30 seconds");
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		await runReadyEmail(production(), resendFake().fetchImpl);
+		expect(log).not.toHaveBeenCalled();
+		expect(error).not.toHaveBeenCalled();
+		log.mockRestore();
+		error.mockRestore();
+	});
+
+	it("costs a set-up household one read and sends nothing", async () => {
+		await openHousehold({ members: [DANA] });
+		await writeRecord({
+			strokes: {
+				bank: STROKE_ONE,
+				pay: STROKE_ONE,
+				bills: STROKE_ONE,
+				budgets: STROKE_ONE,
+				count: STROKE_ONE,
+			},
+			budgets: {},
+		});
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
 	});
 });
 
@@ -339,7 +448,7 @@ describe("the ready email: recipients", () => {
 		await addMember(RILEY, { removed: true });
 		await addMember("casey@example.com", { seen: "2020" });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 	});
 
@@ -353,16 +462,16 @@ describe("the ready email: recipients", () => {
 			},
 		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([RILEY]);
 	});
 
 	it("sends once on a morning: a second run that morning sends nothing", async () => {
 		await openHousehold();
 		const first = resendFake();
-		await runReadyEmail(production(), first.fetchImpl, NOW);
+		await runReadyEmail(production(), first.fetchImpl);
 		const second = resendFake();
-		await runReadyEmail(production(), second.fetchImpl, NOW);
+		await runReadyEmail(production(), second.fetchImpl);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(second.sent).toEqual([]);
 	});
@@ -378,12 +487,11 @@ describe("the ready email: a run that overlaps another", () => {
 		const firstFetch = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
-				if (to === DANA)
-					await runReadyEmail(production(), second.fetchImpl, NOW);
+				if (to === DANA) await runReadyEmail(production(), second.fetchImpl);
 				return first.fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), firstFetch, NOW);
+		await runReadyEmail(production(), firstFetch);
 		expect(second.sent.map((mail) => mail.to)).toEqual([RILEY]);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA, RILEY]);
@@ -402,7 +510,7 @@ describe("the ready email: a question answered during a run", () => {
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), answeredDuringDana, NOW);
+		await runReadyEmail(production(), answeredDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -454,7 +562,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), linkedDuringDana, NOW);
+		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -469,7 +577,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), linkedDuringDana, NOW);
+		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
 		expect(sent[0]?.text).toContain("from Chase.");
 		expect(sent[1]?.text).toContain("from Chase and Ally.");
@@ -492,7 +600,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), removedDuringDana, NOW);
+		await runReadyEmail(production(), removedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -519,7 +627,7 @@ describe("the ready email: delivery", () => {
 		await openHousehold();
 		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
 		const { fetchImpl } = resendFake(500);
-		await runReadyEmail(production({ EMAIL: { send } }), fetchImpl, NOW);
+		await runReadyEmail(production({ EMAIL: { send } }), fetchImpl);
 		expect(send).toHaveBeenCalledOnce();
 		expect(send.mock.calls[0]?.[0]).toMatchObject({
 			to: DANA,
@@ -538,15 +646,10 @@ describe("the ready email: delivery", () => {
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
-			NOW,
 		);
 		expect(await storedList()).toEqual([]);
 		const next = resendFake();
-		await runReadyEmail(
-			production(),
-			next.fetchImpl,
-			new Date("2026-10-15T13:00:00Z"),
-		);
+		await runReadyEmail(production(), next.fetchImpl);
 		expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -559,14 +662,10 @@ describe("the ready email: delivery", () => {
 				return new Response("{}", { status: to === DANA ? 500 : 200 });
 			},
 		);
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(await storedList()).toEqual([RILEY]);
 		const next = resendFake();
-		await runReadyEmail(
-			production(),
-			next.fetchImpl,
-			new Date("2026-10-15T13:00:00Z"),
-		);
+		await runReadyEmail(production(), next.fetchImpl);
 		expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([RILEY, DANA]);
 	});
@@ -577,7 +676,7 @@ describe("the ready email: delivery", () => {
 		const timedOut = vi.fn(async () => {
 			throw new Error("timeout");
 		});
-		await runReadyEmail(production(), timedOut, NOW);
+		await runReadyEmail(production(), timedOut);
 		expect(await storedList()).toEqual([]);
 		expect(log).toHaveBeenCalledWith(
 			"ready email: 0 sent, 1 failed (resend timeout or error)",
@@ -606,7 +705,7 @@ describe("the ready email: the words", () => {
 			await addTransactions(accountId, counts[index] ?? 0);
 		}
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		return sent[0]?.text ?? "";
 	};
 
@@ -710,7 +809,7 @@ describe("the ready email: the words", () => {
 			.bind(accountId)
 			.run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent[0]?.text).toContain("from Chase and sorted 1 transaction.");
 	});
 });
@@ -719,7 +818,7 @@ describe("the ready email: the log", () => {
 	it("logs one count line for a clean run, with no address, bank or count in it", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		await runReadyEmail(production(), resendFake().fetchImpl, NOW);
+		await runReadyEmail(production(), resendFake().fetchImpl);
 		expect(log).toHaveBeenCalledOnce();
 		expect(log).toHaveBeenCalledWith("ready email: 1 sent, 0 failed");
 		log.mockRestore();
@@ -736,7 +835,6 @@ describe("the ready email: the log", () => {
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
-			NOW,
 		);
 		expect(log).toHaveBeenCalledOnce();
 		expect(log).toHaveBeenCalledWith(
@@ -754,7 +852,6 @@ describe("the ready email: the log", () => {
 		await runReadyEmail(
 			production({ RESEND_API_KEY: undefined }),
 			resendFake().fetchImpl,
-			NOW,
 		);
 		expect(log).toHaveBeenCalledWith(
 			"ready email: 0 sent, 1 failed (no provider configured)",
