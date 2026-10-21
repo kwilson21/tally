@@ -205,7 +205,7 @@ describe("HomeSetup", () => {
 		expect(html).not.toContain("Link a bank");
 	});
 
-	it("ready: one transaction says 'Your 1 transaction is sorted', and none says 'Everything is sorted'", async () => {
+	it("ready: one transaction says 'Your 1 transaction is sorted', and zero transactions says 'Everything is sorted'", async () => {
 		const one = await top({
 			phase: "ready",
 			drawn: 1,
@@ -499,7 +499,7 @@ describe("HomeSetup's presence check-in", () => {
 	const CHECK_IN = 'hx-post="/home/seen"';
 	const night = { brought: 12, needYou: 0 };
 
-	it("is drawn while the history is read by a page that refreshes, and while the questions are ready", async () => {
+	it("is drawn while the history is read, and while the questions are ready", async () => {
 		expect(
 			await top({
 				phase: "reading",
@@ -515,8 +515,9 @@ describe("HomeSetup's presence check-in", () => {
 		).toContain(CHECK_IN);
 	});
 
-	it("is not drawn while the page no longer refreshes (slow, or stale), so its person counts as away (decision 146)", async () => {
-		// The page cannot show the change itself, so it stops checking in and the ready email reaches the person.
+	it("is still drawn while the page no longer refreshes (slow, or stale), so its person is still there (decision 146)", async () => {
+		// The check-in is what tells Tally the person is still here, so a page that stops refreshing keeps checking in too. The
+		// page reloads itself once its step moves on (/home/seen), so someone watching sees the questions appear.
 		expect(
 			await top({
 				phase: "reading",
@@ -528,7 +529,7 @@ describe("HomeSetup's presence check-in", () => {
 				sorted: 192,
 				total: 222,
 			}),
-		).not.toContain(CHECK_IN);
+		).toContain(CHECK_IN);
 		expect(
 			await top({
 				phase: "reading",
@@ -536,7 +537,49 @@ describe("HomeSetup's presence check-in", () => {
 				bankCount: 1,
 				refreshes: false,
 			}),
-		).not.toContain(CHECK_IN);
+		).toContain(CHECK_IN);
+	});
+
+	it("posts the step the page shows, as its hx-vals, so /home/seen can tell when that step has moved on", async () => {
+		const reading = await top({
+			phase: "reading",
+			drawn: 1,
+			bankCount: 1,
+			refreshes: true,
+		});
+		expect(reading).toContain(
+			'hx-vals="{&quot;step&quot;:&quot;reading&quot;}"',
+		);
+		const sorting = await top({
+			phase: "reading",
+			drawn: 1,
+			bankCount: 1,
+			sorting: true,
+			refreshes: true,
+			sorted: 192,
+			total: 222,
+		});
+		expect(sorting).toContain(
+			'hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"',
+		);
+		const slow = await top({
+			phase: "reading",
+			drawn: 1,
+			bankCount: 1,
+			sorting: true,
+			slow: true,
+			refreshes: false,
+			sorted: 192,
+			total: 222,
+		});
+		expect(slow).toContain('hx-vals="{&quot;step&quot;:&quot;slow&quot;}"');
+		const ready = await top({
+			phase: "ready",
+			drawn: 5,
+			sorted: 222,
+			total: 222,
+		});
+		expect(ready).toContain('hx-vals="{&quot;step&quot;:&quot;ready&quot;}"');
 	});
 
 	it("draws the check-in with an id, so a poll that stops refreshing can take it out of the page", async () => {

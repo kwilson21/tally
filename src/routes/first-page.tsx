@@ -277,6 +277,8 @@ firstPage.post("/first-page/budgets", async (c) => {
 	if (!["all", "yes", "another", "skip"].includes(answer))
 		return c.text("Choose an answer.", 400);
 	// Keep all is the only answer to its own question; every other answer is one at a time, so its page is drawn that way.
+	// Read before the page settles, as the GET reads it: a refused amount's page keeps the check-in while none was drawn.
+	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
 	const before = await settleAndLoad(c.env.DB, today, {
 		oneAtATime: answer !== "all",
 	});
@@ -369,7 +371,8 @@ firstPage.post("/first-page/budgets", async (c) => {
 	} else {
 		const typed = String(form.get("budget") ?? "");
 		const parsed = parseBudgetAmount(typed);
-		if (!parsed.ok) return budgetRefused(c, before, parsed.error, typed);
+		if (!parsed.ok)
+			return budgetRefused(c, before, parsed.error, typed, watching);
 		kind = "another";
 		cents = parsed.cents;
 	}
@@ -515,7 +518,16 @@ async function savingsRefused(
 		return answered(c, model, budgetsMovedOnWords(), NO_MOTION, "info");
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
-		return c.html(pageDocument(model, true, null, savingsError), 422);
+		return c.html(
+			pageDocument(
+				model,
+				true,
+				null,
+				savingsError,
+				!anyQuestionAnswered(before),
+			),
+			422,
+		);
 	return c.html(
 		<FirstPageBody
 			model={model}
@@ -566,10 +578,12 @@ function budgetRefused(
 	model: FirstPageModel,
 	error: string,
 	typed: string,
+	/** True while no question was drawn before the page settled (the check-in, decision 146). */
+	watching: boolean,
 ) {
 	const budgetError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
-		return c.html(pageDocument(model, true, budgetError), 422);
+		return c.html(pageDocument(model, true, budgetError, null, watching), 422);
 	return c.html(
 		<FirstPageBody
 			model={model}

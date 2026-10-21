@@ -118,13 +118,13 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(html).toContain('id="your-banks"');
 		expect(html).not.toContain("every 5s");
 		expect(html).not.toContain("data-quiet");
-		// The page stops refreshing, so it stops checking in: the check-in is taken out of the page (decision 146).
-		expect(html).toContain('<div id="home-seen" hx-swap-oob="delete">');
+		// The page stops refreshing, but its person is still there: the poll never takes the check-in out (decision 146).
+		expect(html).not.toContain('hx-swap-oob="delete"');
 	});
 
-	it("keeps the check-in while the list still refreshes", async () => {
+	it("leaves the check-in alone while the step it shows has not changed", async () => {
 		await readingBanks();
-		const { html } = await refresh();
+		const { html } = await refresh("?step=reading");
 		expect(html).toContain('hx-trigger="every 5s"');
 		expect(html).not.toContain('id="home-seen"');
 	});
@@ -266,6 +266,25 @@ describe("GET /home/banks: a step change is announced once (decision 146)", () =
 		expect(again.html).toContain("Sorting your last 90 days:");
 	});
 
+	it("swaps the check-in to the new step when the poll announces it, so the page does not reload for a change it shows (decision 146)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-check', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
+		await readingBanks();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		const ids = (await connectedIds()).join(",");
+		const { html } = await refresh(`?in=${ids}&step=reading`);
+		expect(html).toContain(
+			'<div id="home-seen" hx-swap-oob="outerHTML" hidden',
+		);
+		expect(html).toContain('hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"');
+		// A poll that names the step already shown swaps no check-in, so the 5-second poll never resets the 30-second one.
+		const same = await refresh(`?in=${ids}&step=sorting`);
+		expect(same.html).not.toContain('id="home-seen"');
+	});
+
 	it("announces the ready status and redraws the top once the questions open from a sort (reading to ready)", async () => {
 		await readingBanks();
 		await env.DB.prepare(
@@ -346,7 +365,7 @@ describe("a page that stops refreshing: its check-in and the ready email (decisi
 		EMAIL: undefined,
 	} as never;
 
-	it("a slow page drops its check-in, so its person, last checked in a minute ago, is emailed once the questions open", async () => {
+	it("a slow page keeps its check-in, so its person, last checked in a minute ago, is emailed only once away ten minutes", async () => {
 		await readingBanks();
 		await env.DB.prepare("DELETE FROM household_members").run();
 		await env.DB.prepare(
@@ -363,7 +382,8 @@ describe("a page that stops refreshing: its check-in and the ready email (decisi
 		).run();
 		const slow = await refresh();
 		expect(slow.html).toContain("Sorting is taking longer than usual");
-		expect(slow.html).toContain('<div id="home-seen" hx-swap-oob="delete">');
+		// The page stops refreshing, not checking in: the poll removes nothing (decision 146).
+		expect(slow.html).not.toContain('hx-swap-oob="delete"');
 
 		// The sort finishes and the questions open. The page has stopped checking in, and its last check-in is a minute old,
 		// so this minute is too soon for the email.

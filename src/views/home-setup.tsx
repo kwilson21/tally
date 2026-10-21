@@ -179,13 +179,13 @@ function FifthDay({
 /**
  * The setup top. `linkBank` is Home's Link a bank (before a bank, and only when Plaid is on): the one button, with its
  * error region. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), said as
- * Home's top says it, with its Fix. Its words lead, so while one is drawn the slow line leaves out "Nothing for you to do.", since a bank that needs a fix
- * is something to do. The status takes focus after Plaid redraws
- * Home (`data-link-bank-focus`, plaid-link.js). `fifthDay` is the money and the link the fifth-day view draws (Home's
- * Safe to spend, and where "See what needs you" goes); it is given only on the day stroke five is drawn. `focusStatus` is
- * given only by the refresh that redraws the top once the questions open (home.tsx): the status is autofocus there, so htmx
- * moves focus to it once the swap lands, since the button that had it (Link a bank, a Fix) has been removed. A full load
- * never sets it, so Home never takes focus on load.
+ * Home's top says it, with its Fix. Its words lead, so while one is drawn the slow line leaves out "Nothing for you to
+ * do.", since a bank that needs a fix is something to do. The status takes focus after Plaid redraws Home
+ * (`data-link-bank-focus`, plaid-link.js). `fifthDay` is the money and the link the fifth-day view draws (Home's Safe
+ * to spend, and where "See what needs you" goes); it is given only on the day stroke five is drawn. `focusStatus` is
+ * given only by the refresh that redraws the top once the questions open (home.tsx): the status is autofocus there, so
+ * htmx moves focus to it once the swap lands, since the button that had it (Link a bank, a Fix) has been removed. A
+ * full load never sets it, so Home never takes focus on load.
  */
 export function HomeSetup({
 	view,
@@ -298,12 +298,11 @@ export function HomeSetup({
 					</p>
 				</div>
 			)}
-			{/* The check-in says the person is still here (decision 146). A reading page that no longer refreshes draws none, so
-			    its person counts as away and the ready email reaches them: it can't show the questions appearing. */}
-			{polls &&
-				(phase === "ready" || (phase === "reading" && view.refreshes)) && (
-					<HomeSeenCheckIn />
-				)}
+			{/* The check-in says the person is still here (decision 146), and names the step this page shows, so /home/seen reloads
+			    the page once that step has moved on. A page that no longer refreshes checks in too. */}
+			{polls && (phase === "reading" || phase === "ready") && (
+				<HomeSeenCheckIn step={phase === "ready" ? "ready" : setupStep(view)} />
+			)}
 		</section>
 	);
 }

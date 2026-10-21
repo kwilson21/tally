@@ -27,7 +27,7 @@ import { setSavingsGoal } from "../db/savings-goals";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
-import { readSetup } from "../first-tally/setup";
+import { readSetup, type SetupView } from "../first-tally/setup";
 import {
 	bankState,
 	readYourBanks,
@@ -45,7 +45,7 @@ import { BottomSheet } from "../views/bottom-sheet";
 import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
-import { HOME_SEEN_ID } from "../views/home-seen";
+import { HomeSeenCheckIn, type ShownStep } from "../views/home-seen";
 import {
 	HomeSetup,
 	setupNextLine,
@@ -669,24 +669,24 @@ const idsIn = (raw: string | undefined) =>
 const inSentence = (bank: YourBank) =>
 	`${bank.name} is in: ${bank.count.toLocaleString("en-US")} ${bank.count === 1 ? "transaction" : "transactions"}.`;
 
-/**
- * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while the page refreshes
- * (decision 146). It answers with the list, and the status out of band (so the focused status is never replaced). A bank that
- * came in since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
- * HX-Retarget. Once the page stops refreshing, the answer takes the presence check-in out of the page, so the person counts as
- * away. With no setup to draw (the demo, a set-up family, or the fifth day, which Home draws in full), it asks for a reload,
- * so Home draws as it is.
- */
+/** The reading steps the banks refresh's poll names, so a change of step is announced once (decision 146). */
 const SETUP_STEPS = ["reading", "sorting", "slow"] as const;
 
-home.get("/home/banks", async (c) => {
-	const reload = () => {
-		c.header("HX-Refresh", "true");
-		return c.body(null);
-	};
-	if (c.env.DEMO === "true") return reload();
-	const today = await householdToday(c.env.DB);
-	const banks = await readYourBanks(c.env.DB);
+/** The steps the presence check-in may name (decision 146). Any other value is no step at all. */
+const SHOWN_STEPS: readonly ShownStep[] = [
+	"reading",
+	"sorting",
+	"slow",
+	"ready",
+];
+
+/**
+ * Home's setup as the banks refresh and the presence check-in read it: today, the banks, the flagged ones, and the setup
+ * (null when none is drawn).
+ */
+async function readHomeSetup(db: D1Database) {
+	const today = await householdToday(db);
+	const banks = await readYourBanks(db);
 	const flagged = flaggedBanks(
 		banks.map((bank) => ({
 			name: bank.name,
@@ -695,10 +695,40 @@ home.get("/home/banks", async (c) => {
 		})),
 		today,
 	);
-	const setup = await readSetup(c.env.DB, {
-		today,
-		flagged,
-	});
+	const setup = await readSetup(db, { today, flagged });
+	return { today, banks, flagged, setup };
+}
+
+/**
+ * The step Home's page shows, as the presence check-in names it (decision 146): ready once the questions are open, otherwise
+ * the reading step. Null when Home draws no setup to step through: before a bank, answered, the fifth day, or no setup at all.
+ */
+function shownStepOf(setup: SetupView | null): ShownStep | null {
+	if (
+		!setup ||
+		setup.fifth ||
+		setup.phase === "before" ||
+		setup.phase === "answered"
+	)
+		return null;
+	return setup.phase === "ready" ? "ready" : setupStep(setup);
+}
+
+/**
+ * The Your banks list's refresh (P140 A, decision 133, spec §8.8). The list polls it every 5 seconds while the page refreshes
+ * (decision 146). It answers with the list, and the status out of band (so the focused status is never replaced). A bank that
+ * came in since the page was drawn is announced once. Once the questions open, it redraws the whole first-week top once, with
+ * HX-Retarget. A step change (reading, sorting, taking longer than usual) is announced once, and the presence check-in is
+ * swapped to the new step, so the page doesn't reload for a change it shows (decision 146). With no setup to draw (the demo,
+ * a set-up family, or the fifth day, which Home draws in full), it asks for a reload, so Home draws as it is.
+ */
+home.get("/home/banks", async (c) => {
+	const reload = () => {
+		c.header("HX-Refresh", "true");
+		return c.body(null);
+	};
+	if (c.env.DEMO === "true") return reload();
+	const { today, banks, flagged, setup } = await readHomeSetup(c.env.DB);
 	// The fifth day's view has its own Safe to spend and link, and before a bank Home carries Link a bank; neither is read
 	// here, so Home draws them in full.
 	if (!setup || setup.fifth || setup.phase === "before") return reload();
@@ -754,25 +784,35 @@ home.get("/home/banks", async (c) => {
 			<p id="setup-next" hx-swap-oob="innerHTML">
 				{setupNextLine(setup, bankLine)}
 			</p>
-			{/* This poll stops refreshing the page once the sort is slow or the import stale, so the page stops checking in too: its
-			    person counts as away, and the ready email reaches them (decision 146). */}
-			{!setup.refreshes && <div id={HOME_SEEN_ID} hx-swap-oob="delete" />}
+			{/* The check-in is swapped to the step this poll found, so the page keeps checking in with the step it shows, and
+			    doesn't reload for a change it has just shown (decision 146). */}
+			{stepChanged && <HomeSeenCheckIn step={stepNow} oob />}
 		</>,
 	);
 });
 
-// The presence check-in (decision 146): a person whose Home setup is open says they are still there, every 30 seconds
-// (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds old, so
-// the page's repeats write once in each window. The demo writes nothing. The answer is 204 with no body: nothing swaps.
+/**
+ * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, every
+ * 30 seconds (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds
+ * old, so the page's repeats write once in each window. The demo writes nothing and answers 204. Home's check-in sends the
+ * step its page shows: once that step has moved on (the questions opened, sorting started or stopped being slow, the phase
+ * became answered, or setup is gone), the answer is 200 with HX-Refresh, so the page reloads and shows it; otherwise 204 with
+ * no body. The questions page sends no step, so its answer is always 204.
+ */
 home.post("/home/seen", async (c) => {
-	if (c.env.DEMO !== "true") {
-		await c.env.DB.prepare(
-			"UPDATE household_members SET home_seen_at = datetime('now') WHERE email = ? AND removed_at IS NULL AND (home_seen_at IS NULL OR home_seen_at < datetime('now', ?))",
-		)
-			.bind(actor(c), `-${HOME_SEEN_EVERY_MS / 1000} seconds`)
-			.run();
-	}
-	return c.body(null, 204);
+	if (c.env.DEMO === "true") return c.body(null, 204);
+	await c.env.DB.prepare(
+		"UPDATE household_members SET home_seen_at = datetime('now') WHERE email = ? AND removed_at IS NULL AND (home_seen_at IS NULL OR home_seen_at < datetime('now', ?))",
+	)
+		.bind(actor(c), `-${HOME_SEEN_EVERY_MS / 1000} seconds`)
+		.run();
+	const form = await c.req.parseBody();
+	const shown = SHOWN_STEPS.find((step) => step === form.step);
+	if (shown === undefined) return c.body(null, 204);
+	const { setup } = await readHomeSetup(c.env.DB);
+	if (shownStepOf(setup) === shown) return c.body(null, 204);
+	c.header("HX-Refresh", "true");
+	return c.body(null);
 });
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.
