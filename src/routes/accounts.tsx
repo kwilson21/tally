@@ -20,6 +20,10 @@ import {
 	forgetPayDeposits,
 	takeBackBankStrokes,
 } from "../db/first-tally";
+import {
+	APPLE_CARD_SAMPLE_BALANCE_CENTS,
+	appleCardSample,
+} from "../demo/apple-card-sample";
 import { hxTrigger } from "../htmx";
 import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
@@ -369,12 +373,68 @@ function uploadDone(c: Context<App>, message: string, isHtmx: boolean) {
 }
 
 /**
+ * The demo's Add the sample (spec §8.10). The sample is dated from the seeded bank's latest transaction, so a second press
+ * finds its rows held and says Nothing new. Its balance is the demo's, and its months are the demo's (demoCardMonths).
+ */
+async function sampleUpload(c: Context<App>, isHtmx: boolean) {
+	const today = await householdToday(c.env.DB);
+	const latest = await c.env.DB.prepare(
+		"SELECT MAX(t.date) AS date FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL",
+	).first<{ date: string | null }>();
+	const anchor = latest?.date ?? today;
+	const read = parseAppleCsv(appleCardSample(anchor));
+	// The sample is written by the code above, so a sample that doesn't read is a bug, never a visitor's mistake.
+	if (!read.ok) throw new Error("The demo's Apple Card sample doesn't read");
+	const result = await importAppleCard(c.env.DB, read.rows, {
+		by: c.get("actor"),
+		today,
+		balanceCents: APPLE_CARD_SAMPLE_BALANCE_CENTS,
+	});
+	if (!result.ok) throw new Error("The demo's Apple Card sample has no start");
+	await demoCardMonths(c.env.DB, anchor);
+	try {
+		await afterSync(c.env.DB);
+	} catch {
+		console.error("apple card rules failed");
+	}
+	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
+}
+
+/**
+ * The demo's card keeps its months: a balance on each day the seeded banks have one, from the first of them, typed on the
+ * anchor. Without this the demo's line would start on the day of the sample instead of six months back.
+ */
+async function demoCardMonths(db: D1Database, anchor: string) {
+	await db.batch([
+		db
+			.prepare(
+				`INSERT INTO balance_history (account_id, date, balance_cents)
+				SELECT (SELECT id FROM accounts WHERE subtype = 'apple_card'), h.date, ?
+				FROM balance_history h JOIN accounts a ON a.id = h.account_id
+				WHERE a.plaid_item_id IS NOT NULL
+				GROUP BY h.date
+				ON CONFLICT(account_id, date) DO UPDATE SET balance_cents = excluded.balance_cents`,
+			)
+			.bind(APPLE_CARD_SAMPLE_BALANCE_CENTS),
+		db
+			.prepare(
+				`UPDATE accounts SET balance_on = ?, counted_from = (
+					SELECT MIN(h.date) FROM balance_history h JOIN accounts b ON b.id = h.account_id WHERE b.plaid_item_id IS NOT NULL
+				) WHERE subtype = 'apple_card'`,
+			)
+			.bind(anchor),
+	]);
+}
+
+/**
  * Apple Card's upload (spec §8.10, decision 138). The request's size is checked before anything is read; then the file
  * and the balance are checked, and a refusal shows both errors; then the rows are stored in one batch, and the rows
  * added go through the same steps a sync's do. Nothing is saved on a refusal, and no file, row, amount or balance is logged.
  */
 accounts.post("/accounts/apple-card", async (c) => {
 	const isHtmx = c.req.header("HX-Request") === "true";
+	// The demo takes no file: its sample is added instead, and its body is never read (spec §8.10).
+	if (c.env.DEMO === "true") return sampleUpload(c, isHtmx);
 	const today = await householdToday(c.env.DB);
 	// The request's length, before its body is read: a length that isn't digits, or one over the cap, is refused.
 	const declared = c.req.header("content-length") ?? "";
