@@ -294,10 +294,13 @@ describe("Apple Card's upload sheet (#766)", () => {
 				ROW_A,
 				'09/12/2026,09/13/2026,"THAI PALACE","Thai Palace","Restaurants","Purchase","$24.10"',
 			);
-			const { html } = await post(
+			const { res, html } = await post(
 				{ file: file(bad), balance: "" },
 				{ htmx: true },
 			);
+			expect(res.status).toBe(422);
+			// A refusal after the body is read sends no toast: the alert under the field is what's announced.
+			expect(res.headers.get("HX-Trigger")).toBeNull();
 			expect(html).toContain(
 				"Row 3's amount can't be read. Nothing was added.",
 			);
@@ -420,6 +423,39 @@ describe("Apple Card's upload sheet (#766)", () => {
 			);
 			const html = await res.text();
 			expect(html).toMatch(/<a [^>]*autofocus[^>]*>/);
+		});
+
+		it("offers Add Apple Card and draws the removed group with no bank, once the card is removed", async () => {
+			await post(
+				{ file: file(csv(ROW_A)), balance: "1,240.18" },
+				{ htmx: true },
+			);
+			// Remove Apple Card keeps its rows and clears its balance, so the card is off and no bank is linked.
+			await env.DB.batch([
+				env.DB.prepare(
+					"DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id IS NOT NULL)",
+				),
+				env.DB.prepare(
+					"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id IS NOT NULL)",
+				),
+				env.DB.prepare("DELETE FROM accounts WHERE plaid_item_id IS NOT NULL"),
+				env.DB.prepare("DELETE FROM plaid_items"),
+				env.DB.prepare(
+					"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card'",
+				),
+			]);
+			const html = (
+				await (await app.request("/accounts", {}, family)).text()
+			).replaceAll("&#39;", "'");
+			// Add Apple Card shows again, since the card is removed, whatever the banks are (spec §8.10).
+			expect(html).toMatch(
+				/<a [^>]*href="\/accounts\/apple-card"[^>]*>\s*Add Apple Card/,
+			);
+			// The removed card's group is drawn like a disconnected bank's: its name and "Removed", no Upload.
+			const group =
+				html.split("data-apple-card")[1]?.split("</section>")[0] ?? "";
+			expect(group).toContain("Removed");
+			expect(group).not.toContain("Upload a file");
 		});
 
 		it("draws the card alone, with net worth and the group, when no bank is linked", async () => {

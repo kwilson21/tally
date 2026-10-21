@@ -167,6 +167,8 @@ async function AccountsSummary({
 	const cardKept = appleCard !== null && appleCard.removedAt === null;
 	// Add Apple Card waits for the card to be off (none, or removed), and for Tally's history to have a start.
 	const addCard = !cardKept && (await historyStart(env.DB, today)) !== null;
+	// Nothing to add up before any bank or kept card (decision 55): the empty state, with a removed card's group below it.
+	const empty = banks.length === 0 && !cardKept;
 	return (
 		<div id="accounts-summary">
 			{alert && (
@@ -174,7 +176,7 @@ async function AccountsSummary({
 					{alert}
 				</p>
 			)}
-			{banks.length === 0 && !cardKept ? (
+			{empty ? (
 				<>
 					<h1 class="font-serif text-5xl font-semibold tracking-tight">
 						Accounts
@@ -218,32 +220,32 @@ async function AccountsSummary({
 							/>
 						))}
 					</div>
-					{appleCard && (
-						<AppleCardGroup
-							card={cardView(appleCard)}
-							today={today}
-							demo={demo}
-							focusUpload={focus === "apple-card" && cardKept}
-						/>
-					)}
-					{(plaidEnabled || addCard) && (
-						<div class="mt-8 flex flex-wrap items-center gap-3">
-							{plaidEnabled && <LinkBankButton />}
-							{addCard && (
-								<Button
-									kind="secondary"
-									href="/accounts/apple-card"
-									autofocus={focus === "apple-card" && !cardKept}
-									{...sheetAttrs("/accounts/apple-card")}
-								>
-									Add Apple Card
-								</Button>
-							)}
-						</div>
-					)}
-					{plaidEnabled && <LinkBankError />}
 				</>
 			)}
+			{appleCard && (
+				<AppleCardGroup
+					card={cardView(appleCard)}
+					today={today}
+					demo={demo}
+					focusUpload={focus === "apple-card" && cardKept}
+				/>
+			)}
+			{((plaidEnabled && !empty) || addCard) && (
+				<div class="mt-8 flex flex-wrap items-center gap-3">
+					{plaidEnabled && !empty && <LinkBankButton />}
+					{addCard && (
+						<Button
+							kind="secondary"
+							href="/accounts/apple-card"
+							autofocus={focus === "apple-card" && !cardKept}
+							{...sheetAttrs("/accounts/apple-card")}
+						>
+							Add Apple Card
+						</Button>
+					)}
+				</div>
+			)}
+			{plaidEnabled && !empty && <LinkBankError />}
 			<div id="sheet">{sheet}</div>
 		</div>
 	);
