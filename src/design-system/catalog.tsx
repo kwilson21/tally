@@ -646,15 +646,24 @@ function Brand() {
 			>
 				<State label="Two banks: one in, one being read with the ring">
 					<YourBanks
+						polls={false}
 						banks={[CHASE_IN, AMEX_READING]}
 						today={FIRST_WEEK_TODAY}
 					/>
 				</State>
 				<State label="A bank that needs signing in: Paused, with no ring">
-					<YourBanks banks={[CHASE_IN, AMEX_PAUSED]} today={FIRST_WEEK_TODAY} />
+					<YourBanks
+						polls={false}
+						banks={[CHASE_IN, AMEX_PAUSED]}
+						today={FIRST_WEEK_TODAY}
+					/>
 				</State>
 				<State label="A bank linked over an hour ago, its history not in: Reading, with no ring">
-					<YourBanks banks={[AMEX_PAST_HOUR]} today={FIRST_WEEK_TODAY} />
+					<YourBanks
+						polls={false}
+						banks={[AMEX_PAST_HOUR]}
+						today={FIRST_WEEK_TODAY}
+					/>
 				</State>
 			</Specimen>
 			<Specimen
