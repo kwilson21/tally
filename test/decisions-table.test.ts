@@ -12,13 +12,13 @@ describe("docs/decisions.md's table format", () => {
 	it("gives decision 146's row the table's four cells: number, date, decision and why (#762)", () => {
 		const row =
 			decisions.split("\n").find((line) => line.startsWith("| 146 | ")) ?? "";
-		const cells = cellsOf(row);
-		expect(cells).toHaveLength(4);
-		expect(cells[0]).toBe("146");
-		expect(cells[1]).toBe("2026-10-21");
-		expect(cells[2].endsWith("for the first week only.")).toBe(true);
-		expect(
-			cells[3].startsWith("**Why.** The owner's production first week"),
-		).toBe(true);
+		const [number, date, decision = "", why = ""] = cellsOf(row);
+		expect(cellsOf(row)).toHaveLength(4);
+		expect(number).toBe("146");
+		expect(date).toBe("2026-10-21");
+		expect(decision.endsWith("for the first week only.")).toBe(true);
+		expect(why.startsWith("**Why.** The owner's production first week")).toBe(
+			true,
+		);
 	});
 });
