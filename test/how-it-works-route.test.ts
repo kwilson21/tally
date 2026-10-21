@@ -1423,3 +1423,13 @@ describe("How Tally works' Your first week (P125 E, #591)", () => {
 		expect(html).not.toContain('id="first-week"');
 	});
 });
+
+describe("How Tally works' Apple Card line, and the CI page list (#766)", () => {
+	it("says where Apple Card's rows come from, in the paragraph about the numbers", async () => {
+		const res = await exports.default.fetch("http://tally.test/how-it-works");
+		const html = (await res.text()).replaceAll("&#39;", "'");
+		expect(html).toContain(
+			"Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending.",
+		);
+	});
+});

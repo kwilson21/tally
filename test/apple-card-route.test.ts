@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
 import { recordSorting } from "./record-sorting";
@@ -443,5 +444,40 @@ describe("Apple Card's upload sheet (#766)", () => {
 			expect(html).toContain("Apple Card");
 			expect(html).toContain("Upload a file");
 		});
+	});
+});
+
+describe("the first week is untouched by an upload (spec §8.10, #766)", () => {
+	it("leaves the first-week record as it was, so an upload draws no stroke", async () => {
+		await resetDemo(env.DB, TODAY);
+		const before = await readFirstTally(env.DB);
+		const csv = [
+			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)",
+			'09/10/2026,09/11/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"',
+		].join("\n");
+		const form = new FormData();
+		form.set("file", new File([csv], "apple.csv", { type: "text/csv" }));
+		form.set("balance", "1,240.18");
+		const request = new Request("http://tally.test/accounts/apple-card", {
+			method: "POST",
+			body: form,
+		});
+		const bytes = await request.arrayBuffer();
+		const res = await app.request(
+			"/accounts/apple-card",
+			{
+				method: "POST",
+				headers: {
+					"content-type": request.headers.get("content-type") ?? "",
+					"content-length": String(bytes.byteLength),
+					"HX-Request": "true",
+				},
+				body: bytes,
+			},
+			family,
+			ctx(),
+		);
+		expect(res.status).toBe(200);
+		expect(await readFirstTally(env.DB)).toEqual(before);
 	});
 });

@@ -15,9 +15,9 @@ import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
 import {
+	accountsByBank,
 	appleCardAccount,
 	countedAccounts,
-	accountsByBank,
 } from "../db/accounts";
 import { readAiTally } from "../db/ai-log";
 import { namesToReview } from "../db/merchant-names";
@@ -311,7 +311,10 @@ howItWorks.get("/how-it-works", async (c) => {
 					{demo
 						? "AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today."
 						: "AI helps with categories and store names, and a person can always change them."}{" "}
-					Code does all the math.
+					Code does all the math. Apple Card comes in when you upload the file
+					Apple exports, because Plaid can't reach it. Paying off the card, or a
+					payment that bounced, is left out on both sides, so it never counts as
+					spending.
 				</p>
 				{firstWeek && (
 					<Section id="first-week" title="Your first week">

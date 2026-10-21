@@ -559,3 +559,9 @@ describe("screenshotSection when there's nothing to compare", () => {
 		expect(section).not.toContain("## Screenshots");
 	});
 });
+
+describe("PAGES and Apple Card (#766)", () => {
+	it("shoots the Accounts upload sheet, which the demo shows with its sample", () => {
+		expect(PAGES.map((p) => p.path)).toContain("/accounts/apple-card");
+	});
+});

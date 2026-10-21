@@ -33,6 +33,8 @@ export const PAGES = [
 	{ name: "bills", path: "/bills" },
 	{ name: "trends", path: "/trends" },
 	{ name: "accounts", path: "/accounts" },
+	// Accounts' Apple Card sheet (#766): the demo's sample, which CI's seeded demo shows.
+	{ name: "apple-card-sheet", path: "/accounts/apple-card" },
 	{ name: "documents", path: "/documents" },
 	{ name: "settings", path: "/settings" },
 	{ name: "settings-categories", path: "/settings/categories" },
