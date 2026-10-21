@@ -33,6 +33,16 @@ beforeEach(async () => {
 });
 
 describe("GET /how-it-works in the demo", () => {
+	it("says the minute check and the ready email in the Cron Triggers and Resend rows (decision 146)", async () => {
+		const html = decodeHtml((await get("/how-it-works")).html);
+		expect(html).toContain(
+			"Each minute, in the family app, it checks whether a new family's first questions have opened and emails each person who left the page 10 minutes ago, once; the 10:00 run sends due reconnect reminders and checks again.",
+		);
+		expect(html).toContain(
+			"Sends bank sign-in reminder emails and the first week's ready email;",
+		);
+	});
+
 	it("lists the Cloudflare Workflows row after Cron Triggers, in the owner's words (decision 139)", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain("Cloudflare Workflows");

@@ -5,9 +5,10 @@
 //
 // A sorting group takes the calls it wants in one step before it starts (`reserveJevCalls`) and keeps its grant
 // under its own name, `jev_reserved_<date>_<turn>`, in the same batch (decision 143). A reserve step that runs again
-// gets that grant back; its save gives back what it didn't ask and removes the record. A call costs no query of its
-// own: D1 allows 1,000 queries in one invocation, and a night's 500 calls must fit in them. A run cut off before it
-// gives back loses the unused part for that day, which only ever leaves the day with fewer calls, never more.
+// gets that grant back; its save gives back what it didn't ask and removes the record. A group's answers are saved in
+// one batch, so a group of 25 costs one batch, not 25 round trips. The day's cap is 500, or the first week's larger
+// allowance (decision 146: dailyJevCap in sort-groups.ts). A run cut off before it gives back loses the unused part for
+// that day, which only ever leaves the day with fewer calls, never more.
 
 import { daysBefore } from "../dates";
 import { withTurnGuard } from "./sorting-turn";

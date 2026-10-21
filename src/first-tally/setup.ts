@@ -45,8 +45,22 @@ export type SetupView = {
 	bankCount: number;
 	/** Every connected bank's 90-day history is in (banksHistoryIn). Until it is, Home promises no time. */
 	historyIn: boolean;
-	/** Reading: what Jev still owes the import fits one night's allowance (§8.6), so the questions come by the morning. */
-	fitsOneNight: boolean;
+	/**
+	 * Reading, every history in, and something still waiting for Jev: the sort is under way. Home counts the sorted
+	 * transactions and says the questions open when it's done (decision 146).
+	 */
+	sorting: boolean;
+	/**
+	 * Sorting, and the newest bank's history came in over an hour ago: Tally keeps trying on its own, and no time is
+	 * promised (decision 146).
+	 */
+	slow: boolean;
+	/**
+	 * Reading, with something moving (a bank still coming in that nothing flags, or the sort once every history is in and it
+	 * is not slow) and a bank linked or its history in during the last hour: Home refreshes itself while it can, and says so
+	 * (decision 146). A flagged bank still loading, or a stale import, stops it.
+	 */
+	refreshes: boolean;
 	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
 	sorted: number;
 	total: number;
@@ -102,26 +116,14 @@ export const QUESTION_NOTES = [
 ];
 
 /**
- * While the import is read, every bank's history is in, and it fits one night's AI allowance (§8.6): the questions come
- * by the morning.
+ * While the import is read (decision 146): no time is promised, since the sort runs as fast as Jev answers. Lines two to
+ * four say what follows the sort, and the fifth says Later.
  */
-const MORNING_NOTES = [
+const READING_NOTES = [
 	"",
-	"Tomorrow morning",
-	"Tomorrow morning",
-	"Tomorrow morning",
-	"Later",
-];
-
-/**
- * While an import bigger than one night is read: no time is promised, since the status says "when it's done" (#585: never
- * promise what a failed run can't keep).
- */
-const CATCH_UP_NOTES = [
-	"",
-	"When it's done",
-	"When it's done",
-	"When it's done",
+	"After sorting",
+	"After sorting",
+	"After sorting",
 	"Later",
 ];
 
@@ -163,7 +165,6 @@ export function setupSteps(
 	phase: SetupPhase,
 	bankName: string | null,
 	today: string,
-	byMorning: boolean,
 	bankCount: number,
 ): StepLine[] {
 	// The line the family acts on now says "Next": the first stroke not yet drawn once the questions are open. Before a
@@ -173,13 +174,7 @@ export function setupSteps(
 		phase === "ready"
 			? STROKES.findIndex((stroke) => record?.strokes[stroke] === undefined)
 			: -1;
-	// byMorning is every bank's history in and the rest fitting one night (setupView): only then is the morning promised.
-	const notes =
-		phase !== "reading"
-			? QUESTION_NOTES
-			: byMorning
-				? MORNING_NOTES
-				: CATCH_UP_NOTES;
+	const notes = phase !== "reading" ? QUESTION_NOTES : READING_NOTES;
 	return STROKES.map((stroke, i) => {
 		const drawn = record?.strokes[stroke] !== undefined;
 		const day = record?.strokes[stroke] ?? null;
@@ -318,10 +313,35 @@ export async function readFirstWeek(
 	};
 }
 
+const HOUR_MS = 3_600_000;
+
+/**
+ * A stored time as milliseconds: D1's UTC `YYYY-MM-DD HH:MM:SS`, an ISO time ending in Z, or a bare `YYYY-MM-DD` (midnight
+ * UTC). Anything else is null, and a null never counts as recent (decision 146).
+ */
+export function storedTimeMs(value: string | null): number | null {
+	if (value === null) return null;
+	let iso: string | null = null;
+	if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value))
+		iso = `${value.replace(" ", "T")}Z`;
+	else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value))
+		iso = value;
+	else if (/^\d{4}-\d{2}-\d{2}$/.test(value)) iso = `${value}T00:00:00Z`;
+	if (iso === null) return null;
+	const ms = Date.parse(iso);
+	return Number.isFinite(ms) ? ms : null;
+}
+
+/** The latest of some times, the nulls left out; null when none is known. */
+function newestMs(times: (number | null)[]): number | null {
+	const known = times.filter((time): time is number => time !== null);
+	return known.length === 0 ? null : Math.max(...known);
+}
+
 /**
  * The setup Home shows, from the record, the connected banks, what Jev still owes and the banks' flags (src/stale-bank.ts);
- * null once the first week is set up, except on the day stroke five is drawn. `cap` is the day's Jev allowance, `total`
- * how many transactions the banks sent.
+ * null once the first week is set up, except on the day stroke five is drawn. `total` is how many transactions the banks
+ * sent, and `nowMs` is the clock the sort's times are read against.
  */
 export function setupView({
 	record,
@@ -329,8 +349,8 @@ export function setupView({
 	flagged,
 	waiting,
 	total,
-	cap,
 	today,
+	nowMs,
 }: {
 	record: FirstTally | null;
 	banks: GateBank[];
@@ -339,9 +359,9 @@ export function setupView({
 	/** Imported transactions still waiting for Jev's category or income answer (countWaitingForJev). */
 	waiting: number;
 	total: number;
-	/** The household's daily Jev allowance (categorize-pending's jevCallLimit). */
-	cap: number;
 	today: string;
+	/** The clock the sort's times are read against (Date.now in readSetup). */
+	nowMs: number;
 }): SetupView | null {
 	const fifthDay =
 		record?.strokes.count === today && record.night !== undefined;
@@ -356,29 +376,42 @@ export function setupView({
 			: questionsAnswered(record)
 				? "answered"
 				: questionsOpen({
-							today,
 							strokeOneDay: record?.strokes.bank ?? null,
 							banks,
 							waiting,
 						})
 					? "ready"
 					: "reading";
-	const fitsOneNight = waiting <= cap;
+	const sorting = phase === "reading" && historyIn && waiting > 0;
+	const historyAt = newestMs(
+		banks.map((bank) => storedTimeMs(bank.historyCompleteAt)),
+	);
+	const slow = sorting && historyAt !== null && nowMs - historyAt > HOUR_MS;
+	const linkedAt = newestMs(banks.map((bank) => storedTimeMs(bank.linkedAt)));
+	const recent = newestMs([linkedAt, historyAt]);
+	// Something is moving: once every history is in, the sort (not slow). While one is still coming in, a bank that nothing
+	// flags: a flagged one waits for a sign-in or a sync that isn't coming, as bankState's paused does. Flags are matched by
+	// name, as answeredWaitingFor reads them.
+	const flaggedNames = new Set(flagged.map((bank) => bank.name));
+	const moving =
+		phase === "reading" &&
+		(historyIn
+			? sorting && !slow
+			: banks.some(
+					(bank) =>
+						bank.historyCompleteAt === null && !flaggedNames.has(bank.name),
+				));
+	const refreshes = moving && recent !== null && nowMs - recent <= HOUR_MS;
 	return {
 		phase,
 		drawn: strokesDrawn(record),
-		steps: setupSteps(
-			record,
-			phase,
-			bankName,
-			today,
-			historyIn && fitsOneNight,
-			banks.length,
-		),
+		steps: setupSteps(record, phase, bankName, today, banks.length),
 		bankName,
 		bankCount: banks.length,
 		historyIn,
-		fitsOneNight,
+		sorting,
+		slow,
+		refreshes,
 		sorted: Math.max(0, total - waiting),
 		total,
 		fifth: fifthDay ? (record?.night ?? null) : null,
@@ -395,11 +428,7 @@ export function setupView({
  */
 export async function readSetup(
 	db: D1Database,
-	{
-		today,
-		cap,
-		flagged,
-	}: { today: string; cap: number; flagged: FlaggedBank[] },
+	{ today, flagged }: { today: string; flagged: FlaggedBank[] },
 ): Promise<SetupView | null> {
 	let record = await readFirstTally(db);
 	const budgetsDay = record?.strokes.budgets;
@@ -431,5 +460,13 @@ export async function readSetup(
 				)
 				.first<{ total: number }>()
 		)?.total ?? 0;
-	return setupView({ record, banks, flagged, waiting, total, cap, today });
+	return setupView({
+		record,
+		banks,
+		flagged,
+		waiting,
+		total,
+		today,
+		nowMs: Date.now(),
+	});
 }

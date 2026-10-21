@@ -12,6 +12,7 @@ import { keepNightCounts } from "./first-tally/night";
 import { runTimeBudgetMs } from "./run-budget";
 import {
 	type SortEnv,
+	type SortOptions,
 	type StepConfig,
 	type StepRunner,
 	sortGroups,
@@ -20,6 +21,12 @@ import type { SortParams } from "./sort-start";
 import { suggestNightlyNames } from "./suggest-names-pending";
 
 type InstanceEnv = SortEnv & { AI?: Ai };
+
+/**
+ * The most Jev asks one sorting instance makes (decision 146). Each ask is a step, and each group of 25 adds three, so this
+ * stays under Workflows' 10,000 steps an instance on Workers Paid. What is left waits for the next sync or the night.
+ */
+export const INSTANCE_MAX_CALLS = 5000;
 
 const NIGHT_STEPS = {
 	// Workers AI steps never retry, so no request is made twice. Each starts no request after 13 minutes from its own
@@ -36,6 +43,29 @@ const NIGHT_STEPS = {
 		sensitive: "output",
 	},
 } satisfies Record<string, StepConfig>;
+
+/**
+ * The options an instance's sort runs with (decision 146): the rows the params name, and the most Jev asks the instance makes,
+ * INSTANCE_MAX_CALLS. Every instance's sort gets its options here, so the cap is set in one place.
+ */
+export function instanceSortOptions(
+	params: SortParams,
+	options: {
+		runId: string;
+		/** The wait before a busy Jev is asked again (decision 145). */
+		sleep?: (name: string, ms: number) => Promise<void>;
+	},
+): SortOptions {
+	return {
+		rulesApplied: params.rulesApplied,
+		onlyIds: params.ids,
+		bySync: params.bySync,
+		runId: options.runId,
+		waitForTurn: true,
+		maxCalls: INSTANCE_MAX_CALLS,
+		sleep: options.sleep,
+	};
+}
 
 /**
  * Runs one sorting instance's steps through `runStep` (see StepRunner). The sort is the same as ever. With `params.night`
@@ -56,14 +86,12 @@ export async function runSortInstance(
 	},
 ): Promise<void> {
 	try {
-		await sortGroups(env, runStep, options.fetchImpl, {
-			rulesApplied: params.rulesApplied,
-			onlyIds: params.ids,
-			bySync: params.bySync,
-			runId: options.runId,
-			waitForTurn: true,
-			sleep: options.sleep,
-		});
+		await sortGroups(
+			env,
+			runStep,
+			options.fetchImpl,
+			instanceSortOptions(params, options),
+		);
 	} catch (error) {
 		// A step that ran out of retries ends the sort quietly; the rows it didn't save wait for the next sort.
 		console.error(

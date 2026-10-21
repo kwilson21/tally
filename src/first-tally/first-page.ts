@@ -22,6 +22,7 @@ import {
 	markedTransferSql,
 } from "../db/counted-month";
 import {
+	anyQuestionAnswered,
 	type BillsKept,
 	type BudgetAnswer,
 	type FirstTally,
@@ -90,6 +91,12 @@ export type FirstPageModel = {
 	waiting: BillSuggestion[];
 	/** The budgets step (spec §8.8): null until pay and bills are done, since the page asks them first. */
 	budgets: BudgetsStep | null;
+	/**
+	 * True while no question is answered in the record once the page has settled its own draws (anyQuestionAnswered): the
+	 * check-in an answer's reply keeps (decision 146). A page's first visit reads its own value before it settles, since
+	 * settling draws a pay question with nothing to ask (routes/first-page.tsx).
+	 */
+	watching: boolean;
 };
 
 /**
@@ -694,6 +701,7 @@ export async function settleAndLoad(
 		keep: split.keep,
 		waiting: split.waiting,
 		budgets: done ? await budgetsStep(db, today, record, oneAtATime) : null,
+		watching: !anyQuestionAnswered(record),
 	};
 }
 

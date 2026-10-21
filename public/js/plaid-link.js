@@ -168,10 +168,22 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	const linkErrorRegion = () =>
 		document.querySelector("[data-link-bank-error]");
 	const showAlert = (message) => {
-		const alert = document.createElement("p");
-		alert.setAttribute("role", "alert");
-		alert.textContent = message;
-		linkErrorRegion()?.replaceChildren(alert);
+		const region = linkErrorRegion();
+		if (region) {
+			const alert = document.createElement("p");
+			alert.setAttribute("role", "alert");
+			alert.textContent = message;
+			region.replaceChildren(alert);
+			return;
+		}
+		// No error region is on screen (a first-week redraw can take it away while Plaid's window is open), so the
+		// words still reach the person as a toast: the same "toast" event an HX-Trigger toast dispatches (toast.js).
+		document.body.dispatchEvent(
+			new CustomEvent("toast", {
+				bubbles: true,
+				detail: { message, type: "error" },
+			}),
+		);
 	};
 	const showFailure = (responseText) => {
 		const serverAlert = responseText
@@ -236,12 +248,18 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 								// Leave malformed headers to htmx's normal handling.
 							}
 						};
-						button.addEventListener("htmx:after:request", finished);
-						button.addEventListener("htmx:finally:request", finished);
+						// The exchange's source is the clicked button while it is on the page, else the live Link a bank, else
+						// the body. A first-week redraw can replace the button while Plaid's window is open, and htmx 4 sends
+						// nothing for a source that is no longer in the document, so the exchange never depends on the one clicked.
+						const source = button.isConnected
+							? button
+							: (document.querySelector("[data-link-bank]") ?? document.body);
+						source.addEventListener("htmx:after:request", finished);
+						source.addEventListener("htmx:finally:request", finished);
 						try {
 							await htmx.ajax("POST", "/plaid/exchange", {
-								source: button,
-								target: linkErrorRegion() ?? button,
+								source,
+								target: linkErrorRegion() ?? source,
 								swap: "none",
 								headers: {
 									"Content-Type": "application/x-www-form-urlencoded",
@@ -249,8 +267,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 								values: { public_token: publicToken },
 							});
 						} finally {
-							button.removeEventListener("htmx:after:request", finished);
-							button.removeEventListener("htmx:finally:request", finished);
+							source.removeEventListener("htmx:after:request", finished);
+							source.removeEventListener("htmx:finally:request", finished);
 						}
 						if (
 							!exchangeContext?.response ||
@@ -321,13 +339,26 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		}
 	};
 
+	// Home's first-week refreshes, the Your banks poll and the presence check-in, carry data-waits-for-link. While Plaid Link
+	// is open they are skipped, so a sort that finishes mid-link can't redraw the first-week top and take the bank being linked
+	// away (decision 146). htmx 4.0.0 (node_modules/htmx.org/dist/htmx.js, #issueRequest) dispatches a cancelable
+	// htmx:before:request on a request's source element, and sends nothing when it is prevented. A skipped tick is not queued:
+	// the next tick after onSuccess or onExit runs as usual. A Plaid session longer than the email's 10 minutes counts as away,
+	// which is acceptable because linking a bank closes the questions again.
+	const skipWhileLinking = (event) => {
+		if (linking && event.target?.hasAttribute?.("data-waits-for-link"))
+			event.preventDefault();
+	};
+
 	// One delegated listener for both buttons, so a button a refresh replaced still works.
-	if (document.addEventListener)
+	if (document.addEventListener) {
 		document.addEventListener("click", (event) => {
 			const linkButton = event.target?.closest?.("[data-link-bank]");
 			if (linkButton) return linkClick(linkButton);
 			return repairClick(event);
 		});
+		document.addEventListener("htmx:before:request", skipWhileLinking);
+	}
 }
 
 if (typeof document !== "undefined") {

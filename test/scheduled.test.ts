@@ -414,6 +414,68 @@ describe("scheduled handler: which run a cron starts", () => {
 	});
 });
 
+// The minute run (decision 146): each minute in production runs the ready email alone. A family whose questions are open
+// and whose person has left gets the email on the first minute, nothing on the next, and nothing ever in the demo.
+describe("scheduled handler: the minute run for the ready email (decision 146)", () => {
+	/** A family whose questions are open: a bank with its history in, stroke one drawn, no waiting, Dana on the list. */
+	async function openFamily() {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await saveAiSwitches(env.DB, { categories: false, income: false });
+		await env.DB.batch([
+			env.DB.prepare(
+				"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = '2026-10-13 09:00:00', history_complete_at = '2026-10-13 09:00:00'",
+			),
+			env.DB.prepare("DELETE FROM household_members"),
+			env.DB.prepare(
+				"INSERT INTO household_members (email, last_seen_at) VALUES ('dana@example.com', datetime('now'))",
+			),
+			env.DB.prepare(
+				"DELETE FROM household_settings WHERE key = 'first_tally'",
+			),
+			env.DB.prepare(
+				"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
+			).bind(JSON.stringify({ strokes: { bank: "2026-10-13" }, budgets: {} })),
+		]);
+	}
+
+	it("sends the ready email once with the questions open, starts no sorting instance, and sends nothing more the next minute", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await openFamily();
+		create.mockClear();
+		const resend = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(async () => Response.json({}, { status: 200 }));
+		const minuteEnv = {
+			...env,
+			DEMO: "false",
+			RESEND_API_KEY: "key",
+			EMAIL: undefined,
+		};
+		await scheduledWith.scheduled({ cron: "* * * * *" }, minuteEnv);
+		expect(resend).toHaveBeenCalledTimes(1);
+		expect(create).not.toHaveBeenCalled();
+		await scheduledWith.scheduled({ cron: "* * * * *" }, minuteEnv);
+		expect(resend).toHaveBeenCalledTimes(1);
+		vi.restoreAllMocks();
+	});
+
+	it("never runs in the demo", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await openFamily();
+		create.mockClear();
+		const resend = vi
+			.spyOn(globalThis, "fetch")
+			.mockImplementation(async () => Response.json({}, { status: 200 }));
+		await scheduledWith.scheduled(
+			{ cron: "* * * * *" },
+			{ ...env, DEMO: "true", RESEND_API_KEY: "key" },
+		);
+		expect(resend).not.toHaveBeenCalled();
+		expect(create).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+	});
+});
+
 it("logs a night that fails to start by its error name, and the feedback retry still runs", async () => {
 	vi.spyOn(console, "log").mockImplementation(() => {});
 	const logged = vi.spyOn(console, "error").mockImplementation(() => {});

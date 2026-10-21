@@ -1,18 +1,23 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
+import {
+	CLAIM_SQL,
+	readLine,
+	readyEmailKey,
+	renderReadyEmail,
+	runReadyEmail,
+} from "../src/first-tally/ready-email";
 import handler from "../src/index";
+import type { Mail } from "../src/reconnect/deliver";
 
-// The ready email (P140, decision 134, spec §8.8): one email per person, sent by the 10:00 UTC run once a new family's first
-// questions are open, and never again to an address it has reached.
+// The ready email (P140, decision 134, decision 146, spec §8.8): one email per person, sent by the minute run once a new
+// family's first questions are open (the 10:00 run is the backstop), and never again to an address it has reached. A person
+// whose page has checked in within the last 10 minutes is not sent to yet: someone still watching sees the questions there.
 
-// The household's Oct 14, 9:00 in New York. Stroke one was drawn the day before, so the questions can open today.
-const NOW = new Date("2026-10-14T13:00:00Z");
-// 02:00 UTC on Oct 14 is still Oct 13 in New York: the same household day as stroke one, so the questions are shut.
-const SAME_DAY = new Date("2026-10-14T02:00:00Z");
 const STROKE_ONE = "2026-10-13";
 const SUBJECT = "Three questions to finish setting up";
 const NEXT =
@@ -28,9 +33,15 @@ const scheduledWith = handler as unknown as {
 
 type Sent = { to: string; subject: string; html: string; text: string };
 
-/** Resend's fake: answers `status` and records each request's recipient and words. */
+/** The Idempotency-Key a request carried, or null when it carried none. */
+const keyOf = (init: RequestInit | undefined) =>
+	(init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"] ??
+	null;
+
+/** Resend's fake: answers `status` and records each request's recipient, words and Idempotency-Key. */
 function resendFake(status = 200) {
 	const sent: Sent[] = [];
+	const keys: (string | null)[] = [];
 	const fetchImpl = vi.fn(
 		async (_url: RequestInfo | URL, init?: RequestInit) => {
 			const body = JSON.parse(String(init?.body)) as Sent;
@@ -40,10 +51,40 @@ function resendFake(status = 200) {
 				html: body.html,
 				text: body.text,
 			});
+			keys.push(keyOf(init));
 			return new Response("{}", { status });
 		},
 	);
-	return { fetchImpl, sent };
+	return { fetchImpl, sent, keys };
+}
+
+/**
+ * The key a ready email carries for an address and its words, written out from its definition (decision 146): SHA-256 of the
+ * JSON of the lower-cased address, the subject, the HTML and the text.
+ */
+async function keyFor(address: string, mail: Mail) {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(
+			JSON.stringify([
+				address.toLowerCase(),
+				mail.subject,
+				mail.html,
+				mail.text,
+			]),
+		),
+	);
+	const hex = [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+	return `ready-email-${hex}`;
+}
+
+/** The first email Resend was sent, which a test takes its words from. */
+function firstMail(sent: Sent[]): Mail {
+	const mail = sent[0];
+	if (!mail) throw new Error("Resend was sent no email");
+	return mail;
 }
 
 /** The production environment: Resend on, Cloudflare's email off unless a test gives it. */
@@ -143,7 +184,7 @@ async function clearHousehold() {
 }
 
 /**
- * A family whose questions are open on NOW's day: one Chase bank with its history in and no transactions, stroke one drawn
+ * A family whose questions are open: one Chase bank with its history in and no transactions, stroke one drawn
  * the day before, and the given members. The Jev switches are off, so no transaction waits for an answer unless a test
  * turns them on. Returns the bank's account id.
  */
@@ -185,7 +226,7 @@ describe("the ready email: who gets it, and when", () => {
 	it("sends each household address the email once, with the words, and records each address as reached", async () => {
 		await openHousehold({ members: [DANA, RILEY] });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
 		for (const mail of sent) {
 			expect(mail.subject).toBe(SUBJECT);
@@ -212,7 +253,7 @@ describe("the ready email: who gets it, and when", () => {
 		await openHousehold({ members: [DANA] });
 		const before = await readFirstTally(env.DB);
 		expect(before?.readyEmailedTo).toBeUndefined();
-		await runReadyEmail(production(), resendFake().fetchImpl, NOW);
+		await runReadyEmail(production(), resendFake().fetchImpl);
 		expect(await storedList()).toEqual([DANA]);
 	});
 
@@ -228,7 +269,7 @@ describe("the ready email: who gets it, and when", () => {
 				return new Response("{}", { status: 200 });
 			},
 		);
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(reachedAtSend).toEqual([true]);
 	});
 
@@ -238,16 +279,19 @@ describe("the ready email: who gets it, and when", () => {
 			"UPDATE plaid_items SET history_complete_at = NULL",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 		expect(await storedList()).toBeUndefined();
 	});
 
-	it("does not send on stroke one's own household day, though it is already the next day in UTC", async () => {
-		await openHousehold();
+	it("sends on stroke one's own day once every bank's history is in and nothing waits", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: { strokes: { bank: todayIn(DEFAULT_TIME_ZONE) }, budgets: {} },
+		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, SAME_DAY);
-		expect(sent).toEqual([]);
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 	});
 
 	it("does not send with no connected bank", async () => {
@@ -256,7 +300,7 @@ describe("the ready email: who gets it, and when", () => {
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
@@ -269,7 +313,7 @@ describe("the ready email: who gets it, and when", () => {
 			.bind(accountId)
 			.run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
@@ -283,7 +327,7 @@ describe("the ready email: who gets it, and when", () => {
 				},
 			});
 			const { fetchImpl, sent } = resendFake();
-			await runReadyEmail(production(), fetchImpl, NOW);
+			await runReadyEmail(production(), fetchImpl);
 			expect(sent).toEqual([]);
 		},
 	);
@@ -302,21 +346,21 @@ describe("the ready email: who gets it, and when", () => {
 			},
 		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
 	it("does not send in the demo", async () => {
 		await openHousehold();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production({ DEMO: "true" }), fetchImpl, NOW);
+		await runReadyEmail(production({ DEMO: "true" }), fetchImpl);
 		expect(sent).toEqual([]);
 	});
 
 	it("does not send to an empty household list", async () => {
 		await openHousehold({ members: [] });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent).toEqual([]);
 		expect(await storedList()).toBeUndefined();
 	});
@@ -327,8 +371,140 @@ describe("the ready email: who gets it, and when", () => {
 			"INSERT INTO household_settings (key, value) VALUES ('bank_sign_in_emails', 'off')",
 		).run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+});
+
+describe("the ready email: who is still there (decision 146)", () => {
+	/** Sets a person's last check-in to a SQLite time modifier from now, such as '-30 seconds'. */
+	const checkedInAt = (email: string, when: string) =>
+		env.DB.prepare(
+			"UPDATE household_members SET home_seen_at = datetime('now', ?) WHERE email = ?",
+		)
+			.bind(when, email)
+			.run();
+
+	/** A database whose prepared statements are counted, so a run's reads can be counted. */
+	function countingDb() {
+		const statements: string[] = [];
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						statements.push(sql);
+						return target.prepare(sql);
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		return { db, statements };
+	}
+
+	it.each(["-30 seconds", "-9 minutes"])(
+		"gives no email to a person whose page checked in %s, and tries them on a later minute",
+		async (when) => {
+			await openHousehold({ members: [DANA] });
+			await checkedInAt(DANA, when);
+			const first = resendFake();
+			await runReadyEmail(production(), first.fetchImpl);
+			expect(first.sent).toEqual([]);
+			expect(await storedList()).toBeUndefined();
+			await checkedInAt(DANA, "-11 minutes");
+			const later = resendFake();
+			await runReadyEmail(production(), later.fetchImpl);
+			expect(later.sent.map((mail) => mail.to)).toEqual([DANA]);
+		},
+	);
+
+	it("gives the email to a person whose page last checked in 11 minutes ago", async () => {
+		await openHousehold({ members: [DANA] });
+		await checkedInAt(DANA, "-11 minutes");
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+
+	it("of two people, emails only the one who has left", async () => {
+		await openHousehold({ members: [DANA, RILEY] });
+		await checkedInAt(DANA, "-30 seconds");
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([RILEY]);
+		expect(await storedList()).toEqual([RILEY]);
+	});
+
+	it("gives the email to a person whose page has never checked in", async () => {
+		await openHousehold({ members: [DANA] });
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
+	});
+
+	it("sends nothing once a question is answered, even to a person who has left", async () => {
+		await openHousehold({ members: [DANA] });
+		await writeRecord({
+			strokes: { bank: STROKE_ONE, pay: STROKE_ONE },
+			budgets: {},
+		});
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(sent).toEqual([]);
+	});
+
+	it("nothing is logged when no address is claimed", async () => {
+		await openHousehold({ members: [DANA] });
+		await checkedInAt(DANA, "-30 seconds");
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const error = vi.spyOn(console, "error").mockImplementation(() => {});
+		await runReadyEmail(production(), resendFake().fetchImpl);
+		expect(log).not.toHaveBeenCalled();
+		expect(error).not.toHaveBeenCalled();
+		log.mockRestore();
+		error.mockRestore();
+	});
+
+	it("a set-up household costs one read and sends nothing", async () => {
+		await openHousehold({ members: [DANA] });
+		await writeRecord({
+			strokes: {
+				bank: STROKE_ONE,
+				pay: STROKE_ONE,
+				bills: STROKE_ONE,
+				budgets: STROKE_ONE,
+				count: STROKE_ONE,
+			},
+			budgets: {},
+		});
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
+	});
+
+	it("a household with no first week record costs one read and sends nothing", async () => {
+		await clearHousehold();
+		await addBank(1, "Chase");
+		await addMember(DANA);
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
+	});
+
+	it("a household whose stroke one has no day costs one read and sends nothing", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: { strokes: { bank: null }, budgets: {} },
+		});
+		const { db, statements } = countingDb();
+		const { fetchImpl, sent } = resendFake();
+		await runReadyEmail(production({ DB: db }), fetchImpl);
+		expect(statements).toHaveLength(1);
+		expect(sent).toEqual([]);
 	});
 });
 
@@ -339,7 +515,7 @@ describe("the ready email: recipients", () => {
 		await addMember(RILEY, { removed: true });
 		await addMember("casey@example.com", { seen: "2020" });
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 	});
 
@@ -353,16 +529,16 @@ describe("the ready email: recipients", () => {
 			},
 		});
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent.map((mail) => mail.to)).toEqual([RILEY]);
 	});
 
 	it("sends once on a morning: a second run that morning sends nothing", async () => {
 		await openHousehold();
 		const first = resendFake();
-		await runReadyEmail(production(), first.fetchImpl, NOW);
+		await runReadyEmail(production(), first.fetchImpl);
 		const second = resendFake();
-		await runReadyEmail(production(), second.fetchImpl, NOW);
+		await runReadyEmail(production(), second.fetchImpl);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(second.sent).toEqual([]);
 	});
@@ -378,12 +554,11 @@ describe("the ready email: a run that overlaps another", () => {
 		const firstFetch = vi.fn(
 			async (url: RequestInfo | URL, init?: RequestInit) => {
 				const to = (JSON.parse(String(init?.body)) as Sent).to;
-				if (to === DANA)
-					await runReadyEmail(production(), second.fetchImpl, NOW);
+				if (to === DANA) await runReadyEmail(production(), second.fetchImpl);
 				return first.fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), firstFetch, NOW);
+		await runReadyEmail(production(), firstFetch);
 		expect(second.sent.map((mail) => mail.to)).toEqual([RILEY]);
 		expect(first.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA, RILEY]);
@@ -402,7 +577,7 @@ describe("the ready email: a question answered during a run", () => {
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), answeredDuringDana, NOW);
+		await runReadyEmail(production(), answeredDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -454,7 +629,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), linkedDuringDana, NOW);
+		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -469,7 +644,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), linkedDuringDana, NOW);
+		await runReadyEmail(production(), linkedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA, RILEY]);
 		expect(sent[0]?.text).toContain("from Chase.");
 		expect(sent[1]?.text).toContain("from Chase and Ally.");
@@ -492,7 +667,7 @@ describe("the ready email: the gate and the members, checked before each address
 				return fetchImpl(url, init);
 			},
 		);
-		await runReadyEmail(production(), removedDuringDana, NOW);
+		await runReadyEmail(production(), removedDuringDana);
 		expect(sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -519,7 +694,7 @@ describe("the ready email: delivery", () => {
 		await openHousehold();
 		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
 		const { fetchImpl } = resendFake(500);
-		await runReadyEmail(production({ EMAIL: { send } }), fetchImpl, NOW);
+		await runReadyEmail(production({ EMAIL: { send } }), fetchImpl);
 		expect(send).toHaveBeenCalledOnce();
 		expect(send.mock.calls[0]?.[0]).toMatchObject({
 			to: DANA,
@@ -528,7 +703,7 @@ describe("the ready email: delivery", () => {
 		expect(await storedList()).toEqual([DANA]);
 	});
 
-	it("releases the address when neither provider delivers, so the next morning sends it again", async () => {
+	it("releases the address when neither provider delivers, so the next minute sends it again", async () => {
 		await openHousehold();
 		const email = {
 			send: vi.fn(async () => {
@@ -538,15 +713,10 @@ describe("the ready email: delivery", () => {
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
-			NOW,
 		);
 		expect(await storedList()).toEqual([]);
 		const next = resendFake();
-		await runReadyEmail(
-			production(),
-			next.fetchImpl,
-			new Date("2026-10-15T13:00:00Z"),
-		);
+		await runReadyEmail(production(), next.fetchImpl);
 		expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -559,14 +729,10 @@ describe("the ready email: delivery", () => {
 				return new Response("{}", { status: to === DANA ? 500 : 200 });
 			},
 		);
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(await storedList()).toEqual([RILEY]);
 		const next = resendFake();
-		await runReadyEmail(
-			production(),
-			next.fetchImpl,
-			new Date("2026-10-15T13:00:00Z"),
-		);
+		await runReadyEmail(production(), next.fetchImpl);
 		expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
 		expect(await storedList()).toEqual([RILEY, DANA]);
 	});
@@ -577,12 +743,399 @@ describe("the ready email: delivery", () => {
 		const timedOut = vi.fn(async () => {
 			throw new Error("timeout");
 		});
-		await runReadyEmail(production(), timedOut, NOW);
+		await runReadyEmail(production(), timedOut);
 		expect(await storedList()).toEqual([]);
 		expect(log).toHaveBeenCalledWith(
 			"ready email: 0 sent, 1 failed (resend timeout or error)",
 		);
 		log.mockRestore();
+	});
+});
+
+describe("the ready email: a try that Resend may have accepted never goes to Cloudflare's email (decision 146)", () => {
+	const conflict = (name: string) =>
+		vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(JSON.stringify({ name, statusCode: 409 }), {
+					status: 409,
+				}),
+		);
+
+	it("falls back to Cloudflare's email on a 409 invalid_idempotent_request, since that key was used with other words and this email was never sent under it, and the address is reached", async () => {
+		await openHousehold();
+		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+		await runReadyEmail(
+			production({ EMAIL: { send } }),
+			conflict("invalid_idempotent_request"),
+		);
+		expect(send).toHaveBeenCalledOnce();
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("releases the address on a timeout even with Cloudflare's email set, so no fallback sends and the next minute retries with the same key", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const timedOut = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				},
+			);
+			await runReadyEmail(production({ EMAIL: { send } }), timedOut);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([]);
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (resend timeout or error)",
+			);
+			const next = resendFake();
+			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+			expect(next.keys).toEqual([await keyFor(DANA, firstMail(next.sent))]);
+			expect(send).not.toHaveBeenCalled();
+		} finally {
+			log.mockRestore();
+		}
+	});
+
+	it("a retry with the same words is answered with Resend's record of the first send, so the email is not sent twice and Cloudflare's email sends nothing", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const first = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				},
+			);
+			await runReadyEmail(production({ EMAIL: { send } }), first);
+			const again = resendFake(200);
+			await runReadyEmail(production({ EMAIL: { send } }), again.fetchImpl);
+			expect(again.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([DANA]);
+		} finally {
+			log.mockRestore();
+		}
+	});
+
+	it("tries again on a 409 concurrent_idempotent_requests: the first send may still fail, so nothing is kept reached and nothing is sent by Cloudflare", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			await runReadyEmail(
+				production({ EMAIL: { send } }),
+				conflict("concurrent_idempotent_requests"),
+			);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([]);
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (resend 409)",
+			);
+		} finally {
+			log.mockRestore();
+		}
+	});
+});
+
+describe("the ready email: a try Resend may hold keeps its words (decision 146)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	/** A Resend that times out: no answer at all, so the send may be held by Resend. */
+	const timesOut = () =>
+		vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+			throw new Error("timeout");
+		});
+
+	/** A Resend that answers 409 concurrent_idempotent_requests: another request with the key is still in progress. */
+	const concurrent = () =>
+		vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response(
+					JSON.stringify({
+						name: "concurrent_idempotent_requests",
+						statusCode: 409,
+					}),
+					{ status: 409 },
+				),
+		);
+
+	/** The email a try sent to Resend, as the request carried it. */
+	const bodyOf = (init: RequestInit | undefined) =>
+		JSON.parse(String(init?.body)) as Sent;
+
+	/** SHA-256 in hex of the lower-cased address: the key a held try's words are kept under (ready-email.tsx). */
+	async function addressHashOf(address: string) {
+		const digest = await crypto.subtle.digest(
+			"SHA-256",
+			new TextEncoder().encode(address.toLowerCase()),
+		);
+		return [...new Uint8Array(digest)]
+			.map((byte) => byte.toString(16).padStart(2, "0"))
+			.join("");
+	}
+
+	/** The entries kept for held tries, by the address's hash: each its read line and the time of its first held try; {} when none is kept. */
+	const heldLinesOf = async () =>
+		(
+			(await readFirstTally(env.DB)) as
+				| (Record<string, unknown> & {
+						heldReadyEmail?: Record<string, { line: string; at: string }>;
+				  })
+				| null
+		)?.heldReadyEmail ?? {};
+
+	it("a try that times out keeps its words, so the next try sends the same email under the same key, though the count has changed", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const first = timesOut();
+		await runReadyEmail(production(), first);
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		const sentFirst = bodyOf(first.mock.calls[0]?.[1]);
+		expect(next.sent).toEqual([
+			{
+				to: DANA,
+				subject: sentFirst.subject,
+				html: sentFirst.html,
+				text: sentFirst.text,
+			},
+		]);
+		expect(next.sent[0]?.text).toContain(
+			"Tally has read your last 90 days from Chase.",
+		);
+		expect(next.sent[0]?.text).not.toContain("sorted 1 transaction");
+		expect(next.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("a 409 concurrent_idempotent_requests keeps its words too, so the next try sends the first words under the same key", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const first = concurrent();
+		await runReadyEmail(production(), first);
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		const sentFirst = bodyOf(first.mock.calls[0]?.[1]);
+		expect(next.sent.map((mail) => mail.text)).toEqual([sentFirst.text]);
+		expect(next.sent[0]?.html).toBe(sentFirst.html);
+		expect(next.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+	});
+
+	it("keeps the words under the address's hash, never the address itself", async () => {
+		await openHousehold({ members: [DANA] });
+		await runReadyEmail(production(), timesOut());
+		const held = await heldLinesOf();
+		expect(Object.keys(held)).toEqual([await addressHashOf(DANA)]);
+		expect(Object.values(held).map((entry) => entry.line)).toEqual([
+			"Tally has read your last 90 days from Chase.",
+		]);
+		expect(Object.values(held)[0]?.at).toMatch(
+			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+		);
+		expect(JSON.stringify(held)).not.toContain(DANA);
+	});
+
+	it("a definite failure keeps no words, so the next try sends the new words under a new key", async () => {
+		const accountId = await openHousehold({ members: [DANA] });
+		const refused = resendFake(500);
+		await runReadyEmail(production(), refused.fetchImpl);
+		expect(await storedList()).toEqual([]);
+		expect(await heldLinesOf()).toEqual({});
+		await addTransactions(accountId, 1);
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.sent[0]?.text).toContain(
+			"Tally has read your last 90 days from Chase and sorted 1 transaction.",
+		);
+		expect(next.keys).toEqual([await keyFor(DANA, firstMail(next.sent))]);
+	});
+
+	describe("a kept try goes through Resend only, for up to a day (decision 146)", () => {
+		const HELD_LINE =
+			"Tally has read your last 90 days from Chase and sorted 5 transactions.";
+		const HOUR_MS = 3_600_000;
+		const EMAIL_SENDER = () =>
+			vi.fn(async (_message: Record<string, unknown>) => ({}));
+
+		/** A household whose DANA has a kept try: its line, and the time of its first held try `ageMs` ago. Returns that time. */
+		async function openKept(line: string, ageMs: number, at?: string) {
+			const firstHeld = at ?? new Date(Date.now() - ageMs).toISOString();
+			await openHousehold({
+				members: [DANA],
+				record: {
+					strokes: { bank: STROKE_ONE },
+					budgets: {},
+					heldReadyEmail: {
+						[await addressHashOf(DANA)]: { line, at: firstHeld },
+					},
+				},
+			});
+			return firstHeld;
+		}
+
+		it.each([429, 500, 503])(
+			"a try that times out, then a %i, keeps its words and first time, and Cloudflare's email sends nothing",
+			async (status) => {
+				await openHousehold({ members: [DANA] });
+				const log = vi.spyOn(console, "error").mockImplementation(() => {});
+				const send = EMAIL_SENDER();
+				const first = timesOut();
+				await runReadyEmail(production({ EMAIL: { send } }), first);
+				const kept = (await heldLinesOf())[await addressHashOf(DANA)];
+				const again = resendFake(status);
+				await runReadyEmail(production({ EMAIL: { send } }), again.fetchImpl);
+				expect(send).not.toHaveBeenCalled();
+				expect(again.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+				expect((await heldLinesOf())[await addressHashOf(DANA)]).toEqual(kept);
+				// A held try releases the address, as a timeout always has; the kept entry is what carries on.
+				expect(await storedList()).toEqual([]);
+				expect(log).toHaveBeenLastCalledWith(
+					`ready email: 0 sent, 1 failed (resend ${status})`,
+				);
+			},
+		);
+
+		it("a later held try keeps the first line and time, since it is the same email", async () => {
+			const at = await openKept(HELD_LINE, 5 * HOUR_MS);
+			await runReadyEmail(production(), timesOut());
+			expect(await heldLinesOf()).toEqual({
+				[await addressHashOf(DANA)]: { line: HELD_LINE, at },
+			});
+		});
+
+		it("an entry 22 hours old is still retried: it sends the kept line, not the read now, under the key those words give, and drops the entry once delivered", async () => {
+			await openKept(HELD_LINE, 22 * HOUR_MS);
+			const send = EMAIL_SENDER();
+			const next = resendFake();
+			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+			expect(next.sent.map((mail) => mail.text)).toEqual([
+				renderReadyEmail(HELD_LINE).text,
+			]);
+			expect(next.keys).toEqual([
+				await keyFor(DANA, renderReadyEmail(HELD_LINE)),
+			]);
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([DANA]);
+			expect(await heldLinesOf()).toEqual({});
+		});
+
+		it("an entry 23 hours and 1 minute old is not sent: the address stays reached, the entry is dropped, and the run logs 'held over a day'", async () => {
+			await openKept(HELD_LINE, 23 * HOUR_MS + 60_000);
+			const log = vi.spyOn(console, "error").mockImplementation(() => {});
+			const send = EMAIL_SENDER();
+			const next = resendFake();
+			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+			expect(next.fetchImpl).not.toHaveBeenCalled();
+			expect(send).not.toHaveBeenCalled();
+			expect(await storedList()).toEqual([DANA]);
+			expect(await heldLinesOf()).toEqual({});
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (held over a day)",
+			);
+			expect(JSON.stringify(log.mock.calls)).not.toContain(DANA);
+			// The address is reached, so a later minute sends it nothing.
+			const later = resendFake();
+			await runReadyEmail(production(), later.fetchImpl);
+			expect(later.fetchImpl).not.toHaveBeenCalled();
+		});
+
+		it("an entry whose time cannot be read is dropped, not sent", async () => {
+			await openKept(HELD_LINE, 0, "last Tuesday");
+			const log = vi.spyOn(console, "error").mockImplementation(() => {});
+			const next = resendFake();
+			await runReadyEmail(production(), next.fetchImpl);
+			expect(next.fetchImpl).not.toHaveBeenCalled();
+			expect(await heldLinesOf()).toEqual({});
+			expect(log).toHaveBeenCalledWith(
+				"ready email: 0 sent, 1 failed (held over a day)",
+			);
+		});
+
+		it("with no kept try, a 503 still falls back to Cloudflare's email, as a definite failure always has", async () => {
+			await openHousehold({ members: [DANA] });
+			const send = EMAIL_SENDER();
+			await runReadyEmail(
+				production({ EMAIL: { send } }),
+				resendFake(503).fetchImpl,
+			);
+			expect(send).toHaveBeenCalledOnce();
+			expect(await storedList()).toEqual([DANA]);
+			expect(await heldLinesOf()).toEqual({});
+		});
+	});
+
+	it("a closed gate still ends the run: a question answered after a held try sends nothing more", async () => {
+		await openHousehold({ members: [DANA] });
+		await runReadyEmail(production(), timesOut());
+		await writeRecord({
+			strokes: { bank: STROKE_ONE, pay: STROKE_ONE },
+			budgets: {},
+		});
+		const next = resendFake();
+		await runReadyEmail(production(), next.fetchImpl);
+		expect(next.fetchImpl).not.toHaveBeenCalled();
+		expect(next.sent).toEqual([]);
+	});
+});
+
+describe("the ready email: one Idempotency-Key per address and its words (Resend)", () => {
+	const WORDS = renderReadyEmail(readLine([{ name: "Chase" }], 10));
+
+	it("gives the email the key its address and words define, the same for every try", async () => {
+		await openHousehold();
+		const { fetchImpl, keys, sent } = resendFake();
+		await runReadyEmail(production(), fetchImpl);
+		expect(keys).toEqual([await keyFor(DANA, firstMail(sent))]);
+		expect(await readyEmailKey(DANA, firstMail(sent))).toBe(
+			await keyFor(DANA, firstMail(sent)),
+		);
+	});
+
+	it("changes the key when the read line changes, so a retry whose words changed is a new email", async () => {
+		const changed = renderReadyEmail(readLine([{ name: "Chase" }], 11));
+		expect(await readyEmailKey(DANA, WORDS)).not.toBe(
+			await readyEmailKey(DANA, changed),
+		);
+		expect(await readyEmailKey(DANA, WORDS)).toBe(
+			await readyEmailKey(
+				DANA,
+				renderReadyEmail(readLine([{ name: "Chase" }], 10)),
+			),
+		);
+	});
+
+	it("derives the key from the lower-cased address, so a capital letter sends the same key", async () => {
+		expect(await readyEmailKey("Dana@Example.com", WORDS)).toBe(
+			await readyEmailKey("dana@example.com", WORDS),
+		);
+		expect(await readyEmailKey(DANA, WORDS)).toMatch(
+			/^ready-email-[0-9a-f]{64}$/,
+		);
+		expect((await readyEmailKey(DANA, WORDS)).length).toBe(76);
+	});
+
+	it("tries a timed-out send again next minute with the same key, so Resend answers the first send instead of sending twice", async () => {
+		await openHousehold();
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const timedOut = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
+					throw new Error("timeout");
+				},
+			);
+			await runReadyEmail(production(), timedOut);
+			const next = resendFake();
+			await runReadyEmail(production(), next.fetchImpl);
+			expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
+			const words = firstMail(next.sent);
+			expect(keyOf(timedOut.mock.calls[0]?.[1])).toBe(
+				await keyFor(DANA, words),
+			);
+			expect(next.keys).toEqual([await keyFor(DANA, words)]);
+		} finally {
+			log.mockRestore();
+		}
 	});
 });
 
@@ -606,7 +1159,7 @@ describe("the ready email: the words", () => {
 			await addTransactions(accountId, counts[index] ?? 0);
 		}
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		return sent[0]?.text ?? "";
 	};
 
@@ -710,7 +1263,7 @@ describe("the ready email: the words", () => {
 			.bind(accountId)
 			.run();
 		const { fetchImpl, sent } = resendFake();
-		await runReadyEmail(production(), fetchImpl, NOW);
+		await runReadyEmail(production(), fetchImpl);
 		expect(sent[0]?.text).toContain("from Chase and sorted 1 transaction.");
 	});
 });
@@ -719,7 +1272,7 @@ describe("the ready email: the log", () => {
 	it("logs one count line for a clean run, with no address, bank or count in it", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
-		await runReadyEmail(production(), resendFake().fetchImpl, NOW);
+		await runReadyEmail(production(), resendFake().fetchImpl);
 		expect(log).toHaveBeenCalledOnce();
 		expect(log).toHaveBeenCalledWith("ready email: 1 sent, 0 failed");
 		log.mockRestore();
@@ -736,7 +1289,6 @@ describe("the ready email: the log", () => {
 		await runReadyEmail(
 			production({ EMAIL: email }),
 			resendFake(500).fetchImpl,
-			NOW,
 		);
 		expect(log).toHaveBeenCalledOnce();
 		expect(log).toHaveBeenCalledWith(
@@ -754,7 +1306,6 @@ describe("the ready email: the log", () => {
 		await runReadyEmail(
 			production({ RESEND_API_KEY: undefined }),
 			resendFake().fetchImpl,
-			NOW,
 		);
 		expect(log).toHaveBeenCalledWith(
 			"ready email: 0 sent, 1 failed (no provider configured)",

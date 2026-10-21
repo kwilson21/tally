@@ -29,7 +29,7 @@ const EXPORT_COLUMNS = {
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
 	household_settings: "key, value",
 	household_members:
-		"email, first_seen_at, last_seen_at, session_issued_at, removed_at",
+		"email, first_seen_at, last_seen_at, session_issued_at, removed_at, home_seen_at",
 	household_people: "id, name",
 	never_suggest_rules: "id, merchant_key, kind, decided_on, created_at",
 } as const;

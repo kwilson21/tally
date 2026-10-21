@@ -3,6 +3,7 @@ import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
 import {
+	anyQuestionAnswered,
 	type BudgetAnswer,
 	type PayAnswer,
 	readFirstTally,
@@ -103,12 +104,21 @@ function answered(
 	type: "success" | "info" = "success",
 ) {
 	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
-	return c.html(<FirstPageBody model={model} focus motion={motion} />, 200, {
-		"HX-Trigger": hxTrigger({
-			toast: { message, type },
-			announce: message,
-		}),
-	});
+	return c.html(
+		<FirstPageBody
+			model={model}
+			focus
+			motion={motion}
+			watching={model.watching}
+		/>,
+		200,
+		{
+			"HX-Trigger": hxTrigger({
+				toast: { message, type },
+				announce: message,
+			}),
+		},
+	);
 }
 
 /**
@@ -128,6 +138,8 @@ function pageDocument(
 	focus: boolean,
 	budgetError: BudgetError | null = null,
 	savingsError: BudgetError | null = null,
+	/** True while no question is answered: the page checks in, so Tally knows someone is still here (decision 146). */
+	watching = false,
 ) {
 	return (
 		<Layout
@@ -141,6 +153,7 @@ function pageDocument(
 					focus={focus}
 					budgetError={budgetError}
 					savingsError={savingsError}
+					watching={watching}
 				/>
 			</div>
 		</Layout>
@@ -150,11 +163,14 @@ function pageDocument(
 firstPage.get("/first-page", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
 	const oneAtATime = c.req.query("budgets") === "one";
+	// Read before the page settles its own questions: settleAndLoad draws a pay question that has nothing to ask, which would
+	// end the check-in on the first visit (decision 146).
+	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
 	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
-	return c.html(pageDocument(model, oneAtATime));
+	return c.html(pageDocument(model, oneAtATime, null, null, watching));
 });
 
 /**
@@ -165,7 +181,7 @@ firstPage.get("/first-page", async (c) => {
 firstPage.post("/first-page/pay", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	const form = await c.req.formData();
 	const key = String(form.get("merchant") ?? "");
 	const answer = String(form.get("answer") ?? "");
@@ -230,7 +246,7 @@ function paySaved(
 firstPage.post("/first-page/bills", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// Only the charges the form showed are kept: its `keep` fields, each one re-checked against the charges now. An
 	// empty form keeps none, and a charge that is new or changed since the page drew is asked again on the page.
 	const values = (await c.req.formData())
@@ -263,12 +279,14 @@ firstPage.post("/first-page/bills", async (c) => {
 firstPage.post("/first-page/budgets", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 	if (!["all", "yes", "another", "skip"].includes(answer))
 		return c.text("Choose an answer.", 400);
 	// Keep all is the only answer to its own question; every other answer is one at a time, so its page is drawn that way.
+	// Read before the page settles, as the GET reads it: a refused amount's page keeps the check-in while none was drawn.
+	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
 	const before = await settleAndLoad(c.env.DB, today, {
 		oneAtATime: answer !== "all",
 	});
@@ -361,7 +379,8 @@ firstPage.post("/first-page/budgets", async (c) => {
 	} else {
 		const typed = String(form.get("budget") ?? "");
 		const parsed = parseBudgetAmount(typed);
-		if (!parsed.ok) return budgetRefused(c, before, parsed.error, typed);
+		if (!parsed.ok)
+			return budgetRefused(c, before, parsed.error, typed, watching);
 		kind = "another";
 		cents = parsed.cents;
 	}
@@ -390,7 +409,7 @@ firstPage.post("/first-page/savings", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const db = c.env.DB;
 	const today = await householdToday(db);
-	if (!(await readQuestionsGate(db, today))) return notOpen(c);
+	if (!(await readQuestionsGate(db))) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 	if (answer !== "save" && answer !== "skip")
@@ -507,13 +526,23 @@ async function savingsRefused(
 		return answered(c, model, budgetsMovedOnWords(), NO_MOTION, "info");
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
-		return c.html(pageDocument(model, true, null, savingsError), 422);
+		return c.html(
+			pageDocument(
+				model,
+				true,
+				null,
+				savingsError,
+				!anyQuestionAnswered(before),
+			),
+			422,
+		);
 	return c.html(
 		<FirstPageBody
 			model={model}
 			focus
 			motion={NO_MOTION}
 			savingsError={savingsError}
+			watching={model.watching}
 		/>,
 		422,
 		{
@@ -558,16 +587,19 @@ function budgetRefused(
 	model: FirstPageModel,
 	error: string,
 	typed: string,
+	/** True while no question was drawn before the page settled (the check-in, decision 146). */
+	watching: boolean,
 ) {
 	const budgetError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
-		return c.html(pageDocument(model, true, budgetError), 422);
+		return c.html(pageDocument(model, true, budgetError, null, watching), 422);
 	return c.html(
 		<FirstPageBody
 			model={model}
 			focus
 			motion={NO_MOTION}
 			budgetError={budgetError}
+			watching={model.watching}
 		/>,
 		422,
 		{

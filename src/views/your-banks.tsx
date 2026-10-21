@@ -28,14 +28,25 @@ export function YourBanks({
 	banks,
 	today,
 	polls = true,
+	keepPolling = false,
+	step,
+	oob = false,
 }: {
 	banks: YourBank[];
 	today: string;
 	/** False for a picture on the proposals page, which fires nothing by itself (#448): the rows draw, the list doesn't poll. */
 	polls?: boolean;
+	/** Poll while Tally sorts too, not only while a bank is read (decision 146). */
+	keepPolling?: boolean;
+	/** The step Home shows (sorting, slow, reading), sent with the poll so a change is announced once. */
+	step?: string;
+	/** Swaps the list in for the one the page shows, out of band (the presence check-in's answer, decision 146). */
+	oob?: boolean;
 }) {
 	const states = banks.map((bank) => ({ bank, state: bankState(bank, today) }));
-	const polling = polls && states.some(({ state }) => state === "being-read");
+	const polling =
+		polls &&
+		(keepPolling || states.some(({ state }) => state === "being-read"));
 	const inIds = states
 		.filter(({ state }) => state === "in")
 		.map(({ bank }) => bank.id);
@@ -44,14 +55,17 @@ export function YourBanks({
 			id="your-banks"
 			class="mt-4"
 			aria-labelledby="your-banks-label"
+			{...(oob ? { "hx-swap-oob": "outerHTML" } : {})}
 			{...(polling
 				? {
-						"hx-get": `/home/banks?in=${inIds.join(",")}`,
+						"hx-get": `/home/banks?in=${inIds.join(",")}${step ? `&step=${step}` : ""}`,
 						"hx-trigger": "every 5s",
 						"hx-swap": "outerHTML",
 						"hx-status:4xx": "swap:none",
 						"hx-status:5xx": "swap:none",
 						"data-quiet": true,
+						// A Plaid Link window pauses the poll (plaid-link.js, decision 146).
+						"data-waits-for-link": true,
 					}
 				: {})}
 		>
