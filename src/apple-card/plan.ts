@@ -36,20 +36,34 @@ export function leftOut(row: AppleRow): boolean {
 }
 
 export type ImportPlan = {
-	/** Every row to try, in file order. An excluded row is still added, so it counts as held. */
+	/**
+	 * Every row to try, in file order: the rows cleared on or after `historyStart`, and the before-history rows Tally
+	 * holds. An excluded row is still added, so it counts as held; the store skips the rows Tally holds.
+	 */
 	add: { row: AppleRow; key: string; twin: number; excluded: boolean }[];
 	/** Rows with no Clearing Date yet: left out, and a later upload brings them in. */
 	notCleared: number;
-	/** Rows cleared before Tally's history starts: left out. */
+	/** Rows cleared before Tally's history starts that Tally doesn't hold: left out. */
 	beforeHistory: number;
 };
 
 /**
- * Plans an upload: a row with no Clearing Date is counted as not cleared, one cleared before `historyStart` as before
- * history, and every other row is numbered among its identical rows (its twin), from 1, in file order. The store skips
- * the twins Tally already holds.
+ * The twin numbers Tally already holds, by row key: what import.ts reads from the Apple Card before the batch, so that
+ * planImport stays pure.
  */
-export function planImport(rows: AppleRow[], historyStart: string): ImportPlan {
+export type HeldTwins = ReadonlyMap<string, ReadonlySet<number>>;
+
+/**
+ * Plans an upload: a row with no Clearing Date is counted as not cleared, and every other row is numbered among its
+ * identical rows (its twin), from 1, in file order. A row cleared before `historyStart` is before history unless Tally
+ * holds its key and twin: a held row is counted as already, since the history start moves (it is the bank's earliest row
+ * once the bank's history completes, not 90 days back while it loads). The store skips the twins Tally holds.
+ */
+export function planImport(
+	rows: AppleRow[],
+	historyStart: string,
+	held: HeldTwins = new Map(),
+): ImportPlan {
 	const add: ImportPlan["add"] = [];
 	const twins = new Map<string, number>();
 	let notCleared = 0;
@@ -59,13 +73,13 @@ export function planImport(rows: AppleRow[], historyStart: string): ImportPlan {
 			notCleared++;
 			continue;
 		}
-		if (row.clearingDate < historyStart) {
-			beforeHistory++;
-			continue;
-		}
 		const key = rowKey(row);
 		const twin = (twins.get(key) ?? 0) + 1;
 		twins.set(key, twin);
+		if (row.clearingDate < historyStart && !held.get(key)?.has(twin)) {
+			beforeHistory++;
+			continue;
+		}
 		add.push({ row, key, twin, excluded: leftOut(row) });
 	}
 	return { add, notCleared, beforeHistory };

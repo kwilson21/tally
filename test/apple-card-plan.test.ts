@@ -82,6 +82,24 @@ describe("planImport", () => {
 	});
 });
 
+describe("planImport: rows Tally holds", () => {
+	it("counts a held row cleared before the history start as held, not as before history", () => {
+		const early = row({ clearingDate: "2026-07-20" });
+		const held = new Map([[rowKey(early), new Set([1])]]);
+		const plan = planImport([early], "2026-07-21", held);
+		expect(plan.beforeHistory).toBe(0);
+		expect(plan.add.map((item) => item.twin)).toEqual([1]);
+	});
+
+	it("still leaves out a before-history row Tally doesn't hold, and a twin beyond the held ones", () => {
+		const early = row({ clearingDate: "2026-07-20" });
+		const held = new Map([[rowKey(early), new Set([1])]]);
+		const plan = planImport([early, { ...early, line: 3 }], "2026-07-21", held);
+		expect(plan.beforeHistory).toBe(1);
+		expect(plan.add.map((item) => item.twin)).toEqual([1]);
+	});
+});
+
 describe("leftOut (decision 144)", () => {
 	it("leaves out a Payment", () => {
 		expect(

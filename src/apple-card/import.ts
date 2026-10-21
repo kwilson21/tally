@@ -6,7 +6,7 @@ import { daysBefore } from "../dates";
 import { suggestBankNamesSql } from "../db/merchant-names";
 import { tidyName } from "../transactions/tidy-name";
 import type { AppleRow } from "./csv";
-import { type ImportPlan, planImport } from "./plan";
+import { type HeldTwins, type ImportPlan, planImport, rowKey } from "./plan";
 
 export type ImportResult = {
 	ok: true;
@@ -78,6 +78,43 @@ function suggestableName(row: AppleRow): string | null {
 	return name;
 }
 
+/**
+ * The twins Tally already holds on the Apple Card for the file's rows cleared before `historyStart`, read with one query
+ * before the batch (planImport counts a held row as already, never as before history). Only those rows need it: the rows
+ * on or after the start are inserted, and the store's conflict rule leaves the ones Tally holds alone.
+ */
+async function heldTwins(
+	db: D1Database,
+	rows: AppleRow[],
+	historyStart: string,
+): Promise<HeldTwins> {
+	const keys = [
+		...new Set(
+			rows.flatMap((row) =>
+				row.clearingDate !== null && row.clearingDate < historyStart
+					? [rowKey(row)]
+					: [],
+			),
+		),
+	];
+	const held = new Map<string, Set<number>>();
+	if (keys.length === 0) return held;
+	const found = await db
+		.prepare(
+			`SELECT t.upload_key AS key, t.upload_twin AS twin
+			FROM transactions t JOIN accounts a ON a.id = t.account_id
+			WHERE a.subtype = 'apple_card' AND t.upload_key IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify(keys))
+		.all<{ key: string; twin: number }>();
+	for (const { key, twin } of found.results) {
+		const twins = held.get(key) ?? new Set<number>();
+		twins.add(twin);
+		held.set(key, twins);
+	}
+	return held;
+}
+
 /** Splits the planned rows into statements of at most ROWS_PER_STATEMENT rows and JSON_CHARS_PER_STATEMENT characters. */
 function chunkRows<T>(items: T[]): T[][] {
 	const chunks: T[][] = [];
@@ -118,7 +155,11 @@ export async function importAppleCard(
 			ok: false,
 			error: "Link a bank first. Tally's history starts with your bank's.",
 		};
-	const plan: ImportPlan = planImport(rows, start);
+	const plan: ImportPlan = planImport(
+		rows,
+		start,
+		await heldTwins(db, rows, start),
+	);
 	const { today, balanceCents, by } = options;
 
 	const statements: D1PreparedStatement[] = [

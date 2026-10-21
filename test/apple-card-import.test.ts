@@ -6,7 +6,7 @@ import {
 	type ImportResult,
 	importAppleCard,
 } from "../src/apple-card/import";
-import { rowKey } from "../src/apple-card/plan";
+import { importWords, rowKey } from "../src/apple-card/plan";
 import { daysBefore } from "../src/dates";
 import { merchantsToAsk, namesStillAsked } from "../src/db/merchant-names";
 import { pendingForJev, saveSplit } from "../src/db/transactions";
@@ -623,6 +623,49 @@ describe("importAppleCard: Jev's hint", () => {
 		const pending = await pendingForJev(db, 10, { ids: [Number(stored?.id)] });
 		expect(pending).toHaveLength(1);
 		expect(pending[0]).toMatchObject({ plaidCategory: "Grocery" });
+	});
+});
+
+describe("importAppleCard: a held row after the history start moves past it", () => {
+	it("counts a row Tally holds as already in Tally, with no 'from before' clause, and adds nothing", async () => {
+		const text = csvOf(
+			row({
+				tx: "06/30/2026",
+				clear: "07/01/2026",
+				desc: "HELD CAFE",
+				merchant: "Held Cafe",
+			}),
+		);
+		// The seed's bank history isn't complete yet, so the start is 90 days back and the Jul 1 row is stored.
+		const first = await uploadOk(text);
+		expect(first).toMatchObject({ added: 1, beforeHistory: 0 });
+		expect(await countCardRows()).toBe(1);
+		// The bank's history completes with its earliest row in August, so Jul 1 is now before Tally's history.
+		await db
+			.prepare(
+				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id IS NOT NULL) AND date < '2026-08-01'",
+			)
+			.run();
+		await db
+			.prepare("UPDATE plaid_items SET history_complete_at = datetime('now')")
+			.run();
+		const again = await uploadOk(text);
+		expect(again.historyStart).toBe(await bankEarliest());
+		expect(again.historyStart > "2026-07-01").toBe(true);
+		expect(again).toMatchObject({ added: 0, already: 1, beforeHistory: 0 });
+		expect(
+			importWords(
+				{
+					added: again.added,
+					already: again.already,
+					notCleared: again.notCleared,
+					beforeHistory: again.beforeHistory,
+				},
+				again.historyStart,
+				TODAY,
+			),
+		).toBe("Nothing new. 1 was already in Tally.");
+		expect(await countCardRows()).toBe(1);
 	});
 });
 
