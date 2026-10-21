@@ -2604,6 +2604,14 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
 		.run();
 }
 
+/**
+ * The category Jev is told for a row (`plaid_category` in its question): Plaid's, or Apple Card's own category for an
+ * uploaded row (spec §8.10). The read and the save guard share it, so a row's save checks the category it was asked
+ * with (decision 143). Every other reader keeps `plaid_category` alone. It is NULL for a row with neither, as before.
+ */
+const jevCategoryHintSql = (alias: string) =>
+	`COALESCE(${alias}.plaid_category, ${alias}.apple_category)`;
+
 // A credit a person already decided about: Jev can only help with its category. The review columns
 // are NULL on older rows, which SQL won't compare, so a missing review counts as no review: COALESCE
 // makes this 0 rather than NULL, and `NOT` of it can't drop the row.
@@ -2672,7 +2680,7 @@ export async function pendingForJev(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
 				${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 				t.amount_cents AS amountCents, a.type AS accountType,
-				t.plaid_category AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
+				${jevCategoryHintSql("t")} AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
 				t.account_id AS accountId, t.for_person_id AS forPersonId,
 				t.details_asked AS detailsAsked,
@@ -2918,6 +2926,7 @@ export type JevSeen = {
 	accountId: number;
 	/** The account's type, which Jev is told as `account_type`: a Plaid sync rewrites it on the same account (decision 143). */
 	accountType: string;
+	/** What Jev is told as `plaid_category`: Plaid's category, or Apple Card's for an uploaded row (jevCategoryHintSql). */
 	plaidCategory: string | null;
 	note: string | null;
 	kind: string | null;
@@ -2940,7 +2949,7 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND transactions.amount_cents = ${value("amountCents")}
 		AND transactions.account_id = ${value("accountId")}
 		AND (SELECT type FROM accounts WHERE id = transactions.account_id) IS ${value("accountType")}
-		AND transactions.plaid_category IS ${value("plaidCategory")}
+		AND ${jevCategoryHintSql("transactions")} IS ${value("plaidCategory")}
 		AND transactions.note IS ${value("note")}
 		AND transactions.kind IS ${value("kind")}
 		AND transactions.for_person_id IS ${value("forPersonId")}

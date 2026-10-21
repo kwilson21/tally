@@ -28,12 +28,26 @@ export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
 /**
  * The bank texts Workers AI is asked about (spec §7), as one predicate over `t` with `merchants m` joined: a text Plaid
  * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash
- * entry a person typed (on the Cash account) is never asked about, nor a split part. Shared by merchantsToAsk and the
- * night's count of names still waiting (namesStillAsked), so the two can't disagree.
+ * entry a person typed (on the Cash account) is never asked about, nor a split part, nor an Apple Card row (§8.10: its
+ * Merchant is its name, or none is sent). Shared by merchantsToAsk and the night's count of names still waiting
+ * (namesStillAsked), so the two can't disagree.
  */
 export const NAME_ASKED_SQL = `t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
 	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
+	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.subtype = 'apple_card')
 	AND m.display_name IS NULL AND m.suggested_name IS NULL AND COALESCE(m.suggestion_status, 'none') = 'none'`;
+
+/**
+ * Suggests each bank name for its merchant, `pending` (spec §8.6, decision 68). One `?`: the names, a JSON array. A
+ * merchant a person named, or whose suggestion they decided, is never touched; a guess still waiting gives way. `guard`
+ * is the SQL that must hold for the rows to be written: a sync's lock (OWNS_LOCK), or `1` for an upload, which runs
+ * in one batch with nothing to lock.
+ */
+export const suggestBankNamesSql = (guard: string) =>
+	`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
+	 SELECT value, value, 'pending' FROM json_each(?) WHERE ${guard}
+	 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
+	 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`;
 
 /**
  * The bank texts to ask Workers AI about, at most `limit` (NAME_ASKED_SQL). A merchant is asked about once, so an answer

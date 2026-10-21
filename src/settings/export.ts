@@ -10,13 +10,14 @@ const EXPORT_COLUMNS = {
 	merchants:
 		"raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill",
 	merchant_name_failures: "raw_name, failed_at",
-	// Each account names its bank and says whether it's disconnected, since bank rows carry no id.
-	accounts: `id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at,
-		(SELECT institution_name FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank,
-		(SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id) AS bank_disconnected`,
+	// Each account names its bank and says whether it's disconnected, since bank rows carry no id. An uploaded Apple Card
+	// has no bank connection: its bank is Apple Card, and it can't be disconnected (spec §8.10).
+	accounts: `id, plaid_item_id, plaid_account_id, name, mask, type, subtype, is_liability, balance_cents, updated_at, uploaded_on, balance_on, removed_at, counted_from,
+		COALESCE((SELECT institution_name FROM plaid_items p WHERE p.id = accounts.plaid_item_id), CASE WHEN accounts.subtype = 'apple_card' THEN 'Apple Card' END) AS bank,
+		COALESCE((SELECT CASE WHEN p.disconnected_at IS NOT NULL THEN 1 ELSE 0 END FROM plaid_items p WHERE p.id = accounts.plaid_item_id), CASE WHEN accounts.subtype = 'apple_card' THEN 0 END) AS bank_disconnected`,
 	balance_history: "account_id, date, balance_cents",
 	transactions:
-		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, income_confidence, transfer_confidence, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, refund_unlinked_purchase_date, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, plaid_detailed_category, split_removed_from_cents, split_removed_bills, merchant_name, pending, jev_none_fit, jev_mixed, jev_also_category_id, category_suggestion_id, kind, for_person_id, details_asked, note_guessed, note_tried_at, note_failed_at, note_dismissed, note_worth_writing, kind_guessed, for_person_guessed, kind_cleared, for_person_cleared, income_maybe_declined, transfer_maybe_declined, own_name",
+		"id, plaid_transaction_id, account_id, date, amount_cents, raw_name, category_id, category_source, category_confidence, flag_transfer, flag_reimbursement, flag_income, income_source, income_confidence, transfer_confidence, credit_reviewed, credit_reviewed_by, excluded, parent_id, is_split, refund_of_id, refund_unlinked_purchase_date, note, updated_by, updated_at, excluded_source, jev_category_id, jev_failed_at, plaid_category, plaid_detailed_category, split_removed_from_cents, split_removed_bills, merchant_name, pending, jev_none_fit, jev_mixed, jev_also_category_id, category_suggestion_id, kind, for_person_id, details_asked, note_guessed, note_tried_at, note_failed_at, note_dismissed, note_worth_writing, kind_guessed, for_person_guessed, kind_cleared, for_person_cleared, income_maybe_declined, transfer_maybe_declined, own_name, apple_category, upload_key, upload_twin",
 	bills:
 		"id, name, amount_cents, due_day, frequency, anchor_month, anchor_date, category_id, merchant_raw_name, merchant_raw_text, active, added_on",
 	bill_amounts: "bill_id, effective_month, amount_cents",
