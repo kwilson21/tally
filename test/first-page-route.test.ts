@@ -28,7 +28,7 @@ import { firstPage } from "../src/routes/first-page";
 const db = env.DB;
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
-/** Stroke one was drawn two days ago, so the questions are open today (the household day after it, spec §8.8). */
+/** Stroke one was drawn two days ago, so the questions are open today (spec §8.8, decision 146: no wait for a later day). */
 const STROKE_ONE = daysBefore(TODAY, 2);
 
 /**

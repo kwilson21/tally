@@ -1,14 +1,12 @@
-// When the first week's questions open (spec §8.8, decision 114): the household day after stroke one, every connected
-// bank's first sync and its 90-day history done, and no imported transaction still waiting for Jev's category or income
-// answer. Nothing polls; the page reads this when it's drawn. Once the first week is set up they stay shut
+// When the first week's questions open (spec §8.8, decision 146): once stroke one is drawn, every connected bank's first
+// sync and its 90-day history done, and no imported transaction still waiting for Jev's category or income answer. There
+// is no wait for a later day. Nothing here polls; the pages that show it do. Once the first week is set up they stay shut
 // (readQuestionsGate).
 import { readAiSwitches } from "../db/ai-switches";
 import { isSetUp, readFirstTally } from "../db/first-tally";
 import { countWaitingForJev } from "../db/transactions";
 
 export type QuestionsFacts = {
-	/** The household's day now (YYYY-MM-DD). */
-	today: string;
 	/** Stroke one's household day, or null when stroke one is drawn with no day (or not drawn). */
 	strokeOneDay: string | null;
 	/** Each connected, not disconnected, bank: when its last sync finished and when Plaid's history was in. */
@@ -31,12 +29,12 @@ export function banksHistoryIn(banks: QuestionsFacts["banks"]): boolean {
 }
 
 /**
- * True when the questions may open. Each condition is checked on its own: the day after stroke one, every connected bank
- * with its history in (banksHistoryIn), and nothing waiting.
+ * True when the questions may open. Each condition is checked on its own: stroke one drawn with its day, every connected bank
+ * with its history in (banksHistoryIn), and nothing waiting. A household with a bank and no stroke one (no first_tally
+ * record) is shut.
  */
 export function questionsOpen(facts: QuestionsFacts): boolean {
-	if (facts.strokeOneDay === null || facts.today <= facts.strokeOneDay)
-		return false;
+	if (facts.strokeOneDay === null) return false;
 	if (!banksHistoryIn(facts.banks)) return false;
 	return facts.waiting === 0;
 }
@@ -77,15 +75,11 @@ export async function readGateInputs(
  * set up (isSetUp: all five strokes drawn), so a set-up household is sent Home and its questions are not asked again (#647).
  * Home's setup doesn't come through here: it checks isSetUp itself and reads questionsOpen and the inputs directly.
  */
-export async function readQuestionsGate(
-	db: D1Database,
-	today: string,
-): Promise<boolean> {
+export async function readQuestionsGate(db: D1Database): Promise<boolean> {
 	const record = await readFirstTally(db);
 	if (isSetUp(record)) return false;
 	const { banks, waiting } = await readGateInputs(db);
 	return questionsOpen({
-		today,
 		strokeOneDay: record?.strokes.bank ?? null,
 		banks,
 		waiting,

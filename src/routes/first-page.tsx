@@ -150,7 +150,7 @@ function pageDocument(
 firstPage.get("/first-page", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
 	const oneAtATime = c.req.query("budgets") === "one";
 	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
@@ -165,7 +165,7 @@ firstPage.get("/first-page", async (c) => {
 firstPage.post("/first-page/pay", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	const form = await c.req.formData();
 	const key = String(form.get("merchant") ?? "");
 	const answer = String(form.get("answer") ?? "");
@@ -230,7 +230,7 @@ function paySaved(
 firstPage.post("/first-page/bills", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// Only the charges the form showed are kept: its `keep` fields, each one re-checked against the charges now. An
 	// empty form keeps none, and a charge that is new or changed since the page drew is asked again on the page.
 	const values = (await c.req.formData())
@@ -263,7 +263,7 @@ firstPage.post("/first-page/bills", async (c) => {
 firstPage.post("/first-page/budgets", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	if (!(await readQuestionsGate(c.env.DB, today))) return notOpen(c);
+	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 	if (!["all", "yes", "another", "skip"].includes(answer))
@@ -390,7 +390,7 @@ firstPage.post("/first-page/savings", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const db = c.env.DB;
 	const today = await householdToday(db);
-	if (!(await readQuestionsGate(db, today))) return notOpen(c);
+	if (!(await readQuestionsGate(db))) return notOpen(c);
 	const form = await c.req.formData();
 	const answer = String(form.get("answer") ?? "");
 	if (answer !== "save" && answer !== "skip")
