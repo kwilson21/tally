@@ -16,18 +16,39 @@ const wholeMoney = new Intl.NumberFormat("en-US", {
 	maximumFractionDigits: 0,
 });
 
-/** The field's text as integer cents: "" is 0, anything unreadable is null. */
-export function fieldCents(text) {
-	const trimmed = text.trim();
-	if (trimmed === "") return 0;
-	if (!DOLLARS.test(trimmed)) return null;
-	const [whole = "", fraction = ""] = trimmed.replace(/[$,]/g, "").split(".");
+/** A dollar text (already checked against DOLLARS) as unsigned integer cents. */
+function unsignedCents(text) {
+	const [whole = "", fraction = ""] = text.replace(/[$,]/g, "").split(".");
 	return Number(whole || "0") * 100 + Number(fraction.padEnd(2, "0"));
 }
 
-/** Integer cents as the field shows them, always with cents, as in the original: "612.40", "612.00". */
+/**
+ * The field's text as integer cents: "" is 0, anything unreadable is null. A credit field (`credit`, from its
+ * data-allow-credit attribute: a card's balance, decision 138) also reads a leading minus.
+ */
+export function fieldCents(text, credit = false) {
+	const trimmed = text.trim();
+	if (trimmed === "") return 0;
+	if (credit && trimmed.startsWith("-")) {
+		const body = trimmed.slice(1);
+		if (!DOLLARS.test(body)) return null;
+		const cents = unsignedCents(body);
+		return cents === 0 ? 0 : -cents;
+	}
+	if (!DOLLARS.test(trimmed)) return null;
+	return unsignedCents(trimmed);
+}
+
+/** Whether a field takes a credit: a minus first, and steps that cross $0 (its data-allow-credit attribute). */
+function isCredit(input) {
+	return input.dataset?.allowCredit !== undefined;
+}
+
+/** Integer cents as the field shows them, always with cents, as in the original: "612.40", "612.00", "-12.34". */
 export function showCents(cents) {
-	return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+	const sign = cents < 0 ? "-" : "";
+	const size = Math.abs(cents);
+	return `${sign}${Math.floor(size / 100)}.${String(size % 100).padStart(2, "0")}`;
 }
 
 /** Integer cents as the screen reader hears them and Round to shows them: "$1,234.50", or "$1,235" when whole. */
@@ -35,10 +56,15 @@ export function dollars(cents, whole = false) {
 	return (whole ? wholeMoney : money).format(cents / 100);
 }
 
-/** The field after adding `delta` cents, never below $0. Text it can't read is left alone, and ↓ at $0 does nothing. */
-export function nudged(text, delta) {
-	const cents = fieldCents(text);
-	if (cents === null || (cents === 0 && delta < 0)) return text;
+/**
+ * The field after adding `delta` cents: never below $0 on a plain field, and across $0 on a credit field. Text it
+ * can't read is left alone, and ↓ at $0 does nothing on a plain field.
+ */
+export function nudged(text, delta, credit = false) {
+	const cents = fieldCents(text, credit);
+	if (cents === null) return text;
+	if (credit) return showCents(cents + delta);
+	if (cents === 0 && delta < 0) return text;
 	return showCents(Math.max(0, cents + delta));
 }
 
@@ -99,10 +125,12 @@ function say(message) {
 export function update(root) {
 	const input = root.querySelector("[data-money-input]");
 	if (!input) return;
-	const cents = fieldCents(input.value);
+	const credit = isCredit(input);
+	const cents = fieldCents(input.value, credit);
 	for (const step of root.querySelectorAll("[data-nudge]")) {
 		step.disabled =
-			cents === null || (cents === 0 && Number(step.dataset.nudge) < 0);
+			cents === null ||
+			(!credit && cents === 0 && Number(step.dataset.nudge) < 0);
 	}
 	const round = root.querySelector("[data-roundup]");
 	if (round) {
@@ -133,7 +161,7 @@ export function set(root, text) {
 	input.value = text;
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 	update(root);
-	const cents = fieldCents(text);
+	const cents = fieldCents(text, isCredit(input));
 	if (cents !== null) say(dollars(cents));
 }
 
@@ -141,7 +169,7 @@ export function set(root, text) {
 export function nudge(root, delta) {
 	const input = root.querySelector("[data-money-input]");
 	if (!input) return;
-	const next = nudged(input.value, delta);
+	const next = nudged(input.value, delta, isCredit(input));
 	if (next !== input.value) set(root, next);
 }
 

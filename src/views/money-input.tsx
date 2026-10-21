@@ -18,18 +18,29 @@ type Props = {
 	averageCents?: number | null;
 	autofocus?: boolean;
 	inputAttributes?: Record<string, string>;
+	/**
+	 * A card's balance (decision 138): a typed minus is an amount, − and ▼ stay on at $0, and the field takes text
+	 * input, since iOS's decimal pad has no minus key. The server and public/js/money.js read it alike.
+	 */
+	allowCredit?: boolean;
+	/** Leaves Round to out, for a field whose cents have no whole-dollar offer (a balance). */
+	noRound?: boolean;
+	/** A line under the label, read first in the field's description (before its error). */
+	hint?: string;
 };
 
 /**
  * The typed text in cents, or null when it isn't a dollar amount this box can read. A text starting with
- * "-" is unreadable, as money.js reads it (its DOLLARS has no minus), so the steps and Round to agree.
+ * "-" is unreadable unless the box takes a credit (allowCredit), as money.js reads it, so the steps and Round to agree.
+ * A minus on zero is zero.
  */
-function centsOf(text: string): number | null {
+function centsOf(text: string, allowCredit: boolean): number | null {
 	const trimmed = text.trim();
 	if (trimmed === "") return 0;
-	if (trimmed.startsWith("-")) return null;
+	if (trimmed.startsWith("-") && !allowCredit) return null;
 	try {
-		return toCents(trimmed);
+		const cents = toCents(trimmed);
+		return cents === 0 ? 0 : cents;
 	} catch {
 		return null;
 	}
@@ -76,10 +87,17 @@ export function MoneyInput({
 	averageCents = null,
 	autofocus,
 	inputAttributes,
+	allowCredit = false,
+	noRound = false,
+	hint,
 }: Props) {
-	const cents = centsOf(value);
+	const cents = centsOf(value, allowCredit);
 	const unreadable = cents === null;
-	const atZero = unreadable || cents === 0;
+	const atZero = unreadable || (!allowCredit && cents === 0);
+	const describedBy =
+		[hint ? `${id}-hint` : null, error ? `${id}-error` : null]
+			.filter(Boolean)
+			.join(" ") || undefined;
 	const hasCents = cents !== null && cents % 100 !== 0;
 	const roundedCents = cents === null ? 0 : Math.ceil(cents / 100) * 100;
 	return (
@@ -87,6 +105,11 @@ export function MoneyInput({
 			<label for={id} class="text-base text-ink">
 				{label}
 			</label>
+			{hint && (
+				<p id={`${id}-hint`} class="text-sm text-muted">
+					{hint}
+				</p>
+			)}
 			<div class="flex items-center justify-center gap-3">
 				<button
 					type="button"
@@ -112,13 +135,14 @@ export function MoneyInput({
 						name={name}
 						value={value}
 						placeholder="0.00"
-						inputmode="decimal"
+						inputmode={allowCredit ? "text" : "decimal"}
 						autocomplete="off"
 						data-money-input
+						{...(allowCredit ? { "data-allow-credit": "" } : {})}
 						{...inputAttributes}
 						autofocus={autofocus}
 						aria-invalid={error ? "true" : undefined}
-						aria-describedby={error ? `${id}-error` : undefined}
+						aria-describedby={describedBy}
 						class={`-my-3 min-w-0 flex-1 self-stretch bg-transparent text-[1.75rem] font-bold tabular-nums placeholder:font-normal placeholder:text-muted focus-visible:outline-none ${error ? "field-shake" : ""}`}
 					/>
 					<div
@@ -166,19 +190,21 @@ export function MoneyInput({
 				</p>
 			)}
 			<div data-money-js class="flex flex-wrap justify-center gap-2">
-				<button
-					type="button"
-					data-roundup={hasCents ? String(roundedCents) : ""}
-					hidden={!hasCents}
-					aria-pressed="false"
-					class={moneyChip}
-				>
-					<Check />
-					<span data-roundup-label class="tabular-nums">
-						Round to{" "}
-						{hasCents ? formatCents(roundedCents, { wholeDollars: true }) : ""}
-					</span>
-				</button>
+				{!noRound && (
+					<button
+						type="button"
+						data-roundup={hasCents ? String(roundedCents) : ""}
+						hidden={!hasCents}
+						aria-pressed="false"
+						class={moneyChip}
+					>
+						<Check />
+						<span data-roundup-label class="tabular-nums">
+							Round to{" "}
+							{hasCents ? formatCents(roundedCents, { wholeDollars: true }) : ""}
+						</span>
+					</button>
+				)}
 				{lastMonthCents > 0 && (
 					<button
 						type="button"

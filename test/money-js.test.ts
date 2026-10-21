@@ -217,8 +217,8 @@ function control(dataset: Record<string, string> = {}): Control {
 }
 
 /** A money box with its field, the four steps, Round to (offering `offer` cents) and one Last month chip. */
-function widget(text: string, offer = "") {
-	const input = control({ moneyInput: "" });
+function widget(text: string, offer = "", credit = false) {
+	const input = control(credit ? { moneyInput: "", allowCredit: "" } : { moneyInput: "" });
 	input.value = text;
 	const minus = control({ nudge: "-100" });
 	const plus = control({ nudge: "100" });
@@ -651,5 +651,90 @@ describe("browser steps (the fake DOM stands in for the page)", () => {
 			expect(input.value).toBe("12.34");
 			expect(minus.disabled).toBe(false);
 		});
+	});
+});
+
+describe("credit balances (allowCredit: a leading minus, and no floor at $0)", () => {
+	it("reads a leading minus only on a credit field", () => {
+		expect(fieldCents("-12.00", true)).toBe(-1200);
+		expect(fieldCents("-$1,234.5", true)).toBe(-123450);
+		expect(fieldCents("12.00", true)).toBe(1200);
+		// A minus is never zero: -0 is the same as 0.
+		expect(Object.is(fieldCents("-0.00", true), 0)).toBe(true);
+		expect(fieldCents("-5")).toBeNull();
+		expect(fieldCents("-", true)).toBeNull();
+		expect(fieldCents("--5", true)).toBeNull();
+		expect(fieldCents("5-", true)).toBeNull();
+	});
+
+	it("shows negative cents from the absolute value, always with cents", () => {
+		expect(showCents(-1234)).toBe("-12.34");
+		expect(showCents(-5)).toBe("-0.05");
+		expect(showCents(-100)).toBe("-1.00");
+		expect(showCents(0)).toBe("0.00");
+	});
+
+	it("steps across zero on a credit field, and still floors a plain one at $0", () => {
+		expect(nudged("0.50", -100, true)).toBe("-0.50");
+		expect(nudged("-0.50", 100, true)).toBe("0.50");
+		expect(nudged("-12.00", 1, true)).toBe("-11.99");
+		expect(nudged("", -1, true)).toBe("-0.01");
+		expect(nudged("0.50", -100)).toBe("0.00");
+		expect(nudged("-5", 1)).toBe("-5");
+	});
+
+	it("leaves text it can't read alone on a credit field", () => {
+		expect(nudged("-abc", 100, true)).toBe("-abc");
+	});
+
+	it("announces a typed credit as formatCents writes it, with its minus", () => {
+		vi.stubGlobal("document", {
+			get activeElement() {
+				return browser.activeElement;
+			},
+			getElementById: (id: string) =>
+				id === "announcer" ? browser.region : null,
+		});
+		vi.stubGlobal("requestAnimationFrame", (callback: () => void) =>
+			callback(),
+		);
+		try {
+			const { root, input } = widget("12.00", "", true);
+			set(root, "-12.34");
+			expect(input.value).toBe("-12.34");
+			expect(browser.region.textContent).toBe(
+				formatCents(-1234),
+			);
+		} finally {
+			vi.unstubAllGlobals();
+			browser.region.textContent = "";
+		}
+	});
+
+	it("keeps − and ▼ on at $0 on a credit field, and turns them off on a plain one", () => {
+		const credit = widget("0.00", "", true);
+		update(credit.root);
+		expect(credit.minus.disabled).toBe(false);
+		expect(credit.down.disabled).toBe(false);
+		const plain = widget("0.00");
+		update(plain.root);
+		expect(plain.minus.disabled).toBe(true);
+		expect(plain.down.disabled).toBe(true);
+	});
+
+	it("draws no Round to on a field without one, and update still brings the steps in line", () => {
+		const input = control({ moneyInput: "", allowCredit: "" });
+		input.value = "-3.50";
+		const minus = control({ nudge: "-100" });
+		const plus = control({ nudge: "100" });
+		const root = {
+			querySelector: (selector: string) =>
+				selector === "[data-money-input]" ? input : null,
+			querySelectorAll: (selector: string) =>
+				selector === "[data-nudge]" ? [minus, plus] : [],
+		};
+		expect(() => update(root)).not.toThrow();
+		expect(minus.disabled).toBe(false);
+		expect(plus.disabled).toBe(false);
 	});
 });
