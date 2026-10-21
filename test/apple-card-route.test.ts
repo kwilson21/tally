@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
+import type { SortParams } from "../src/sort-start";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -231,6 +232,32 @@ describe("Apple Card's upload sheet (#766)", () => {
 		it("stores a credit typed with a minus, as a negative amount owed", async () => {
 			await post({ file: file(csv(ROW_A)), balance: "-12.00" }, { htmx: true });
 			expect((await cardAccount())?.balance_cents).toBe(-1200);
+		});
+
+		it("hands the rows it added to the sorting Workflow once, and none when it adds nothing", async () => {
+			// The sorting binding is a plain recorder here, so no instance runs; the key lets the start go ahead.
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const bindings = {
+				...family,
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			await post(
+				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
+				{ htmx: true, bindings },
+			);
+			expect(create).toHaveBeenCalledTimes(1);
+			const params = create.mock.calls[0]?.[0].params;
+			expect(params?.bySync).toBe(true);
+			expect(params?.ids).toHaveLength(2);
+			// The same file again adds nothing, so there is nothing to sort.
+			await post(
+				{ file: file(csv(ROW_A, ROW_B)), balance: "" },
+				{ htmx: true, bindings },
+			);
+			expect(create).toHaveBeenCalledTimes(1);
 		});
 	});
 
