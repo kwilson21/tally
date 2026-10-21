@@ -86,7 +86,7 @@ const cloudflareEmail = () => {
 };
 
 describe("deliver: a keyed send never falls back to Cloudflare's email when Resend may have accepted it", () => {
-	it("counts a 409 invalid_idempotent_request as delivered: the key was already used, so nothing is sent again or by the fallback", async () => {
+	it("falls back to Cloudflare's email on a 409 invalid_idempotent_request: Resend's docs say the key was used with a different payload, so this body was never sent under it, and the fallback delivers it", async () => {
 		const fetchImpl = resendAnswer(409, "invalid_idempotent_request");
 		const email = cloudflareEmail();
 		const outcome = await deliver(
@@ -97,9 +97,63 @@ describe("deliver: a keyed send never falls back to Cloudflare's email when Rese
 			timeout,
 			"ready-email-abc",
 		);
-		expect(outcome).toEqual({ delivered: true, kinds: [] });
-		expect(email.send).not.toHaveBeenCalled();
+		expect(outcome.delivered).toBe(true);
 		expect(fetchImpl).toHaveBeenCalledOnce();
+		expect(email.send).toHaveBeenCalledOnce();
+	});
+
+	it("does not fall back on any other 409, whatever its name: the answer doesn't say the send didn't go", async () => {
+		const fetchImpl = resendAnswer(409, "some_later_conflict");
+		const email = cloudflareEmail();
+		const outcome = await deliver(
+			{ RESEND_API_KEY: "test-key", EMAIL: email },
+			"reader@example.com",
+			MAIL,
+			fetchImpl,
+			timeout,
+			"ready-email-abc",
+		);
+		expect(outcome.delivered).toBe(false);
+		expect(outcome.kinds).toEqual(["resend 409"]);
+		expect(email.send).not.toHaveBeenCalled();
+	});
+
+	it("does not fall back on a 409 with no readable name", async () => {
+		const fetchImpl = vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) =>
+				new Response("not json", { status: 409 }),
+		);
+		const email = cloudflareEmail();
+		const outcome = await deliver(
+			{ RESEND_API_KEY: "test-key", EMAIL: email },
+			"reader@example.com",
+			MAIL,
+			fetchImpl,
+			timeout,
+			"ready-email-abc",
+		);
+		expect(outcome.delivered).toBe(false);
+		expect(email.send).not.toHaveBeenCalled();
+	});
+
+	it("does not fall back on a network error, which leaves Resend's answer unknown", async () => {
+		const fetchImpl = vi.fn(
+			async (_url: RequestInfo | URL, _init?: RequestInit) => {
+				throw new TypeError("network");
+			},
+		);
+		const email = cloudflareEmail();
+		const outcome = await deliver(
+			{ RESEND_API_KEY: "test-key", EMAIL: email },
+			"reader@example.com",
+			MAIL,
+			fetchImpl,
+			timeout,
+			"ready-email-abc",
+		);
+		expect(outcome.delivered).toBe(false);
+		expect(outcome.kinds).toEqual(["resend timeout or error"]);
+		expect(email.send).not.toHaveBeenCalled();
 	});
 
 	it("does not fall back on a 409 concurrent_idempotent_requests: the first send may still fail, so the try is failed and released", async () => {

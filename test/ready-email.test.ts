@@ -6,10 +6,13 @@ import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import {
 	CLAIM_SQL,
+	readLine,
 	readyEmailKey,
+	renderReadyEmail,
 	runReadyEmail,
 } from "../src/first-tally/ready-email";
 import handler from "../src/index";
+import type { Mail } from "../src/reconnect/deliver";
 
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email per person, sent by the minute run once a new
 // family's first questions are open (the 10:00 run is the backstop), and never again to an address it has reached. A person
@@ -55,16 +58,33 @@ function resendFake(status = 200) {
 	return { fetchImpl, sent, keys };
 }
 
-/** The key a ready email carries for an address, written out from its definition: SHA-256 of the lower-cased address. */
-async function keyFor(address: string) {
+/**
+ * The key a ready email carries for an address and its words, written out from its definition (decision 146): SHA-256 of the
+ * JSON of the lower-cased address, the subject, the HTML and the text.
+ */
+async function keyFor(address: string, mail: Mail) {
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
-		new TextEncoder().encode(address.toLowerCase()),
+		new TextEncoder().encode(
+			JSON.stringify([
+				address.toLowerCase(),
+				mail.subject,
+				mail.html,
+				mail.text,
+			]),
+		),
 	);
 	const hex = [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
 	return `ready-email-${hex}`;
+}
+
+/** The first email Resend was sent, which a test takes its words from. */
+function firstMail(sent: Sent[]): Mail {
+	const mail = sent[0];
+	if (!mail) throw new Error("Resend was sent no email");
+	return mail;
 }
 
 /** The production environment: Resend on, Cloudflare's email off unless a test gives it. */
@@ -718,14 +738,14 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 				}),
 		);
 
-	it("keeps the address reached when Resend answers 409 invalid_idempotent_request: the send was already accepted, and Cloudflare's email sends nothing", async () => {
+	it("falls back to Cloudflare's email on a 409 invalid_idempotent_request, since that key was used with other words and this email was never sent under it, and the address is reached", async () => {
 		await openHousehold();
 		const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
 		await runReadyEmail(
 			production({ EMAIL: { send } }),
 			conflict("invalid_idempotent_request"),
 		);
-		expect(send).not.toHaveBeenCalled();
+		expect(send).toHaveBeenCalledOnce();
 		expect(await storedList()).toEqual([DANA]);
 	});
 
@@ -747,24 +767,28 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 			);
 			const next = resendFake();
 			await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
-			expect(next.keys).toEqual([await keyFor(DANA)]);
+			expect(next.keys).toEqual([await keyFor(DANA, firstMail(next.sent))]);
 			expect(send).not.toHaveBeenCalled();
 		} finally {
 			log.mockRestore();
 		}
 	});
 
-	it("keeps the address reached once a retry with the same key is answered 409 invalid_idempotent_request, so the first send is not sent again", async () => {
+	it("a retry with the same words is answered with Resend's record of the first send, so the email is not sent twice and Cloudflare's email sends nothing", async () => {
 		await openHousehold();
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
-			await runReadyEmail(
-				production(),
-				vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+			const send = vi.fn(async (_message: Record<string, unknown>) => ({}));
+			const first = vi.fn(
+				async (_url: RequestInfo | URL, _init?: RequestInit) => {
 					throw new Error("timeout");
-				}),
+				},
 			);
-			await runReadyEmail(production(), conflict("invalid_idempotent_request"));
+			await runReadyEmail(production({ EMAIL: { send } }), first);
+			const again = resendFake(200);
+			await runReadyEmail(production({ EMAIL: { send } }), again.fetchImpl);
+			expect(again.keys).toEqual([keyOf(first.mock.calls[0]?.[1])]);
+			expect(send).not.toHaveBeenCalled();
 			expect(await storedList()).toEqual([DANA]);
 		} finally {
 			log.mockRestore();
@@ -791,20 +815,40 @@ describe("the ready email: a try that Resend may have accepted never goes to Clo
 	});
 });
 
-describe("the ready email: one Idempotency-Key per address (Resend)", () => {
-	it("gives the email the key the address defines, the same for every try", async () => {
+describe("the ready email: one Idempotency-Key per address and its words (Resend)", () => {
+	const WORDS = renderReadyEmail(readLine([{ name: "Chase" }], 10));
+
+	it("gives the email the key its address and words define, the same for every try", async () => {
 		await openHousehold();
-		const { fetchImpl, keys } = resendFake();
+		const { fetchImpl, keys, sent } = resendFake();
 		await runReadyEmail(production(), fetchImpl);
-		expect(keys).toEqual([await keyFor(DANA)]);
-		expect(await readyEmailKey(DANA)).toBe(await keyFor(DANA));
+		expect(keys).toEqual([await keyFor(DANA, firstMail(sent))]);
+		expect(await readyEmailKey(DANA, firstMail(sent))).toBe(
+			await keyFor(DANA, firstMail(sent)),
+		);
+	});
+
+	it("changes the key when the read line changes, so a retry whose words changed is a new email", async () => {
+		const changed = renderReadyEmail(readLine([{ name: "Chase" }], 11));
+		expect(await readyEmailKey(DANA, WORDS)).not.toBe(
+			await readyEmailKey(DANA, changed),
+		);
+		expect(await readyEmailKey(DANA, WORDS)).toBe(
+			await readyEmailKey(
+				DANA,
+				renderReadyEmail(readLine([{ name: "Chase" }], 10)),
+			),
+		);
 	});
 
 	it("derives the key from the lower-cased address, so a capital letter sends the same key", async () => {
-		expect(await readyEmailKey("Dana@Example.com")).toBe(
-			await readyEmailKey("dana@example.com"),
+		expect(await readyEmailKey("Dana@Example.com", WORDS)).toBe(
+			await readyEmailKey("dana@example.com", WORDS),
 		);
-		expect(await readyEmailKey(DANA)).toMatch(/^ready-email-[0-9a-f]{64}$/);
+		expect(await readyEmailKey(DANA, WORDS)).toMatch(
+			/^ready-email-[0-9a-f]{64}$/,
+		);
+		expect((await readyEmailKey(DANA, WORDS)).length).toBe(76);
 	});
 
 	it("tries a timed-out send again next minute with the same key, so Resend answers the first send instead of sending twice", async () => {
@@ -820,8 +864,11 @@ describe("the ready email: one Idempotency-Key per address (Resend)", () => {
 			const next = resendFake();
 			await runReadyEmail(production(), next.fetchImpl);
 			expect(next.sent.map((mail) => mail.to)).toEqual([DANA]);
-			expect(keyOf(timedOut.mock.calls[0]?.[1])).toBe(await keyFor(DANA));
-			expect(next.keys).toEqual([await keyFor(DANA)]);
+			const words = firstMail(next.sent);
+			expect(keyOf(timedOut.mock.calls[0]?.[1])).toBe(
+				await keyFor(DANA, words),
+			);
+			expect(next.keys).toEqual([await keyFor(DANA, words)]);
 		} finally {
 			log.mockRestore();
 		}

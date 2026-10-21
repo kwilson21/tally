@@ -2,9 +2,9 @@
 // family's first questions are open, while pay, bills and budgets are all undrawn. The minute run sends it (the 10:00 run
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
 // still on Home's setup (while it refreshes) or the questions page sees the questions there instead. An address is claimed in the record's
-// readyEmailedTo before its email goes, and released unless the email is delivered (Resend's conflict answer for its key counts as
-// delivered, deliver.ts), so it is tried again on a later minute
-// while the questions stay open, and no one gets it twice. It is drawn like the bank sign-in email (src/reconnect/email.tsx).
+// readyEmailedTo before its email goes, and released unless the email is delivered. A try Resend may already have accepted (no
+// answer, or a 409 other than invalid_idempotent_request, deliver.ts) is released too, and tried again on a later minute with the
+// same key, so it is never sent twice; the questions staying open is what lets it be tried again. It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
 	QUESTION_STROKES,
@@ -61,14 +61,26 @@ const RELEASE_SQL = `UPDATE household_settings
 	WHERE key = 'first_tally'`;
 
 /**
- * The Idempotency-Key the ready email carries to Resend, the same for every try at one address (decision 146): SHA-256 of the
- * lower-cased address, in hex, after "ready-email-". Resend keeps a key for 24 hours, so a try that came after one Resend had
- * already accepted (answered past deliver's timeout) gets Resend's answer for that send and nothing is sent twice.
+ * The Idempotency-Key the ready email carries to Resend (decision 146): "ready-email-" and the SHA-256 in hex of the JSON of
+ * the lower-cased address, the subject, the HTML and the text, so 76 characters, under Resend's 256. Every try at one address
+ * with the same words sends the same key. Resend keeps a key for 24 hours (its docs, dashboard/emails/idempotency-keys), so a
+ * try that came after one Resend had already accepted (answered past deliver's timeout) gets Resend's answer for that send and
+ * nothing is sent twice. A retry whose words changed has a new key, so it is a new email.
  */
-export async function readyEmailKey(address: string): Promise<string> {
+export async function readyEmailKey(
+	address: string,
+	mail: Mail,
+): Promise<string> {
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
-		new TextEncoder().encode(address.toLowerCase()),
+		new TextEncoder().encode(
+			JSON.stringify([
+				address.toLowerCase(),
+				mail.subject,
+				mail.html,
+				mail.text,
+			]),
+		),
 	);
 	const hex = [...new Uint8Array(digest)]
 		.map((byte) => byte.toString(16).padStart(2, "0"))
@@ -179,13 +191,15 @@ export async function runReadyEmail(
 		// the next address's read.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
+		// One Mail for this address: its words give the key and are the body Resend is sent (decision 146).
+		const mail = renderReadyEmail(read);
 		const outcome = await deliver(
 			env,
 			recipient,
-			renderReadyEmail(read),
+			mail,
 			fetchImpl,
 			timeoutSignal,
-			await readyEmailKey(recipient),
+			await readyEmailKey(recipient, mail),
 		);
 		if (outcome.delivered) {
 			sentCount += 1;

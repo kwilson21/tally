@@ -37,14 +37,20 @@ async function errorName(response: Response): Promise<string | null> {
  * Sends one email to one address. Resend gets it first, with a 10 second timeout; Cloudflare's email only when Resend didn't
  * deliver. `kinds` names each failed attempt by its provider status or error kind (never the address), and is "no provider
  * configured" when neither provider is set up. `idempotencyKey` is sent to Resend only, as its Idempotency-Key header, so
- * a retry of the same email (one Resend already accepted, answered late) is answered from Resend's record and not sent again.
- * Cloudflare's email has no such key, so the fallback never carries one.
+ * a retry of the same email (one Resend already accepted, answered late) is answered from Resend's record and not sent again:
+ * Resend keeps a key for 24 hours (its docs, dashboard/emails/idempotency-keys). Cloudflare's email has no such key, so the
+ * fallback never carries one.
  *
- * With a key (the ready email, decision 146) Resend may already hold the send, so the fallback is not used when Resend's
- * answer can't say it didn't: a 409 invalid_idempotent_request means the key was already used, so the send is delivered
- * (Resend's docs: the key was used on a request with a different payload); a 409 concurrent_idempotent_requests, another
- * 409, or no answer at all (a timeout or a network error) is a failed try with no fallback, and the caller tries again with
- * the same key. Any other Resend failure still falls back, as it does without a key.
+ * With a key (the ready email, decision 146) Resend may already hold the send, so the fallback is used only when Resend's answer
+ * shows this body was never sent under the key (Resend's docs, api-reference/errors and dashboard/emails/idempotency-keys, read
+ * 2026-10-21):
+ * - a 409 invalid_idempotent_request says the key was used with a different payload, so this body was never sent under it, and
+ *   the try is a failed Resend try that falls back like any other;
+ * - a 409 concurrent_idempotent_requests (another request with the key is in progress; Resend says it is safe to retry later),
+ *   any other 409, and no answer at all (a timeout or a network error) are failed tries with no fallback, and the caller tries
+ *   again with the same key;
+ * - any other Resend failure falls back, as it does without a key.
+ * Without a key (the reconnect email) nothing here changes.
  */
 export async function deliver(
 	env: DeliveryEnv,
@@ -68,22 +74,21 @@ export async function deliver(
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);
 		delivered = response?.ok ?? false;
-		if (
-			!delivered &&
-			idempotencyKey &&
-			(!response || response.status === 409)
-		) {
+		if (!delivered && idempotencyKey) {
+			// Resend may already hold this send (decision 146). Only invalid_idempotent_request says this body was never sent
+			// under the key, so only it falls back; every other conflict, and no answer, is a failed try with no fallback.
+			const conflict =
+				response?.status === 409 ? await errorName(response) : null;
 			if (
-				response &&
-				(await errorName(response)) === "invalid_idempotent_request"
+				!response ||
+				(response.status === 409 && conflict !== "invalid_idempotent_request")
 			)
-				return { delivered: true, kinds: [] };
-			return {
-				delivered: false,
-				kinds: [
-					response ? `resend ${response.status}` : "resend timeout or error",
-				],
-			};
+				return {
+					delivered: false,
+					kinds: [
+						response ? `resend ${response.status}` : "resend timeout or error",
+					],
+				};
 		}
 		if (!delivered)
 			kinds.push(
