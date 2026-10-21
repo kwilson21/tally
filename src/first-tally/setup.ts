@@ -13,7 +13,7 @@ import {
 	type Stroke,
 } from "../db/first-tally";
 import { merchantDisplayNames } from "../db/merchant-names";
-import type { FlaggedBank } from "../stale-bank";
+import { bankFlag } from "../stale-bank";
 import { tidyName } from "../transactions/tidy-name";
 import type { StepLine } from "../views/tally-steps";
 import { andList } from "./budgets";
@@ -144,12 +144,9 @@ export function strokesDrawn(record: FirstTally | null): number {
  * The answered phase's wait (#671): while a connected bank is reading its history or needs signing in, the status says what
  * Tally waits for, in place of tomorrow's promise. A bank that needs signing in is named first, since it has a Fix action.
  */
-export function answeredWaitingFor(
-	banks: GateBank[],
-	flagged: FlaggedBank[],
-): string | null {
-	const signIn = flagged
-		.filter((bank) => bank.reason === "sign-in")
+export function answeredWaitingFor(banks: GateBank[]): string | null {
+	const signIn = banks
+		.filter((bank) => bank.needsAttention)
 		.map((bank) => bank.name);
 	if (signIn.length > 0)
 		return `once ${andList(signIn)} ${signIn.length === 1 ? "is" : "are"} signed in again.`;
@@ -339,14 +336,13 @@ function newestMs(times: (number | null)[]): number | null {
 }
 
 /**
- * The setup Home shows, from the record, the connected banks, what Jev still owes and the banks' flags (src/stale-bank.ts);
- * null once the first week is set up, except on the day stroke five is drawn. `total` is how many transactions the banks
- * sent, and `nowMs` is the clock the sort's times are read against.
+ * The setup Home shows, from the record, the connected banks (each with its own sign-in flag and sync marks) and what Jev
+ * still owes; null once the first week is set up, except on the day stroke five is drawn. `total` is how many transactions
+ * the banks sent, and `nowMs` is the clock the sort's times are read against.
  */
 export function setupView({
 	record,
 	banks,
-	flagged,
 	waiting,
 	total,
 	today,
@@ -354,8 +350,6 @@ export function setupView({
 }: {
 	record: FirstTally | null;
 	banks: GateBank[];
-	/** The connected banks Home flags: one that needs signing in, or stopped updating (flaggedBanks). */
-	flagged: FlaggedBank[];
 	/** Imported transactions still waiting for Jev's category or income answer (countWaitingForJev). */
 	waiting: number;
 	total: number;
@@ -390,16 +384,23 @@ export function setupView({
 	const linkedAt = newestMs(banks.map((bank) => storedTimeMs(bank.linkedAt)));
 	const recent = newestMs([linkedAt, historyAt]);
 	// Something is moving: once every history is in, the sort (not slow). While one is still coming in, a bank that nothing
-	// flags: a flagged one waits for a sign-in or a sync that isn't coming, as bankState's paused does. Flags are matched by
-	// name, as answeredWaitingFor reads them.
-	const flaggedNames = new Set(flagged.map((bank) => bank.name));
+	// flags: a flagged one waits for a sign-in or a sync that isn't coming, as bankState's paused does. Each bank's flag is
+	// its own row's (bankFlag, as YourBanks reads it), so two banks sharing a name never share a flag.
+	const isFlagged = (bank: GateBank) =>
+		bankFlag(
+			{
+				name: bank.name,
+				needsAttention: bank.needsAttention,
+				lastSyncedAt: bank.lastSyncedAt,
+			},
+			today,
+		) !== null;
 	const moving =
 		phase === "reading" &&
 		(historyIn
 			? sorting && !slow
 			: banks.some(
-					(bank) =>
-						bank.historyCompleteAt === null && !flaggedNames.has(bank.name),
+					(bank) => bank.historyCompleteAt === null && !isFlagged(bank),
 				));
 	const refreshes = moving && recent !== null && nowMs - recent <= HOUR_MS;
 	return {
@@ -415,8 +416,7 @@ export function setupView({
 		sorted: Math.max(0, total - waiting),
 		total,
 		fifth: fifthDay ? (record?.night ?? null) : null,
-		answeredWaiting:
-			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
+		answeredWaiting: phase === "answered" ? answeredWaitingFor(banks) : null,
 		emailed: (record?.readyEmailedTo ?? []).length > 0,
 	};
 }
@@ -428,7 +428,7 @@ export function setupView({
  */
 export async function readSetup(
 	db: D1Database,
-	{ today, flagged }: { today: string; flagged: FlaggedBank[] },
+	{ today }: { today: string },
 ): Promise<SetupView | null> {
 	let record = await readFirstTally(db);
 	const budgetsDay = record?.strokes.budgets;
@@ -463,7 +463,6 @@ export async function readSetup(
 	return setupView({
 		record,
 		banks,
-		flagged,
 		waiting,
 		total,
 		today,

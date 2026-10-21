@@ -39,11 +39,16 @@ export function questionsOpen(facts: QuestionsFacts): boolean {
 	return facts.waiting === 0;
 }
 
-/** A connected bank as the gate and Home's setup read it: its name, and the two sync marks the gate needs. */
+/**
+ * A connected bank as the gate and Home's setup read it: its name, the two sync marks the gate needs, and its own sign-in
+ * flag. Home's flags are decided per bank from these (bankFlag), never by matching a name: two banks can share one.
+ */
 export type GateBank = QuestionsFacts["banks"][number] & {
 	name: string;
 	/** When the bank was linked (plaid_items.created_at, UTC `YYYY-MM-DD HH:MM:SS`). */
 	linkedAt: string | null;
+	/** The bank's login needs fixing (`plaid_items.status = needs_attention`). */
+	needsAttention: boolean;
 };
 
 /**
@@ -61,11 +66,16 @@ export const BANK_CONNECTED_SQL =
 export async function readGateInputs(
 	db: D1Database,
 ): Promise<{ banks: GateBank[]; waiting: number }> {
-	const { results: banks } = await db
+	const { results } = await db
 		.prepare(
-			"SELECT institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
+			"SELECT institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt, status = 'needs_attention' AS needsAttention FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
 		)
-		.all<GateBank>();
+		.all<Omit<GateBank, "needsAttention"> & { needsAttention: number }>();
+	// D1 returns the flag as 0 or 1 (as readYourBanks reads its freshness).
+	const banks = results.map((row) => ({
+		...row,
+		needsAttention: row.needsAttention === 1,
+	}));
 	const switches = await readAiSwitches(db);
 	const waiting = await countWaitingForJev(db, {
 		categories: switches.categories,

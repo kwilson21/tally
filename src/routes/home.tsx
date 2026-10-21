@@ -302,8 +302,7 @@ async function renderHome(
 		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
 	// The first week's setup (P125 E, spec §8.8): the family app only, on the current month, until all five strokes are
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
-	const setup =
-		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
+	const setup = current && !demo ? await readSetup(c.env.DB, { today }) : null;
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
@@ -714,7 +713,7 @@ async function readHomeSetup(db: D1Database) {
 		})),
 		today,
 	);
-	const setup = await readSetup(db, { today, flagged });
+	const setup = await readSetup(db, { today });
 	return { today, banks, flagged, setup };
 }
 
