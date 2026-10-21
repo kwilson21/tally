@@ -25,7 +25,7 @@ import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 import { SplitLine } from "../views/split-form";
-import { TallySteps } from "../views/tally-steps";
+import { type StepLine, TallySteps } from "../views/tally-steps";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -1102,6 +1102,22 @@ function banksView(): SetupView {
 	};
 }
 
+/**
+ * Today's five lines as they were drawn, frozen as literal data: the live setup's words (After sorting) must not reach this
+ * picture, which stays as it was (P140's "Today" is a record, and only A draws the live HomeSetup).
+ */
+const BANKS_TODAY_STEPS: StepLine[] = [
+	{ name: "Link your bank", done: true, note: "Chase, linked" },
+	{ name: "Your pay", done: false, note: "When it's done" },
+	{ name: "Your bills", done: false, note: "When it's done" },
+	{ name: "Your budgets", done: false, note: "When it's done" },
+	{
+		name: "Tomorrow · Tally keeps count on its own",
+		done: false,
+		note: "Later",
+	},
+];
+
 /** Today: the reading phase as it is drawn now, with one line naming neither bank, and no button. */
 function BanksToday() {
 	return (
@@ -1112,9 +1128,7 @@ function BanksToday() {
 				once it has read them all and sorted them.
 			</p>
 			<p class="mt-2 text-muted">Nothing for you to do until then.</p>
-			<TallySteps
-				steps={setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, 1)}
-			/>
+			<TallySteps steps={BANKS_TODAY_STEPS} />
 		</section>
 	);
 }

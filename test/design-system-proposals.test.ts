@@ -6648,6 +6648,21 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		expect(chunk).not.toContain("hx-trigger");
 	});
 
+	it("keeps Today's five lines as they were drawn: When it's done on pay, bills and budgets, whatever the live first week says now (P140)", async () => {
+		const html = await drawn();
+		const start = html.indexOf('<section id="p140-banks"');
+		const chunk = html.slice(
+			start,
+			html.indexOf('<section aria-labelledby="followups-picks-title"'),
+		);
+		const today = options(chunk)[0] ?? "";
+		expect(today).toContain(">Today</h4>");
+		expect(count(today, "When it&#39;s done")).toBe(3);
+		expect(today).not.toContain("After sorting");
+		expect(today).toContain("Chase, linked");
+		expect(today).toContain("Later");
+	});
+
 	it("draws P139 as one visual specimen with Today, A and B, A recommended and picked", async () => {
 		const chunk = specimenOf(await drawn());
 		expect(chunk).toContain('data-ds-tier="visual"');
