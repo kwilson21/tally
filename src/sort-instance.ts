@@ -59,6 +59,9 @@ export async function runSortInstance(
 			bySync: params.bySync,
 			runId: options.runId,
 			waitForTurn: true,
+			// One instance asks at most 5,000 (decision 146): a step per ask and three per group of 25 stay under Workflows'
+			// 10,000 steps on Workers Paid. What is left waits for the next sync or the night.
+			maxCalls: 5000,
 		});
 	} catch (error) {
 		// A step that ran out of retries ends the sort quietly; the rows it didn't save wait for the next sort.
