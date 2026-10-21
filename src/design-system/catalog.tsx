@@ -7911,6 +7911,7 @@ function FirstWeekGroup() {
 		keep: [],
 		waiting: [],
 		budgets: null,
+		watching: false,
 		...over,
 	});
 	return (

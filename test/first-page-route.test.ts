@@ -1101,6 +1101,24 @@ describe("the presence check-in on the page (decision 146)", () => {
 		expect(res.status).toBe(200);
 		expect(html).not.toContain(CHECK_IN);
 	});
+
+	it("is drawn inside the swapped #first-page of a pay answer that leaves a question open, so the page keeps checking in", async () => {
+		// Two payroll merchants: answering the first leaves the second to ask, so the pay step is not drawn yet.
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		await deposits("OTHER PAYROLL", 180000, 2);
+		const { res, html } = await answerAsShown("yes", true);
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="first-page"');
+		expect(html).toContain(CHECK_IN);
+	});
+
+	it("is not drawn in a pay answer's #first-page once the answer draws the pay step, so the swap takes away the one the page drew", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { res, html } = await answerAsShown("yes", true);
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="first-page"');
+		expect(html).not.toContain(CHECK_IN);
+	});
 });
 
 describe("empty steps", () => {

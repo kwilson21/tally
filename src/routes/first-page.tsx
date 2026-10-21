@@ -48,7 +48,6 @@ import {
 	type Motion,
 	NO_MOTION,
 } from "../views/first-page";
-import { HomeSeenCheckIn } from "../views/home-seen";
 import { Layout } from "../views/layout";
 
 // The question page (P125 E, spec §8.8, decision 114): the family app only, opened once the gate is open. Each answer
@@ -105,12 +104,21 @@ function answered(
 	type: "success" | "info" = "success",
 ) {
 	if (!c.req.header("HX-Request")) return c.redirect("/first-page", 303);
-	return c.html(<FirstPageBody model={model} focus motion={motion} />, 200, {
-		"HX-Trigger": hxTrigger({
-			toast: { message, type },
-			announce: message,
-		}),
-	});
+	return c.html(
+		<FirstPageBody
+			model={model}
+			focus
+			motion={motion}
+			watching={model.watching}
+		/>,
+		200,
+		{
+			"HX-Trigger": hxTrigger({
+				toast: { message, type },
+				announce: message,
+			}),
+		},
+	);
 }
 
 /**
@@ -145,8 +153,8 @@ function pageDocument(
 					focus={focus}
 					budgetError={budgetError}
 					savingsError={savingsError}
+					watching={watching}
 				/>
-				{watching && <HomeSeenCheckIn />}
 			</div>
 		</Layout>
 	);
@@ -534,6 +542,7 @@ async function savingsRefused(
 			focus
 			motion={NO_MOTION}
 			savingsError={savingsError}
+			watching={model.watching}
 		/>,
 		422,
 		{
@@ -590,6 +599,7 @@ function budgetRefused(
 			focus
 			motion={NO_MOTION}
 			budgetError={budgetError}
+			watching={model.watching}
 		/>,
 		422,
 		{
