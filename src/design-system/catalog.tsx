@@ -538,29 +538,7 @@ function Brand() {
 						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, 0)}
 					/>
 				</State>
-				<State label="The evening of stroke one: Chase, linked; the rest come after sorting">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-				<State label="The import is still sorting: the rest come after it">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-				<State label="The reading, the history still coming in: no time promised">
+				<State label="While Tally reads and sorts: Chase, linked; steps 2 to 4 say After sorting, and the fifth says Later">
 					<TallySteps
 						steps={setupSteps(
 							BANK_SYNCED,
@@ -685,7 +663,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds, and a page whose step has moved on reloads itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
