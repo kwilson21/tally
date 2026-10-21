@@ -29,8 +29,25 @@ export type JevInput = {
 
 export type JevResult =
 	| { ok: true; answer: JevAnswer }
-	/** status is null when no response arrived (network error or timeout). */
-	| { ok: false; status: number | null; requestId: string | null };
+	/**
+	 * status is null when no response arrived (network error or timeout). retryAfterMs is the wait Jev asked for, present
+	 * only when Jev sent a readable retry-after on an error response (decision 145).
+	 */
+	| {
+			ok: false;
+			status: number | null;
+			requestId: string | null;
+			retryAfterMs?: number;
+	  };
+
+/**
+ * Jev's retry-after, read as whole seconds and turned into milliseconds (decision 145). An HTTP-date, a negative or
+ * fractional number, or nothing at all gives no wait.
+ */
+function retryAfter(response: Response): { retryAfterMs?: number } {
+	const seconds = response.headers.get("retry-after") ?? "";
+	return /^\d+$/.test(seconds) ? { retryAfterMs: Number(seconds) * 1000 } : {};
+}
 
 /**
  * Asked only with the details, in the same call (decision 103): whether a "what it was" line could say
@@ -175,7 +192,13 @@ export async function askJev(
 	}
 
 	const requestId = response.headers.get("x-typesafe-request-id");
-	if (!response.ok) return { ok: false, status: response.status, requestId };
+	if (!response.ok)
+		return {
+			ok: false,
+			status: response.status,
+			requestId,
+			...retryAfter(response),
+		};
 
 	const answer = parseAnswer(
 		await response.json().catch(() => null),

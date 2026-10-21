@@ -135,6 +135,8 @@ export type AskResult =
 			status: number | null;
 			requestId: string | null;
 			serviceWide: boolean;
+			/** The wait Jev asked for, when it sent a readable retry-after (decision 145). */
+			retryAfterMs?: number;
 	  }
 	| {
 			id: number;
@@ -358,6 +360,9 @@ async function askOne(
 				status: result.status,
 				requestId: result.requestId,
 				serviceWide: serviceWide(result.status),
+				...(result.retryAfterMs === undefined
+					? {}
+					: { retryAfterMs: result.retryAfterMs }),
 			};
 		}
 		return { id, outcome: "answered", answer: result.answer };

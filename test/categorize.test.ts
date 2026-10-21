@@ -239,6 +239,67 @@ describe("askJev", () => {
 		});
 	});
 
+	describe("the wait Jev asks for (decision 145)", () => {
+		const rateLimited = (headers: Record<string, string>) =>
+			fakeFetch(() => new Response("{}", { status: 429, headers }));
+
+		it.each([
+			["7", 7000],
+			["0", 0],
+			["90", 90_000],
+		])(
+			"reads retry-after %s as whole seconds: %i ms",
+			async (header, ms) => {
+				const { fetchImpl } = rateLimited({ "retry-after": header });
+				expect(await askJev(input, categories, "k", fetchImpl)).toEqual({
+					ok: false,
+					status: 429,
+					requestId: null,
+					retryAfterMs: ms,
+				});
+			},
+		);
+
+		it.each([
+			["an HTTP-date", "Wed, 21 Oct 2026 07:28:00 GMT"],
+			["a negative number", "-3"],
+			["a word", "abc"],
+			["a fraction", "1.5"],
+			["an empty value", ""],
+		])("leaves retryAfterMs out for %s", async (_label, header) => {
+			const { fetchImpl } = rateLimited({ "retry-after": header });
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result).toEqual({ ok: false, status: 429, requestId: null });
+			expect(result).not.toHaveProperty("retryAfterMs");
+		});
+
+		it("leaves retryAfterMs out when Jev sends no retry-after", async () => {
+			const { fetchImpl } = rateLimited({});
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result).not.toHaveProperty("retryAfterMs");
+		});
+
+		it("never carries retryAfterMs when no response arrived", async () => {
+			const { fetchImpl } = fakeFetch(() => {
+				throw new DOMException("The operation timed out.", "TimeoutError");
+			});
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result).not.toHaveProperty("retryAfterMs");
+		});
+
+		it("never carries retryAfterMs when a 200's body can't be parsed", async () => {
+			const { fetchImpl } = fakeFetch(
+				() =>
+					new Response("not json", {
+						status: 200,
+						headers: { "retry-after": "5" },
+					}),
+			);
+			const result = await askJev(input, categories, "k", fetchImpl);
+			expect(result).not.toHaveProperty("retryAfterMs");
+		});
+	});
+
 	it("passes a timeout signal to fetch", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(input, categories, "k", fetchImpl);
