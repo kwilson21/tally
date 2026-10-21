@@ -269,4 +269,73 @@ describe("parseAppleCsv", () => {
 		const row = `09/25/2026,09/26/2026,"${longest}","Long","Gas","Purchase","1.00","Pat Rivera"`;
 		expect(rowsOf(file(HEADER8, row))[0]?.description).toBe(longest);
 	});
+
+	it("refuses a quote that doesn't open its field: text after a closing quote, or a quote in the middle of a field", () => {
+		const bads = [
+			// Text after the closing quote of Type: "Payment"x would read as Paymentx, a payment counted as spending.
+			'09/25/2026,09/26/2026,"BAD TYPE","Bad","Gas","Payment"x,"-12.00","Pat Rivera"',
+			// A quote in the middle of an unquoted Type: x"Payment" would read as xPayment.
+			'09/25/2026,09/26/2026,"BAD TYPE","Bad","Gas",x"Payment","-12.00","Pat Rivera"',
+			// A space after the closing quote, before the comma.
+			'09/25/2026,09/26/2026,"BAD SPACE","Bad","Gas" ,"Purchase","1.00","Pat Rivera"',
+			// A space before the opening quote: the quote is no longer the field's first character.
+			'09/25/2026,09/26/2026,"BAD LEAD","Bad", "Gas","Purchase","1.00","Pat Rivera"',
+		];
+		for (const bad of bads) {
+			expect(errorOf(withBadRow14(bad))).toBe(
+				"Row 14 can't be read. Nothing was added.",
+			);
+		}
+	});
+
+	it("names the malformed row's number when a good row comes before it", () => {
+		const bad =
+			'09/25/2026,09/26/2026,"BAD TYPE","Bad","Gas","Payment"x,"-12.00","Pat Rivera"';
+		expect(errorOf(file(HEADER8, GREENLEAF, bad))).toBe(
+			"Row 3 can't be read. Nothing was added.",
+		);
+	});
+
+	it("refuses a malformed row of empty-looking fields, rather than skipping it as blank", () => {
+		const emptyLooking = `"" ${",".repeat(7)}`;
+		expect(errorOf(withBadRow14(emptyLooking))).toBe(
+			"Row 14 can't be read. Nothing was added.",
+		);
+	});
+
+	it("names the first row that can't be read in file order, whichever check it fails", () => {
+		const malformed =
+			'09/25/2026,09/26/2026,"BAD TYPE","Bad","Gas","Payment"x,"-12.00","Pat Rivera"';
+		const badAmount =
+			'09/25/2026,09/26/2026,"BAD AMOUNT","Bad","Gas","Purchase","$45.25","Pat Rivera"';
+		expect(errorOf(file(HEADER8, GREENLEAF, malformed, badAmount))).toBe(
+			"Row 3 can't be read. Nothing was added.",
+		);
+		expect(errorOf(file(HEADER8, GREENLEAF, badAmount, malformed))).toBe(
+			"Row 3's amount can't be read. Nothing was added.",
+		);
+	});
+
+	it("refuses a malformed header as not Apple's, even when its names read right", () => {
+		const spacedHeader = HEADER8.replace(
+			"Transaction Date,",
+			'"Transaction Date" ,',
+		);
+		expect(errorOf(file(spacedHeader, GREENLEAF))).toBe(NOT_APPLE);
+	});
+
+	it("reads a closing quote followed by CRLF, LF, a comma, or the end of the text", () => {
+		const lf = file(HEADER8, GREENLEAF);
+		const crlf = `${HEADER8}\r\n${GREENLEAF}\r\n${GREENLEAF}`;
+		const end = `${HEADER8}\n${GREENLEAF}`;
+		expect(rowsOf(lf).map((row) => row.amountCents)).toEqual([3840]);
+		expect(rowsOf(crlf).map((row) => row.amountCents)).toEqual([3840, 3840]);
+		expect(rowsOf(end).map((row) => row.amountCents)).toEqual([3840]);
+	});
+
+	it("reads doubled quotes inside a quoted field, including at its start and end", () => {
+		const row =
+			'09/25/2026,09/26/2026,"""QUOTED""","Quoted","Dining","Purchase","4.00","Pat Rivera"';
+		expect(rowsOf(file(HEADER8, row))[0]?.description).toBe('"QUOTED"');
+	});
 });

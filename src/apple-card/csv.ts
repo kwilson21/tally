@@ -41,15 +41,27 @@ export function cleanText(text: string): string {
 }
 
 /**
- * Splits CSV text into records of fields. A quoted field may hold commas, line breaks and doubled quotes. When the text
- * ends inside a quoted field, `open` is that record's number (counted as a spreadsheet counts records, the header 1), and
- * the record is left out of `out`: its text can't be read.
+ * Splits CSV text into records of fields. A quoted field may hold commas, line breaks and doubled quotes, and a quote
+ * may only open a field, as its first character. Text after a field's closing quote, or a quote in the middle of a
+ * field, makes its record malformed: `malformed` holds those records' indexes in `out`. Such a record is still read
+ * on, so the record boundaries stay where they are. When the text ends inside a quoted field, `open` is that record's
+ * number (counted as a spreadsheet counts records, the header 1), and the record is left out of `out`: its text can't
+ * be read.
  */
-function records(text: string): { out: string[][]; open: number | null } {
+function records(text: string): {
+	out: string[][];
+	open: number | null;
+	malformed: Set<number>;
+} {
 	const out: string[][] = [];
+	const malformed = new Set<number>();
 	let record: string[] = [];
 	let field = "";
 	let quoted = false;
+	// The field's quoted text has closed: only a comma, a line break or the end of the text may follow.
+	let closed = false;
+	// Nothing has been read for the field yet, so a quote here opens it.
+	let atStart = true;
 	for (let i = 0; i < text.length; i++) {
 		const char = text.charAt(i);
 		if (quoted) {
@@ -57,26 +69,39 @@ function records(text: string): { out: string[][]; open: number | null } {
 				if (text.charAt(i + 1) === '"') {
 					field += '"';
 					i++;
-				} else quoted = false;
+				} else {
+					quoted = false;
+					closed = true;
+				}
 			} else field += char;
-		} else if (char === '"') quoted = true;
-		else if (char === ",") {
+		} else if (char === ",") {
 			record.push(field);
 			field = "";
+			closed = false;
+			atStart = true;
 		} else if (char === "\r" || char === "\n") {
 			record.push(field);
 			out.push(record);
 			record = [];
 			field = "";
+			closed = false;
+			atStart = true;
 			if (char === "\r" && text.charAt(i + 1) === "\n") i++;
-		} else field += char;
+		} else {
+			if (atStart && char === '"') quoted = true;
+			else {
+				if (closed || char === '"') malformed.add(out.length);
+				field += char;
+			}
+			atStart = false;
+		}
 	}
-	if (quoted) return { out, open: out.length + 1 };
+	if (quoted) return { out, open: out.length + 1, malformed };
 	if (field !== "" || record.length > 0) {
 		record.push(field);
 		out.push(record);
 	}
-	return { out, open: null };
+	return { out, open: null, malformed };
 }
 
 /** Integer cents for Apple's amount text, or null. A dollar sign is refused, and so is anything toCents rejects. */
@@ -168,27 +193,32 @@ function readRow(fields: string[], line: number, width: number): RowResult {
 }
 
 /**
- * Reads Apple's CSV text. The first record must be Apple's header, exactly. Every later record must have the header's
- * number of fields and read cleanly; the first one that doesn't refuses the whole file, and the error names its row.
- * A quote left open at the end of the text refuses the file too, naming the record it was in. A byte-order mark is
- * removed, and blank records (a trailing blank line, or a record of empty fields) are skipped.
+ * Reads Apple's CSV text. The first record must be Apple's header, exactly, with no quote in the wrong place (a malformed
+ * header is not Apple's). Every later record must have no quote in the wrong place, have the header's number of fields
+ * and read cleanly; the first one that doesn't refuses the whole file, and the error names its row. A quote left open at
+ * the end of the text refuses the file too, naming the record it was in. A byte-order mark is removed, and blank records
+ * (a trailing blank line, or a record of empty fields) are skipped.
  */
 export function parseAppleCsv(
 	text: string,
 ): { ok: true; rows: AppleRow[] } | { ok: false; error: string } {
-	const { out: all, open } = records(text.replace(/^﻿/, ""));
+	const { out: all, open, malformed } = records(text.replace(/^﻿/, ""));
 	const header = (all[0] ?? []).map(cleanText);
 	const withPurchasedBy = [...APPLE_COLUMNS, PURCHASED_BY];
 	const isApple =
-		(header.length === APPLE_COLUMNS.length &&
+		!malformed.has(0) &&
+		((header.length === APPLE_COLUMNS.length &&
 			header.every((name, i) => name === APPLE_COLUMNS[i])) ||
-		(header.length === withPurchasedBy.length &&
-			header.every((name, i) => name === withPurchasedBy[i]));
+			(header.length === withPurchasedBy.length &&
+				header.every((name, i) => name === withPurchasedBy[i])));
 	if (!isApple) return { ok: false, error: NOT_APPLE };
 
 	const rows: AppleRow[] = [];
 	for (let index = 1; index < all.length; index++) {
 		const fields = all[index] ?? [];
+		// A malformed record is refused before the blank check, so a malformed record of empty-looking fields isn't skipped.
+		if (malformed.has(index))
+			return { ok: false, error: unreadableWords(index + 1) };
 		// A blank record, or one of empty fields (a spreadsheet's re-save can leave those), is skipped, not refused.
 		if (fields.every((field) => cleanText(field) === "")) continue;
 		const result = readRow(fields, index + 1, header.length);
