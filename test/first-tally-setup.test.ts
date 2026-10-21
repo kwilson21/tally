@@ -221,9 +221,12 @@ describe("setupView: which setup state Home shows", () => {
 		});
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
-		expect(reading?.steps.some((s) => s.note === "Tomorrow morning")).toBe(
-			false,
-		);
+		expect(reading?.steps.slice(1).map((s) => s.note)).toEqual([
+			"After sorting",
+			"After sorting",
+			"After sorting",
+			"Later",
+		]);
 	});
 
 	it("counts the connected banks and names the first one's, not the second's", () => {

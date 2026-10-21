@@ -409,7 +409,7 @@ describe("the ready email: who is still there (decision 146)", () => {
 		expect(sent).toEqual([]);
 	});
 
-	it("logs nothing on a minute when no address is claimed", async () => {
+	it("nothing is logged when no address is claimed", async () => {
 		await openHousehold({ members: [DANA] });
 		await checkedInAt(DANA, "-30 seconds");
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -421,7 +421,7 @@ describe("the ready email: who is still there (decision 146)", () => {
 		error.mockRestore();
 	});
 
-	it("costs a set-up household one read and sends nothing", async () => {
+	it("a set-up household costs one read and sends nothing", async () => {
 		await openHousehold({ members: [DANA] });
 		await writeRecord({
 			strokes: {
