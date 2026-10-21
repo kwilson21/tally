@@ -197,6 +197,65 @@ describe("setupView: which setup state Home shows", () => {
 		expect(garbled?.refreshes).toBe(false);
 	});
 
+	it("does not refresh for a recent bank that is still loading when it is flagged, since nothing is moving (decision 146)", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const loading = {
+			...BANK,
+			linkedAt: "2026-10-14 11:30:00",
+			historyCompleteAt: null,
+		};
+		const needsSignIn = view({
+			record,
+			banks: [loading],
+			flagged: [{ name: "Chase", reason: "sign-in" }],
+			total: 10,
+		});
+		expect(needsSignIn?.phase).toBe("reading");
+		expect(needsSignIn?.refreshes).toBe(false);
+		const stopped = view({
+			record,
+			banks: [loading],
+			flagged: [{ name: "Chase", reason: "stale", since: "2026-10-10" }],
+			total: 10,
+		});
+		expect(stopped?.refreshes).toBe(false);
+		// The same bank, nothing flagging it: it refreshes.
+		expect(
+			view({ record, banks: [loading], flagged: [], total: 10 })?.refreshes,
+		).toBe(true);
+	});
+
+	it("refreshes while one bank is flagged and another is still loading and healthy", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const flaggedBank = {
+			...BANK,
+			linkedAt: "2026-10-14 11:30:00",
+			historyCompleteAt: null,
+		};
+		const healthy = { ...flaggedBank, name: "Wells Fargo" };
+		const both = view({
+			record,
+			banks: [flaggedBank, healthy],
+			flagged: [{ name: "Chase", reason: "sign-in" }],
+			total: 10,
+		});
+		expect(both?.refreshes).toBe(true);
+	});
+
+	it("refreshes while the sort runs once every history is in, even with a flagged bank (decision 146)", () => {
+		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+		const sorting = view({
+			record,
+			banks: [RECENT, { ...RECENT, name: "Wells Fargo" }],
+			flagged: [{ name: "Chase", reason: "stale", since: "2026-10-10" }],
+			waiting: 500,
+			total: 1500,
+		});
+		expect(sorting?.sorting).toBe(true);
+		expect(sorting?.slow).toBe(false);
+		expect(sorting?.refreshes).toBe(true);
+	});
+
 	it("is ready once the gate is open: every bank synced and its history in, and nothing waiting", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const ready = view({ record, banks: [BANK], waiting: 0, total: 362 });

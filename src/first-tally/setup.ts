@@ -56,8 +56,9 @@ export type SetupView = {
 	 */
 	slow: boolean;
 	/**
-	 * Reading, not slow, with a bank linked or its history in during the last hour: Home refreshes itself while it can, and
-	 * says so (decision 146). A stale import stops refreshing.
+	 * Reading, with something moving (a bank still coming in that nothing flags, or the sort once every history is in and it
+	 * is not slow) and a bank linked or its history in during the last hour: Home refreshes itself while it can, and says so
+	 * (decision 146). A flagged bank still loading, or a stale import, stops it.
 	 */
 	refreshes: boolean;
 	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
@@ -388,11 +389,19 @@ export function setupView({
 	const slow = sorting && historyAt !== null && nowMs - historyAt > HOUR_MS;
 	const linkedAt = newestMs(banks.map((bank) => storedTimeMs(bank.linkedAt)));
 	const recent = newestMs([linkedAt, historyAt]);
-	const refreshes =
+	// Something is moving: once every history is in, the sort (not slow). While one is still coming in, a bank that nothing
+	// flags: a flagged one waits for a sign-in or a sync that isn't coming, as bankState's paused does. Flags are matched by
+	// name, as answeredWaitingFor reads them.
+	const flaggedNames = new Set(flagged.map((bank) => bank.name));
+	const moving =
 		phase === "reading" &&
-		!slow &&
-		recent !== null &&
-		nowMs - recent <= HOUR_MS;
+		(historyIn
+			? sorting && !slow
+			: banks.some(
+					(bank) =>
+						bank.historyCompleteAt === null && !flaggedNames.has(bank.name),
+				));
+	const refreshes = moving && recent !== null && nowMs - recent <= HOUR_MS;
 	return {
 		phase,
 		drawn: strokesDrawn(record),

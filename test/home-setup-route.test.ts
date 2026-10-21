@@ -334,23 +334,72 @@ describe("Home during setup", () => {
 		expect(html).toContain("stopped updating");
 	});
 
-	it("a bank that needs signing in during the reading shows its line and Fix, not 'Nothing for you to do'", async () => {
+	/**
+	 * A household in the slow step: every bank's history came in over an hour ago, all banks are synced, and one transaction
+	 * still waits for Jev. With `signIn`, the first bank needs signing in.
+	 */
+	const slowHousehold = async ({ signIn }: { signIn: boolean }) => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		await env.DB.prepare(
-			"UPDATE plaid_items SET status = 'needs_attention'",
+			"UPDATE plaid_items SET status = 'ok', last_synced_at = datetime('now', '-2 hours'), history_complete_at = datetime('now', '-2 hours')",
 		).run();
+		if (signIn)
+			await env.DB.prepare(
+				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = (SELECT MIN(id) FROM plaid_items)",
+			).run();
 		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = NULL",
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-slow', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
 		).run();
 		await writeRecord({
 			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
 			budgets: {},
 		});
+	};
+
+	it("a bank that needs signing in while Tally sorts shows its line and Fix, and the slow line leaves out 'Nothing for you to do'", async () => {
+		await slowHousehold({ signIn: true });
 		const html = await page(family);
-		expect(html).toContain("Your first week");
+		expect(html).toContain("Sorting is taking longer than usual:");
+		expect(html).toContain(
+			"Tally keeps trying on its own and will email you the moment your questions are ready.",
+		);
 		expect(html).toContain("needs signing in");
 		expect(html).toContain('href="/accounts"');
-		expect(html).not.toContain("Nothing for you to do");
+		expect(html).not.toContain("Nothing for you to do.");
+	});
+
+	it("the slow line says 'Nothing for you to do.' when no bank needs a fix (the control for the line above)", async () => {
+		await slowHousehold({ signIn: false });
+		const html = await page(family);
+		expect(html).toContain("Sorting is taking longer than usual:");
+		expect(html).toContain(
+			"Tally keeps trying on its own and will email you the moment your questions are ready. Nothing for you to do.",
+		);
+		expect(html).not.toContain("needs signing in");
+	});
+
+	it("a recent bank still loading that needs signing in does not poll the Your banks list, and the page does not say it updates (decision 146)", async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = NULL, status = 'needs_attention', created_at = datetime('now', '-10 minutes')",
+		).run();
+		await writeRecord({
+			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
+			budgets: {},
+		});
+		const flagged = await page(family);
+		expect(flagged).toContain("needs signing in");
+		expect(flagged).toContain("Tally's reading your last 90 days from");
+		expect(flagged).not.toContain('hx-trigger="every 5s"');
+		expect(flagged).not.toContain("This page updates as it goes");
+		// The control: the same bank, healthy, polls and says so.
+		await env.DB.prepare("UPDATE plaid_items SET status = 'ok'").run();
+		const healthy = await page(family);
+		expect(healthy).toContain('hx-trigger="every 5s"');
+		expect(healthy).toContain("This page updates as it goes");
 	});
 
 	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and Home offers Link a bank again", async () => {
