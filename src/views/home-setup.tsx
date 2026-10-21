@@ -18,6 +18,9 @@ import { YourBanks } from "./your-banks";
 
 const count = (n: number) => n.toLocaleString("en-US");
 
+/** Home's headline before a bank is linked (decision 114). Home's announce for a redraw to it uses these words too. */
+export const BEFORE_HEADLINE = "Five strokes, and you're set up.";
+
 /**
  * The ready status (decision 146): every transaction the banks sent is sorted, and the three questions are next. The count
  * reads as a sentence: "Your 1 transaction", "Everything" when there are none.
@@ -124,6 +127,7 @@ function FifthDay({
 	safeToSpendCents,
 	needsHref,
 	bankLine,
+	focusStatus = false,
 }: {
 	view: SetupView;
 	night: NightCounts;
@@ -131,6 +135,8 @@ function FifthDay({
 	/** Where "See what needs you" goes, given when the night left something for a person (home.tsx). */
 	needsHref?: string;
 	bankLine?: string[];
+	/** The night's sentence takes focus: a full redraw of Home on the fifth day (home.tsx). */
+	focusStatus?: boolean;
 }) {
 	const amount = safeToSpendText(safeToSpendCents);
 	return (
@@ -154,7 +160,12 @@ function FifthDay({
 					<Notebook strokes={5} ink size="size-24" />
 				</div>
 			</div>
-			<p id="setup-status" class="mt-3 font-serif text-lg italic">
+			<p
+				id="setup-status"
+				class="mt-3 font-serif text-lg italic"
+				tabindex={focusStatus ? -1 : undefined}
+				autofocus={focusStatus}
+			>
 				{nightSentence(night)}
 			</p>
 			{night.needYou > 0 && needsHref && (
@@ -220,6 +231,7 @@ export function HomeSetup({
 				safeToSpendCents={fifthDay.safeToSpendCents}
 				needsHref={fifthDay.needsHref}
 				bankLine={bankLine}
+				focusStatus={focusStatus}
 			/>
 		);
 	}
@@ -238,8 +250,10 @@ export function HomeSetup({
 							? "min-w-0 font-serif text-4xl font-semibold tracking-tight"
 							: "sr-only"
 					}
+					tabindex={focusStatus && before ? -1 : undefined}
+					autofocus={focusStatus && before}
 				>
-					{before ? "Five strokes, and you're set up." : "Your first week"}
+					{before ? BEFORE_HEADLINE : "Your first week"}
 				</h1>
 				<Notebook strokes={view.drawn} ink size="size-24" />
 			</div>

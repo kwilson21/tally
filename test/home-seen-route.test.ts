@@ -78,6 +78,16 @@ const announced = (res: Response) => {
 	return header ? (JSON.parse(header) as { announce?: string }).announce : null;
 };
 
+/** The text of the one element a redrawn page gives focus to (autofocus), as the page reads it; null when none has it. */
+const focusedText = (html: string) =>
+	html
+		.replaceAll("&#39;", "'")
+		.match(/<[a-z0-9]+[^<>]*\bautofocus\b[^<>]*>([^<]*)</)?.[1] ?? null;
+
+/** How many elements a page gives autofocus to: a redrawn page focuses one, what changed (decision 146). */
+const autofocusCount = (html: string) =>
+	html.match(/\bautofocus\b/g)?.length ?? 0;
+
 // Every connected bank still reading its history: the reading step.
 const reading = async () => {
 	await env.DB.prepare(
@@ -327,7 +337,13 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(res.headers.get("HX-Retarget")).toBe("#page");
 		expect(res.headers.get("HX-Reselect")).toBe("#page");
 		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
-		expect(await res.text()).toContain('id="page"');
+		const html = await res.text();
+		expect(html).toContain('id="page"');
+		// Home's status is announced as the page draws it, and it takes focus: the Link a bank or Fix button that had focus is gone.
+		const drawn = focusedText(html);
+		expect(drawn).toBeTruthy();
+		expect(announced(res)).toBe(drawn);
+		expect(autofocusCount(html)).toBe(1);
 	});
 
 	it("redraws Home in full on the fifth day, with its view and the night announced, and no reload", async () => {
@@ -350,9 +366,13 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(announced(res)).toBe(
 			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
 		);
-		expect(await res.text()).toContain(
+		const html = await res.text();
+		expect(html).toContain(
 			"From tomorrow this list goes, and Home is just Home.",
 		);
+		// The night's sentence takes focus: the page's status is the one thing that changed (decision 146).
+		expect(focusedText(html)).toBe(announced(res));
+		expect(autofocusCount(html)).toBe(1);
 	});
 
 	it("redraws Home in full, with no reload, once the last connected bank is disconnected (before a bank)", async () => {
@@ -364,7 +384,12 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(res.status).toBe(200);
 		expect(res.headers.get("HX-Refresh")).toBeNull();
 		expect(res.headers.get("HX-Retarget")).toBe("#page");
-		expect(await res.text()).toContain('id="page"');
+		const html = await res.text();
+		expect(html).toContain('id="page"');
+		// Before a bank, Home's headline is announced and takes focus, as the page draws it (decision 146).
+		expect(announced(res)).toBe("Five strokes, and you're set up.");
+		expect(focusedText(html)).toBe("Five strokes, and you're set up.");
+		expect(autofocusCount(html)).toBe(1);
 	});
 
 	it("never answers HX-Refresh to the questions page's check-in, which sends no step", async () => {

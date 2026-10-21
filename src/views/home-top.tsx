@@ -35,7 +35,23 @@ type Props = {
 	band?: { href: string; text: Child; detail?: string; older?: number };
 	/** False when no category has a budget this month: nothing can be over budget, so it's never brick (#519). */
 	hasBudgets?: boolean;
+	/** The status takes focus: a full redraw of Home after the first week's setup is gone (decision 146, home.tsx). */
+	focusStatus?: boolean;
 };
+
+/**
+ * The sentence Home's status line draws: the over-budget sentence while Safe to spend is below zero with a budget, otherwise
+ * the status sentence. Home's announce for a redraw uses the same words the line draws.
+ */
+export function homeStatusWords(
+	status: string,
+	safeToSpendCents: number,
+	hasBudgets: boolean,
+): string {
+	return hasBudgets && safeToSpendCents < 0
+		? "Over budget this month. Spending more takes it further over."
+		: status;
+}
 
 /** The month, then Safe to spend, the status sentence, a stale-bank line when needed, and the Band. How this works is at Home's foot (HowFoot). */
 export function HomeTop({
@@ -50,6 +66,7 @@ export function HomeTop({
 	forecast,
 	currentMonth = true,
 	hasBudgets = true,
+	focusStatus = false,
 }: Props) {
 	const negative = safeToSpendCents < 0;
 	const amount = safeToSpendText(safeToSpendCents);
@@ -83,10 +100,12 @@ export function HomeTop({
 					<LedgerIllustration />
 				</div>
 			</div>
-			<p class="mt-3 font-serif text-lg italic">
-				{over
-					? "Over budget this month. Spending more takes it further over."
-					: status}
+			<p
+				class="mt-3 font-serif text-lg italic"
+				tabindex={focusStatus ? -1 : undefined}
+				autofocus={focusStatus}
+			>
+				{homeStatusWords(status, safeToSpendCents, hasBudgets)}
 			</p>
 			{currentMonth && bankLine && <BankBehind words={bankLine} />}
 			{currentMonth && dailyAmount && (

@@ -47,13 +47,14 @@ import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeSeenCheckIn, type ShownStep } from "../views/home-seen";
 import {
+	BEFORE_HEADLINE,
 	HomeSetup,
 	nightSentence,
 	setupNextLine,
 	setupStep,
 	statusOf,
 } from "../views/home-setup";
-import { HomeTop } from "../views/home-top";
+import { HomeTop, homeStatusWords } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
 import { LinkBank, plaidScripts } from "../views/link-bank";
@@ -155,6 +156,11 @@ type HomeOptions = {
 	adjusting?: boolean;
 	/** After a tap reaches a limit, focus goes to the row's other button. */
 	nudgeFocus?: { id: number; direction: "up" | "down" };
+	/**
+	 * A full redraw of Home from the first week's poll or check-in (redrawFirstWeek, decision 146): what the page draws in its
+	 * status is announced after `said` (the banks that came in), and that status takes focus.
+	 */
+	firstWeekRedraw?: { said: string };
 	status?: 200 | 404 | 422;
 };
 
@@ -173,6 +179,7 @@ async function renderHome(
 		saved,
 		adjusting,
 		nudgeFocus,
+		firstWeekRedraw,
 		status = 200,
 	}: HomeOptions = {},
 ) {
@@ -330,6 +337,20 @@ async function renderHome(
 		stripMonths(month, firstMonth, currentMonth),
 	);
 
+	// A full redraw from the first week's poll or check-in (redrawFirstWeek): the status this page draws is announced, and it takes
+	// focus, since the button that had focus is gone (decision 146). The announce is read from the same setup the page draws.
+	if (firstWeekRedraw) {
+		const drawn = drawnFirstWeekWords(setup, Boolean(bankNotice), {
+			status: statusSentence(summary.categories),
+			safeToSpendCents: summary.safeToSpendCents,
+			hasBudgets,
+		});
+		const message = [firstWeekRedraw.said, drawn].filter(Boolean).join(" ");
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
+		);
+	}
 	return c.html(
 		<Layout
 			active="home"
@@ -346,6 +367,7 @@ async function renderHome(
 								view={setup}
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
+								focusStatus={Boolean(firstWeekRedraw)}
 								yourBanks={{
 									banks: yourBanks,
 									today,
@@ -374,6 +396,7 @@ async function renderHome(
 								safeToSpendCents={summary.safeToSpendCents}
 								hasBudgets={hasBudgets}
 								status={statusSentence(summary.categories)}
+								focusStatus={Boolean(firstWeekRedraw)}
 								bankLine={bankNotice?.words}
 								bankDate={bankNotice?.asOf}
 								dailyAmount={dailyAmount}
@@ -711,6 +734,21 @@ function shownStepOf(setup: SetupView | null): ShownStep | null {
 }
 
 /**
+ * The words a full redraw of Home draws in its focused status (decision 146): the fifth day's sentence, Home's headline before a
+ * bank, the setup's status while the setup is drawn, or else Home's own status sentence. The announce says these words.
+ */
+function drawnFirstWeekWords(
+	setup: SetupView | null,
+	bankLine: boolean,
+	home: { status: string; safeToSpendCents: number; hasBudgets: boolean },
+): string {
+	if (setup?.fifth) return nightSentence(setup.fifth);
+	if (setup?.phase === "before") return BEFORE_HEADLINE;
+	if (setup) return statusOf(setup, bankLine);
+	return homeStatusWords(home.status, home.safeToSpendCents, home.hasBudgets);
+}
+
+/**
  * The Your banks list as the reading page draws it (decision 146). The poll's answer and the presence check-in's out-of-band
  * swap both draw it here, so they name the same step and keep polling by the same rule: while Tally refreshes (setup.refreshes),
  * and while a bank is being read. `oob` swaps it in for the list the page shows.
@@ -751,7 +789,7 @@ function linkBankOnHome() {
  * check-in both answer through here, so they can't drift. A reload would close Plaid Link's window, which the page's own Link
  * a bank opens. While the top can be drawn in place, the whole top (#setup-top) is redrawn once, its status takes focus, and
  * `said` (the banks the poll says came in) is announced with the status. With no setup to draw in place (set up, before a bank,
- * or the fifth day), Home is drawn in full into #page, and what it says (`said`, and the fifth day's sentence) is announced.
+ * or the fifth day), Home is drawn in full into #page; renderHome announces what it draws (`said` first) and focuses its status.
  */
 async function redrawFirstWeek(
 	c: Context<App>,
@@ -763,16 +801,7 @@ async function redrawFirstWeek(
 		c.header("HX-Retarget", "#page");
 		c.header("HX-Reswap", "outerHTML");
 		c.header("HX-Reselect", "#page");
-		// What the page says as it is redrawn: a bank that came in, and on the fifth day, what the night did.
-		const message = [said, setup?.fifth ? nightSentence(setup.fifth) : ""]
-			.filter(Boolean)
-			.join(" ");
-		if (message)
-			c.header(
-				"HX-Trigger",
-				hxTrigger({ toast: { message, type: "info" }, announce: message }),
-			);
-		return renderHome(c, today);
+		return renderHome(c, today, { firstWeekRedraw: { said } });
 	}
 	const message = [said, statusOf(setup, flagged.length > 0)]
 		.filter(Boolean)

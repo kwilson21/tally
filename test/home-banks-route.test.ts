@@ -364,6 +364,29 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 		expect(res.headers.get("HX-Retarget")).toBe("#page");
 		expect(res.headers.get("HX-Reselect")).toBe("#page");
 		expect(html).toContain('id="page"');
+		// Set up, Home's status is announced as it is drawn and takes focus (decision 146): the page has no focused button left.
+		const focused = html
+			.replaceAll("&#39;", "'")
+			.match(/<[a-z0-9]+[^<>]*\bautofocus\b[^<>]*>([^<]*)</)?.[1];
+		expect(focused).toBeTruthy();
+		expect(trigger(res)?.announce).toBe(focused);
+		expect(trigger(res)?.toast).toEqual({ message: focused, type: "info" });
+		expect(html.match(/\bautofocus\b/g)?.length).toBe(1);
+	});
+
+	it("redraws Home in full before a bank, announcing its headline and taking focus on it (decision 146)", async () => {
+		await readingBanks();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+		const { res, html } = await refresh();
+		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(html).toContain('id="page"');
+		expect(trigger(res)?.announce).toBe("Five strokes, and you're set up.");
+		expect(html.replaceAll("&#39;", "'")).toMatch(
+			/<h1[^<>]*\bautofocus\b[^<>]*>Five strokes, and you're set up\.<\/h1>/,
+		);
+		expect(html.match(/\bautofocus\b/g)?.length).toBe(1);
 	});
 
 	it("answers 204 in the demo, which draws no setup to poll for, and never reloads", async () => {
