@@ -785,12 +785,15 @@ function RemovePage({
 	deleteHistory = false,
 	error,
 	address,
+	plaid,
 }: {
 	count: number;
 	deleteHistory?: boolean;
 	error?: string;
 	/** The address the page was asked for, with its query, so the keys sheet can open over it. */
 	address?: string;
+	/** Whether Plaid is configured: its form swaps Accounts in, so Link a bank needs Plaid Link's scripts here. */
+	plaid: boolean;
 }) {
 	const url = "/accounts/apple-card/remove";
 	return (
@@ -799,7 +802,7 @@ function RemovePage({
 			active="accounts"
 			demo={false}
 			currentPath={address}
-			{...plaidScripts(false)}
+			{...plaidScripts(plaid)}
 		>
 			<h1 class="font-serif text-4xl font-semibold tracking-tight">
 				Remove Apple Card?
@@ -857,6 +860,7 @@ accounts.get("/accounts/apple-card/remove", async (c) => {
 		<RemovePage
 			count={await cardTransactionCount(c.env.DB, card.id)}
 			address={addressOf(c)}
+			plaid={enabled(c.env)}
 		/>,
 	);
 });
@@ -898,6 +902,7 @@ accounts.post("/accounts/apple-card/remove", async (c) => {
 				count={await cardTransactionCount(c.env.DB, card.id)}
 				deleteHistory={deleteHistory}
 				error="Couldn't remove Apple Card. Try again."
+				plaid={enabled(c.env)}
 			/>,
 			502,
 		);

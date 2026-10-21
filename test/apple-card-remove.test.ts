@@ -12,6 +12,19 @@ recordSorting({ sort: true });
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const demo = { ...env, DEMO: "true" } as unknown as Env;
+const PLAID_LINK_SCRIPT =
+	"https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+const plaidBindings = {
+	...family,
+	PLAID_CLIENT_ID: "client",
+	PLAID_SECRET: "secret",
+	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+} as unknown as Env;
+const noPlaid = {
+	...family,
+	PLAID_CLIENT_ID: undefined,
+	PLAID_SECRET: undefined,
+} as unknown as Env;
 
 const app = new Hono<{ Bindings: Env; Variables: { actor: string } }>();
 app.use("*", async (c, next) => {
@@ -208,5 +221,47 @@ describe("Remove Apple Card (#766)", () => {
 			PLAID_SECRET: undefined,
 		} as unknown as Env);
 		expect(res.status).toBe(200);
+	});
+
+	// The remove form swaps Accounts into the page, so Link a bank on this page needs Plaid Link's scripts, as Disconnect's page has.
+	it("loads Plaid Link's scripts when Plaid is configured, and none when it isn't", async () => {
+		const withPlaid = await app.request(
+			"/accounts/apple-card/remove",
+			{},
+			plaidBindings,
+		);
+		expect(withPlaid.status).toBe(200);
+		const html = await withPlaid.text();
+		expect(html).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(html).toContain('src="/js/plaid-link.js"');
+
+		const withoutPlaid = await app.request(
+			"/accounts/apple-card/remove",
+			{},
+			noPlaid,
+		);
+		const plain = await withoutPlaid.text();
+		expect(plain).not.toContain(PLAID_LINK_SCRIPT);
+		expect(plain).not.toContain("/js/plaid-link.js");
+	});
+
+	it("keeps Plaid Link's scripts on the page it answers with when the remove fails", async () => {
+		// Only the batch fails, so the page re-renders with its error, as it does when D1 is down.
+		const failingDb = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "batch")
+					return () => Promise.reject(new Error("D1 is down"));
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const { res, html } = await post("/accounts/apple-card/remove", "", {
+			...plaidBindings,
+			DB: failingDb,
+		} as unknown as Env);
+		expect(res.status).toBe(502);
+		expect(html).toContain("Couldn't remove Apple Card. Try again.");
+		expect(html).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(html).toContain('src="/js/plaid-link.js"');
 	});
 });
