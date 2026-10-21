@@ -5,7 +5,11 @@ import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { recordNightSync } from "../src/first-tally/night";
 import type { SyncAllResult } from "../src/plaid/sync-all";
-import { runSortInstance } from "../src/sort-instance";
+import {
+	INSTANCE_MAX_CALLS,
+	instanceSortOptions,
+	runSortInstance,
+} from "../src/sort-instance";
 import type { SortParams } from "../src/sort-start";
 import { fakeSteps } from "./fake-sort-steps";
 
@@ -362,6 +366,28 @@ describe("each step's budget counts from its own start", () => {
 
 		// The names' three, then the suggestions' one at 15 minutes, inside their own 28-minute deadline.
 		expect(order).toEqual(["names", "names", "names", "categories"]);
+	});
+});
+
+describe("one instance asks Jev at most INSTANCE_MAX_CALLS (decision 146)", () => {
+	it("gives the instance's sort the 5,000 cap, so one instance stays under Workflows' 10,000 steps", () => {
+		expect(INSTANCE_MAX_CALLS).toBe(5000);
+		// The options sortGroups receives from every instance: the cap is among them, so removing it fails here.
+		expect(
+			instanceSortOptions(
+				{ bySync: false, rulesApplied: false },
+				{ runId: "run" },
+			),
+		).toMatchObject({ maxCalls: INSTANCE_MAX_CALLS, waitForTurn: true });
+	});
+
+	it("gives the night's instance the same cap", () => {
+		expect(
+			instanceSortOptions(
+				{ bySync: false, rulesApplied: false, night: NIGHT },
+				{ runId: "run" },
+			).maxCalls,
+		).toBe(INSTANCE_MAX_CALLS);
 	});
 });
 
