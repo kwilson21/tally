@@ -107,6 +107,30 @@ async function post(
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
 }
 
+/** A database whose batch first runs `before`, as another tab does between this request's read and its batch. */
+function racedDb(before: string): D1Database {
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "batch")
+				return async (statements: D1PreparedStatement[]) => {
+					await target.prepare(before).run();
+					return target.batch(statements);
+				};
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+// Another tab's keep, and its delete: the writes this request's batch can meet after its own read (spec §8.10).
+const OTHER_TAB_KEEPS =
+	"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card' AND removed_at IS NULL";
+const OTHER_TAB_DELETES = [
+	"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
+	"DELETE FROM balance_history WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
+	"DELETE FROM accounts WHERE subtype = 'apple_card'",
+];
+
 describe("Remove Apple Card (#766)", () => {
 	beforeEach(async () => {
 		vi.restoreAllMocks();
@@ -207,6 +231,64 @@ describe("Remove Apple Card (#766)", () => {
 			"Apple Card is already removed.",
 		);
 		expect(await cardRowCount()).toEqual({ n: 2 });
+	});
+
+	it("says it's already removed when another tab keeps the card between this request's read and its batch, and changes nothing", async () => {
+		const history = await cardHistoryCount();
+		const { res } = await post("/accounts/apple-card/remove", "", {
+			...family,
+			DB: racedDb(OTHER_TAB_KEEPS),
+		} as unknown as Env);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Apple Card is already removed.",
+		);
+		expect(await cardRowCount()).toEqual({ n: 2 });
+		expect(await cardHistoryCount()).toEqual(history);
+		// The other tab's change stands: the card is removed and its balance cleared, and nothing here changed it.
+		const card = await env.DB.prepare(
+			"SELECT balance_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
+		).first<{ balance_on: string | null; removed_at: string | null }>();
+		expect(card?.balance_on).toBeNull();
+		expect(card?.removed_at).not.toBeNull();
+	});
+
+	it("says it's already removed when another tab keeps the card while this request deletes it, and deletes nothing", async () => {
+		const history = await cardHistoryCount();
+		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
+			...family,
+			DB: racedDb(OTHER_TAB_KEEPS),
+		} as unknown as Env);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Apple Card is already removed.",
+		);
+		expect(await cardRowCount()).toEqual({ n: 2 });
+		expect(await cardHistoryCount()).toEqual(history);
+		expect(await cardCount()).toEqual({ n: 1 });
+	});
+
+	it("says it's already removed when another tab deletes the card while this request deletes it, and not not-found", async () => {
+		// Each of the other tab's statements runs before this request's batch, as a sequence of its own.
+		const deleted = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						for (const sql of OTHER_TAB_DELETES)
+							await target.prepare(sql).run();
+						return target.batch(statements);
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const { res } = await post("/accounts/apple-card/remove", "delete=yes", {
+			...family,
+			DB: deleted,
+		} as unknown as Env);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Apple Card is already removed.",
+		);
+		expect(await cardCount()).toEqual({ n: 0 });
 	});
 
 	it("is not found before there is a card to remove, and a remove with none says it's already removed", async () => {

@@ -537,7 +537,27 @@ describe("Apple Card's upload sheet (#766)", () => {
 			expect(html).not.toContain("No banks linked yet.");
 		});
 
-		it("draws Cancel as a link back to /accounts?focus=apple-card, which toasts the cancel for htmx", async () => {
+		it("draws Cancel and the backdrop as links back to /accounts?focus=apple-card, with the attributes htmx swaps Accounts in by", async () => {
+			const sheet = (
+				await (await app.request("/accounts/apple-card", {}, family)).text()
+			).replaceAll("&#39;", "'");
+			// Cancel's own link (its text is Cancel) and the backdrop, which closes the sheet the same way.
+			const cancel = sheet.match(/<a\b[^>]*>Cancel<\/a>/)?.[0] ?? "";
+			const backdrop =
+				sheet.match(/<a\b[^>]*data-sheet-close[^>]*>/)?.[0] ?? "";
+			expect(cancel).not.toBe("");
+			expect(backdrop).not.toBe("");
+			for (const link of [cancel, backdrop]) {
+				expect(link).toContain('href="/accounts?focus=apple-card"');
+				expect(link).toContain('hx-get="/accounts?focus=apple-card"');
+				expect(link).toContain('hx-target="#accounts-summary"');
+				expect(link).toContain('hx-select="#accounts-summary"');
+				expect(link).toContain('hx-swap="outerHTML"');
+				expect(link).toContain('hx-push-url="/accounts"');
+			}
+		});
+
+		it("answers Cancel's htmx request with the cancel toast, and focus back on the Apple Card action", async () => {
 			const res = await app.request(
 				"/accounts?focus=apple-card",
 				{ headers: { "HX-Request": "true" } },
