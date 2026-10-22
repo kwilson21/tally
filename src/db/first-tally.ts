@@ -90,6 +90,11 @@ export type FirstTally = {
 	 */
 	readyPushedTo?: string[];
 	/**
+	 * The time a ready push reached one of a person's devices (decision 149), keyed by the address's hash as heldReadyEmail is
+	 * (`YYYY-MM-DDTHH:MM:SSZ`). The ready email waits EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). Absent until one reaches.
+	 */
+	readyPushedAt?: Record<string, string>;
+	/**
 	 * The kept tries of the ready email (decisions 146 and 147), keyed by the SHA-256 in hex of the lower-cased address: the whole
 	 * email (subject, HTML and text) a try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The
 	 * next try sends that same email under the same key, through Resend only, until Resend answers or the entry is 23 hours old.

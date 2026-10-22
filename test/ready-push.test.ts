@@ -216,6 +216,21 @@ const isRead = (sql: string) => sql.startsWith("SELECT");
 const pushedList = async () => (await readFirstTally(env.DB))?.readyPushedTo;
 
 /**
+ * Sets when a person's push was delivered, as a SQLite time modifier from now, such as '-7 minutes': the stamp the push writes
+ * under the address's hash (readyPushedAt, decision 149). A test moves it back to see the email's 8 minutes pass.
+ */
+const pushedAt = async (email: string, when: string) =>
+	env.DB.prepare(
+		"UPDATE household_settings SET value = json_set(value, '$.readyPushedAt.\"' || ?1 || '\"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?2)) WHERE key = 'first_tally'",
+	)
+		.bind(await heldKeyOf(email), when)
+		.run();
+
+/** The time a person's push was recorded at, as stored, or undefined when none was. */
+const storedPushedAt = async (email: string) =>
+	(await readFirstTally(env.DB))?.readyPushedAt?.[await heldKeyOf(email)];
+
+/**
  * The key a kept ready email is stored under: the SHA-256 in hex of the lower-cased address (ready-email.tsx). Computed here
  * from the spec, not through the module, so a wrong key in the module cannot pass.
  */
@@ -633,6 +648,92 @@ describe("the ready push: every read comes before a claim", () => {
 	});
 });
 
+describe("the ready email waits 8 minutes after a push that reached a device (decision 149)", () => {
+	it("pushes a person away 25 minutes when the questions open, and sends no email in the same run", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, pushed, resent } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(pushed).toEqual([PHONE]);
+		expect(resent).toEqual([]);
+	});
+
+	it("sends no email 7 minutes after the push, and sends it 8 minutes after, with the person still away and unanswered", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, resent } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		await pushedAt(DANA, "-7 minutes");
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([]);
+		await pushedAt(DANA, "-8 minutes");
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([DANA]);
+	});
+
+	it("sends no email when a question is answered in those 8 minutes, even once they have passed", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, resent } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		await env.DB.prepare(
+			"UPDATE household_settings SET value = json_set(value, '$.strokes.pay', '2026-10-22') WHERE key = 'first_tally'",
+		).run();
+		await pushedAt(DANA, "-8 minutes");
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([]);
+	});
+
+	it("records the push's time under the address's hash, never the address itself", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		await runReadyPush(pushing(), { fetchImpl: fakeFetch().fetchImpl });
+		const record = await readFirstTally(env.DB);
+		expect(Object.keys(record?.readyPushedAt ?? {})).toEqual([
+			await heldKeyOf(DANA),
+		]);
+	});
+
+	it("records the push when one device took it, even with another device's answer transient, and the email still waits", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		await addDevice(DANA, LAPTOP);
+		const { fetchImpl, resent } = fakeFetch({
+			answer: (endpoint) => (endpoint === PHONE ? 201 : 503),
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(await storedPushedAt(DANA)).toMatch(
+			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+		);
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([]);
+	});
+
+	it.each([
+		["a transient answer (503)", 503],
+		["a device that is gone (410)", 410],
+		["a permanent refusal (403)", 403],
+	])(
+		"records no push when no device took it (%s), and the email keeps its 10 minutes",
+		async (_name, status) => {
+			await openHousehold();
+			await addMember(DANA, { seen: "-11 minutes" });
+			await addDevice(DANA, PHONE);
+			const { fetchImpl, resent } = fakeFetch({ answer: () => status });
+			await runReadyPush(pushing(), { fetchImpl });
+			expect(await storedPushedAt(DANA)).toBeUndefined();
+			await runReadyEmail(pushing(), fetchImpl);
+			expect(resent).toEqual([DANA]);
+		},
+	);
+});
+
 describe("the ready email still goes", () => {
 	it("a failed release leaves that person's one claim, and the email still goes at ten minutes", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
@@ -650,7 +751,7 @@ describe("the ready email still goes", () => {
 		expect(email.resent).toEqual([DANA]);
 	});
 
-	it("sends the email at ten minutes to a person whose push went", async () => {
+	it("holds the email after a push that went, and sends it once 8 minutes have passed (decision 149)", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: "-11 minutes" });
 		await addDevice(DANA, PHONE);
@@ -658,6 +759,19 @@ describe("the ready email still goes", () => {
 		await runReadyPush(pushing(), { fetchImpl });
 		await runReadyEmail(pushing(), fetchImpl);
 		expect(pushed).toEqual([PHONE]);
+		expect(resent).toEqual([]);
+		await pushedAt(DANA, "-8 minutes");
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([DANA]);
+	});
+
+	it("a person with no device is emailed at ten minutes, as before, and no push is recorded", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-11 minutes" });
+		const { fetchImpl, resent } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(await storedPushedAt(DANA)).toBeUndefined();
+		await runReadyEmail(pushing(), fetchImpl);
 		expect(resent).toEqual([DANA]);
 	});
 
@@ -702,16 +816,24 @@ describe("the scheduled run: a push never stops the email", () => {
 	it.each([
 		["the minute run", "* * * * *"],
 		["the 10:00 backstop", "0 10 * * *"],
-	])("runs the push before the email on %s", async (_name, cron) => {
-		await openHousehold();
-		await addMember(DANA, { seen: "-11 minutes" });
-		await addDevice(DANA, PHONE);
-		const { fetchImpl, resent } = fakeFetch();
-		vi.stubGlobal("fetch", fetchImpl);
-		await scheduledWith.scheduled({ cron }, pushing());
-		expect(resent).toEqual([DANA]);
-		expect(await pushedList()).toEqual([DANA]);
-	});
+	])(
+		"runs the push before the email on %s, so the email waits for the push",
+		async (_name, cron) => {
+			await openHousehold();
+			await addMember(DANA, { seen: "-11 minutes" });
+			await addDevice(DANA, PHONE);
+			const { fetchImpl, pushed, resent } = fakeFetch();
+			vi.stubGlobal("fetch", fetchImpl);
+			await scheduledWith.scheduled({ cron }, pushing());
+			// The push went first, so the email (which would otherwise go at 10 minutes) waits 8 minutes after it.
+			expect(pushed).toEqual([PHONE]);
+			expect(resent).toEqual([]);
+			expect(await pushedList()).toEqual([DANA]);
+			expect(await storedPushedAt(DANA)).toMatch(
+				/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+			);
+		},
+	);
 
 	it("still sends the email when the push's database read fails", async () => {
 		await openHousehold();

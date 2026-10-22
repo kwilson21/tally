@@ -59,6 +59,14 @@ export const PUSH_RELEASE_SQL = `UPDATE household_settings
 	WHERE key = 'first_tally'`;
 
 /**
+ * Stores the time a push reached one of a person's devices, under the address's hash (readyPushedAt, decision 149). ?1 is the hash.
+ * The time is SQLite's own clock, as the email's guard reads it (ready-email.tsx), so the two never disagree.
+ */
+export const PUSH_STAMP_SQL = `UPDATE household_settings
+	SET value = json_set(household_settings.value, '$.readyPushedAt."' || ?1 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+	WHERE key = 'first_tally'`;
+
+/**
  * Every device with the person it belongs to, read before any claim (the join keeps a device with no member row out, and a
  * removed person's devices are deleted with them).
  */
@@ -127,9 +135,8 @@ export async function runReadyPush(
 	for (const [email, devices] of byPerson) {
 		// The gate, read again before this person's claim: a bank linked or a question answered since the last person ends the run.
 		if (!(await gateOpen(env.DB))) break;
-		const claim = await env.DB.prepare(PUSH_CLAIM_SQL)
-			.bind(email, await addressHashOf(email))
-			.run();
+		const hash = await addressHashOf(email);
+		const claim = await env.DB.prepare(PUSH_CLAIM_SQL).bind(email, hash).run();
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
@@ -170,6 +177,16 @@ export async function runReadyPush(
 				failedCount += 1;
 				failureKinds.add("push error");
 				transient = true;
+			}
+		}
+		if (delivered > 0) {
+			// The email waits EMAIL_AFTER_PUSH_MS from this push (decision 149). If the time can't be stored, that is counted, and the
+			// email goes at ten minutes as before.
+			try {
+				await env.DB.prepare(PUSH_STAMP_SQL).bind(hash).run();
+			} catch {
+				failedCount += 1;
+				failureKinds.add("push error");
 			}
 		}
 		if (delivered === 0 && transient) {

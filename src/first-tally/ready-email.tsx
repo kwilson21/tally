@@ -23,7 +23,7 @@ import {
 import { reconnectRecipients } from "../reconnect/reminders";
 import { andList } from "./budgets";
 import { questionsOpen, readGateInputs } from "./gate";
-import { EMAIL_AWAY_AFTER_MS } from "./home-seen";
+import { EMAIL_AFTER_PUSH_MS, EMAIL_AWAY_AFTER_MS } from "./home-seen";
 
 const SUBJECT = "Three questions to finish setting up";
 const NEXT =
@@ -68,9 +68,18 @@ export function claimSql(
 			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
 }
 
-// Claims an address before its email is sent. A refused address is skipped; runReadyEmail reads the gate again before the next
-// one, so a question answered meanwhile ends it (claimSql has the rest).
-export const CLAIM_SQL = claimSql("$.readyEmailedTo", EMAIL_AWAY_AFTER_MS);
+// Not within EMAIL_AFTER_PUSH_MS of a ready push that reached one of the address's devices (decision 149): the push is seen first,
+// and the email waits for the person to come back or answer. ?2 is the address's hash, the key readyPushedAt stores the time under.
+const PUSH_WAIT_GUARD = `\n\t\tAND (json_type(household_settings.value, '$.readyPushedAt."' || ?2 || '"') IS NULL
+		OR datetime(json_extract(household_settings.value, '$.readyPushedAt."' || ?2 || '"')) <= datetime('now', '-${EMAIL_AFTER_PUSH_MS / 1000} seconds'))`;
+
+// Claims an address before its email is sent. ?1 is the address and ?2 its hash. A refused address is skipped; runReadyEmail reads
+// the gate again before the next one, so a question answered meanwhile ends it (claimSql has the rest).
+export const CLAIM_SQL = claimSql(
+	"$.readyEmailedTo",
+	EMAIL_AWAY_AFTER_MS,
+	PUSH_WAIT_GUARD,
+);
 
 // Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
 // address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
@@ -347,13 +356,13 @@ export async function runReadyEmail(
 	for (const { email: recipient } of recipients) {
 		const read = await currentRead(env);
 		if (read === null) break;
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient).run();
-		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, or
-		// its person is still on a first-week page. Each is skipped. A question answered after the read above is caught by
-		// the next address's read.
+		const hash = await addressHashOf(recipient);
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient, hash).run();
+		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, its
+		// person is still on a first-week page, or a ready push reached them less than EMAIL_AFTER_PUSH_MS ago. Each is skipped.
+		// A question answered after the read above is caught by the next address's read.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		const hash = await addressHashOf(recipient);
 		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its stored email is sent again, through
 		// Resend only; otherwise this read's email goes out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
 		const kept = await keptTryOf(env.DB, recipient);

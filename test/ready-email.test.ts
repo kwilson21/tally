@@ -220,6 +220,33 @@ function failingOn(needle: string): D1Database {
 
 const storedList = async () => (await readFirstTally(env.DB))?.readyEmailedTo;
 
+/** The SHA-256 in hex of the lower-cased address: the key readyPushedAt and heldReadyEmail use, written out from the spec. */
+async function hashOf(address: string) {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(address.toLowerCase()),
+	);
+	return [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+}
+
+/** The claim for one address: CLAIM_SQL takes the address and its hash (decision 149). */
+const claimOf = async (address: string) =>
+	env.DB.prepare(CLAIM_SQL)
+		.bind(address, await hashOf(address))
+		.run();
+
+/** A time `when` from now, as the push stores it: SQLite's time as YYYY-MM-DDTHH:MM:SSZ. */
+async function stampAgo(when: string): Promise<string> {
+	const row = await env.DB.prepare(
+		"SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) AS t",
+	)
+		.bind(when)
+		.first<{ t: string }>();
+	return row?.t ?? "";
+}
+
 beforeEach(async () => resetDemo(env.DB, "2026-10-07"));
 
 describe("the ready email: who gets it, and when", () => {
@@ -584,7 +611,7 @@ describe("the ready email: a question answered during a run", () => {
 
 	it("the claim changes one row while the questions are open", async () => {
 		await openHousehold();
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		const claim = await claimOf(DANA);
 		expect(claim.meta.changes).toBe(1);
 		expect(await storedList()).toEqual([DANA]);
 	});
@@ -598,7 +625,7 @@ describe("the ready email: a question answered during a run", () => {
 					budgets: {},
 				},
 			});
-			const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+			const claim = await claimOf(DANA);
 			expect(claim.meta.changes).toBe(0);
 			expect(await storedList()).toBeUndefined();
 		},
@@ -611,7 +638,7 @@ describe("the ready email: a question answered during a run", () => {
 				budgets: {},
 			},
 		});
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		const claim = await claimOf(DANA);
 		expect(claim.meta.changes).toBe(0);
 		expect(await storedList()).toBeUndefined();
 	});
@@ -675,7 +702,7 @@ describe("the ready email: the gate and the members, checked before each address
 	it("the claim changes no row for a member who was removed", async () => {
 		await openHousehold({ members: [] });
 		await addMember(DANA, { removed: true });
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		const claim = await claimOf(DANA);
 		expect(claim.meta.changes).toBe(0);
 		expect(await storedList()).toBeUndefined();
 	});
@@ -683,9 +710,72 @@ describe("the ready email: the gate and the members, checked before each address
 	it("the claim changes no row for a member not seen in 90 days", async () => {
 		await openHousehold({ members: [] });
 		await addMember(DANA, { seen: "2020" });
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(DANA).run();
+		const claim = await claimOf(DANA);
 		expect(claim.meta.changes).toBe(0);
 		expect(await storedList()).toBeUndefined();
+	});
+});
+
+describe("the ready email: a push that reached a device waits 8 minutes (decision 149)", () => {
+	it("the claim changes no row for an address whose push went 7 minutes ago", async () => {
+		await openHousehold({
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyPushedAt: { [await hashOf(DANA)]: await stampAgo("-7 minutes") },
+			},
+		});
+		const claim = await claimOf(DANA);
+		expect(claim.meta.changes).toBe(0);
+		expect(await storedList()).toBeUndefined();
+	});
+
+	it("the claim changes one row for an address whose push went 8 minutes ago", async () => {
+		await openHousehold({
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyPushedAt: { [await hashOf(DANA)]: await stampAgo("-8 minutes") },
+			},
+		});
+		const claim = await claimOf(DANA);
+		expect(claim.meta.changes).toBe(1);
+		expect(await storedList()).toEqual([DANA]);
+	});
+
+	it("the claim changes one row for an address with no push, and for another address's push", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyPushedAt: { [await hashOf(RILEY)]: await stampAgo("-1 minute") },
+			},
+		});
+		const claim = await claimOf(DANA);
+		expect(claim.meta.changes).toBe(1);
+	});
+
+	it("holds the email to a person whose push went 7 minutes ago, and sends it once the push is 8 minutes old", async () => {
+		await openHousehold({
+			members: [DANA],
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyPushedAt: { [await hashOf(DANA)]: await stampAgo("-7 minutes") },
+			},
+		});
+		const first = resendFake();
+		await runReadyEmail(production(), first.fetchImpl);
+		expect(first.sent).toEqual([]);
+		await env.DB.prepare(
+			"UPDATE household_settings SET value = json_set(value, '$.readyPushedAt.\"' || ?1 || '\"', ?2) WHERE key = 'first_tally'",
+		)
+			.bind(await hashOf(DANA), await stampAgo("-8 minutes"))
+			.run();
+		const later = resendFake();
+		await runReadyEmail(production(), later.fetchImpl);
+		expect(later.sent.map((mail) => mail.to)).toEqual([DANA]);
 	});
 });
 

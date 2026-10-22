@@ -11,3 +11,6 @@ export const EMAIL_AWAY_AFTER_MS = 600_000;
 
 /** How long after its last check-in a person counts as away, so the ready push is sent to each of their devices (ready-push.ts). */
 export const PUSH_AWAY_AFTER_MS = 120_000;
+
+/** How long after a delivered ready push its person's ready email waits, so the push is seen first (ready-email.tsx). */
+export const EMAIL_AFTER_PUSH_MS = 480_000;
