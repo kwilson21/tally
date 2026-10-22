@@ -395,11 +395,22 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 	});
 	if (!result.ok) throw new Error("The demo's Apple Card sample has no start");
 	await demoCardMonths(c.env.DB, anchor);
+	// The same steps the real upload's rows get: merchant rules, then the sorting for the rows added (none on a second press).
+	let rulesFailed = false;
 	try {
 		await afterSync(c.env.DB);
 	} catch {
+		rulesFailed = true;
 		console.error("apple card rules failed");
 	}
+	if (result.addedIds.length > 0)
+		c.executionCtx.waitUntil(
+			sortAfterSync(
+				c.env,
+				{ changedIds: result.addedIds },
+				{ rulesApplied: !rulesFailed },
+			),
+		);
 	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 }
 

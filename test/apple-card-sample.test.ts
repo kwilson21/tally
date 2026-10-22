@@ -8,6 +8,7 @@ import { accountsWithHistory } from "../src/db/balance-history";
 import { appleCardSample } from "../src/demo/apple-card-sample";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
+import type { SortParams } from "../src/sort-start";
 import { recordSorting } from "./record-sorting";
 
 recordSorting({ sort: true });
@@ -105,6 +106,33 @@ describe("the demo's Apple Card sample (#766)", () => {
 		);
 		expect(text).toContain("Apple Card");
 		expect(await cardRows()).toEqual({ n: 13, excluded: 2 });
+	});
+
+	it("hands the sample's added rows to the sorting Workflow once, as the real upload does, and none on a second press", async () => {
+		// The sorting binding is a recorder here (no instance runs); the key lets the start go ahead, as the real upload's test does.
+		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+			async () => ({ id: "fake" }),
+		);
+		const bindings = {
+			...demo,
+			JEV_API_KEY: "test-key",
+			SORT: { create },
+		} as unknown as Env;
+		const press = () =>
+			app.request(
+				"/accounts/apple-card",
+				{ method: "POST", headers: { "HX-Request": "true" } },
+				bindings,
+				ctx(),
+			);
+		await press();
+		expect(create).toHaveBeenCalledTimes(1);
+		const params = create.mock.calls[0]?.[0].params;
+		expect(params?.bySync).toBe(true);
+		expect(params?.ids).toHaveLength(13);
+		// Pressed again, the sample adds nothing, so nothing is sorted twice.
+		await press();
+		expect(create).toHaveBeenCalledTimes(1);
 	});
 
 	it("says Nothing new when Add the sample is pressed again, and never adds rows dated later", async () => {
