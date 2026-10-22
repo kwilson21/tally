@@ -75,6 +75,14 @@ export function Layout({
 					})}
 				/>
 				<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+				{/* Home Screen on iPhone (decision 148): the manifest is fetched with credentials, since Cloudflare Access sits in front of
+				    it (MDN, "Deploying a manifest"); without the attribute Access answers the fetch with its sign-in page. */}
+				<link
+					rel="manifest"
+					href="/manifest.webmanifest"
+					crossorigin="use-credentials"
+				/>
+				<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 				<link rel="stylesheet" href="/assets/app.css" />
 				<script src="/vendor/htmx.min.js" defer></script>
 				<script src="/js/toast.js" defer></script>
