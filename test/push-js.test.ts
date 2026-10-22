@@ -32,7 +32,7 @@ class El {
 	readonly children: El[] = [];
 	parent: El | null = null;
 	hidden = false;
-	disabled = false;
+	private isDisabled = false;
 	textContent = "";
 	readonly classes = new Set<string>();
 	readonly classList = {
@@ -46,6 +46,14 @@ class El {
 		readonly tag: string,
 		readonly owner: Dom,
 	) {}
+	get disabled() {
+		return this.isDisabled;
+	}
+	/** A disabled element drops focus, as a browser does: a busy button that had focus leaves it on nothing. */
+	set disabled(value: boolean) {
+		this.isDisabled = value;
+		if (value && this.owner.activeElement === this) this.owner.active = null;
+	}
 	setAttribute(name: string, value: string) {
 		this.attrs.set(name, String(value));
 	}
@@ -72,6 +80,7 @@ class El {
 		this.parent = null;
 	}
 	focus() {
+		this.owner.active = this;
 		this.owner.focused.push(this);
 	}
 	descendants(): El[] {
@@ -101,9 +110,15 @@ function matches(el: El, selector: string) {
 /** The page's document: a root, the listeners, the events it was sent, and the elements focus was moved to. */
 class Dom {
 	readonly root = new El("html", this);
+	readonly body = new El("body", this);
 	readonly focused: El[] = [];
 	readonly dispatched: Ev[] = [];
+	/** The element with focus, or null for none (a browser then reports the body). */
+	active: El | null = null;
 	private readonly listeners = new Map<string, Handler[]>();
+	get activeElement(): El {
+		return this.active ?? this.body;
+	}
 	createElement(tag: string) {
 		return new El(tag, this);
 	}
@@ -443,6 +458,58 @@ describe("the notify control's tap", () => {
 				detail: { message: COULDNT_SAVE, type: "error" },
 			}),
 		]);
+	});
+
+	it("keeps focus on the button after a failed save, so a keyboard user keeps their place", async () => {
+		const { dom, control } = await page({
+			saveStatus: 500,
+			subscribe: async () => subscriptionWith(AS_PUBLIC),
+		});
+		const button = control.querySelector("[data-notify-on]") as El;
+		// Enter or Space on a focused button is the keyboard's tap; the busy state then disables that focused button.
+		button.focus();
+		dom.click(button);
+		await flush();
+		expect(shown(control, "off")).toBe(true);
+		expect(button.disabled).toBe(false);
+		expect(dom.activeElement).toBe(button);
+	});
+
+	it("keeps focus on the button when the subscribe fails with permission still granted, and toasts the save words", async () => {
+		const { dom, control } = await page({
+			permission: "granted",
+			subscribe: async () => {
+				throw new DOMException("aborted", "AbortError");
+			},
+		});
+		const button = control.querySelector("[data-notify-on]") as El;
+		button.focus();
+		dom.click(button);
+		await flush();
+		expect(shown(control, "off")).toBe(true);
+		expect(button.disabled).toBe(false);
+		expect(dom.activeElement).toBe(button);
+		expect(dom.sent("toast")).toEqual([
+			expect.objectContaining({
+				detail: { message: COULDNT_SAVE, type: "error" },
+			}),
+		]);
+	});
+
+	it("leaves focus where the person moved it when a failed save ends, rather than taking it back", async () => {
+		const { dom, control } = await page({
+			saveStatus: 500,
+			subscribe: async () => subscriptionWith(AS_PUBLIC),
+		});
+		const button = control.querySelector("[data-notify-on]") as El;
+		button.focus();
+		dom.click(button);
+		// The person tabs to a link while the save is out, so focus is on something of theirs.
+		const elsewhere = dom.createElement("a");
+		dom.root.append(elsewhere);
+		elsewhere.focus();
+		await flush();
+		expect(dom.activeElement).toBe(elsewhere);
 	});
 
 	it("announces On, and does not focus, when the control has left the page while the tap was saved", async () => {

@@ -134,6 +134,19 @@ export function setupPush({
 		});
 	};
 
+	/** Focus is on nothing, or on the body: a busy button that had it was disabled, and a browser drops it there (toast.js's #460). */
+	const focusLost = () => {
+		const active = document.activeElement;
+		return !active || active === document.body;
+	};
+
+	/** The tap did not finish: the control is Off again with its button usable, and focus is back on the button if a busy one lost it. */
+	const backToOff = (node) => {
+		setBusy(node, false);
+		showState(node, "off");
+		if (focusLost()) node.querySelector("[data-notify-on]")?.focus();
+	};
+
 	/** The tap's subscription was made: store it, then show On (or, if the control has left the page, announce it). */
 	const subscribed = async (subscription) => {
 		let saved = false;
@@ -142,16 +155,14 @@ export function setupPush({
 		} catch {
 			saved = false;
 		}
-		const live = document.querySelector("[data-notify]");
 		if (!saved) {
 			await subscription.unsubscribe().catch(() => {});
-			if (live) {
-				setBusy(live, false);
-				showState(live, "off");
-			}
+			const live = document.querySelector("[data-notify]");
+			if (live) backToOff(live);
 			toast(COULDNT_SAVE);
 			return;
 		}
+		const live = document.querySelector("[data-notify]");
 		if (live) {
 			setBusy(live, false);
 			showState(live, "on");
@@ -170,12 +181,13 @@ export function setupPush({
 			focusOn(live, "blocked");
 			return;
 		}
-		showState(live, "off");
 		if (Notification.permission === "default") {
 			// Dismissed: the button is usable again, focus stays on it, and nothing is announced.
+			showState(live, "off");
 			live.querySelector("[data-notify-on]")?.focus();
 			return;
 		}
+		backToOff(live);
 		toast(COULDNT_SAVE);
 	};
 
