@@ -97,10 +97,14 @@ export function setupPush({
 			element.hidden = element.getAttribute("data-notify-state") !== state;
 	};
 
-	/** The Home Screen hint, with the device it names in its own element (the words around it are the same for each). */
+	/**
+	 * The Home Screen hint. On an iPad its one sentence is the server's, with every "iPhone" said as "iPad", set as one text node
+	 * so a screen reader reads it in one piece. On an iPhone the server's sentence stands.
+	 */
 	const showHint = (node, device) => {
-		const word = node.querySelector("[data-notify-device]");
-		if (word) word.textContent = device;
+		const hint = node.querySelector('[data-notify-state="iphone"]');
+		if (hint && device === "iPad")
+			hint.textContent = hint.textContent.replaceAll("iPhone", "iPad");
 		showState(node, "iphone");
 	};
 

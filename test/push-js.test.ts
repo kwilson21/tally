@@ -11,6 +11,11 @@ const OTHER_KEY =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
 const ON = "Notifications are on for this device.";
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
+// The Home Screen hint's sentence, as the server draws it, and as push.js sets it on an iPad (every iPhone in it becomes iPad).
+const IPHONE_HINT =
+	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.";
+const IPAD_HINT =
+	"To get a notification on iPad, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.";
 
 /** base64url text as the bytes it stands for. */
 const bytesOf = (text: string) => {
@@ -162,11 +167,8 @@ function drawControl(dom: Dom, vapidKey = AS_PUBLIC) {
 	const iphone = dom.createElement("p");
 	iphone.setAttribute("data-notify-state", "iphone");
 	iphone.hidden = true;
-	// The device word the hint names, in its own element (push.js sets it to iPad on an iPad).
-	const device = dom.createElement("span");
-	device.setAttribute("data-notify-device", "true");
-	device.textContent = "iPhone";
-	iphone.append(device);
+	// The hint is one sentence in one text node (push.js sets the iPad sentence the same way).
+	iphone.textContent = IPHONE_HINT;
 	const blocked = dom.createElement("p");
 	blocked.setAttribute("data-notify-state", "blocked");
 	blocked.setAttribute("tabindex", "-1");
@@ -277,9 +279,9 @@ const shown = (control: El, state: string) => {
 	return el ? !el.hidden : false;
 };
 
-/** The device word the Home Screen hint names (its own element), or null when the control has none. */
-const deviceWord = (control: El) =>
-	control.querySelector("[data-notify-device]")?.textContent ?? null;
+/** The Home Screen hint's element, or null when the control has none. */
+const hintOf = (control: El) =>
+	control.querySelector('[data-notify-state="iphone"]');
 
 describe("the notify control on a page: what the browser already has", () => {
 	it("shows nothing in a browser without Web Push", async () => {
@@ -308,14 +310,15 @@ describe("the notify control on a page: what the browser already has", () => {
 		expect(shown(control, "iphone")).toBe(false);
 	});
 
-	it("names the device in the hint: iPhone stays iPhone", async () => {
+	it("keeps the iPhone sentence on an iPhone, as one text node with no element inside it", async () => {
 		const { control } = await page({
 			supported: false,
 			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
 			standalone: false,
 		});
 		expect(shown(control, "iphone")).toBe(true);
-		expect(deviceWord(control)).toBe("iPhone");
+		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
+		expect(hintOf(control)?.children).toEqual([]);
 	});
 
 	it("shows the hint on an iPad outside its Home Screen app, naming it iPad", async () => {
@@ -327,7 +330,9 @@ describe("the notify control on a page: what the browser already has", () => {
 		});
 		expect(shown(control, "iphone")).toBe(true);
 		expect(shown(control, "off")).toBe(false);
-		expect(deviceWord(control)).toBe("iPad");
+		// The iPad sentence: the same words, every iPhone (and "newer iPhones") said as iPad, in one text node.
+		expect(hintOf(control)?.textContent).toBe(IPAD_HINT);
+		expect(hintOf(control)?.children).toEqual([]);
 	});
 
 	it("shows the hint on an iPad in desktop mode, which reports Macintosh with touch points, naming it iPad", async () => {
@@ -338,7 +343,7 @@ describe("the notify control on a page: what the browser already has", () => {
 			standalone: false,
 		});
 		expect(shown(control, "iphone")).toBe(true);
-		expect(deviceWord(control)).toBe("iPad");
+		expect(hintOf(control)?.textContent).toBe(IPAD_HINT);
 	});
 
 	it("shows nothing for a Mac, which reports no touch points", async () => {

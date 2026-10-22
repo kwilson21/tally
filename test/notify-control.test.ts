@@ -133,11 +133,17 @@ describe("the notify control's words and button", () => {
 		expect(markup).toMatch(/<svg[^>]*class="size-5"/);
 	});
 
-	it("draws the iPhone hint with its words, the device named in its own element for push.js (iPad)", async () => {
+	it("draws the iPhone hint as one sentence in one text node, with the ⋯ button in its Share step", async () => {
 		const markup = await control("iphone");
-		expect(markup).toContain(
-			'To get a notification on <span data-notify-device="true">iPhone</span>, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.',
+		// The hint's element holds the sentence and nothing else: no element inside it, so a screen reader reads it in one piece
+		// and push.js can set the iPad sentence as one text node.
+		const hint = /<p[^>]*data-notify-state="iphone"[^>]*>([\s\S]*?)<\/p>/.exec(
+			markup,
 		);
+		expect(hint?.[1]).toBe(
+			"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.",
+		);
+		expect(markup).not.toContain("data-notify-device");
 	});
 
 	it("draws the quiet Blocked line, focusable so a refused tap can move focus to it", async () => {
