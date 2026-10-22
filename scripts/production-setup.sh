@@ -85,12 +85,16 @@ step "11. Build the database tables" \
 	npx wrangler d1 migrations apply DB --env "$ENV" --remote
 
 # Optional (decision 148): the keys for notifications on a device. Not required to deploy: until they are set, nothing is drawn or sent.
-# Each value goes straight to put_value, so the private key is never printed.
+# Each value goes straight to put_value, so the private key is never printed. json_field reads $keys (set by push_keys) on stdin:
+# the JSON is never a command-line argument, since every user on the machine can read a command line in the process list.
+json_field() {
+	printf '%s' "$keys" | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => process.stdout.write(JSON.parse(s)[process.argv[1]]));' "$1"
+}
 push_keys() {
 	local keys public private
 	keys=$(node scripts/vapid-keys.mjs) || return 1
-	public=$(node -p 'JSON.parse(process.argv[1]).publicKey' "$keys") || return 1
-	private=$(node -p 'JSON.parse(process.argv[1]).privateKey' "$keys") || return 1
+	public=$(json_field publicKey) || return 1
+	private=$(json_field privateKey) || return 1
 	put_value VAPID_PUBLIC_KEY "$public" && put_value VAPID_PRIVATE_KEY "$private"
 }
 
