@@ -4,7 +4,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { runReadyEmail } from "../src/first-tally/ready-email";
-import { runReadyPush } from "../src/first-tally/ready-push";
+import { PUSH_RELEASE_SQL, runReadyPush } from "../src/first-tally/ready-push";
 import handler from "../src/index";
 
 // The ready push (decision 148, spec §8.8): once a new family's first questions are open and nobody has answered one, each
@@ -485,6 +485,51 @@ describe("the ready push: how each answer counts", () => {
 		expect(text).toContain("push 410");
 		expect(text).not.toContain("push.example.test");
 		expect(text).not.toContain(DANA);
+	});
+});
+
+describe("the ready push: a database error after the claim never leaves it stuck", () => {
+	it("releases the claim when the device read fails right after it, so a later minute pushes", async () => {
+		const errors: unknown[][] = [];
+		vi.spyOn(console, "error").mockImplementation((...args) => {
+			errors.push(args);
+		});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		const first = fakeFetch();
+		await runReadyPush(pushing({ DB: failingOn("SELECT id, endpoint") }), {
+			fetchImpl: first.fetchImpl,
+		});
+		expect(first.pushed).toEqual([]);
+		expect(await pushedList()).toEqual([]);
+		expect(JSON.stringify(errors)).toContain(
+			"ready push: 0 sent, 1 failed (push error)",
+		);
+		const second = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl: second.fetchImpl });
+		expect(second.pushed).toEqual([PHONE]);
+		expect(await pushedList()).toEqual([DANA]);
+	});
+
+	it("does not throw when the release fails, and still tries the next person", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addMember(RILEY, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(RILEY, SPARE);
+		const { fetchImpl, pushed } = fakeFetch({
+			answer: (endpoint) => (endpoint === PHONE ? 503 : 201),
+		});
+		await expect(
+			runReadyPush(pushing({ DB: failingOn(PUSH_RELEASE_SQL) }), {
+				fetchImpl,
+			}),
+		).resolves.toBeUndefined();
+		expect(pushed).toEqual([PHONE, SPARE]);
 	});
 });
 

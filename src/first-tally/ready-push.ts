@@ -5,7 +5,9 @@
 // A device that answers 404 or 410 is deleted by its row. A device that gives no answer,
 // a 429 or a 5xx is transient: when no device answers with a success and some answer is transient, the claim is released and the
 // next minute tries again, until the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is
-// retried every minute. The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
+// retried every minute. A database error after the claim (the device read, or the release) is a transient failure too, and
+// the release is best effort, so a claim is never left stuck by a single failed statement. The minute run calls this before
+// runReadyEmail; a failure here never stops the email (src/index.tsx).
 
 import { anyQuestionAnswered, readFirstTally } from "../db/first-tally";
 import { type PushEnv, vapidKeys } from "../push/keys";
@@ -106,11 +108,18 @@ export async function runReadyPush(
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		const { results: devices } = await env.DB.prepare(DEVICES_SQL)
-			.bind(email)
-			.all<Device>();
+		let devices: Device[] = [];
 		let delivered = 0;
 		let transient = false;
+		try {
+			devices = (await env.DB.prepare(DEVICES_SQL).bind(email).all<Device>())
+				.results;
+		} catch {
+			// A device read that fails right after the claim is one transient failure, so the claim is released below.
+			failedCount += 1;
+			failureKinds.add("push error");
+			transient = true;
+		}
 		for (const device of devices) {
 			try {
 				const { status } = await sendPush(
@@ -148,8 +157,15 @@ export async function runReadyPush(
 				transient = true;
 			}
 		}
-		if (delivered === 0 && transient)
-			await env.DB.prepare(PUSH_RELEASE_SQL).bind(email).run();
+		if (delivered === 0 && transient) {
+			// Best effort: if the release itself fails, the claim stays, the failure is counted, and the next person still goes.
+			try {
+				await env.DB.prepare(PUSH_RELEASE_SQL).bind(email).run();
+			} catch {
+				failedCount += 1;
+				failureKinds.add("push error");
+			}
+		}
 	}
 	if (claimedCount > 0)
 		logDeliveries("ready push", sentCount, failedCount, failureKinds);
