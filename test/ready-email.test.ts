@@ -1184,6 +1184,99 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 					"ready email: 0 sent, 1 failed (held over a day)",
 				);
 			});
+
+			it("stores a legacy kept try for an address still checking in as its whole email, with its first time, and sends nothing", async () => {
+				const at = timeAgo(HOUR_MS);
+				await openHeldEntry({ line: HELD_LINE, at });
+				await env.DB.prepare(
+					"UPDATE household_members SET home_seen_at = datetime('now', '-1 minute') WHERE email = ?",
+				)
+					.bind(DANA)
+					.run();
+				const send = EMAIL_SENDER();
+				const next = resendFake();
+				await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+				expect(next.fetchImpl).not.toHaveBeenCalled();
+				expect(send).not.toHaveBeenCalled();
+				expect(await heldOf()).toEqual({
+					[await addressHashOf(DANA)]: {
+						mail: renderReadyEmail(HELD_LINE),
+						at,
+					},
+				});
+				// Once DANA has left, the kept try goes out as that stored email, under the key the email gives.
+				await env.DB.prepare(
+					"UPDATE household_members SET home_seen_at = NULL WHERE email = ?",
+				)
+					.bind(DANA)
+					.run();
+				const later = resendFake();
+				await runReadyEmail(production(), later.fetchImpl);
+				expect(later.sent.map((mail) => mail.text)).toEqual([
+					renderReadyEmail(HELD_LINE).text,
+				]);
+				expect(later.keys).toEqual([
+					await readyEmailKey(DANA, renderReadyEmail(HELD_LINE)),
+				]);
+			});
+
+			it("turns only the legacy entries into their emails, and leaves the other kept tries and the rest of the record as they are", async () => {
+				const at = timeAgo(HOUR_MS);
+				const other = renderReadyEmail(
+					"Tally has read your last 90 days from Chase.",
+				);
+				await openHousehold({
+					members: [DANA],
+					record: {
+						strokes: { bank: STROKE_ONE },
+						budgets: {},
+						readyEmailedTo: [RILEY],
+						heldReadyEmail: {
+							[await addressHashOf(DANA)]: { line: HELD_LINE, at },
+							[await addressHashOf(RILEY)]: { mail: other, at },
+						},
+					},
+				});
+				await env.DB.prepare(
+					"UPDATE household_members SET home_seen_at = datetime('now', '-1 minute') WHERE email = ?",
+				)
+					.bind(DANA)
+					.run();
+				await runReadyEmail(production(), resendFake().fetchImpl);
+				expect(await heldOf()).toEqual({
+					[await addressHashOf(DANA)]: {
+						mail: renderReadyEmail(HELD_LINE),
+						at,
+					},
+					[await addressHashOf(RILEY)]: { mail: other, at },
+				});
+				expect(await storedList()).toEqual([RILEY]);
+			});
+
+			it("a kept try already stored as its whole email is not written again by the minute run", async () => {
+				await openKept(renderReadyEmail(HELD_LINE), HOUR_MS);
+				await env.DB.prepare(
+					"UPDATE household_members SET home_seen_at = datetime('now', '-1 minute') WHERE email = ?",
+				)
+					.bind(DANA)
+					.run();
+				const writes: string[] = [];
+				const db = new Proxy(env.DB, {
+					get(target, prop) {
+						if (prop === "prepare")
+							return (sql: string) => {
+								if (/^\s*UPDATE/.test(sql)) writes.push(sql);
+								return target.prepare(sql);
+							};
+						const value = Reflect.get(target, prop, target);
+						return typeof value === "function" ? value.bind(target) : value;
+					},
+				});
+				await runReadyEmail(production({ DB: db }), resendFake().fetchImpl);
+				expect(writes.filter((sql) => sql.includes("heldReadyEmail"))).toEqual(
+					[],
+				);
+			});
 		});
 	});
 

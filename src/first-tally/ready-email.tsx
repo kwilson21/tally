@@ -7,9 +7,10 @@
 // text) and the UTC time of that first try are stored, and every later try sends that same stored email through Resend
 // only, under the same key, until Resend answers, for up to HELD_DROP_AFTER_MS. The stored email is never built again, so a
 // deploy that changes the words cannot change the key. After that the address stays reached and nothing more is sent
-// (decision 146). It is drawn like the bank sign-in email (src/reconnect/email.tsx).
+// (decisions 146 and 147). It is drawn like the bank sign-in email (src/reconnect/email.tsx).
 import {
 	anyQuestionAnswered,
+	type FirstTally,
 	QUESTION_STROKES,
 	readFirstTally,
 } from "../db/first-tally";
@@ -77,11 +78,65 @@ const DROP_HELD_SQL = `UPDATE household_settings
 // The kept tries (heldReadyEmail), read whole: the minute run picks one address's out of them.
 const HELD_SQL = `SELECT json_extract(value, '$.heldReadyEmail') AS held FROM household_settings WHERE key = 'first_tally'`;
 
+// Turns one legacy kept try into the whole email its line builds, with its own time. ?1 is the address's hash and ?2 the kept
+// try as JSON ({"mail", "at"}). Only an entry that is still a line when the write lands changes, so a release that replaced
+// it meanwhile is never overwritten, and the other paths of the record are left as they are.
+const KEEP_LEGACY_SQL = `UPDATE household_settings
+	SET value = json_set(household_settings.value, '$.heldReadyEmail."' || ?1 || '"', json(?2))
+	WHERE key = 'first_tally'
+		AND json_type(household_settings.value, '$.heldReadyEmail."' || ?1 || '".line') = 'text'
+		AND json_type(household_settings.value, '$.heldReadyEmail."' || ?1 || '".mail') IS NULL`;
+
 /**
  * A try Resend may hold, kept for its address (decision 146): the whole email it tried, and the UTC time of the first such try
  * as `YYYY-MM-DDTHH:MM:SSZ`, which later held tries never change.
  */
 type KeptTry = { mail: Mail; at: string };
+
+/**
+ * A kept try the merged code stored before the whole email was kept (c5577a5): its read line and the time of its first try,
+ * and no email. keepLegacyTries turns each into the email its line builds.
+ */
+type LegacyTry = { line: string; at: string };
+
+/** The kept tries still stored as only a read line, by the address's hash (none in a record that keeps whole emails). */
+function legacyTriesOf(record: FirstTally | null): [string, LegacyTry][] {
+	const tries: [string, LegacyTry][] = [];
+	for (const [hash, entry] of Object.entries(record?.heldReadyEmail ?? {})) {
+		const { mail, line, at } = entry as {
+			mail?: unknown;
+			line?: unknown;
+			at?: unknown;
+		};
+		if (
+			mail === undefined &&
+			typeof line === "string" &&
+			typeof at === "string"
+		)
+			tries.push([hash, { line, at }]);
+	}
+	return tries;
+}
+
+/**
+ * Turns each legacy kept try into the whole email its line builds, with its own time, in one write (decision 147). It runs at
+ * the start of each minute that reads the record, whether or not that address can be claimed this minute, so each kept try's
+ * words, and so its key, are fixed from then on. A record with no such entry writes nothing.
+ */
+async function keepLegacyTries(
+	db: D1Database,
+	record: FirstTally | null,
+): Promise<void> {
+	const tries = legacyTriesOf(record);
+	if (tries.length === 0) return;
+	await db.batch(
+		tries.map(([hash, { line, at }]) =>
+			db
+				.prepare(KEEP_LEGACY_SQL)
+				.bind(hash, JSON.stringify({ mail: renderReadyEmail(line), at })),
+		),
+	);
+}
 
 /**
  * A kept try older than this is not tried again: Resend keeps an Idempotency-Key for 24 hours (its docs, dashboard/emails/
@@ -125,9 +180,9 @@ const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
 
 /**
  * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is
- * the same email under the same key (decision 146). An entry the merged code kept before the whole email was stored (c5577a5)
- * has its read line and no email: the email that line builds is the same one, since the template has not changed, so it is
- * that kept try too. An entry that is neither a stored email nor a line, with a time, is no kept try.
+ * the same email under the same key (decision 146). keepLegacyTries has already turned an entry the merged code kept as only
+ * its read line (c5577a5) into its email, at the start of this minute; a line-only entry still here is read as the email its
+ * line builds, the same way. An entry that is neither a stored email nor a line, with a time, is no kept try.
  */
 async function keptTryOf(
 	db: D1Database,
@@ -240,8 +295,8 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
  * answered, a bank linked with its history still loading, the last bank removed, a sort waiting) ends the run there, and
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
  * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
- * next try sends that stored email again under the same key, through Resend only, until Resend answers (decision 146). A
- * kept try 23 hours old is dropped, and the address stays reached. The log line is written only when an address was
+ * next try sends that stored email again under the same key, through Resend only, until Resend answers (decisions 146 and
+ * 147). A kept try 23 hours old is dropped, and the address stays reached. The log line is written only when an address was
  * claimed, so a quiet minute logs nothing.
  */
 export async function runReadyEmail(
@@ -250,9 +305,12 @@ export async function runReadyEmail(
 	timeoutSignal: (milliseconds: number) => AbortSignal = AbortSignal.timeout,
 ) {
 	if (env.DEMO === "true") return;
-	// The minute's first read: a family whose questions are answered (or set up before this shipped), or with no stroke one day
-	// (which questionsOpen needs, so nothing could be sent), stops here. Everyone else costs one read each minute.
+	// The minute's first read. A kept try stored as only its read line (c5577a5) becomes its whole email first, so its words are
+	// fixed whatever this minute does (decision 147); a record without one writes nothing here.
 	const record = await readFirstTally(env.DB);
+	await keepLegacyTries(env.DB, record);
+	// A family whose questions are answered (or set up before this shipped), or with no stroke one day (which questionsOpen
+	// needs, so nothing could be sent), stops here. Everyone else costs one read each minute.
 	if (anyQuestionAnswered(record) || (record?.strokes.bank ?? null) === null)
 		return;
 	if ((await currentRead(env)) === null) return;
