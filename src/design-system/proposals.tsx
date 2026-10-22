@@ -38,7 +38,7 @@ import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
 import { SetupProposal } from "./proposals-setup";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 147), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 148), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -579,7 +579,7 @@ export const DECIDED: readonly {
 	{
 		title: "P142 · A new family's setup",
 		outcome:
-			"Option A: setup on its own pages: a welcome, then four steps, each a screen with a step bar, one question, the bank's own numbers as a ledger card and the answers at its foot, and a finish that shows Safe to spend and what was set up; no tab bar until setup is done, and the fifth stroke goes (decision 147).",
+			"Option A: setup on its own pages: a welcome, then four steps, each a screen with a step bar, one question, the bank's own numbers as a ledger card and the answers at its foot, and a finish that shows Safe to spend and what was set up; no tab bar until setup is done, and the fifth stroke goes (decision 148).",
 		issue: 772,
 	},
 ];
@@ -626,7 +626,7 @@ export function Proposals() {
 					Picked: a new family's setup
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
-					Drawn Oct 22. The owner's pick, marked Picked, is decision 147: A.
+					Drawn Oct 22. The owner's pick, marked Picked, is decision 148: A.
 				</p>
 				<SetupProposal />
 			</section>

@@ -419,7 +419,7 @@ describe("GET /design-system/proposals", () => {
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
-			// P142 (#770, decision 147) marks its option A, so it has one Picked.
+			// P142 (#770, decision 148) marks its option A, so it has one Picked.
 			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
@@ -5329,7 +5329,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P142, #770, decision 147)
+		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P142, #770, decision 148)
 		// and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
@@ -6871,7 +6871,7 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 				picture.includes(`aria-label="${label}, on a phone"`),
 			) ?? "";
 
-	it("opens P142's picked section after P140's and before the follow-ups', titled and dated, citing decision 147 (#770)", async () => {
+	it("opens P142's picked section after P140's and before the follow-ups', titled and dated, citing decision 148 (#770)", async () => {
 		const html = await drawn();
 		const open = html.indexOf('<section aria-labelledby="p142-title"');
 		expect(open).toBeGreaterThan(-1);
@@ -6885,14 +6885,14 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		expect(section).toContain('<h2 id="p142-title"');
 		expect(section).toContain("Picked: a new family&#39;s setup");
 		expect(section).toContain(
-			"Drawn Oct 22. The owner&#39;s pick, marked Picked, is decision 147: A.",
+			"Drawn Oct 22. The owner&#39;s pick, marked Picked, is decision 148: A.",
 		);
 		expect(html).not.toContain("Open: a new family&#39;s setup");
 		const decided = DECIDED.find((entry) => entry.title.startsWith("P142 ·"));
 		expect(decided?.title).toBe("P142 · A new family's setup");
 		expect(decided?.issue).toBe(772);
 		expect(decided?.outcome).toContain("Option A: setup on its own pages");
-		expect(decided?.outcome).toContain("(decision 147).");
+		expect(decided?.outcome).toContain("(decision 148).");
 	});
 
 	it("draws P142 as one visual specimen with Today, A (picked, recommended) and B, and one Picked on A", async () => {
@@ -7083,13 +7083,17 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		expect(ids).toEqual([P142, `${P142}-title`]);
 	});
 
-	it("records decision 147 in docs/decisions.md as the owner's pick of A for P142, for #770", () => {
+	it("records decision 148 in docs/decisions.md as the owner's pick of A for P142, for #770", () => {
 		const row = decisions
 			.split("\n")
-			.find((line) => line.startsWith("| 147 |"));
-		expect(row, "decision 147's row").toBeDefined();
+			.find((line) => line.startsWith("| 148 |"));
+		expect(row, "decision 148's row").toBeDefined();
 		expect(row).toContain("P142");
 		expect(row).toContain("#770");
 		expect(row).toContain("A, setup on its own pages");
+		expect(
+			decisions.split("\n").find((line) => line.startsWith("| 147 |")),
+			"decision 147's row is #776's ready email, so it must not name P142",
+		).not.toContain("P142");
 	});
 });
