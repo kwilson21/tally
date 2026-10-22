@@ -85,8 +85,9 @@ export type FirstTally = {
 	/**
 	 * The kept tries of the ready email (decision 146), keyed by the SHA-256 in hex of the lower-cased address: the whole email
 	 * (subject, HTML and text) a try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The next
-	 * try sends that same email under the same key, through Resend only, until Resend answers or the entry is a day old. Absent
-	 * until one is kept.
+	 * try sends that same email under the same key, through Resend only, until Resend answers or the entry is 23 hours old. An
+	 * entry kept as only its read line (before the whole email was kept) is read as that email (ready-email.tsx). Absent until
+	 * one is kept.
 	 */
 	heldReadyEmail?: Record<
 		string,
