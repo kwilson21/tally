@@ -811,6 +811,37 @@ describe("GET /design-system in the demo", () => {
 		},
 	);
 
+	it("gives each AppleCardSheet state its own ids, so each label and description reads its own field (#766)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		const ids = [...section.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(10);
+		expect(new Set(ids).size).toBe(ids.length);
+		// Every id a label or description names is drawn once on the page, so none points at another state's field.
+		const refs = [
+			...section.matchAll(
+				/(?:aria-labelledby|aria-describedby|\bfor)="([^"]+)"/g,
+			),
+		].flatMap((m) => (m[1] ?? "").split(" "));
+		expect(refs.length).toBeGreaterThan(0);
+		for (const ref of refs)
+			expect(html.split(`id="${ref}"`).length - 1).toBe(1);
+	});
+
+	it("draws the before-first-upload Apple Card state as Accounts does: Add Apple Card beside Link a bank, and no group yet (#766)", async () => {
+		const { html } = await get("/design-system");
+		const state =
+			html
+				.split("Before the first upload: no card yet")[1]
+				?.split("No balance yet")[0] ?? "";
+		expect(state).toContain("Link a bank");
+		expect(state).toContain("Add Apple Card");
+		expect(state).toContain("data-link-bank-error");
+		expect(state).not.toContain("data-apple-card");
+		expect(state).not.toContain("Upload a file");
+	});
+
 	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {
 		const { html } = await get("/design-system");
 		const section =
@@ -1770,7 +1801,7 @@ describe("GET /design-system: Apple Card's group, file field and sheet (#766)", 
 			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
 		const labels = [
 			...sheet.matchAll(
-				/<button[^>]*id="apple-card-upload"[^>]*>\s*<span class="contents[^"]*">([^<]*)<\/span>/g,
+				/<button[^>]*id="ds-apple-card-[a-z-]+-upload"[^>]*>\s*<span class="contents[^"]*">([^<]*)<\/span>/g,
 			),
 		].map((match) => match[1]);
 		expect(labels).toContain("Upload");

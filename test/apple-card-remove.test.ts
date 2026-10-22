@@ -135,7 +135,9 @@ describe("Remove Apple Card (#766)", () => {
 			"DELETE FROM transactions WHERE id IN (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' ORDER BY t.id DESC LIMIT 1)",
 		).run();
 		const html = (
-			await (await app.request("/accounts/apple-card/remove", {}, family)).text()
+			await (
+				await app.request("/accounts/apple-card/remove", {}, family)
+			).text()
 		).replaceAll("&#39;", "'");
 		expect(html).toContain(
 			"Its 1 transaction stays, so past months still add up, unless you tick the box below.",

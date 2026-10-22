@@ -57,7 +57,7 @@ import {
 	BillStatusHeading,
 	includesLine,
 } from "../views/bill-row";
-import { BottomSheet } from "../views/bottom-sheet";
+import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { BudgetSheet } from "../views/budget-sheet";
 import { BusyRing } from "../views/busy-ring";
@@ -102,6 +102,7 @@ import { Key, KeysDetails, KeysSheetBody, Ledger } from "../views/keys";
 import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
+import { LinkBankButton, LinkBankError } from "../views/link-bank";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -6643,17 +6644,19 @@ function AccountsGroup() {
 						/>
 					</div>
 				</State>
-				<State label="Before the first upload: the card's name, no “Updated through” line yet">
+				<State label="Before the first upload: no card yet, so only the buttons row is drawn, with the error region under it">
 					<div class="max-w-xl">
-						<AppleCardGroup
-							card={{
-								balanceCents: 0,
-								balanceOn: null,
-								through: null,
-								removed: false,
-							}}
-							today="2026-10-21"
-						/>
+						<div class="mt-8 flex flex-wrap items-center gap-3">
+							<LinkBankButton />
+							<Button
+								kind="secondary"
+								href="/accounts/apple-card"
+								{...sheetAttrs("/accounts/apple-card")}
+							>
+								Add Apple Card
+							</Button>
+						</div>
+						<LinkBankError />
 					</div>
 				</State>
 				<State label="No balance yet: no amount, and the line says it isn't in net worth">
@@ -6740,6 +6743,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-empty"
 							today="2026-10-21"
 							closeHref="/accounts?focus=apple-card"
 							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
@@ -6752,6 +6756,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-balance"
 							today="2026-10-21"
 							balance="1,240.18"
 							balanceOn="2026-10-18"
@@ -6766,6 +6771,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-no-file"
 							today="2026-10-21"
 							fileError="Choose the CSV file Apple exported."
 							closeHref="/accounts?focus=apple-card"
@@ -6779,6 +6785,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-too-big"
 							today="2026-10-21"
 							fileError="This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file."
 							closeHref="/accounts?focus=apple-card"
@@ -6792,6 +6799,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-not-apple"
 							today="2026-10-21"
 							fileError="This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV."
 							closeHref="/accounts?focus=apple-card"
@@ -6805,6 +6813,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-bad-row"
 							today="2026-10-21"
 							fileError="Row 14's amount can't be read. Nothing was added."
 							closeHref="/accounts?focus=apple-card"
@@ -6818,6 +6827,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-no-bank"
 							today="2026-10-21"
 							fileError="Link a bank first. Tally's history starts with your bank's."
 							closeHref="/accounts?focus=apple-card"
@@ -6831,6 +6841,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-bad-balance"
 							today="2026-10-21"
 							balance="12.3.4"
 							balanceOn="2026-10-18"
@@ -6847,6 +6858,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-both"
 							today="2026-10-21"
 							fileError="Choose the CSV file Apple exported."
 							balance="12.3.4"
@@ -6862,6 +6874,7 @@ function AccountsGroup() {
 						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
 					>
 						<AppleCardSheet
+							id="ds-apple-card-demo"
 							demo
 							today="2026-09-22"
 							closeHref="/accounts?focus=apple-card"

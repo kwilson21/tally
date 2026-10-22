@@ -8,6 +8,8 @@ import { MoneyInput } from "./money-input";
 export const APPLE_CARD_SHEET_TITLE = "Apple Card";
 
 type Props = {
+	/** Prefixes the ids of the title, the fields and the submit; the catalog gives each state its own (BudgetSheet's id). */
+	id?: string;
 	/** The demo's sheet: no file and no balance, and its submit adds the sample (spec §8.10). */
 	demo?: boolean;
 	/** The balance as typed, kept when the upload is refused (the file input can't be refilled). */
@@ -30,6 +32,7 @@ type Props = {
  * the title, the one-line intro, the file field, the optional balance, then Cancel and the submit, in Savings' grid.
  */
 export function AppleCardSheet({
+	id = "apple-card",
 	demo = false,
 	balance = "",
 	balanceOn = null,
@@ -49,7 +52,7 @@ export function AppleCardSheet({
 			<div class="flex items-center gap-3">
 				<Icon name="card" class="size-7" />
 				<h2
-					id="apple-card-sheet-title"
+					id={`${id}-sheet-title`}
 					class="font-serif text-3xl font-semibold"
 					tabindex={-1}
 				>
@@ -69,7 +72,7 @@ export function AppleCardSheet({
 				hx-post="/accounts/apple-card"
 				hx-encoding="multipart/form-data"
 				hx-disable="findAll button[type=submit]"
-				hx-indicator="#apple-card-upload"
+				hx-indicator={`#${id}-upload`}
 				hx-target="#accounts-summary"
 				hx-select="#accounts-summary"
 				hx-swap="outerHTML"
@@ -77,7 +80,7 @@ export function AppleCardSheet({
 				{!demo && (
 					<>
 						<FileField
-							id="apple-card-file"
+							id={`${id}-file`}
 							name="file"
 							label="Apple Card file (CSV)"
 							hint="On card.apple.com or in Wallet: Export Transactions, pick the dates, then CSV."
@@ -85,7 +88,7 @@ export function AppleCardSheet({
 							autofocus={focus === "file"}
 						/>
 						<MoneyInput
-							id="apple-card-balance"
+							id={`${id}-balance`}
 							name="balance"
 							label="Balance in Wallet"
 							value={balance}
@@ -107,7 +110,7 @@ export function AppleCardSheet({
 						Cancel
 					</Button>
 					<Button
-						id="apple-card-upload"
+						id={`${id}-upload`}
 						type="submit"
 						class="w-full"
 						busyLabel={demo ? "Adding…" : "Uploading…"}
