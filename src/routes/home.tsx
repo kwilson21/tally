@@ -37,6 +37,7 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import { vapidKeys } from "../push/keys";
 import { loadsPlaid } from "../security";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -304,6 +305,11 @@ async function renderHome(
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
 		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
+	// Notify me on this device (decision 149): drawn only when the server has its Web Push keys, which the demo never has.
+	// The script loads on every full load with the keys, in any phase and on any month: a check-in's redraw (redrawFirstWeek)
+	// draws the control back into reading, a swap onto this month draws it too, and an htmx swap loads no script of its own.
+	const pushKeys = await vapidKeys(c.env);
+	const pushScript = pushKeys !== null;
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
@@ -351,10 +357,12 @@ async function renderHome(
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
+	const plaid = plaidScripts(plaidButton);
 	return c.html(
 		<Layout
 			active="home"
-			{...plaidScripts(plaidButton)}
+			{...plaid}
+			modules={pushScript ? [...plaid.modules, "/js/push.js"] : plaid.modules}
 			demo={demo}
 			currentPath={addressOf(c)}
 		>
@@ -368,6 +376,7 @@ async function renderHome(
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
 								focusStatus={Boolean(firstWeekRedraw)}
+								notify={pushKeys ? { vapidKey: pushKeys.publicKey } : undefined}
 								yourBanks={{
 									banks: yourBanks,
 									today,
@@ -814,6 +823,7 @@ async function redrawFirstWeek(
 		hxTrigger({ toast: { message, type: "info" }, announce: message }),
 	);
 	const reading = setup.phase === "reading";
+	const pushKeys = await vapidKeys(c.env);
 	return c.html(
 		<HomeSetup
 			view={setup}
@@ -823,6 +833,7 @@ async function redrawFirstWeek(
 				reading ? { banks, today, keepPolling: setup.refreshes } : undefined
 			}
 			focusStatus
+			notify={pushKeys ? { vapidKey: pushKeys.publicKey } : undefined}
 		/>,
 	);
 }
@@ -877,8 +888,10 @@ home.get("/home/banks", async (c) => {
 });
 
 /**
- * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, every
- * 30 seconds (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds
+ * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, on load,
+ * every 30 seconds, and again when the tab comes back (HomeSeenCheckIn). A tab that isn't on screen cancels it (home-seen.js,
+ * decision 149), except that an open Plaid Link gets a quiet ping instead. Only the signed-in member's own row is written, and
+ * only once its last check-in is 30 seconds
  * old, so the page's repeats write once in each window. The demo writes nothing and answers 204. Home's check-in sends the
  * step its page shows. While that step is still the step now, the answer is 204 with no body. Once it has moved on, the page
  * is answered as the Your banks poll answers (redrawFirstWeek), and never reloaded: the questions opened, or the phase left

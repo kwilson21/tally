@@ -23,13 +23,15 @@ import {
 import { reconnectRecipients } from "../reconnect/reminders";
 import { andList } from "./budgets";
 import { questionsOpen, readGateInputs } from "./gate";
-import { EMAIL_AWAY_AFTER_MS } from "./home-seen";
+import { EMAIL_AFTER_PUSH_MS, EMAIL_AWAY_AFTER_MS } from "./home-seen";
 
 const SUBJECT = "Three questions to finish setting up";
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
 const BUTTON = "Finish setting up";
-const LINK = "https://tally.thesuperhuman.us/first-page";
+/** The first week's questions page: the ready email's button and the ready push's link both open it (decision 149). */
+export const QUESTIONS_PATH = "/first-page";
+const LINK = `https://tally.thesuperhuman.us${QUESTIONS_PATH}`;
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
 
 // The same test in SQL. json_type is NULL only when the key is absent (a null value reads 'null'), as the rest of the code tests it.
@@ -44,19 +46,45 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	JOIN plaid_items p ON p.id = a.plaid_item_id
 	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
-// Claims an address before its email is sent. It changes no row when the address is in the list already, so a second claim
-// of one address (an earlier run, or one still going) sends nothing. It changes no row either once a question is answered,
-// or when the address is no longer one the email goes to (removed, or not seen in 90 days: reconnectRecipients' rule), or
-// when its person checked in on a first-week page within EMAIL_AWAY_AFTER_MS (home_seen_at): they are still there, so a
-// later minute tries them. A refused address is skipped; runReadyEmail reads the gate again before the next one, so a
-// question answered meanwhile ends it.
-export const CLAIM_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value, '$.readyEmailedTo',
-		json_insert(COALESCE(json_extract(household_settings.value, '$.readyEmailedTo'), json('[]')), '$[#]', ?1))
+/**
+ * The claim for one address, in SQL (shared with the ready push, decision 149). `listPath` is the record's list the address
+ * joins: readyEmailedTo for the email, readyPushedTo for the push. ?1 is the address. It changes no row when the address is in
+ * that list already, so a second claim of one address (an earlier run, or one still going) sends nothing. It changes no row
+ * either once a question is answered, or when the address is no longer one the send goes to (removed, or not seen in 90 days:
+ * reconnectRecipients' rule), or when its person checked in on a first-week page within `awayMs` (home_seen_at): they are
+ * still there, so a later minute tries them. `extraGuard` adds one more condition after the list's, with ?1 as the address.
+ * `extraSet` writes one more path in the same statement, as `, '<path>', <value>` (the push's stamp, decision 149), so the
+ * list and that path change together or not at all.
+ */
+export function claimSql(
+	listPath: string,
+	awayMs: number,
+	extraGuard = "",
+	extraSet = "",
+): string {
+	return `UPDATE household_settings
+	SET value = json_set(household_settings.value, '${listPath}',
+		json_insert(COALESCE(json_extract(household_settings.value, '${listPath}'), json('[]')), '$[#]', ?1)${extraSet})
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
-		SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)
+		SELECT 1 FROM json_each(household_settings.value, '${listPath}') AS e WHERE e.value = ?1)${extraGuard}
 		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
-			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${EMAIL_AWAY_AFTER_MS / 1000} seconds')))`;
+			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
+}
+
+// Not within EMAIL_AFTER_PUSH_MS of a ready push (decision 149). readyPushedAt is written when the push claims the person (holding the
+// email while the push is in flight), moved to the delivery's time when a device takes it, and removed when none does; if that removal
+// fails, it keeps the claim's time and the email waits 8 minutes from the claim. So the push is seen first, and the email waits for the
+// person to come back or answer. ?2 is the address's hash, the key readyPushedAt stores the time under.
+const PUSH_WAIT_GUARD = `\n\t\tAND (json_type(household_settings.value, '$.readyPushedAt."' || ?2 || '"') IS NULL
+		OR datetime(json_extract(household_settings.value, '$.readyPushedAt."' || ?2 || '"')) <= datetime('now', '-${EMAIL_AFTER_PUSH_MS / 1000} seconds'))`;
+
+// Claims an address before its email is sent. ?1 is the address and ?2 its hash. A refused address is skipped; runReadyEmail reads
+// the gate again before the next one, so a question answered meanwhile ends it (claimSql has the rest).
+export const CLAIM_SQL = claimSql(
+	"$.readyEmailedTo",
+	EMAIL_AWAY_AFTER_MS,
+	PUSH_WAIT_GUARD,
+);
 
 // Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
 // address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
@@ -175,8 +203,12 @@ async function sha256Hex(text: string): Promise<string> {
 		.join("");
 }
 
-/** The hash of the lower-cased address: the key a kept try is stored under, so the address itself is never stored. */
-const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
+/**
+ * The hash of the lower-cased address: the key a kept try is stored under in heldReadyEmail, so the address itself is never
+ * stored. The ready push reads it too, to see whether a kept try may already have reached the address (decision 149).
+ */
+export const addressHashOf = (address: string) =>
+	sha256Hex(address.toLowerCase());
 
 /**
  * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is
@@ -268,10 +300,12 @@ export function renderReadyEmail(read: string): Mail {
  * bank's history is in, nothing waits for Jev, and no question is answered. The facts are the ones the gate reads (gate.ts),
  * read again at each address's turn so a change during the run is seen.
  */
-async function currentRead(env: { DB: D1Database }): Promise<string | null> {
-	const record = await readFirstTally(env.DB);
+export async function openRead(
+	db: D1Database,
+	record: FirstTally | null,
+): Promise<string | null> {
 	if (anyQuestionAnswered(record)) return null;
-	const { banks, waiting } = await readGateInputs(env.DB);
+	const { banks, waiting } = await readGateInputs(db);
 	if (
 		!questionsOpen({
 			strokeOneDay: record?.strokes.bank ?? null,
@@ -281,8 +315,13 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
 	)
 		return null;
 	const total =
-		(await env.DB.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
+		(await db.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
 	return readLine(banks, total);
+}
+
+/** openRead on a record read now, for each address's turn. */
+async function currentRead(env: { DB: D1Database }): Promise<string | null> {
+	return openRead(env.DB, await readFirstTally(env.DB));
 }
 
 /**
@@ -322,13 +361,14 @@ export async function runReadyEmail(
 	for (const { email: recipient } of recipients) {
 		const read = await currentRead(env);
 		if (read === null) break;
-		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient).run();
-		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, or
-		// its person is still on a first-week page. Each is skipped. A question answered after the read above is caught by
-		// the next address's read.
+		const hash = await addressHashOf(recipient);
+		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient, hash).run();
+		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, its
+		// person is still on a first-week page, or their readyPushedAt stamp is under EMAIL_AFTER_PUSH_MS old (a push in flight, one
+		// that reached a device, or a claim whose stamp could not be removed). Each is skipped.
+		// A question answered after the read above is caught by the next address's read.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		const hash = await addressHashOf(recipient);
 		// The kept try for this address, if a try Resend may hold kept one (decision 146). Its stored email is sent again, through
 		// Resend only; otherwise this read's email goes out, and a failure that Resend may not hold keeps nothing (RELEASE_SQL).
 		const kept = await keptTryOf(env.DB, recipient);

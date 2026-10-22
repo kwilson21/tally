@@ -1426,6 +1426,19 @@ describe("GET /design-system in the demo", () => {
 		]);
 	});
 
+	it("gives each notify control drawing its own help line, so no button points at another drawing's paragraph (#763)", async () => {
+		const { html } = await get("/design-system");
+		// Each NotifyControl drawing, and HomeSetup's Sorting state, draws a button described by its help line. A shared id would
+		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help.
+		const described = [
+			...html.matchAll(/aria-describedby="(notify-help[^"]*)"/g),
+		].map((match) => match[1] ?? "");
+		expect(described).toHaveLength(5);
+		expect(new Set(described).size).toBe(described.length);
+		for (const id of described)
+			expect(html.match(new RegExp(`\\sid="${id}"`, "g")), id).toHaveLength(1);
+	});
+
 	it("gives every specimen one tier, and makes Visual ones inert to htmx", async () => {
 		const { html } = await get("/design-system");
 		const tags = specimens(html);

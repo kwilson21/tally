@@ -27,6 +27,7 @@ const EXPORT_COLUMNS = {
 	// What AI did (spec §8.6): what Tally applied, by kind, transaction or merchant and household day; no amounts.
 	ai_log:
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
+	// push_subscriptions is not listed on purpose: each device's push endpoint and keys are device tokens, like the access token.
 	household_settings: "key, value",
 	household_members:
 		"email, first_seen_at, last_seen_at, session_issued_at, removed_at, home_seen_at",

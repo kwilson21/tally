@@ -83,6 +83,20 @@ export type FirstTally = {
 	 */
 	readyEmailedTo?: string[];
 	/**
+	 * The addresses sent the ready push (decision 149): each address gets one push on each device it turned notifications on for,
+	 * claimed before its pushes go and taken off again only when no device answered and some answer was transient, so a retry
+	 * is a new minute's try. Absent until one is claimed. The push stops for an address once it is in readyEmailedTo, or once
+	 * its kept email try is in heldReadyEmail (the email may already have reached it).
+	 */
+	readyPushedTo?: string[];
+	/**
+	 * readyPushedAt is written when the push claims the person (holding the email while the push is in flight), moved to the
+	 * delivery's time when a device takes it, and removed when none does; if that removal fails, it keeps the claim's time and the
+	 * email waits 8 minutes from the claim. Keyed by the address's hash as heldReadyEmail is (`YYYY-MM-DDTHH:MM:SSZ`), and the ready
+	 * email waits EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). Absent until a claim writes one (decision 149).
+	 */
+	readyPushedAt?: Record<string, string>;
+	/**
 	 * The kept tries of the ready email (decisions 146 and 147), keyed by the SHA-256 in hex of the lower-cased address: the whole
 	 * email (subject, HTML and text) a try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The
 	 * next try sends that same email under the same key, through Resend only, until Resend answers or the entry is 23 hours old.

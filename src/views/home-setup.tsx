@@ -12,6 +12,7 @@ import { headlineAmountClass, homeDrawingClass } from "./headline-amount";
 import { HomeSeenCheckIn } from "./home-seen";
 import { safeToSpendText } from "./home-top";
 import { Notebook } from "./notebook";
+import { NotifyControl, type NotifyShown } from "./notify-control";
 import { TallySteps } from "./tally-steps";
 import { WhyLink } from "./why-link";
 import { YourBanks } from "./your-banks";
@@ -206,11 +207,17 @@ export function HomeSetup({
 	yourBanks,
 	focusStatus = false,
 	polls = true,
+	notify,
 }: {
 	view: SetupView;
 	linkBank?: Child;
 	bankLine?: string[];
 	fifthDay?: { safeToSpendCents: number; needsHref?: string };
+	/**
+	 * Notify me on this device (decision 149): drawn only in the reading phase, and only when the server has Web Push keys (Home
+	 * passes it then, never in the demo). `shown` is for the catalog's drawings alone.
+	 */
+	notify?: { vapidKey: string; shown?: NotifyShown; idSuffix?: string };
 	/** The connected banks' rows and today's date, drawn while the import is read (YourBanks). */
 	yourBanks?: {
 		banks: YourBank[];
@@ -282,6 +289,14 @@ export function HomeSetup({
 				<p id="setup-next" class="mt-2 text-muted">
 					{setupNextLine(view, Boolean(bankLine))}
 				</p>
+			)}
+			{/* A sibling of #setup-next, #setup-status and Your banks, never inside them: those are swapped or polled (home.tsx). */}
+			{phase === "reading" && notify && (
+				<NotifyControl
+					vapidKey={notify.vapidKey}
+					shown={notify.shown}
+					idSuffix={notify.idSuffix}
+				/>
 			)}
 			{bankLine && <BankBehind words={bankLine} />}
 			{phase === "reading" && yourBanks && (

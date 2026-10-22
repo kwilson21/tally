@@ -48,6 +48,13 @@ describe("app shell", () => {
 		expect(html).toContain('<script src="/js/sheet.js" defer=""></script>');
 	});
 
+	it("loads home-seen.js on every page as a module, so a hidden tab's check-in is cancelled (decision 149)", async () => {
+		const html = await home();
+		expect(html).toContain(
+			'<script src="/js/home-seen.js" type="module"></script>',
+		);
+	});
+
 	it("links the tally-mark favicon, so browsers don't request a missing /favicon.ico", async () => {
 		const html = await home();
 		expect(html).toContain(

@@ -37,11 +37,19 @@ export async function noteHouseholdMember(
 		.run();
 }
 
+/**
+ * Removes a person from the household. Their devices' push subscriptions go with them (decision 149), in the same batch, so a
+ * removed person gets no push and their device tokens are not kept.
+ */
 export async function removeHouseholdMember(db: D1Database, email: string) {
-	await db
-		.prepare(
-			"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
-		)
-		.bind(email)
-		.run();
+	await db.batch([
+		db
+			.prepare(
+				"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
+			)
+			.bind(email),
+		db
+			.prepare("DELETE FROM push_subscriptions WHERE member_email = ?")
+			.bind(email),
+	]);
 }

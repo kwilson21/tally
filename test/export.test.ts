@@ -487,6 +487,22 @@ describe("data exports", () => {
 		expect(body).not.toContain("secret-key");
 	});
 
+	it("leaves each device's push subscription out of the download: its endpoint and keys never appear (decision 149)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES ('dana@example.com', 'https://push.example.test/send/never-export-this-endpoint', 'p256dh-never-export', 'auth-never-export')",
+		).run();
+		const response = await exports.default.fetch(
+			`${BASE}/settings/export/tally.json`,
+		);
+		const body = await response.text();
+		const data = JSON.parse(body) as Record<string, unknown>;
+		expect(data).not.toHaveProperty("push_subscriptions");
+		expect(body).not.toContain("push_subscriptions");
+		expect(body).not.toContain("never-export-this-endpoint");
+		expect(body).not.toContain("p256dh-never-export");
+		expect(body).not.toContain("auth-never-export");
+	});
+
 	it("links both downloads from the Your data section", async () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/settings/data`)

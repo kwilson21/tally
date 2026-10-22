@@ -1,0 +1,317 @@
+// The notify control's script (decision 149): Web Push for a new family's first questions. The browser asks for permission only
+// in a tap, so the tap's first call is the subscribe. The control is found by [data-notify] alone, so a page that draws it
+// (Home now, /setup later, #772) needs no change here. Setup is quiet and idempotent: it never moves focus, never announces, and
+// costs nothing on the 5-second poll (only a node not yet set up is touched). Text is set with textContent, never HTML.
+
+const SW_URL = "/sw.js";
+const SUBSCRIBE_URL = "/push/subscribe";
+const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
+const ON_WORDS = "Notifications are on for this device.";
+
+/** The VAPID public key's bytes, from its base64url text. */
+function keyBytes(text) {
+	const base64 = text.replaceAll("-", "+").replaceAll("_", "/");
+	const padded = base64.padEnd(
+		base64.length + ((4 - (base64.length % 4)) % 4),
+		"=",
+	);
+	return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
+/** A binary value as base64url without padding, as the subscribe route reads it. */
+function base64Url(buffer) {
+	let binary = "";
+	for (const byte of new Uint8Array(buffer))
+		binary += String.fromCharCode(byte);
+	return btoa(binary)
+		.replaceAll("+", "-")
+		.replaceAll("/", "_")
+		.replace(/=+$/, "");
+}
+
+/** A base64url key with any "=" padding taken off: the subscribe route takes the keys unpadded, whichever way they were read. */
+function unpadded(text) {
+	return String(text ?? "").replace(/=+$/, "");
+}
+
+/** True when two binary values hold the same bytes (a subscription's key against the page's). */
+function sameBytes(first, second) {
+	if (!first || !second) return false;
+	const a = new Uint8Array(first);
+	const b = new Uint8Array(second);
+	return a.length === b.length && a.every((byte, index) => byte === b[index]);
+}
+
+/**
+ * Sets up the notify control on a page. Each argument is the browser's own (passed in so tests can fake them). It runs once
+ * now and again after each htmx swap, for each control not yet set up.
+ */
+export function setupPush({
+	document,
+	navigator,
+	Notification,
+	fetch,
+	matchMedia,
+	window,
+	screen,
+}) {
+	// The endpoint of a subscription a control's device already had when its quiet re-post answered 409 (someone else's device),
+	// by control. A tap whose save then fails leaves that subscription alone (decision 149).
+	const ownedElsewhere = new WeakMap();
+	// The registration is made once, and each control waits for it. Nothing is asked: registering a worker is silent.
+	let registration = null;
+	let registering = null;
+	const register = () => {
+		registering ??= navigator.serviceWorker
+			.register(SW_URL, { scope: "/" })
+			.then(() => navigator.serviceWorker.ready)
+			.then((ready) => {
+				registration = ready;
+				return ready;
+			});
+		return registering;
+	};
+
+	const supported = () =>
+		"serviceWorker" in navigator &&
+		"PushManager" in window &&
+		"Notification" in window;
+	/**
+	 * The device the Home Screen hint names: "iPad", "iPhone" (an iPod too), or null for anything else. A user agent that names
+	 * iPad, iPhone or iPod keeps its own answer. An iPhone or iPad in Request Desktop Website mode reports Macintosh, and a real Mac
+	 * has no touch points (maxTouchPoints 0), so touch tells those two apart from a Mac. Then the screen's short side, in CSS
+	 * pixels whatever the orientation, tells a phone from a tablet: an iPhone's is 440 or less and an iPad's 744 or more, so 600
+	 * is between them.
+	 */
+	const appleDevice = () => {
+		const agent = navigator.userAgent;
+		if (/iPad/.test(agent)) return "iPad";
+		if (/iPhone|iPod/.test(agent)) return "iPhone";
+		if (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1)
+			return Math.min(screen.width, screen.height) < 600 ? "iPhone" : "iPad";
+		return null;
+	};
+	/** The device for the hint, outside the Home Screen app (where Web Push works only): iPhone or iPad, or null for none. */
+	const hintDevice = () =>
+		navigator.standalone !== true &&
+		!matchMedia("(display-mode: standalone)").matches
+			? appleDevice()
+			: null;
+
+	/** Shows one state of the control and hides the others (each state carries data-notify-state). */
+	const showState = (node, state) => {
+		for (const element of node.querySelectorAll("[data-notify-state]"))
+			element.hidden = element.getAttribute("data-notify-state") !== state;
+	};
+
+	/**
+	 * The Home Screen hint. On an iPad its one sentence is the server's, with every "iPhone" said as "iPad", set as one text node
+	 * so a screen reader reads it in one piece. On an iPhone the server's sentence stands.
+	 */
+	const showHint = (node, device) => {
+		const hint = node.querySelector('[data-notify-state="iphone"]');
+		if (hint && device === "iPad")
+			hint.textContent = hint.textContent.replaceAll("iPhone", "iPad");
+		showState(node, "iphone");
+	};
+
+	/** The button's busy look, set on the element itself, as plaid-link.js does (Button's busyLabel shows through htmx-request). */
+	const setBusy = (node, busy) => {
+		const button = node.querySelector("[data-notify-on]");
+		if (!button) return;
+		button.disabled = busy;
+		button.setAttribute("aria-busy", String(busy));
+		button.classList.toggle("htmx-request", busy);
+	};
+
+	const focusOn = (node, state) =>
+		node.querySelector(`[data-notify-state="${state}"]`)?.focus();
+
+	const announce = (value) =>
+		document.dispatchEvent(new CustomEvent("announce", { detail: { value } }));
+	const toast = (message) =>
+		document.dispatchEvent(
+			new CustomEvent("toast", { detail: { message, type: "error" } }),
+		);
+
+	/** The subscription's keys, from getKey (or the JSON's keys where getKey is absent). */
+	const keysOf = (subscription) => {
+		if (typeof subscription.getKey === "function")
+			return {
+				p256dh: base64Url(subscription.getKey("p256dh")),
+				auth: base64Url(subscription.getKey("auth")),
+			};
+		return subscription.toJSON().keys;
+	};
+
+	/**
+	 * Stores a device: a form post, so Hono's csrf check applies. A tap stores it for the person who tapped. A page load's quiet
+	 * re-post (`restore`) only brings back a lost row, and the server never moves a device to whoever is looking at it (decision 149).
+	 */
+	const save = (subscription, { restore = false } = {}) => {
+		const keys = keysOf(subscription);
+		const body = new URLSearchParams({
+			endpoint: subscription.endpoint,
+			p256dh: unpadded(keys.p256dh),
+			auth: unpadded(keys.auth),
+		});
+		if (restore) body.set("restore", "1");
+		return fetch(SUBSCRIBE_URL, {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body,
+		});
+	};
+
+	/** Focus is on nothing, or on the body: a busy button that had it was disabled, and a browser drops it there (toast.js's #460). */
+	const focusLost = () => {
+		const active = document.activeElement;
+		return !active || active === document.body;
+	};
+
+	/** The tap did not finish: the control is Off again with its button usable, and focus is back on the button if a busy one lost it. */
+	const backToOff = (node) => {
+		setBusy(node, false);
+		showState(node, "off");
+		if (focusLost()) node.querySelector("[data-notify-on]")?.focus();
+	};
+
+	/**
+	 * The tap's subscription was made: store it, then show On (or, if the control has left the page, announce it). A save that
+	 * fails removes the tap's subscription, unless it is the device's own subscription from before the tap: subscribe with the
+	 * same key returns that one, so removing it would take away the notifications of the person who turned the device on.
+	 */
+	const subscribed = async (subscription, node) => {
+		let saved = false;
+		try {
+			saved = (await save(subscription)).ok;
+		} catch {
+			saved = false;
+		}
+		if (!saved) {
+			if (ownedElsewhere.get(node) !== subscription.endpoint)
+				await subscription.unsubscribe().catch(() => {});
+			const live = document.querySelector("[data-notify]");
+			if (live) backToOff(live);
+			toast(COULDNT_SAVE);
+			return;
+		}
+		// The device is this person's now (the save moved it), so nothing is kept from before the tap.
+		ownedElsewhere.delete(node);
+		const live = document.querySelector("[data-notify]");
+		if (live) {
+			setBusy(live, false);
+			showState(live, "on");
+			focusOn(live, "on");
+		} else announce(ON_WORDS);
+	};
+
+	/** The tap's subscription was refused or failed: blocked, dismissed, or any other failure, each said as the design says. */
+	const refused = () => {
+		const live = document.querySelector("[data-notify]");
+		if (!live) return;
+		setBusy(live, false);
+		if (Notification.permission === "denied") {
+			// The Blocked line is the one thing said: it is shown and focused, as the On line is, so it is read once.
+			showState(live, "blocked");
+			focusOn(live, "blocked");
+			return;
+		}
+		if (Notification.permission === "default") {
+			// Dismissed: the button is usable again, focus stays on it, and nothing is announced.
+			showState(live, "off");
+			live.querySelector("[data-notify-on]")?.focus();
+			return;
+		}
+		backToOff(live);
+		toast(COULDNT_SAVE);
+	};
+
+	/**
+	 * The tap. Its first call is the subscribe, with no await before it: the browser asks for permission only inside the
+	 * gesture's own handler, and in every browser that call is what asks (Apple: call it immediately from the event handler).
+	 */
+	const tap = (node) => {
+		const key = keyBytes(node.getAttribute("data-vapid-key") ?? "");
+		let pending;
+		try {
+			pending = registration.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey: key,
+			});
+		} catch (error) {
+			pending = Promise.reject(error);
+		}
+		setBusy(node, true);
+		pending.then((subscription) => subscribed(subscription, node), refused);
+	};
+
+	/** Sets up one control: its state from what the browser already has, once the registration is ready. */
+	const setUp = async (node) => {
+		node.setAttribute("data-notify-ready", "");
+		if (!supported()) {
+			const device = hintDevice();
+			if (device) showHint(node, device);
+			return;
+		}
+		try {
+			await register();
+		} catch {
+			return;
+		}
+		if (Notification.permission === "denied") {
+			showState(node, "blocked");
+			return;
+		}
+		const key = keyBytes(node.getAttribute("data-vapid-key") ?? "");
+		const subscription = await registration.pushManager.getSubscription();
+		if (
+			subscription &&
+			!sameBytes(subscription.options?.applicationServerKey, key)
+		)
+			// The keys were changed: a subscription made with the old key can't receive, so it goes.
+			await subscription.unsubscribe().catch(() => {});
+		else if (subscription && Notification.permission === "granted") {
+			// Quietly stored again, so the server's row comes back if it was lost. Nothing is shown until it answers: a 409 means
+			// the device is someone else's now, so it shows Off quietly and a tap moves the device to this person (decision 149).
+			// Any other answer, and no answer at all, shows On: the device is subscribed, and the server may just be unreachable.
+			save(subscription, { restore: true })
+				.then((response) => {
+					// Someone else's device: its endpoint is remembered, so a later failed tap leaves this subscription alone.
+					if (response.status === 409)
+						ownedElsewhere.set(node, subscription.endpoint);
+					showState(node, response.status === 409 ? "off" : "on");
+				})
+				.catch(() => showState(node, "on"));
+			return;
+		}
+		showState(node, "off");
+	};
+
+	/** Sets up each control on the page that is not set up yet. */
+	const setUpAll = () => {
+		for (const node of document.querySelectorAll("[data-notify]"))
+			if (!node.hasAttribute("data-notify-ready")) setUp(node);
+	};
+
+	document.addEventListener("click", (event) => {
+		if (!event.target?.closest?.("[data-notify-on]")) return;
+		const live = document.querySelector("[data-notify]");
+		if (live && registration) tap(live);
+	});
+	document.addEventListener("htmx:after:process", setUpAll);
+	setUpAll();
+}
+
+if (typeof document !== "undefined") {
+	setupPush({
+		document,
+		navigator,
+		Notification: globalThis.Notification,
+		fetch,
+		matchMedia: (query) => window.matchMedia(query),
+		window,
+		screen,
+	});
+}

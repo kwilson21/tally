@@ -48,6 +48,7 @@ function harness({
 	linkBank = true,
 	errorRegionOnScreen = true,
 	redrawKeepsLinkButton = false,
+	visibilityState = "visible",
 	dataset,
 	tokenResponse = {
 		ok: true,
@@ -69,6 +70,7 @@ function harness({
 	/** False when no [data-link-bank-error] is on screen (a first-week redraw can take it away). */
 	errorRegionOnScreen?: boolean;
 	redrawKeepsLinkButton?: boolean;
+	visibilityState?: "visible" | "hidden";
 	dataset?: Record<string, string>;
 	tokenResponse?: {
 		ok: boolean;
@@ -177,6 +179,8 @@ function harness({
 	const documentEvents = elementListeners();
 	const document = {
 		body,
+		// A tab on screen, unless the test says otherwise. The presence ping ignores it while a link is open (decision 149).
+		visibilityState,
 		addEventListener: (name: string, listener: never) => {
 			if (name === "click") delegatedClick = listener;
 			else documentEvents.addEventListener(name, listener);
@@ -989,10 +993,84 @@ describe("plaid-link.js", () => {
 			},
 		});
 
+		/** The presence check-in's element (home-seen.tsx), which says the person is still there. */
+		const checkIn = () => ({
+			id: "home-seen",
+			isConnected: true,
+			hasAttribute: (name: string) => name === "data-waits-for-link",
+		});
+		/** The POSTs to /home/seen the page has sent, as fetch was called. */
+		const pingsOf = (h: ReturnType<typeof harness>) =>
+			h.fetch.mock.calls
+				.filter(([url]) => url === "/home/seen")
+				.map((call) => call as unknown as [string, RequestInit]);
+
 		it("cancels a request from an element that waits for the link, while a link is running", async () => {
 			const h = harness();
 			await h.click();
 			expect(h.beforeRequest(waiting()).defaultPrevented).toBe(true);
+		});
+
+		it("sends one quiet presence ping in place of a skipped check-in, while a link is running", async () => {
+			const h = harness();
+			await h.click();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			const pings = pingsOf(h);
+			expect(pings).toHaveLength(1);
+			const [, init] = pings[0] ?? [];
+			expect(init?.method).toBe("POST");
+			expect(init?.headers).toEqual({
+				"Content-Type": "application/x-www-form-urlencoded",
+			});
+			// An empty body: no step, so /home/seen only moves home_seen_at and answers 204 (the route's tests pin that).
+			expect(init?.body).toBe("");
+		});
+
+		it("hidden while linking still sends one ping: a bank's own sign-in in another tab counts as there (decision 149)", async () => {
+			const h = harness({ visibilityState: "hidden" });
+			await h.click();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			expect(pingsOf(h)).toHaveLength(1);
+		});
+
+		it("sends one ping while the tab is on screen and a link is running (decision 149)", async () => {
+			const h = harness({ visibilityState: "visible" });
+			await h.click();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			expect(pingsOf(h)).toHaveLength(1);
+		});
+
+		it("sends a ping for each skipped check-in tick, one at a time", async () => {
+			const h = harness();
+			await h.click();
+			h.beforeRequest(checkIn());
+			h.beforeRequest(checkIn());
+			h.beforeRequest(checkIn());
+			expect(pingsOf(h)).toHaveLength(3);
+		});
+
+		it("sends no ping for a skipped poll or refresh, since only the check-in says the person is there", async () => {
+			const h = harness();
+			await h.click();
+			const poll = { ...waiting(), id: "your-banks" };
+			expect(h.beforeRequest(poll).defaultPrevented).toBe(true);
+			expect(h.beforeRequest(waiting()).defaultPrevented).toBe(true);
+			expect(pingsOf(h)).toEqual([]);
+		});
+
+		it("sends nothing extra when no link is running, so the check-in runs as usual", async () => {
+			const h = harness();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(false);
+			expect(pingsOf(h)).toEqual([]);
+		});
+
+		it("ignores a ping that fails, so a skipped tick never throws", async () => {
+			const h = harness();
+			await h.click();
+			h.fetch.mockRejectedValueOnce(new TypeError("offline"));
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(pingsOf(h)).toHaveLength(1);
 		});
 
 		it("leaves a request from any other element alone while a link is running", async () => {
