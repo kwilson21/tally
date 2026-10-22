@@ -391,6 +391,49 @@ describe("Apple Card's upload sheet (#766)", () => {
 		});
 	});
 
+	describe("the sheet's id is drawn once (#766)", () => {
+		// Counts the sheet's own id, which must be on one element in each answer (two would be two elements with one id).
+		const sheetIds = (html: string) => html.split('id="sheet"').length - 1;
+
+		it("draws one #sheet on the no-JavaScript page, with the sheet open", async () => {
+			const html = await (
+				await app.request("/accounts/apple-card", {}, family)
+			).text();
+			expect(sheetIds(html)).toBe(1);
+		});
+
+		it("draws one #sheet in the htmx answer for Upload a file and Add Apple Card", async () => {
+			const html = await (
+				await app.request(
+					"/accounts/apple-card",
+					{ headers: { "HX-Request": "true" } },
+					family,
+				)
+			).text();
+			expect(sheetIds(html)).toBe(1);
+		});
+
+		it("draws one #sheet on the no-JavaScript refusals, the size gate's and a refused file's", async () => {
+			const gate = await postUnread("abc");
+			expect(sheetIds(gate.html)).toBe(1);
+			const refused = await post(
+				{ file: file("OFXHEADER:100\n<OFX>"), balance: "" },
+				{ htmx: false },
+			);
+			expect(refused.res.status).toBe(422);
+			expect(sheetIds(refused.html)).toBe(1);
+		});
+
+		it("draws one #sheet in the htmx 422 that swaps #accounts-summary", async () => {
+			const { res, html } = await post(
+				{ file: file("OFXHEADER:100\n<OFX>"), balance: "" },
+				{ htmx: true },
+			);
+			expect(res.status).toBe(422);
+			expect(sheetIds(html)).toBe(1);
+		});
+	});
+
 	describe("Accounts with Apple Card", () => {
 		it("shows the group after the banks, then the buttons, the error region, and #sheet last", async () => {
 			await post(

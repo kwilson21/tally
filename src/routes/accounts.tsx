@@ -246,7 +246,8 @@ async function AccountsSummary({
 				</div>
 			)}
 			{plaidEnabled && !empty && <LinkBankError />}
-			<div id="sheet">{sheet}</div>
+			{/* The sheet brings its own #sheet (uploadSheet), so the page draws that one id once. */}
+			{sheet ?? <div id="sheet" />}
 		</div>
 	);
 }
