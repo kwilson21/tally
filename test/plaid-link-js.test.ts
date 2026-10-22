@@ -48,6 +48,7 @@ function harness({
 	linkBank = true,
 	errorRegionOnScreen = true,
 	redrawKeepsLinkButton = false,
+	visibilityState = "visible",
 	dataset,
 	tokenResponse = {
 		ok: true,
@@ -69,6 +70,7 @@ function harness({
 	/** False when no [data-link-bank-error] is on screen (a first-week redraw can take it away). */
 	errorRegionOnScreen?: boolean;
 	redrawKeepsLinkButton?: boolean;
+	visibilityState?: "visible" | "hidden";
 	dataset?: Record<string, string>;
 	tokenResponse?: {
 		ok: boolean;
@@ -177,6 +179,8 @@ function harness({
 	const documentEvents = elementListeners();
 	const document = {
 		body,
+		// A tab on screen, unless the test says otherwise: the presence ping is sent only while it is visible (decision 148).
+		visibilityState,
 		addEventListener: (name: string, listener: never) => {
 			if (name === "click") delegatedClick = listener;
 			else documentEvents.addEventListener(name, listener);
@@ -1020,6 +1024,20 @@ describe("plaid-link.js", () => {
 			});
 			// An empty body: no step, so /home/seen only moves home_seen_at and answers 204 (the route's tests pin that).
 			expect(init?.body).toBe("");
+		});
+
+		it("sends no ping while the tab is hidden, so a hidden tab mid-link counts as away (decision 148)", async () => {
+			const h = harness({ visibilityState: "hidden" });
+			await h.click();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			expect(pingsOf(h)).toEqual([]);
+		});
+
+		it("sends one ping while the tab is on screen and a link is running (decision 148)", async () => {
+			const h = harness({ visibilityState: "visible" });
+			await h.click();
+			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
+			expect(pingsOf(h)).toHaveLength(1);
 		});
 
 		it("sends a ping for each skipped check-in tick, one at a time", async () => {

@@ -345,10 +345,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	// htmx:before:request on a request's source element, and sends nothing when it is prevented. A skipped tick is not queued:
 	// the next tick after onSuccess or onExit runs as usual. The exchange is never skipped.
 	//
-	// A Plaid window still counts as the person being there. So the check-in's skipped tick is replaced by a quiet presence
-	// ping: a form post with no step, so /home/seen only moves home_seen_at and answers 204 (decision 146). Neither the push
-	// (2 minutes) nor the email (10 minutes) goes while someone is linking a bank (decision 148). The poll and the refreshes
-	// send nothing in its place.
+	// A Plaid window still counts as the person being there, while its tab is on screen. So the check-in's skipped tick is
+	// replaced by a quiet presence ping: a form post with no step, so /home/seen only moves home_seen_at and answers 204
+	// (decision 146). Neither the push (2 minutes) nor the email (10 minutes) goes while someone is linking a bank on screen
+	// (decision 148). A tab that isn't on screen counts as away, so while it is hidden no ping is sent. The poll and the
+	// refreshes send nothing in its place.
 	const presencePing = () =>
 		fetch("/home/seen", {
 			method: "POST",
@@ -360,7 +361,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		if (!linking || !event.target?.hasAttribute?.("data-waits-for-link"))
 			return;
 		event.preventDefault();
-		if (event.target.id === "home-seen") presencePing();
+		if (
+			event.target.id === "home-seen" &&
+			document.visibilityState === "visible"
+		)
+			presencePing();
 	};
 
 	// One delegated listener for both buttons, so a button a refresh replaced still works.
