@@ -195,11 +195,31 @@ function subscriptionWith(
 	};
 }
 
+/**
+ * A subscription with no getKey, so its keys come only from toJSON, padded with "=" as some browsers pad them. The server takes the
+ * keys unpadded (65 bytes is 87 characters, 16 bytes is 22), so push.js must take the padding off.
+ */
+function paddedJsonSubscription() {
+	const endpoint = "https://push.example.test/send/padded";
+	return {
+		endpoint,
+		options: { applicationServerKey: bytesOf(AS_PUBLIC).buffer as ArrayBuffer },
+		unsubscribe: vi.fn(async () => true),
+		toJSON: () => ({
+			endpoint,
+			keys: { p256dh: `${OTHER_KEY}=`, auth: "BTBZMqHH6r4Tts7J_aSIgg==" },
+		}),
+	};
+}
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 type Options = {
 	permission?: "default" | "granted" | "denied";
-	subscription?: ReturnType<typeof subscriptionWith> | null;
+	subscription?:
+		| ReturnType<typeof subscriptionWith>
+		| ReturnType<typeof paddedJsonSubscription>
+		| null;
 	subscribe?: () => Promise<unknown>;
 	userAgent?: string;
 	/** navigator.maxTouchPoints: an iPad in desktop mode reports Macintosh with touch points, a real Mac reports 0. */
@@ -613,6 +633,34 @@ describe("the notify control's tap", () => {
 			control.querySelector('[data-notify-state="on"]'),
 		]);
 		expect(dom.sent("announce")).toEqual([]);
+	});
+
+	it("posts a toJSON key with its padding taken off, on a tap", async () => {
+		const { dom, control, fetch } = await page({
+			subscribe: async () => paddedJsonSubscription(),
+		});
+		dom.click(control.querySelector("[data-notify-on]") as El);
+		await flush();
+		expect(fetch).toHaveBeenCalledOnce();
+		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		const body = init.body as URLSearchParams;
+		expect(body.get("p256dh")).toBe(OTHER_KEY);
+		expect(body.get("auth")).toBe("BTBZMqHH6r4Tts7J_aSIgg");
+		expect(shown(control, "on")).toBe(true);
+	});
+
+	it("posts a toJSON key with its padding taken off, on the quiet re-post too", async () => {
+		const { fetch } = await page({
+			permission: "granted",
+			subscription: paddedJsonSubscription(),
+		});
+		await flush();
+		expect(fetch).toHaveBeenCalledOnce();
+		const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		const body = init.body as URLSearchParams;
+		expect(body.get("restore")).toBe("1");
+		expect(body.get("p256dh")).toBe(OTHER_KEY);
+		expect(body.get("auth")).toBe("BTBZMqHH6r4Tts7J_aSIgg");
 	});
 
 	it("shows the busy state while the subscribe is pending, and clears it once saved", async () => {

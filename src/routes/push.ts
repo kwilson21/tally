@@ -3,7 +3,8 @@
 // is at most 2,000 characters and a browser's push service over https (push/endpoint.ts); the key is an uncompressed P-256
 // point that imports on the curve (RFC 8291 §7); the auth secret is 16 bytes. The encoded lengths are checked before any field
 // is decoded. Input that fails answers 422. Web Push that is off (the demo, or no keys), and a person who isn't signed in or is
-// removed, answer 404 before the body is read. Otherwise the device is stored for the signed-in person, or moved to them if it
+// removed, answer 404 before the body is read. A body whose Content-Length is missing or over 4,096 bytes answers 413 before it
+// is read. Otherwise the device is stored for the signed-in person, or moved to them if it
 // was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
 // quiet re-post carries restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
 // 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
@@ -20,6 +21,9 @@ export const push = new Hono<App>();
 
 /** The longest endpoint stored: a push service's URL is far shorter (decision 149). */
 const MAX_ENDPOINT_LENGTH = 2000;
+
+/** The largest body read: a real subscription form is well under 1 KB (decision 149). A body without a Content-Length is refused. */
+const MAX_BODY_LENGTH = 4096;
 
 /** The encoded lengths push.js sends, unpadded: 65 bytes of key is 87 base64url characters, and 16 bytes of secret is 22. */
 const P256DH_LENGTH = 87;
@@ -87,6 +91,15 @@ push.post("/push/subscribe", async (c) => {
 		.bind(member)
 		.first();
 	if (!current) return c.body(null, 404);
+	// The body is read only when its declared size is a number of bytes within MAX_BODY_LENGTH: a missing or unreadable
+	// Content-Length, or a larger one, answers 413 before parseBody reads anything.
+	const declared = c.req.header("content-length");
+	if (
+		!declared ||
+		!/^\d{1,9}$/.test(declared) ||
+		Number(declared) > MAX_BODY_LENGTH
+	)
+		return c.body(null, 413);
 	const form = (await c.req.parseBody()) as Record<string, unknown>;
 	const subscription = await subscriptionOf(form);
 	if (!subscription) return c.body(null, 422);

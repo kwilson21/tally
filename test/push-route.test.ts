@@ -45,9 +45,13 @@ const b64u = (bytes: Uint8Array) =>
 		.replaceAll("/", "_")
 		.replace(/=+$/, "");
 
-/** The subscribe form post, as push.js sends it. */
-const subscribe = (
-	fields: Record<string, string>,
+/** A body's Content-Length, as a browser sends it: its size in bytes. */
+const lengthOf = (body: string) =>
+	String(new TextEncoder().encode(body).byteLength);
+
+/** The subscribe form post with a raw body, sent with its Content-Length as a browser sends it. */
+const postBody = (
+	body: string,
 	{
 		bindings = family,
 		who = PERSON,
@@ -61,12 +65,19 @@ const subscribe = (
 			headers: {
 				Origin: origin,
 				"Content-Type": "application/x-www-form-urlencoded",
+				"Content-Length": lengthOf(body),
 				...(who === null ? {} : { "x-test-actor": who }),
 			},
-			body: new URLSearchParams(fields).toString(),
+			body,
 		},
 		bindings,
 	);
+
+/** The subscribe form post, with the fields as push.js sends them. */
+const subscribe = (
+	fields: Record<string, string>,
+	options: { bindings?: Env; who?: string | null; origin?: string } = {},
+) => postBody(new URLSearchParams(fields).toString(), options);
 
 const good = { endpoint: ENDPOINT, p256dh: UA_PUBLIC, auth: AUTH };
 
@@ -346,10 +357,10 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 		return () => spy.mock.calls.map(([text]) => String(text));
 	};
 
-	it("refuses a 1 MB key without decoding it", async () => {
+	it("refuses a 1 MB key with 413, without decoding it", async () => {
 		const decoded = watchDecoding();
 		const huge = "Q".repeat(1_000_000);
-		expect((await subscribe({ ...good, p256dh: huge })).status).toBe(422);
+		expect((await subscribe({ ...good, p256dh: huge })).status).toBe(413);
 		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
 	});
 
@@ -366,11 +377,11 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
 	});
 
-	it("refuses a 1 MB auth secret without decoding it", async () => {
+	it("refuses a 1 MB auth secret with 413, without decoding it", async () => {
 		const decoded = watchDecoding();
 		expect(
 			(await subscribe({ ...good, auth: "Q".repeat(1_000_000) })).status,
-		).toBe(422);
+		).toBe(413);
 		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
 	});
 
@@ -392,6 +403,7 @@ describe("POST /push/subscribe: the encoded lengths are checked before anything 
 });
 
 // A multipart body that is not one, so reading it throws: an answer other than 404 shows the body was read.
+const UNREADABLE = "this is not a multipart body";
 const unreadable = (bindings: Env, who: string | null = PERSON) =>
 	router.request(
 		"/push/subscribe",
@@ -400,9 +412,10 @@ const unreadable = (bindings: Env, who: string | null = PERSON) =>
 			headers: {
 				Origin: ORIGIN,
 				"Content-Type": "multipart/form-data; boundary=x",
+				"Content-Length": lengthOf(UNREADABLE),
 				...(who === null ? {} : { "x-test-actor": who }),
 			},
-			body: "this is not a multipart body",
+			body: UNREADABLE,
 		},
 		bindings,
 	);
@@ -436,6 +449,82 @@ describe("POST /push/subscribe: the checks before the body is read (404 without 
 
 	it("reads the body for a member with keys, so the same unreadable body is not a 404", async () => {
 		expect((await unreadable(family)).status).not.toBe(404);
+	});
+});
+
+describe("POST /push/subscribe: the body's size is checked before it is read (413)", () => {
+	// A real subscription form is well under 1 KB (decision 149); anything over 4,096 bytes, or with no Content-Length, is refused
+	// before parseBody reads it.
+	it("refuses a valid subscription over 4,096 bytes, and stores nothing", async () => {
+		const body = new URLSearchParams({
+			...good,
+			pad: "x".repeat(4096),
+		}).toString();
+		expect(lengthOf(body)).not.toBe("4096");
+		expect((await postBody(body)).status).toBe(413);
+		expect(await rowsFor()).toEqual([]);
+	});
+
+	it("refuses an oversized body before reading it, so an unreadable one is a 413 and not an error", async () => {
+		const response = await router.request(
+			"/push/subscribe",
+			{
+				method: "POST",
+				headers: {
+					Origin: ORIGIN,
+					"Content-Type": "multipart/form-data; boundary=x",
+					"Content-Length": "5000",
+					"x-test-actor": PERSON,
+				},
+				body: UNREADABLE,
+			},
+			family,
+		);
+		expect(response.status).toBe(413);
+	});
+
+	it("reads a body of exactly 4,096 bytes", async () => {
+		const base = new URLSearchParams({ ...good, pad: "" }).toString();
+		const body = base + "x".repeat(4096 - base.length);
+		expect(lengthOf(body)).toBe("4096");
+		expect((await postBody(body)).status).toBe(204);
+		expect(await rowsFor()).toHaveLength(1);
+	});
+
+	it("refuses a request with no Content-Length, and stores nothing", async () => {
+		const response = await router.request(
+			"/push/subscribe",
+			{
+				method: "POST",
+				headers: {
+					Origin: ORIGIN,
+					"Content-Type": "application/x-www-form-urlencoded",
+					"x-test-actor": PERSON,
+				},
+				body: new URLSearchParams(good).toString(),
+			},
+			family,
+		);
+		expect(response.status).toBe(413);
+		expect(await rowsFor()).toEqual([]);
+	});
+
+	it("refuses a Content-Length that is not a number", async () => {
+		const response = await router.request(
+			"/push/subscribe",
+			{
+				method: "POST",
+				headers: {
+					Origin: ORIGIN,
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Content-Length": "lots",
+					"x-test-actor": PERSON,
+				},
+				body: new URLSearchParams(good).toString(),
+			},
+			family,
+		);
+		expect(response.status).toBe(413);
 	});
 });
 

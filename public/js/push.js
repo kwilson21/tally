@@ -29,6 +29,11 @@ function base64Url(buffer) {
 		.replace(/=+$/, "");
 }
 
+/** A base64url key with any "=" padding taken off: the subscribe route takes the keys unpadded, whichever way they were read. */
+function unpadded(text) {
+	return String(text ?? "").replace(/=+$/, "");
+}
+
 /** True when two binary values hold the same bytes (a subscription's key against the page's). */
 function sameBytes(first, second) {
 	if (!first || !second) return false;
@@ -147,8 +152,8 @@ export function setupPush({
 		const keys = keysOf(subscription);
 		const body = new URLSearchParams({
 			endpoint: subscription.endpoint,
-			p256dh: keys.p256dh,
-			auth: keys.auth,
+			p256dh: unpadded(keys.p256dh),
+			auth: unpadded(keys.auth),
 		});
 		if (restore) body.set("restore", "1");
 		return fetch(SUBSCRIBE_URL, {
