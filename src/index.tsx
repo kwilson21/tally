@@ -96,7 +96,7 @@ app.onError(serverErrorPage);
  */
 const RECONNECT_EMAIL_CRON = "0 10 * * *";
 
-/** Every minute, production only (wrangler.jsonc): the ready email, and nothing else (decision 146). */
+/** Every minute, production only (wrangler.jsonc): the ready push, then the ready email (decisions 146 and 148). */
 const READY_EMAIL_CRON = "* * * * *";
 
 /**

@@ -6,8 +6,8 @@ import { NotifyControl, type NotifyShown } from "../src/views/notify-control";
 
 // The notify control (decision 148, N1): "Notify me on this device" under Home's first-week setup while the questions are not
 // yet open. Four states, each hidden until push.js shows one, so with no JavaScript, or in a browser without Web Push, nothing
-// shows. A catalog drawing passes `shown` to un-hide one state. It goes right after the reading phase's status line, as a
-// sibling of #setup-next, #setup-status and Your banks, never inside them: those are swapped, and a swap must not touch it.
+// shows. A catalog drawing passes `shown` to un-hide one state. It goes right after #setup-next, the line under the status, as
+// a sibling of #setup-status, #setup-next and Your banks, never inside them: those are swapped, and a swap must not touch it.
 
 const VAPID =
 	"BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
