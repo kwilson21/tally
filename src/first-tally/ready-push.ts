@@ -2,10 +2,10 @@
 // first questions are open and nobody has answered one. It goes to a person only once their page has not checked in for
 // PUSH_AWAY_AFTER_MS, and only once: the claim (readyPushedTo) is kept after a success, and the email's own claim (readyEmailedTo)
 // stops any push after the email has gone, as does a kept email try (heldReadyEmail), which may already have reached the person.
-// A device that answers 404 or 410 is deleted by its row. A device that gives no answer, a 429 or a 5xx is transient: when no
-// device answers with a success and some answer is transient, the claim is released and the next minute tries again, until
-// the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute. A device
-// stored on a host that isn't a browser's push service is never fetched, and counts as permanent (push/endpoint.ts).
+// A device that answers 404 or 410 is deleted by its id and endpoint, as read. A device that gives no answer, a 429 or a 5xx
+// is transient: when no device answers with a success and some answer is transient, the claim is released and the next minute
+// tries again, until the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every
+// minute. A device stored on a host that isn't a browser's push service is never fetched, and counts as permanent (push/endpoint.ts).
 // What the email waits for is the stamp readyPushedAt, under the address's hash. The claim writes it in the same statement that
 // takes the person (PUSH_CLAIM_SQL), so no email can claim that person from the claim until the push's answers are in: the email
 // waits EMAIL_AFTER_PUSH_MS (8 minutes) from the claim. A device that takes the push moves the stamp to the delivery's time, so the
@@ -194,10 +194,13 @@ export async function runReadyPush(
 					},
 				);
 				const answer = answerOf(status);
-				// A device that is gone is deleted by its row, as read: a subscription made since (another row) is kept.
+				// A device that is gone is deleted by the id and endpoint read before the claims. Ids are not AUTOINCREMENT, so a freed
+				// id can be given to another device before this DELETE lands: the endpoint keeps that device (and a subscription made since).
 				if (answer === "gone")
-					await env.DB.prepare("DELETE FROM push_subscriptions WHERE id = ?")
-						.bind(device.id)
+					await env.DB.prepare(
+						"DELETE FROM push_subscriptions WHERE id = ? AND endpoint = ?",
+					)
+						.bind(device.id, device.endpoint)
 						.run();
 				if (answer === "sent") {
 					sentCount += 1;

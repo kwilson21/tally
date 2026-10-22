@@ -254,6 +254,17 @@ const keptEmail = (text: string) => ({
 	at: "2026-10-13T09:00:00Z",
 });
 
+/** The id a device's row has, as stored (the test reads it before a run, the way the run reads its devices). */
+async function idOf(endpoint: string) {
+	const row = await env.DB.prepare(
+		"SELECT id FROM push_subscriptions WHERE endpoint = ?",
+	)
+		.bind(endpoint)
+		.first<{ id: number }>();
+	if (!row) throw new Error("no device stored for that endpoint");
+	return row.id;
+}
+
 /** The devices still stored for an address, by endpoint. */
 async function devicesOf(email: string) {
 	const { results } = await env.DB.prepare(
@@ -465,6 +476,31 @@ describe("the ready push: how each answer counts", () => {
 		const { fetchImpl } = fakeFetch({ answer: () => 404 });
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(await devicesOf(DANA)).toEqual([]);
+	});
+
+	it("a 410 deletes the row it read by its id and endpoint, so a device that has taken that id since is left alone", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		const phoneId = await idOf(PHONE);
+		const { fetchImpl } = fakeFetch({
+			answer: (endpoint) => (endpoint === PHONE ? 410 : 201),
+			beforeAnswer: async (endpoint) => {
+				// The cap trimmed PHONE's row, and SQLite gave its id to another member's new device before the run's DELETE lands
+				// (ids are not AUTOINCREMENT, so a freed id can be reused). The DELETE must not take that device away.
+				if (endpoint !== PHONE) return;
+				await env.DB.batch([
+					env.DB.prepare("DELETE FROM push_subscriptions WHERE id = ?").bind(
+						phoneId,
+					),
+					env.DB.prepare(
+						"INSERT INTO push_subscriptions (id, member_email, endpoint, p256dh, auth) VALUES (?, ?, ?, ?, ?)",
+					).bind(phoneId, RILEY, SPARE, UA_PUBLIC, AUTH),
+				]);
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(await devicesOf(RILEY)).toEqual([SPARE]);
 	});
 
 	it("releases the claim when every device gave a transient answer, so the next minute tries again", async () => {
