@@ -228,14 +228,14 @@ export function setupPush({
 			// The keys were changed: a subscription made with the old key can't receive, so it goes.
 			await subscription.unsubscribe().catch(() => {});
 		else if (subscription && Notification.permission === "granted") {
-			showState(node, "on");
-			// Quietly stored again, so the server's row comes back if it was lost. A failure shows nothing extra. A 409 means the
-			// device is someone else's now: it shows Off quietly, so a tap moves the device to this person (decision 149).
+			// Quietly stored again, so the server's row comes back if it was lost. Nothing is shown until it answers: a 409 means
+			// the device is someone else's now, so it shows Off quietly and a tap moves the device to this person (decision 149).
+			// Any other answer, and no answer at all, shows On: the device is subscribed, and the server may just be unreachable.
 			save(subscription, { restore: true })
-				.then((response) => {
-					if (response.status === 409) showState(node, "off");
-				})
-				.catch(() => {});
+				.then((response) =>
+					showState(node, response.status === 409 ? "off" : "on"),
+				)
+				.catch(() => showState(node, "on"));
 			return;
 		}
 		showState(node, "off");

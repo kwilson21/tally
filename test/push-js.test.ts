@@ -199,6 +199,10 @@ type Options = {
 	supported?: boolean;
 	saveStatus?: number;
 	restoreStatus?: number;
+	/** A quiet re-post waits for this before it answers, so a test can look at the control while it is pending. */
+	restoreGate?: Promise<void>;
+	/** A quiet re-post fails to reach the server (a network error). */
+	restoreError?: boolean;
 	vapidKey?: string;
 };
 
@@ -229,6 +233,8 @@ async function page(options: Options = {}) {
 	const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
 		const restore =
 			(init?.body as URLSearchParams | undefined)?.get("restore") === "1";
+		if (restore && options.restoreError) throw new TypeError("network down");
+		if (restore && options.restoreGate) await options.restoreGate;
 		return new Response(null, {
 			status: restore
 				? (options.restoreStatus ?? options.saveStatus ?? 201)
@@ -320,6 +326,69 @@ describe("the notify control on a page: what the browser already has", () => {
 			saveStatus: 500,
 		});
 		expect(shown(control, "on")).toBe(true);
+		expect(dom.sent("toast")).toEqual([]);
+	});
+
+	it("shows neither On nor Off while the quiet re-post is pending, then On once it answers 2xx", async () => {
+		let answer = () => {};
+		const gate = new Promise<void>((resolve) => {
+			answer = resolve;
+		});
+		const { control, dom, fetch } = await page({
+			permission: "granted",
+			subscription: subscriptionWith(AS_PUBLIC),
+			restoreGate: gate,
+		});
+		expect(fetch).toHaveBeenCalledOnce();
+		expect(shown(control, "on")).toBe(false);
+		expect(shown(control, "off")).toBe(false);
+		answer();
+		await flush();
+		expect(shown(control, "on")).toBe(true);
+		expect(shown(control, "off")).toBe(false);
+		expect(dom.sent("toast")).toEqual([]);
+	});
+
+	it("shows neither On nor Off while the quiet re-post is pending, then Off quietly for a 409", async () => {
+		let answer = () => {};
+		const gate = new Promise<void>((resolve) => {
+			answer = resolve;
+		});
+		const { control, dom } = await page({
+			permission: "granted",
+			subscription: subscriptionWith(AS_PUBLIC),
+			restoreStatus: 409,
+			restoreGate: gate,
+		});
+		expect(shown(control, "on")).toBe(false);
+		expect(shown(control, "off")).toBe(false);
+		answer();
+		await flush();
+		expect(shown(control, "off")).toBe(true);
+		expect(shown(control, "on")).toBe(false);
+		expect(dom.sent("toast")).toEqual([]);
+		expect(dom.sent("announce")).toEqual([]);
+	});
+
+	it("shows On, with no toast, when the quiet re-post answers 5xx: the device is still subscribed", async () => {
+		const { control, dom } = await page({
+			permission: "granted",
+			subscription: subscriptionWith(AS_PUBLIC),
+			restoreStatus: 503,
+		});
+		expect(shown(control, "on")).toBe(true);
+		expect(shown(control, "off")).toBe(false);
+		expect(dom.sent("toast")).toEqual([]);
+	});
+
+	it("shows On, with no toast, when the quiet re-post cannot reach the server", async () => {
+		const { control, dom } = await page({
+			permission: "granted",
+			subscription: subscriptionWith(AS_PUBLIC),
+			restoreError: true,
+		});
+		expect(shown(control, "on")).toBe(true);
+		expect(shown(control, "off")).toBe(false);
 		expect(dom.sent("toast")).toEqual([]);
 	});
 

@@ -1256,7 +1256,7 @@ const NOTIFY_SPEC: UseSpecText = {
 	motion:
 		"The busy ring turns while the browser answers, as every busy button's does; under reduced motion it stops and the words Turning on… stay. Nothing else moves.",
 	edges:
-		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. Long text wraps, and the button keeps its 44px height.",
+		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. A device someone else turned on shows the button, quietly, and a tap moves it to you (decision 149). Long text wraps, and the button keeps its 44px height.",
 	words:
 		"Button: “Notify me on this device” · busy: “Turning on…” · line: “One notification when your questions are ready, if you've left Tally.” · On: “Notifications are on for this device.” · iPhone: “To get a notification on iPhone, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.” · Blocked: “Notifications are blocked for Tally in this device's settings.” · Save failed: “Couldn't save. Check your connection and try again.”",
 };
