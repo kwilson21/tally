@@ -23,6 +23,7 @@ import { howItWorks } from "./routes/how-it-works";
 import { organize } from "./routes/organize";
 import { plaid } from "./routes/plaid";
 import { plans } from "./routes/plans";
+import { push } from "./routes/push";
 import { settings } from "./routes/settings";
 import { suggestions } from "./routes/suggestions";
 import { transactions } from "./routes/transactions";
@@ -236,6 +237,7 @@ app.route("/", feedback);
 app.route("/", firstPage);
 app.route("/", designSystem);
 app.route("/", webhooks);
+app.route("/", push);
 
 export default {
 	fetch: app.fetch,

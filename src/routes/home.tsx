@@ -37,6 +37,7 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
+import { vapidKeys } from "../push/keys";
 import { loadsPlaid } from "../security";
 import { flaggedBanks, homeBankNotice } from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
@@ -304,6 +305,11 @@ async function renderHome(
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
 		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
+	// Notify me on this device (decision 148): drawn only when the server has its Web Push keys, which the demo never has.
+	const pushKeys = setup ? await vapidKeys(c.env) : null;
+	const pushScript =
+		pushKeys !== null &&
+		(setup?.phase === "before" || setup?.phase === "reading");
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
@@ -351,10 +357,12 @@ async function renderHome(
 			hxTrigger({ toast: { message, type: "info" }, announce: message }),
 		);
 	}
+	const plaid = plaidScripts(plaidButton);
 	return c.html(
 		<Layout
 			active="home"
-			{...plaidScripts(plaidButton)}
+			{...plaid}
+			modules={pushScript ? [...plaid.modules, "/js/push.js"] : plaid.modules}
 			demo={demo}
 			currentPath={addressOf(c)}
 		>
@@ -368,6 +376,7 @@ async function renderHome(
 								linkBank={linkBank}
 								bankLine={bankNotice?.words}
 								focusStatus={Boolean(firstWeekRedraw)}
+								notify={pushKeys ? { vapidKey: pushKeys.publicKey } : undefined}
 								yourBanks={{
 									banks: yourBanks,
 									today,
@@ -814,6 +823,7 @@ async function redrawFirstWeek(
 		hxTrigger({ toast: { message, type: "info" }, announce: message }),
 	);
 	const reading = setup.phase === "reading";
+	const pushKeys = await vapidKeys(c.env);
 	return c.html(
 		<HomeSetup
 			view={setup}
@@ -823,6 +833,7 @@ async function redrawFirstWeek(
 				reading ? { banks, today, keepPolling: setup.refreshes } : undefined
 			}
 			focusStatus
+			notify={pushKeys ? { vapidKey: pushKeys.publicKey } : undefined}
 		/>,
 	);
 }
