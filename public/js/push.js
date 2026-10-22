@@ -49,6 +49,9 @@ export function setupPush({
 	matchMedia,
 	window,
 }) {
+	// The endpoint of a subscription a control's device already had when its quiet re-post answered 409 (someone else's device),
+	// by control. A tap whose save then fails leaves that subscription alone (decision 149).
+	const ownedElsewhere = new WeakMap();
 	// The registration is made once, and each control waits for it. Nothing is asked: registering a worker is silent.
 	let registration = null;
 	let registering = null;
@@ -163,8 +166,12 @@ export function setupPush({
 		if (focusLost()) node.querySelector("[data-notify-on]")?.focus();
 	};
 
-	/** The tap's subscription was made: store it, then show On (or, if the control has left the page, announce it). */
-	const subscribed = async (subscription) => {
+	/**
+	 * The tap's subscription was made: store it, then show On (or, if the control has left the page, announce it). A save that
+	 * fails removes the tap's subscription, unless it is the device's own subscription from before the tap: subscribe with the
+	 * same key returns that one, so removing it would take away the notifications of the person who turned the device on.
+	 */
+	const subscribed = async (subscription, node) => {
 		let saved = false;
 		try {
 			saved = (await save(subscription)).ok;
@@ -172,12 +179,15 @@ export function setupPush({
 			saved = false;
 		}
 		if (!saved) {
-			await subscription.unsubscribe().catch(() => {});
+			if (ownedElsewhere.get(node) !== subscription.endpoint)
+				await subscription.unsubscribe().catch(() => {});
 			const live = document.querySelector("[data-notify]");
 			if (live) backToOff(live);
 			toast(COULDNT_SAVE);
 			return;
 		}
+		// The device is this person's now (the save moved it), so nothing is kept from before the tap.
+		ownedElsewhere.delete(node);
 		const live = document.querySelector("[data-notify]");
 		if (live) {
 			setBusy(live, false);
@@ -223,7 +233,7 @@ export function setupPush({
 			pending = Promise.reject(error);
 		}
 		setBusy(node, true);
-		pending.then(subscribed, refused);
+		pending.then((subscription) => subscribed(subscription, node), refused);
 	};
 
 	/** Sets up one control: its state from what the browser already has, once the registration is ready. */
@@ -256,9 +266,12 @@ export function setupPush({
 			// the device is someone else's now, so it shows Off quietly and a tap moves the device to this person (decision 149).
 			// Any other answer, and no answer at all, shows On: the device is subscribed, and the server may just be unreachable.
 			save(subscription, { restore: true })
-				.then((response) =>
-					showState(node, response.status === 409 ? "off" : "on"),
-				)
+				.then((response) => {
+					// Someone else's device: its endpoint is remembered, so a later failed tap leaves this subscription alone.
+					if (response.status === 409)
+						ownedElsewhere.set(node, subscription.endpoint);
+					showState(node, response.status === 409 ? "off" : "on");
+				})
 				.catch(() => showState(node, "on"));
 			return;
 		}

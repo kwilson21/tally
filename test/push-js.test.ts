@@ -628,6 +628,64 @@ describe("the notify control's tap", () => {
 		]);
 	});
 
+	it("does not unsubscribe the device's own subscription when the save fails after a 409 restore, and still shows Off with the toast", async () => {
+		// The device was turned on by someone else (the restore answers 409). subscribe with the same key returns that same
+		// subscription, so a failed save must leave it alone: removing it would take the other person's notifications away.
+		const existing = subscriptionWith(AS_PUBLIC);
+		const { dom, control } = await page({
+			permission: "granted",
+			subscription: existing,
+			restoreStatus: 409,
+			saveStatus: 500,
+			subscribe: async () => existing,
+		});
+		expect(shown(control, "off")).toBe(true);
+		dom.click(control.querySelector("[data-notify-on]") as El);
+		await flush();
+		expect(existing.unsubscribe).not.toHaveBeenCalled();
+		expect(shown(control, "off")).toBe(true);
+		expect(shown(control, "on")).toBe(false);
+		expect(dom.sent("toast")).toEqual([
+			expect.objectContaining({
+				detail: { message: COULDNT_SAVE, type: "error" },
+			}),
+		]);
+	});
+
+	it("still unsubscribes a new subscription whose save fails after a 409 restore, since it is not the device's own", async () => {
+		const existing = subscriptionWith(AS_PUBLIC);
+		const fresh = subscriptionWith(
+			AS_PUBLIC,
+			"https://push.example.test/send/brand-new",
+		);
+		const { dom, control } = await page({
+			permission: "granted",
+			subscription: existing,
+			restoreStatus: 409,
+			saveStatus: 500,
+			subscribe: async () => fresh,
+		});
+		dom.click(control.querySelector("[data-notify-on]") as El);
+		await flush();
+		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
+		expect(existing.unsubscribe).not.toHaveBeenCalled();
+		expect(shown(control, "off")).toBe(true);
+	});
+
+	it("unsubscribes a fresh device's subscription when its save fails (no subscription before the tap)", async () => {
+		const fresh = subscriptionWith(AS_PUBLIC);
+		const { dom, control } = await page({
+			permission: "granted",
+			subscription: null,
+			saveStatus: 500,
+			subscribe: async () => fresh,
+		});
+		dom.click(control.querySelector("[data-notify-on]") as El);
+		await flush();
+		expect(fresh.unsubscribe).toHaveBeenCalledOnce();
+		expect(shown(control, "off")).toBe(true);
+	});
+
 	it("keeps focus on the button after a failed save, so a keyboard user keeps their place", async () => {
 		const { dom, control } = await page({
 			saveStatus: 500,
