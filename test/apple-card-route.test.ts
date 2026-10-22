@@ -41,6 +41,59 @@ const ctx = () => ({
 	props: {},
 });
 
+/** Waits for the background work a request handed to waitUntil (its sorting hand-off), so a test reads what it did. */
+const settled = (context: ReturnType<typeof ctx>) =>
+	Promise.all(context.waitUntil.mock.calls.map(([promise]) => promise));
+
+/**
+ * A D1 that reports the values each statement is bound with, before D1 takes them (`record`), and otherwise is the real D1.
+ * Its statements are unwrapped when batched, so the batch runs the real statements.
+ */
+function recordingDb(record: (sql: string, values: unknown[]) => void) {
+	const real = new WeakMap<object, D1PreparedStatement>();
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					const wrapper = new Proxy(statement, {
+						get(inner, key) {
+							if (key === "bind")
+								return (...values: unknown[]) => {
+									record(sql, values);
+									return inner.bind(...values);
+								};
+							const value = Reflect.get(inner, key, inner);
+							return typeof value === "function" ? value.bind(inner) : value;
+						},
+					});
+					real.set(wrapper, statement);
+					return wrapper;
+				};
+			if (prop === "batch")
+				return (statements: D1PreparedStatement[]) =>
+					target.batch(statements.map((s) => real.get(s) ?? s));
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+/** A D1 whose statements containing `fails` throw when prepared, as a failing D1 does (the sample test's proxy). */
+function failingDb(fails: string): D1Database {
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (sql: string) => {
+					if (sql.includes(fails)) throw new Error("D1 is down");
+					return target.prepare(sql);
+				};
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
 /** A multipart form, sent as bytes with an explicit Content-Length, as a browser sends it. */
 async function multipart(fields: Record<string, string | File>) {
 	const form = new FormData();
@@ -61,7 +114,12 @@ function file(text: string, name = "apple.csv") {
 
 async function post(
 	fields: Record<string, string | File>,
-	options: { htmx?: boolean; contentLength?: string; bindings?: Env } = {},
+	options: {
+		htmx?: boolean;
+		contentLength?: string;
+		bindings?: Env;
+		context?: ReturnType<typeof ctx>;
+	} = {},
 ) {
 	const { type, bytes } = await multipart(fields);
 	const headers: Record<string, string> = {
@@ -73,7 +131,7 @@ async function post(
 		"/accounts/apple-card",
 		{ method: "POST", headers, body: bytes },
 		options.bindings ?? family,
-		ctx(),
+		options.context ?? ctx(),
 	);
 	const html = (await res.text()).replaceAll("&#39;", "'");
 	return { res, html };
@@ -432,6 +490,128 @@ describe("Apple Card's upload sheet (#766)", () => {
 				"Link a bank first. Tally's history starts with your bank's.",
 			);
 			expect(await cardAccount()).toBeFalsy();
+		});
+	});
+
+	describe("POST /accounts/apple-card, the steps after its rows are stored (#766)", () => {
+		beforeEach(async () => {
+			vi.restoreAllMocks();
+			await resetDemo(env.DB, TODAY);
+		});
+
+		it("applies a merchant rule to a row it adds, so the sorting doesn't ask Jev about it", async () => {
+			const category = await env.DB.prepare(
+				"SELECT id FROM categories WHERE archived = 0 ORDER BY id LIMIT 1",
+			).first<{ id: number }>();
+			await env.DB.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('Greenleaf Market #12', ?)",
+			)
+				.bind(category?.id)
+				.run();
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const context = ctx();
+			const bindings = {
+				...family,
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			const { res } = await post(
+				{ file: file(csv(ROW_A)), balance: "" },
+				{ htmx: true, bindings, context },
+			);
+			expect(res.status).toBe(200);
+			await settled(context);
+			expect(
+				await env.DB.prepare(
+					"SELECT t.category_id AS categoryId, t.category_source AS source FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
+				).first(),
+			).toEqual({ categoryId: category?.id, source: "merchant_rule" });
+			expect(create.mock.calls[0]?.[0].params).toMatchObject({
+				bySync: true,
+				rulesApplied: true,
+			});
+		});
+
+		it("saves the rows when the rules step fails, tells the sorting the rules didn't run, and logs fixed words", async () => {
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const context = ctx();
+			// Only the merchant rules' statement fails to prepare; the rows are stored before the rules step runs.
+			const bindings = {
+				...family,
+				DB: failingDb(
+					"WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')",
+				),
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			try {
+				const { res } = await post(
+					{ file: file(csv(ROW_A, ROW_B)), balance: "" },
+					{ htmx: true, bindings, context },
+				);
+				expect(res.status).toBe(200);
+				await settled(context);
+				expect(await cardRows()).toEqual({ n: 2 });
+				expect(create).toHaveBeenCalledTimes(1);
+				expect(create.mock.calls[0]?.[0].params).toMatchObject({
+					bySync: true,
+					rulesApplied: false,
+				});
+				// The log names the step in fixed words, never the error or a row.
+				expect(logged).toHaveBeenCalledWith("apple card rules failed");
+			} finally {
+				logged.mockRestore();
+			}
+		});
+	});
+
+	describe("POST /accounts/apple-card, the balance's limits (#766)", () => {
+		beforeEach(async () => {
+			vi.restoreAllMocks();
+			await resetDemo(env.DB, TODAY);
+		});
+
+		it("refuses a balance too big to hold as whole cents, under the balance, and saves nothing", async () => {
+			const { res, html } = await post(
+				{ file: file(csv(ROW_A)), balance: "99999999999999999999" },
+				{ htmx: true },
+			);
+			expect(res.status).toBe(422);
+			expect(html).toContain(
+				"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
+			);
+			expect(html).toMatch(/<input [^>]*id="apple-card-balance"[^>]*autofocus/);
+			expect(html).toContain('value="99999999999999999999"');
+			expect(await cardRows()).toEqual({ n: 0 });
+			expect(await cardAccount()).toBeFalsy();
+		});
+
+		it("saves a balance typed as -0.00 as a whole 0, never a negative zero", async () => {
+			// SQLite stores -0 as 0 too, so the stored row can't tell them apart: the check is on the values bound to D1.
+			const bound: unknown[] = [];
+			const db = recordingDb((sql, values) => {
+				if (sql.includes("balance_cents")) bound.push(...values);
+			});
+			const { res } = await post(
+				{ file: file(csv(ROW_A)), balance: "-0.00" },
+				{
+					htmx: true,
+					bindings: { ...family, DB: db } as unknown as Env,
+				},
+			);
+			expect(res.status).toBe(200);
+			expect(bound).toContain(0);
+			expect(bound.some((value) => Object.is(value, -0))).toBe(false);
+			expect(
+				await env.DB.prepare(
+					"SELECT CAST(balance_cents AS TEXT) AS text, typeof(balance_cents) AS type FROM accounts WHERE subtype = 'apple_card'",
+				).first(),
+			).toEqual({ text: "0", type: "integer" });
 		});
 	});
 
