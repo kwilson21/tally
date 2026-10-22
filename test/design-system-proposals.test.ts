@@ -419,9 +419,8 @@ describe("GET /design-system/proposals", () => {
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
-			// P141 (#770) is open: nothing is picked yet.
-			const expected =
-				id === "p141-setup" ? 0 : n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P141 (#770, decision 147) marks its option A, so it has one Picked.
+			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -458,7 +457,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(95);
+		expect(DECIDED.length).toBe(96);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -502,7 +501,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-16)).toBe(entry);
+		expect(DECIDED.at(-17)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -511,7 +510,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-15)).toBe(entry);
+		expect(DECIDED.at(-16)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -527,7 +526,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-14)).toBe(entry);
+		expect(DECIDED.at(-15)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -536,7 +535,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-13)).toBe(entry);
+		expect(DECIDED.at(-14)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -549,7 +548,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-12)).toBe(entry);
+		expect(DECIDED.at(-13)).toBe(entry);
 	});
 
 	it("keeps P125 to P139 in proposal order, so a later decision can't move them", () => {
@@ -570,6 +569,7 @@ describe("GET /design-system/proposals", () => {
 			"P138 ·",
 			"P139 ·",
 			"P140 ·",
+			"P141 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
@@ -606,7 +606,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"up to two bills by name, then “and N more”",
 		);
-		expect(DECIDED.at(-5)).toBe(entry);
+		expect(DECIDED.at(-6)).toBe(entry);
 	});
 
 	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 before P139", () => {
@@ -640,10 +640,12 @@ describe("GET /design-system/proposals", () => {
 			"Option A: Your banks lists each connected bank's state",
 		);
 		expect(banks?.outcome).toContain("(decision 133).");
-		expect(DECIDED.at(-4)).toBe(rules);
-		expect(DECIDED.at(-3)).toBe(payments);
-		expect(DECIDED.at(-2)).toBe(split);
-		expect(DECIDED.at(-1)).toBe(banks);
+		expect(DECIDED.at(-5)).toBe(rules);
+		expect(DECIDED.at(-4)).toBe(payments);
+		expect(DECIDED.at(-3)).toBe(split);
+		expect(DECIDED.at(-2)).toBe(banks);
+		const setup = DECIDED.find((d) => d.title.startsWith("P141 ·"));
+		expect(DECIDED.at(-1)).toBe(setup);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -5195,7 +5197,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("lists P130 to P133 as the decided entries before P134, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-11, -7);
+		const last = DECIDED.slice(-12, -8);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",
@@ -5327,8 +5329,8 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Between the intro and the follow-ups' section sit only P141's open section (#770) and its one specimen, then the Picked sections
-		// (P139, #660, and P140, #719) and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
+		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P141, #770, decision 147)
+		// and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
@@ -5337,17 +5339,17 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(
 			html.slice(top, open).match(/<section aria-labelledby="[^"]*"/g),
 		).toEqual([
-			'<section aria-labelledby="p141-title"',
 			'<section aria-labelledby="p139-title"',
 			'<section aria-labelledby="p140-title"',
+			'<section aria-labelledby="p141-title"',
 		]);
 		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
-			'<section id="p141-setup"',
 			'<section id="p139-split-category"',
 			'<section id="p140-banks"',
 			// P140's A is the real HomeSetup, whose own section and Your banks section sit inside its picture.
 			'<section id="setup-top"',
 			'<section id="your-banks"',
+			'<section id="p141-setup"',
 		]);
 		expect(html.slice(open + 1, p136)).not.toContain(
 			'<section aria-labelledby="',
@@ -6629,7 +6631,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const start = html.indexOf('<section id="p140-banks"');
 		const chunk = html.slice(
 			start,
-			html.indexOf('<section aria-labelledby="followups-picks-title"'),
+			html.indexOf('<section aria-labelledby="p141-title"'),
 		);
 		expect(chunk).toContain("P140 · A new family&#39;s banks");
 		const named = options(chunk);
@@ -6657,7 +6659,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const start = html.indexOf('<section id="p140-banks"');
 		const chunk = html.slice(
 			start,
-			html.indexOf('<section aria-labelledby="followups-picks-title"'),
+			html.indexOf('<section aria-labelledby="p141-title"'),
 		);
 		const today = options(chunk)[0] ?? "";
 		expect(today).toContain(">Today</h4>");
@@ -6861,23 +6863,31 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
 
-	it("opens an open section above P139's, titled and dated, with nothing picked yet and P141 not in DECIDED", async () => {
+	it("opens P141's picked section after P140's and before the follow-ups', titled and dated, citing decision 147 (#770)", async () => {
 		const html = await drawn();
 		const open = html.indexOf('<section aria-labelledby="p141-title"');
 		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeGreaterThan(
+			html.indexOf('<section aria-labelledby="p140-title"'),
+		);
 		expect(open).toBeLessThan(
-			html.indexOf('<section aria-labelledby="p139-title"'),
+			html.indexOf('<section aria-labelledby="followups-picks-title"'),
 		);
 		const section = html.slice(open, html.indexOf(`<section id="${P141}"`));
 		expect(section).toContain('<h2 id="p141-title"');
-		expect(section).toContain("Open: a new family&#39;s setup");
-		expect(section).toContain("Drawn Oct 22 for #770. Nothing is picked yet.");
-		expect(DECIDED.some((entry) => entry.title.startsWith("P141 ·"))).toBe(
-			false,
+		expect(section).toContain("Picked: a new family&#39;s setup");
+		expect(section).toContain(
+			"Drawn Oct 22. The owner&#39;s pick, marked Picked, is decision 147: A.",
 		);
+		expect(html).not.toContain("Open: a new family&#39;s setup");
+		const decided = DECIDED.find((entry) => entry.title.startsWith("P141 ·"));
+		expect(decided?.title).toBe("P141 · A new family's setup");
+		expect(decided?.issue).toBe(772);
+		expect(decided?.outcome).toContain("Option A: setup on its own pages");
+		expect(decided?.outcome).toContain("(decision 147).");
 	});
 
-	it("draws P141 as one visual specimen with Today, A (recommended) and B, and nothing picked", async () => {
+	it("draws P141 as one visual specimen with Today, A (picked, recommended) and B, and one Picked on A", async () => {
 		const chunk = specimenOf(await drawn());
 		expect(chunk).toContain('data-ds-tier="visual"');
 		expect(chunk).toContain("P141 · A new family&#39;s setup");
@@ -6887,8 +6897,11 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		expect(named[1]).toContain(">A · Setup on its own pages");
 		expect(named[2]).toContain(">B · Setup stays on Home, in plain words</h4>");
 		expect(named[1]).toContain(">Recommended<");
+		expect(named[1]).toContain(">Picked<");
+		expect(named[0]).not.toContain(">Picked<");
+		expect(named[2]).not.toContain(">Picked<");
 		expect(count(chunk, ">Recommended<")).toBe(1);
-		expect(chunk).not.toContain(">Picked<");
+		expect(count(chunk, ">Picked<")).toBe(1);
 	});
 
 	it("draws Today's three phones, A's five phones and two desktop pictures, then B's three phones, each captioned in that order", async () => {
@@ -7001,5 +7014,15 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		expect(reachableInPictures(chunk)).toEqual([]);
 		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
 		expect(ids).toEqual([P141, `${P141}-title`]);
+	});
+
+	it("records decision 147 in docs/decisions.md as the owner's pick of A for P141, for #770", () => {
+		const row = decisions
+			.split("\n")
+			.find((line) => line.startsWith("| 147 |"));
+		expect(row, "decision 147's row").toBeDefined();
+		expect(row).toContain("P141");
+		expect(row).toContain("#770");
+		expect(row).toContain("A, setup on its own pages");
 	});
 });

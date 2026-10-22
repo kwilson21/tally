@@ -493,6 +493,7 @@ export function SetupProposal() {
 					name="A · Setup on its own pages"
 					note="A welcome says what Tally does and how long setup takes, then four steps, each one screen with a step bar, one question, the bank's own numbers as a ledger card and the answer at the screen's foot. No tab bar until setup is done. Budgets end with the savings question, as now. The finish shows Safe to spend and what was set up. Tally's first night is no longer a step, and Home is plain Home from the moment setup ends."
 					cost="Setup becomes a page of its own, and Home's first-week top, the fifth-day view and How Tally works' Your first week go."
+					picked
 					why="It says it's setup and how long it takes, uses plain words, and ends with the family's own number."
 					width="w-full"
 				>
