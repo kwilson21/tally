@@ -4,8 +4,8 @@
 // auth secret is 16 bytes. Input that fails answers 422. Web Push that is off (the demo, or no keys) answers 404, as does a
 // person who isn't signed in or is removed. Otherwise the device is stored for the signed-in person, or moved to them if it
 // was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
-// quiet re-post carries restore=1: it brings a lost row back, but never moves one, so opening Home on a shared device does
-// not hand it to whoever is looking.
+// quiet re-post carries restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
+// 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
 
 import { Hono } from "hono";
 import { actor } from "../actor";
@@ -57,8 +57,12 @@ const INSERT_SQL =
 /** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. */
 const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth`;
 
-/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row keeps its owner (decision 148). */
+/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 148). */
 const RESTORE_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO NOTHING`;
+
+/** The one person a device is stored for, if any. */
+const OWNER_SQL =
+	"SELECT member_email FROM push_subscriptions WHERE endpoint = ?";
 
 push.post("/push/subscribe", async (c) => {
 	const form = (await c.req.parseBody()) as Record<string, unknown>;
@@ -77,8 +81,26 @@ push.post("/push/subscribe", async (c) => {
 		.bind(member)
 		.first();
 	if (!current) return c.body(null, 404);
-	await c.env.DB.prepare(form.restore === "1" ? RESTORE_SQL : TAP_SQL)
-		.bind(member, subscription.endpoint, subscription.p256dh, subscription.auth)
+	const row = [
+		member,
+		subscription.endpoint,
+		subscription.p256dh,
+		subscription.auth,
+	];
+	if (form.restore !== "1") {
+		await c.env.DB.prepare(TAP_SQL)
+			.bind(...row)
+			.run();
+		return c.body(null, 204);
+	}
+	// A page load's quiet re-post: a missing row is stored for this person. An existing row must already be theirs, and is then
+	// left as it is; one that belongs to someone else is not moved here, so the answer is 409 and the page shows the device as Off.
+	const restored = await c.env.DB.prepare(RESTORE_SQL)
+		.bind(...row)
 		.run();
-	return c.body(null, 204);
+	if (restored.meta.changes) return c.body(null, 204);
+	const owner = await c.env.DB.prepare(OWNER_SQL)
+		.bind(subscription.endpoint)
+		.first<{ member_email: string }>();
+	return c.body(null, owner?.member_email === member ? 204 : 409);
 });

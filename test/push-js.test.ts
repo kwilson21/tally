@@ -10,8 +10,6 @@ const AS_PUBLIC =
 const OTHER_KEY =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
 const ON = "Notifications are on for this device.";
-const BLOCKED =
-	"Notifications are blocked for Tally in this device's settings.";
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 
 /** base64url text as the bytes it stands for. */
@@ -145,7 +143,7 @@ class Dom {
 	}
 }
 
-/** The control as the server draws it: four states, all hidden, a button, and an empty alert region. */
+/** The control as the server draws it: four states, all hidden, and a button. */
 function drawControl(dom: Dom, vapidKey = AS_PUBLIC) {
 	const node = dom.createElement("div");
 	node.setAttribute("data-notify", "true");
@@ -168,9 +166,7 @@ function drawControl(dom: Dom, vapidKey = AS_PUBLIC) {
 	blocked.setAttribute("data-notify-state", "blocked");
 	blocked.setAttribute("tabindex", "-1");
 	blocked.hidden = true;
-	const alert = dom.createElement("div");
-	alert.setAttribute("data-notify-alert", "true");
-	node.append(off, on, iphone, blocked, alert);
+	node.append(off, on, iphone, blocked);
 	dom.root.append(node);
 	return node;
 }
@@ -202,6 +198,7 @@ type Options = {
 	standalone?: boolean;
 	supported?: boolean;
 	saveStatus?: number;
+	restoreStatus?: number;
 	vapidKey?: string;
 };
 
@@ -228,9 +225,16 @@ async function page(options: Options = {}) {
 		options.supported === false
 			? {}
 			: { PushManager: class {}, Notification: class {} };
-	const fetch = vi.fn(
-		async () => new Response(null, { status: options.saveStatus ?? 201 }),
-	);
+	// A page load's quiet re-post (restore=1) answers restoreStatus when given, and a tap's save answers saveStatus.
+	const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+		const restore =
+			(init?.body as URLSearchParams | undefined)?.get("restore") === "1";
+		return new Response(null, {
+			status: restore
+				? (options.restoreStatus ?? options.saveStatus ?? 201)
+				: (options.saveStatus ?? 201),
+		});
+	});
 	setupPush({
 		document: dom,
 		navigator,
@@ -317,6 +321,40 @@ describe("the notify control on a page: what the browser already has", () => {
 		});
 		expect(shown(control, "on")).toBe(true);
 		expect(dom.sent("toast")).toEqual([]);
+	});
+
+	it("shows Off, with no toast, focus or unsubscribe, when the quiet re-post answers 409 (the device is someone else's)", async () => {
+		const subscription = subscriptionWith(AS_PUBLIC);
+		const { control, dom } = await page({
+			permission: "granted",
+			subscription,
+			restoreStatus: 409,
+		});
+		expect(shown(control, "off")).toBe(true);
+		expect(shown(control, "on")).toBe(false);
+		expect(subscription.unsubscribe).not.toHaveBeenCalled();
+		expect(dom.sent("toast")).toEqual([]);
+		expect(dom.sent("announce")).toEqual([]);
+		expect(dom.focused).toEqual([]);
+	});
+
+	it("moves the device to the person who taps after a 409 restore: the tap's post carries no restore", async () => {
+		const { dom, control, fetch } = await page({
+			permission: "granted",
+			subscription: subscriptionWith(AS_PUBLIC),
+			restoreStatus: 409,
+			saveStatus: 201,
+		});
+		dom.click(control.querySelector("[data-notify-on]") as El);
+		await flush();
+		expect(fetch).toHaveBeenCalledTimes(2);
+		const [url, tap] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+		expect(url).toBe("/push/subscribe");
+		expect((tap.body as URLSearchParams).get("restore")).toBeNull();
+		expect(shown(control, "on")).toBe(true);
+		expect(dom.focused).toEqual([
+			control.querySelector('[data-notify-state="on"]'),
+		]);
 	});
 
 	it("unsubscribes a subscription made with a different key, then shows Off", async () => {
@@ -408,7 +446,7 @@ describe("the notify control's tap", () => {
 		expect(button.classes.has("htmx-request")).toBe(false);
 	});
 
-	it("shows Blocked, inserts the alert and moves focus to the Blocked line when refused with permission denied", async () => {
+	it("shows the quiet Blocked line and moves focus to it, alone, when refused with permission denied", async () => {
 		const { dom, control, notification } = await page({
 			subscribe: async () => {
 				notification.permission = "denied";
@@ -418,14 +456,15 @@ describe("the notify control's tap", () => {
 		dom.click(control.querySelector("[data-notify-on]") as El);
 		await flush();
 		expect(shown(control, "blocked")).toBe(true);
-		const region = control.querySelector("[data-notify-alert]") as El;
-		const alert = region.children[0] as El;
-		expect(alert.tag).toBe("p");
-		expect(alert.getAttribute("role")).toBe("alert");
-		expect(alert.textContent).toBe(BLOCKED);
+		expect(shown(control, "off")).toBe(false);
+		// The Blocked line is the only thing said: no alert paragraph of the script's own, so a screen reader reads it once.
+		expect(control.querySelectorAll('[role="alert"]')).toEqual([]);
+		expect(control.querySelector("[data-notify-alert]")).toBeNull();
 		expect(dom.focused).toEqual([
 			control.querySelector('[data-notify-state="blocked"]'),
 		]);
+		expect(dom.sent("announce")).toEqual([]);
+		expect(dom.sent("toast")).toEqual([]);
 	});
 
 	it("goes back to Off, keeps focus on the button and says nothing when the prompt is dismissed", async () => {

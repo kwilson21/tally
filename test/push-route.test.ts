@@ -121,10 +121,41 @@ describe("POST /push/subscribe: storing a device", () => {
 });
 
 describe("POST /push/subscribe: the quiet re-post on a page load (restore=1)", () => {
-	it("leaves a device with the person it was turned on for, and answers 204", async () => {
+	it("answers 409 for a device turned on for someone else, and changes nothing", async () => {
 		await subscribe(good, { who: RILEY });
 		const response = await subscribe({ ...good, restore: "1" });
+		expect(response.status).toBe(409);
+		expect(await rowsFor()).toEqual([
+			{
+				member_email: RILEY,
+				endpoint: ENDPOINT,
+				p256dh: UA_PUBLIC,
+				auth: AUTH,
+			},
+		]);
+	});
+
+	it("answers 204 for a device that is already the signed-in person's, and changes nothing", async () => {
+		await subscribe(good);
+		const response = await subscribe({ ...good, restore: "1" });
 		expect(response.status).toBe(204);
+		expect(await rowsFor()).toEqual([
+			{
+				member_email: PERSON,
+				endpoint: ENDPOINT,
+				p256dh: UA_PUBLIC,
+				auth: AUTH,
+			},
+		]);
+	});
+
+	it("answers 409 for someone else's device even when the restore's keys differ, and keeps the stored keys", async () => {
+		await subscribe(good, { who: RILEY });
+		const response = await subscribe(
+			{ ...good, auth: b64u(new Uint8Array(16).fill(9)), restore: "1" },
+			{ who: PERSON },
+		);
+		expect(response.status).toBe(409);
 		expect(await rowsFor()).toEqual([
 			{
 				member_email: RILEY,

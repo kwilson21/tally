@@ -241,8 +241,13 @@ export function setupPush({
 			await subscription.unsubscribe().catch(() => {});
 		else if (subscription && Notification.permission === "granted") {
 			showState(node, "on");
-			// Quietly stored again, so the server's row comes back if it was lost. A failure shows nothing extra.
-			save(subscription, { restore: true }).catch(() => {});
+			// Quietly stored again, so the server's row comes back if it was lost. A failure shows nothing extra. A 409 means the
+			// device is someone else's now: it shows Off quietly, so a tap moves the device to this person (decision 148).
+			save(subscription, { restore: true })
+				.then((response) => {
+					if (response.status === 409) showState(node, "off");
+				})
+				.catch(() => {});
 			return;
 		}
 		showState(node, "off");
