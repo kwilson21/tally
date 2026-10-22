@@ -73,6 +73,7 @@ describe("schema", () => {
 			"plaid_items",
 			"planned_delete_holds",
 			"planned_expenses",
+			"push_subscriptions",
 			"savings_goal_amounts",
 			"transactions",
 		]);

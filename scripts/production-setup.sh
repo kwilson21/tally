@@ -84,6 +84,20 @@ step "11. Build the database tables" \
 	"Creates Tally's tables in the empty tally-production database. Safe to repeat: finished migrations are skipped." \
 	npx wrangler d1 migrations apply DB --env "$ENV" --remote
 
+# Optional (decision 148): the keys for notifications on a device. Not required to deploy: until they are set, nothing is drawn or sent.
+# Each value goes straight to put_value, so the private key is never printed.
+push_keys() {
+	local keys public private
+	keys=$(node scripts/vapid-keys.mjs) || return 1
+	public=$(node -p 'JSON.parse(process.argv[1]).publicKey' "$keys") || return 1
+	private=$(node -p 'JSON.parse(process.argv[1]).privateKey' "$keys") || return 1
+	put_value VAPID_PUBLIC_KEY "$public" && put_value VAPID_PRIVATE_KEY "$private"
+}
+
+step "12. Notification keys (optional)" \
+	"Makes the keys that let each device get a notification, and saves them as two secrets. Setting new keys makes every device turn notifications on again. Answer s to skip." \
+	push_keys
+
 # Deploys only once every setting from steps 2–10 is set and step 11 left nothing to apply,
 # so a skipped step can't put Tally live without its sign-in check or its tables.
 REQUIRED="PLAID_CLIENT_ID PLAID_SECRET TOKEN_ENCRYPTION_KEY JEV_API_KEY PLAID_ENV PLAID_WEBHOOK_URL FEEDBACK_GITHUB_TOKEN ACCESS_TEAM_DOMAIN ACCESS_AUD"
@@ -120,7 +134,7 @@ deploy_when_ready() {
 	npx wrangler deploy --env "$ENV" --message "$release $sha" --var "APP_VERSION:$release $sha"
 }
 
-step "12. Deploy" \
+step "13. Deploy" \
 	"Checks every setting is set, the tables are built and this is a clean checkout of origin/main, then puts Tally live at https://$HOST. The first deploy also creates its DNS record and certificate." \
 	deploy_when_ready
 
