@@ -4,15 +4,21 @@
 // stops any push after the email has gone, as does a kept email try (heldReadyEmail), which may already have reached the person.
 // A device that answers 404 or 410 is deleted by its row. A device that gives no answer, a 429 or a 5xx is transient: when no
 // device answers with a success and some answer is transient, the claim is released and the next minute tries again, until
-// the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute.
+// the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute. A device
+// stored on a host that isn't a browser's push service is never fetched, and counts as permanent (push/endpoint.ts).
+// What the email waits for is the stamp readyPushedAt, under the address's hash. The claim writes it in the same statement that
+// takes the person (PUSH_CLAIM_SQL), so no email can claim that person from the claim until the push's answers are in: the email
+// waits EMAIL_AFTER_PUSH_MS (8 minutes) from the claim. A device that takes the push moves the stamp to the delivery's time, so the
+// email waits 8 minutes from the delivery. When no device takes it, the stamp goes at once (PUSH_RELEASE_SQL with a transient
+// answer, PUSH_UNSTAMP_SQL with only permanent or gone answers), and the email keeps its ten minutes. If one of those removals
+// fails, its stamp stays, so the email waits 8 minutes from the claim: the email still goes, at the later of that and ten minutes.
 // Every device is read in one query before any claim, so a failed read claims nobody (the run throws, the minute run logs it,
 // and the next minute tries again). The gate (the record, the banks and the sort count, as the email reads it) is read again
 // before each person's claim, so a bank linked meanwhile or a question answered stops the run there (decision 149).
 // Each person is claimed just before their devices are sent to, and a device whose send throws counts as failed without
-// stopping the others. When a device takes the push, the time is stored (readyPushedAt), and the ready email waits
-// EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). The release is best effort: if it fails, that one person keeps their one
-// claim and gets no push, but the email still goes at ten minutes, since its own claim (readyEmailedTo) does not depend on
-// this one. The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
+// stopping the others. A release that fails leaves that person's one claim, so they get no push, but the email is not blocked:
+// its own claim (readyEmailedTo) does not depend on this one. The minute run calls this before runReadyEmail; a failure here
+// never stops the email (src/index.tsx).
 
 import { readFirstTally } from "../db/first-tally";
 import { isPushServiceEndpoint } from "../push/endpoint";
@@ -43,20 +49,37 @@ const NOT_EMAILED_GUARD =
 const NOT_KEPT_GUARD =
 	"\n\t\tAND json_type(household_settings.value, '$.heldReadyEmail.\"' || ?2 || '\"') IS NULL";
 
-/** Claims one person for the push: the email's guards, plus not yet emailed and no kept try. ?1 is the address, ?2 its hash. */
+// The stamp the claim writes in its own statement (?2 is the hash): the claim's time, which holds the email while the push is in flight.
+const CLAIM_STAMP = `, '$.readyPushedAt."' || ?2 || '"', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')`;
+
+/**
+ * Claims one person for the push: the email's guards, plus not yet emailed and no kept try. ?1 is the address, ?2 its hash. The
+ * claim and its stamp (readyPushedAt) are one statement, so no email can claim the person between them (decision 149).
+ */
 export const PUSH_CLAIM_SQL = claimSql(
 	"$.readyPushedTo",
 	PUSH_AWAY_AFTER_MS,
 	NOT_EMAILED_GUARD + NOT_KEPT_GUARD,
+	CLAIM_STAMP,
 );
 
 /**
- * Takes one person back off readyPushedTo, so the next minute tries again. Only that list: RELEASE_SQL would also rewrite the kept
- * email's try under the same address hash, and so wipe it (decisions 146 and 147).
+ * Takes one person back off readyPushedTo and removes the stamp the claim wrote, in one statement, so the next minute tries again
+ * and the email isn't held for a push that reached no device. ?1 is the address, ?2 its hash. Only those two paths: RELEASE_SQL
+ * would also rewrite the kept email's try under the same address hash, and so wipe it (decisions 146 and 147).
  */
 export const PUSH_RELEASE_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value, '$.readyPushedTo',
-		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyPushedTo') AS e WHERE e.value <> ?1)))
+	SET value = json_remove(json_set(household_settings.value, '$.readyPushedTo',
+		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyPushedTo') AS e WHERE e.value <> ?1))),
+		'$.readyPushedAt."' || ?2 || '"')
+	WHERE key = 'first_tally'`;
+
+/**
+ * Removes the stamp the claim wrote and keeps the claim, when no device took the push and none answered transiently (?1 is the
+ * hash). The claim stays, so no later minute sends again, and the email goes at its ten minutes (decision 149).
+ */
+export const PUSH_UNSTAMP_SQL = `UPDATE household_settings
+	SET value = json_remove(household_settings.value, '$.readyPushedAt."' || ?1 || '"')
 	WHERE key = 'first_tally'`;
 
 /**
@@ -187,19 +210,22 @@ export async function runReadyPush(
 			}
 		}
 		if (delivered > 0) {
-			// The email waits EMAIL_AFTER_PUSH_MS from this push (decision 149). If the time can't be stored, that is counted, and the
-			// email goes at ten minutes as before.
+			// The email waits EMAIL_AFTER_PUSH_MS from this delivery (decision 149). If the time can't be stored, that is counted, and
+			// the stamp the claim wrote stands, so the email waits from the claim instead.
 			try {
 				await env.DB.prepare(PUSH_STAMP_SQL).bind(hash).run();
 			} catch {
 				failedCount += 1;
 				failureKinds.add("push error");
 			}
-		}
-		if (delivered === 0 && transient) {
-			// Best effort: if the release itself fails, the claim stays, the failure is counted, and the next person still goes.
+		} else {
+			// Nothing took the push. A transient answer releases the claim and its stamp, so the next minute tries again. Otherwise
+			// the claim stays and only the stamp goes, so the email keeps its ten minutes. Best effort: if the statement fails, its
+			// stamp stays (the email then waits EMAIL_AFTER_PUSH_MS from the claim), the failure is counted, and the next person goes.
 			try {
-				await env.DB.prepare(PUSH_RELEASE_SQL).bind(email).run();
+				if (transient)
+					await env.DB.prepare(PUSH_RELEASE_SQL).bind(email, hash).run();
+				else await env.DB.prepare(PUSH_UNSTAMP_SQL).bind(hash).run();
 			} catch {
 				failedCount += 1;
 				failureKinds.add("push error");

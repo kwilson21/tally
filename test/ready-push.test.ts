@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { runReadyEmail } from "../src/first-tally/ready-email";
+import { CLAIM_SQL, runReadyEmail } from "../src/first-tally/ready-email";
 import {
 	PUSH_PAYLOAD,
 	PUSH_RELEASE_SQL,
@@ -672,6 +672,111 @@ describe("the ready push: every read comes before a claim", () => {
 	});
 });
 
+describe("the ready push holds the email while it is in flight, and after each answer (decision 149)", () => {
+	it("an email claim made while the push's sends are pending changes no row, so the email cannot go first", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const claims: number[] = [];
+		const { fetchImpl } = fakeFetch({
+			beforeAnswer: async () => {
+				// The email's own claim (CLAIM_SQL), made while the push to the phone is still out. The person is away 25 minutes and
+				// unanswered, so nothing but the push's stamp can stop it.
+				const claim = await env.DB.prepare(CLAIM_SQL)
+					.bind(DANA, await heldKeyOf(DANA))
+					.run();
+				claims.push(claim.meta.changes);
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(claims).toEqual([0]);
+		expect((await readFirstTally(env.DB))?.readyEmailedTo).toBeUndefined();
+	});
+
+	it("the claim stamps the push's time in the same write that takes the person, before any send", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const seen: { list?: string[]; stamp?: string } = {};
+		const { fetchImpl } = fakeFetch({
+			beforeAnswer: async () => {
+				const record = await readFirstTally(env.DB);
+				seen.list = record?.readyPushedTo;
+				seen.stamp = record?.readyPushedAt?.[await heldKeyOf(DANA)];
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(seen.list).toEqual([DANA]);
+		expect(seen.stamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+	});
+
+	it("an overlapping run during a push's sends does not push the person again", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		let overlapped = false;
+		const { fetchImpl, pushed } = fakeFetch({
+			beforeAnswer: async () => {
+				if (overlapped) return;
+				overlapped = true;
+				// Another minute's run starts while this one's send is pending (10:00 has two schedules).
+				await runReadyPush(pushing(), { fetchImpl });
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([PHONE]);
+	});
+
+	it("after every device answers with a transient error, the release takes the stamp too, so the email goes at ten minutes", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const push = fakeFetch({ answer: () => 503 });
+		await runReadyPush(pushing(), { fetchImpl: push.fetchImpl });
+		expect(await pushedList()).toEqual([]);
+		expect(await storedPushedAt(DANA)).toBeUndefined();
+		const email = fakeFetch();
+		await runReadyEmail(pushing(), email.fetchImpl);
+		expect(email.resent).toEqual([DANA]);
+	});
+
+	it.each([
+		["a permanent refusal (403)", 403],
+		["a device that is gone (410)", 410],
+	])(
+		"after %s, the claim is kept and the stamp goes, so the email goes at ten minutes",
+		async (_name, status) => {
+			await openHousehold();
+			await addMember(DANA, { seen: "-25 minutes" });
+			await addDevice(DANA, PHONE);
+			const push = fakeFetch({ answer: () => status });
+			await runReadyPush(pushing(), { fetchImpl: push.fetchImpl });
+			expect(await pushedList()).toEqual([DANA]);
+			expect(await storedPushedAt(DANA)).toBeUndefined();
+			const email = fakeFetch();
+			await runReadyEmail(pushing(), email.fetchImpl);
+			expect(email.resent).toEqual([DANA]);
+		},
+	);
+
+	it("a delivery refreshes the stamp to the delivery's time, so the email waits 8 minutes from the delivery", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-25 minutes" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, resent } = fakeFetch({
+			// The stamp the claim wrote is set 30 minutes back, so only the delivery's own refresh can hold the email.
+			beforeAnswer: async () => {
+				await pushedAt(DANA, "-30 minutes");
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		const stamp = await storedPushedAt(DANA);
+		expect(Date.now() - Date.parse(stamp ?? "")).toBeLessThan(60_000);
+		await runReadyEmail(pushing(), fetchImpl);
+		expect(resent).toEqual([]);
+	});
+});
+
 describe("the ready email waits 8 minutes after a push that reached a device (decision 149)", () => {
 	it("pushes a person away 25 minutes when the questions open, and sends no email in the same run", async () => {
 		await openHousehold();
@@ -759,7 +864,7 @@ describe("the ready email waits 8 minutes after a push that reached a device (de
 });
 
 describe("the ready email still goes", () => {
-	it("a failed release leaves that person's one claim, and the email still goes at ten minutes", async () => {
+	it("a failed release leaves that person's one claim and its stamp, and the email goes once the stamp is 8 minutes old", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await openHousehold();
@@ -770,6 +875,11 @@ describe("the ready email still goes", () => {
 			fetchImpl: push.fetchImpl,
 		});
 		expect(await pushedList()).toEqual([DANA]);
+		// The release could not remove the stamp the claim wrote, so the email waits for it: 8 minutes from the claim.
+		const early = fakeFetch();
+		await runReadyEmail(pushing(), early.fetchImpl);
+		expect(early.resent).toEqual([]);
+		await pushedAt(DANA, "-8 minutes");
 		const email = fakeFetch();
 		await runReadyEmail(pushing(), email.fetchImpl);
 		expect(email.resent).toEqual([DANA]);

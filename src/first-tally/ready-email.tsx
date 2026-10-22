@@ -53,15 +53,18 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
  * either once a question is answered, or when the address is no longer one the send goes to (removed, or not seen in 90 days:
  * reconnectRecipients' rule), or when its person checked in on a first-week page within `awayMs` (home_seen_at): they are
  * still there, so a later minute tries them. `extraGuard` adds one more condition after the list's, with ?1 as the address.
+ * `extraSet` writes one more path in the same statement, as `, '<path>', <value>` (the push's stamp, decision 149), so the
+ * list and that path change together or not at all.
  */
 export function claimSql(
 	listPath: string,
 	awayMs: number,
 	extraGuard = "",
+	extraSet = "",
 ): string {
 	return `UPDATE household_settings
 	SET value = json_set(household_settings.value, '${listPath}',
-		json_insert(COALESCE(json_extract(household_settings.value, '${listPath}'), json('[]')), '$[#]', ?1))
+		json_insert(COALESCE(json_extract(household_settings.value, '${listPath}'), json('[]')), '$[#]', ?1)${extraSet})
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
 		SELECT 1 FROM json_each(household_settings.value, '${listPath}') AS e WHERE e.value = ?1)${extraGuard}
 		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')

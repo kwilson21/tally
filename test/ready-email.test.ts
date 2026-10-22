@@ -11,6 +11,7 @@ import {
 	renderReadyEmail,
 	runReadyEmail,
 } from "../src/first-tally/ready-email";
+import { PUSH_CLAIM_SQL } from "../src/first-tally/ready-push";
 import handler from "../src/index";
 import type { Mail } from "../src/reconnect/deliver";
 
@@ -713,6 +714,40 @@ describe("the ready email: the gate and the members, checked before each address
 		const claim = await claimOf(DANA);
 		expect(claim.meta.changes).toBe(0);
 		expect(await storedList()).toBeUndefined();
+	});
+});
+
+describe("the ready push's claim holds the email in the same write (decision 149)", () => {
+	it("the push's claim takes the person and stamps the time in one write, so the email's claim changes no row straight after", async () => {
+		await openHousehold();
+		const push = await env.DB.prepare(PUSH_CLAIM_SQL)
+			.bind(DANA, await hashOf(DANA))
+			.run();
+		expect(push.meta.changes).toBe(1);
+		const record = await readFirstTally(env.DB);
+		expect(record?.readyPushedTo).toEqual([DANA]);
+		expect(record?.readyPushedAt?.[await hashOf(DANA)]).toMatch(
+			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+		);
+		expect((await claimOf(DANA)).meta.changes).toBe(0);
+	});
+
+	it("the push's claim leaves another address's stamp and the email's own list as they were", async () => {
+		const rileysStamp = await stampAgo("-1 minute");
+		await openHousehold({
+			members: [DANA, RILEY],
+			record: {
+				strokes: { bank: STROKE_ONE },
+				budgets: {},
+				readyPushedAt: { [await hashOf(RILEY)]: rileysStamp },
+			},
+		});
+		await env.DB.prepare(PUSH_CLAIM_SQL)
+			.bind(DANA, await hashOf(DANA))
+			.run();
+		const record = await readFirstTally(env.DB);
+		expect(record?.readyEmailedTo).toBeUndefined();
+		expect(record?.readyPushedAt?.[await hashOf(RILEY)]).toBe(rileysStamp);
 	});
 });
 
