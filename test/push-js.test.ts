@@ -204,6 +204,8 @@ type Options = {
 	userAgent?: string;
 	/** navigator.maxTouchPoints: an iPad in desktop mode reports Macintosh with touch points, a real Mac reports 0. */
 	maxTouchPoints?: number;
+	/** screen.width and screen.height: an iPhone in desktop mode is told from an iPad by the short side (defaults to an iPad's). */
+	screen?: { width: number; height: number };
 	standalone?: boolean;
 	supported?: boolean;
 	saveStatus?: number;
@@ -258,6 +260,7 @@ async function page(options: Options = {}) {
 		fetch,
 		matchMedia: () => ({ matches: false }),
 		window,
+		screen: options.screen ?? { width: 1024, height: 1366 },
 	});
 	await flush();
 	return {
@@ -340,10 +343,54 @@ describe("the notify control on a page: what the browser already has", () => {
 			supported: false,
 			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
 			maxTouchPoints: 5,
+			screen: { width: 1024, height: 1366 },
 			standalone: false,
 		});
 		expect(shown(control, "iphone")).toBe(true);
 		expect(hintOf(control)?.textContent).toBe(IPAD_HINT);
+	});
+
+	it("shows the iPhone hint on an iPhone in Request Desktop Website mode, which reports Macintosh with touch points, by its phone-sized screen", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			maxTouchPoints: 5,
+			screen: { width: 390, height: 844 },
+			standalone: false,
+		});
+		expect(shown(control, "iphone")).toBe(true);
+		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
+	});
+
+	it("tells the phone from the tablet by the short side, so a landscape phone is still an iPhone", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			maxTouchPoints: 5,
+			screen: { width: 844, height: 390 },
+			standalone: false,
+		});
+		expect(hintOf(control)?.textContent).toBe(IPHONE_HINT);
+	});
+
+	it("keeps the answer a user agent names: an iPhone's own agent stays iPhone on a tablet-sized screen, an iPad's stays iPad on a phone-sized one", async () => {
+		const phone = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
+			maxTouchPoints: 5,
+			screen: { width: 1024, height: 1366 },
+			standalone: false,
+		});
+		expect(hintOf(phone.control)?.textContent).toBe(IPHONE_HINT);
+		const tablet = await page({
+			supported: false,
+			userAgent:
+				"Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15",
+			maxTouchPoints: 5,
+			screen: { width: 390, height: 844 },
+			standalone: false,
+		});
+		expect(hintOf(tablet.control)?.textContent).toBe(IPAD_HINT);
 	});
 
 	it("shows nothing for a Mac, which reports no touch points", async () => {
@@ -351,6 +398,18 @@ describe("the notify control on a page: what the browser already has", () => {
 			supported: false,
 			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
 			maxTouchPoints: 0,
+			standalone: false,
+		});
+		for (const state of ["off", "on", "iphone", "blocked"])
+			expect(shown(control, state)).toBe(false);
+	});
+
+	it("shows nothing for a Mac with a phone-sized screen and no touch points", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			maxTouchPoints: 0,
+			screen: { width: 390, height: 844 },
 			standalone: false,
 		});
 		for (const state of ["off", "on", "iphone", "blocked"])

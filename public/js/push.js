@@ -48,6 +48,7 @@ export function setupPush({
 	fetch,
 	matchMedia,
 	window,
+	screen,
 }) {
 	// The endpoint of a subscription a control's device already had when its quiet re-post answered 409 (someone else's device),
 	// by control. A tap whose save then fails leaves that subscription alone (decision 149).
@@ -71,17 +72,18 @@ export function setupPush({
 		"PushManager" in window &&
 		"Notification" in window;
 	/**
-	 * The device the Home Screen hint names: "iPad", "iPhone" (an iPod too), or null for anything else. An iPad in desktop mode
-	 * reports Macintosh, and a real Mac has no touch points (maxTouchPoints 0), so touch tells the two apart.
+	 * The device the Home Screen hint names: "iPad", "iPhone" (an iPod too), or null for anything else. A user agent that names
+	 * iPad, iPhone or iPod keeps its own answer. An iPhone or iPad in Request Desktop Website mode reports Macintosh, and a real Mac
+	 * has no touch points (maxTouchPoints 0), so touch tells those two apart from a Mac. Then the screen's short side, in CSS
+	 * pixels whatever the orientation, tells a phone from a tablet: an iPhone's is 440 or less and an iPad's 744 or more, so 600
+	 * is between them.
 	 */
 	const appleDevice = () => {
 		const agent = navigator.userAgent;
-		if (
-			/iPad/.test(agent) ||
-			(/Macintosh/.test(agent) && navigator.maxTouchPoints > 1)
-		)
-			return "iPad";
+		if (/iPad/.test(agent)) return "iPad";
 		if (/iPhone|iPod/.test(agent)) return "iPhone";
+		if (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1)
+			return Math.min(screen.width, screen.height) < 600 ? "iPhone" : "iPad";
 		return null;
 	};
 	/** The device for the hint, outside the Home Screen app (where Web Push works only): iPhone or iPad, or null for none. */
@@ -305,5 +307,6 @@ if (typeof document !== "undefined") {
 		fetch,
 		matchMedia: (query) => window.matchMedia(query),
 		window,
+		screen,
 	});
 }
