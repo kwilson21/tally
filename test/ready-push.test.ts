@@ -189,6 +189,30 @@ function countingDb(counter: { statements: number }): D1Database {
 /** The address list the push has claimed, as the record holds it. */
 const pushedList = async () => (await readFirstTally(env.DB))?.readyPushedTo;
 
+/**
+ * The key a kept ready email is stored under: the SHA-256 in hex of the lower-cased address (ready-email.tsx). Computed here
+ * from the spec, not through the module, so a wrong key in the module cannot pass.
+ */
+async function heldKeyOf(email: string) {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(email.toLowerCase()),
+	);
+	return [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+}
+
+/** A kept ready email, as the record stores it (decisions 146 and 147). */
+const keptEmail = (text: string) => ({
+	mail: {
+		subject: "Three questions to finish setting up",
+		html: `<p>${text}</p>`,
+		text,
+	},
+	at: "2026-10-13T09:00:00Z",
+});
+
 /** The devices still stored for an address, by endpoint. */
 async function devicesOf(email: string) {
 	const { results } = await env.DB.prepare(
@@ -248,6 +272,34 @@ describe("the ready push: who gets it, and when", () => {
 		const { fetchImpl, pushed } = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl });
 		expect(pushed).toEqual([]);
+	});
+
+	it("does not push to a person whose kept ready email may already have reached them (decisions 146 and 147)", async () => {
+		// The email's first try got no answer, so the address is off readyEmailedTo but its try is kept under its own hash.
+		await openHousehold({
+			strokes: { bank: STROKE_ONE },
+			budgets: {},
+			heldReadyEmail: { [await heldKeyOf(DANA)]: keptEmail("kept") },
+		});
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, pushed } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([]);
+		expect(await pushedList()).toBeUndefined();
+	});
+
+	it("a kept ready email for someone else does not stop this person's push", async () => {
+		await openHousehold({
+			strokes: { bank: STROKE_ONE },
+			budgets: {},
+			heldReadyEmail: { [await heldKeyOf(RILEY)]: keptEmail("kept") },
+		});
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, pushed } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([PHONE]);
 	});
 
 	it("does not push to a removed person, even with devices still stored", async () => {
@@ -449,21 +501,33 @@ describe("the ready email still goes", () => {
 	});
 
 	it("leaves a kept ready email untouched when a push releases its claim", async () => {
+		// The push claims Dana first (no try is kept yet). While her push is out, the email's own try is kept under her hash
+		// (a concurrent run), and Riley's kept try is already there. A transient answer then releases Dana's push claim, which
+		// must not touch either kept try: only RELEASE_SQL rewrites heldReadyEmail, and that would wipe Dana's.
+		const rileysKey = await heldKeyOf(RILEY);
 		const held = {
-			["0".repeat(64)]: {
-				mail: { subject: "kept", html: "<p>kept</p>", text: "kept" },
-				at: "2026-10-13T09:00:00Z",
-			},
+			[await heldKeyOf(DANA)]: keptEmail("kept for dana"),
+			[rileysKey]: keptEmail("kept for riley"),
 		};
 		await openHousehold({
 			strokes: { bank: STROKE_ONE },
 			budgets: {},
-			heldReadyEmail: held,
+			heldReadyEmail: { [rileysKey]: held[rileysKey] },
 		});
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
-		const { fetchImpl } = fakeFetch({ answer: () => 503 });
+		const { fetchImpl } = fakeFetch({
+			answer: () => 503,
+			beforeAnswer: async () => {
+				await env.DB.prepare(
+					"UPDATE household_settings SET value = json_set(value, '$.heldReadyEmail', json(?)) WHERE key = 'first_tally'",
+				)
+					.bind(JSON.stringify(held))
+					.run();
+			},
+		});
 		await runReadyPush(pushing(), { fetchImpl });
+		expect(await pushedList()).toEqual([]);
 		expect((await readFirstTally(env.DB))?.heldReadyEmail).toEqual(held);
 	});
 });

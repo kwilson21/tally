@@ -189,8 +189,12 @@ async function sha256Hex(text: string): Promise<string> {
 		.join("");
 }
 
-/** The hash of the lower-cased address: the key a kept try is stored under, so the address itself is never stored. */
-const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
+/**
+ * The hash of the lower-cased address: the key a kept try is stored under in heldReadyEmail, so the address itself is never
+ * stored. The ready push reads it too, to see whether a kept try may already have reached the address (decision 148).
+ */
+export const addressHashOf = (address: string) =>
+	sha256Hex(address.toLowerCase());
 
 /**
  * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is

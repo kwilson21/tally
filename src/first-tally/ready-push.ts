@@ -1,7 +1,8 @@
 // The ready push (decision 148, spec §8.8): one Web Push to each device a person turned notifications on for, once a new family's
 // first questions are open and nobody has answered one. It goes to a person only once their page has not checked in for
 // PUSH_AWAY_AFTER_MS, and only once: the claim (readyPushedTo) is kept after a success, and the email's own claim (readyEmailedTo)
-// stops any push after the email has gone. A device that answers 404 or 410 is deleted by its row. A device that gives no answer,
+// stops any push after the email has gone, as does a kept email try (heldReadyEmail), which may already have reached the person.
+// A device that answers 404 or 410 is deleted by its row. A device that gives no answer,
 // a 429 or a 5xx is transient: when no device answers with a success and some answer is transient, the claim is released and the
 // next minute tries again, until the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is
 // retried every minute. The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
@@ -11,7 +12,12 @@ import { type PushEnv, vapidKeys } from "../push/keys";
 import { type PushPayload, sendPush } from "../push/web-push";
 import { logDeliveries } from "../reconnect/deliver";
 import { PUSH_AWAY_AFTER_MS } from "./home-seen";
-import { claimSql, openRead, QUESTIONS_PATH } from "./ready-email";
+import {
+	addressHashOf,
+	claimSql,
+	openRead,
+	QUESTIONS_PATH,
+} from "./ready-email";
 
 /** The push's words: the title and the body the notification shows, and the page it opens (sw.js). */
 export const PUSH_PAYLOAD: PushPayload = {
@@ -24,11 +30,16 @@ export const PUSH_PAYLOAD: PushPayload = {
 const NOT_EMAILED_GUARD =
 	"\n\t\tAND NOT EXISTS (SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)";
 
-/** Claims one person for the push: the email's guards, plus not yet emailed. ?1 is the address (decision 148). */
+// Not while the email's kept try is stored under the address's hash (decisions 146 and 147). RELEASE_SQL takes the address off
+// readyEmailedTo when a try may be held, so the list alone would let a push go after Resend may have accepted the email.
+const NOT_KEPT_GUARD =
+	"\n\t\tAND json_type(household_settings.value, '$.heldReadyEmail.\"' || ?2 || '\"') IS NULL";
+
+/** Claims one person for the push: the email's guards, plus not yet emailed and no kept try. ?1 is the address, ?2 its hash. */
 export const PUSH_CLAIM_SQL = claimSql(
 	"$.readyPushedTo",
 	PUSH_AWAY_AFTER_MS,
-	NOT_EMAILED_GUARD,
+	NOT_EMAILED_GUARD + NOT_KEPT_GUARD,
 );
 
 /**
@@ -89,7 +100,9 @@ export async function runReadyPush(
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
 	for (const { email } of people) {
-		const claim = await env.DB.prepare(PUSH_CLAIM_SQL).bind(email).run();
+		const claim = await env.DB.prepare(PUSH_CLAIM_SQL)
+			.bind(email, await addressHashOf(email))
+			.run();
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
