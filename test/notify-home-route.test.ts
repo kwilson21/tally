@@ -135,12 +135,14 @@ describe("Home's full load: the control and its script", () => {
 
 	it("on a past month, with the keys: push.js but no control (the control is drawn on this month only, and a swap back to it finds the script)", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
-		const [year, month] = TODAY.slice(0, 7).split("-").map(Number);
-		const lastMonth = new Date(Date.UTC(year, month - 2, 1))
-			.toISOString()
-			.slice(0, 7);
+		const previous = new Date(`${TODAY.slice(0, 7)}-01T00:00:00Z`);
+		previous.setUTCMonth(previous.getUTCMonth() - 1);
 		const html = await (
-			await home.request(`/?month=${lastMonth}`, {}, pushing)
+			await home.request(
+				`/?month=${previous.toISOString().slice(0, 7)}`,
+				{},
+				pushing,
+			)
 		).text();
 		expect(html).not.toContain("data-notify");
 		expect(html).toContain(PUSH_MODULE);
