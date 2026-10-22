@@ -3,6 +3,8 @@
 // - vapidAuthorization: the server's signed JWT that identifies it to the push service (RFC 8292);
 // - sendPush: one POST to a subscription's endpoint, with the five headers the push service needs. It never throws and never
 //   logs: a fetch error, a timeout, or a subscription whose keys won't encrypt all answer { status: null }.
+// The signed VAPID header is cached in memory per push origin and public key, and reused for up to eleven hours (decision 149).
+// The cache lives per Worker instance, so a fresh instance signs once more.
 
 import { fromBase64Url, toBase64Url } from "./base64url";
 import type { VapidKeys } from "./keys";
@@ -209,6 +211,41 @@ export async function vapidAuthorization(
 	return `vapid t=${signingInput}.${toBase64Url(signature)}, k=${keys.publicKey}`;
 }
 
+/** A signed VAPID header and the exp it carries (seconds). */
+type CachedHeader = { header: string; exp: number };
+
+/**
+ * The signed headers, by push origin and public key (decision 149). Apple's Web Push guide asks that a VAPID JWT is not refreshed
+ * more than once an hour, so a header is reused while more than an hour is left before its exp. It is only held here, in memory:
+ * never logged, and never stored in D1 or the household's settings.
+ */
+const vapidCache = new Map<string, CachedHeader>();
+
+/** A cached header is reused only while more than this many seconds are left before its exp: one hour. */
+const REUSE_WHILE_LEFT_S = 3_600;
+
+/** Forgets every cached header, so the next send signs anew. For the tests. */
+export function clearVapidCache(): void {
+	vapidCache.clear();
+}
+
+/**
+ * The Authorization header for one send: the cached one for this push origin and public key while more than an hour is left
+ * before its exp, otherwise a new one (vapidAuthorization), which is then cached.
+ */
+async function authorizationFor(
+	endpoint: string,
+	keys: VapidKeys,
+	nowSec: number,
+): Promise<string> {
+	const cacheKey = `${keys.publicKey} ${new URL(endpoint).origin}`;
+	const cached = vapidCache.get(cacheKey);
+	if (cached && cached.exp - nowSec > REUSE_WHILE_LEFT_S) return cached.header;
+	const header = await vapidAuthorization(endpoint, keys, nowSec);
+	vapidCache.set(cacheKey, { header, exp: nowSec + VAPID_LIFETIME_S });
+	return header;
+}
+
 /**
  * Sends one push to a subscription's endpoint (RFC 8030): a POST of the sealed payload, with TTL 600, Urgency high, the
  * octet-stream type, aes128gcm and the VAPID Authorization, and nothing else. Any HTTP answer comes back as its status. A fetch
@@ -238,7 +275,7 @@ export async function sendPush(
 				Urgency: "high",
 				"Content-Type": "application/octet-stream",
 				"Content-Encoding": "aes128gcm",
-				Authorization: await vapidAuthorization(
+				Authorization: await authorizationFor(
 					subscription.endpoint,
 					keys,
 					nowSec,

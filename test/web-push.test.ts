@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fromBase64Url } from "../src/push/base64url";
+import { fromBase64Url, toBase64Url } from "../src/push/base64url";
 import { vapidKeys } from "../src/push/keys";
 import {
+	clearVapidCache,
 	encrypt,
 	type PushPayload,
 	sendPush,
@@ -407,5 +408,137 @@ describe("sendPush", () => {
 			}),
 		});
 		expect(logged).toEqual([]);
+	});
+});
+
+describe("the VAPID header's cache (decision 149)", () => {
+	// Apple asks that a VAPID JWT is not refreshed more than once an hour, so a signed header is reused for its origin and key
+	// while more than an hour is left before its exp (twelve hours on): up to eleven hours after it was signed.
+	const NOW = 1_800_000_000;
+	const HOUR = 3_600;
+	const ORIGIN = "https://push.example.test";
+
+	beforeEach(() => {
+		clearVapidCache();
+	});
+
+	/** The Authorization header one send carries, from a fetch that answers 201. */
+	async function authorizationOf(
+		endpoint: string,
+		pair: Awaited<ReturnType<typeof keys>>,
+		nowSec: number,
+	) {
+		const requests: RequestInit[] = [];
+		const fetchImpl = vi.fn(
+			async (_url: RequestInfo | URL, init?: RequestInit) => {
+				requests.push(init ?? {});
+				return new Response(null, { status: 201 });
+			},
+		);
+		await sendPush({ ...SUBSCRIPTION, endpoint }, PAYLOAD, pair, {
+			fetchImpl,
+			nowSec,
+		});
+		const headers = requests[0]?.headers as Record<string, string>;
+		return headers.Authorization ?? "";
+	}
+
+	/** The claims of the JWT in an Authorization header. */
+	const claimsOf = (header: string) => {
+		const token = /^vapid t=([^,]+),/.exec(header)?.[1] ?? "";
+		return JSON.parse(
+			new TextDecoder().decode(bytes(token.split(".")[1] ?? "")),
+		) as { aud: string; exp: number; sub: string };
+	};
+
+	/** VAPID keys from a fresh P-256 pair, so a changed key is a real different key. */
+	async function freshKeys() {
+		const pair = (await crypto.subtle.generateKey(
+			{ name: "ECDSA", namedCurve: "P-256" },
+			true,
+			["sign", "verify"],
+		)) as CryptoKeyPair;
+		const privateJwk = (await crypto.subtle.exportKey(
+			"jwk",
+			pair.privateKey,
+		)) as JsonWebKey;
+		const publicRaw = new Uint8Array(
+			(await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer,
+		);
+		const made = await vapidKeys({
+			VAPID_PUBLIC_KEY: toBase64Url(publicRaw),
+			VAPID_PRIVATE_KEY: privateJwk.d ?? "",
+		});
+		if (!made) throw new Error("a fresh pair should make keys");
+		return made;
+	}
+
+	it("reuses one token for two sends to the same origin within an hour", async () => {
+		const pair = await keys();
+		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
+		const second = await authorizationOf(
+			`${ORIGIN}/send/two`,
+			pair,
+			NOW + 1_800,
+		);
+		expect(second).toBe(first);
+	});
+
+	it("reuses a token until eleven hours after it was signed, and no later", async () => {
+		const pair = await keys();
+		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
+		expect(
+			await authorizationOf(`${ORIGIN}/send/one`, pair, NOW + 11 * HOUR - 60),
+		).toBe(first);
+	});
+
+	it("signs anew 11 h 1 min after the token was signed", async () => {
+		const pair = await keys();
+		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
+		const later = NOW + 11 * HOUR + 60;
+		const second = await authorizationOf(`${ORIGIN}/send/one`, pair, later);
+		expect(second).not.toBe(first);
+		expect(claimsOf(second).exp).toBe(later + 43_200);
+	});
+
+	it("gives a different push origin its own token, with its own aud", async () => {
+		const pair = await keys();
+		const apple = await authorizationOf(
+			"https://web.push.apple.com/abc",
+			pair,
+			NOW,
+		);
+		const mozilla = await authorizationOf(
+			"https://updates.push.services.mozilla.com/wpush/x",
+			pair,
+			NOW + 60,
+		);
+		expect(claimsOf(apple).aud).toBe("https://web.push.apple.com");
+		expect(claimsOf(mozilla).aud).toBe(
+			"https://updates.push.services.mozilla.com",
+		);
+		expect(claimsOf(mozilla).exp).toBe(NOW + 60 + 43_200);
+	});
+
+	it("signs anew when the keys change, so the header names the new public key", async () => {
+		const first = await keys();
+		const headerOld = await authorizationOf(`${ORIGIN}/send/one`, first, NOW);
+		const changed = await freshKeys();
+		const headerNew = await authorizationOf(
+			`${ORIGIN}/send/one`,
+			changed,
+			NOW + 60,
+		);
+		expect(headerNew).not.toBe(headerOld);
+		expect(headerNew.endsWith(`k=${changed.publicKey}`)).toBe(true);
+	});
+
+	it("signs anew after the cache is cleared", async () => {
+		const pair = await keys();
+		const first = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW);
+		clearVapidCache();
+		const second = await authorizationOf(`${ORIGIN}/send/one`, pair, NOW + 600);
+		expect(second).not.toBe(first);
+		expect(claimsOf(second).exp).toBe(NOW + 600 + 43_200);
 	});
 });
