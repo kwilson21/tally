@@ -120,6 +120,41 @@ describe("POST /push/subscribe: storing a device", () => {
 	});
 });
 
+describe("POST /push/subscribe: the quiet re-post on a page load (restore=1)", () => {
+	it("leaves a device with the person it was turned on for, and answers 204", async () => {
+		await subscribe(good, { who: RILEY });
+		const response = await subscribe({ ...good, restore: "1" });
+		expect(response.status).toBe(204);
+		expect(await rowsFor()).toEqual([
+			{
+				member_email: RILEY,
+				endpoint: ENDPOINT,
+				p256dh: UA_PUBLIC,
+				auth: AUTH,
+			},
+		]);
+	});
+
+	it("brings back a lost device for the signed-in person", async () => {
+		const response = await subscribe({ ...good, restore: "1" });
+		expect(response.status).toBe(204);
+		expect(await rowsFor()).toEqual([
+			{
+				member_email: PERSON,
+				endpoint: ENDPOINT,
+				p256dh: UA_PUBLIC,
+				auth: AUTH,
+			},
+		]);
+	});
+
+	it("still moves a device to whoever taps, without restore=1", async () => {
+		await subscribe(good, { who: RILEY });
+		await subscribe({ ...good, restore: "0" });
+		expect((await rowsFor())[0]?.member_email).toBe(PERSON);
+	});
+});
+
 describe("POST /push/subscribe: input that is not a subscription (422)", () => {
 	it("refuses a missing endpoint", async () => {
 		expect((await subscribe({ p256dh: UA_PUBLIC, auth: AUTH })).status).toBe(
@@ -153,11 +188,20 @@ describe("POST /push/subscribe: input that is not a subscription (422)", () => {
 		).toBe(422);
 	});
 
-	it("refuses a key that does not start 0x04, or is the wrong length", async () => {
+	it("refuses a compressed key, which is the wrong length", async () => {
 		const compressed = new Uint8Array(33).fill(2);
 		expect(
 			(await subscribe({ ...good, p256dh: b64u(compressed) })).status,
 		).toBe(422);
+	});
+
+	it("refuses a 65-byte key that does not start 0x04 (RFC 8291 §7 wants the uncompressed point)", async () => {
+		const notUncompressed = new Uint8Array(65).fill(7);
+		notUncompressed[0] = 0x02;
+		expect(
+			(await subscribe({ ...good, p256dh: b64u(notUncompressed) })).status,
+		).toBe(422);
+		expect(await rowsFor()).toEqual([]);
 	});
 
 	it("refuses an auth secret that is not 16 bytes", async () => {

@@ -3,7 +3,9 @@
 // is https and at most 2,000 characters; the key is an uncompressed P-256 point that imports on the curve (RFC 8291 §7); the
 // auth secret is 16 bytes. Input that fails answers 422. Web Push that is off (the demo, or no keys) answers 404, as does a
 // person who isn't signed in or is removed. Otherwise the device is stored for the signed-in person, or moved to them if it
-// was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204.
+// was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
+// quiet re-post carries restore=1: it brings a lost row back, but never moves one, so opening Home on a shared device does
+// not hand it to whoever is looking.
 
 import { Hono } from "hono";
 import { actor } from "../actor";
@@ -49,10 +51,18 @@ async function subscriptionOf(form: Record<string, unknown>) {
 	return { endpoint, p256dh, auth };
 }
 
+const INSERT_SQL =
+	"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)";
+
+/** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. */
+const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth`;
+
+/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row keeps its owner (decision 148). */
+const RESTORE_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO NOTHING`;
+
 push.post("/push/subscribe", async (c) => {
-	const subscription = await subscriptionOf(
-		(await c.req.parseBody()) as Record<string, unknown>,
-	);
+	const form = (await c.req.parseBody()) as Record<string, unknown>;
+	const subscription = await subscriptionOf(form);
 	if (!subscription) return c.body(null, 422);
 	if (!(await vapidKeys(c.env))) return c.body(null, 404);
 	let member: string;
@@ -67,9 +77,7 @@ push.post("/push/subscribe", async (c) => {
 		.bind(member)
 		.first();
 	if (!current) return c.body(null, 404);
-	await c.env.DB.prepare(
-		"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth",
-	)
+	await c.env.DB.prepare(form.restore === "1" ? RESTORE_SQL : TAP_SQL)
 		.bind(member, subscription.endpoint, subscription.p256dh, subscription.auth)
 		.run();
 	return c.body(null, 204);

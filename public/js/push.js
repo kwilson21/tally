@@ -119,18 +119,23 @@ export function setupPush({
 		return subscription.toJSON().keys;
 	};
 
-	/** Stores a device for the signed-in person: a form post, so Hono's csrf check applies. Idempotent on the server. */
-	const save = (subscription) => {
+	/**
+	 * Stores a device: a form post, so Hono's csrf check applies. A tap stores it for the person who tapped. A page load's quiet
+	 * re-post (`restore`) only brings back a lost row, and the server never moves a device to whoever is looking at it (decision 148).
+	 */
+	const save = (subscription, { restore = false } = {}) => {
 		const keys = keysOf(subscription);
+		const body = new URLSearchParams({
+			endpoint: subscription.endpoint,
+			p256dh: keys.p256dh,
+			auth: keys.auth,
+		});
+		if (restore) body.set("restore", "1");
 		return fetch(SUBSCRIBE_URL, {
 			method: "POST",
 			credentials: "same-origin",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				endpoint: subscription.endpoint,
-				p256dh: keys.p256dh,
-				auth: keys.auth,
-			}),
+			body,
 		});
 	};
 
@@ -237,7 +242,7 @@ export function setupPush({
 		else if (subscription && Notification.permission === "granted") {
 			showState(node, "on");
 			// Quietly stored again, so the server's row comes back if it was lost. A failure shows nothing extra.
-			save(subscription).catch(() => {});
+			save(subscription, { restore: true }).catch(() => {});
 			return;
 		}
 		showState(node, "off");

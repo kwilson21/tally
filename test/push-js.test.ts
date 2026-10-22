@@ -304,6 +304,8 @@ describe("the notify control on a page: what the browser already has", () => {
 		expect((init.body as URLSearchParams).get("endpoint")).toBe(
 			subscription.endpoint,
 		);
+		// A page load only restores the row (restore=1): the server never moves a device to whoever is looking at it.
+		expect((init.body as URLSearchParams).get("restore")).toBe("1");
 		expect(subscribe).not.toHaveBeenCalled();
 	});
 
@@ -377,6 +379,8 @@ describe("the notify control's tap", () => {
 		expect(body.get("endpoint")).toBe("https://push.example.test/send/fresh");
 		expect(body.get("p256dh")).toBeTruthy();
 		expect(body.get("auth")).toBeTruthy();
+		// A tap is the person turning the device on, so the server moves it to them (no restore field).
+		expect(body.get("restore")).toBeNull();
 		expect(shown(control, "on")).toBe(true);
 		expect(dom.focused).toEqual([
 			control.querySelector('[data-notify-state="on"]'),
