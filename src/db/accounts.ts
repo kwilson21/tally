@@ -230,7 +230,7 @@ export function banksFromRows(results: BankRow[]): Bank[] {
  */
 export type AppleCardAccount = {
 	id: number;
-	/** The balance owed in cents, for debt negative: what was typed last. */
+	/** The card's balance in cents, as owed: positive when the family owes it, negative for a credit (which adds to net worth). What was typed last. */
 	balanceCents: number;
 	/** The household day the balance was typed, or null while none counts (Remove clears it). */
 	balanceOn: string | null;

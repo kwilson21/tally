@@ -27,7 +27,7 @@ After the write, the same steps a Plaid sync starts run on the new rows. The UI 
 - no row had a blank Merchant or a blank Clearing Date
 - the format: UTF-8 with one non-ASCII character in a Description, no byte-order mark, LF line endings, no newline after the last row, every field quoted except the two dates, and dates zero-padded `MM/DD/YYYY`
 
-Line numbers below were read on main at `9a7c3dd`. A builder checks them first.
+Line numbers below were read on main at `c5577a5`. A builder checks them first.
 
 ## Global Constraints
 

@@ -6,7 +6,7 @@ import { Icon } from "./icons";
 
 /** The Apple Card account as Accounts draws it (spec §8.10, P141 B). */
 export type AppleCardView = {
-	/** The balance owed in cents, for debt negative (AccountRow shows it as a card's balance). */
+	/** The card's balance in cents, as owed: positive when the family owes it, negative for a credit. AccountRow shows it as debt, negative. */
 	balanceCents: number;
 	/** The household day the balance was typed, or null while none counts. */
 	balanceOn: string | null;
