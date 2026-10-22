@@ -13,9 +13,9 @@ const ON = "Notifications are on for this device.";
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 // The Home Screen hint's sentence, as the server draws it, and as push.js sets it on an iPad (every iPhone in it becomes iPad).
 const IPHONE_HINT =
-	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.";
+	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.";
 const IPAD_HINT =
-	"To get a notification on iPad, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.";
+	"To get a notification on iPad, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.";
 
 /** base64url text as the bytes it stands for. */
 const bytesOf = (text: string) => {

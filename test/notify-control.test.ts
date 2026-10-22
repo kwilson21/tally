@@ -141,7 +141,7 @@ describe("the notify control's words and button", () => {
 			markup,
 		);
 		expect(hint?.[1]).toBe(
-			"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.",
+			"To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.",
 		);
 		expect(markup).not.toContain("data-notify-device");
 	});
