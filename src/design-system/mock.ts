@@ -411,6 +411,7 @@ export const BAND = {
 
 const BANK_TODAY = "2026-10-05";
 const chase = (overrides: Partial<BankSync>): BankSync => ({
+	id: 1,
 	name: "Chase",
 	needsAttention: false,
 	lastSyncedAt: "2026-09-28 09:00:00",
@@ -436,7 +437,7 @@ export const BANK_LINES = {
 			flaggedBanks(
 				[
 					chase({ needsAttention: true }),
-					chase({ name: "Citi", lastSyncedAt: "2026-09-20 09:00:00" }),
+					chase({ id: 2, name: "Citi", lastSyncedAt: "2026-09-20 09:00:00" }),
 				],
 				BANK_TODAY,
 			),

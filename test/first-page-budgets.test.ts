@@ -1077,9 +1077,9 @@ describe("keep all's count of what changed (#590 review)", () => {
 });
 
 describe("a refused amount without JavaScript (#590 review)", () => {
-	it("keeps the presence check-in on the page it returns while no question was drawn before the page settled (decision 146)", async () => {
-		// Nothing is drawn but the bank: the first visit's rule, so the check-in stays until a question is drawn. The refused
-		// page is the same page as a redraw with JavaScript, so it draws the check-in as the first visit does.
+	it("draws no presence check-in on the page it returns: its settle drew the pay step (no paycheck), so a question is answered, as with a redraw (decision 146)", async () => {
+		// Nothing is drawn but the bank before this request. The refused page is the same page as a redraw with JavaScript, which
+		// reads the check-in after the settle, so it draws none: the settle drew the pay step, and an answered question ends it.
 		const res = await post(
 			"/first-page/budgets",
 			[
@@ -1090,7 +1090,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 			false,
 		);
 		expect(res.res.status).toBe(422);
-		expect(res.html).toContain('hx-post="/home/seen"');
+		expect(res.html).not.toContain('hx-post="/home/seen"');
 	});
 
 	it("draws the page at 422 with its error, the typed amount, and Another amount open", async () => {
@@ -1486,6 +1486,43 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			form.includes('action="/first-page/savings"'),
 		);
 
+	/**
+	 * The database with a take-back landing right after the savings check (savingsOpen) reads the record, before the refusal
+	 * reads it again: the pay and bills strokes the check saw drawn are taken back, as a bank link takes them back (json_remove).
+	 * Only the first check is changed, so the refusal's own settle draws them again.
+	 */
+	function takeBackAfterSavingsCheck(): D1Database {
+		let taken = false;
+		return new Proxy(db, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						if (taken || !sql.includes("AS open")) return statement;
+						taken = true;
+						return new Proxy(statement, {
+							get(inner, key) {
+								if (key === "first")
+									return async () => {
+										const row = await inner.first();
+										await target
+											.prepare(
+												"UPDATE household_settings SET value = json_remove(value, '$.strokes.pay', '$.strokes.bills') WHERE key = 'first_tally'",
+											)
+											.run();
+										return row;
+									};
+								const value = Reflect.get(inner, key, inner);
+								return typeof value === "function" ? value.bind(inner) : value;
+							},
+						});
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	}
+
 	it("asks Save some each month? after the last category, with the field blank, and no Four line yet", async () => {
 		const { html } = await skipAll();
 		const text = textOf(html);
@@ -1685,6 +1722,28 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(textOf(html)).toContain(QUESTION);
 		expect(textOf(html)).toContain(BLANK);
 		// Pay is drawn before the budgets step can show, so no question is unanswered and the page has no check-in.
+		expect(html).not.toContain('hx-post="/home/seen"');
+	});
+
+	it("without JavaScript a refused Save it draws no check-in after a take-back lands between its check and its read, since its settle draws pay and bills again", async () => {
+		await skipAll();
+		const drawn = await readFirstTally(db);
+		expect(drawn?.strokes.pay).toBeDefined();
+		expect(drawn?.strokes.bills).toBeDefined();
+		const { res, html } = await post(
+			"/first-page/savings",
+			[
+				["answer", "save"],
+				["goal", ""],
+			],
+			false,
+			takeBackAfterSavingsCheck(),
+		);
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain(QUESTION);
+		expect(textOf(html)).toContain(BLANK);
+		// The settle drew the pay step again, so a question is answered and the page checks in no more.
+		expect((await readFirstTally(db))?.strokes.pay).toBeDefined();
 		expect(html).not.toContain('hx-post="/home/seen"');
 	});
 
