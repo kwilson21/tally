@@ -2,8 +2,10 @@
 // while they are open, so Tally knows who is still there and emails only the people who have left (ready-email.tsx). Home's
 // check-in also sends the step its page shows (`step`), so /home/seen redraws the page's first-week top once that step has
 // moved on, and someone watching sees the questions appear (it never reloads the page). It is a hidden element that swaps
-// nothing and announces nothing, so it is
-// not a live region. It is plain htmx, no script.
+// nothing and announces nothing, so it is not a live region. It checks in on load, every 30 seconds, and again at once when
+// the tab comes back to the screen (visibilitychange). A tab that isn't on screen counts as away (decision 148, the owner's
+// pick): home-seen.js, which Layout loads on every page, cancels the check-in while the tab is hidden, so the push and the
+// email go to someone who has switched away.
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 
 /** The id lets a refresh swap a new check-in in for the one the page shows (hx-swap-oob="outerHTML"). */
@@ -26,7 +28,10 @@ export function HomeSeenCheckIn({
 }) {
 	const checkIn = {
 		"hx-post": "/home/seen",
-		"hx-trigger": `load, every ${HOME_SEEN_EVERY_MS / 1000}s`,
+		// visibilitychange from:document checks in when the tab comes back. htmx 4 resolves `from:document` to the document itself
+		// (node_modules/htmx.org/dist/htmx.js #findAllExt), so the event reaches it. Going hidden fires it too, and home-seen.js
+		// cancels that one.
+		"hx-trigger": `load, every ${HOME_SEEN_EVERY_MS / 1000}s, visibilitychange from:document`,
 		"hx-swap": "none",
 		"hx-status:4xx": "swap:none",
 		"hx-status:5xx": "swap:none",

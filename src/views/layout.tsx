@@ -92,6 +92,8 @@ export function Layout({
 				<script src="/js/money.js" type="module"></script>
 				{/* The keys (#72, decision 109): / ? j k e, ← → and u. Without it the keys are a details (HowFoot, More). */}
 				<script src="/js/keyboard.js" type="module"></script>
+				{/* Cancels the presence check-in while the tab is hidden: a tab that isn't on screen counts as away (decision 148). */}
+				<script src="/js/home-seen.js" type="module"></script>
 				{scripts.map((src) => (
 					<script src={src} defer></script>
 				))}

@@ -592,7 +592,7 @@ describe("HomeSetup's presence check-in", () => {
 		expect(html).toContain(`<div id="home-seen" hidden`);
 	});
 
-	it("is hidden, polls on load and every 30 seconds, and swaps nothing", async () => {
+	it("is hidden, checks in on load, every 30 seconds and when the tab comes back, and swaps nothing", async () => {
 		const html = await top({
 			phase: "reading",
 			drawn: 1,
@@ -604,7 +604,9 @@ describe("HomeSetup's presence check-in", () => {
 			html.indexOf(CHECK_IN) + 200,
 		);
 		expect(tag).toContain("hidden");
-		expect(tag).toContain('hx-trigger="load, every 30s"');
+		expect(tag).toContain(
+			'hx-trigger="load, every 30s, visibilitychange from:document"',
+		);
 		expect(tag).toContain('hx-swap="none"');
 	});
 

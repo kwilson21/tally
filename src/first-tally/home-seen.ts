@@ -1,7 +1,7 @@
-// Who is still on the first week's pages (decision 146). Home's first-week setup and the questions page post a check-in
-// every HOME_SEEN_EVERY_MS while they are open, and the ready email goes to a person only once no check-in has come for
-// EMAIL_AWAY_AFTER_MS. A laptop's background tab may keep checking in about once a minute (browsers slow timers in
-// background tabs), so it counts as there until it is closed.
+// Who is still on the first week's pages (decisions 146 and 148). Home's first-week setup and the questions page post a
+// check-in every HOME_SEEN_EVERY_MS while they are open, and the ready email goes to a person only once no check-in has
+// come for EMAIL_AWAY_AFTER_MS. A tab that isn't on screen counts as away (decision 148, the owner's pick): home-seen.js
+// cancels the check-in while the tab is hidden, so a background tab, or a minimized window, does not keep someone there.
 
 /** How often an open first-week page checks in (the check-in element, src/views/home-seen.tsx). */
 export const HOME_SEEN_EVERY_MS = 30_000;
