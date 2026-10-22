@@ -576,7 +576,7 @@ describe("the ready push: every read comes before a claim", () => {
 		await addMember(RILEY, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		await addDevice(RILEY, SPARE);
-		// A new bank is linked while Dana's push is out, and its history is still loading: the gate closes after her push.
+		// A new bank is linked while Dana's push is out, and its history is still loading: the gate closes after the first push.
 		const { fetchImpl, pushed } = fakeFetch({
 			beforeAnswer: async (endpoint) => {
 				if (endpoint === PHONE) await addBank(2, "Amex", { history: false });

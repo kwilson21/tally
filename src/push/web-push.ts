@@ -3,8 +3,9 @@
 // - vapidAuthorization: the server's signed JWT that identifies it to the push service (RFC 8292);
 // - sendPush: one POST to a subscription's endpoint, with the five headers the push service needs. It never throws and never
 //   logs: a fetch error, a timeout, or a subscription whose keys won't encrypt all answer { status: null }.
-// The signed VAPID header is cached in memory per push origin and public key, and reused for up to eleven hours (decision 149).
-// The cache lives per Worker instance, so a fresh instance signs once more.
+// The signed VAPID header is cached in memory per push origin and public key. Within one Worker instance it is reused while more
+// than an hour is left before its exp, twelve hours after signing: RFC 8292 §5 encourages reusing a token. A later run in a fresh
+// Worker instance, which a minute's cron run usually is, signs a new one (decision 149).
 
 import { fromBase64Url, toBase64Url } from "./base64url";
 import type { VapidKeys } from "./keys";
@@ -215,9 +216,9 @@ export async function vapidAuthorization(
 type CachedHeader = { header: string; exp: number };
 
 /**
- * The signed headers, by push origin and public key (decision 149). Apple's Web Push guide asks that a VAPID JWT is not refreshed
- * more than once an hour, so a header is reused while more than an hour is left before its exp. It is only held here, in memory:
- * never logged, and never stored in D1 or the household's settings.
+ * The signed headers, by push origin and public key (decision 149). RFC 8292 §5 encourages reusing a token, and Apple's Web Push
+ * guide asks that a VAPID JWT is not refreshed more than once an hour, so a header is reused while more than an hour is left
+ * before its exp. It is only held here, in memory: never logged, and never stored in D1 or the household's settings.
  */
 const vapidCache = new Map<string, CachedHeader>();
 

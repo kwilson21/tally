@@ -934,7 +934,7 @@ function Brand() {
 				title="NotifyControl"
 				tier="visual"
 				components={["NotifyControl"]}
-				sentence="Notify me on this device (decision 149): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the iPhone hint, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
+				sentence="Notify me on this device (decision 149): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the Home Screen hint for an iPhone or an iPad, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
 			>
 				<State label="Off: the button, with its one line under it">
 					<NotifyControl
@@ -946,7 +946,7 @@ function Brand() {
 				<State label="On: a check and the words that say it is on">
 					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="on" idSuffix="on" />
 				</State>
-				<State label="iPhone outside its Home Screen app: the hint in place of the button">
+				<State label="iPhone or iPad outside its Home Screen app: the hint in place of the button">
 					<NotifyControl
 						vapidKey={NOTIFY_FAKE_KEY}
 						shown="iphone"
@@ -1248,7 +1248,7 @@ const NOTIFY_SPEC: UseSpecText = {
 	affordance:
 		"An outlined, full-width button, Notify me on this device, with one muted line under it. Once on, a check and the words that say so take its place.",
 	states:
-		"Off: the button and its line. Busy: the button says Turning on… while the browser answers, and its ring turns. On: a check and the words Notifications are on for this device. iPhone outside its Home Screen app: the hint in place of the button. Blocked: the quiet line, in place of the button. Hover: no change (touch has none). Focus: the focus-visible ring on the button. Disabled: only while Turning on… shows. With no JavaScript, or in a browser without Web Push, none of the four shows.",
+		"Off: the button and its line. Busy: the button says Turning on… while the browser answers, and its ring turns. On: a check and the words Notifications are on for this device. iPhone or iPad outside its Home Screen app: the hint in place of the button. Blocked: the quiet line, in place of the button. Hover: no change (touch has none). Focus: the focus-visible ring on the button. Disabled: only while Turning on… shows. With no JavaScript, or in a browser without Web Push, none of the four shows.",
 	feedback:
 		"A tap asks the browser for permission at once, and the button says Turning on… until it answers. A granted tap saves the device and moves focus to the On line, which is read once. A dismissed prompt leaves the button as it was, with focus still on it and nothing said. A refused prompt shows the Blocked line and moves focus to it, so it is read once. A save that fails goes back to the button, and a toast says Couldn't save. Check your connection and try again.",
 	input:
@@ -1256,9 +1256,9 @@ const NOTIFY_SPEC: UseSpecText = {
 	motion:
 		"The busy ring turns while the browser answers, as every busy button's does; under reduced motion it stops and the words Turning on… stay. Nothing else moves.",
 	edges:
-		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. A device someone else turned on shows the button, quietly, and a tap moves it to you (decision 149). Long text wraps, and the button keeps its 44px height.",
+		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone or iPad outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. A device someone else turned on shows the button, quietly, and a tap moves it to you (decision 149). Long text wraps, and the button keeps its 44px height.",
 	words:
-		"Button: “Notify me on this device” · busy: “Turning on…” · line: “One notification when your questions are ready, if you've left Tally.” · On: “Notifications are on for this device.” · iPhone: “To get a notification on iPhone, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.” · Blocked: “Notifications are blocked for Tally in this device's settings.” · Save failed: “Couldn't save. Check your connection and try again.”",
+		"Button: “Notify me on this device” · busy: “Turning on…” · line: “One notification when your questions are ready, if you've left Tally.” · On: “Notifications are on for this device.” · iPhone: “To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.” · iPad: “To get a notification on iPad, add Tally to your Home Screen first: tap Share (under ⋯ on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.” · Blocked: “Notifications are blocked for Tally in this device's settings.” · Save failed: “Couldn't save. Check your connection and try again.”",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.

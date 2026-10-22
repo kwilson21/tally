@@ -85,8 +85,8 @@ app.onError(serverErrorPage);
  *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
  * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`) as a backstop.
  * - Each minute (`runReadyPush`, then `runReadyEmail`, decisions 146 and 149): a new family's ready push goes out two minutes
- *   after its person leaves the first-week pages, and the ready email ten minutes after (ready-email.tsx, ready-push.ts). It
- *   reads one row for everyone else.
+ *   after its person leaves the first-week pages, and the ready email ten minutes after, or 8 minutes after that push reached
+ *   one of their devices (ready-email.tsx, ready-push.ts). It reads one row for everyone else.
  *
  * The demo has the one 09:00 run: it resets, then starts the same Workflow (with no counts) and retries feedback.
  *

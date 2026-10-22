@@ -5,14 +5,14 @@
 // A device that answers 404 or 410 is deleted by its row. A device that gives no answer, a 429 or a 5xx is transient: when no
 // device answers with a success and some answer is transient, the claim is released and the next minute tries again, until
 // the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute.
-// Every device is read in one query before any claim, so a failed read claims nobody (the run throws, the minute run logs
-// it, and the next minute tries again). The gate (the record, the banks and the sort count, as the email reads it) is read
-// again before each person's claim, so a bank linked meanwhile or a question answered stops the run there (decision 149).
+// Every device is read in one query before any claim, so a failed read claims nobody (the run throws, the minute run logs it,
+// and the next minute tries again). The gate (the record, the banks and the sort count, as the email reads it) is read again
+// before each person's claim, so a bank linked meanwhile or a question answered stops the run there (decision 149).
 // Each person is claimed just before their devices are sent to, and a device whose send throws counts as failed without
-// stopping the others. The release is best effort: if it fails,
-// that one person keeps their one claim and gets no push, but the email still goes at ten minutes, since its own claim
-// (readyEmailedTo) does not depend on this one. The minute run calls this before runReadyEmail; a failure here never stops
-// the email (src/index.tsx).
+// stopping the others. When a device takes the push, the time is stored (readyPushedAt), and the ready email waits
+// EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). The release is best effort: if it fails, that one person keeps their one
+// claim and gets no push, but the email still goes at ten minutes, since its own claim (readyEmailedTo) does not depend on
+// this one. The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
 import { readFirstTally } from "../db/first-tally";
 import { type PushEnv, vapidKeys } from "../push/keys";

@@ -36,7 +36,7 @@ describe("GET /how-it-works in the demo", () => {
 	it("says the minute check, the ready push and the ready email in the Cron Triggers and Resend rows (decisions 146 and 149)", async () => {
 		const html = decodeHtml((await get("/how-it-works")).html);
 		expect(html).toContain(
-			"Each minute, in the family app, it checks whether a new family's first questions have opened, pushes each device of a person who left the page 2 minutes ago (decision 149), and emails each person who left the page 10 minutes ago, once; the 10:00 run sends due reconnect reminders and checks again.",
+			"Each minute, in the family app, it checks whether a new family's first questions have opened, pushes each device of a person who left the page 2 minutes ago (decision 149), and emails each person who left the page 10 minutes ago, once, or 8 minutes after a push reached one of their devices (decision 149); the 10:00 run sends due reconnect reminders and checks again.",
 		);
 		expect(html).toContain(
 			"Sends bank sign-in reminder emails and the first week's ready email;",
