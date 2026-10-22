@@ -244,7 +244,7 @@ Line numbers below were read on main at `c5577a5`. A builder checks them first.
   - `src/views/file-field.tsx` (`FileField`, built on `FormField`)
   - `src/views/apple-card-group.tsx` (`AppleCardGroup`)
   - `src/views/apple-card-sheet.tsx` (`AppleCardSheet`)
-  - (no separate Remove file: the Remove page is drawn in `src/routes/accounts.tsx`, beside Disconnect's page)
+  - `src/views/apple-card-remove.tsx` (`AppleCardRemove`, the Remove page, modelled on Disconnect's)
 - Modify:
   - `src/routes/accounts.tsx`
   - `src/db/accounts.ts`
@@ -328,7 +328,7 @@ Line numbers below were read on main at `c5577a5`. A builder checks them first.
     - `delete=yes` calls the per-account pay cleanup first, then deletes the card's transactions, its `balance_history` and the account.
     - Remove isn't offered in the demo: it returns 404, and the group has no Manage there, as with Disconnect.
   - **The first week:** an upload draws no stroke. The first week's waiting count still counts Plaid rows only (`src/first-tally/setup.ts:~417`, `src/db/transactions.ts:2759`).
-  - **Demo (`DEMO: "true"`):** the sheet has no file or balance field; the POST never reads its body and imports `appleCardSample(today)` with `APPLE_CARD_SAMPLE_BALANCE_CENTS` (Task 6), and the demo's card counts in net worth.
+  - **Demo (`DEMO: "true"`):** the sheet has no file or balance field; the POST never reads its body and imports `appleCardSample(anchor)`, the anchor being the seeded bank's latest transaction date, with `APPLE_CARD_SAMPLE_BALANCE_CENTS` (Task 6), and the demo's card counts in net worth.
   - **A card with no rows** (its first upload held only uncleared or older rows, or none), after the last bank and its history are deleted: an upload still works, starting 90 days back.
 - [ ] **Step 3:** Run `npx vitest run test/apple-card-route.test.ts`. Expected: FAIL.
 - [ ] **Step 4: Implement.**
