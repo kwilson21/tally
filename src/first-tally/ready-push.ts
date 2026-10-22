@@ -2,12 +2,15 @@
 // first questions are open and nobody has answered one. It goes to a person only once their page has not checked in for
 // PUSH_AWAY_AFTER_MS, and only once: the claim (readyPushedTo) is kept after a success, and the email's own claim (readyEmailedTo)
 // stops any push after the email has gone, as does a kept email try (heldReadyEmail), which may already have reached the person.
-// A device that answers 404 or 410 is deleted by its row. A device that gives no answer,
-// a 429 or a 5xx is transient: when no device answers with a success and some answer is transient, the claim is released and the
-// next minute tries again, until the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is
-// retried every minute. A database error after the claim (the device read, or the release) is a transient failure too, and
-// the release is best effort, so a claim is never left stuck by a single failed statement. The minute run calls this before
-// runReadyEmail; a failure here never stops the email (src/index.tsx).
+// A device that answers 404 or 410 is deleted by its row. A device that gives no answer, a 429 or a 5xx is transient: when no
+// device answers with a success and some answer is transient, the claim is released and the next minute tries again, until
+// the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute.
+// Every device is read in one query before any claim, so a failed read claims nobody (the run throws, the minute run logs
+// it, and the next minute tries again) and no read follows a claim. Each person is claimed just before their devices are sent
+// to, and a device whose send throws counts as failed without stopping the others. The release is best effort: if it fails,
+// that one person keeps their one claim and gets no push, but the email still goes at ten minutes, since its own claim
+// (readyEmailedTo) does not depend on this one. The minute run calls this before runReadyEmail; a failure here never stops
+// the email (src/index.tsx).
 
 import { anyQuestionAnswered, readFirstTally } from "../db/first-tally";
 import { type PushEnv, vapidKeys } from "../push/keys";
@@ -53,14 +56,20 @@ export const PUSH_RELEASE_SQL = `UPDATE household_settings
 		json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyPushedTo') AS e WHERE e.value <> ?1)))
 	WHERE key = 'first_tally'`;
 
-/** The people with at least one device, once each (the join keeps a removed person's devices out, as they are deleted). */
-const PEOPLE_SQL = `SELECT DISTINCT s.member_email AS email FROM push_subscriptions s
-	JOIN household_members m ON m.email = s.member_email ORDER BY s.member_email`;
+/**
+ * Every device with the person it belongs to, read before any claim (the join keeps a device with no member row out, and a
+ * removed person's devices are deleted with them).
+ */
+const DEVICES_SQL = `SELECT s.id, s.member_email AS email, s.endpoint, s.p256dh, s.auth FROM push_subscriptions s
+	JOIN household_members m ON m.email = s.member_email ORDER BY s.member_email, s.id`;
 
-const DEVICES_SQL =
-	"SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE member_email = ? ORDER BY id";
-
-type Device = { id: number; endpoint: string; p256dh: string; auth: string };
+type Device = {
+	id: number;
+	email: string;
+	endpoint: string;
+	p256dh: string;
+	auth: string;
+};
 
 /** How one device's answer counts (decision 149). */
 type Answer = "sent" | "gone" | "permanent" | "transient";
@@ -76,9 +85,9 @@ function answerOf(status: number | null): Answer {
 /**
  * The ready push, run each minute and by the 10:00 backstop. It does nothing without the VAPID keys (the demo, or no secrets),
  * reading nothing. Otherwise it reads the record once and the gate once: a question answered, or the questions not open, ends it.
- * Then, for each person with a device, the claim (PUSH_CLAIM_SQL) decides whether they go on, and each of their devices is sent
- * to inside its own try, so a failure there counts as that device failing and never stops the others. Only the counts are
- * logged, under "ready push", and only when someone was claimed.
+ * It then reads every device once, before any claim. For each person with a device, the claim (PUSH_CLAIM_SQL) decides whether
+ * they go on, and each of their devices is sent to inside its own try, so a failure there counts as that device failing and
+ * never stops the others. Only the counts are logged, under "ready push", and only when someone was claimed.
  */
 export async function runReadyPush(
 	env: PushEnv & { DB: D1Database; DEMO?: string },
@@ -93,33 +102,28 @@ export async function runReadyPush(
 	const record = await readFirstTally(env.DB);
 	if (anyQuestionAnswered(record) || (await openRead(env.DB, record)) === null)
 		return;
-	const { results: people } = await env.DB.prepare(PEOPLE_SQL).all<{
-		email: string;
-	}>();
+	// The one read of the devices, before any claim: a failure here throws, and no one is claimed.
+	const { results } = await env.DB.prepare(DEVICES_SQL).all<Device>();
+	const byPerson = new Map<string, Device[]>();
+	for (const device of results) {
+		const list = byPerson.get(device.email) ?? [];
+		list.push(device);
+		byPerson.set(device.email, list);
+	}
 	const nowMs = (options.now ?? Date.now)();
 	let claimedCount = 0;
 	let sentCount = 0;
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
-	for (const { email } of people) {
+	for (const [email, devices] of byPerson) {
 		const claim = await env.DB.prepare(PUSH_CLAIM_SQL)
 			.bind(email, await addressHashOf(email))
 			.run();
 		// No row changed: already pushed (an earlier run, or one still going), emailed, removed, or still on a first-week page.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
-		let devices: Device[] = [];
 		let delivered = 0;
 		let transient = false;
-		try {
-			devices = (await env.DB.prepare(DEVICES_SQL).bind(email).all<Device>())
-				.results;
-		} catch {
-			// A device read that fails right after the claim is one transient failure, so the claim is released below.
-			failedCount += 1;
-			failureKinds.add("push error");
-			transient = true;
-		}
 		for (const device of devices) {
 			try {
 				const { status } = await sendPush(

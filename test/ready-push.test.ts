@@ -186,6 +186,28 @@ function countingDb(counter: { statements: number }): D1Database {
 	});
 }
 
+/** The database, recording each statement it prepares, trimmed and in order, so a test can see what a run reads and writes when. */
+function recordingDb(statements: string[]): D1Database {
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (sql: string) => {
+					statements.push(sql.trim());
+					return target.prepare(sql);
+				};
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+/** A statement that claims a push, or releases one: an update of the record's readyPushedTo list. */
+const isPushClaimOrRelease = (sql: string) =>
+	sql.startsWith("UPDATE household_settings") && sql.includes("readyPushedTo");
+
+/** A statement that reads. */
+const isRead = (sql: string) => sql.startsWith("SELECT");
+
 /** The address list the push has claimed, as the record holds it. */
 const pushedList = async () => (await readFirstTally(env.DB))?.readyPushedTo;
 
@@ -488,25 +510,43 @@ describe("the ready push: how each answer counts", () => {
 	});
 });
 
-describe("the ready push: a database error after the claim never leaves it stuck", () => {
-	it("releases the claim when the device read fails right after it, so a later minute pushes", async () => {
-		const errors: unknown[][] = [];
-		vi.spyOn(console, "error").mockImplementation((...args) => {
-			errors.push(args);
+describe("the ready push: every read comes before a claim", () => {
+	it("reads every device in one query before it claims anyone, and reads nothing after a claim", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addMember(RILEY, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(RILEY, SPARE);
+		const statements: string[] = [];
+		const { fetchImpl, pushed } = fakeFetch();
+		await runReadyPush(pushing({ DB: recordingDb(statements) }), {
+			fetchImpl,
 		});
+		expect(pushed).toEqual([PHONE, SPARE]);
+		const firstClaim = statements.findIndex(isPushClaimOrRelease);
+		expect(firstClaim).toBeGreaterThan(-1);
+		expect(statements.slice(firstClaim).filter(isRead)).toEqual([]);
+		expect(
+			statements.filter(
+				(sql) => isRead(sql) && sql.includes("push_subscriptions"),
+			),
+		).toHaveLength(1);
+	});
+
+	it("a failed device read claims nobody, so the next minute pushes", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		await openHousehold();
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addDevice(DANA, PHONE);
 		const first = fakeFetch();
-		await runReadyPush(pushing({ DB: failingOn("SELECT id, endpoint") }), {
-			fetchImpl: first.fetchImpl,
-		});
+		await expect(
+			runReadyPush(pushing({ DB: failingOn("FROM push_subscriptions s") }), {
+				fetchImpl: first.fetchImpl,
+			}),
+		).rejects.toThrow("boom");
 		expect(first.pushed).toEqual([]);
-		expect(await pushedList()).toEqual([]);
-		expect(JSON.stringify(errors)).toContain(
-			"ready push: 0 sent, 1 failed (push error)",
-		);
+		expect(await pushedList()).toBeUndefined();
 		const second = fakeFetch();
 		await runReadyPush(pushing(), { fetchImpl: second.fetchImpl });
 		expect(second.pushed).toEqual([PHONE]);
@@ -534,6 +574,22 @@ describe("the ready push: a database error after the claim never leaves it stuck
 });
 
 describe("the ready email still goes", () => {
+	it("a failed release leaves that person's one claim, and the email still goes at ten minutes", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		await openHousehold();
+		await addMember(DANA, { seen: "-11 minutes" });
+		await addDevice(DANA, PHONE);
+		const push = fakeFetch({ answer: () => 503 });
+		await runReadyPush(pushing({ DB: failingOn(PUSH_RELEASE_SQL) }), {
+			fetchImpl: push.fetchImpl,
+		});
+		expect(await pushedList()).toEqual([DANA]);
+		const email = fakeFetch();
+		await runReadyEmail(pushing(), email.fetchImpl);
+		expect(email.resent).toEqual([DANA]);
+	});
+
 	it("sends the email at ten minutes to a person whose push went", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: "-11 minutes" });
