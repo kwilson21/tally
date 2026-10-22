@@ -364,7 +364,8 @@ export async function runReadyEmail(
 		const hash = await addressHashOf(recipient);
 		const claim = await env.DB.prepare(CLAIM_SQL).bind(recipient, hash).run();
 		// No row changed: the address was reached already (an earlier run, or one still going), it is no longer a member, its
-		// person is still on a first-week page, or a ready push reached them less than EMAIL_AFTER_PUSH_MS ago. Each is skipped.
+		// person is still on a first-week page, or their readyPushedAt stamp is under EMAIL_AFTER_PUSH_MS old (a push in flight, one
+		// that reached a device, or a claim whose stamp could not be removed). Each is skipped.
 		// A question answered after the read above is caught by the next address's read.
 		if (!claim.meta.changes) continue;
 		claimedCount += 1;
