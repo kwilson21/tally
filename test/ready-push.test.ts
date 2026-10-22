@@ -511,7 +511,7 @@ describe("the ready push: how each answer counts", () => {
 });
 
 describe("the ready push: every read comes before a claim", () => {
-	it("reads every device in one query before it claims anyone, and reads nothing after a claim", async () => {
+	it("reads every device in one query before it claims anyone, and reads the gate again before each claim", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: "-180 seconds" });
 		await addMember(RILEY, { seen: "-180 seconds" });
@@ -523,14 +523,60 @@ describe("the ready push: every read comes before a claim", () => {
 			fetchImpl,
 		});
 		expect(pushed).toEqual([PHONE, SPARE]);
-		const firstClaim = statements.findIndex(isPushClaimOrRelease);
-		expect(firstClaim).toBeGreaterThan(-1);
-		expect(statements.slice(firstClaim).filter(isRead)).toEqual([]);
+		const isDeviceRead = (sql: string) =>
+			isRead(sql) && sql.includes("push_subscriptions");
+		expect(statements.filter(isDeviceRead)).toHaveLength(1);
+		const deviceRead = statements.findIndex(isDeviceRead);
+		const claims = statements.flatMap((sql, index) =>
+			isPushClaimOrRelease(sql) ? [index] : [],
+		);
+		expect(claims).toHaveLength(2);
+		const [firstClaim, secondClaim] = claims as [number, number];
+		expect(deviceRead).toBeLessThan(firstClaim);
+		// The gate (the record, the banks and the sort count) is read again between the two claims ...
 		expect(
-			statements.filter(
-				(sql) => isRead(sql) && sql.includes("push_subscriptions"),
-			),
-		).toHaveLength(1);
+			statements.slice(firstClaim + 1, secondClaim).filter(isRead).length,
+		).toBeGreaterThan(0);
+		// ... and nothing is read after the last claim.
+		expect(statements.slice(secondClaim).filter(isRead)).toEqual([]);
+	});
+
+	it("stops the loop when the gate closes after the first push: the second person is neither claimed nor pushed", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addMember(RILEY, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(RILEY, SPARE);
+		// A new bank is linked while Dana's push is out, and its history is still loading: the gate closes after her push.
+		const { fetchImpl, pushed } = fakeFetch({
+			beforeAnswer: async (endpoint) => {
+				if (endpoint === PHONE) await addBank(2, "Amex", { history: false });
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([PHONE]);
+		expect(await pushedList()).toEqual([DANA]);
+	});
+
+	it("stops the loop when a question is answered after the first push", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addMember(RILEY, { seen: "-180 seconds" });
+		await addDevice(DANA, PHONE);
+		await addDevice(RILEY, SPARE);
+		const { fetchImpl, pushed } = fakeFetch({
+			beforeAnswer: async (endpoint) => {
+				if (endpoint !== PHONE) return;
+				await env.DB.prepare(
+					`UPDATE household_settings SET value = json_set(value, '$.strokes.pay', ?) WHERE key = 'first_tally'`,
+				)
+					.bind(STROKE_ONE)
+					.run();
+			},
+		});
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([PHONE]);
+		expect(await pushedList()).toEqual([DANA]);
 	});
 
 	it("a failed device read claims nobody, so the next minute pushes", async () => {

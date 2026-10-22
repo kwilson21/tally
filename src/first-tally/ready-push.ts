@@ -6,13 +6,15 @@
 // device answers with a success and some answer is transient, the claim is released and the next minute tries again, until
 // the email goes. Any other 4xx is permanent for this push, so the claim is kept and nothing is retried every minute.
 // Every device is read in one query before any claim, so a failed read claims nobody (the run throws, the minute run logs
-// it, and the next minute tries again) and no read follows a claim. Each person is claimed just before their devices are sent
-// to, and a device whose send throws counts as failed without stopping the others. The release is best effort: if it fails,
+// it, and the next minute tries again). The gate (the record, the banks and the sort count, as the email reads it) is read
+// again before each person's claim, so a bank linked meanwhile or a question answered stops the run there (decision 149).
+// Each person is claimed just before their devices are sent to, and a device whose send throws counts as failed without
+// stopping the others. The release is best effort: if it fails,
 // that one person keeps their one claim and gets no push, but the email still goes at ten minutes, since its own claim
 // (readyEmailedTo) does not depend on this one. The minute run calls this before runReadyEmail; a failure here never stops
 // the email (src/index.tsx).
 
-import { anyQuestionAnswered, readFirstTally } from "../db/first-tally";
+import { readFirstTally } from "../db/first-tally";
 import { type PushEnv, vapidKeys } from "../push/keys";
 import { type PushPayload, sendPush } from "../push/web-push";
 import { logDeliveries } from "../reconnect/deliver";
@@ -83,11 +85,20 @@ function answerOf(status: number | null): Answer {
 }
 
 /**
+ * The gate as the email reads it (openRead on a record read now): true while the questions are open to the push, false once a
+ * question is answered or the gate closes (a bank's history still loading, a sort waiting, the last bank removed).
+ */
+async function gateOpen(db: D1Database): Promise<boolean> {
+	return (await openRead(db, await readFirstTally(db))) !== null;
+}
+
+/**
  * The ready push, run each minute and by the 10:00 backstop. It does nothing without the VAPID keys (the demo, or no secrets),
- * reading nothing. Otherwise it reads the record once and the gate once: a question answered, or the questions not open, ends it.
- * It then reads every device once, before any claim. For each person with a device, the claim (PUSH_CLAIM_SQL) decides whether
- * they go on, and each of their devices is sent to inside its own try, so a failure there counts as that device failing and
- * never stops the others. Only the counts are logged, under "ready push", and only when someone was claimed.
+ * reading nothing. Otherwise it reads the gate: a question answered, or the questions not open, ends it. It then reads every
+ * device once, before any claim. For each person with a device, the gate is read again and a closed gate ends the run there, so
+ * nobody after it is claimed or pushed (decision 149). Then the claim (PUSH_CLAIM_SQL) decides whether that person goes on, and
+ * each of their devices is sent to inside its own try, so a failure there counts as that device failing and never stops the
+ * others. Only the counts are logged, under "ready push", and only when someone was claimed.
  */
 export async function runReadyPush(
 	env: PushEnv & { DB: D1Database; DEMO?: string },
@@ -99,9 +110,7 @@ export async function runReadyPush(
 ) {
 	const keys = await vapidKeys(env);
 	if (!keys) return;
-	const record = await readFirstTally(env.DB);
-	if (anyQuestionAnswered(record) || (await openRead(env.DB, record)) === null)
-		return;
+	if (!(await gateOpen(env.DB))) return;
 	// The one read of the devices, before any claim: a failure here throws, and no one is claimed.
 	const { results } = await env.DB.prepare(DEVICES_SQL).all<Device>();
 	const byPerson = new Map<string, Device[]>();
@@ -116,6 +125,8 @@ export async function runReadyPush(
 	let failedCount = 0;
 	const failureKinds = new Set<string>();
 	for (const [email, devices] of byPerson) {
+		// The gate, read again before this person's claim: a bank linked or a question answered since the last person ends the run.
+		if (!(await gateOpen(env.DB))) break;
 		const claim = await env.DB.prepare(PUSH_CLAIM_SQL)
 			.bind(email, await addressHashOf(email))
 			.run();
