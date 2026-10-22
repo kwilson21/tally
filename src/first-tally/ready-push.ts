@@ -16,9 +16,9 @@
 // and the next minute tries again). The gate (the record, the banks and the sort count, as the email reads it) is read again
 // before each person's claim, so a bank linked meanwhile or a question answered stops the run there (decision 149).
 // Each person is claimed just before their devices are sent to, and a device whose send throws counts as failed without
-// stopping the others. A release that fails leaves that person's one claim, so they get no push, but the email is not blocked:
-// its own claim (readyEmailedTo) does not depend on this one. The minute run calls this before runReadyEmail; a failure here
-// never stops the email (src/index.tsx).
+// stopping the others. A release that fails leaves that person's one claim, so they get no push, and their email waits at most
+// 8 minutes from the claim (above). The email's own claim (readyEmailedTo) does not depend on this one, so the email still goes.
+// The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
 import { readFirstTally } from "../db/first-tally";
 import { isPushServiceEndpoint } from "../push/endpoint";
