@@ -3,9 +3,9 @@
 // have the Worker send requests to any https origin. The route and the ready push both use this one check.
 
 /**
- * The push services, one per browser family: fcm.googleapis.com for Chrome, Android and most other Chromium browsers;
- * push.services.mozilla.com for Firefox; push.apple.com for Safari on a Mac and for the iPhone and iPad web apps (Home Screen);
- * notify.windows.com for Edge on Windows.
+ * The push services that match a host and its subdomains: fcm.googleapis.com is Chrome Stable and most other Chromium browsers;
+ * push.services.mozilla.com is Firefox; push.apple.com is Safari on a Mac and the iPhone and iPad web apps (Home Screen);
+ * notify.windows.com is Edge on Windows.
  */
 export const PUSH_SERVICE_HOSTS = [
 	"fcm.googleapis.com",
@@ -15,8 +15,14 @@ export const PUSH_SERVICE_HOSTS = [
 ] as const;
 
 /**
- * True when the endpoint is an https URL whose host is one of PUSH_SERVICE_HOSTS or a subdomain of one, with no port but the
- * default. The host is compared lower-cased. A URL that doesn't parse is false.
+ * The push services that match only that exact host, never a subdomain: jmt17.google.com is Chrome Beta, Dev and Canary, and
+ * unbranded Chromium builds (Chromium's push_messaging_constants.cc). No other google.com name is one.
+ */
+export const PUSH_SERVICE_EXACT_HOSTS = ["jmt17.google.com"] as const;
+
+/**
+ * True when the endpoint is an https URL whose host is one of PUSH_SERVICE_HOSTS or a subdomain of one, or one of
+ * PUSH_SERVICE_EXACT_HOSTS, with no port but the default. The host is compared lower-cased. A URL that doesn't parse is false.
  */
 export function isPushServiceEndpoint(endpoint: string): boolean {
 	let url: URL;
@@ -28,6 +34,8 @@ export function isPushServiceEndpoint(endpoint: string): boolean {
 	// A URL's port is "" for the default port (443 for https), so a port written out as 443 is the default too.
 	if (url.protocol !== "https:" || url.port !== "") return false;
 	const host = url.hostname.toLowerCase();
+	if ((PUSH_SERVICE_EXACT_HOSTS as readonly string[]).includes(host))
+		return true;
 	return PUSH_SERVICE_HOSTS.some(
 		(service) => host === service || host.endsWith(`.${service}`),
 	);

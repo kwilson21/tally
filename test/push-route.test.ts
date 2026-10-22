@@ -291,7 +291,7 @@ describe("POST /push/subscribe: input that is not a subscription (422)", () => {
 });
 
 describe("POST /push/subscribe: only a browser's push service (422 otherwise)", () => {
-	// Each browser family's push service (push.ts, PUSH_SERVICE_HOSTS). The ready push sends to whatever is stored, so a host
+	// Each browser family's push service (push/endpoint.ts). The ready push sends to whatever is stored, so a host
 	// that isn't one of these would have the Worker send requests to any https origin.
 	it.each([
 		[
@@ -301,6 +301,10 @@ describe("POST /push/subscribe: only a browser's push service (422 otherwise)", 
 		[
 			"Chrome's host, in capitals and with the default port",
 			"https://FCM.GOOGLEAPIS.COM:443/fcm/send/abc",
+		],
+		[
+			"Chrome Beta, Dev and Canary, and unbranded Chromium builds",
+			"https://jmt17.google.com/fcm/send/abc",
 		],
 		["Firefox", "https://updates.push.services.mozilla.com/wpush/v2/abc"],
 		["Firefox's bare host", "https://push.services.mozilla.com/wpush/v2/abc"],
@@ -321,6 +325,9 @@ describe("POST /push/subscribe: only a browser's push service (422 otherwise)", 
 		"https://web.push.apple.com:8443/x",
 		"https://push.apple.com.evil.example/x",
 		"http://fcm.googleapis.com/x",
+		"https://evil.google.com/x",
+		"https://jmt17.google.com.evil.example/x",
+		"https://x.jmt17.google.com/x",
 	])("answers 422 and stores nothing for %s", async (endpoint) => {
 		expect((await subscribe({ ...good, endpoint })).status).toBe(422);
 		expect(await rowsFor()).toEqual([]);
