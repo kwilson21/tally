@@ -2,8 +2,9 @@ import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
-import { readFirstTally } from "../src/db/first-tally";
+import { isSetUp, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
+import { readGateInputs } from "../src/first-tally/gate";
 import { accounts } from "../src/routes/accounts";
 import type { SortParams } from "../src/sort-start";
 import { recordSorting } from "./record-sorting";
@@ -584,19 +585,17 @@ describe("Apple Card's upload sheet (#766)", () => {
 });
 
 describe("the first week is untouched by an upload (spec §8.10, #766)", () => {
-	it("leaves the first-week record as it was, so an upload draws no stroke", async () => {
-		await resetDemo(env.DB, TODAY);
-		const before = await readFirstTally(env.DB);
-		const csv = [HEADER, ROW_A].join("\n");
+	/** An upload, sent as a browser's htmx form sends it: the bytes with an explicit Content-Length. */
+	async function uploadCsv(text: string, balance = "") {
 		const form = new FormData();
-		form.set("file", new File([csv], "apple.csv", { type: "text/csv" }));
-		form.set("balance", "1,240.18");
+		form.set("file", new File([text], "apple.csv", { type: "text/csv" }));
+		form.set("balance", balance);
 		const request = new Request("http://tally.test/accounts/apple-card", {
 			method: "POST",
 			body: form,
 		});
 		const bytes = await request.arrayBuffer();
-		const res = await app.request(
+		return app.request(
 			"/accounts/apple-card",
 			{
 				method: "POST",
@@ -610,7 +609,31 @@ describe("the first week is untouched by an upload (spec §8.10, #766)", () => {
 			family,
 			ctx(),
 		);
+	}
+
+	it("leaves the first-week record as it was, so an upload draws no stroke", async () => {
+		await resetDemo(env.DB, TODAY);
+		const before = await readFirstTally(env.DB);
+		const res = await uploadCsv(csv(ROW_A), "1,240.18");
 		expect(res.status).toBe(200);
 		expect(await readFirstTally(env.DB)).toEqual(before);
+	});
+
+	it("leaves the first week's waiting count as it was: Apple Card's rows never wait for Jev in it", async () => {
+		await resetDemo(env.DB, TODAY);
+		// Still in the first week, with a bank's row waiting for Jev's category, so the count the first week reads is not zero.
+		expect(isSetUp(await readFirstTally(env.DB))).toBe(false);
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'first-week-waiting', ?, 1200, 'SHOP WAITING' FROM accounts WHERE plaid_item_id IS NOT NULL ORDER BY id LIMIT 1",
+		)
+			.bind(TODAY)
+			.run();
+		const before = (await readGateInputs(env.DB)).waiting;
+		expect(before).toBeGreaterThan(0);
+		// The upload's rows need a category like any purchase, but they're Apple's, so the first week's count is the same.
+		const res = await uploadCsv(csv(ROW_A, ROW_B));
+		expect(res.status).toBe(200);
+		expect(await cardRows()).toEqual({ n: 2 });
+		expect((await readGateInputs(env.DB)).waiting).toBe(before);
 	});
 });
