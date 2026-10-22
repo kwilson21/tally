@@ -419,7 +419,9 @@ describe("GET /design-system/proposals", () => {
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
-			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
+			// P141 (#770) is open: nothing is picked yet.
+			const expected =
+				id === "p141-setup" ? 0 : n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
 			// pictures: exactly one for the proposals drawn before P120, and at least one from P120 on, which draw a
@@ -5325,8 +5327,8 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Between the intro and the follow-ups' section sits only the Picked section (P139, #660) and its one specimen, and between
-		// the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
+		// Between the intro and the follow-ups' section sit only P141's open section (#770) and its one specimen, then the Picked sections
+		// (P139, #660, and P140, #719) and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
 			'<section aria-labelledby="followups-picks-title" class="mt-12">',
@@ -5335,10 +5337,12 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(
 			html.slice(top, open).match(/<section aria-labelledby="[^"]*"/g),
 		).toEqual([
+			'<section aria-labelledby="p141-title"',
 			'<section aria-labelledby="p139-title"',
 			'<section aria-labelledby="p140-title"',
 		]);
 		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
+			'<section id="p141-setup"',
 			'<section id="p139-split-category"',
 			'<section id="p140-banks"',
 			// P140's A is the real HomeSetup, whose own section and Your banks section sit inside its picture.
@@ -6838,5 +6842,164 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		expect(new Set(ids).size).toBe(ids.length);
 		for (const [, target] of chunk.matchAll(/\sfor="([^"]+)"/g))
 			expect(ids).toContain(target);
+	});
+});
+
+describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const count = (text: string, part: string) => text.split(part).length - 1;
+	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
+	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+	const LABELS = (chunk: string) =>
+		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map(
+			(m) => m[1] ?? "",
+		);
+	const P141 = "p141-setup";
+	// The specimen alone: block() runs to the next section, which takes the wrapping section's closing tag with it.
+	const specimenOf = (html: string) => {
+		const chunk = block(html, P141);
+		return chunk.slice(0, chunk.lastIndexOf("</section>"));
+	};
+
+	it("opens an open section above P139's, titled and dated, with nothing picked yet and P141 not in DECIDED", async () => {
+		const html = await drawn();
+		const open = html.indexOf('<section aria-labelledby="p141-title"');
+		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeLessThan(
+			html.indexOf('<section aria-labelledby="p139-title"'),
+		);
+		const section = html.slice(open, html.indexOf(`<section id="${P141}"`));
+		expect(section).toContain('<h2 id="p141-title"');
+		expect(section).toContain("Open: a new family&#39;s setup");
+		expect(section).toContain("Drawn Oct 22 for #770. Nothing is picked yet.");
+		expect(DECIDED.some((entry) => entry.title.startsWith("P141 ·"))).toBe(
+			false,
+		);
+	});
+
+	it("draws P141 as one visual specimen with Today, A (recommended) and B, and nothing picked", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).toContain('data-ds-tier="visual"');
+		expect(chunk).toContain("P141 · A new family&#39;s setup");
+		const named = options(chunk);
+		expect(named.length).toBe(3);
+		expect(named[0]).toContain(">Today</h4>");
+		expect(named[1]).toContain(">A · Setup on its own pages");
+		expect(named[2]).toContain(">B · Setup stays on Home, in plain words</h4>");
+		expect(named[1]).toContain(">Recommended<");
+		expect(count(chunk, ">Recommended<")).toBe(1);
+		expect(chunk).not.toContain(">Picked<");
+	});
+
+	it("draws Today's three phones, A's five phones and two desktop pictures, then B's three phones, each captioned in that order", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(LABELS(chunk)).toEqual([
+			"Today, before a bank, on a phone",
+			"Today, the pay question, on a phone",
+			"Today, after the questions, on a phone",
+			"A, the welcome, on a phone",
+			"A, reading your bank, on a phone",
+			"A, the pay question, on a phone",
+			"A, the budgets question, on a phone",
+			"A, setup done, on a phone",
+			"A, the welcome, on desktop",
+			"A, setup done, on desktop",
+			"B, before a bank, on a phone",
+			"B, questions ready, on a phone",
+			"B, just finished, on a phone",
+		]);
+		expect(
+			[...chunk.matchAll(/<figcaption[^>]*>([^<]*)<\/figcaption>/g)].map(
+				(m) => m[1] ?? "",
+			),
+		).toEqual([
+			"Before a bank",
+			"The pay question",
+			"After the questions",
+			"Welcome",
+			"Reading your bank",
+			"Step 2: your pay",
+			"Step 4: your budgets",
+			"Done",
+			"Welcome, on desktop",
+			"Done, on desktop",
+			"Before a bank",
+			"Questions ready",
+			"Just finished",
+		]);
+	});
+
+	it("keeps each option's words: Today's strokes and its fifth, A's steps and finish, B's count, and none of the others' words", async () => {
+		const [today = "", a = "", b = ""] = options(specimenOf(await drawn()));
+		expect(today).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that&#39;s the fifth.",
+		);
+		expect(today).toContain("Five strokes, and you&#39;re set up.");
+		expect(today).not.toContain("none done");
+		for (const words of [
+			"Welcome to Tally.",
+			"Step 2 of 4 · Your pay",
+			"Is this your pay?",
+			"Keep all 12",
+			"You&#39;re set up.",
+			"$1,284",
+		])
+			expect(a).toContain(words);
+		for (const words of [
+			"keeps count",
+			"Five strokes",
+			"Your first tally",
+			"Your first page",
+		])
+			expect(a).not.toContain(words);
+		expect(b).toContain("Setup · 1 of 4 done");
+		expect(b).not.toContain("keeps count");
+		expect(b).not.toContain("Your first tally");
+	});
+
+	it("gives Today's fifth line the note Later in its first picture, with no line done", async () => {
+		const [today = ""] = options(specimenOf(await drawn()));
+		const [first = ""] = today.split("<figure").slice(1);
+		expect(first).toContain(
+			'<span class="shrink-0 text-sm text-muted">Later</span>',
+		);
+		expect(first).not.toContain("none done");
+		expect(first).toContain("Your first tally · 0 of 5");
+	});
+
+	it("draws both desktop pictures 840 px tall, so the welcome's last line sits inside its frame", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(count(chunk, "h-[840px]")).toBe(2);
+		expect(chunk).not.toContain("h-[760px]");
+	});
+
+	it("draws the app's Feedback pill in the masthead of every picture, and no quiet Feedback text", async () => {
+		const chunk = specimenOf(await drawn());
+		const pictures = chunk.split("<figure").slice(1);
+		expect(pictures.length).toBe(13);
+		for (const picture of pictures)
+			expect(picture).toContain('href="/feedback"');
+		expect(count(chunk, 'href="/feedback"')).toBe(13);
+		expect(chunk).not.toContain(
+			'<span class="text-sm text-muted">Feedback</span>',
+		);
+	});
+
+	it("draws a tab bar on Today's and B's phones and none on A's, since setup has no tabs", async () => {
+		const [today = "", a = "", b = ""] = options(specimenOf(await drawn()));
+		expect(today).toContain("<nav");
+		expect(a).not.toContain("<nav");
+		expect(b).toContain("<nav");
+	});
+
+	it("draws no client JavaScript, no form and no htmx request, nothing reachable inside a picture, and only its own ids", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).not.toContain("<script");
+		expect(chunk).not.toContain("<form");
+		expect(actions(chunk)).toEqual([]);
+		expect(firesByItself(chunk)).toEqual([]);
+		expect(reachableInPictures(chunk)).toEqual([]);
+		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
+		expect(ids).toEqual([P141, `${P141}-title`]);
 	});
 });

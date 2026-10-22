@@ -36,6 +36,7 @@ import { PolishRoundCProposals } from "./proposals-polish-4";
 import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
+import { SetupProposal } from "./proposals-setup";
 
 // What the owner decided from 2026-09-26 on (decisions 46 to 131), and the issue each ships in.
 export const DECIDED: readonly {
@@ -593,6 +594,16 @@ export function Proposals() {
 					Back to the design system
 				</a>
 			</p>
+
+			<section aria-labelledby="p141-title" class="mt-12">
+				<h2 id="p141-title" class="font-serif text-3xl font-semibold">
+					Open: a new family's setup
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 22 for #770. Nothing is picked yet.
+				</p>
+				<SetupProposal />
+			</section>
 
 			<section aria-labelledby="p139-title" class="mt-12">
 				<h2 id="p139-title" class="font-serif text-3xl font-semibold">
