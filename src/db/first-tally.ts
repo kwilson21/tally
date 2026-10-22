@@ -85,7 +85,8 @@ export type FirstTally = {
 	/**
 	 * The addresses sent the ready push (decision 148): each address gets one push on each device it turned notifications on for,
 	 * claimed before its pushes go and taken off again only when no device answered and some answer was transient, so a retry
-	 * is a new minute's try. Absent until one is claimed. The push stops for an address once it is in readyEmailedTo.
+	 * is a new minute's try. Absent until one is claimed. The push stops for an address once it is in readyEmailedTo, or once
+	 * its kept email try is in heldReadyEmail (the email may already have reached it).
 	 */
 	readyPushedTo?: string[];
 	/**

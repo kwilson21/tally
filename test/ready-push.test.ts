@@ -501,7 +501,7 @@ describe("the ready email still goes", () => {
 	});
 
 	it("leaves a kept ready email untouched when a push releases its claim", async () => {
-		// The push claims Dana first (no try is kept yet). While her push is out, the email's own try is kept under her hash
+		// The push claims Dana first (no try is kept yet). While Dana's push is out, the email's own try is kept under Dana's hash
 		// (a concurrent run), and Riley's kept try is already there. A transient answer then releases Dana's push claim, which
 		// must not touch either kept try: only RELEASE_SQL rewrites heldReadyEmail, and that would wipe Dana's.
 		const rileysKey = await heldKeyOf(RILEY);
