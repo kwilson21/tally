@@ -1,4 +1,4 @@
-// The notify control (decision 148, N1): "Notify me on this device" under Home's first-week setup, while the first questions are not
+// The notify control (decision 149, N1): "Notify me on this device" under Home's first-week setup, while the first questions are not
 // yet open. One wrapper, data-notify, holds four states, each hidden until push.js shows the one that applies (Off, On, the iPhone
 // hint, Blocked). With no JavaScript, or in a browser without Web Push, all four stay hidden, so nothing shows. A catalog drawing
 // passes `shown` to un-hide one state (only catalog drawings do). push.js finds the control by [data-notify] alone, so the

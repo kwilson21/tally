@@ -7,7 +7,7 @@ import { runReadyEmail } from "../src/first-tally/ready-email";
 import { PUSH_RELEASE_SQL, runReadyPush } from "../src/first-tally/ready-push";
 import handler from "../src/index";
 
-// The ready push (decision 148, spec §8.8): once a new family's first questions are open and nobody has answered one, each
+// The ready push (decision 149, spec §8.8): once a new family's first questions are open and nobody has answered one, each
 // person whose page has not checked in for two minutes gets one push on each device they turned notifications on for. The
 // email follows at ten minutes (ready-email.test.ts), and a person emailed meanwhile is not pushed. A push that can't be sent
 // is counted and never stops the email.

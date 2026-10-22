@@ -487,7 +487,7 @@ describe("data exports", () => {
 		expect(body).not.toContain("secret-key");
 	});
 
-	it("leaves each device's push subscription out of the download: its endpoint and keys never appear (decision 148)", async () => {
+	it("leaves each device's push subscription out of the download: its endpoint and keys never appear (decision 149)", async () => {
 		await env.DB.prepare(
 			"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES ('dana@example.com', 'https://push.example.test/send/never-export-this-endpoint', 'p256dh-never-export', 'auth-never-export')",
 		).run();

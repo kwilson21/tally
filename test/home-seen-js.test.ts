@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { setupHomeSeen } from "../public/js/home-seen.js";
 
-// The presence check-in's script (decision 148): a tab that isn't on screen counts as away. It runs against a fake document,
+// The presence check-in's script (decision 149): a tab that isn't on screen counts as away. It runs against a fake document,
 // as plaid-link-js.test.ts does: one listener for htmx:before:request, a visibilityState the test sets, and requests the test
 // sends from elements. htmx 4 dispatches a cancelable htmx:before:request on the element that sends a request, and sends
 // nothing when it is prevented (node_modules/htmx.org/dist/htmx.js, #issueRequest).
@@ -39,7 +39,7 @@ function fakeDocument(visibilityState: string) {
 
 const checkIn = { id: "home-seen" };
 
-describe("home-seen.js: a tab that isn't on screen counts as away (decision 148)", () => {
+describe("home-seen.js: a tab that isn't on screen counts as away (decision 149)", () => {
 	it("cancels the check-in's request while the tab is hidden", () => {
 		const document = fakeDocument("hidden");
 		setupHomeSeen({ document });

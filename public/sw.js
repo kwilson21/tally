@@ -1,4 +1,4 @@
-// Tally's service worker (decision 148): it shows the first questions' push and opens Tally when it is tapped. It caches nothing
+// Tally's service worker (decision 149): it shows the first questions' push and opens Tally when it is tapped. It caches nothing
 // and has no fetch handler, so Tally stays server-owned. Registering it asks for nothing; the notification's permission is asked
 // only in a tap (push.js). A push must always show a notification, or the browser can revoke the permission, so the words below
 // are the fallback for a push that can't be read.

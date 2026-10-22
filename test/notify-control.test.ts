@@ -4,7 +4,7 @@ import type { YourBank } from "../src/first-tally/your-banks";
 import { HomeSetup } from "../src/views/home-setup";
 import { NotifyControl, type NotifyShown } from "../src/views/notify-control";
 
-// The notify control (decision 148, N1): "Notify me on this device" under Home's first-week setup while the questions are not
+// The notify control (decision 149, N1): "Notify me on this device" under Home's first-week setup while the questions are not
 // yet open. Four states, each hidden until push.js shows one, so with no JavaScript, or in a browser without Web Push, nothing
 // shows. A catalog drawing passes `shown` to un-hide one state. It goes right after #setup-next, the line under the status, as
 // a sibling of #setup-status, #setup-next and Your banks, never inside them: those are swapped, and a swap must not touch it.

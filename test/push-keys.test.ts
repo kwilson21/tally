@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { toBase64Url } from "../src/push/base64url";
 import { vapidKeys } from "../src/push/keys";
 
-// The VAPID keys (decision 148): two secrets, the uncompressed P-256 public key (65 bytes starting 0x04) and the private scalar
+// The VAPID keys (decision 149): two secrets, the uncompressed P-256 public key (65 bytes starting 0x04) and the private scalar
 // (32 bytes), both base64url. vapidKeys reads them once for every caller, so Home's drawing, the route and the minute run agree.
 
 /** A real P-256 pair, in the two forms the secrets take: the public point and the private scalar `d`. */

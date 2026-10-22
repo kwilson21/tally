@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HOME_SEEN_EVERY_MS } from "../src/first-tally/home-seen";
 import { HomeSeenCheckIn } from "../src/views/home-seen";
 
-// The presence check-in's trigger (decision 148). It checks in on load, every 30 seconds, and at once when the tab comes back
+// The presence check-in's trigger (decision 149). It checks in on load, every 30 seconds, and at once when the tab comes back
 // to the screen: visibilitychange from the document (htmx 4's `from:` modifier takes the keyword `document`, which resolves to
 // the document, node_modules/htmx.org/dist/htmx.js #findAllExt). A hidden tab's check-in is cancelled by home-seen.js, so the
 // trigger never has to know about visibility, and Tally's CSP has no 'unsafe-eval' for htmx's filter expressions (src/security.ts).
@@ -15,7 +15,7 @@ const tagOf = (markup: string) =>
 const triggerOf = (markup: string) =>
 	tagOf(markup).match(/hx-trigger="([^"]*)"/)?.[1];
 
-describe("the presence check-in's trigger (decision 148)", () => {
+describe("the presence check-in's trigger (decision 149)", () => {
 	it("checks in on load, every 30 seconds, and when the tab comes back to the screen", () => {
 		expect(triggerOf(html(HomeSeenCheckIn({})))).toBe(
 			"load, every 30s, visibilitychange from:document",

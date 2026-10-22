@@ -1,4 +1,4 @@
-// The Web Push keys (decision 148): the two VAPID secrets, set with `wrangler secret put` (production only). One helper reads
+// The Web Push keys (decision 149): the two VAPID secrets, set with `wrangler secret put` (production only). One helper reads
 // them for every caller (Home's drawing, the subscribe route and the minute run), so the three can't disagree about whether
 // notifications are on. The private key is never logged or returned.
 

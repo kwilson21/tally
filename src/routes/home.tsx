@@ -305,7 +305,7 @@ async function renderHome(
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
 	const setup =
 		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
-	// Notify me on this device (decision 148): drawn only when the server has its Web Push keys, which the demo never has.
+	// Notify me on this device (decision 149): drawn only when the server has its Web Push keys, which the demo never has.
 	const pushKeys = setup ? await vapidKeys(c.env) : null;
 	const pushScript =
 		pushKeys !== null &&
@@ -890,7 +890,7 @@ home.get("/home/banks", async (c) => {
 /**
  * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, on load,
  * every 30 seconds, and again when the tab comes back (HomeSeenCheckIn). A tab that isn't on screen cancels it (home-seen.js,
- * decision 148), except that an open Plaid Link gets a quiet ping instead. Only the signed-in member's own row is written, and
+ * decision 149), except that an open Plaid Link gets a quiet ping instead. Only the signed-in member's own row is written, and
  * only once its last check-in is 30 seconds
  * old, so the page's repeats write once in each window. The demo writes nothing and answers 204. Home's check-in sends the
  * step its page shows. While that step is still the step now, the answer is 204 with no body. Once it has moved on, the page

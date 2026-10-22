@@ -348,7 +348,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	// An open Plaid Link counts as the person being there, including a bank's own sign-in in another tab, which hides Tally's
 	// tab for the whole sign-in. So the check-in's skipped tick is replaced by a quiet presence ping whatever the tab's
 	// visibility: a form post with no step, so /home/seen only moves home_seen_at and answers 204 (decision 146). Neither the
-	// push (2 minutes) nor the email (10 minutes) goes while Plaid Link is open (decision 148). The poll and the refreshes
+	// push (2 minutes) nor the email (10 minutes) goes while Plaid Link is open (decision 149). The poll and the refreshes
 	// send nothing in its place.
 	const presencePing = () =>
 		fetch("/home/seen", {

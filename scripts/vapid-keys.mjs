@@ -1,4 +1,4 @@
-// Makes one pair of VAPID keys for Web Push (decision 148, RFC 8292) and prints them as one line of JSON:
+// Makes one pair of VAPID keys for Web Push (decision 149, RFC 8292) and prints them as one line of JSON:
 //   {"publicKey":"…","privateKey":"…"}
 // The public key is the uncompressed P-256 point (65 bytes starting 0x04) and the private key is the scalar d (32 bytes), both
 // base64url. Node's WebCrypto only, no dependency. The owner runs it through scripts/production-setup.sh, which sets each value

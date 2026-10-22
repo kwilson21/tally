@@ -1,4 +1,4 @@
-// The notify control's script (decision 148): Web Push for a new family's first questions. The browser asks for permission only
+// The notify control's script (decision 149): Web Push for a new family's first questions. The browser asks for permission only
 // in a tap, so the tap's first call is the subscribe. The control is found by [data-notify] alone, so a page that draws it
 // (Home now, /setup later, #772) needs no change here. Setup is quiet and idempotent: it never moves focus, never announces, and
 // costs nothing on the 5-second poll (only a node not yet set up is touched). Text is set with textContent, never HTML.
@@ -109,7 +109,7 @@ export function setupPush({
 
 	/**
 	 * Stores a device: a form post, so Hono's csrf check applies. A tap stores it for the person who tapped. A page load's quiet
-	 * re-post (`restore`) only brings back a lost row, and the server never moves a device to whoever is looking at it (decision 148).
+	 * re-post (`restore`) only brings back a lost row, and the server never moves a device to whoever is looking at it (decision 149).
 	 */
 	const save = (subscription, { restore = false } = {}) => {
 		const keys = keysOf(subscription);
@@ -230,7 +230,7 @@ export function setupPush({
 		else if (subscription && Notification.permission === "granted") {
 			showState(node, "on");
 			// Quietly stored again, so the server's row comes back if it was lost. A failure shows nothing extra. A 409 means the
-			// device is someone else's now: it shows Off quietly, so a tap moves the device to this person (decision 148).
+			// device is someone else's now: it shows Off quietly, so a tap moves the device to this person (decision 149).
 			save(subscription, { restore: true })
 				.then((response) => {
 					if (response.status === 409) showState(node, "off");

@@ -179,7 +179,7 @@ function harness({
 	const documentEvents = elementListeners();
 	const document = {
 		body,
-		// A tab on screen, unless the test says otherwise. The presence ping ignores it while a link is open (decision 148).
+		// A tab on screen, unless the test says otherwise. The presence ping ignores it while a link is open (decision 149).
 		visibilityState,
 		addEventListener: (name: string, listener: never) => {
 			if (name === "click") delegatedClick = listener;
@@ -1026,14 +1026,14 @@ describe("plaid-link.js", () => {
 			expect(init?.body).toBe("");
 		});
 
-		it("hidden while linking still sends one ping: a bank's own sign-in in another tab counts as there (decision 148)", async () => {
+		it("hidden while linking still sends one ping: a bank's own sign-in in another tab counts as there (decision 149)", async () => {
 			const h = harness({ visibilityState: "hidden" });
 			await h.click();
 			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);
 			expect(pingsOf(h)).toHaveLength(1);
 		});
 
-		it("sends one ping while the tab is on screen and a link is running (decision 148)", async () => {
+		it("sends one ping while the tab is on screen and a link is running (decision 149)", async () => {
 			const h = harness({ visibilityState: "visible" });
 			await h.click();
 			expect(h.beforeRequest(checkIn()).defaultPrevented).toBe(true);

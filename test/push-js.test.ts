@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { setupPush } from "../public/js/push.js";
 
-// The notify control's script (decision 148), with a fake DOM as plaid-link-js.test.ts and keyboard-js.test.ts use: a control
+// The notify control's script (decision 149), with a fake DOM as plaid-link-js.test.ts and keyboard-js.test.ts use: a control
 // drawn with its four states hidden (as the server draws it), and the browser's navigator, registration, Notification and fetch
 // faked. The script asks for nothing on its own, shows the state the browser already has, and does its tap's subscribe first.
 

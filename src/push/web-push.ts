@@ -1,4 +1,4 @@
-// Web Push without a dependency (decision 148), on WebCrypto alone. Three parts, each citing the RFC it follows:
+// Web Push without a dependency (decision 149), on WebCrypto alone. Three parts, each citing the RFC it follows:
 // - encrypt: the message body, sealed for the subscriber (RFC 8291 §3, aes128gcm of RFC 8188: one record, no padding);
 // - vapidAuthorization: the server's signed JWT that identifies it to the push service (RFC 8292);
 // - sendPush: one POST to a subscription's endpoint, with the five headers the push service needs. It never throws and never

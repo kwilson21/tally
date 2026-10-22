@@ -29,7 +29,7 @@ const SUBJECT = "Three questions to finish setting up";
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
 const BUTTON = "Finish setting up";
-/** The first week's questions page: the ready email's button and the ready push's link both open it (decision 148). */
+/** The first week's questions page: the ready email's button and the ready push's link both open it (decision 149). */
 export const QUESTIONS_PATH = "/first-page";
 const LINK = `https://tally.thesuperhuman.us${QUESTIONS_PATH}`;
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
@@ -47,7 +47,7 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
 /**
- * The claim for one address, in SQL (shared with the ready push, decision 148). `listPath` is the record's list the address
+ * The claim for one address, in SQL (shared with the ready push, decision 149). `listPath` is the record's list the address
  * joins: readyEmailedTo for the email, readyPushedTo for the push. ?1 is the address. It changes no row when the address is in
  * that list already, so a second claim of one address (an earlier run, or one still going) sends nothing. It changes no row
  * either once a question is answered, or when the address is no longer one the send goes to (removed, or not seen in 90 days:
@@ -191,7 +191,7 @@ async function sha256Hex(text: string): Promise<string> {
 
 /**
  * The hash of the lower-cased address: the key a kept try is stored under in heldReadyEmail, so the address itself is never
- * stored. The ready push reads it too, to see whether a kept try may already have reached the address (decision 148).
+ * stored. The ready push reads it too, to see whether a kept try may already have reached the address (decision 149).
  */
 export const addressHashOf = (address: string) =>
 	sha256Hex(address.toLowerCase());

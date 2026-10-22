@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { push } from "../src/routes/push";
 import { sameOrigin } from "../src/security";
 
-// POST /push/subscribe (decision 148): a device's push subscription, sent as a form post from the notify control (push.js). It
+// POST /push/subscribe (decision 149): a device's push subscription, sent as a form post from the notify control (push.js). It
 // answers 422 for input that isn't a subscription, and 404 when Web Push is off (the demo, or no keys), or the person isn't
 // signed in or is removed. Otherwise it stores the device for the signed-in person and answers 204. A device that subscribes
 // again is kept as one row, and belongs to whoever turned it on last.

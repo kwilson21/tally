@@ -84,7 +84,7 @@ step "11. Build the database tables" \
 	"Creates Tally's tables in the empty tally-production database. Safe to repeat: finished migrations are skipped." \
 	npx wrangler d1 migrations apply DB --env "$ENV" --remote
 
-# Optional (decision 148): the keys for notifications on a device. Not required to deploy: until they are set, nothing is drawn or sent.
+# Optional (decision 149): the keys for notifications on a device. Not required to deploy: until they are set, nothing is drawn or sent.
 # Each value goes straight to put_value, so the private key is never printed. json_field reads $keys (set by push_keys) on stdin:
 # the JSON is never a command-line argument, since every user on the machine can read a command line in the process list.
 json_field() {

@@ -38,7 +38,7 @@ export async function noteHouseholdMember(
 }
 
 /**
- * Removes a person from the household. Their devices' push subscriptions go with them (decision 148), in the same batch, so a
+ * Removes a person from the household. Their devices' push subscriptions go with them (decision 149), in the same batch, so a
  * removed person gets no push and their device tokens are not kept.
  */
 export async function removeHouseholdMember(db: D1Database, email: string) {

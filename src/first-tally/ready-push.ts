@@ -1,4 +1,4 @@
-// The ready push (decision 148, spec §8.8): one Web Push to each device a person turned notifications on for, once a new family's
+// The ready push (decision 149, spec §8.8): one Web Push to each device a person turned notifications on for, once a new family's
 // first questions are open and nobody has answered one. It goes to a person only once their page has not checked in for
 // PUSH_AWAY_AFTER_MS, and only once: the claim (readyPushedTo) is kept after a success, and the email's own claim (readyEmailedTo)
 // stops any push after the email has gone, as does a kept email try (heldReadyEmail), which may already have reached the person.
@@ -62,7 +62,7 @@ const DEVICES_SQL =
 
 type Device = { id: number; endpoint: string; p256dh: string; auth: string };
 
-/** How one device's answer counts (decision 148). */
+/** How one device's answer counts (decision 149). */
 type Answer = "sent" | "gone" | "permanent" | "transient";
 
 function answerOf(status: number | null): Answer {

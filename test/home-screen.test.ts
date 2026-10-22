@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import manifestText from "../public/manifest.webmanifest?raw";
 import { Layout } from "../src/views/layout";
 
-// Tally on an iPhone's Home Screen (decision 148): a web app manifest, and an apple-touch-icon, so Home Screen opens Tally in
+// Tally on an iPhone's Home Screen (decision 149): a web app manifest, and an apple-touch-icon, so Home Screen opens Tally in
 // its own window (iOS needs display standalone or fullscreen). The manifest is read as its text, not through the Worker: behind
 // Cloudflare Access the Worker answers its sign-in page (403), so its fields are checked here. The link carries
 // crossorigin="use-credentials", since the manifest is fetched with the Access cookies: MDN's "Web application manifest",

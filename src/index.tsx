@@ -84,7 +84,7 @@ app.onError(serverErrorPage);
  *   groups of 25, then makes the night's notes and names, then new-category suggestions, then keeps the first night's
  *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
  * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`) as a backstop.
- * - Each minute (`runReadyPush`, then `runReadyEmail`, decisions 146 and 148): a new family's ready push goes out two minutes
+ * - Each minute (`runReadyPush`, then `runReadyEmail`, decisions 146 and 149): a new family's ready push goes out two minutes
  *   after its person leaves the first-week pages, and the ready email ten minutes after (ready-email.tsx, ready-push.ts). It
  *   reads one row for everyone else.
  *
@@ -96,7 +96,7 @@ app.onError(serverErrorPage);
  */
 const RECONNECT_EMAIL_CRON = "0 10 * * *";
 
-/** Every minute, production only (wrangler.jsonc): the ready push, then the ready email (decisions 146 and 148). */
+/** Every minute, production only (wrangler.jsonc): the ready push, then the ready email (decisions 146 and 149). */
 const READY_EMAIL_CRON = "* * * * *";
 
 /**
@@ -242,7 +242,7 @@ app.route("/", push);
 export default {
 	fetch: app.fetch,
 	async scheduled(controller, env) {
-		// The ready push goes first, each time the ready email does (decision 148): a push failure is logged and never stops the email.
+		// The ready push goes first, each time the ready email does (decision 149): a push failure is logged and never stops the email.
 		if (controller.cron === READY_EMAIL_CRON) {
 			await runStep("ready push", () => runReadyPush(env));
 			await runStep("ready email", () => runReadyEmail(env));

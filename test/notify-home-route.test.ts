@@ -6,7 +6,7 @@ import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 import { sameOrigin } from "../src/security";
 
-// Home's notify control and its script (decision 148), through the routes: Home's full load (GET /) and the check-in's redraw
+// Home's notify control and its script (decision 149), through the routes: Home's full load (GET /) and the check-in's redraw
 // (POST /home/seen) draw the control while the first week is reading and the server has VAPID keys. The control's script loads
 // on a full load in the before and reading phases, so Plaid's success, which swaps #page in place, still finds it. Neither
 // shows anything in the demo.

@@ -214,7 +214,7 @@ export function HomeSetup({
 	bankLine?: string[];
 	fifthDay?: { safeToSpendCents: number; needsHref?: string };
 	/**
-	 * Notify me on this device (decision 148): drawn only in the reading phase, and only when the server has Web Push keys (Home
+	 * Notify me on this device (decision 149): drawn only in the reading phase, and only when the server has Web Push keys (Home
 	 * passes it then, never in the demo). `shown` is for the catalog's drawings alone.
 	 */
 	notify?: { vapidKey: string; shown?: NotifyShown; idSuffix?: string };

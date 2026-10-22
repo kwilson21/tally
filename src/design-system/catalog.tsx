@@ -664,7 +664,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). While the import is read, Notify me on this device sits under that line (NotifyControl, decision 148). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds while its tab is on screen, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). While the import is read, Notify me on this device sits under that line (NotifyControl, decision 149). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds while its tab is on screen, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
@@ -934,7 +934,7 @@ function Brand() {
 				title="NotifyControl"
 				tier="visual"
 				components={["NotifyControl"]}
-				sentence="Notify me on this device (decision 148): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the iPhone hint, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
+				sentence="Notify me on this device (decision 149): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the iPhone hint, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
 			>
 				<State label="Off: the button, with its one line under it">
 					<NotifyControl
@@ -1241,7 +1241,7 @@ const BANK_LINE_SPEC: UseSpecText = {
 // The notify control's fake key: the catalog never subscribes, so the key only has to be a value the attribute can hold.
 const NOTIFY_FAKE_KEY = "catalog-fake-vapid-key";
 
-// The notify control's use spec (DESIGN.md, "Use"; decision 148): all eight answers, for sign-off.
+// The notify control's use spec (DESIGN.md, "Use"; decision 149): all eight answers, for sign-off.
 const NOTIFY_SPEC: UseSpecText = {
 	purpose:
 		"Let a person get one notification on this device when their first questions are ready, even after they've left Tally.",

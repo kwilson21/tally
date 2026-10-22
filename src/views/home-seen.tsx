@@ -3,7 +3,7 @@
 // check-in also sends the step its page shows (`step`), so /home/seen redraws the page's first-week top once that step has
 // moved on, and someone watching sees the questions appear (it never reloads the page). It is a hidden element that swaps
 // nothing and announces nothing, so it is not a live region. It checks in on load, every 30 seconds, and again at once when
-// the tab comes back to the screen (visibilitychange). A tab that isn't on screen counts as away (decision 148, the owner's
+// the tab comes back to the screen (visibilitychange). A tab that isn't on screen counts as away (decision 149, the owner's
 // pick): home-seen.js, which Layout loads on every page, cancels the check-in while the tab is hidden, so the push and the
 // email go to someone who has switched away, unless Plaid Link is open (plaid-link.js then sends a quiet ping).
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
@@ -37,7 +37,7 @@ export function HomeSeenCheckIn({
 		"hx-status:5xx": "swap:none",
 		"data-quiet": true,
 		// A Plaid Link window pauses the check-in too, so its answer can't redraw Home mid-link; a quiet ping with no step stands
-		// in for each skipped tick, so the person still counts as there (plaid-link.js, decisions 146 and 148).
+		// in for each skipped tick, so the person still counts as there (plaid-link.js, decisions 146 and 149).
 		"data-waits-for-link": true,
 		...(step ? { "hx-vals": JSON.stringify({ step }) } : {}),
 	};

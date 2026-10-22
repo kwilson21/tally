@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import swSource from "../public/sw.js?raw";
 import { PUSH_PAYLOAD } from "../src/first-tally/ready-push";
 
-// The service worker (decision 148): push shows the ready notification from its payload, and always shows one; a tap closes
+// The service worker (decision 149): push shows the ready notification from its payload, and always shows one; a tap closes
 // it and opens Tally, focusing and navigating an open window or opening a new one. It caches nothing and has no fetch handler.
 // Its fallback words and page are the push's own (PUSH_PAYLOAD), so the two can't drift apart.
 

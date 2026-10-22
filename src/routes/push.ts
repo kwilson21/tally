@@ -1,4 +1,4 @@
-// POST /push/subscribe (decision 148): one device's Web Push subscription, from the notify control's script (public/js/push.js).
+// POST /push/subscribe (decision 149): one device's Web Push subscription, from the notify control's script (public/js/push.js).
 // A form post, so Hono's csrf check applies (sameOrigin). The three fields are checked before anything is stored: the endpoint
 // is https and at most 2,000 characters; the key is an uncompressed P-256 point that imports on the curve (RFC 8291 §7); the
 // auth secret is 16 bytes. Input that fails answers 422. Web Push that is off (the demo, or no keys) answers 404, as does a
@@ -16,7 +16,7 @@ type App = { Bindings: Env; Variables: { actor: string } };
 
 export const push = new Hono<App>();
 
-/** The longest endpoint stored: a push service's URL is far shorter (decision 148). */
+/** The longest endpoint stored: a push service's URL is far shorter (decision 149). */
 const MAX_ENDPOINT_LENGTH = 2000;
 
 const P256 = { name: "ECDH", namedCurve: "P-256" } as const;
@@ -57,7 +57,7 @@ const INSERT_SQL =
 /** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. */
 const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth`;
 
-/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 148). */
+/** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 149). */
 const RESTORE_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO NOTHING`;
 
 /** The one person a device is stored for, if any. */

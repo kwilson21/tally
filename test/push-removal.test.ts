@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { removeHouseholdMember } from "../src/db/reconnect";
 
-// A removed person's devices go with them (decision 148): their push subscriptions are deleted in the same run as the removal,
+// A removed person's devices go with them (decision 149): their push subscriptions are deleted in the same run as the removal,
 // and nobody else's are touched.
 
 beforeEach(async () => {

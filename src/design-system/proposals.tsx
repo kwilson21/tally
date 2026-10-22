@@ -36,8 +36,9 @@ import { PolishRoundCProposals } from "./proposals-polish-4";
 import { PolishRoundDProposals } from "./proposals-polish-5";
 import { RulesProposals } from "./proposals-rules";
 import { SafeToSpendSmallProposal } from "./proposals-safe-small";
+import { SetupProposal } from "./proposals-setup";
 
-// What the owner decided from 2026-09-26 on (decisions 46 to 131), and the issue each ships in.
+// What the owner decided from 2026-09-26 on (decisions 46 to 148), and the issue each ships in.
 export const DECIDED: readonly {
 	title: string;
 	outcome: string;
@@ -575,6 +576,12 @@ export const DECIDED: readonly {
 			"Option A: Your banks lists each connected bank's state under the status (90 days in · 412, or Reading · 86 so far with the busy ring), and Have more accounts? with Link a bank sits under it while the import is read; the list refreshes every 5 seconds while a bank is read (decision 133).",
 		issue: 719,
 	},
+	{
+		title: "P142 · A new family's setup",
+		outcome:
+			"Option A: setup on its own pages: a welcome, then four steps, each a screen with a step bar, one question, the bank's own numbers as a ledger card and the answers at its foot, and a finish that shows Safe to spend and what was set up; no tab bar until setup is done, and the fifth stroke goes (decision 148).",
+		issue: 772,
+	},
 ];
 
 /** The proposals page body. */
@@ -612,6 +619,16 @@ export function Proposals() {
 					Drawn Oct 19. The owner's pick, marked Picked, is decision 133: A.
 				</p>
 				<BanksProposal />
+			</section>
+
+			<section aria-labelledby="p142-title" class="mt-12">
+				<h2 id="p142-title" class="font-serif text-3xl font-semibold">
+					Picked: a new family's setup
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 22. The owner's pick, marked Picked, is decision 148: A.
+				</p>
+				<SetupProposal />
 			</section>
 
 			<section aria-labelledby="followups-picks-title" class="mt-12">

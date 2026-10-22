@@ -8,7 +8,7 @@ import {
 	vapidAuthorization,
 } from "../src/push/web-push";
 
-// Web Push without a dependency (decision 148): RFC 8291 (aes128gcm over ECDH P-256), RFC 8188 (the record and its header) and
+// Web Push without a dependency (decision 149): RFC 8291 (aes128gcm over ECDH P-256), RFC 8188 (the record and its header) and
 // RFC 8292 (the VAPID JWT). Every byte is checked against the RFC's own example: Appendix A's intermediate values, which give
 // the body of its §5 example exactly. The RFC's Content-Length of 145 is wrong: the body is 144 bytes (86 header + 41 plaintext
 // + 1 delimiter + 16 tag), so the test compares the bytes, never a length from the RFC.
