@@ -83,7 +83,7 @@ app.onError(serverErrorPage);
  *   starts the night's Workflow and retries feedback. The Workflow (src/sort-instance.ts) sorts everything waiting in
  *   groups of 25, then makes the night's notes and names, then new-category suggestions, then keeps the first night's
  *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
- * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`) as a backstop.
+ * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready push and ready email (`runReadyPush`, `runReadyEmail`) as a backstop.
  * - Each minute (`runReadyPush`, then `runReadyEmail`, decisions 146 and 149): a new family's ready push goes out two minutes
  *   after its person leaves the first-week pages, and the ready email ten minutes after, or 8 minutes after that push reached
  *   one of their devices (ready-email.tsx, ready-push.ts). It reads one row for everyone else.
