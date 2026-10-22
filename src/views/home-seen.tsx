@@ -5,7 +5,7 @@
 // nothing and announces nothing, so it is not a live region. It checks in on load, every 30 seconds, and again at once when
 // the tab comes back to the screen (visibilitychange). A tab that isn't on screen counts as away (decision 148, the owner's
 // pick): home-seen.js, which Layout loads on every page, cancels the check-in while the tab is hidden, so the push and the
-// email go to someone who has switched away.
+// email go to someone who has switched away, unless Plaid Link is open (plaid-link.js then sends a quiet ping).
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 
 /** The id lets a refresh swap a new check-in in for the one the page shows (hx-swap-oob="outerHTML"). */

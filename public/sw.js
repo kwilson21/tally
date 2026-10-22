@@ -3,6 +3,7 @@
 // only in a tap (push.js). A push must always show a notification, or the browser can revoke the permission, so the words below
 // are the fallback for a push that can't be read.
 
+// The fallback copies PUSH_PAYLOAD (src/first-tally/ready-push.ts), whose url is QUESTIONS_PATH; test/sw-js.test.ts keeps them equal.
 const FALLBACK = {
 	title: "Tally",
 	body: "Your three questions are ready. About three minutes to finish setting up your budget.",

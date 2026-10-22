@@ -888,8 +888,10 @@ home.get("/home/banks", async (c) => {
 });
 
 /**
- * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, every
- * 30 seconds (HomeSeenCheckIn). Only the signed-in member's own row is written, and only once its last check-in is 30 seconds
+ * The presence check-in (decision 146): a person whose Home setup or questions page is open says they are still there, on load,
+ * every 30 seconds, and again when the tab comes back (HomeSeenCheckIn). A tab that isn't on screen cancels it (home-seen.js,
+ * decision 148), except that an open Plaid Link gets a quiet ping instead. Only the signed-in member's own row is written, and
+ * only once its last check-in is 30 seconds
  * old, so the page's repeats write once in each window. The demo writes nothing and answers 204. Home's check-in sends the
  * step its page shows. While that step is still the step now, the answer is 204 with no body. Once it has moved on, the page
  * is answered as the Your banks poll answers (redrawFirstWeek), and never reloaded: the questions opened, or the phase left
