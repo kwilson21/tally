@@ -15,6 +15,7 @@
 // this one. The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
 import { readFirstTally } from "../db/first-tally";
+import { isPushServiceEndpoint } from "../push/endpoint";
 import { type PushEnv, vapidKeys } from "../push/keys";
 import { type PushPayload, sendPush } from "../push/web-push";
 import { logDeliveries } from "../reconnect/deliver";
@@ -143,6 +144,12 @@ export async function runReadyPush(
 		let delivered = 0;
 		let transient = false;
 		for (const device of devices) {
+			// A device stored on another host is never fetched. It is a permanent failure, so the claim is kept and no later run sends.
+			if (!isPushServiceEndpoint(device.endpoint)) {
+				failedCount += 1;
+				failureKinds.add("push endpoint refused");
+				continue;
+			}
 			try {
 				const { status } = await sendPush(
 					{

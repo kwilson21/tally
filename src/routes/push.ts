@@ -1,6 +1,7 @@
 // POST /push/subscribe (decision 149): one device's Web Push subscription, from the notify control's script (public/js/push.js).
 // A form post, so Hono's csrf check applies (sameOrigin). The three fields are checked before anything is stored: the endpoint
-// is https and at most 2,000 characters; the key is an uncompressed P-256 point that imports on the curve (RFC 8291 §7); the
+// is at most 2,000 characters and a browser's push service over https (push/endpoint.ts); the key is an uncompressed P-256
+// point that imports on the curve (RFC 8291 §7); the
 // auth secret is 16 bytes. Input that fails answers 422. Web Push that is off (the demo, or no keys) answers 404, as does a
 // person who isn't signed in or is removed. Otherwise the device is stored for the signed-in person, or moved to them if it
 // was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
@@ -10,6 +11,7 @@
 import { Hono } from "hono";
 import { actor } from "../actor";
 import { fromBase64Url } from "../push/base64url";
+import { isPushServiceEndpoint } from "../push/endpoint";
 import { vapidKeys } from "../push/keys";
 
 type App = { Bindings: Env; Variables: { actor: string } };
@@ -31,11 +33,7 @@ const fieldOf = (form: Record<string, unknown>, name: string) => {
 async function subscriptionOf(form: Record<string, unknown>) {
 	const endpoint = fieldOf(form, "endpoint");
 	if (!endpoint || endpoint.length > MAX_ENDPOINT_LENGTH) return null;
-	try {
-		if (new URL(endpoint).protocol !== "https:") return null;
-	} catch {
-		return null;
-	}
+	if (!isPushServiceEndpoint(endpoint)) return null;
 	const p256dh = fieldOf(form, "p256dh");
 	const point = p256dh ? fromBase64Url(p256dh) : null;
 	if (!p256dh || point?.length !== 65 || point[0] !== 0x04) return null;

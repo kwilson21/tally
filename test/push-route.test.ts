@@ -12,7 +12,7 @@ import { sameOrigin } from "../src/security";
 const PERSON = "person@example.com";
 const RILEY = "riley@example.com";
 const ORIGIN = "http://localhost";
-const ENDPOINT = "https://push.example.test/send/abc";
+const ENDPOINT = "https://fcm.googleapis.com/fcm/send/abc";
 // RFC 8291's receiver key and auth secret, a valid P-256 point and a 16-byte secret (see web-push.test.ts).
 const UA_PUBLIC =
 	"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
@@ -231,14 +231,20 @@ describe("POST /push/subscribe: input that is not a subscription (422)", () => {
 
 	it("refuses an endpoint that is not https", async () => {
 		expect(
-			(await subscribe({ ...good, endpoint: "http://push.example.test/x" }))
+			(await subscribe({ ...good, endpoint: "http://fcm.googleapis.com/x" }))
 				.status,
 		).toBe(422);
 	});
 
 	it("refuses an endpoint over 2,000 characters", async () => {
-		const long = `https://push.example.test/${"a".repeat(2000)}`;
+		const long = `https://fcm.googleapis.com/${"a".repeat(2000)}`;
 		expect((await subscribe({ ...good, endpoint: long })).status).toBe(422);
+	});
+
+	it("accepts an endpoint of exactly 2,000 characters on a push service", async () => {
+		const exact = `https://fcm.googleapis.com/${"a".repeat(2000 - "https://fcm.googleapis.com/".length)}`;
+		expect(exact).toHaveLength(2000);
+		expect((await subscribe({ ...good, endpoint: exact })).status).toBe(204);
 	});
 
 	it("refuses a key that is not base64url", async () => {
@@ -280,6 +286,43 @@ describe("POST /push/subscribe: input that is not a subscription (422)", () => {
 
 	it("stores nothing for input that is refused", async () => {
 		await subscribe({ ...good, auth: "x" });
+		expect(await rowsFor()).toEqual([]);
+	});
+});
+
+describe("POST /push/subscribe: only a browser's push service (422 otherwise)", () => {
+	// Each browser family's push service (push.ts, PUSH_SERVICE_HOSTS). The ready push sends to whatever is stored, so a host
+	// that isn't one of these would have the Worker send requests to any https origin.
+	it.each([
+		[
+			"Chrome, Android and most Chromium browsers",
+			"https://fcm.googleapis.com/fcm/send/abc",
+		],
+		[
+			"Chrome's host, in capitals and with the default port",
+			"https://FCM.GOOGLEAPIS.COM:443/fcm/send/abc",
+		],
+		["Firefox", "https://updates.push.services.mozilla.com/wpush/v2/abc"],
+		["Firefox's bare host", "https://push.services.mozilla.com/wpush/v2/abc"],
+		[
+			"Safari, on a Mac and the iPhone and iPad web apps",
+			"https://web.push.apple.com/QAbc",
+		],
+		["Edge on Windows", "https://wns2-par02p.notify.windows.com/w/?token=abc"],
+	])("stores a device on %s's push service", async (_name, endpoint) => {
+		expect((await subscribe({ ...good, endpoint })).status).toBe(204);
+		expect((await rowsFor()).map((row) => row.endpoint)).toEqual([endpoint]);
+	});
+
+	it.each([
+		"https://evil.example/x",
+		"https://fcm.googleapis.com.evil.example/x",
+		"https://notfcm.googleapis.com/x",
+		"https://web.push.apple.com:8443/x",
+		"https://push.apple.com.evil.example/x",
+		"http://fcm.googleapis.com/x",
+	])("answers 422 and stores nothing for %s", async (endpoint) => {
+		expect((await subscribe({ ...good, endpoint })).status).toBe(422);
 		expect(await rowsFor()).toEqual([]);
 	});
 });

@@ -19,10 +19,10 @@ import handler from "../src/index";
 const STROKE_ONE = "2026-10-13";
 const DANA = "dana@example.com";
 const RILEY = "riley@example.com";
-const PHONE = "https://push.example.test/send/dana-phone";
-const LAPTOP = "https://push.example.test/send/dana-laptop";
-const SPARE = "https://push.example.test/send/riley-phone";
-const NEW_DEVICE = "https://push.example.test/send/dana-new";
+const PHONE = "https://fcm.googleapis.com/send/dana-phone";
+const LAPTOP = "https://fcm.googleapis.com/send/dana-laptop";
+const SPARE = "https://fcm.googleapis.com/send/riley-phone";
+const NEW_DEVICE = "https://fcm.googleapis.com/send/dana-new";
 
 // RFC 8291's receiver key and auth secret, and RFC 8292's VAPID pair from Appendix A: valid P-256 keys, so the push encrypts
 // and signs for real and only the push service is faked.
@@ -353,6 +353,30 @@ describe("the ready push: who gets it, and when", () => {
 		expect(pushed).toEqual([PHONE]);
 	});
 
+	it("never fetches a device stored on another host, and sends to the person's others", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, "https://evil.example/x");
+		await addDevice(DANA, PHONE);
+		const { fetchImpl, pushed } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([PHONE]);
+		expect(await pushedList()).toEqual([DANA]);
+	});
+
+	it("counts a device on another host as a permanent failure: the claim is kept, and no later run fetches it", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addDevice(DANA, "https://evil.example/x");
+		const first = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl: first.fetchImpl });
+		expect(first.pushed).toEqual([]);
+		expect(await pushedList()).toEqual([DANA]);
+		const second = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl: second.fetchImpl });
+		expect(second.pushed).toEqual([]);
+	});
+
 	it("does not push to a removed person, even with devices still stored", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: "-180 seconds", removed: true });
@@ -534,7 +558,7 @@ describe("the ready push: how each answer counts", () => {
 		const text = JSON.stringify(logs);
 		expect(text).toContain("ready push: 1 sent, 1 failed");
 		expect(text).toContain("push 410");
-		expect(text).not.toContain("push.example.test");
+		expect(text).not.toContain("fcm.googleapis.com");
 		expect(text).not.toContain(DANA);
 	});
 });
