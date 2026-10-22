@@ -636,27 +636,18 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 		}
 	});
 
-	it("names Apple Card's rules in plain words, in the demo and the family app (#766)", async () => {
+	it("adds no Apple Card copy to the net-worth section: the spec gives How Tally works one line, in its intro (#766)", async () => {
 		for (const html of [(await get("/how-it-works")).html, await family()]) {
 			const section = decodeHtml(sectionOf(html));
-			// The intro says what the total holds, uploaded cards included.
+			// The intro keeps its wording from before uploads, as the spec does.
 			expect(section).toContain(
-				"Accounts shows what everything you've linked or uploaded adds up to",
+				"Accounts shows what everything you've linked adds up to",
 			);
-			// Apple Card counts once an upload types its balance; until then, or once removed, it is left out.
-			expect(section).toContain(
-				"Apple Card counts once an upload types its balance, and is subtracted as a credit card is.",
-			);
-			expect(section).toContain(
-				"Until then, and after you remove it, it is left out, so the line doesn't wait for it.",
-			);
-			// An upload that types the balance saves it for that day, as a bank's sync does.
-			expect(section).toContain(
-				"An upload that types Apple Card's balance saves it for that day, as a bank's sync does.",
-			);
-			expect(section).toContain("A later upload the same day replaces it.");
-			// The two new rules are inside the fold, which counts them: 5 before, 7 now.
-			expect(section).toMatch(/7 rules</);
+			expect(section).not.toContain("uploaded");
+			expect(section).not.toContain("Apple Card");
+			// The fold's rule count is the rules inside it, unchanged at 5.
+			expect(section).toMatch(/5 rules</);
+			expect(section).not.toMatch(/7 rules</);
 		}
 	});
 

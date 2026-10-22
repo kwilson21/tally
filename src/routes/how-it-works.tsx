@@ -816,8 +816,8 @@ howItWorks.get("/how-it-works", async (c) => {
 
 				<Section id="net-worth" title="Net worth">
 					<p class="mt-2">
-						Accounts shows what everything you've linked or uploaded adds up to,
-						and a line of how it has moved over the last 6 months.
+						Accounts shows what everything you've linked adds up to, and a line
+						of how it has moved over the last 6 months.
 					</p>
 					{netWorthText ? (
 						<Example demo={demo} monthName={monthLabel}>
@@ -826,7 +826,7 @@ howItWorks.get("/how-it-works", async (c) => {
 					) : (
 						<p class="mt-3">There are no accounts to add up yet.</p>
 					)}
-					<RulesFold count={7}>
+					<RulesFold count={5}>
 						<ul class="mt-3 list-disc space-y-1 pl-5">
 							<li>
 								Net worth is what you have minus what you owe: every account's
@@ -842,15 +842,6 @@ howItWorks.get("/how-it-works", async (c) => {
 								day replaces it, so a day has one.
 								{demo &&
 									" This demo has no bank connection, so its six months of balances come with the made-up data."}
-							</li>
-							<li>
-								Apple Card counts once an upload types its balance, and is
-								subtracted as a credit card is. Until then, and after you remove
-								it, it is left out, so the line doesn't wait for it.
-							</li>
-							<li>
-								An upload that types Apple Card's balance saves it for that day,
-								as a bank's sync does. A later upload the same day replaces it.
 							</li>
 							<li>
 								The line has a point for each day with a balance, this month
