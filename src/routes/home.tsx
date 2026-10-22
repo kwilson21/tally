@@ -244,8 +244,8 @@ async function renderHome(
 	);
 	const demo = c.env.DEMO === "true";
 	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
-	// needs signing in. Read once, for the bank line and for the setup (its fifth day and the answered wait, #671). The demo
-	// has no real banks, so it never asks.
+	// needs signing in. Read once, and that one list is both the bank line and the setup's input (its refresh, its answered
+	// wait and its fifth day), so the two always agree. The demo has no real banks, so it never asks.
 	const flagged =
 		demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today);
 	const bankNotice = homeBankNotice(flagged, today);
@@ -302,7 +302,8 @@ async function renderHome(
 		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
 	// The first week's setup (P125 E, spec §8.8): the family app only, on the current month, until all five strokes are
 	// drawn. Before a bank, Home carries Link a bank and loads Plaid Link; Accounts' button redraws Accounts, this one Home.
-	const setup = current && !demo ? await readSetup(c.env.DB, { today }) : null;
+	const setup =
+		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];
@@ -707,13 +708,14 @@ async function readHomeSetup(db: D1Database) {
 	const banks = await readYourBanks(db);
 	const flagged = flaggedBanks(
 		banks.map((bank) => ({
+			id: bank.id,
 			name: bank.name,
 			needsAttention: bank.status === "needs_attention",
 			lastSyncedAt: bank.lastSyncedAt,
 		})),
 		today,
 	);
-	const setup = await readSetup(db, { today });
+	const setup = await readSetup(db, { today, flagged });
 	return { today, banks, flagged, setup };
 }
 

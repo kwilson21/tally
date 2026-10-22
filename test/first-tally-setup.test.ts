@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { bankSyncs } from "../src/db/accounts";
 import type { FirstTally } from "../src/db/first-tally";
 import { readFirstTally, takeBackBankStrokes } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { readSetup, setupView, storedTimeMs } from "../src/first-tally/setup";
+import { flaggedBanks, homeBankNotice } from "../src/stale-bank";
 
 // Home's setup (P125 E, spec §8.8): what the first week shows, from the record, the banks and what Jev still owes.
 const TODAY = "2026-10-14";
@@ -49,11 +51,11 @@ function raceBeforeBankStroke(hook: () => Promise<unknown>): D1Database {
 	});
 }
 const BANK = {
+	id: 1,
 	name: "Chase",
 	linkedAt: "2026-10-13 09:00:00",
 	lastSyncedAt: "2026-10-13",
 	historyCompleteAt: "2026-10-13",
-	needsAttention: false,
 };
 /** A bank whose history came in half an hour before NOW: the sort is recent. */
 const RECENT = { ...BANK, historyCompleteAt: "2026-10-14 11:30:00" };
@@ -66,6 +68,7 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 	setupView({
 		record: null,
 		banks: [],
+		flagged: [],
 		waiting: 0,
 		total: 0,
 		today: TODAY,
@@ -204,10 +207,11 @@ describe("setupView: which setup state Home shows", () => {
 			linkedAt: "2026-10-14 11:30:00",
 			historyCompleteAt: null,
 		};
-		// Each bank's flag is its own row's (needsAttention, lastSyncedAt): the same bank, flagged or not.
+		// Each bank's flag is the one the caller read for its row (flagged, by id): the same bank, flagged or not.
 		const needsSignIn = view({
 			record,
-			banks: [{ ...loading, needsAttention: true }],
+			banks: [loading],
+			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
 		expect(needsSignIn?.phase).toBe("reading");
@@ -215,6 +219,7 @@ describe("setupView: which setup state Home shows", () => {
 		const stopped = view({
 			record,
 			banks: [{ ...loading, lastSyncedAt: "2026-10-10" }],
+			flagged: [{ id: 1, name: "Chase", reason: "stale", since: "2026-10-10" }],
 			total: 10,
 		});
 		expect(stopped?.refreshes).toBe(false);
@@ -231,10 +236,8 @@ describe("setupView: which setup state Home shows", () => {
 		};
 		const both = view({
 			record,
-			banks: [
-				{ ...loading, needsAttention: true },
-				{ ...loading, name: "Wells Fargo" },
-			],
+			banks: [loading, { ...loading, id: 2, name: "Wells Fargo" }],
+			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
 		expect(both?.refreshes).toBe(true);
@@ -247,15 +250,33 @@ describe("setupView: which setup state Home shows", () => {
 			linkedAt: "2026-10-14 11:30:00",
 			historyCompleteAt: null,
 		};
+		// Two banks named Chase: the flag is the first row's, so the second, healthy and still loading, refreshes.
 		const twoChases = view({
 			record,
-			banks: [
-				{ ...loading, needsAttention: true },
-				{ ...loading, needsAttention: false },
-			],
+			banks: [loading, { ...loading, id: 2 }],
+			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 			total: 10,
 		});
 		expect(twoChases?.refreshes).toBe(true);
+		// The flag on the second row alone: the first, healthy and still loading, refreshes.
+		const flaggedSecond = view({
+			record,
+			banks: [loading, { ...loading, id: 2 }],
+			flagged: [{ id: 2, name: "Chase", reason: "sign-in" }],
+			total: 10,
+		});
+		expect(flaggedSecond?.refreshes).toBe(true);
+		// Both flagged: nothing is moving, so nothing refreshes.
+		const bothFlagged = view({
+			record,
+			banks: [loading, { ...loading, id: 2 }],
+			flagged: [
+				{ id: 1, name: "Chase", reason: "sign-in" },
+				{ id: 2, name: "Chase", reason: "sign-in" },
+			],
+			total: 10,
+		});
+		expect(bothFlagged?.refreshes).toBe(false);
 	});
 
 	it("refreshes while the sort runs once every history is in, even with a flagged bank (decision 146)", () => {
@@ -264,8 +285,9 @@ describe("setupView: which setup state Home shows", () => {
 			record,
 			banks: [
 				{ ...RECENT, lastSyncedAt: "2026-10-10" },
-				{ ...RECENT, name: "Wells Fargo" },
+				{ ...RECENT, id: 2, name: "Wells Fargo" },
 			],
+			flagged: [{ id: 1, name: "Chase", reason: "stale", since: "2026-10-10" }],
 			waiting: 500,
 			total: 1500,
 		});
@@ -285,11 +307,11 @@ describe("setupView: which setup state Home shows", () => {
 	it("promises no time while any connected bank's history is still coming, even when another bank's is in", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const second = {
+			id: 2,
 			name: "Northline",
 			linkedAt: "2026-10-13 09:00:00",
 			lastSyncedAt: "2026-10-13",
 			historyCompleteAt: null,
-			needsAttention: false,
 		};
 		const reading = view({
 			record,
@@ -311,7 +333,7 @@ describe("setupView: which setup state Home shows", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const two = view({
 			record,
-			banks: [BANK, { ...BANK, name: "Northline" }],
+			banks: [BANK, { ...BANK, id: 2, name: "Northline" }],
 			waiting: 0,
 			total: 10,
 		});
@@ -328,7 +350,7 @@ describe("setupView: which setup state Home shows", () => {
 		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
 		const ready = view({
 			record,
-			banks: [BANK, { ...BANK, name: "Northline" }],
+			banks: [BANK, { ...BANK, id: 2, name: "Northline" }],
 			waiting: 0,
 			total: 10,
 		});
@@ -432,7 +454,7 @@ describe("setupView: which setup state Home shows", () => {
 					linkedAt: "2026-10-13 09:00:00",
 					lastSyncedAt: null,
 					historyCompleteAt: null,
-					needsAttention: false,
+					id: 2,
 				},
 			],
 		});
@@ -462,7 +484,7 @@ describe("setupView: which setup state Home shows", () => {
 					linkedAt: "2026-10-13 09:00:00",
 					lastSyncedAt: null,
 					historyCompleteAt: null,
-					needsAttention: false,
+					id: 2,
 				},
 			],
 		});
@@ -486,7 +508,7 @@ describe("setupView: which setup state Home shows", () => {
 					linkedAt: "2026-10-13 09:00:00",
 					lastSyncedAt: null,
 					historyCompleteAt: null,
-					needsAttention: false,
+					id: 2,
 				},
 			],
 		});
@@ -517,7 +539,7 @@ describe("setupView: which setup state Home shows", () => {
 					linkedAt: "2026-10-13 09:00:00",
 					lastSyncedAt: null,
 					historyCompleteAt: null,
-					needsAttention: false,
+					id: 2,
 				},
 			],
 		});
@@ -584,13 +606,14 @@ describe("readSetup", () => {
 		)
 			.bind(JSON.stringify(ALL_DRAWN))
 			.run();
-		expect(await readSetup(env.DB, { today: TODAY })).toBeNull();
+		expect(await readSetup(env.DB, { today: TODAY, flagged: [] })).toBeNull();
 	});
 
 	it("draws stroke one today for a connected bank that has none (linked before the first week shipped)", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		const setup = await readSetup(env.DB, {
 			today: TODAY,
+			flagged: [],
 		});
 		// Stroke one is drawn today, but the setup is reading, not set up: the connected banks' 90-day history isn't in yet
 		// (the demo seed's banks carry no history mark), so the questions stay shut until it is.
@@ -610,7 +633,7 @@ describe("readSetup", () => {
 				"UPDATE plaid_items SET disconnected_at = datetime('now')",
 			).run(),
 		);
-		await readSetup(racing, { today: TODAY });
+		await readSetup(racing, { today: TODAY, flagged: [] });
 		expect((await readFirstTally(env.DB))?.strokes.bank).toBeUndefined();
 	});
 
@@ -635,25 +658,60 @@ describe("readSetup", () => {
 			.run();
 	};
 
+	/** The flags Home reads for the rows now, as its setup is given them: bankSyncs, then flaggedBanks, one list. */
+	const homeFlags = async () => flaggedBanks(await bankSyncs(env.DB), TODAY);
+
 	it("refreshes for a healthy bank still loading when another bank with the same name needs signing in (each row's own flag)", async () => {
 		await twoChases(["needs_attention", "ok"]);
-		const setup = await readSetup(env.DB, { today: TODAY });
+		const setup = await readSetup(env.DB, {
+			today: TODAY,
+			flagged: await homeFlags(),
+		});
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.refreshes).toBe(true);
 	});
 
 	it("stops refreshing when the only bank still loading needs signing in", async () => {
 		await twoChases(["needs_attention"]);
-		const setup = await readSetup(env.DB, { today: TODAY });
+		const setup = await readSetup(env.DB, {
+			today: TODAY,
+			flagged: await homeFlags(),
+		});
 		expect(setup?.phase).toBe("reading");
 		expect(setup?.refreshes).toBe(false);
+	});
+
+	it("decides refreshes from the flags it is given, not the row: a list that flags the bank stops Home refreshing, and its notice names the bank", async () => {
+		await twoChases(["ok"]);
+		const id = (
+			await env.DB.prepare("SELECT id FROM plaid_items ORDER BY id").first<{
+				id: number;
+			}>()
+		)?.id;
+		const flagged = [
+			{ id: id ?? 0, name: "Chase", reason: "sign-in" as const },
+		];
+		const setup = await readSetup(env.DB, { today: TODAY, flagged });
+		expect(setup?.refreshes).toBe(false);
+		expect(homeBankNotice(flagged, TODAY)?.words).toEqual([
+			"Chase needs signing in",
+		]);
+	});
+
+	it("keeps refreshing when the list leaves the bank unflagged, even though its row says it needs signing in", async () => {
+		await twoChases(["needs_attention"]);
+		const setup = await readSetup(env.DB, { today: TODAY, flagged: [] });
+		expect(setup?.phase).toBe("reading");
+		expect(setup?.refreshes).toBe(true);
 	});
 
 	it("reads before-bank setup for a household with no record and no connected bank", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
-		expect((await readSetup(env.DB, { today: TODAY }))?.phase).toBe("before");
+		expect(
+			(await readSetup(env.DB, { today: TODAY, flagged: [] }))?.phase,
+		).toBe("before");
 	});
 });
 
@@ -775,7 +833,7 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("is not drawn on the budgets stroke's own day, even with the night kept", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: budgetsDay });
+		await readSetup(env.DB, { today: budgetsDay, flagged: [] });
 		expect(await countOf()).toBeUndefined();
 	});
 
@@ -783,6 +841,7 @@ describe("the fifth day (P125 E, #586)", () => {
 		await seedHousehold({ ...fourDrawn, night });
 		const view = await readSetup(env.DB, {
 			today: later,
+			flagged: [],
 		});
 		expect(await countOf()).toBe(later);
 		expect(view?.fifth).toEqual(night);
@@ -795,9 +854,10 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("keeps the first day it was drawn, so loading Home again the same day changes nothing", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later });
+		await readSetup(env.DB, { today: later, flagged: [] });
 		const again = await readSetup(env.DB, {
 			today: later,
+			flagged: [],
 		});
 		expect(await countOf()).toBe(later);
 		expect(again?.fifth).toEqual(night);
@@ -805,14 +865,16 @@ describe("the fifth day (P125 E, #586)", () => {
 
 	it("is Home again from the next household day: no set-up view, and the record stays", async () => {
 		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later });
-		expect(await readSetup(env.DB, { today: "2026-10-15" })).toBeNull();
+		await readSetup(env.DB, { today: later, flagged: [] });
+		expect(
+			await readSetup(env.DB, { today: "2026-10-15", flagged: [] }),
+		).toBeNull();
 		expect(await countOf()).toBe(later);
 	});
 
 	it("is not drawn while no night has been kept", async () => {
 		await seedHousehold(fourDrawn);
-		await readSetup(env.DB, { today: later });
+		await readSetup(env.DB, { today: later, flagged: [] });
 		expect(await countOf()).toBeUndefined();
 	});
 
@@ -827,7 +889,7 @@ describe("the fifth day (P125 E, #586)", () => {
 			},
 			budgets: {},
 		});
-		expect(await readSetup(env.DB, { today: later })).toBeNull();
+		expect(await readSetup(env.DB, { today: later, flagged: [] })).toBeNull();
 	});
 
 	it("is shown by setupView only on the day stroke five is drawn", () => {
@@ -856,18 +918,18 @@ describe("the answered wait (P125 E, #671)", () => {
 		budgets: {},
 	};
 	const reading = {
+		id: 2,
 		name: "Chase",
 		linkedAt: "2026-10-13 09:00:00",
 		lastSyncedAt: null,
 		historyCompleteAt: null,
-		needsAttention: false,
 	};
 	const wells = {
+		id: 3,
 		name: "Wells Fargo",
 		linkedAt: "2026-10-13 09:00:00",
 		lastSyncedAt: "2026-10-13",
 		historyCompleteAt: "2026-10-13",
-		needsAttention: false,
 	};
 
 	it("says what Tally waits for while one bank reads its history, and promises nothing for tomorrow", () => {
@@ -882,7 +944,8 @@ describe("the answered wait (P125 E, #671)", () => {
 	it("names the one bank that needs signing in", () => {
 		const v = view({
 			record: answered,
-			banks: [{ ...BANK, needsAttention: true }],
+			banks: [BANK],
+			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
 		});
 		expect(v?.answeredWaiting).toBe("once Chase is signed in again.");
 	});
@@ -899,9 +962,10 @@ describe("the answered wait (P125 E, #671)", () => {
 	it("names both banks that need signing in", () => {
 		const v = view({
 			record: answered,
-			banks: [
-				{ ...BANK, needsAttention: true },
-				{ ...wells, needsAttention: true },
+			banks: [BANK, wells],
+			flagged: [
+				{ id: 1, name: "Chase", reason: "sign-in" },
+				{ id: 3, name: "Wells Fargo", reason: "sign-in" },
 			],
 		});
 		expect(v?.answeredWaiting).toBe(
@@ -955,7 +1019,7 @@ describe("the re-ask note (P125 E, #578)", () => {
 					linkedAt: "2026-10-13 09:00:00",
 					lastSyncedAt: null,
 					historyCompleteAt: null,
-					needsAttention: false,
+					id: 2,
 				},
 			],
 		});

@@ -7,6 +7,8 @@ import { daysBefore, shortDay } from "./dates";
 export const STALE_AFTER_DAYS = 3;
 
 export type BankSync = {
+	/** The bank's `plaid_items` id. A flag belongs to its row by this id, never by the name (two banks can share one). */
+	id: number;
 	name: string;
 	/** The bank's login needs fixing (`plaid_items.status = needs_attention`). */
 	needsAttention: boolean;
@@ -16,13 +18,17 @@ export type BankSync = {
 	disconnected?: boolean;
 };
 
-export type FlaggedBank =
+/** A flagged bank's name, why it is flagged, and its sync date: what Home's bank line reads (homeBankNotice). */
+export type FlagWords =
 	| { name: string; reason: "sign-in"; since?: string }
 	| { name: string; reason: "stale"; since: string };
 
+/** A flagged bank: the id of its row, then its name, reason and date (bankFlag). */
+export type FlaggedBank = { id: number } & FlagWords;
+
 /** Home's selected wording and the date attached to the Safe to spend amount. */
 export function homeBankNotice(
-	flagged: FlaggedBank[],
+	flagged: FlagWords[],
 	today: string,
 ): { words: string[]; asOf?: string } | null {
 	if (flagged.length === 0) return null;
@@ -34,7 +40,7 @@ export function homeBankNotice(
 		return a.name.localeCompare(b.name);
 	});
 	const dated = sorted.find(
-		(bank): bank is FlaggedBank & { since: string } => bank.since !== undefined,
+		(bank): bank is FlagWords & { since: string } => bank.since !== undefined,
 	);
 	const visible = sorted
 		.slice(0, 3)
@@ -67,13 +73,14 @@ export function bankFlag(bank: BankSync, today: string): FlaggedBank | null {
 	const since = bank.lastSyncedAt?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 	if (bank.needsAttention)
 		return {
+			id: bank.id,
 			name: bank.name,
 			reason: "sign-in",
 			...(since && { since }),
 		};
 	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
 	if (since !== undefined && since <= daysBefore(today, STALE_AFTER_DAYS))
-		return { name: bank.name, reason: "stale", since };
+		return { id: bank.id, name: bank.name, reason: "stale", since };
 	return null;
 }
 
