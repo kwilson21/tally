@@ -162,6 +162,11 @@ function drawControl(dom: Dom, vapidKey = AS_PUBLIC) {
 	const iphone = dom.createElement("p");
 	iphone.setAttribute("data-notify-state", "iphone");
 	iphone.hidden = true;
+	// The device word the hint names, in its own element (push.js sets it to iPad on an iPad).
+	const device = dom.createElement("span");
+	device.setAttribute("data-notify-device", "true");
+	device.textContent = "iPhone";
+	iphone.append(device);
 	const blocked = dom.createElement("p");
 	blocked.setAttribute("data-notify-state", "blocked");
 	blocked.setAttribute("tabindex", "-1");
@@ -195,6 +200,8 @@ type Options = {
 	subscription?: ReturnType<typeof subscriptionWith> | null;
 	subscribe?: () => Promise<unknown>;
 	userAgent?: string;
+	/** navigator.maxTouchPoints: an iPad in desktop mode reports Macintosh with touch points, a real Mac reports 0. */
+	maxTouchPoints?: number;
 	standalone?: boolean;
 	supported?: boolean;
 	saveStatus?: number;
@@ -222,6 +229,7 @@ async function page(options: Options = {}) {
 		serviceWorker: { register, ready: Promise.resolve(registration) },
 		userAgent:
 			options.userAgent ?? "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)",
+		maxTouchPoints: options.maxTouchPoints ?? 0,
 		standalone: options.standalone,
 	};
 	const notification = { permission: options.permission ?? "default" };
@@ -269,6 +277,10 @@ const shown = (control: El, state: string) => {
 	return el ? !el.hidden : false;
 };
 
+/** The device word the Home Screen hint names (its own element), or null when the control has none. */
+const deviceWord = (control: El) =>
+	control.querySelector("[data-notify-device]")?.textContent ?? null;
+
 describe("the notify control on a page: what the browser already has", () => {
 	it("shows nothing in a browser without Web Push", async () => {
 		const { control, register } = await page({ supported: false });
@@ -294,6 +306,50 @@ describe("the notify control on a page: what the browser already has", () => {
 			standalone: true,
 		});
 		expect(shown(control, "iphone")).toBe(false);
+	});
+
+	it("names the device in the hint: iPhone stays iPhone", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
+			standalone: false,
+		});
+		expect(shown(control, "iphone")).toBe(true);
+		expect(deviceWord(control)).toBe("iPhone");
+	});
+
+	it("shows the hint on an iPad outside its Home Screen app, naming it iPad", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent:
+				"Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15",
+			standalone: false,
+		});
+		expect(shown(control, "iphone")).toBe(true);
+		expect(shown(control, "off")).toBe(false);
+		expect(deviceWord(control)).toBe("iPad");
+	});
+
+	it("shows the hint on an iPad in desktop mode, which reports Macintosh with touch points, naming it iPad", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			maxTouchPoints: 5,
+			standalone: false,
+		});
+		expect(shown(control, "iphone")).toBe(true);
+		expect(deviceWord(control)).toBe("iPad");
+	});
+
+	it("shows nothing for a Mac, which reports no touch points", async () => {
+		const { control } = await page({
+			supported: false,
+			userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			maxTouchPoints: 0,
+			standalone: false,
+		});
+		for (const state of ["off", "on", "iphone", "blocked"])
+			expect(shown(control, state)).toBe(false);
 	});
 
 	it("shows On, and posts the subscription again, when a matching subscription exists with permission granted", async () => {

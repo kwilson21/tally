@@ -8,12 +8,14 @@
 import { Button } from "./button";
 import { Icon } from "./icons";
 
-/** The four states: Off (the button), On, the iPhone hint, and Blocked (quiet). */
+/** The four states: Off (the button), On, the Home Screen hint for an iPhone or iPad, and Blocked (quiet). */
 export type NotifyShown = "off" | "on" | "iphone" | "blocked";
 
 const ON = "Notifications are on for this device.";
-const IPHONE =
-	"To get a notification on iPhone, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.";
+// The hint names the device in its own element (an iPad's word is set by push.js, which finds it by data-notify-device).
+const IPHONE_BEFORE = "To get a notification on ";
+const IPHONE_AFTER =
+	", add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.";
 const BLOCKED =
 	"Notifications are blocked for Tally in this device's settings.";
 
@@ -64,7 +66,9 @@ export function NotifyControl({
 				data-notify-state="iphone"
 				hidden={hidden("iphone")}
 			>
-				{IPHONE}
+				{IPHONE_BEFORE}
+				<span data-notify-device>iPhone</span>
+				{IPHONE_AFTER}
 			</p>
 			<p
 				class="mt-4 text-sm text-muted"

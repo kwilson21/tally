@@ -67,15 +67,38 @@ export function setupPush({
 		"serviceWorker" in navigator &&
 		"PushManager" in window &&
 		"Notification" in window;
-	const onIPhone = () =>
-		/iPhone|iPod/.test(navigator.userAgent) &&
+	/**
+	 * The device the Home Screen hint names: "iPad", "iPhone" (an iPod too), or null for anything else. An iPad in desktop mode
+	 * reports Macintosh, and a real Mac has no touch points (maxTouchPoints 0), so touch tells the two apart.
+	 */
+	const appleDevice = () => {
+		const agent = navigator.userAgent;
+		if (
+			/iPad/.test(agent) ||
+			(/Macintosh/.test(agent) && navigator.maxTouchPoints > 1)
+		)
+			return "iPad";
+		if (/iPhone|iPod/.test(agent)) return "iPhone";
+		return null;
+	};
+	/** The device for the hint, outside the Home Screen app (where Web Push works only): iPhone or iPad, or null for none. */
+	const hintDevice = () =>
 		navigator.standalone !== true &&
-		!matchMedia("(display-mode: standalone)").matches;
+		!matchMedia("(display-mode: standalone)").matches
+			? appleDevice()
+			: null;
 
 	/** Shows one state of the control and hides the others (each state carries data-notify-state). */
 	const showState = (node, state) => {
 		for (const element of node.querySelectorAll("[data-notify-state]"))
 			element.hidden = element.getAttribute("data-notify-state") !== state;
+	};
+
+	/** The Home Screen hint, with the device it names in its own element (the words around it are the same for each). */
+	const showHint = (node, device) => {
+		const word = node.querySelector("[data-notify-device]");
+		if (word) word.textContent = device;
+		showState(node, "iphone");
 	};
 
 	/** The button's busy look, set on the element itself, as plaid-link.js does (Button's busyLabel shows through htmx-request). */
@@ -207,7 +230,8 @@ export function setupPush({
 	const setUp = async (node) => {
 		node.setAttribute("data-notify-ready", "");
 		if (!supported()) {
-			if (onIPhone()) showState(node, "iphone");
+			const device = hintDevice();
+			if (device) showHint(node, device);
 			return;
 		}
 		try {

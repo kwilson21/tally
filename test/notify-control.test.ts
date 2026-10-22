@@ -133,10 +133,10 @@ describe("the notify control's words and button", () => {
 		expect(markup).toMatch(/<svg[^>]*class="size-5"/);
 	});
 
-	it("draws the iPhone hint with its words", async () => {
+	it("draws the iPhone hint with its words, the device named in its own element for push.js (iPad)", async () => {
 		const markup = await control("iphone");
 		expect(markup).toContain(
-			"To get a notification on iPhone, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.",
+			'To get a notification on <span data-notify-device="true">iPhone</span>, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.',
 		);
 	});
 
