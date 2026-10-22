@@ -693,7 +693,11 @@ function Brand() {
 				<State label="Sorting: the count of what is sorted, and the line says the questions open when it's done">
 					<HomeSetup
 						polls={false}
-						notify={{ vapidKey: NOTIFY_FAKE_KEY, shown: "off" }}
+						notify={{
+							vapidKey: NOTIFY_FAKE_KEY,
+							shown: "off",
+							idSuffix: "sorting",
+						}}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
@@ -933,16 +937,32 @@ function Brand() {
 				sentence="Notify me on this device (decision 148): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the iPhone hint, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
 			>
 				<State label="Off: the button, with its one line under it">
-					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="off" />
+					<NotifyControl
+						vapidKey={NOTIFY_FAKE_KEY}
+						shown="off"
+						idSuffix="off"
+					/>
 				</State>
 				<State label="On: a check and the words that say it is on">
-					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="on" />
+					<NotifyControl
+						vapidKey={NOTIFY_FAKE_KEY}
+						shown="on"
+						idSuffix="on"
+					/>
 				</State>
 				<State label="iPhone outside its Home Screen app: the hint in place of the button">
-					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="iphone" />
+					<NotifyControl
+						vapidKey={NOTIFY_FAKE_KEY}
+						shown="iphone"
+						idSuffix="iphone"
+					/>
 				</State>
 				<State label="Blocked in this device's settings: the quiet line">
-					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="blocked" />
+					<NotifyControl
+						vapidKey={NOTIFY_FAKE_KEY}
+						shown="blocked"
+						idSuffix="blocked"
+					/>
 				</State>
 				<UseSpec spec={NOTIFY_SPEC} />
 			</Specimen>

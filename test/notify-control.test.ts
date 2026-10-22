@@ -92,6 +92,15 @@ describe("the notify control's four states", () => {
 		expect(markup).toMatch(/<div data-notify="true" data-vapid-key="[^"]+">/);
 	});
 
+	it("gives a drawing's help line its own id, and points its button at that id (idSuffix, catalog only)", async () => {
+		const markup = html(
+			await NotifyControl({ vapidKey: VAPID, shown: "off", idSuffix: "sorting" }),
+		);
+		expect(markup).toContain('id="notify-help-sorting"');
+		expect(markup).toContain('aria-describedby="notify-help-sorting"');
+		expect(markup).not.toContain('id="notify-help"');
+	});
+
 	it("keeps an empty alert region for a tap that is refused", async () => {
 		expect(await control()).toContain('<div data-notify-alert="true"></div>');
 	});

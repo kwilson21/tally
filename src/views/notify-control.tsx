@@ -18,16 +18,20 @@ const BLOCKED =
 
 /**
  * The control for one VAPID public key (`vapidKey`, base64url, the key the browser subscribes with). Each state is hidden unless
- * `shown` names it.
+ * `shown` names it. The help line's id is notify-help in the app; a catalog drawing passes `idSuffix`, so each drawing's id is
+ * its own and no button points at another drawing's line.
  */
 export function NotifyControl({
 	vapidKey,
 	shown,
+	idSuffix,
 }: {
 	vapidKey: string;
 	shown?: NotifyShown;
+	idSuffix?: string;
 }) {
 	const hidden = (state: NotifyShown) => shown !== state;
+	const helpId = idSuffix ? `notify-help-${idSuffix}` : "notify-help";
 	return (
 		<div data-notify data-vapid-key={vapidKey}>
 			<div class="mt-4" data-notify-state="off" hidden={hidden("off")}>
@@ -37,11 +41,11 @@ export function NotifyControl({
 					class="w-full"
 					busyLabel="Turning on…"
 					data-notify-on
-					aria-describedby="notify-help"
+					aria-describedby={helpId}
 				>
 					Notify me on this device
 				</Button>
-				<p id="notify-help" class="mt-2 text-sm text-muted">
+				<p id={helpId} class="mt-2 text-sm text-muted">
 					One notification when your questions are ready, if you've left Tally.
 				</p>
 			</div>

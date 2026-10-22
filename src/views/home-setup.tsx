@@ -217,7 +217,7 @@ export function HomeSetup({
 	 * Notify me on this device (decision 148): drawn only in the reading phase, and only when the server has Web Push keys (Home
 	 * passes it then, never in the demo). `shown` is for the catalog's drawings alone.
 	 */
-	notify?: { vapidKey: string; shown?: NotifyShown };
+	notify?: { vapidKey: string; shown?: NotifyShown; idSuffix?: string };
 	/** The connected banks' rows and today's date, drawn while the import is read (YourBanks). */
 	yourBanks?: {
 		banks: YourBank[];
@@ -292,7 +292,11 @@ export function HomeSetup({
 			)}
 			{/* A sibling of #setup-next, #setup-status and Your banks, never inside them: those are swapped or polled (home.tsx). */}
 			{phase === "reading" && notify && (
-				<NotifyControl vapidKey={notify.vapidKey} shown={notify.shown} />
+				<NotifyControl
+					vapidKey={notify.vapidKey}
+					shown={notify.shown}
+					idSuffix={notify.idSuffix}
+				/>
 			)}
 			{bankLine && <BankBehind words={bankLine} />}
 			{phase === "reading" && yourBanks && (
