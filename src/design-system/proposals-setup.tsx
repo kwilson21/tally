@@ -146,7 +146,7 @@ const TODAY_AFTER: StepLine[] = [
 function WelcomeBody() {
 	return (
 		<>
-			<Notebook strokes={0} ink size="size-20" />
+			<Notebook strokes={0} ink size="size-16" />
 			<h1 class="mt-2 font-serif text-4xl font-semibold tracking-tight">
 				Welcome to Tally.
 			</h1>

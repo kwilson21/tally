@@ -7032,6 +7032,27 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 		expect(chunk).not.toContain("h-[760px]");
 	});
 
+	it("draws A's welcome pictures, phone and desktop, with the notebook at size-16 and not size-20 (P142, #770)", async () => {
+		const chunk = specimenOf(await drawn());
+		const phone = pictureNamed(chunk, "A, the welcome");
+		const desktop =
+			chunk
+				.split("<figure")
+				.slice(1)
+				.find((picture) =>
+					picture.includes('aria-label="A, the welcome, on desktop"'),
+				) ?? "";
+		// The notebook is the picture's 120-square drawing; its svg carries the box's size class.
+		const notebookClasses = (picture: string) =>
+			[...picture.matchAll(/<svg class="([^"]*)" viewBox="0 0 120 120"/g)].map(
+				(m) => m[1] ?? "",
+			);
+		expect(phone).not.toBe("");
+		expect(desktop).not.toBe("");
+		expect(notebookClasses(phone)).toEqual(["size-16 shrink-0"]);
+		expect(notebookClasses(desktop)).toEqual(["size-16 shrink-0"]);
+	});
+
 	it("draws the app's Feedback pill in the masthead of every picture, and no quiet Feedback text", async () => {
 		const chunk = specimenOf(await drawn());
 		const pictures = chunk.split("<figure").slice(1);
