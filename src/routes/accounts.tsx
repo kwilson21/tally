@@ -398,8 +398,22 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 		balanceCents: APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	});
 	if (!result.ok) throw new Error("The demo's Apple Card sample has no start");
-	await demoCardMonths(c.env.DB, anchor);
-	// The same steps the real upload's rows get: merchant rules, then the sorting for the rows added (none on a second press).
+	// The same steps the real upload's rows get, first, so a failure in the months below never drops the sorting.
+	await afterUpload(c, result.addedIds);
+	try {
+		await demoCardMonths(c.env.DB, anchor);
+	} catch {
+		// Fixed words only: the demo's months are not worth a row or an error's detail in the log.
+		console.error("apple card months failed");
+	}
+	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
+}
+
+/**
+ * The steps an upload's added rows get, as a sync's do: the merchant rules now, then the sorting of the rows added in the
+ * background (none on a second press). A failed rules step is logged in fixed words, and the sorting is told it didn't run.
+ */
+async function afterUpload(c: Context<App>, addedIds: number[]) {
 	let rulesFailed = false;
 	try {
 		await afterSync(c.env.DB);
@@ -407,15 +421,14 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 		rulesFailed = true;
 		console.error("apple card rules failed");
 	}
-	if (result.addedIds.length > 0)
+	if (addedIds.length > 0)
 		c.executionCtx.waitUntil(
 			sortAfterSync(
 				c.env,
-				{ changedIds: result.addedIds },
+				{ changedIds: addedIds },
 				{ rulesApplied: !rulesFailed },
 			),
 		);
-	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 }
 
 /**
@@ -509,21 +522,7 @@ accounts.post("/accounts/apple-card", async (c) => {
 		);
 
 	// The same steps a sync's rows get: merchant rules and bill matching now, then the sorting in the background.
-	let rulesFailed = false;
-	try {
-		await afterSync(c.env.DB);
-	} catch {
-		rulesFailed = true;
-		console.error("apple card rules failed");
-	}
-	if (result.addedIds.length > 0)
-		c.executionCtx.waitUntil(
-			sortAfterSync(
-				c.env,
-				{ changedIds: result.addedIds },
-				{ rulesApplied: !rulesFailed },
-			),
-		);
+	await afterUpload(c, result.addedIds);
 	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 });
 

@@ -135,11 +135,105 @@ describe("the demo's Apple Card sample (#766)", () => {
 		expect(create).toHaveBeenCalledTimes(1);
 	});
 
+	it("saves the sample and hands its rows to the sorting when the demo's months fail, and answers the success redraw", async () => {
+		// Only the months' batch fails: its statement is the one that groups the seeded balances by day (demoCardMonths).
+		const db = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "prepare")
+					return (sql: string) => {
+						if (sql.includes("GROUP BY h.date")) throw new Error("D1 is down");
+						return target.prepare(sql);
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const background: Promise<unknown>[] = [];
+		const collecting = {
+			waitUntil: (promise: Promise<unknown>) => {
+				background.push(promise);
+			},
+			passThroughOnException() {},
+			props: {},
+		};
+		// The sorting binding is a recorder, as the sort hand-off test's is.
+		const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+			async () => ({ id: "fake" }),
+		);
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const res = await app.request(
+				"/accounts/apple-card",
+				{ method: "POST", headers: { "HX-Request": "true" } },
+				{
+					...demo,
+					DB: db,
+					JEV_API_KEY: "test-key",
+					SORT: { create },
+				} as unknown as Env,
+				collecting as unknown as ExecutionContext,
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Trigger")).toContain(
+				"Added 13 from Apple Card.",
+			);
+			expect(await cardRows()).toEqual({ n: 13, excluded: 2 });
+			await Promise.all(background);
+			expect(create).toHaveBeenCalledTimes(1);
+			expect(create.mock.calls[0]?.[0].params.ids).toHaveLength(13);
+			// The log names the step in fixed words, never the error or a row.
+			expect(logged).toHaveBeenCalledWith("apple card months failed");
+		} finally {
+			logged.mockRestore();
+		}
+	});
+
 	it("says Nothing new when Add the sample is pressed again, and never adds rows dated later", async () => {
 		await addSample();
 		const { res } = await addSample();
 		expect(res.headers.get("HX-Trigger")).toContain("Nothing new.");
 		expect(await cardRows()).toEqual({ n: 13, excluded: 2 });
+	});
+
+	it("anchors the sample on the seeded bank's latest row, not on today: a day later Add the sample still says Nothing new", async () => {
+		// The seed's latest bank row is the household's today; move those rows back a day, so the anchor is not today.
+		await env.DB.prepare(
+			"UPDATE transactions SET date = date(date, '-1 day') WHERE account_id IN (SELECT id FROM accounts WHERE plaid_item_id IS NOT NULL)",
+		).run();
+		expect(await anchor()).not.toBe(TODAY);
+		const cardLatest = () =>
+			env.DB.prepare(
+				"SELECT MAX(t.date) AS d FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
+			).first<{ d: string | null }>();
+		// Only Date is faked, so today moves on a day between the presses and nothing else in the request changes.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
+			const first = await addSample();
+			expect(first.res.headers.get("HX-Trigger")).toContain(
+				"Added 13 from Apple Card.",
+			);
+			const rows = await cardRows();
+			const latest = (await cardLatest())?.d;
+			vi.setSystemTime(new Date(Date.parse(`${TODAY}T12:00:00Z`) + 86_400_000));
+			const second = await addSample();
+			expect(second.res.headers.get("HX-Trigger")).toContain("Nothing new.");
+			expect(await cardRows()).toEqual(rows);
+			expect((await cardLatest())?.d).toBe(latest);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("writes Apple's own header unquoted, as the spec's first line says, and quotes every other field but the two dates", () => {
+		const lines = appleCardSample("2026-09-22").split("\n");
+		expect(lines[0]).toBe(
+			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
+		);
+		for (const line of lines.slice(1)) {
+			expect(line).toMatch(/^(\d{2}\/\d{2}\/\d{4})?,(\d{2}\/\d{2}\/\d{4})?,"/);
+			expect(line.endsWith(',"Pat Rivera"')).toBe(true);
+		}
 	});
 
 	it("reads no body and needs no Content-Length: a demo POST with any body succeeds", async () => {

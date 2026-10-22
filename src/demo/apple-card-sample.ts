@@ -7,6 +7,7 @@ import { daysBefore } from "../dates";
 /** The sample's balance owed, in cents: what the demo's card counts in net worth (spec §8.10). */
 export const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018;
 
+/** Apple's header, unquoted: the first line the spec reads as Apple's own (spec §8.10). */
 const HEADER = [
 	"Transaction Date",
 	"Clearing Date",
@@ -168,5 +169,5 @@ export function appleCardSample(anchor: string): string {
 			"24.00",
 		),
 	];
-	return [HEADER.map(quote).join(","), ...rows].join("\n");
+	return [HEADER.join(","), ...rows].join("\n");
 }
