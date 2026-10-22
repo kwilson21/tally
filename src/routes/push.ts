@@ -51,10 +51,12 @@ async function subscriptionOf(form: Record<string, unknown>) {
 	return { endpoint, p256dh, auth };
 }
 
-const INSERT_SQL =
-	"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)";
+// The membership guard is part of the write itself: a row is stored only while the person is a member, so a removal that lands
+// after the check above still stores nothing (the write changes no row). ?1 is the person, ?2 to ?4 the device's fields.
+const INSERT_SQL = `INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth)
+	SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM household_members WHERE email = ?1 AND removed_at IS NULL)`;
 
-/** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. */
+/** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. 0 changes: not a member. */
 const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth`;
 
 /** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 149). */
@@ -75,6 +77,7 @@ push.post("/push/subscribe", async (c) => {
 	} catch {
 		return c.body(null, 404);
 	}
+	// The early answer for someone who isn't a member. The write below checks membership again, and it is the one that stores.
 	const current = await c.env.DB.prepare(
 		"SELECT 1 AS present FROM household_members WHERE email = ? AND removed_at IS NULL",
 	)
@@ -88,10 +91,10 @@ push.post("/push/subscribe", async (c) => {
 		subscription.auth,
 	];
 	if (form.restore !== "1") {
-		await c.env.DB.prepare(TAP_SQL)
+		const tapped = await c.env.DB.prepare(TAP_SQL)
 			.bind(...row)
 			.run();
-		return c.body(null, 204);
+		return c.body(null, tapped.meta.changes ? 204 : 404);
 	}
 	// A page load's quiet re-post: a missing row is stored for this person. An existing row must already be theirs, and is then
 	// left as it is; one that belongs to someone else is not moved here, so the answer is 409 and the page shows the device as Off.

@@ -82,6 +82,42 @@ const rowsFor = async () => {
 	return results;
 };
 
+/**
+ * The database with the person removed right after the route's membership check, so the removal lands between the check and the
+ * write. The write's own guard is what must then store nothing.
+ */
+function removedRightAfterItsCheck(): D1Database {
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop !== "prepare") {
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			}
+			return (sql: string) => {
+				if (!sql.includes("SELECT 1 AS present FROM household_members"))
+					return target.prepare(sql);
+				return {
+					bind: (...values: unknown[]) => ({
+						first: async () => {
+							const row = await target
+								.prepare(sql)
+								.bind(...values)
+								.first();
+							await target
+								.prepare(
+									"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
+								)
+								.bind(PERSON)
+								.run();
+							return row;
+						},
+					}),
+				} as unknown as D1PreparedStatement;
+			};
+		},
+	});
+}
+
 beforeEach(async () => {
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM push_subscriptions"),
@@ -279,6 +315,23 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 			.bind(PERSON)
 			.run();
 		expect((await subscribe(good)).status).toBe(404);
+		expect(await rowsFor()).toEqual([]);
+	});
+
+	it("stores nothing for a tap when the person is removed between the check and the write, and answers 404", async () => {
+		const response = await subscribe(good, {
+			bindings: { ...family, DB: removedRightAfterItsCheck() },
+		});
+		expect(response.status).toBe(404);
+		expect(await rowsFor()).toEqual([]);
+	});
+
+	it("stores nothing for a restore when the person is removed between the check and the write, and answers 409", async () => {
+		const response = await subscribe(
+			{ ...good, restore: "1" },
+			{ bindings: { ...family, DB: removedRightAfterItsCheck() } },
+		);
+		expect(response.status).toBe(409);
 		expect(await rowsFor()).toEqual([]);
 	});
 });
