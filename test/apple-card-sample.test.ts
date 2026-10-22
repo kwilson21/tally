@@ -115,18 +115,31 @@ describe("the demo's Apple Card sample (#766)", () => {
 	});
 
 	it("reads no body and needs no Content-Length: a demo POST with any body succeeds", async () => {
+		// A body that throws when read, and says whether it was: highWaterMark 0 means only a read pulls it.
+		const state = { pulled: false };
+		const body = new ReadableStream(
+			{
+				pull() {
+					state.pulled = true;
+					throw new Error("the body was read");
+				},
+			},
+			{ highWaterMark: 0 },
+		);
 		const res = await app.request(
 			"/accounts/apple-card",
 			{
 				method: "POST",
 				headers: { "content-type": "multipart/form-data; boundary=zzz" },
-				body: "not a form at all",
-			},
+				body,
+				duplex: "half",
+			} as RequestInit,
 			demo,
 			ctx(),
 		);
-		expect(res.status).not.toBe(422);
-		expect(res.status).not.toBe(413);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/accounts");
+		expect(state.pulled).toBe(false);
 		expect(await cardRows()).toEqual({ n: 13, excluded: 2 });
 	});
 

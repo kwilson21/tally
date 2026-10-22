@@ -78,13 +78,23 @@ async function post(
 	return { res, html };
 }
 
-/** A body that throws when anything reads it: a refusal that reads no body never sees this. */
-const unreadable = () =>
-	new ReadableStream({
-		pull() {
-			throw new Error("the body was read");
+/**
+ * A body that throws when it is read, and says whether it was: `pulled` is set only by a read, because highWaterMark 0
+ * keeps the stream from pulling on its own (a default stream pulls at once, so its flag would say nothing).
+ */
+function unreadable() {
+	const state = { pulled: false };
+	const stream = new ReadableStream(
+		{
+			pull() {
+				state.pulled = true;
+				throw new Error("the body was read");
+			},
 		},
-	});
+		{ highWaterMark: 0 },
+	);
+	return { stream, state };
+}
 
 async function postUnread(contentLength: string, htmx = false) {
 	const headers: Record<string, string> = {
@@ -92,18 +102,24 @@ async function postUnread(contentLength: string, htmx = false) {
 		"content-length": contentLength,
 	};
 	if (htmx) headers["HX-Request"] = "true";
+	const body = unreadable();
 	const res = await app.request(
 		"/accounts/apple-card",
 		{
 			method: "POST",
 			headers,
-			body: unreadable(),
+			body: body.stream,
 			duplex: "half",
 		} as RequestInit,
 		family,
 		ctx(),
 	);
-	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
+	return {
+		res,
+		html: (await res.text()).replaceAll("&#39;", "'"),
+		/** False when the refusal never read the body. */
+		pulled: body.state.pulled,
+	};
 }
 
 /** The submit's own label: its first span holds it, and the second holds the busy label. */
@@ -274,30 +290,33 @@ describe("Apple Card's upload sheet (#766)", () => {
 
 	describe("POST /accounts/apple-card, refusals", () => {
 		it("refuses a request with an unreadable Content-Length before its body is read, with its own words", async () => {
-			const { res, html } = await postUnread("abc");
+			const { res, html, pulled } = await postUnread("abc");
 			expect(res.status).toBe(422);
 			expect(html).toContain(
 				"Tally couldn't tell how big this file is. Try the upload again.",
 			);
 			expect(html).toContain('role="alert"');
+			expect(pulled).toBe(false);
 		});
 
 		it("refuses a request over 1,100,000 bytes before its body is read, with the too-big words", async () => {
-			const { res, html } = await postUnread("1100001");
+			const { res, html, pulled } = await postUnread("1100001");
 			expect(res.status).toBe(422);
 			expect(html).toContain(
 				"This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file.",
 			);
+			expect(pulled).toBe(false);
 		});
 
 		it("answers an htmx refusal of the size gate with HX-Reswap none and one error toast, keeping the page", async () => {
-			const { res } = await postUnread("2000000", true);
+			const { res, pulled } = await postUnread("2000000", true);
 			expect(res.status).toBe(422);
 			expect(res.headers.get("HX-Reswap")).toBe("none");
 			expect(res.headers.get("HX-Trigger")).toContain('"type":"error"');
 			expect(res.headers.get("HX-Trigger")).toContain(
 				"This file is over 1 MB.",
 			);
+			expect(pulled).toBe(false);
 			expect(await cardRows()).toEqual({ n: 0 });
 		});
 
