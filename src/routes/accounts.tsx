@@ -21,7 +21,6 @@ import {
 	forgetPayDeposits,
 	takeBackBankStrokes,
 } from "../db/first-tally";
-import { applyMerchantRules } from "../db/transactions";
 import {
 	APPLE_CARD_SAMPLE_BALANCE_CENTS,
 	appleCardSample,
@@ -29,6 +28,7 @@ import {
 import { hxTrigger } from "../htmx";
 import { toCents } from "../money";
 import { netWorthView } from "../net-worth";
+import { afterSyncSteps } from "../plaid/after-sync";
 import { type PlaidEnv, PlaidError, removeItem } from "../plaid/client";
 import { sortAfterSync } from "../plaid/sort-after-sync";
 import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
@@ -400,7 +400,7 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 	});
 	if (!result.ok) throw new Error("The demo's Apple Card sample has no start");
 	// The same steps the real upload's rows get, first, so a failure in the months below never drops the sorting.
-	await afterUpload(c, result.addedIds, today);
+	await afterUpload(c, result.addedIds);
 	try {
 		await demoCardMonths(c.env.DB, anchor);
 	} catch {
@@ -411,25 +411,19 @@ async function sampleUpload(c: Context<App>, isHtmx: boolean) {
 }
 
 /**
- * The steps an upload's added rows get, as a sync's do: the merchant rules, then bill matching, then the sorting of the
- * rows added, in the background (none on a second press). Each step has its own failure, in fixed words: a failed rules
- * step is logged and the sorting is told it didn't run, and a failed bill step is logged and retried once in the
- * background, the nightly run being the backstop. The rows are stored either way, so the upload still answers success.
+ * The steps an upload's added rows get: afterSync's own steps (afterSyncSteps, so a sync and an upload can't drift apart),
+ * the merchant rules, then bill matching, then the sorting of the rows added, in the background (none on a second press).
+ * Each step has its own failure, in fixed words: a failed rules step is logged and the sorting is told it didn't run, and a
+ * failed bill step is logged and retried once in the background, the nightly run being the backstop. The rows are stored
+ * either way, so the upload still answers success.
  */
-async function afterUpload(c: Context<App>, addedIds: number[], today: string) {
-	let rulesFailed = false;
-	try {
-		await applyMerchantRules(c.env.DB);
-	} catch {
-		rulesFailed = true;
-		console.error("apple card rules failed");
-	}
-	try {
-		await matchBillPayments(c.env.DB, today);
-	} catch {
+async function afterUpload(c: Context<App>, addedIds: number[]) {
+	const steps = await afterSyncSteps(c.env.DB);
+	if (steps.rulesFailed) console.error("apple card rules failed");
+	if (steps.billsFailed) {
 		console.error("apple card bills failed");
 		c.executionCtx.waitUntil(
-			matchBillPayments(c.env.DB, today).catch(() =>
+			matchBillPayments(c.env.DB).catch(() =>
 				console.error("apple card bills failed"),
 			),
 		);
@@ -439,7 +433,7 @@ async function afterUpload(c: Context<App>, addedIds: number[], today: string) {
 			sortAfterSync(
 				c.env,
 				{ changedIds: addedIds },
-				{ rulesApplied: !rulesFailed },
+				{ rulesApplied: !steps.rulesFailed },
 			),
 		);
 }
@@ -535,7 +529,7 @@ accounts.post("/accounts/apple-card", async (c) => {
 		);
 
 	// The same steps a sync's rows get: merchant rules and bill matching now, then the sorting in the background.
-	await afterUpload(c, result.addedIds, today);
+	await afterUpload(c, result.addedIds);
 	return uploadDone(c, importWords(result, result.historyStart, today), isHtmx);
 });
 
