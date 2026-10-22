@@ -3,7 +3,6 @@ import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
 import {
-	anyQuestionAnswered,
 	type BudgetAnswer,
 	type PayAnswer,
 	readFirstTally,
@@ -523,13 +522,7 @@ async function savingsRefused(
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
 		return c.html(
-			pageDocument(
-				model,
-				true,
-				null,
-				savingsError,
-				!anyQuestionAnswered(before),
-			),
+			pageDocument(model, true, null, savingsError, model.watching),
 			422,
 		);
 	return c.html(
