@@ -306,11 +306,10 @@ async function renderHome(
 	const setup =
 		current && !demo ? await readSetup(c.env.DB, { today, flagged }) : null;
 	// Notify me on this device (decision 149): drawn only when the server has its Web Push keys, which the demo never has.
-	// The script loads on every full load until the questions are answered, not only while the import is read: a check-in
-	// redraws the page back to reading (redrawFirstWeek draws the control), and an htmx swap loads no script of its own.
-	const pushKeys = setup ? await vapidKeys(c.env) : null;
-	const pushScript =
-		pushKeys !== null && setup !== null && setup.phase !== "answered";
+	// The script loads on every full load with the keys, in any phase and on any month: a check-in's redraw (redrawFirstWeek)
+	// draws the control back into reading, a swap onto this month draws it too, and an htmx swap loads no script of its own.
+	const pushKeys = await vapidKeys(c.env);
+	const pushScript = pushKeys !== null;
 	// The Your banks list (P140 A) reads each connected bank while the import is read; its rows are drawn only in that phase.
 	const yourBanks =
 		setup?.phase === "reading" ? await readYourBanks(c.env.DB) : [];

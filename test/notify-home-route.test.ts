@@ -8,8 +8,8 @@ import { sameOrigin } from "../src/security";
 
 // Home's notify control and its script (decision 149), through the routes: Home's full load (GET /) and the check-in's redraw
 // (POST /home/seen) draw the control while the first week is reading and the server has VAPID keys. The control's script loads
-// on a full load in the before, reading and ready phases, so Plaid's success, and a check-in's redraw back to reading, still
-// find it. Neither shows anything in the demo, and the answered phase loads no script.
+// on every full load with the keys, in any phase and on any month, so Plaid's success, a check-in's redraw back to reading and
+// a swap onto this month still find it. Neither shows anything in the demo, and the demo loads no script.
 
 const PERSON = "person@example.com";
 const ORIGIN = "http://localhost";
@@ -115,7 +115,7 @@ describe("Home's full load: the control and its script", () => {
 		expect(html).toContain(PUSH_MODULE);
 	});
 
-	it("once the questions are answered, with the keys: neither the control nor push.js", async () => {
+	it("once the questions are answered, with the keys: push.js but no control (a later redraw back to reading still finds the script)", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
@@ -130,7 +130,20 @@ describe("Home's full load: the control and its script", () => {
 		});
 		const html = await page(pushing);
 		expect(html).not.toContain("data-notify");
-		expect(html).not.toContain(PUSH_MODULE);
+		expect(html).toContain(PUSH_MODULE);
+	});
+
+	it("on a past month, with the keys: push.js but no control (the control is drawn on this month only, and a swap back to it finds the script)", async () => {
+		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
+		const [year, month] = TODAY.slice(0, 7).split("-").map(Number);
+		const lastMonth = new Date(Date.UTC(year, month - 2, 1))
+			.toISOString()
+			.slice(0, 7);
+		const html = await (
+			await home.request(`/?month=${lastMonth}`, {}, pushing)
+		).text();
+		expect(html).not.toContain("data-notify");
+		expect(html).toContain(PUSH_MODULE);
 	});
 
 	it("in the demo, never: no control and no push.js", async () => {
