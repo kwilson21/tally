@@ -1,14 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { PUSH_PAYLOAD } from "../src/first-tally/ready-push";
 import swSource from "../public/sw.js?raw";
 
 // The service worker (decision 148): push shows the ready notification from its payload, and always shows one; a tap closes
 // it and opens Tally, focusing and navigating an open window or opening a new one. It caches nothing and has no fetch handler.
-
-const FALLBACK = {
-	title: "Tally",
-	body: "Your three questions are ready. About three minutes to finish setting up your budget.",
-	url: "/first-page",
-};
+// Its fallback words and page are the push's own (PUSH_PAYLOAD), so the two can't drift apart.
 
 type Listener = (event: Record<string, unknown>) => void;
 
@@ -71,10 +67,10 @@ describe("the service worker's push", () => {
 			}),
 		);
 		expect(scope.registration.showNotification).toHaveBeenCalledWith(
-			FALLBACK.title,
+			PUSH_PAYLOAD.title,
 			expect.objectContaining({
-				body: FALLBACK.body,
-				data: { url: FALLBACK.url },
+				body: PUSH_PAYLOAD.body,
+				data: { url: PUSH_PAYLOAD.url },
 			}),
 		);
 	});
@@ -83,11 +79,39 @@ describe("the service worker's push", () => {
 		const { scope, send } = worker();
 		await send("push", {});
 		expect(scope.registration.showNotification).toHaveBeenCalledWith(
-			FALLBACK.title,
+			PUSH_PAYLOAD.title,
 			expect.objectContaining({
-				body: FALLBACK.body,
+				body: PUSH_PAYLOAD.body,
 			}),
 		);
+	});
+
+	it("its fallback words and page are PUSH_PAYLOAD's, whether the payload is unreadable or the first notification fails", async () => {
+		const unreadable = worker();
+		await unreadable.send(
+			"push",
+			pushWith(() => {
+				throw new SyntaxError("not json");
+			}),
+		);
+		const failing = worker();
+		failing.scope.registration.showNotification
+			.mockRejectedValueOnce(new Error("blocked"))
+			.mockResolvedValueOnce(undefined);
+		await failing.send("push", pushWith(() => ({ title: 1 })));
+		for (const shown of [
+			unreadable.scope.registration.showNotification,
+			failing.scope.registration.showNotification,
+		]) {
+			expect(shown).toHaveBeenLastCalledWith(
+				PUSH_PAYLOAD.title,
+				expect.objectContaining({
+					body: PUSH_PAYLOAD.body,
+					data: { url: PUSH_PAYLOAD.url },
+					tag: "tally-ready",
+				}),
+			);
+		}
 	});
 
 	it("opens a page on this site only: another origin's address falls back to the questions page", async () => {
@@ -110,7 +134,7 @@ describe("the service worker's push", () => {
 		);
 		for (const [, options] of scope.registration.showNotification.mock
 			.calls as unknown as [string, { data: { url: string } }][]) {
-			expect(options.data.url).toBe("/first-page");
+			expect(options.data.url).toBe(PUSH_PAYLOAD.url);
 		}
 	});
 
@@ -125,9 +149,9 @@ describe("the service worker's push", () => {
 		);
 		expect(scope.registration.showNotification).toHaveBeenCalledTimes(2);
 		expect(scope.registration.showNotification).toHaveBeenLastCalledWith(
-			FALLBACK.title,
+			PUSH_PAYLOAD.title,
 			expect.objectContaining({
-				body: FALLBACK.body,
+				body: PUSH_PAYLOAD.body,
 			}),
 		);
 	});
@@ -185,7 +209,7 @@ describe("the service worker's tap", () => {
 	it("opens the questions page when the notification carries no page", async () => {
 		const { scope, send } = worker([]);
 		await send("notificationclick", { notification: { close: vi.fn() } });
-		expect(scope.clients.openWindow).toHaveBeenCalledWith("/first-page");
+		expect(scope.clients.openWindow).toHaveBeenCalledWith(PUSH_PAYLOAD.url);
 	});
 });
 

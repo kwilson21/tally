@@ -501,7 +501,7 @@ describe("the scheduled run: a push never stops the email", () => {
 		expect(resent).toEqual([DANA]);
 	});
 
-	it("still sends the email when the private key is malformed (no push is drawn or sent)", async () => {
+	it("a malformed private key means no push is drawn or sent, and the email still goes", async () => {
 		await openHousehold();
 		await addMember(DANA, { seen: "-11 minutes" });
 		await addDevice(DANA, PHONE);
