@@ -944,11 +944,7 @@ function Brand() {
 					/>
 				</State>
 				<State label="On: a check and the words that say it is on">
-					<NotifyControl
-						vapidKey={NOTIFY_FAKE_KEY}
-						shown="on"
-						idSuffix="on"
-					/>
+					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="on" idSuffix="on" />
 				</State>
 				<State label="iPhone outside its Home Screen app: the hint in place of the button">
 					<NotifyControl

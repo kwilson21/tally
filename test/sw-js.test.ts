@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { PUSH_PAYLOAD } from "../src/first-tally/ready-push";
 import swSource from "../public/sw.js?raw";
+import { PUSH_PAYLOAD } from "../src/first-tally/ready-push";
 
 // The service worker (decision 148): push shows the ready notification from its payload, and always shows one; a tap closes
 // it and opens Tally, focusing and navigating an open window or opening a new one. It caches nothing and has no fetch handler.
@@ -98,7 +98,10 @@ describe("the service worker's push", () => {
 		failing.scope.registration.showNotification
 			.mockRejectedValueOnce(new Error("blocked"))
 			.mockResolvedValueOnce(undefined);
-		await failing.send("push", pushWith(() => ({ title: 1 })));
+		await failing.send(
+			"push",
+			pushWith(() => ({ title: 1 })),
+		);
 		for (const shown of [
 			unreadable.scope.registration.showNotification,
 			failing.scope.registration.showNotification,

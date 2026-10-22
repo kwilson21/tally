@@ -94,7 +94,11 @@ describe("the notify control's four states", () => {
 
 	it("gives a drawing's help line its own id, and points its button at that id (idSuffix, catalog only)", async () => {
 		const markup = html(
-			await NotifyControl({ vapidKey: VAPID, shown: "off", idSuffix: "sorting" }),
+			await NotifyControl({
+				vapidKey: VAPID,
+				shown: "off",
+				idSuffix: "sorting",
+			}),
 		);
 		expect(markup).toContain('id="notify-help-sorting"');
 		expect(markup).toContain('aria-describedby="notify-help-sorting"');
