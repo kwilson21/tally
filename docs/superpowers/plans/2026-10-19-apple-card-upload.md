@@ -17,7 +17,8 @@ After the write, the same steps a Plaid sync starts run on the new rows. The UI 
 
 **Two PRs, one issue each.**
 - **PR 1 (#731): Tasks 1–3.** Reading, planning and storing. Screens don't change.
-- **PR 2: Tasks 4–6.** The sheet, Accounts, Home, the demo, the export's bank name, and How Tally works. Its issue is opened when PR 1 merges.
+- **PR 2 (#766): Tasks 4 and 6.** The sheet and Accounts, the demo's sample, and How Tally works' line. The export's bank name shipped in #765.
+- **PR 3 (#767): Task 5.** Home's nudge, built after #762 merges.
 
 **Gate before PR 1's brief: met on 2026-10-21.** The owner's export, from Jul 1 to Oct 21, 2026 (never committed or copied into a test), confirmed:
 - the 8-column header, with `Purchased By`
@@ -26,7 +27,7 @@ After the write, the same steps a Plaid sync starts run on the new rows. The UI 
 - no row had a blank Merchant or a blank Clearing Date
 - the format: UTF-8 with one non-ASCII character in a Description, no byte-order mark, LF line endings, no newline after the last row, every field quoted except the two dates, and dates zero-padded `MM/DD/YYYY`
 
-Line numbers below were read on main at `a17b1ff`. A builder checks them first.
+Line numbers below were read on main at `c5577a5`. A builder checks them first.
 
 ## Global Constraints
 
@@ -41,7 +42,7 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - Never log a row, a file or an amount. The uploaded file is never stored. Test fixtures are made-up rows in Apple's layout, never the family's export.
 - The demo never takes a file.
 - Migrations are plain SQL, numbered. `0058` is PR 1's; the next is `0059`.
-- PR 2 decodes the uploaded file with `new TextDecoder("utf-8", { fatal: true })`, so a file in another encoding is refused before the reader sees it.
+- PR 2 decodes the uploaded file without `fatal` (`new TextDecoder("utf-8")`); csv.ts's U+FFFD check names the row that holds a bad byte, so a file in another encoding is refused by row.
 
 ## Review Focus
 
@@ -68,6 +69,8 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
   - `const NOT_APPLE = "This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV."`
   - `function parseAppleCsv(text: string): { ok: true; rows: AppleRow[] } | { ok: false; error: string }`
 - `line` is the row's number as a spreadsheet shows it: the header is 1, and the first transaction is 2.
+
+**Corrections (2026-10-21, from the PR 1 brief):** a quote may only open a field. After a closing quote only a comma, a line ending or the end of the text may follow, and an unclosed quote at the end refuses the file.
 
 - [ ] **Step 1: Write the failing tests** (`describe("parseAppleCsv")`):
   - **`reads one purchase`:** `10/03/2026,10/04/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40","Pat Rivera"` gives `{ line: 2, transactionDate: "2026-10-03", clearingDate: "2026-10-04", description: "GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA", merchant: "Greenleaf Market #12", category: "Grocery", type: "Purchase", amountCents: 3840 }`.
@@ -106,8 +109,8 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - Produces:
   - `const PAYMENT_TYPE = "Payment"`
   - `function rowKey(row: AppleRow): string`: `JSON.stringify([transactionDate, clearingDate, description, type, amountCents])`
-  - `type ImportPlan = { add: { row: AppleRow; key: string; twin: number }[]; notCleared: number; beforeHistory: number }`
-  - `function planImport(rows: AppleRow[], historyStart: string): ImportPlan`
+  - `type ImportPlan = { add: { row: AppleRow; key: string; twin: number; excluded: boolean }[]; notCleared: number; beforeHistory: number }`
+  - `function planImport(rows: AppleRow[], historyStart: string, held?: HeldTwins): ImportPlan`
     - `add` is every row to try.
     - `twin` is the row's rank, from 1, among rows with the same key, in file order, after the skips.
     - Task 3's unique index skips the ranks Tally already holds. Held twins are always 1 to h: uploaded rows are never deleted one by one, and split parts never carry `upload_key` (`src/db/transactions.ts:2236, 2466`).
@@ -172,6 +175,7 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - **Correction 8 (chunks by size too).** Each row insert is at most 500 rows or about 500,000 characters of JSON, whichever comes first, and the `RETURNING` ids are gathered across statements. Tests cover 250 rows, 1,001 rows (three or more statements) and 500 long rows (two or more).
 - **Correction 9 (names in the same batch).** The name suggestions use `suggestBankNamesSql("1")`, moved from `sync.ts`, in the upload's own batch, built from `plan.add`'s merchants. The upsert leaves named and decided merchants alone.
 - **Correction 10 (narrowing).** `ImportResult` has `ok: true`, so `ImportResult | { ok: false; error: string }` narrows in the tests.
+- **Held twins before history (PR 2 brief).** `importAppleCard` reads the held twins before the batch: one `json_each` query, only for rows cleared before `historyStart`, so a held row counts as already, never as before history.
 - **Historical start.** `historyStart` returns `string | null`: null when there is no card and no bank to start from. Then `importAppleCard` returns the "Link a bank first" error and saves nothing.
 
 - [ ] **Step 1: Write `migrations/0058_apple_card.sql`:**
@@ -227,20 +231,28 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 
 ### Task 4: The sheet and Accounts (PR 2)
 
+**Corrections (2026-10-21, from the PR 2 brief; the brief wins where it differs):**
+- The chart's SQL is a `LEFT JOIN plaid_items p`, with the card's clause in its WHERE (`src/db/balance-history.ts:29-43`). The card counts when `balanceOn !== null && removedAt === null`.
+- Home's parts (BankBehind, the nudge) move to Task 5, which is PR 3 (#767).
+- The export's bank name shipped in #765 and is dropped from Task 6.
+- `src/db/first-tally.ts:195-225` holds `forgetPayDeposits`. Remove builds one shared pay-cleanup builder, and `forgetCardPayDeposits(db)` guards on the card being kept.
+- `src/db/transactions.ts:2790-2811` holds `countWaitingForJev`; an upload's rows never draw a stroke.
+- Cancel goes to `/accounts?focus=apple-card`; a Remove page is drawn modelled on Disconnect's.
+
 **Files:**
 - Create:
   - `src/views/file-field.tsx` (`FileField`, built on `FormField`)
   - `src/views/apple-card-group.tsx` (`AppleCardGroup`)
   - `src/views/apple-card-sheet.tsx` (`AppleCardSheet`)
-  - `src/views/apple-card-remove.tsx`
+  - `src/views/apple-card-remove.tsx` (`AppleCardRemove`, the Remove page, modelled on Disconnect's)
 - Modify:
   - `src/routes/accounts.tsx`
   - `src/db/accounts.ts`
   - `src/db/balance-history.ts:29-65`
-  - `src/db/first-tally.ts`: a per-account version of `forgetPayDeposits`, which today works per Plaid bank (`:190-212`)
+  - `src/db/first-tally.ts`: a per-account version of `forgetPayDeposits`, which today works per Plaid bank (`:195-225`)
   - `src/views/money-input.tsx`: `allowCredit`, `hint` and `noRound` props
   - `public/js/money.js`: a leading minus only where `data-allow-credit` is set, and on those fields `nudged()` and `showCents()` (`:28-49`) work on negative values: no clamp at 0, and cents formatted from the absolute value. Test both, as the existing money input tests do
-  - `src/routes/how-it-works.tsx:255-257`: the net-worth example counts the card
+  - `src/routes/how-it-works.tsx:259-261`: the net-worth example counts the card
   - `src/views/contents-list.tsx:35-45`: More's Accounts count
   - `src/design-system/catalog.tsx`
   - `DESIGN.md`
@@ -316,7 +328,7 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
     - `delete=yes` calls the per-account pay cleanup first, then deletes the card's transactions, its `balance_history` and the account.
     - Remove isn't offered in the demo: it returns 404, and the group has no Manage there, as with Disconnect.
   - **The first week:** an upload draws no stroke. The first week's waiting count still counts Plaid rows only (`src/first-tally/setup.ts:~417`, `src/db/transactions.ts:2759`).
-  - **Demo (`DEMO: "true"`):** the sheet has no file or balance field; the POST never reads its body and imports `appleCardSample(today)` with `APPLE_CARD_SAMPLE_BALANCE_CENTS` (Task 6), and the demo's card counts in net worth.
+  - **Demo (`DEMO: "true"`):** the sheet has no file or balance field; the POST never reads its body and imports `appleCardSample(anchor)`, the anchor being the seeded bank's latest transaction date, with `APPLE_CARD_SAMPLE_BALANCE_CENTS` (Task 6), and the demo's card counts in net worth.
   - **A card with no rows** (its first upload held only uncleared or older rows, or none), after the last bank and its history are deleted: an upload still works, starting 90 days back.
 - [ ] **Step 3:** Run `npx vitest run test/apple-card-route.test.ts`. Expected: FAIL.
 - [ ] **Step 4: Implement.**
@@ -326,7 +338,7 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - [ ] **Step 5:** Run the tests, then every gate. Expected: PASS.
 - [ ] **Step 6:** Commit: `feat: Accounts uploads Apple Card's file in a sheet (P141 B)`.
 
-### Task 5: Home's nudge (PR 2)
+### Task 5: Home's nudge (PR 3, #767)
 
 **Files:**
 - Create: `src/apple-card/stale.ts`
@@ -359,17 +371,18 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - [ ] **Step 4:** Run. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat: Home nudges after a week without an Apple Card upload`.
 
-### Task 6: The demo sample, the export's bank, How Tally works (PR 2)
+### Task 6: The demo sample and How Tally works' line (PR 2, #766)
+
+**Corrections (2026-10-21, from the PR 2 brief):** the export's bank name shipped in #765, so it is dropped here. The sample's dates are anchored to the seeded bank's latest transaction date (`SELECT MAX(t.date) FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id IS NOT NULL`), so a second "Add the sample" finds its rows already held. How Tally works' line goes in the intro paragraph (`src/routes/how-it-works.tsx:300-307`).
 
 **Files:**
 - Create: `src/demo/apple-card-sample.ts`
 - Modify:
-  - `src/settings/export.ts:14-17`: `bank` is `'Apple Card'` for that account
-  - `src/routes/how-it-works.tsx:296-303`
-- Test: `test/apple-card-sample.test.ts`, plus the existing export test
+  - `src/routes/how-it-works.tsx:300-307`
+- Test: `test/apple-card-sample.test.ts`
 
 **Interfaces:**
-- Produces: `const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018` and `function appleCardSample(today: string): string`. It's a made-up CSV in Apple's 8-column header, dated relative to `today` within the seed's history, with 12–16 rows:
+- Produces: `const APPLE_CARD_SAMPLE_BALANCE_CENTS = 124018` and `function appleCardSample(anchor: string): string`. It's a made-up CSV in Apple's 8-column header, dated back from `anchor` (the seeded bank's latest transaction date) within the seed's history, with 12–16 rows:
   - purchases at the Riveras' usual stores
   - one pair of twins
   - one Payment
@@ -381,12 +394,11 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - [ ] **Step 1: Write the failing tests:**
   - `parseAppleCsv(appleCardSample("2026-09-22"))` is ok and holds every kind listed above.
   - After a demo POST, the nightly `resetDemo` leaves no Apple Card account (`src/demo/reset.ts:24-47`).
-  - The export's `bank` is `"Apple Card"` for that account.
   - How Tally works says "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending."
 - [ ] **Step 2:** Run. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run. Expected: PASS. Then run every gate, the e2e included.
-- [ ] **Step 5:** Commit: `feat: the demo's Apple Card sample, its export bank name, and How Tally works' line`.
+- [ ] **Step 5:** Commit: `feat: the demo's Apple Card sample, and How Tally works' line (#766)`.
 
 ## Confidence
 
@@ -415,7 +427,7 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 
 **Task 4: 8.**
 - Verified:
-  - A multipart POST passes the same-origin check with `Origin` (`src/security.ts:44`, `src/index.tsx:299`).
+  - A multipart POST passes the same-origin check with `Origin` (`src/security.ts:44`, `src/index.tsx:152`).
   - `parseBody` returns `File` (Hono 4.13.8, `body.js`).
   - htmx 4 sends a file when the form's `enctype` is multipart.
   - Disconnect's SQL (`src/routes/accounts.tsx:332-357`).
@@ -428,4 +440,4 @@ Line numbers below were read on main at `a17b1ff`. A builder checks them first.
 - Verified: `contents-list.tsx:36` uses `flaggedBanks` for sign-in only.
 
 **Task 6: 8.**
-- Verified: the demo reset clears accounts, transactions and balance history (`src/demo/reset.ts:24-47`), and the export's bank comes from a Plaid subquery (`src/settings/export.ts:14-17`).
+- Verified: the demo reset clears accounts, transactions and balance history (`src/demo/reset.ts:24-47`).

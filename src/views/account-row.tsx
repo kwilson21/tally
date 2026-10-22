@@ -7,18 +7,24 @@ type Props = {
 	mask: string | null;
 	/** Plaid's account type: "credit" draws a card, anything else a bank. */
 	type: string;
-	/** Plaid's current balance in cents; for debt, the amount owed. */
-	balanceCents: number;
+	/** Plaid's current balance in cents; for debt, the amount owed. Null draws the row with no amount (Apple Card, before a balance counts). */
+	balanceCents: number | null;
 	isLiability: boolean;
+	/** A line under the name in place of the last four digits (Apple Card's "Balance as of Oct 18"). */
+	detail?: string;
 };
 
-/** One account: its icon, name, last four digits and balance, with debt shown negative (spec §5). */
+/**
+ * One account: its icon, name, last four digits and balance, with debt shown negative (spec §5). A detail line (Apple
+ * Card's date) takes the digits' place, and a row with no balance draws no amount.
+ */
 export function AccountRow({
 	name,
 	mask,
 	type,
 	balanceCents,
 	isLiability,
+	detail,
 }: Props) {
 	return (
 		<li class="flex h-16 items-center gap-4">
@@ -27,17 +33,23 @@ export function AccountRow({
 			</span>
 			<span class="min-w-0 flex-1">
 				<span class="block truncate text-lg leading-6">{name}</span>
-				{mask && (
-					<span class="block leading-6 text-muted">
-						<span class="sr-only">ending in </span>
-						<span aria-hidden="true">••</span>
-						{mask}
-					</span>
+				{detail ? (
+					<span class="block leading-6 text-muted">{detail}</span>
+				) : (
+					mask && (
+						<span class="block leading-6 text-muted">
+							<span class="sr-only">ending in </span>
+							<span aria-hidden="true">••</span>
+							{mask}
+						</span>
+					)
 				)}
 			</span>
-			<span class="shrink-0 text-lg tabular-nums">
-				{formatCents(isLiability ? -balanceCents : balanceCents)}
-			</span>
+			{balanceCents !== null && (
+				<span class="shrink-0 text-lg tabular-nums">
+					{formatCents(isLiability ? -balanceCents : balanceCents)}
+				</span>
+			)}
 		</li>
 	);
 }

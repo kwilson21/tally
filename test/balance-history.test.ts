@@ -40,7 +40,7 @@ describe("accountsWithHistory", () => {
 			},
 		} as unknown as D1Database;
 		const { banks, points } = await accountsWithHistory(db, TODAY);
-		expect(batches).toEqual([2]);
+		expect(batches).toEqual([3]);
 		expect(banks).toHaveLength(2);
 		expect(points).toHaveLength(158);
 	});

@@ -94,7 +94,9 @@ export function budgetExample(
 
 /**
  * Net worth in two sums, from the accounts Accounts adds up (a disconnected bank's are left out, as
- * its headline does): what they hold, less what is owed. Null when no account counts.
+ * its headline does): what they hold, less what is owed. A credit balance (a card that owes the family, a
+ * negative liability) adds to what's held, and owed only sums the amounts owed, so the sums never read "−
+ * -$12.00 owed". Null when no account counts.
  */
 export function netWorthExample(
 	accounts: {
@@ -105,12 +107,14 @@ export function netWorthExample(
 ): string | null {
 	const counted = accounts.filter((a) => a.connected !== false);
 	if (counted.length === 0) return null;
-	const held = counted
-		.filter((a) => !a.isLiability)
-		.reduce((sum, a) => sum + a.balanceCents, 0);
+	const held = counted.reduce(
+		(sum, a) =>
+			sum + (a.isLiability ? Math.max(-a.balanceCents, 0) : a.balanceCents),
+		0,
+	);
 	const owed = counted
 		.filter((a) => a.isLiability)
-		.reduce((sum, a) => sum + a.balanceCents, 0);
+		.reduce((sum, a) => sum + Math.max(a.balanceCents, 0), 0);
 	if (owed === 0)
 		return `${formatCents(held)} in accounts and nothing owed, so net worth is ${formatCents(held)}.`;
 	return `${formatCents(held)} in accounts − ${formatCents(owed)} owed = ${formatCents(held - owed)} net worth.`;

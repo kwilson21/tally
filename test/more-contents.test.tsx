@@ -225,3 +225,40 @@ describe("Colophon", () => {
 		expect(Colophon({ demo: false, version: "   " })).toBeNull();
 	});
 });
+
+describe("More's Accounts count with Apple Card (#766)", () => {
+	const card = (fields: {
+		balanceOn: string | null;
+		removedAt: string | null;
+	}) => ({
+		balanceCents: 0,
+		balanceOn: fields.balanceOn,
+		uploadedOn: TODAY,
+		removedAt: fields.removedAt,
+		countedFrom: null,
+		through: null,
+	});
+
+	it("counts a card that isn't removed from its first upload, balance or not", () => {
+		expect(accountsPlace([])).toBe("None linked yet");
+		expect(
+			places({
+				banks: [],
+				appleCard: card({ balanceOn: null, removedAt: null }),
+			})[0]?.folio?.text,
+		).toBe("1 account");
+	});
+
+	it("doesn't count a removed card, and a card alongside the banks adds one", () => {
+		expect(
+			places({
+				banks: [],
+				appleCard: card({ balanceOn: null, removedAt: "2026-10-03 10:00:00" }),
+			})[0]?.folio?.text,
+		).toBe("None linked yet");
+		expect(
+			places({ appleCard: card({ balanceOn: null, removedAt: null }) })[0]
+				?.folio?.text,
+		).toBe("4 accounts");
+	});
+});

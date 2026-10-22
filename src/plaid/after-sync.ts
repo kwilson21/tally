@@ -9,17 +9,35 @@ import { applyMerchantRules } from "../db/transactions";
  * The order matters. Rules come after sync's copy of a merchant's settings on its first Plaid name
  * (made in the page's own batch), so that rule is already there. Decision 68's sorting of new
  * transactions by Jev belongs after the rules, so Jev isn't asked about what a rule just sorted.
+ *
+ * An Apple Card upload's added rows get these same steps (spec §8.10), so this list is the only place they are named.
  */
-export async function afterSync(db: D1Database): Promise<void> {
-	// Each step runs even if the other fails, so a rule error never leaves a bill unmatched; the
-	// first failure is still thrown afterwards, so the caller can say so.
+export async function afterSyncSteps(db: D1Database): Promise<{
+	rulesFailed: boolean;
+	billsFailed: boolean;
+	error?: unknown;
+}> {
+	// Each step runs even if the other fails, so a rule error never leaves a bill unmatched; the first
+	// failure is returned with the flags, so the caller can say which step failed.
 	const failures: unknown[] = [];
-	for (const step of [applyMerchantRules, matchBillPayments]) {
+	const failed = async (step: () => Promise<unknown>): Promise<boolean> => {
 		try {
-			await step(db);
+			await step();
+			return false;
 		} catch (error) {
 			failures.push(error);
+			return true;
 		}
-	}
-	if (failures.length > 0) throw failures[0];
+	};
+	const rulesFailed = await failed(() => applyMerchantRules(db));
+	const billsFailed = await failed(() => matchBillPayments(db));
+	return failures.length > 0
+		? { rulesFailed, billsFailed, error: failures[0] }
+		: { rulesFailed, billsFailed };
+}
+
+/** afterSyncSteps for a sync's callers: throws the first failure, so a failed sync can say so. */
+export async function afterSync(db: D1Database): Promise<void> {
+	const { rulesFailed, billsFailed, error } = await afterSyncSteps(db);
+	if (rulesFailed || billsFailed) throw error;
 }

@@ -793,7 +793,13 @@ describe("GET /design-system in the demo", () => {
 		);
 	});
 
-	it.each(["not-budgeted-row", "transactions-button"])(
+	it.each([
+		"not-budgeted-row",
+		"transactions-button",
+		"file-field",
+		"apple-card-sheet",
+		"apple-card-remove",
+	])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
 			const { html } = await get("/design-system");
@@ -805,6 +811,37 @@ describe("GET /design-system in the demo", () => {
 			}
 		},
 	);
+
+	it("gives each AppleCardSheet state its own ids, so each label and description reads its own field (#766)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		const ids = [...section.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(10);
+		expect(new Set(ids).size).toBe(ids.length);
+		// Every id a label or description names is drawn once on the page, so none points at another state's field.
+		const refs = [
+			...section.matchAll(
+				/(?:aria-labelledby|aria-describedby|\bfor)="([^"]+)"/g,
+			),
+		].flatMap((m) => (m[1] ?? "").split(" "));
+		expect(refs.length).toBeGreaterThan(0);
+		for (const ref of refs)
+			expect(html.split(`id="${ref}"`).length - 1).toBe(1);
+	});
+
+	it("draws the before-first-upload Apple Card state as Accounts does: Add Apple Card beside Link a bank, and no group yet (#766)", async () => {
+		const { html } = await get("/design-system");
+		const state =
+			html
+				.split("Before the first upload: no card yet")[1]
+				?.split("No balance yet")[0] ?? "";
+		expect(state).toContain("Link a bank");
+		expect(state).toContain("Add Apple Card");
+		expect(state).toContain("data-link-bank-error");
+		expect(state).not.toContain("data-apple-card");
+		expect(state).not.toContain("Upload a file");
+	});
 
 	it("draws the SuggestionCard specimen's Yes full width, with No under it, never beside it (P42 A)", async () => {
 		const { html } = await get("/design-system");
@@ -1709,5 +1746,127 @@ describe("app pages", () => {
 			const csp = res.headers.get("content-security-policy") ?? "";
 			expect(csp).toContain("form-action 'self'");
 		}
+	});
+});
+
+describe("GET /design-system: Apple Card's group, file field and sheet (#766)", () => {
+	it("draws the group as a bank's is: the date line, the card's balance, Upload a file and Manage", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const group =
+			html.split('id="apple-card-group"')[1]?.split('id="file-field"')[0] ?? "";
+		expect(group).toContain("Updated through Oct 18");
+		expect(group).toContain("Balance as of Oct 18");
+		expect(group).toContain("-$1,240.18");
+		expect(group).toContain("Upload a file");
+		expect(group).toContain("Remove Apple Card");
+		expect(group).toContain("isn't in net worth yet.");
+	});
+
+	it("draws the removed group with no amount, no Upload and no Manage, and the demo's with no Manage", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const group =
+			html.split('id="apple-card-group"')[1]?.split('id="file-field"')[0] ?? "";
+		const removed =
+			group.split("and no Manage</p>")[1]?.split("</section>")[0] ?? "";
+		expect(removed).toContain("Removed</p>");
+		expect(removed).not.toContain("Upload a file");
+		expect(removed).not.toContain("Manage");
+		expect(removed).not.toMatch(/tabular-nums">-?\$/);
+		const demo = group.split("the same group, with no Manage</p>")[1] ?? "";
+		expect(demo).toContain("Upload a file");
+		expect(demo).not.toContain("Manage");
+		expect(demo).not.toContain("Remove Apple Card");
+	});
+
+	it("puts FileField's error in role=alert, named by the field's description", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		expect(html).toMatch(
+			/<input [^>]*id="ds-apple-card-file-error"[^>]*aria-describedby="ds-apple-card-file-error-hint ds-apple-card-file-error-error"[^>]*>/,
+		);
+		expect(html).toMatch(/<p id="ds-apple-card-file-error-error" role="alert"/);
+	});
+
+	it("draws the sheet's errors under their fields and the demo's sheet without fields", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		expect(sheet).toContain(
+			"This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV.",
+		);
+		expect(sheet).toContain(
+			"Row 14's amount can't be read. Nothing was added.",
+		);
+		expect(sheet).toContain(
+			"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
+		);
+		expect(sheet).toContain("Add the sample");
+		expect(sheet).toContain("In the demo, Tally uses a sample file.");
+		expect(sheet).toContain("Optional. Left blank, Oct 18's balance stays.");
+	});
+
+	it("draws the sheet's no-JavaScript size refusal under the file field, in role=alert (the words the size gate says)", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		expect(sheet).toContain(
+			"Tally couldn't tell how big this file is. Try the upload again.",
+		);
+		expect(sheet).toMatch(
+			/<p id="ds-apple-card-size-file-error" role="alert"[^>]*>Tally couldn't tell how big this file is\. Try the upload again\.<\/p>/,
+		);
+	});
+
+	it("draws Remove Apple Card's page in the catalog: its heading, both counts, the delete chip, Remove and Cancel, and the failure in role=alert, all inert with distinct ids", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const page =
+			html.split('id="apple-card-remove"')[1]?.split("</section>")[0] ?? "";
+		expect(page).toContain("Remove Apple Card?");
+		expect(page).toContain("Its 12 transactions stay");
+		expect(page).toContain("Its 1 transaction stays");
+		expect(page).toContain("Also delete its transactions");
+		expect(page).toContain("This deletes them for good.");
+		expect(page).toContain(">Remove<");
+		expect(page).toContain(">Cancel<");
+		expect(page).toMatch(
+			/<p role="alert" class="[^"]*">Couldn't remove Apple Card\. Try again\.<\/p>/,
+		);
+		// Each state sits in its own inert box, so nothing in the page can take focus or post.
+		expect(page.match(/<div inert/g)).toHaveLength(4);
+		// The delete hint and the chip name it by its own id, so no id is drawn twice on the page.
+		const ids = [...page.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const described of page.matchAll(/aria-describedby="([^"]+)"/g)) {
+			for (const ref of (described[1] ?? "").split(" ")) {
+				expect(html.split(`id="${ref}"`).length - 1).toBe(1);
+			}
+		}
+		// The page's form is the Remove page's own address, drawn with htmx's hx-ignore by the Visual specimen.
+		expect(page).toContain('action="/accounts/apple-card/remove"');
+	});
+
+	it("names the submit Upload, as the spec's Cancel and Upload does, and the demo's Add the sample; DESIGN.md says the same", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		const labels = [
+			...sheet.matchAll(
+				/<button[^>]*id="ds-apple-card-[a-z-]+-upload"[^>]*>\s*<span class="contents[^"]*">([^<]*)<\/span>/g,
+			),
+		].map((match) => match[1]);
+		expect(labels).toContain("Upload");
+		expect(labels).toContain("Add the sample");
+		for (const label of labels) {
+			expect(["Upload", "Add the sample"]).toContain(label);
+		}
+		expect(sheet).toContain("then Cancel and Upload. On a phone");
+		expect(design).toContain('then Cancel and "Upload"; the demo');
 	});
 });

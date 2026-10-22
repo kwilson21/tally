@@ -228,15 +228,23 @@ export function takeBackBankStrokes(
 }
 
 /**
- * The statement that takes a bank's deposits out of the pay record when its history is deleted: each Yes and No deposit
- * whose transaction belongs to the bank goes, and a merchant left with neither loses its place. A merchant keeps only
- * the keys it still has deposits under, so one the bank never paid comes out as it was. It runs while the bank
- * is still connected (as takeBackBankStrokes checks), so a second submit changes nothing, and it is one UPDATE, so the
- * read and the write of the record happen in one statement.
+ * The Apple Card is kept while it is on: its rows are only removed (Remove Apple Card, spec §8.10) while this holds, so a
+ * second submit, or a card that was removed in another tab, changes nothing.
  */
-export function forgetPayDeposits(
+export const APPLE_CARD_KEPT =
+	"EXISTS (SELECT 1 FROM accounts WHERE subtype = 'apple_card' AND removed_at IS NULL)";
+
+/**
+ * The shared body of the pay cleanups: the pay record's Yes and No copies of the deposits whose transactions `gone`
+ * selects are taken out, while `guard` holds. A merchant left with neither answer loses its place, and one with
+ * deposits left keeps only those, so a merchant the bank never paid comes out as it was. One UPDATE, so the read and the
+ * write of the record happen in one statement. `binds` are the values of ?2 in `gone` and `guard`, when they take one.
+ */
+function forgetDepositsWhere(
 	db: D1Database,
-	itemId: number,
+	gone: string,
+	guard: string,
+	binds: number[],
 ): D1PreparedStatement {
 	const kept = (answer: "yes" | "no") =>
 		`(SELECT json_group_object(d.key, json(d.value)) FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
@@ -244,7 +252,7 @@ export function forgetPayDeposits(
 		`EXISTS (SELECT 1 FROM json_each(m.value, '$.${answer}') AS d WHERE CAST(d.key AS INTEGER) NOT IN (SELECT id FROM gone))`;
 	return db
 		.prepare(
-			`WITH gone AS (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id = ?2)
+			`WITH gone AS (${gone})
 			UPDATE household_settings SET value = json_set(value, '$.pay', json((
 				SELECT json_group_object(m.key, json(json_patch(json_object('at', json_extract(m.value, '$.at')), json_patch(
 					CASE WHEN ${hasKept("yes")} THEN json_object('yes', json(${kept("yes")})) ELSE '{}' END,
@@ -253,10 +261,39 @@ export function forgetPayDeposits(
 				FROM json_each(household_settings.value, '$.pay') AS m
 				WHERE ${hasKept("yes")} OR ${hasKept("no")}
 			)))
-			WHERE key = ?1 AND json_type(value, '$.pay') IS NOT NULL
-				AND EXISTS (SELECT 1 FROM plaid_items WHERE id = ?2 AND disconnected_at IS NULL)`,
+			WHERE key = ?1 AND json_type(value, '$.pay') IS NOT NULL AND ${guard}`,
 		)
-		.bind(KEY, itemId);
+		.bind(KEY, ...binds);
+}
+
+/**
+ * The statement that takes a bank's deposits out of the pay record when its history is deleted: each Yes and No deposit
+ * whose transaction belongs to the bank goes, and a merchant left with neither loses its place. It runs while the bank
+ * is still connected (as takeBackBankStrokes checks), so a second submit changes nothing.
+ */
+export function forgetPayDeposits(
+	db: D1Database,
+	itemId: number,
+): D1PreparedStatement {
+	return forgetDepositsWhere(
+		db,
+		"SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.plaid_item_id = ?2",
+		"EXISTS (SELECT 1 FROM plaid_items WHERE id = ?2 AND disconnected_at IS NULL)",
+		[itemId],
+	);
+}
+
+/**
+ * The same cleanup for Apple Card's rows, which Remove Apple Card deletes with its account (spec §8.10): it runs first in
+ * that batch, while the card is still kept (APPLE_CARD_KEPT), so the deposits are found through the card's rows.
+ */
+export function forgetCardPayDeposits(db: D1Database): D1PreparedStatement {
+	return forgetDepositsWhere(
+		db,
+		"SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card'",
+		APPLE_CARD_KEPT,
+		[],
+	);
 }
 
 /**

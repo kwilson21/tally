@@ -208,3 +208,74 @@ describe("MoneyInput's corners (decision 85, Q61 A)", () => {
 		expect(draw()).not.toMatch(/rounded(-[a-z]{1,2})?-lg/);
 	});
 });
+
+describe("MoneyInput's credit balance, hint and no Round to (#766)", () => {
+	const drawn = (props: Partial<Parameters<typeof MoneyInput>[0]> = {}) =>
+		renderToString(
+			<MoneyInput
+				id="balance"
+				name="balance"
+				label="Balance in Wallet"
+				value=""
+				{...props}
+			/>,
+		);
+	const steps = (html: string) => ({
+		minus: html.match(/data-nudge="-100"[^>]*>/)?.[0] ?? "",
+		down: html.match(/data-nudge="-1"[^>]*>/)?.[0] ?? "",
+	});
+
+	it("keeps − and ▼ on at $0 only on a credit field", () => {
+		const credit = drawn({ allowCredit: true, value: "0.00" });
+		expect(credit).toMatch(/<input [^>]*data-allow-credit[^>]*>/);
+		expect(steps(credit).minus).not.toMatch(/\sdisabled(="")?[\s>]/);
+		expect(steps(credit).down).not.toMatch(/\sdisabled(="")?[\s>]/);
+		const plain = drawn({ value: "0.00" });
+		expect(plain).not.toMatch(/data-allow-credit/);
+		expect(steps(plain).minus).toMatch(/\sdisabled(="")?[\s>]/);
+	});
+
+	it("reads a typed minus as an amount on a credit field, and as unreadable on a plain one", () => {
+		const credit = drawn({ allowCredit: true, value: "-12.00" });
+		expect(steps(credit).minus).not.toMatch(/\sdisabled(="")?[\s>]/);
+		const plain = drawn({ value: "-5" });
+		expect(steps(plain).minus).toMatch(/\sdisabled(="")?[\s>]/);
+		expect(plain).not.toMatch(/data-allow-credit/);
+	});
+
+	it("uses text input mode on a credit field, since iOS's decimal pad has no minus", () => {
+		expect(drawn({ allowCredit: true })).toMatch(
+			/<input [^>]*inputmode="text"[^>]*>/,
+		);
+		expect(drawn()).toMatch(/<input [^>]*inputmode="decimal"[^>]*>/);
+	});
+
+	it("leaves Round to out with noRound, and keeps it otherwise", () => {
+		expect(drawn({ noRound: true, value: "12.40" })).not.toContain(
+			"data-roundup",
+		);
+		expect(drawn({ value: "12.40" })).toContain("data-roundup");
+	});
+
+	it("draws the hint under the label, its id first in aria-describedby, then the error", () => {
+		const html = drawn({
+			hint: "Optional. For a credit, type a minus first.",
+			error:
+				"Enter the balance as dollars, like 1,240.18, or with a minus for a credit.",
+		});
+		expect(html).toContain(
+			'<p id="balance-hint" class="text-sm text-muted">Optional. For a credit, type a minus first.</p>',
+		);
+		expect(html).toMatch(
+			/<input [^>]*aria-describedby="balance-hint balance-error"[^>]*>/,
+		);
+		expect(html.indexOf("balance-hint")).toBeLessThan(
+			html.indexOf('id="balance-error"'),
+		);
+	});
+
+	it("keeps aria-describedby to the error alone when there is no hint", () => {
+		const html = drawn({ error: "Choose the CSV file Apple exported." });
+		expect(html).toMatch(/<input [^>]*aria-describedby="balance-error"[^>]*>/);
+	});
+});

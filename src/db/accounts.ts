@@ -104,7 +104,7 @@ export type AccountChoice = {
 };
 
 /**
- * Every account, in the order its bank was linked and Cash last, for Transactions' Account choice. A
+ * Every account, in the order its bank was linked, then the Apple Card (spec §8.10), and Cash last, for Transactions' Account choice. A
  * disconnected bank's accounts are included and marked, since their transactions stay.
  */
 export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
@@ -112,7 +112,7 @@ export async function accountChoices(db: D1Database): Promise<AccountChoice[]> {
 		.prepare(
 			`SELECT a.id, a.name, a.mask, a.type, a.subtype, p.institution_name AS bank, p.disconnected_at
 			FROM accounts a LEFT JOIN plaid_items p ON p.id = a.plaid_item_id
-			ORDER BY a.type = 'cash', a.plaid_item_id, a.id`,
+			ORDER BY a.type = 'cash', a.plaid_item_id IS NULL, a.plaid_item_id, a.id`,
 		)
 		.all<{
 			id: number;
@@ -224,4 +224,88 @@ export function banksFromRows(results: BankRow[]): Bank[] {
 		});
 	}
 	return banks;
+}
+
+/**
+ * The household's Apple Card account (spec §8.10, #766), as net worth and Accounts read it: its balance and the days that
+ * count it, its removal and its last row. `through` is the latest date of its rows (its Clearing Dates, Payments included).
+ */
+export type AppleCardAccount = {
+	id: number;
+	/** The card's balance in cents, as owed: positive when the family owes it, negative for a credit (which adds to net worth). What was typed last. */
+	balanceCents: number;
+	/** The household day the balance was typed, or null while none counts (Remove clears it). */
+	balanceOn: string | null;
+	/** The household day of the last upload. */
+	uploadedOn: string | null;
+	/** When Remove Apple Card kept it, or null while it's on. */
+	removedAt: string | null;
+	/** The first day its balance counts from; the chart reads its balances from here on. */
+	countedFrom: string | null;
+	/** The latest date of its rows, or null before its first row. */
+	through: string | null;
+};
+
+/** One row of `appleCardStatement`. */
+export type AppleCardRow = {
+	id: number;
+	balance_cents: number;
+	balance_on: string | null;
+	uploaded_on: string | null;
+	removed_at: string | null;
+	counted_from: string | null;
+	through: string | null;
+};
+
+/** The household's Apple Card account, unrun, so a page can read it in the same `db.batch` as its other reads. */
+export function appleCardStatement(db: D1Database): D1PreparedStatement {
+	return db.prepare(
+		`SELECT id, balance_cents, balance_on, uploaded_on, removed_at, counted_from,
+			(SELECT MAX(date) FROM transactions WHERE account_id = a.id) AS through
+		FROM accounts a WHERE subtype = 'apple_card'`,
+	);
+}
+
+/** The card `appleCardStatement` read, or null when there is none. */
+export function appleCardFromRow(
+	row: AppleCardRow | null | undefined,
+): AppleCardAccount | null {
+	if (!row) return null;
+	return {
+		id: row.id,
+		balanceCents: row.balance_cents,
+		balanceOn: row.balance_on,
+		uploadedOn: row.uploaded_on,
+		removedAt: row.removed_at,
+		countedFrom: row.counted_from,
+		through: row.through,
+	};
+}
+
+/** The household's Apple Card account, or null before its first upload (How Tally works and More read it alone). */
+export async function appleCardAccount(
+	db: D1Database,
+): Promise<AppleCardAccount | null> {
+	return appleCardFromRow(await appleCardStatement(db).first<AppleCardRow>());
+}
+
+/**
+ * The accounts net worth adds up: every bank's accounts, and the Apple Card once a balance counts for it and it isn't
+ * removed (spec §8.10). Its balance is owed, so it counts as debt, as any card's does.
+ */
+export function countedAccounts(
+	banks: Bank[],
+	appleCard: AppleCardAccount | null,
+): Account[] {
+	const accounts = banks.flatMap((bank) => bank.accounts);
+	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
+		accounts.push({
+			id: appleCard.id,
+			name: "Apple Card",
+			mask: null,
+			type: "credit",
+			balanceCents: appleCard.balanceCents,
+			isLiability: true,
+		});
+	return accounts;
 }

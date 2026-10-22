@@ -453,7 +453,7 @@ Plaid can't reach Apple Card from a web app (its Apple Card path ran only inside
 - **The first week.** An upload isn't one of a new family's setup steps: step one is still linking a bank, and the questions never wait for Apple Card rows (setup's counts read Plaid rows only).
 - **Demo.** The demo is public, so it never takes a file. Its Upload adds a made-up sample file built into the demo, as if the Riveras had exported it, with a balance of its own, so the demo's sheet has no file field and no balance field; the nightly reset takes it away. Tests also use made-up rows in Apple's layout, never a family's real export.
 - **Download your data** lists the Apple Card account and its transactions as it does any account's, with Apple Card as the bank.
-- **How Tally works** gains one line where it says where the numbers come from: "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending."
+- **How Tally works** gains one line where it says where the numbers come from: "Apple Card comes in when you upload the file Apple exports, because Plaid can't reach it. Paying off the card, or a payment that bounced, is left out on both sides, so it never counts as spending." Its Net worth section says "linked or uploaded" and gains two rules, word for word (the owner's pick on 2026-10-22): "Apple Card counts once an upload types its balance, and is subtracted as a credit card is. Until then, and after you remove it, it is left out, so the line doesn't wait for it." and "An upload that types Apple Card's balance saves it for that day, as a bank's sync does. A later upload the same day replaces it."
 
 ## 9. Demo experience
 

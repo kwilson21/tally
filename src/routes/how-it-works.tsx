@@ -14,7 +14,11 @@ import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../bills/status";
 import { billTotalsForRows } from "../bills/totals";
 import { summarizeMonth } from "../budget";
 import { householdToday, monthName } from "../dates";
-import { accountsByBank } from "../db/accounts";
+import {
+	accountsByBank,
+	appleCardAccount,
+	countedAccounts,
+} from "../db/accounts";
 import { readAiTally } from "../db/ai-log";
 import { namesToReview } from "../db/merchant-names";
 import { loadMonth } from "../db/month";
@@ -261,7 +265,10 @@ howItWorks.get("/how-it-works", async (c) => {
 		)
 		.reduce((sum, transaction) => sum + transaction.amountCents, 0);
 	const netWorthText = netWorthExample(
-		(await accountsByBank(c.env.DB)).flatMap((bank) => bank.accounts),
+		countedAccounts(
+			await accountsByBank(c.env.DB),
+			await appleCardAccount(c.env.DB),
+		),
 	);
 	const threshold = `${Math.round(JEV_THRESHOLD * 100)}%`;
 	const paidBill = billData.rows.find(
@@ -308,7 +315,10 @@ howItWorks.get("/how-it-works", async (c) => {
 					{demo
 						? "AI helps with names and categories: Jev picks categories today, and Workers AI suggests merchant names today."
 						: "AI helps with categories and store names, and a person can always change them."}{" "}
-					Code does all the math.
+					Code does all the math. Apple Card comes in when you upload the file
+					Apple exports, because Plaid can't reach it. Paying off the card, or a
+					payment that bounced, is left out on both sides, so it never counts as
+					spending.
 				</p>
 				{firstWeek && (
 					<Section id="first-week" title="Your first week">
@@ -810,8 +820,8 @@ howItWorks.get("/how-it-works", async (c) => {
 
 				<Section id="net-worth" title="Net worth">
 					<p class="mt-2">
-						Accounts shows what everything you've linked adds up to, and a line
-						of how it has moved over the last 6 months.
+						Accounts shows what everything you've linked or uploaded adds up to,
+						and a line of how it has moved over the last 6 months.
 					</p>
 					{netWorthText ? (
 						<Example demo={demo} monthName={monthLabel}>
@@ -820,7 +830,7 @@ howItWorks.get("/how-it-works", async (c) => {
 					) : (
 						<p class="mt-3">There are no accounts to add up yet.</p>
 					)}
-					<RulesFold count={5}>
+					<RulesFold count={7}>
 						<ul class="mt-3 list-disc space-y-1 pl-5">
 							<li>
 								Net worth is what you have minus what you owe: every account's
@@ -836,6 +846,15 @@ howItWorks.get("/how-it-works", async (c) => {
 								day replaces it, so a day has one.
 								{demo &&
 									" This demo has no bank connection, so its six months of balances come with the made-up data."}
+							</li>
+							<li>
+								Apple Card counts once an upload types its balance, and is
+								subtracted as a credit card is. Until then, and after you remove
+								it, it is left out, so the line doesn't wait for it.
+							</li>
+							<li>
+								An upload that types Apple Card's balance saves it for that day,
+								as a bank's sync does. A later upload the same day replaces it.
 							</li>
 							<li>
 								The line has a point for each day with a balance, this month

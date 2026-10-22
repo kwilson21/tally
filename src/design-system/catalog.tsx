@@ -34,6 +34,9 @@ import { AccountRow } from "../views/account-row";
 import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { AiTally } from "../views/ai-tally";
+import { AppleCardGroup } from "../views/apple-card-group";
+import { AppleCardRemove } from "../views/apple-card-remove";
+import { AppleCardSheet } from "../views/apple-card-sheet";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
 import { BankSignInEmails } from "../views/bank-sign-in-emails";
@@ -55,7 +58,7 @@ import {
 	BillStatusHeading,
 	includesLine,
 } from "../views/bill-row";
-import { BottomSheet } from "../views/bottom-sheet";
+import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
 import { TallyMark, Wordmark } from "../views/brand";
 import { BudgetSheet } from "../views/budget-sheet";
 import { BusyRing } from "../views/busy-ring";
@@ -72,6 +75,7 @@ import { EmptyState } from "../views/empty-state";
 import { ErrorPage } from "../views/error-page";
 import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
+import { FileField } from "../views/file-field";
 import { FilterSelect } from "../views/filter-select";
 import {
 	BillsEmpty,
@@ -99,6 +103,7 @@ import { Key, KeysDetails, KeysSheetBody, Ledger } from "../views/keys";
 import { DemoBanner } from "../views/layout";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
+import { LinkBankButton, LinkBankError } from "../views/link-bank";
 import {
 	MaybeCategory,
 	MaybeIncome,
@@ -1095,7 +1100,13 @@ function MoreSketch({
 		<>
 			<h1 class="font-serif text-5xl font-semibold tracking-tight">More</h1>
 			<ContentsList
-				places={contentsPlaces({ demo, banks, today: MORE_TODAY, toCheck })}
+				places={contentsPlaces({
+					demo,
+					banks,
+					today: MORE_TODAY,
+					toCheck,
+					appleCard: null,
+				})}
 			/>
 			<Colophon demo={demo} version={version} />
 		</>
@@ -1200,6 +1211,74 @@ function BudgetHeading({ adjusting }: { adjusting: boolean }) {
 }
 
 // Adjust mode's use spec (#94): every line answered before the owner signs it off.
+// FileField's use spec (decision 43 step 1; spec §8.9 receipts' file input and §8.10 Apple Card's CSV share it).
+const FILE_FIELD_SPEC: UseSpecText = {
+	purpose:
+		"Let a person choose the file to upload, with its label, hint and error read in that order. Apple Card's CSV now; receipts' file input shares it later (§8.9).",
+	affordance:
+		"A labeled file input: the browser's own file button, 44px tall, with the chosen file's name beside it. The hint sits under it.",
+	states:
+		"Empty: the label and the hint. With an error: the server's words under the field in role=alert, in over, and the field shakes once. No file chosen is a server error, not a browser one.",
+	feedback:
+		"The error comes back with the form's answer and the focus moves to the field. The field is not required, so no browser bubble replaces the words.",
+	input:
+		"Touch: the file button opens the phone's Files. Keyboard: Tab reaches it; Enter or Space opens the picker. Screen reader: the label, then the hint, then the error, which is announced once.",
+	motion:
+		"The error shakes once, as TextInput's does (150 ms). Reduced motion keeps it still.",
+	edges:
+		"The server never checks the file's type or its name, since iPhone Files may send another type. The file is read and thrown away. A file over 1 MB is refused with its own words, after the request's size is checked.",
+	words:
+		"Label: “Apple Card file (CSV)”. Hint: “On card.apple.com or in Wallet: Export Transactions, pick the dates, then CSV.” Errors: “Choose the CSV file Apple exported.”, “This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file.”, and “This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV.”",
+};
+
+// AppleCardSheet's use spec (P141 B, spec §8.10): the sheet Accounts opens for Apple Card's file and balance.
+const APPLE_CARD_SHEET_SPEC: UseSpecText = {
+	purpose:
+		"Upload the file Apple exports, and optionally the balance in Wallet, from Accounts. In the demo it adds the sample file instead.",
+	affordance:
+		"A sheet over Accounts, titled Apple Card with the card icon: the file field, the balance field, then Cancel and Upload. On a phone it rises from the bottom; on a desktop it is a panel on the right.",
+	states:
+		"Empty, before the first upload. Each refusal keeps the sheet open with its error under its field: the file's words under the file field, the balance's under the balance. Both wrong: both show and focus goes to the file. Uploading: the submit reads “Uploading…”. The demo: no fields, and the submit reads “Add the sample”.",
+	feedback:
+		"Success: Accounts redraws with the sheet closed, the address is /accounts, focus goes to Upload a file, and a toast and the announcer say what was added. A refusal redraws the sheet with its error and no toast, so the alert is announced once. Cancel closes the sheet, and with JavaScript it says “Apple Card upload cancelled.”",
+	input:
+		"Touch: every field and button is 44px tall. Keyboard: Tab goes through the fields and buttons, and Escape closes the sheet (sheet.js). Screen reader: the title, then the intro, then each field with its hint and its error.",
+	motion:
+		"The sheet rises and its backdrop fades in over 200 ms; reduced motion shows it in place. The busy ring turns while the upload is sent.",
+	edges:
+		"A request with no Content-Length, or one over 1,100,000 bytes, is refused before its body is read. A file over 1 MB is refused after it is read. A typed credit keeps its minus. Nothing is saved on any refusal. Each refusal keeps the typed balance, but not the file, which the browser can't refill.",
+	words:
+		"Title “Apple Card”. Intro: “Upload the file Apple exports. Tally adds the ones it doesn't have yet.” Balance: “Balance in Wallet”, with the hint “Optional. Left blank, Oct 12's balance stays. For a credit, type a minus first.” or, before one counts, “Optional. For a credit, type a minus first.” Demo: “In the demo, Tally uses a sample file.” and “Add the sample”.",
+};
+
+// AppleCardRemove's use spec (spec §8.10): Remove Apple Card's page, drawn as Disconnect's is.
+const APPLE_CARD_REMOVE_SPEC: UseSpecText = {
+	purpose:
+		"Take Apple Card out of net worth from Accounts' Manage. Its rows stay unless the box is ticked, so past months still add up.",
+	affordance:
+		"A page with its heading, one sentence on how many transactions stay, a chip that also deletes them, then Remove beside a text Cancel.",
+	states:
+		"Keeping the rows is the default, with the box unticked. Ticked, the card's transactions, balances and account go for good. A card already removed in another tab says so and changes nothing. A failure draws the page again with its words in role=alert and the box as it was.",
+	feedback:
+		"Remove goes back to Accounts with a toast: “Removed Apple Card.” or “Removed Apple Card and deleted its transactions.” Cancel goes back to Accounts and changes nothing.",
+	input:
+		"Touch: the chip and both buttons are 44px tall. Keyboard: Tab goes through the chip, Remove and Cancel, and Space ticks the chip. Screen reader: the heading, then the sentence, then the chip with its hint read as its description.",
+	motion:
+		"None of its own: the page changes at once, and the toast arrives as any toast does.",
+	edges:
+		"Without JavaScript Remove posts and is redirected to Accounts. The demo has no Remove: its page is not found, and its group has no Manage. A card removed in another tab says it's already removed.",
+	words:
+		"Heading: “Remove Apple Card?”. Body: “Tally leaves it out of net worth. Its 12 transactions stay, so past months still add up, unless you tick the box below.” Chip: “Also delete its transactions”, with “This deletes them for good.” under it. Buttons: “Remove” and “Cancel”. Failure: “Couldn't remove Apple Card. Try again.”",
+};
+
+const APPLE_CARD_CLOSE_ATTRS = {
+	"hx-get": "/accounts?focus=apple-card",
+	"hx-target": "#accounts-summary",
+	"hx-select": "#accounts-summary",
+	"hx-swap": "outerHTML",
+	"hx-push-url": "/accounts",
+};
+
 const ADJUST_SPEC: UseSpecText = {
 	purpose:
 		"Nudge a budget up or down by $10 right where you see it, without opening its sheet.",
@@ -6627,6 +6706,318 @@ function AccountsGroup() {
 						<AccountRow {...CREDIT_CARD} />
 					</ul>
 				</State>
+			</Specimen>
+			<Specimen
+				id="apple-card-group"
+				title="AppleCardGroup"
+				tier="visual"
+				components={["AppleCardGroup", "FileField", "AppleCardSheet"]}
+				sentence="Apple Card's group on Accounts, drawn as a bank's group is (P141 B, spec §8.10): its name, “Updated through Oct 18” (or “Removed”), one row with the card icon and its balance, the Upload button under it and Manage holding Remove Apple Card. With no balance counting, the row has no amount, and a line says the card isn't in net worth yet."
+			>
+				<State label="With a balance: “Balance as of Oct 18”, the owed amount drawn as a card's balance">
+					<div class="max-w-xl">
+						<AppleCardGroup
+							card={{
+								balanceCents: 124018,
+								balanceOn: "2026-10-18",
+								through: "2026-10-18",
+								removed: false,
+							}}
+							today="2026-10-21"
+						/>
+					</div>
+				</State>
+				<State label="Before the first upload: no card yet, so only the buttons row is drawn, with the error region under it">
+					<div class="max-w-xl">
+						<div class="mt-8 flex flex-wrap items-center gap-3">
+							<LinkBankButton />
+							<Button
+								kind="secondary"
+								href="/accounts/apple-card"
+								{...sheetAttrs("/accounts/apple-card")}
+							>
+								Add Apple Card
+							</Button>
+						</div>
+						<LinkBankError />
+					</div>
+				</State>
+				<State label="No balance yet: no amount, and the line says it isn't in net worth">
+					<div class="max-w-xl">
+						<AppleCardGroup
+							card={{
+								balanceCents: 0,
+								balanceOn: null,
+								through: "2026-10-18",
+								removed: false,
+							}}
+							today="2026-10-21"
+						/>
+					</div>
+				</State>
+				<State label="Removed: “Removed” in place of the date, no amount, no Upload and no Manage">
+					<div class="max-w-xl">
+						<AppleCardGroup
+							card={{
+								balanceCents: 124018,
+								balanceOn: null,
+								through: "2026-10-18",
+								removed: true,
+							}}
+							today="2026-10-21"
+						/>
+					</div>
+				</State>
+				<State label="The demo: the same group, with no Manage">
+					<div class="max-w-xl">
+						<AppleCardGroup
+							card={{
+								balanceCents: 124018,
+								balanceOn: "2026-09-22",
+								through: "2026-09-22",
+								removed: false,
+							}}
+							today="2026-09-22"
+							demo
+						/>
+					</div>
+				</State>
+			</Specimen>
+			<Specimen
+				id="file-field"
+				title="FileField"
+				tier="visual"
+				components={["FileField"]}
+				sentence="A labeled file input for an upload (Apple Card's CSV, and receipts' file later), built on FormField: its label, its hint, then its error in role=alert, with a 44px file button that takes only the page's tokens."
+			>
+				<State label="Empty, with its hint">
+					<div class="max-w-xl">
+						<FileField
+							id="ds-apple-card-file"
+							name="file"
+							label="Apple Card file (CSV)"
+							hint="On card.apple.com or in Wallet: Export Transactions, pick the dates, then CSV."
+						/>
+					</div>
+				</State>
+				<State label="With an error under it, in role=alert">
+					<div class="max-w-xl">
+						<FileField
+							id="ds-apple-card-file-error"
+							name="file"
+							label="Apple Card file (CSV)"
+							hint="On card.apple.com or in Wallet: Export Transactions, pick the dates, then CSV."
+							error="This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV."
+						/>
+					</div>
+				</State>
+				<UseSpec spec={FILE_FIELD_SPEC} />
+			</Specimen>
+			<Specimen
+				id="apple-card-sheet"
+				title="AppleCardSheet"
+				tier="visual"
+				components={["AppleCardSheet"]}
+				sentence="The sheet that uploads Apple Card's file and balance (P141 B, spec §8.10): the card icon and title, the intro, the file field, the balance field, then Cancel and the submit. Drawn inert, as Savings' sheet is, so no field can take focus here."
+			>
+				<State label="Before the first upload, with no balance counting yet">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-empty"
+							today="2026-10-21"
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="With a balance counting: its hint names the day of the balance it keeps">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-balance"
+							today="2026-10-21"
+							balance="1,240.18"
+							balanceOn="2026-10-18"
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: no file chosen">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-no-file"
+							today="2026-10-21"
+							fileError="Choose the CSV file Apple exported."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: the size gate couldn't tell the request's size, so the file is asked for again">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-size"
+							today="2026-10-21"
+							fileError="Tally couldn't tell how big this file is. Try the upload again."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: the file is over 1 MB">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-too-big"
+							today="2026-10-21"
+							fileError="This file is over 1 MB. An Apple Card CSV is far smaller, so check it's the right file."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: not Apple's file">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-not-apple"
+							today="2026-10-21"
+							fileError="This isn't an Apple Card CSV. In Wallet or on card.apple.com, choose Export Transactions and pick CSV."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: a row that can't be read, which names the row">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-bad-row"
+							today="2026-10-21"
+							fileError="Row 14's amount can't be read. Nothing was added."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: no bank linked yet, so Tally's history has no start">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-no-bank"
+							today="2026-10-21"
+							fileError="Link a bank first. Tally's history starts with your bank's."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Error: a balance that can't be read, under its field">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-bad-balance"
+							today="2026-10-21"
+							balance="12.3.4"
+							balanceOn="2026-10-18"
+							balanceError="Enter the balance as dollars, like 1,240.18, or with a minus for a credit."
+							focus="balance"
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="Both wrong: both errors show, and focus goes to the file">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-both"
+							today="2026-10-21"
+							fileError="Choose the CSV file Apple exported."
+							balance="12.3.4"
+							balanceError="Enter the balance as dollars, like 1,240.18, or with a minus for a credit."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<State label="The demo: no file and no balance field, and the submit adds the sample">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-demo"
+							demo
+							today="2026-09-22"
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
+				<UseSpec spec={APPLE_CARD_SHEET_SPEC} />
+			</Specimen>
+			<Specimen
+				id="apple-card-remove"
+				title="AppleCardRemove"
+				tier="visual"
+				components={["AppleCardRemove"]}
+				sentence="Remove Apple Card's page (spec §8.10), drawn as Disconnect's is: its heading, one sentence on how many transactions stay, the chip that also deletes them with its hint, then Remove and Cancel. A failed remove draws the page again with its words in role=alert. Drawn inert, so the form posts nowhere here."
+			>
+				<State label="Keeping the rows, twelve transactions stay: the box unticked">
+					<div inert class="max-w-xl">
+						<AppleCardRemove id="ds-apple-card-remove-twelve" count={12} />
+					</div>
+				</State>
+				<State label="One transaction stays, in the singular">
+					<div inert class="max-w-xl">
+						<AppleCardRemove id="ds-apple-card-remove-one" count={1} />
+					</div>
+				</State>
+				<State label="Also deleting them: the box ticked, so the card's transactions go with it">
+					<div inert class="max-w-xl">
+						<AppleCardRemove
+							id="ds-apple-card-remove-ticked"
+							count={12}
+							deleteHistory
+						/>
+					</div>
+				</State>
+				<State label="A failed remove: the page again, with its words in role=alert above the form">
+					<div inert class="max-w-xl">
+						<AppleCardRemove
+							id="ds-apple-card-remove-failed"
+							count={12}
+							deleteHistory
+							error="Couldn't remove Apple Card. Try again."
+						/>
+					</div>
+				</State>
+				<UseSpec spec={APPLE_CARD_REMOVE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="net-worth-chart"
