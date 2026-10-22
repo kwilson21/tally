@@ -3,7 +3,6 @@ import { actor } from "../actor";
 import { parseBudgetAmount } from "../budgets/amount";
 import { householdToday } from "../dates";
 import {
-	anyQuestionAnswered,
 	type BudgetAnswer,
 	type PayAnswer,
 	readFirstTally,
@@ -166,11 +165,10 @@ firstPage.get("/first-page", async (c) => {
 	if (!(await readQuestionsGate(c.env.DB))) return notOpen(c);
 	// "One at a time" links here (?budgets=one), so the budgets question takes focus on the visit it asks for.
 	const oneAtATime = c.req.query("budgets") === "one";
-	// Read before the page settles its own questions: settleAndLoad draws a pay question that has nothing to ask, which would
-	// end the check-in on the first visit (decision 146).
-	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
+	// The check-in follows the page as it is drawn: settleAndLoad draws the pay step when there is no paycheck to ask about,
+	// and that answers a question, so no check-in is drawn then (model.watching, read after the settle, as an answer's is).
 	const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
-	return c.html(pageDocument(model, oneAtATime, null, null, watching));
+	return c.html(pageDocument(model, oneAtATime, null, null, model.watching));
 });
 
 /**
@@ -285,8 +283,6 @@ firstPage.post("/first-page/budgets", async (c) => {
 	if (!["all", "yes", "another", "skip"].includes(answer))
 		return c.text("Choose an answer.", 400);
 	// Keep all is the only answer to its own question; every other answer is one at a time, so its page is drawn that way.
-	// Read before the page settles, as the GET reads it: a refused amount's page keeps the check-in while none was drawn.
-	const watching = !anyQuestionAnswered(await readFirstTally(c.env.DB));
 	const before = await settleAndLoad(c.env.DB, today, {
 		oneAtATime: answer !== "all",
 	});
@@ -379,8 +375,7 @@ firstPage.post("/first-page/budgets", async (c) => {
 	} else {
 		const typed = String(form.get("budget") ?? "");
 		const parsed = parseBudgetAmount(typed);
-		if (!parsed.ok)
-			return budgetRefused(c, before, parsed.error, typed, watching);
+		if (!parsed.ok) return budgetRefused(c, before, parsed.error, typed);
 		kind = "another";
 		cents = parsed.cents;
 	}
@@ -527,13 +522,7 @@ async function savingsRefused(
 	const savingsError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
 		return c.html(
-			pageDocument(
-				model,
-				true,
-				null,
-				savingsError,
-				!anyQuestionAnswered(before),
-			),
+			pageDocument(model, true, null, savingsError, model.watching),
 			422,
 		);
 	return c.html(
@@ -587,12 +576,13 @@ function budgetRefused(
 	model: FirstPageModel,
 	error: string,
 	typed: string,
-	/** True while no question was drawn before the page settled (the check-in, decision 146). */
-	watching: boolean,
 ) {
 	const budgetError = { text: error, typed };
 	if (!c.req.header("HX-Request"))
-		return c.html(pageDocument(model, true, budgetError, null, watching), 422);
+		return c.html(
+			pageDocument(model, true, budgetError, null, model.watching),
+			422,
+		);
 	return c.html(
 		<FirstPageBody
 			model={model}

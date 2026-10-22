@@ -39,8 +39,14 @@ export function questionsOpen(facts: QuestionsFacts): boolean {
 	return facts.waiting === 0;
 }
 
-/** A connected bank as the gate and Home's setup read it: its name, and the two sync marks the gate needs. */
+/**
+ * A connected bank as the gate and Home's setup read it: its id, its name, and the two sync marks the gate needs. Its
+ * flags are not read here: Home's setup takes the flags its caller read (the same list as its bank notice), and matches
+ * each bank to its flag by id, never by name, since two banks can share one.
+ */
 export type GateBank = QuestionsFacts["banks"][number] & {
+	/** The bank's `plaid_items` id, which its flag is matched by. */
+	id: number;
 	name: string;
 	/** When the bank was linked (plaid_items.created_at, UTC `YYYY-MM-DD HH:MM:SS`). */
 	linkedAt: string | null;
@@ -63,7 +69,7 @@ export async function readGateInputs(
 ): Promise<{ banks: GateBank[]; waiting: number }> {
 	const { results: banks } = await db
 		.prepare(
-			"SELECT institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
+			"SELECT id, institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
 		)
 		.all<GateBank>();
 	const switches = await readAiSwitches(db);

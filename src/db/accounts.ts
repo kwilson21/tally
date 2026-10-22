@@ -155,15 +155,17 @@ export function netWorthCents(
 export async function bankSyncs(db: D1Database): Promise<BankSync[]> {
 	const { results } = await db
 		.prepare(
-			"SELECT institution_name, status, last_synced_at, disconnected_at FROM plaid_items ORDER BY id",
+			"SELECT id, institution_name, status, last_synced_at, disconnected_at FROM plaid_items ORDER BY id",
 		)
 		.all<{
+			id: number;
 			institution_name: string;
 			status: string;
 			last_synced_at: string | null;
 			disconnected_at: string | null;
 		}>();
 	return results.map((row) => ({
+		id: row.id,
 		name: row.institution_name,
 		needsAttention: row.status === "needs_attention",
 		lastSyncedAt: row.last_synced_at,

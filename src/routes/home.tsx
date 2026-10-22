@@ -244,8 +244,8 @@ async function renderHome(
 	);
 	const demo = c.env.DEMO === "true";
 	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
-	// needs signing in. Read once, for the bank line and for the setup (its fifth day and the answered wait, #671). The demo
-	// has no real banks, so it never asks.
+	// needs signing in. Read once, and that one list is both the bank line and the setup's input (its refresh, its answered
+	// wait and its fifth day), so the two always agree. The demo has no real banks, so it never asks.
 	const flagged =
 		demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today);
 	const bankNotice = homeBankNotice(flagged, today);
@@ -708,6 +708,7 @@ async function readHomeSetup(db: D1Database) {
 	const banks = await readYourBanks(db);
 	const flagged = flaggedBanks(
 		banks.map((bank) => ({
+			id: bank.id,
 			name: bank.name,
 			needsAttention: bank.status === "needs_attention",
 			lastSyncedAt: bank.lastSyncedAt,
