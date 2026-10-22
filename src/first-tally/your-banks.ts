@@ -30,6 +30,7 @@ export function bankState(bank: YourBank, today: string): BankState {
 	if (bank.historyCompleteAt !== null) return "in";
 	const flag = bankFlag(
 		{
+			id: bank.id,
 			name: bank.name,
 			needsAttention: bank.status === "needs_attention",
 			lastSyncedAt: bank.lastSyncedAt,

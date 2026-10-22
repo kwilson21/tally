@@ -9,6 +9,7 @@ import {
 
 describe("bankFlag", () => {
 	const bank = (overrides: Partial<BankSync> = {}): BankSync => ({
+		id: 1,
 		name: "Chase",
 		needsAttention: false,
 		lastSyncedAt: "2026-10-04 08:00:00",
@@ -17,19 +18,20 @@ describe("bankFlag", () => {
 
 	it("flags a bank that needs signing in, with its sync date when it has one", () => {
 		expect(bankFlag(bank({ needsAttention: true }), TODAY)).toEqual({
+			id: 1,
 			name: "Chase",
 			reason: "sign-in",
 			since: "2026-10-04",
 		});
 		expect(
 			bankFlag(bank({ needsAttention: true, lastSyncedAt: null }), TODAY),
-		).toEqual({ name: "Chase", reason: "sign-in" });
+		).toEqual({ id: 1, name: "Chase", reason: "sign-in" });
 	});
 
 	it("flags a bank whose last sync is 3 days back, and not one synced yesterday", () => {
 		expect(
 			bankFlag(bank({ lastSyncedAt: "2026-10-02 23:59:59" }), TODAY),
-		).toEqual({ name: "Chase", reason: "stale", since: "2026-10-02" });
+		).toEqual({ id: 1, name: "Chase", reason: "stale", since: "2026-10-02" });
 		expect(
 			bankFlag(bank({ lastSyncedAt: "2026-10-04 00:00:00" }), TODAY),
 		).toBeNull();
@@ -49,6 +51,7 @@ describe("bankFlag", () => {
 const TODAY = "2026-10-05";
 
 const bank = (overrides: Partial<BankSync> = {}): BankSync => ({
+	id: 1,
 	name: "Chase",
 	needsAttention: false,
 	lastSyncedAt: "2026-10-05 08:00:00",
@@ -62,14 +65,14 @@ describe("flaggedBanks", () => {
 
 	it("flags a bank that needs attention, however recently it synced", () => {
 		expect(flaggedBanks([bank({ needsAttention: true })], TODAY)).toEqual([
-			{ name: "Chase", reason: "sign-in", since: "2026-10-05" },
+			{ id: 1, name: "Chase", reason: "sign-in", since: "2026-10-05" },
 		]);
 	});
 
 	it("flags a bank that needs attention and never synced", () => {
 		expect(
 			flaggedBanks([bank({ needsAttention: true, lastSyncedAt: null })], TODAY),
-		).toEqual([{ name: "Chase", reason: "sign-in" }]);
+		).toEqual([{ id: 1, name: "Chase", reason: "sign-in" }]);
 	});
 
 	it("does not flag a bank that synced 2 days ago", () => {
@@ -81,7 +84,7 @@ describe("flaggedBanks", () => {
 	it("flags a bank that last synced 3 days ago, from the start of that day", () => {
 		for (const at of ["2026-10-02 00:00:00", "2026-10-02 23:59:59"]) {
 			expect(flaggedBanks([bank({ lastSyncedAt: at })], TODAY)).toEqual([
-				{ name: "Chase", reason: "stale", since: "2026-10-02" },
+				{ id: 1, name: "Chase", reason: "stale", since: "2026-10-02" },
 			]);
 		}
 	});
@@ -89,7 +92,7 @@ describe("flaggedBanks", () => {
 	it("flags a bank that last synced weeks ago", () => {
 		expect(
 			flaggedBanks([bank({ lastSyncedAt: "2026-09-01 12:00:00" })], TODAY),
-		).toEqual([{ name: "Chase", reason: "stale", since: "2026-09-01" }]);
+		).toEqual([{ id: 1, name: "Chase", reason: "stale", since: "2026-09-01" }]);
 	});
 
 	it("counts across a month and a year", () => {
@@ -98,13 +101,13 @@ describe("flaggedBanks", () => {
 				[bank({ lastSyncedAt: "2026-09-30 12:00:00" })],
 				"2026-10-03",
 			),
-		).toEqual([{ name: "Chase", reason: "stale", since: "2026-09-30" }]);
+		).toEqual([{ id: 1, name: "Chase", reason: "stale", since: "2026-09-30" }]);
 		expect(
 			flaggedBanks(
 				[bank({ lastSyncedAt: "2025-12-30 12:00:00" })],
 				"2026-01-02",
 			),
-		).toEqual([{ name: "Chase", reason: "stale", since: "2025-12-30" }]);
+		).toEqual([{ id: 1, name: "Chase", reason: "stale", since: "2025-12-30" }]);
 		expect(
 			flaggedBanks(
 				[bank({ lastSyncedAt: "2025-12-31 12:00:00" })],
@@ -119,7 +122,9 @@ describe("flaggedBanks", () => {
 				[bank({ needsAttention: true, lastSyncedAt: "2026-09-01 12:00:00" })],
 				TODAY,
 			),
-		).toEqual([{ name: "Chase", reason: "sign-in", since: "2026-09-01" }]);
+		).toEqual([
+			{ id: 1, name: "Chase", reason: "sign-in", since: "2026-09-01" },
+		]);
 	});
 
 	it("never flags a disconnected bank", () => {

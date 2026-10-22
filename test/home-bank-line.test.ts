@@ -73,20 +73,31 @@ describe("bankSyncs", () => {
 		await env.DB.prepare(
 			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, disconnected_at) VALUES (X'00', 'Old Bank', 'person', datetime('now'))",
 		).run();
-		expect(await bankSyncs(env.DB)).toEqual([
+		const syncs = await bankSyncs(env.DB);
+		// Each bank carries its plaid_items id, which its flag is matched by (readSetup).
+		const ids = await env.DB.prepare(
+			"SELECT id FROM plaid_items ORDER BY id",
+		).all<{ id: number }>();
+		expect(syncs.map((bank) => bank.id)).toEqual(
+			ids.results.map((row) => row.id),
+		);
+		expect(syncs).toEqual([
 			{
+				id: expect.any(Number),
 				name: FIRST,
 				needsAttention: false,
 				lastSyncedAt: "2026-10-05 12:00:00",
 				disconnected: false,
 			},
 			{
+				id: expect.any(Number),
 				name: SECOND,
 				needsAttention: true,
 				lastSyncedAt: "2026-10-05 12:00:00",
 				disconnected: false,
 			},
 			{
+				id: expect.any(Number),
 				name: "Old Bank",
 				needsAttention: false,
 				lastSyncedAt: null,
