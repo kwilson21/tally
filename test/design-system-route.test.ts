@@ -115,6 +115,18 @@ describe("GET /design-system in the demo", () => {
 		expect(html).toContain('<section id="busy-ring"');
 	});
 
+	it("draws the Your banks specimens without a poll, as their sentence says (decision 146)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html
+				.split('<section id="yourbanks"')[1]
+				?.split('<section id="busy-ring"')[0] ?? "";
+		expect(section).toContain("this picture does not poll");
+		// Each state is drawn with polls={false}: none carries the list's hx-get to /home/banks or its 5-second trigger.
+		expect(section).not.toContain("/home/banks");
+		expect(section).not.toContain('hx-trigger="every 5s"');
+	});
+
 	it("has one id=first-week on the page, the sidebar's group for a new family's first week (not Home's top)", async () => {
 		const { html } = await get("/design-system");
 		expect(html.split('id="first-week"').length - 1).toBe(1);

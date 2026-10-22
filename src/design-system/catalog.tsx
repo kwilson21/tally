@@ -538,41 +538,16 @@ function Brand() {
 			>
 				<State label="Before a bank: none done, each line says how long it takes">
 					<TallySteps
-						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, true, 0)}
+						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, 0)}
 					/>
 				</State>
-				<State label="The evening of stroke one: Chase, linked; the rest come tomorrow">
+				<State label="While Tally reads and sorts: Chase, linked; steps 2 to 4 say After sorting, and the fifth says Later">
 					<TallySteps
 						steps={setupSteps(
 							BANK_SYNCED,
 							"reading",
 							"Chase",
 							FIRST_WEEK_TODAY,
-							true,
-							1,
-						)}
-					/>
-				</State>
-				<State label="The catch-up evening: the rest come when the import is sorted">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							false,
-							1,
-						)}
-					/>
-				</State>
-				<State label="The evening, the history still coming in: no time promised">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							false,
 							1,
 						)}
 					/>
@@ -584,7 +559,6 @@ function Brand() {
 							"ready",
 							"Chase",
 							FIRST_WEEK_TODAY,
-							true,
 							1,
 						)}
 					/>
@@ -604,7 +578,6 @@ function Brand() {
 							"answered",
 							"Chase",
 							FIRST_WEEK_TODAY,
-							true,
 							1,
 						)}
 					/>
@@ -620,7 +593,6 @@ function Brand() {
 							"reading",
 							"Chase",
 							FIRST_WEEK_TODAY,
-							false,
 							2,
 						)}
 					/>
@@ -641,7 +613,6 @@ function Brand() {
 							"ready",
 							"Chase",
 							FIRST_WEEK_TODAY,
-							true,
 							1,
 						)}
 					/>
@@ -652,19 +623,28 @@ function Brand() {
 				title="YourBanks"
 				tier="visual"
 				components={["YourBanks"]}
-				sentence="Home's Your banks list during a new family's first week (P140 A, decision 133): one ruled row per connected bank, in link order, with the bank icon, its name and how far Tally has got at the right. A bank whose 90-day history is still coming in shows the busy ring and 'Reading · 86 so far'; one linked over an hour ago shows its words with no ring. While any bank is being read the list refreshes itself every 5 seconds, a refresh that fails says nothing, and a bank that comes in is announced once. It stops once none is being read."
+				sentence="Home's Your banks list during a new family's first week (P140 A, decision 133). Its rows draw each bank's state. The list refreshes every 5 seconds while a bank is read or Tally sorts within the hour (decision 146), and this picture does not poll."
 			>
 				<State label="Two banks: one in, one being read with the ring">
 					<YourBanks
+						polls={false}
 						banks={[CHASE_IN, AMEX_READING]}
 						today={FIRST_WEEK_TODAY}
 					/>
 				</State>
 				<State label="A bank that needs signing in: Paused, with no ring">
-					<YourBanks banks={[CHASE_IN, AMEX_PAUSED]} today={FIRST_WEEK_TODAY} />
+					<YourBanks
+						polls={false}
+						banks={[CHASE_IN, AMEX_PAUSED]}
+						today={FIRST_WEEK_TODAY}
+					/>
 				</State>
 				<State label="A bank linked over an hour ago, its history not in: Reading, with no ring">
-					<YourBanks banks={[AMEX_PAST_HOUR]} today={FIRST_WEEK_TODAY} />
+					<YourBanks
+						polls={false}
+						banks={[AMEX_PAST_HOUR]}
+						today={FIRST_WEEK_TODAY}
+					/>
 				</State>
 			</Specimen>
 			<Specimen
@@ -686,10 +666,11 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status promises no time until every bank's 90-day history is in, then says by the morning or how far Tally has got, from 2 banks when more than one is connected. Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Until the ready email has reached someone, a muted line under the status says Tally will email you when they're ready (decision 134). Once the questions are open, the Band says Three things to check."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(null, "before")}
 						linkBank={
 							<Button type="button" class="w-full">
@@ -698,29 +679,51 @@ function Brand() {
 						}
 					/>
 				</State>
-				<State label="Reading, the import fits one night: the evening line">
+				<State label="Reading, the history still coming in: the line says the page updates and the email comes">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
 							total: 40,
-							fitsOneNight: true,
+							historyIn: false,
+							refreshes: true,
+							emailed: false,
 						})}
 					/>
 				</State>
-				<State label="Reading, the import takes more nights: the catch-up line">
+				<State label="Sorting: the count of what is sorted, and the line says the questions open when it's done">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
 							total: 1500,
 							sorted: 900,
-							fitsOneNight: false,
+							sorting: true,
+							refreshes: true,
+							emailed: false,
 						})}
 					/>
 				</State>
-				<State label="Reading, the history still coming in: no time promised">
+				<State label="Taking longer than usual: the count, no time promised, and Tally keeps trying on its own">
 					<HomeSetup
+						polls={false}
+						view={firstWeek(BANK_SYNCED, "reading", {
+							bankName: "Chase",
+							drawn: 1,
+							total: 1500,
+							sorted: 900,
+							sorting: true,
+							slow: true,
+							refreshes: false,
+							emailed: false,
+						})}
+					/>
+				</State>
+				<State label="Reading, the history still coming in, and nothing read for an hour: no time promised, and the page does not refresh">
+					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
@@ -731,6 +734,7 @@ function Brand() {
 				</State>
 				<State label="Reading, two banks: the status says from 2 banks, and the list shows each bank's state, then Have more accounts?">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							bankCount: 2,
@@ -745,11 +749,13 @@ function Brand() {
 						yourBanks={{
 							banks: [CHASE_IN, AMEX_READING],
 							today: FIRST_WEEK_TODAY,
+							polls: false,
 						}}
 					/>
 				</State>
 				<State label="Reading, a bank that needs signing in: its line and Fix above the list, and Paused with no ring">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							bankCount: 2,
@@ -760,11 +766,13 @@ function Brand() {
 						yourBanks={{
 							banks: [CHASE_IN, AMEX_PAUSED],
 							today: FIRST_WEEK_TODAY,
+							polls: false,
 						}}
 					/>
 				</State>
 				<State label="Reading, a bank linked over an hour ago: Reading with no ring">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							bankCount: 2,
@@ -774,11 +782,13 @@ function Brand() {
 						yourBanks={{
 							banks: [CHASE_IN, AMEX_PAST_HOUR],
 							today: FIRST_WEEK_TODAY,
+							polls: false,
 						}}
 					/>
 				</State>
 				<State label="Reading, with a bank that stopped updating: its line under the status">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
@@ -787,8 +797,9 @@ function Brand() {
 						bankLine={["Chase stopped updating Oct 9"]}
 					/>
 				</State>
-				<State label="Questions ready: the three things to check">
+				<State label="Ready: all sorted, the questions are next, and the band sits under the status">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(BANK_SYNCED, "ready", {
 							bankName: "Chase",
 							drawn: 1,
@@ -799,6 +810,7 @@ function Brand() {
 				</State>
 				<State label="The fifth day, all sorted: Safe to spend, what the night did, and the five lines">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(FIFTH_RECORD, "answered", {
 							bankName: "Chase",
 							drawn: 5,
@@ -811,6 +823,7 @@ function Brand() {
 				</State>
 				<State label="The fifth day, one needs you: the link to what needs a person">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(FIFTH_RECORD, "answered", {
 							bankName: "Chase",
 							drawn: 5,
@@ -823,6 +836,7 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank still reads its history: what Tally waits for, not tomorrow">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -846,6 +860,7 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank needs signing in: its line under the status, and no promise beside its Fix">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -870,6 +885,7 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank stopped updating: its line and Fix under a bare count, with no promise">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -893,6 +909,7 @@ function Brand() {
 				</State>
 				<State label="Questions answered: the ruled total, and no Band">
 					<HomeSetup
+						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -929,7 +946,9 @@ const firstWeek = (
 		bankName: null,
 		bankCount: 1,
 		historyIn: true,
-		fitsOneNight: true,
+		sorting: false,
+		slow: false,
+		refreshes: false,
 		sorted: 0,
 		total: 0,
 		...extra,
@@ -941,7 +960,6 @@ const firstWeek = (
 			phase,
 			view.bankName,
 			FIRST_WEEK_TODAY,
-			view.historyIn && view.fitsOneNight,
 			view.bankCount,
 		),
 	};
@@ -8198,6 +8216,7 @@ function FirstWeekGroup() {
 		keep: [],
 		waiting: [],
 		budgets: null,
+		watching: false,
 		...over,
 	});
 	return (

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
+import { markStroke, STROKES } from "../src/db/first-tally";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -298,6 +299,8 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 
 	it("counts the night's sort against the same day", async () => {
 		quiet();
+		// A set-up household, so the usual 500 applies (the first week's larger cap is the next test's).
+		for (const stroke of STROKES) await markStroke(db, stroke, "2026-10-13");
 		// 495 of production's 500 were spent at syncs earlier today.
 		const today = await householdToday(db);
 		await db
@@ -315,6 +318,30 @@ describe("the day's cap across a sync's run and the nightly run", () => {
 		);
 		expect(jev.asked).toHaveLength(5);
 		expect(await callsUsed()).toBe(500);
+	});
+
+	it("lets a first week ask past the usual 500, since no wait is held for the questions (decision 146)", async () => {
+		quiet();
+		await addPending(50);
+		const waiting = (await pendingForJev(db, 1000)).length;
+		// 495 of production's 500 were spent earlier today, but no first_tally record yet: the first week's cap is 2,000 a
+		// connected bank (the demo seed's two), so the night's run asks every waiting row.
+		const today = await householdToday(db);
+		await db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES (?, '495') ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+			)
+			.bind(`jev_calls_${today}`)
+			.run();
+		const jev = fakeJev();
+		await runSortInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "false" },
+			fakeSteps().runStep,
+			{ bySync: false, rulesApplied: false, night: "2026-10-13" },
+			{ runId: crypto.randomUUID(), fetchImpl: jev.fetchImpl },
+		);
+		expect(jev.asked).toHaveLength(waiting);
+		expect(await callsUsed()).toBe(495 + waiting);
 	});
 
 	it("keeps the day's count through the demo's nightly reset, so a second run can't spend the cap again", async () => {

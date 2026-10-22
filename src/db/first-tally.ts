@@ -83,6 +83,12 @@ export type FirstTally = {
 	 */
 	readyEmailedTo?: string[];
 	/**
+	 * The kept tries of the ready email (decision 146), keyed by the SHA-256 in hex of the lower-cased address: the read line a
+	 * try Resend may hold sent, and the UTC time of that first try (`YYYY-MM-DDTHH:MM:SSZ`). The next try sends the same line
+	 * under the same key, through Resend only, until Resend answers or the entry is a day old. Absent until one is kept.
+	 */
+	heldReadyEmail?: Record<string, { line: string; at: string }>;
+	/**
 	 * The savings question's answer (decision 135, #721): the goal's cents the household kept, or "skipped" for Not now. Set
 	 * once, when the question is answered or when stroke four is drawn with a goal above $0 (savingsCopyStatement); a
 	 * take-back keeps it, as it keeps the budgets. Absent until then.
@@ -117,6 +123,16 @@ export function isSetUp(record: FirstTally | null): boolean {
 /** True once the three questions are answered (pay, bills and budgets drawn): only the night's count stroke is left. */
 export function questionsAnswered(record: FirstTally | null): boolean {
 	return (["pay", "bills", "budgets"] as const).every(
+		(stroke) => record?.strokes[stroke] !== undefined,
+	);
+}
+
+/** The three questions' strokes, in the order the first page asks them. */
+export const QUESTION_STROKES = ["pay", "bills", "budgets"] as const;
+
+/** True once any of the three questions is drawn (a migrated record's null counts). The first page's check-in stops then. */
+export function anyQuestionAnswered(record: FirstTally | null): boolean {
+	return QUESTION_STROKES.some(
 		(stroke) => record?.strokes[stroke] !== undefined,
 	);
 }

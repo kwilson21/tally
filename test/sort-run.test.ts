@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { markStroke, STROKES } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { sortGroups } from "../src/sort-groups";
 import { fakeSteps } from "./fake-sort-steps";
@@ -109,6 +110,8 @@ describe("sorting in groups of 25, in one process", () => {
 	});
 
 	it("600 waiting against the 500 cap asks 500 and leaves 100; the demo's 40 cap asks 25 then 15", async () => {
+		// A set-up household, so production's usual 500 applies (the first week's larger cap is in first-week-cap.test.ts).
+		for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
 		const ids = await addWaiting(600);
 		const fetchImpl = vi.fn(async () => reply(0.9));
 		// One run asks about the day's 500 and leaves the other 100 for the next day: no per-run cap.

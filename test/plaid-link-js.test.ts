@@ -3,8 +3,50 @@ import { setupPlaidLink } from "../public/js/plaid-link.js";
 
 const genericFailure = "Couldn't link the bank. Try again.";
 
+type RequestEvent = {
+	target?: unknown;
+	detail?: { ctx?: unknown };
+	defaultPrevented: boolean;
+	preventDefault: () => void;
+};
+type RequestListener = (event: RequestEvent) => void;
+
+/** A cancelable htmx event, as htmx 4 dispatches one on the element it concerns (htmx.js #trigger). */
+function requestEvent(target?: unknown, ctx?: unknown): RequestEvent {
+	const event: RequestEvent = {
+		target,
+		detail: { ctx },
+		defaultPrevented: false,
+		preventDefault() {
+			event.defaultPrevented = true;
+		},
+	};
+	return event;
+}
+
+/** The listeners on one element, which htmx's request events reach. */
+function elementListeners() {
+	const listeners = new Map<string, Set<RequestListener>>();
+	return {
+		listeners,
+		addEventListener: (name: string, listener: RequestListener) => {
+			const set = listeners.get(name) ?? new Set<RequestListener>();
+			set.add(listener);
+			listeners.set(name, set);
+		},
+		removeEventListener: vi.fn((name: string, listener: RequestListener) => {
+			listeners.get(name)?.delete(listener);
+		}),
+		dispatchRequest: (name: string, ctx: unknown) => {
+			for (const listener of listeners.get(name) ?? [])
+				listener(requestEvent(undefined, ctx));
+		},
+	};
+}
+
 function harness({
 	linkBank = true,
+	errorRegionOnScreen = true,
 	redrawKeepsLinkButton = false,
 	dataset,
 	tokenResponse = {
@@ -24,6 +66,8 @@ function harness({
 	},
 }: {
 	linkBank?: boolean;
+	/** False when no [data-link-bank-error] is on screen (a first-week redraw can take it away). */
+	errorRegionOnScreen?: boolean;
 	redrawKeepsLinkButton?: boolean;
 	dataset?: Record<string, string>;
 	tokenResponse?: {
@@ -53,6 +97,7 @@ function harness({
 	const listeners = new Map<string, Set<RequestListener>>();
 	const button = {
 		dataset,
+		isConnected: true,
 		disabled: false,
 		focus: vi.fn(),
 		setAttribute: vi.fn(),
@@ -95,6 +140,7 @@ function harness({
 			selector === "[data-fix-error]" ? repairError : undefined,
 	};
 	const repairButton = {
+		isConnected: true,
 		disabled: false,
 		setAttribute: vi.fn(),
 		classList: { toggle: vi.fn() },
@@ -121,17 +167,27 @@ function harness({
 	};
 	const parsedPages: Array<{ version: string }> = [];
 	const status = { focus: vi.fn() };
+	// The document body, which an exchange with no Link a bank on screen uses as its source (plaid-link.js).
+	const body = {
+		isConnected: true,
+		dispatchEvent: vi.fn(),
+		...elementListeners(),
+	};
+	// The document's own listeners: the click delegate, and the before-request guard for Home's waiting refreshes.
+	const documentEvents = elementListeners();
 	const document = {
-		body: { dispatchEvent: vi.fn() },
+		body,
 		addEventListener: (name: string, listener: never) => {
 			if (name === "click") delegatedClick = listener;
+			else documentEvents.addEventListener(name, listener);
 		},
 		querySelector: (selector: string) => {
 			if (selector === "[data-link-bank]")
 				return linkButtonGone
 					? undefined
 					: (liveLinkButton ?? (linkBank ? button : undefined));
-			if (selector === "[data-link-bank-error]") return liveErrorRegion;
+			if (selector === "[data-link-bank-error]")
+				return errorRegionOnScreen ? liveErrorRegion : undefined;
 			if (selector === "#accounts-summary") return currentSummary;
 			if (selector === "#page") return currentPage;
 			// Only Home has the status line (home-setup.tsx), and Home is the refresh that targets #page.
@@ -195,9 +251,40 @@ function harness({
 	}
 	(globalThis as { Plaid?: unknown }).Plaid = { create };
 	const process = vi.fn();
-	setupPlaidLink({ document, fetch, htmx: { ajax, process }, DOMParser });
+	// htmx 4 sends no request for a source that is no longer in the document: its #handleTriggerEvent returns when
+	// !elt.isConnected (node_modules/htmx.org/dist/htmx.js). The fake refuses one the same way, so an exchange that
+	// depends on a redrawn button fails here as it would in the browser.
+	const htmxAjax = vi.fn(
+		async (method: string, url: string, options: { source?: unknown }) => {
+			if ((options.source as { isConnected?: boolean })?.isConnected === false)
+				return;
+			// The harness's mock, called as htmx calls it (its union type is not callable directly).
+			const send = ajax as unknown as (
+				method: string,
+				url: string,
+				options: unknown,
+			) => unknown;
+			return send(method, url, options);
+		},
+	);
+	setupPlaidLink({
+		document,
+		fetch,
+		htmx: { ajax: htmxAjax, process },
+		DOMParser,
+	});
 	return {
 		ajax,
+		body,
+		/** The before-request event htmx 4 dispatches on a request's source, and whether a listener cancelled it. */
+		beforeRequest: (source: unknown) => {
+			const event = requestEvent(source);
+			for (const listener of documentEvents.listeners.get(
+				"htmx:before:request",
+			) ?? [])
+				listener(event);
+			return event;
+		},
 		button,
 		repairButton,
 		repairChildren,
@@ -878,6 +965,169 @@ describe("plaid-link.js", () => {
 					([url]) => url === "/plaid/items/42/link-token",
 				),
 			).toHaveLength(1);
+		});
+	});
+
+	// Home's first-week refreshes (the Your banks poll and the presence check-in) carry data-waits-for-link. While Plaid
+	// Link is open they are skipped, so a sort that finishes mid-link can't redraw the first-week top and take the bank being
+	// linked away (decision 146). The exchange is never skipped.
+	describe("Home's waiting refreshes, and the exchange after a redraw (decision 146)", () => {
+		const waiting = () => ({
+			isConnected: true,
+			hasAttribute: (name: string) => name === "data-waits-for-link",
+		});
+		const announcements = (h: ReturnType<typeof harness>) =>
+			h.document.body.dispatchEvent.mock.calls
+				.map(([event]) => event)
+				.filter((event) => event.type === "announce")
+				.map((event) => event.detail.value);
+		const linked = () => ({
+			response: { status: 204 },
+			text: "",
+			hx: {
+				trigger: JSON.stringify({ announce: "Linked First Bank." }),
+			},
+		});
+
+		it("cancels a request from an element that waits for the link, while a link is running", async () => {
+			const h = harness();
+			await h.click();
+			expect(h.beforeRequest(waiting()).defaultPrevented).toBe(true);
+		});
+
+		it("leaves a request from any other element alone while a link is running", async () => {
+			const h = harness();
+			await h.click();
+			const plain = { isConnected: true, hasAttribute: () => false };
+			expect(h.beforeRequest(plain).defaultPrevented).toBe(false);
+		});
+
+		it("leaves the exchange alone while the link is running", async () => {
+			const cancelled: boolean[] = [];
+			const ajax = vi.fn(
+				async (_method: string, _url: string, options: { source: unknown }) => {
+					cancelled.push(h.beforeRequest(options.source).defaultPrevented);
+					h.button.dispatchRequest("htmx:finally:request", linked());
+				},
+			);
+			const h = harness({ ajax });
+			await h.click();
+			await h.linkOptions?.onSuccess("public-secret");
+			expect(ajax).toHaveBeenCalledWith(
+				"POST",
+				"/plaid/exchange",
+				expect.anything(),
+			);
+			expect(cancelled).toEqual([false]);
+		});
+
+		it("stops cancelling once onExit ends the link, so the next tick runs as usual", async () => {
+			const h = harness();
+			await h.click();
+			h.linkOptions?.onExit();
+			expect(h.beforeRequest(waiting()).defaultPrevented).toBe(false);
+		});
+
+		it("stops cancelling once onSuccess ends the link, so the next tick runs as usual", async () => {
+			const h = harness();
+			await h.click();
+			await h.linkOptions?.onSuccess("public-secret");
+			expect(h.beforeRequest(waiting()).defaultPrevented).toBe(false);
+		});
+
+		it("exchanges through the live Link a bank when the clicked one was redrawn away before onSuccess", async () => {
+			const ajax = vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (n: string, c: unknown) => void };
+					},
+				) => {
+					options.source.dispatchRequest("htmx:after:request", linked());
+					options.source.dispatchRequest("htmx:finally:request", linked());
+				},
+			);
+			const h = harness({ ajax });
+			await h.click();
+			const live = { ...h.button, isConnected: true, focus: vi.fn() };
+			h.replaceLinkButton(live);
+			h.button.isConnected = false;
+			await h.linkOptions?.onSuccess("public-secret");
+			expect(ajax).toHaveBeenCalledWith(
+				"POST",
+				"/plaid/exchange",
+				expect.objectContaining({
+					source: live,
+					values: { public_token: "public-secret" },
+				}),
+			);
+			expect(announcements(h)).toEqual(["Linked First Bank."]);
+		});
+
+		it("exchanges through document.body when no Link a bank is on screen either", async () => {
+			const ajax = vi.fn(
+				async (
+					_method: string,
+					_url: string,
+					options: {
+						source: { dispatchRequest: (n: string, c: unknown) => void };
+					},
+				) => {
+					options.source.dispatchRequest("htmx:after:request", linked());
+					options.source.dispatchRequest("htmx:finally:request", linked());
+				},
+			);
+			const h = harness({ ajax, linkBank: false });
+			await h.click();
+			h.button.isConnected = false;
+			await h.linkOptions?.onSuccess("public-secret");
+			expect(ajax).toHaveBeenCalledWith(
+				"POST",
+				"/plaid/exchange",
+				expect.objectContaining({ source: h.body }),
+			);
+			expect(announcements(h)).toEqual(["Linked First Bank."]);
+		});
+
+		it("says a failed exchange in a toast when no error region is on screen, so the words still reach the person", async () => {
+			const ajax = vi.fn(async () => {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 502 },
+					text: '<p role="alert">Exchange failed.</p>',
+				});
+			});
+			const h = harness({ ajax, errorRegionOnScreen: false });
+			await h.click();
+			await h.linkOptions?.onSuccess("public-secret");
+			const toasts = h.document.body.dispatchEvent.mock.calls
+				.map(([event]) => event)
+				.filter((event) => event.type === "toast");
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]?.detail).toEqual({
+				message: "Exchange failed.",
+				type: "error",
+			});
+		});
+
+		it("writes a failed exchange into the error region, not a toast, when one is on screen", async () => {
+			const ajax = vi.fn(async () => {
+				h.button.dispatchRequest("htmx:finally:request", {
+					response: { status: 502 },
+					text: '<p role="alert">Exchange failed.</p>',
+				});
+			});
+			const h = harness({ ajax });
+			await h.click();
+			await h.linkOptions?.onSuccess("public-secret");
+			expect(h.children.map((child) => child.textContent)).toEqual([
+				"Exchange failed.",
+			]);
+			expect(
+				h.document.body.dispatchEvent.mock.calls.filter(
+					([event]) => event.type === "toast",
+				),
+			).toHaveLength(0);
 		});
 	});
 });

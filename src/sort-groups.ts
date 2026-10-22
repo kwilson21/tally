@@ -16,6 +16,7 @@ import {
 	readAiSwitches,
 	stillOnKeys,
 } from "./db/ai-switches";
+import { questionsAnswered, readFirstTally } from "./db/first-tally";
 import {
 	dropReservedJevCallsStatement,
 	giveBackReservedJevCallsStatement,
@@ -44,6 +45,30 @@ import { type Deadline, pastDeadline } from "./run-budget";
  */
 export const jevCallLimit = (env: { DEMO?: string }) =>
 	env.DEMO === "false" ? 500 : 40;
+
+/** The first week's allowance per connected bank, until the three questions are answered (decision 146). */
+const FIRST_WEEK_CALLS_PER_BANK = 2000;
+
+/**
+ * How many of the day's calls the sorting may reserve (decision 146). In production, until pay, bills and budgets are
+ * all drawn, it is 2,000 for each connected bank, so a family's first sort is not held to the usual 500 while its
+ * questions wait on it. Otherwise it is the usual cap, which the demo keeps at 40.
+ */
+export async function dailyJevCap(
+	db: D1Database,
+	env: { DEMO?: string },
+): Promise<number> {
+	const usual = jevCallLimit(env);
+	if (env.DEMO !== "false") return usual;
+	// A set-up household has all five strokes drawn, so it has answered the three questions too.
+	if (questionsAnswered(await readFirstTally(db))) return usual;
+	const banks = await db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM plaid_items WHERE disconnected_at IS NULL",
+		)
+		.first<{ n: number }>();
+	return Math.max(usual, FIRST_WEEK_CALLS_PER_BANK * (banks?.n ?? 0));
+}
 
 /** Transactions per group: one read and one write each (decision 139). */
 export const GROUP_SIZE = 25;
@@ -374,7 +399,7 @@ async function reserveCalls(
 	const granted = await reserveJevCalls(
 		env.DB,
 		plan.day,
-		jevCallLimit(env),
+		await dailyJevCap(env.DB, env),
 		plan.rows.length,
 		plan.turnId,
 	);

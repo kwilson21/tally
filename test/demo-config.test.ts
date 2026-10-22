@@ -94,8 +94,9 @@ describe("production environment config (#23)", () => {
 
 	// Decision 139: the night is one Workflow that the 09:00 run starts; reconnect reminders have a dedicated invocation.
 	it("runs the sync and the night's Workflow at 09:00 UTC, then reconnect reminders at 10:00, with no sort runs between them (decision 139)", () => {
+		// Plus the minute's ready email alone, which starts no sort (decision 146).
 		expect(production.triggers).toEqual({
-			crons: ["0 9 * * *", "0 10 * * *"],
+			crons: ["0 9 * * *", "0 10 * * *", "* * * * *"],
 		});
 	});
 

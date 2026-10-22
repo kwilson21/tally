@@ -28,7 +28,7 @@ import { firstPage } from "../src/routes/first-page";
 const db = env.DB;
 const BASE = "http://tally.test";
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
-/** Stroke one was drawn two days ago, so the questions are open today (the household day after it, spec §8.8). */
+/** Stroke one was drawn two days ago, so the questions are open today (spec §8.8, decision 146: no wait for a later day). */
 const STROKE_ONE = daysBefore(TODAY, 2);
 
 /**
@@ -1075,6 +1075,49 @@ describe("Keep keeps what the page showed", () => {
 			.first<{ count: number }>();
 		expect(bills?.count).toBe(0);
 		expect(trigger(res).announce).toMatch(/^Nothing kept\./);
+	});
+});
+
+// The presence check-in (decision 146): the questions page checks in every 30 seconds while no question is answered, so
+// Tally knows someone is still on it. Once one is answered the page draws no check-in.
+describe("the presence check-in on the page (decision 146)", () => {
+	const CHECK_IN = 'hx-post="/home/seen"';
+
+	it("is drawn while no question is answered", async () => {
+		const { res, html } = await get("/first-page");
+		expect(res.status).toBe(200);
+		expect(html).toContain(CHECK_IN);
+	});
+
+	it("is marked, so a Plaid Link window on Home pauses it wherever it is drawn (decision 146)", async () => {
+		const { html } = await get("/first-page");
+		const tag = html.match(/<[a-z]+ id="home-seen"[^>]*>/)?.[0] ?? "";
+		expect(tag).toContain("data-waits-for-link");
+	});
+
+	it("is not drawn once a question is answered", async () => {
+		await markStroke(db, "pay", TODAY);
+		const { res, html } = await get("/first-page");
+		expect(res.status).toBe(200);
+		expect(html).not.toContain(CHECK_IN);
+	});
+
+	it("is drawn inside the swapped #first-page of a pay answer that leaves a question open, so the page keeps checking in", async () => {
+		// Two payroll merchants: answering the first leaves the second to ask, so the pay step is not drawn yet.
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		await deposits("OTHER PAYROLL", 180000, 2);
+		const { res, html } = await answerAsShown("yes", true);
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="first-page"');
+		expect(html).toContain(CHECK_IN);
+	});
+
+	it("is not drawn in a pay answer's #first-page once the answer draws the pay step, so the swap takes away the one the page drew", async () => {
+		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const { res, html } = await answerAsShown("yes", true);
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="first-page"');
+		expect(html).not.toContain(CHECK_IN);
 	});
 });
 

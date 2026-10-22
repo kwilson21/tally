@@ -184,7 +184,7 @@ describe("the first week, from Home to the pay stroke", () => {
 
 		// Home's Band now opens the question page, and the setup headline is gone.
 		const band = await words(await family.fetch("/"));
-		expect(band).toContain("Three things to check");
+		expect(band).toContain("Set up your budget");
 		expect(band).toContain('href="/first-page"');
 		expect(band).not.toContain("Five strokes, and you're set up.");
 

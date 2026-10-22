@@ -15,7 +15,6 @@ const db = env.DB;
 const TODAY = "2026-10-14";
 
 const open = {
-	today: TODAY,
 	strokeOneDay: "2026-10-13",
 	banks: [{ lastSyncedAt: "2026-10-13", historyCompleteAt: "2026-10-13" }],
 	waiting: 0,
@@ -26,12 +25,11 @@ describe("questionsOpen, one condition at a time", () => {
 		expect(questionsOpen(open)).toBe(true);
 	});
 
-	it("stays shut on stroke one's own day: the questions open the day after", () => {
-		expect(questionsOpen({ ...open, strokeOneDay: TODAY })).toBe(false);
-		expect(questionsOpen({ ...open, strokeOneDay: "2026-10-15" })).toBe(false);
+	it("opens on stroke one's own day once history is in and nothing waits", () => {
+		expect(questionsOpen({ ...open, strokeOneDay: TODAY })).toBe(true);
 	});
 
-	it("stays shut with no stroke one day to measure from", () => {
+	it("stays shut with no stroke one day", () => {
 		expect(questionsOpen({ ...open, strokeOneDay: null })).toBe(false);
 	});
 
@@ -353,19 +351,25 @@ describe("readQuestionsGate", () => {
 
 	it("is shut with no bank", async () => {
 		await markStroke(db, "bank", "2026-10-13");
-		expect(await readQuestionsGate(db, TODAY)).toBe(false);
+		expect(await readQuestionsGate(db)).toBe(false);
 	});
 
 	it("opens once stroke one's day is past and the bank's history is in", async () => {
 		await markStroke(db, "bank", "2026-10-13");
 		await addBank("gate-bank-1");
-		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+		expect(await readQuestionsGate(db)).toBe(true);
 	});
 
-	it("is shut on stroke one's own day", async () => {
-		await markStroke(db, "bank", TODAY);
+	it("opens on stroke one's own day once history is in and nothing waits", async () => {
+		// The household's real today, not a fixed date: stroke one is drawn today in the household's time zone.
+		await markStroke(db, "bank", todayIn(DEFAULT_TIME_ZONE));
 		await addBank("gate-bank-1");
-		expect(await readQuestionsGate(db, TODAY)).toBe(false);
+		expect(await readQuestionsGate(db)).toBe(true);
+	});
+
+	it("is shut with a bank and no stroke one drawn, so /first-page stays closed until Home draws it", async () => {
+		await addBank("gate-bank-1");
+		expect(await readQuestionsGate(db)).toBe(false);
 	});
 
 	it("ignores a disconnected bank that never finished", async () => {
@@ -376,7 +380,7 @@ describe("readQuestionsGate", () => {
 			history: null,
 			disconnected: "2026-10-13",
 		});
-		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+		expect(await readQuestionsGate(db)).toBe(true);
 	});
 
 	it("is shut while an imported transaction waits for Jev, and open once Jev is off", async () => {
@@ -387,16 +391,16 @@ describe("readQuestionsGate", () => {
 				"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES (1, 'gate-open', '2026-10-02', 1200, 'SHOP')",
 			)
 			.run();
-		expect(await readQuestionsGate(db, TODAY)).toBe(false);
+		expect(await readQuestionsGate(db)).toBe(false);
 		await saveAiSwitches(db, { categories: false, income: false });
-		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+		expect(await readQuestionsGate(db)).toBe(true);
 	});
 
 	it("is open until the first week is set up, then shut for good, even with every other condition holding (#647)", async () => {
 		await markStroke(db, "bank", "2026-10-13");
 		await addBank("gate-bank-1");
-		expect(await readQuestionsGate(db, TODAY)).toBe(true);
+		expect(await readQuestionsGate(db)).toBe(true);
 		for (const stroke of STROKES) await markStroke(db, stroke, TODAY);
-		expect(await readQuestionsGate(db, TODAY)).toBe(false);
+		expect(await readQuestionsGate(db)).toBe(false);
 	});
 });

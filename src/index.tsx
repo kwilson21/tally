@@ -81,7 +81,9 @@ app.onError(serverErrorPage);
  *   starts the night's Workflow and retries feedback. The Workflow (src/sort-instance.ts) sorts everything waiting in
  *   groups of 25, then makes the night's notes and names, then new-category suggestions, then keeps the first night's
  *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
- * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`).
+ * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready email (`runReadyEmail`) as a backstop.
+ * - Each minute (`runReadyEmail` alone, decision 146): a new family's ready email goes out as soon as its questions are
+ *   open and the person has left the first-week pages (ready-email.tsx). It reads one row for everyone else.
  *
  * The demo has the one 09:00 run: it resets, then starts the same Workflow (with no counts) and retries feedback.
  *
@@ -90,6 +92,9 @@ app.onError(serverErrorPage);
  * db:seed:local`), runs the 09:00 work.
  */
 const RECONNECT_EMAIL_CRON = "0 10 * * *";
+
+/** Every minute, production only (wrangler.jsonc): the ready email, and nothing else (decision 146). */
+const READY_EMAIL_CRON = "* * * * *";
 
 /**
  * The 09:00 run, and the demo's only one. The demo resets first; production then catches up every
@@ -233,7 +238,9 @@ app.route("/", webhooks);
 export default {
 	fetch: app.fetch,
 	async scheduled(controller, env) {
-		if (controller.cron === RECONNECT_EMAIL_CRON) {
+		if (controller.cron === READY_EMAIL_CRON)
+			await runStep("ready email", () => runReadyEmail(env));
+		else if (controller.cron === RECONNECT_EMAIL_CRON) {
 			await runStep("reconnect reminders", () => runReconnectReminders(env));
 			await runStep("ready email", () => runReadyEmail(env));
 		} else await runScheduled(env);

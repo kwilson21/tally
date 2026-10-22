@@ -20,10 +20,48 @@ export type DeliveryEnv = {
 	};
 };
 
+/** What a send may be told (decision 146). */
+export type DeliverOptions = {
+	/**
+	 * Resend only, for a kept try (the ready email's words a try Resend may hold kept, ready-email.tsx): Cloudflare's email is
+	 * never used, and every answer that isn't a success, and no answer at all, comes back `held`. Without it, nothing changes.
+	 */
+	onlyResend?: boolean;
+};
+
+/**
+ * The error name Resend gives an error answer (its body's `name`, such as invalid_idempotent_request), or null when the body
+ * has none. A body that can't be read is no name.
+ */
+async function errorName(response: Response): Promise<string | null> {
+	try {
+		const body = (await response.json()) as { name?: unknown };
+		return typeof body.name === "string" ? body.name : null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Sends one email to one address. Resend gets it first, with a 10 second timeout; Cloudflare's email only when Resend didn't
  * deliver. `kinds` names each failed attempt by its provider status or error kind (never the address), and is "no provider
- * configured" when neither provider is set up.
+ * configured" when neither provider is set up. `idempotencyKey` is sent to Resend only, as its Idempotency-Key header, so
+ * a retry of the same email (one Resend already accepted, answered late) is answered from Resend's record and not sent again:
+ * Resend keeps a key for 24 hours (its docs, dashboard/emails/idempotency-keys). Cloudflare's email has no such key, so the
+ * fallback never carries one.
+ *
+ * With a key (the ready email, decision 146) Resend may already hold the send, so the fallback is used only when Resend's answer
+ * shows this body was never sent under the key (Resend's docs, api-reference/errors and dashboard/emails/idempotency-keys, read
+ * 2026-10-21):
+ * - a 409 invalid_idempotent_request says the key was used with a different payload, so this body was never sent under it, and
+ *   the try is a failed Resend try that falls back like any other;
+ * - a 409 concurrent_idempotent_requests (another request with the key is in progress; Resend says it is safe to retry later),
+ *   any other 409, and no answer at all (a timeout or a network error) are failed tries with no fallback, and come back `held`
+ *   so the caller keeps its words and tries again with the same key;
+ * - any other Resend failure falls back, as it does without a key.
+ * With `onlyResend` (a kept try, decision 146) nothing falls back: every answer that isn't a success, and no answer, comes back
+ * `held`, whatever Resend says. With no Resend key that is held too, since no answer can show the email was never sent.
+ * Without a key (the reconnect email) nothing here changes.
  */
 export async function deliver(
 	env: DeliveryEnv,
@@ -31,7 +69,9 @@ export async function deliver(
 	email: Mail,
 	fetchImpl: typeof fetch,
 	timeoutSignal: (milliseconds: number) => AbortSignal,
-): Promise<{ delivered: boolean; kinds: string[] }> {
+	idempotencyKey?: string,
+	options: DeliverOptions = {},
+): Promise<{ delivered: boolean; kinds: string[]; held?: true }> {
 	const kinds: string[] = [];
 	let delivered = false;
 	if (env.RESEND_API_KEY) {
@@ -41,14 +81,33 @@ export async function deliver(
 			headers: {
 				Authorization: `Bearer ${env.RESEND_API_KEY}`,
 				"Content-Type": "application/json",
+				...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
 			},
 			body: JSON.stringify({ from: FROM, to: recipient, ...email }),
 		}).catch(() => null);
 		delivered = response?.ok ?? false;
-		if (!delivered)
-			kinds.push(
-				response ? `resend ${response.status}` : "resend timeout or error",
-			);
+		const noAnswer = response
+			? `resend ${response.status}`
+			: "resend timeout or error";
+		if (!delivered && options.onlyResend)
+			// A kept try: Resend may hold the send whatever it answered, so the caller keeps its words and tries again.
+			return { delivered: false, kinds: [noAnswer], held: true };
+		if (!delivered && idempotencyKey) {
+			// Resend may already hold this send (decision 146). Only invalid_idempotent_request says this body was never sent
+			// under the key, so only it falls back; every other conflict, and no answer, is a failed try with no fallback.
+			const conflict =
+				response?.status === 409 ? await errorName(response) : null;
+			if (
+				!response ||
+				(response.status === 409 && conflict !== "invalid_idempotent_request")
+			)
+				// `held`: Resend may already hold this send, so the caller keeps its words and tries again with the same key.
+				return { delivered: false, kinds: [noAnswer], held: true };
+		}
+		if (!delivered) kinds.push(noAnswer);
+	} else if (options.onlyResend) {
+		// No Resend key: no answer can show the kept send was never made, so it is held, and Cloudflare's email is not used.
+		return { delivered: false, kinds: ["no provider configured"], held: true };
 	}
 	if (!delivered && env.EMAIL) {
 		try {

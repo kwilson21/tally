@@ -35,6 +35,7 @@ import { dollarsWords, paySentence, shownPayValues } from "../first-tally/pay";
 import { centsToAmount } from "../money";
 import { Button } from "./button";
 import { FoldedRow } from "./folded-row";
+import { HomeSeenCheckIn } from "./home-seen";
 import { safeToSpendText } from "./home-top";
 import { MoneyInput } from "./money-input";
 import { Notebook } from "./notebook";
@@ -718,6 +719,7 @@ export function FirstPageBody({
 	budgetError = null,
 	budgetAmountOpen = false,
 	savingsError = null,
+	watching = false,
 }: {
 	model: FirstPageModel;
 	focus: boolean;
@@ -731,6 +733,11 @@ export function FirstPageBody({
 	budgetAmountOpen?: boolean;
 	/** A refused Save it in the savings question: its words and what was typed. */
 	savingsError?: BudgetError | null;
+	/**
+	 * The presence check-in (decision 146): drawn inside this root while no question is answered, so the swap of the root takes
+	 * it away once one is. The page's caller says which; the catalog's states draw none.
+	 */
+	watching?: boolean;
 }) {
 	const billsAnswered = model.ledger.some((line) => line.id === "bills");
 	const budgets = model.budgets;
@@ -791,6 +798,7 @@ export function FirstPageBody({
 					</>
 				)}
 			</FirstPage>
+			{watching && <HomeSeenCheckIn />}
 		</div>
 	);
 }
