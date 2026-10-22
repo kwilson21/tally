@@ -34,6 +34,7 @@ import { type SyncAllResult, syncAllItems } from "../plaid/sync-all";
 import { decryptToken } from "../plaid/token-crypto";
 import { AccountsTop } from "../views/accounts-top";
 import { AppleCardGroup, type AppleCardView } from "../views/apple-card-group";
+import { AppleCardRemove } from "../views/apple-card-remove";
 import { AppleCardSheet } from "../views/apple-card-sheet";
 import { BankGroup } from "../views/bank-group";
 import { BottomSheet, sheetAttrs } from "../views/bottom-sheet";
@@ -810,7 +811,6 @@ function RemovePage({
 	/** Whether Plaid is configured: its form swaps Accounts in, so Link a bank needs Plaid Link's scripts here. */
 	plaid: boolean;
 }) {
-	const url = "/accounts/apple-card/remove";
 	return (
 		<Layout
 			title="Remove Apple Card? · Tally"
@@ -819,49 +819,11 @@ function RemovePage({
 			currentPath={address}
 			{...plaidScripts(plaid)}
 		>
-			<h1 class="font-serif text-4xl font-semibold tracking-tight">
-				Remove Apple Card?
-			</h1>
-			<p class="mt-4 max-w-xl text-muted">
-				Tally leaves it out of net worth. Its {count}{" "}
-				{count === 1 ? "transaction stays" : "transactions stay"}, so past
-				months still add up, unless you tick the box below.
-			</p>
-			{error && (
-				<p role="alert" class="mt-4 text-over">
-					{error}
-				</p>
-			)}
-			{/* htmx swaps Accounts in with a toast; without JavaScript it posts and is redirected there. */}
-			<form
-				method="post"
-				action={url}
-				class="mt-8"
-				hx-post={url}
-				hx-disable="findAll button[type=submit]"
-				hx-target="#main"
-				hx-select="#main"
-				hx-swap="outerHTML"
-			>
-				<Chip
-					type="checkbox"
-					name="delete"
-					value="yes"
-					checked={deleteHistory}
-					describedBy="delete-hint"
-				>
-					Also delete its transactions
-				</Chip>
-				<p id="delete-hint" class="mt-2 text-muted">
-					This deletes them for good.
-				</p>
-				<div class="mt-6 flex items-center gap-3">
-					<Button type="submit">Remove</Button>
-					<Button kind="text" href="/accounts">
-						Cancel
-					</Button>
-				</div>
-			</form>
+			<AppleCardRemove
+				count={count}
+				deleteHistory={deleteHistory}
+				error={error}
+			/>
 		</Layout>
 	);
 }

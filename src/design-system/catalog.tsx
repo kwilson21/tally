@@ -35,6 +35,7 @@ import { AccountsTop } from "../views/accounts-top";
 import { AdjustLink } from "../views/adjust-link";
 import { AiTally } from "../views/ai-tally";
 import { AppleCardGroup } from "../views/apple-card-group";
+import { AppleCardRemove } from "../views/apple-card-remove";
 import { AppleCardSheet } from "../views/apple-card-sheet";
 import { Band } from "../views/band";
 import { BankGroup } from "../views/bank-group";
@@ -1209,6 +1210,26 @@ const APPLE_CARD_SHEET_SPEC: UseSpecText = {
 		"A request with no Content-Length, or one over 1,100,000 bytes, is refused before its body is read. A file over 1 MB is refused after it is read. A typed credit keeps its minus. Nothing is saved on any refusal. Each refusal keeps the typed balance, but not the file, which the browser can't refill.",
 	words:
 		"Title “Apple Card”. Intro: “Upload the file Apple exports. Tally adds the ones it doesn't have yet.” Balance: “Balance in Wallet”, with the hint “Optional. Left blank, Oct 12's balance stays. For a credit, type a minus first.” or, before one counts, “Optional. For a credit, type a minus first.” Demo: “In the demo, Tally uses a sample file.” and “Add the sample”.",
+};
+
+// AppleCardRemove's use spec (spec §8.10): Remove Apple Card's page, drawn as Disconnect's is.
+const APPLE_CARD_REMOVE_SPEC: UseSpecText = {
+	purpose:
+		"Take Apple Card out of net worth from Accounts' Manage. Its rows stay unless the box is ticked, so past months still add up.",
+	affordance:
+		"A page with its heading, one sentence on how many transactions stay, a chip that also deletes them, then Remove beside a text Cancel.",
+	states:
+		"Keeping the rows is the default, with the box unticked. Ticked, the card's transactions, balances and account go for good. A card already removed in another tab says so and changes nothing. A failure draws the page again with its words in role=alert and the box as it was.",
+	feedback:
+		"Remove goes back to Accounts with a toast: “Removed Apple Card.” or “Removed Apple Card and deleted its transactions.” Cancel goes back to Accounts and changes nothing.",
+	input:
+		"Touch: the chip and both buttons are 44px tall. Keyboard: Tab goes through the chip, Remove and Cancel, and Space ticks the chip. Screen reader: the heading, then the sentence, then the chip with its hint read as its description.",
+	motion:
+		"None of its own: the page changes at once, and the toast arrives as any toast does.",
+	edges:
+		"Without JavaScript Remove posts and is redirected to Accounts. The demo has no Remove: its page is not found, and its group has no Manage. A card removed in another tab says it's already removed.",
+	words:
+		"Heading: “Remove Apple Card?”. Body: “Tally leaves it out of net worth. Its 12 transactions stay, so past months still add up, unless you tick the box below.” Chip: “Also delete its transactions”, with “This deletes them for good.” under it. Buttons: “Remove” and “Cancel”. Failure: “Couldn't remove Apple Card. Try again.”",
 };
 
 const APPLE_CARD_CLOSE_ATTRS = {
@@ -6779,6 +6800,20 @@ function AccountsGroup() {
 						/>
 					</div>
 				</State>
+				<State label="Error: the size gate couldn't tell the request's size, so the file is asked for again">
+					<div
+						inert
+						class="max-w-xl rounded-t-sheet border border-rule bg-paper p-5"
+					>
+						<AppleCardSheet
+							id="ds-apple-card-size"
+							today="2026-10-21"
+							fileError="Tally couldn't tell how big this file is. Try the upload again."
+							closeHref="/accounts?focus=apple-card"
+							closeAttrs={APPLE_CARD_CLOSE_ATTRS}
+						/>
+					</div>
+				</State>
 				<State label="Error: the file is over 1 MB">
 					<div
 						inert
@@ -6883,6 +6918,44 @@ function AccountsGroup() {
 					</div>
 				</State>
 				<UseSpec spec={APPLE_CARD_SHEET_SPEC} />
+			</Specimen>
+			<Specimen
+				id="apple-card-remove"
+				title="AppleCardRemove"
+				tier="visual"
+				components={["AppleCardRemove"]}
+				sentence="Remove Apple Card's page (spec §8.10), drawn as Disconnect's is: its heading, one sentence on how many transactions stay, the chip that also deletes them with its hint, then Remove and Cancel. A failed remove draws the page again with its words in role=alert. Drawn inert, so the form posts nowhere here."
+			>
+				<State label="Keeping the rows, twelve transactions stay: the box unticked">
+					<div inert class="max-w-xl">
+						<AppleCardRemove id="ds-apple-card-remove-twelve" count={12} />
+					</div>
+				</State>
+				<State label="One transaction stays, in the singular">
+					<div inert class="max-w-xl">
+						<AppleCardRemove id="ds-apple-card-remove-one" count={1} />
+					</div>
+				</State>
+				<State label="Also deleting them: the box ticked, so the card's transactions go with it">
+					<div inert class="max-w-xl">
+						<AppleCardRemove
+							id="ds-apple-card-remove-ticked"
+							count={12}
+							deleteHistory
+						/>
+					</div>
+				</State>
+				<State label="A failed remove: the page again, with its words in role=alert above the form">
+					<div inert class="max-w-xl">
+						<AppleCardRemove
+							id="ds-apple-card-remove-failed"
+							count={12}
+							deleteHistory
+							error="Couldn't remove Apple Card. Try again."
+						/>
+					</div>
+				</State>
+				<UseSpec spec={APPLE_CARD_REMOVE_SPEC} />
 			</Specimen>
 			<Specimen
 				id="net-worth-chart"

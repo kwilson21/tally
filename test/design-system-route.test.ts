@@ -798,6 +798,7 @@ describe("GET /design-system in the demo", () => {
 		"transactions-button",
 		"file-field",
 		"apple-card-sheet",
+		"apple-card-remove",
 	])(
 		"gives %s its whole use spec, as a visual component (DESIGN.md section 3)",
 		async (id) => {
@@ -1792,6 +1793,49 @@ describe("GET /design-system: Apple Card's group, file field and sheet (#766)", 
 		expect(sheet).toContain("Add the sample");
 		expect(sheet).toContain("In the demo, Tally uses a sample file.");
 		expect(sheet).toContain("Optional. Left blank, Oct 18's balance stays.");
+	});
+
+	it("draws the sheet's no-JavaScript size refusal under the file field, in role=alert (the words the size gate says)", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const sheet =
+			html.split('id="apple-card-sheet"')[1]?.split("</section>")[0] ?? "";
+		expect(sheet).toContain(
+			"Tally couldn't tell how big this file is. Try the upload again.",
+		);
+		expect(sheet).toMatch(
+			/<p id="ds-apple-card-size-file-error" role="alert"[^>]*>Tally couldn't tell how big this file is\. Try the upload again\.<\/p>/,
+		);
+	});
+
+	it("draws Remove Apple Card's page in the catalog: its heading, both counts, the delete chip, Remove and Cancel, and the failure in role=alert, all inert with distinct ids", async () => {
+		const { html: raw } = await get("/design-system");
+		const html = raw.replaceAll("&#39;", "'");
+		const page =
+			html.split('id="apple-card-remove"')[1]?.split("</section>")[0] ?? "";
+		expect(page).toContain("Remove Apple Card?");
+		expect(page).toContain("Its 12 transactions stay");
+		expect(page).toContain("Its 1 transaction stays");
+		expect(page).toContain("Also delete its transactions");
+		expect(page).toContain("This deletes them for good.");
+		expect(page).toContain(">Remove<");
+		expect(page).toContain(">Cancel<");
+		expect(page).toMatch(
+			/<p role="alert" class="[^"]*">Couldn't remove Apple Card\. Try again\.<\/p>/,
+		);
+		// Each state sits in its own inert box, so nothing in the page can take focus or post.
+		expect(page.match(/<div inert/g)).toHaveLength(4);
+		// The delete hint and the chip name it by its own id, so no id is drawn twice on the page.
+		const ids = [...page.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+		expect(ids.length).toBeGreaterThan(0);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const described of page.matchAll(/aria-describedby="([^"]+)"/g)) {
+			for (const ref of (described[1] ?? "").split(" ")) {
+				expect(html.split(`id="${ref}"`).length - 1).toBe(1);
+			}
+		}
+		// The page's form is the Remove page's own address, drawn with htmx's hx-ignore by the Visual specimen.
+		expect(page).toContain('action="/accounts/apple-card/remove"');
 	});
 
 	it("names the submit Upload, as the spec's Cancel and Upload does, and the demo's Add the sample; DESIGN.md says the same", async () => {
