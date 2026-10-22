@@ -8,8 +8,8 @@ import { sameOrigin } from "../src/security";
 
 // Home's notify control and its script (decision 149), through the routes: Home's full load (GET /) and the check-in's redraw
 // (POST /home/seen) draw the control while the first week is reading and the server has VAPID keys. The control's script loads
-// on a full load in the before and reading phases, so Plaid's success, which swaps #page in place, still finds it. Neither
-// shows anything in the demo.
+// on a full load in the before, reading and ready phases, so Plaid's success, and a check-in's redraw back to reading, still
+// find it. Neither shows anything in the demo, and the answered phase loads no script.
 
 const PERSON = "person@example.com";
 const ORIGIN = "http://localhost";
@@ -101,7 +101,7 @@ describe("Home's full load: the control and its script", () => {
 		expect(html).not.toContain(CONTROL);
 	});
 
-	it("once the questions are open, with the keys: neither the control nor push.js", async () => {
+	it("once the questions are open, with the keys: push.js but no control yet (a redraw back to reading draws it)", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
@@ -111,6 +111,24 @@ describe("Home's full load: the control and its script", () => {
 		});
 		const html = await page(pushing);
 		expect(html).toContain("Set up your budget");
+		expect(html).not.toContain("data-notify");
+		expect(html).toContain(PUSH_MODULE);
+	});
+
+	it("once the questions are answered, with the keys: neither the control nor push.js", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET history_complete_at = datetime('now')",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: TODAY,
+				pay: TODAY,
+				bills: TODAY,
+				budgets: TODAY,
+			},
+			budgets: {},
+		});
+		const html = await page(pushing);
 		expect(html).not.toContain("data-notify");
 		expect(html).not.toContain(PUSH_MODULE);
 	});
