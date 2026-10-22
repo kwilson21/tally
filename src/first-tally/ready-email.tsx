@@ -29,7 +29,9 @@ const SUBJECT = "Three questions to finish setting up";
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
 const BUTTON = "Finish setting up";
-const LINK = "https://tally.thesuperhuman.us/first-page";
+/** The first week's questions page: the ready email's button and the ready push's link both open it (decision 148). */
+export const QUESTIONS_PATH = "/first-page";
+const LINK = `https://tally.thesuperhuman.us${QUESTIONS_PATH}`;
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
 
 // The same test in SQL. json_type is NULL only when the key is absent (a null value reads 'null'), as the rest of the code tests it.
@@ -44,19 +46,31 @@ const SORTED_SQL = `SELECT COUNT(*) AS total FROM transactions t
 	JOIN plaid_items p ON p.id = a.plaid_item_id
 	WHERE p.disconnected_at IS NULL AND t.plaid_transaction_id IS NOT NULL`;
 
-// Claims an address before its email is sent. It changes no row when the address is in the list already, so a second claim
-// of one address (an earlier run, or one still going) sends nothing. It changes no row either once a question is answered,
-// or when the address is no longer one the email goes to (removed, or not seen in 90 days: reconnectRecipients' rule), or
-// when its person checked in on a first-week page within EMAIL_AWAY_AFTER_MS (home_seen_at): they are still there, so a
-// later minute tries them. A refused address is skipped; runReadyEmail reads the gate again before the next one, so a
-// question answered meanwhile ends it.
-export const CLAIM_SQL = `UPDATE household_settings
-	SET value = json_set(household_settings.value, '$.readyEmailedTo',
-		json_insert(COALESCE(json_extract(household_settings.value, '$.readyEmailedTo'), json('[]')), '$[#]', ?1))
+/**
+ * The claim for one address, in SQL (shared with the ready push, decision 148). `listPath` is the record's list the address
+ * joins: readyEmailedTo for the email, readyPushedTo for the push. ?1 is the address. It changes no row when the address is in
+ * that list already, so a second claim of one address (an earlier run, or one still going) sends nothing. It changes no row
+ * either once a question is answered, or when the address is no longer one the send goes to (removed, or not seen in 90 days:
+ * reconnectRecipients' rule), or when its person checked in on a first-week page within `awayMs` (home_seen_at): they are
+ * still there, so a later minute tries them. `extraGuard` adds one more condition after the list's, with ?1 as the address.
+ */
+export function claimSql(
+	listPath: string,
+	awayMs: number,
+	extraGuard = "",
+): string {
+	return `UPDATE household_settings
+	SET value = json_set(household_settings.value, '${listPath}',
+		json_insert(COALESCE(json_extract(household_settings.value, '${listPath}'), json('[]')), '$[#]', ?1))
 	WHERE key = 'first_tally' AND ${QUESTIONS_UNDRAWN_SQL} AND NOT EXISTS (
-		SELECT 1 FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value = ?1)
+		SELECT 1 FROM json_each(household_settings.value, '${listPath}') AS e WHERE e.value = ?1)${extraGuard}
 		AND EXISTS (SELECT 1 FROM household_members m WHERE m.email = ?1 AND m.removed_at IS NULL AND m.last_seen_at >= datetime('now','-90 days')
-			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${EMAIL_AWAY_AFTER_MS / 1000} seconds')))`;
+			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
+}
+
+// Claims an address before its email is sent. A refused address is skipped; runReadyEmail reads the gate again before the next
+// one, so a question answered meanwhile ends it (claimSql has the rest).
+export const CLAIM_SQL = claimSql("$.readyEmailedTo", EMAIL_AWAY_AFTER_MS);
 
 // Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
 // address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
@@ -268,10 +282,12 @@ export function renderReadyEmail(read: string): Mail {
  * bank's history is in, nothing waits for Jev, and no question is answered. The facts are the ones the gate reads (gate.ts),
  * read again at each address's turn so a change during the run is seen.
  */
-async function currentRead(env: { DB: D1Database }): Promise<string | null> {
-	const record = await readFirstTally(env.DB);
+export async function openRead(
+	db: D1Database,
+	record: FirstTally | null,
+): Promise<string | null> {
 	if (anyQuestionAnswered(record)) return null;
-	const { banks, waiting } = await readGateInputs(env.DB);
+	const { banks, waiting } = await readGateInputs(db);
 	if (
 		!questionsOpen({
 			strokeOneDay: record?.strokes.bank ?? null,
@@ -281,8 +297,13 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
 	)
 		return null;
 	const total =
-		(await env.DB.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
+		(await db.prepare(SORTED_SQL).first<{ total: number }>())?.total ?? 0;
 	return readLine(banks, total);
+}
+
+/** openRead on a record read now, for each address's turn. */
+async function currentRead(env: { DB: D1Database }): Promise<string | null> {
+	return openRead(env.DB, await readFirstTally(env.DB));
 }
 
 /**

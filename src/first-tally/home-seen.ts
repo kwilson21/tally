@@ -8,3 +8,6 @@ export const HOME_SEEN_EVERY_MS = 30_000;
 
 /** How long after its last check-in a person counts as away, so the ready email is sent to them (ready-email.tsx). */
 export const EMAIL_AWAY_AFTER_MS = 600_000;
+
+/** How long after its last check-in a person counts as away, so the ready push is sent to each of their devices (ready-push.ts). */
+export const PUSH_AWAY_AFTER_MS = 120_000;
