@@ -419,7 +419,7 @@ describe("GET /design-system/proposals", () => {
 			// P134 and P135 are the second audit's picks (#606, #607), each marking its option A (decision 120).
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
-			// P141 (#770, decision 147) marks its option A, so it has one Picked.
+			// P142 (#770, decision 147) marks its option A, so it has one Picked.
 			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
@@ -569,7 +569,7 @@ describe("GET /design-system/proposals", () => {
 			"P138 ·",
 			"P139 ·",
 			"P140 ·",
-			"P141 ·",
+			"P142 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
@@ -644,7 +644,7 @@ describe("GET /design-system/proposals", () => {
 		expect(DECIDED.at(-4)).toBe(payments);
 		expect(DECIDED.at(-3)).toBe(split);
 		expect(DECIDED.at(-2)).toBe(banks);
-		const setup = DECIDED.find((d) => d.title.startsWith("P141 ·"));
+		const setup = DECIDED.find((d) => d.title.startsWith("P142 ·"));
 		expect(DECIDED.at(-1)).toBe(setup);
 	});
 
@@ -5329,7 +5329,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		const p126 = html.indexOf('<section aria-labelledby="p126-title"');
 		expect(top).toBeGreaterThan(-1);
 		expect(p136).toBeGreaterThan(top);
-		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P141, #770, decision 147)
+		// Between the intro and the follow-ups' section sit only the Picked sections (P139, #660; P140, #719; P142, #770, decision 147)
 		// and their specimens, and between the follow-ups' section and P136 only its two drawings sit. Between P136's section and the audit's, the only section drawn with
 		// mt-12 is the P130 to P133 one: its pictures hold labelled sections too (PlanBand, TrendGroup), but none of them has that class.
 		const open = html.indexOf(
@@ -5341,7 +5341,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		).toEqual([
 			'<section aria-labelledby="p139-title"',
 			'<section aria-labelledby="p140-title"',
-			'<section aria-labelledby="p141-title"',
+			'<section aria-labelledby="p142-title"',
 		]);
 		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
 			'<section id="p139-split-category"',
@@ -5349,7 +5349,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			// P140's A is the real HomeSetup, whose own section and Your banks section sit inside its picture.
 			'<section id="setup-top"',
 			'<section id="your-banks"',
-			'<section id="p141-setup"',
+			'<section id="p142-setup"',
 		]);
 		expect(html.slice(open + 1, p136)).not.toContain(
 			'<section aria-labelledby="',
@@ -6631,7 +6631,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const start = html.indexOf('<section id="p140-banks"');
 		const chunk = html.slice(
 			start,
-			html.indexOf('<section aria-labelledby="p141-title"'),
+			html.indexOf('<section aria-labelledby="p142-title"'),
 		);
 		expect(chunk).toContain("P140 · A new family&#39;s banks");
 		const named = options(chunk);
@@ -6659,7 +6659,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 		const start = html.indexOf('<section id="p140-banks"');
 		const chunk = html.slice(
 			start,
-			html.indexOf('<section aria-labelledby="p141-title"'),
+			html.indexOf('<section aria-labelledby="p142-title"'),
 		);
 		const today = options(chunk)[0] ?? "";
 		expect(today).toContain(">Today</h4>");
@@ -6847,7 +6847,7 @@ describe("GET /design-system/proposals, P139 (how each part of a split picks its
 	});
 });
 
-describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () => {
+describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () => {
 	const drawn = async () => (await get("/design-system/proposals")).html;
 	const count = (text: string, part: string) => text.split(part).length - 1;
 	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
@@ -6856,16 +6856,24 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		[...chunk.matchAll(/role="img" aria-label="([^"]*)"/g)].map(
 			(m) => m[1] ?? "",
 		);
-	const P141 = "p141-setup";
+	const P142 = "p142-setup";
 	// The specimen alone: block() runs to the next section, which takes the wrapping section's closing tag with it.
 	const specimenOf = (html: string) => {
-		const chunk = block(html, P141);
+		const chunk = block(html, P142);
 		return chunk.slice(0, chunk.lastIndexOf("</section>"));
 	};
+	// One phone's picture by its label, the text between its <figure and the next one.
+	const pictureNamed = (chunk: string, label: string) =>
+		chunk
+			.split("<figure")
+			.slice(1)
+			.find((picture) =>
+				picture.includes(`aria-label="${label}, on a phone"`),
+			) ?? "";
 
-	it("opens P141's picked section after P140's and before the follow-ups', titled and dated, citing decision 147 (#770)", async () => {
+	it("opens P142's picked section after P140's and before the follow-ups', titled and dated, citing decision 147 (#770)", async () => {
 		const html = await drawn();
-		const open = html.indexOf('<section aria-labelledby="p141-title"');
+		const open = html.indexOf('<section aria-labelledby="p142-title"');
 		expect(open).toBeGreaterThan(-1);
 		expect(open).toBeGreaterThan(
 			html.indexOf('<section aria-labelledby="p140-title"'),
@@ -6873,24 +6881,24 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		expect(open).toBeLessThan(
 			html.indexOf('<section aria-labelledby="followups-picks-title"'),
 		);
-		const section = html.slice(open, html.indexOf(`<section id="${P141}"`));
-		expect(section).toContain('<h2 id="p141-title"');
+		const section = html.slice(open, html.indexOf(`<section id="${P142}"`));
+		expect(section).toContain('<h2 id="p142-title"');
 		expect(section).toContain("Picked: a new family&#39;s setup");
 		expect(section).toContain(
 			"Drawn Oct 22. The owner&#39;s pick, marked Picked, is decision 147: A.",
 		);
 		expect(html).not.toContain("Open: a new family&#39;s setup");
-		const decided = DECIDED.find((entry) => entry.title.startsWith("P141 ·"));
-		expect(decided?.title).toBe("P141 · A new family's setup");
+		const decided = DECIDED.find((entry) => entry.title.startsWith("P142 ·"));
+		expect(decided?.title).toBe("P142 · A new family's setup");
 		expect(decided?.issue).toBe(772);
 		expect(decided?.outcome).toContain("Option A: setup on its own pages");
 		expect(decided?.outcome).toContain("(decision 147).");
 	});
 
-	it("draws P141 as one visual specimen with Today, A (picked, recommended) and B, and one Picked on A", async () => {
+	it("draws P142 as one visual specimen with Today, A (picked, recommended) and B, and one Picked on A", async () => {
 		const chunk = specimenOf(await drawn());
 		expect(chunk).toContain('data-ds-tier="visual"');
-		expect(chunk).toContain("P141 · A new family&#39;s setup");
+		expect(chunk).toContain("P142 · A new family&#39;s setup");
 		const named = options(chunk);
 		expect(named.length).toBe(3);
 		expect(named[0]).toContain(">Today</h4>");
@@ -6970,6 +6978,44 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		expect(b).not.toContain("Your first tally");
 	});
 
+	it("names the setup proposal P142 on the page, and never the number decision 138 gave the Apple Card upload", async () => {
+		const html = await drawn();
+		expect(html).toContain("P142 · A new family&#39;s setup");
+		// The Apple Card upload's layout keeps the old number (decision 138, #731), so this page must not show it.
+		expect(html).not.toContain("P141 ·");
+	});
+
+	it("draws A's reading screen with the sorting status, the step bar and Your banks with the bank's icon, and no sorted row (P142)", async () => {
+		const chunk = specimenOf(await drawn());
+		const reading = pictureNamed(chunk, "A, reading your bank");
+		expect(reading).toContain("Sorting your last 90 days: 318 of 412 done.");
+		expect(reading).toContain(
+			"Your three questions open the moment it&#39;s done, usually in a few minutes.",
+		);
+		expect(reading).toContain("Your banks");
+		expect(reading).toContain('data-icon="bank"');
+		expect(reading).toContain("90 days in · 412");
+		expect(reading).not.toContain("Tally is sorting 90 days");
+		expect(reading).not.toContain(">Sorted<");
+		// The band with the close-the-page words stays, under Your banks.
+		expect(reading.indexOf("Your banks")).toBeLessThan(
+			reading.indexOf("You can close this page."),
+		);
+	});
+
+	it("draws A's budgets screen with Needs a category after the ruled total, as today's first page does (P142)", async () => {
+		const chunk = specimenOf(await drawn());
+		const budgets = pictureNamed(chunk, "A, the budgets question");
+		expect(budgets).toContain("Needs a category");
+		expect(budgets).toContain("86 transactions · about $320 a month");
+		expect(budgets).toContain(
+			'href="/transactions?uncategorized=1&amp;month=all"',
+		);
+		expect(budgets.indexOf("Needs a category")).toBeGreaterThan(
+			budgets.indexOf("$4,050 a month"),
+		);
+	});
+
 	it("gives Today's fifth line the note Later in its first picture, with no line done", async () => {
 		const [today = ""] = options(specimenOf(await drawn()));
 		const [first = ""] = today.split("<figure").slice(1);
@@ -7013,15 +7059,15 @@ describe("GET /design-system/proposals, P141 (a new family's setup, #770)", () =
 		expect(firesByItself(chunk)).toEqual([]);
 		expect(reachableInPictures(chunk)).toEqual([]);
 		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
-		expect(ids).toEqual([P141, `${P141}-title`]);
+		expect(ids).toEqual([P142, `${P142}-title`]);
 	});
 
-	it("records decision 147 in docs/decisions.md as the owner's pick of A for P141, for #770", () => {
+	it("records decision 147 in docs/decisions.md as the owner's pick of A for P142, for #770", () => {
 		const row = decisions
 			.split("\n")
 			.find((line) => line.startsWith("| 147 |"));
 		expect(row, "decision 147's row").toBeDefined();
-		expect(row).toContain("P141");
+		expect(row).toContain("P142");
 		expect(row).toContain("#770");
 		expect(row).toContain("A, setup on its own pages");
 	});

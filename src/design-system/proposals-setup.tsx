@@ -1,4 +1,4 @@
-// P141 (#770): a new family's setup, drawn for the owner's pick. Today is the setup as it is drawn now; A (recommended) gives setup
+// P142 (#770): a new family's setup, drawn for the owner's pick. Today is the setup as it is drawn now; A (recommended) gives setup
 // its own pages; B keeps it on Home in plain words. Every picture is inert and labelled, like the rest of the page.
 
 import type { Child } from "hono/jsx";
@@ -210,25 +210,28 @@ function ReadingBody() {
 			<h1 class="mt-6 font-serif text-4xl font-semibold tracking-tight">
 				Reading your bank
 			</h1>
-			<p class="mt-3 text-lg">
-				Tally is sorting 90 days of transactions from Chase, so your questions
-				use your real numbers.
+			<p class="mt-3 text-lg">Sorting your last 90 days: 318 of 412 done.</p>
+			<div class="mt-3 h-2 rounded-full bg-rule" aria-hidden="true">
+				<div class="h-2 w-[77%] rounded-full bg-ink" />
+			</div>
+			<p class="mt-3 text-muted">
+				Your three questions open the moment it's done, usually in a few
+				minutes.
 			</p>
 			<div class="mt-6">
-				<p class="flex justify-between text-sm">
-					<span>Sorted</span>
-					<span class="tabular-nums">318 of 412</span>
-				</p>
-				<div class="mt-2 h-2 rounded-full bg-rule">
-					<div class="h-2 w-[77%] rounded-full bg-ink" />
-				</div>
+				<p class="text-sm text-muted">Your banks</p>
+				<ul class="mt-2 border-t border-rule">
+					<li class="flex min-h-11 items-center gap-3 border-b border-rule">
+						<span class="shrink-0 text-muted">
+							<Icon name="bank" class="size-6" />
+						</span>
+						<span class="min-w-0 flex-1 py-2 text-base text-ink">Chase</span>
+						<span class="flex shrink-0 items-center gap-2 text-sm text-muted tabular-nums">
+							90 days in · 412
+						</span>
+					</li>
+				</ul>
 			</div>
-			<ul class="mt-6 border-y border-rule">
-				<li class="flex min-h-11 items-center justify-between gap-3 py-2">
-					<span>Chase</span>
-					<span class="text-sm text-muted">90 days in · 412</span>
-				</li>
-			</ul>
 			<p class="mt-6 rounded-control bg-band p-4">
 				You can close this page. Tally emails you the moment your questions are
 				ready.
@@ -330,6 +333,12 @@ function BudgetsBody() {
 				<span>12 budgets</span>
 				<span class="tabular-nums">$4,050 a month</span>
 			</div>
+			<p class="mt-3 text-sm text-muted">
+				<a href="/transactions?uncategorized=1&month=all" class="text-accent">
+					Needs a category
+				</a>
+				{" · 86 transactions · about $320 a month"}
+			</p>
 		</>
 	);
 }
@@ -398,8 +407,8 @@ function DoneActions() {
 export function SetupProposal() {
 	return (
 		<Specimen
-			id="p141-setup"
-			title="P141 · A new family's setup"
+			id="p142-setup"
+			title="P142 · A new family's setup"
 			tier="visual"
 			sentence="A new family's setup, drawn for the owner's pick (#770): Today, with setup in Home's top and five strokes; A (recommended), setup on its own pages, a welcome and four steps with a step bar, ending on Safe to spend; and B, setup kept on Home in plain words, four numbered steps and no fifth."
 		>

@@ -577,7 +577,7 @@ export const DECIDED: readonly {
 		issue: 719,
 	},
 	{
-		title: "P141 · A new family's setup",
+		title: "P142 · A new family's setup",
 		outcome:
 			"Option A: setup on its own pages: a welcome, then four steps, each a screen with a step bar, one question, the bank's own numbers as a ledger card and the answers at its foot, and a finish that shows Safe to spend and what was set up; no tab bar until setup is done, and the fifth stroke goes (decision 147).",
 		issue: 772,
@@ -621,8 +621,8 @@ export function Proposals() {
 				<BanksProposal />
 			</section>
 
-			<section aria-labelledby="p141-title" class="mt-12">
-				<h2 id="p141-title" class="font-serif text-3xl font-semibold">
+			<section aria-labelledby="p142-title" class="mt-12">
+				<h2 id="p142-title" class="font-serif text-3xl font-semibold">
 					Picked: a new family's setup
 				</h2>
 				<p class="mt-2 max-w-prose text-muted">
