@@ -127,12 +127,12 @@ async function addMember(
 		.run();
 }
 
-/** One device a person turned notifications on for. */
-async function addDevice(email: string, endpoint: string) {
+/** One device a person turned notifications on for, with its created_at (now, unless given). */
+async function addDevice(email: string, endpoint: string, createdAt?: string) {
 	await env.DB.prepare(
-		"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)",
+		"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))",
 	)
-		.bind(email, endpoint, UA_PUBLIC, AUTH)
+		.bind(email, endpoint, UA_PUBLIC, AUTH, createdAt ?? null)
 		.run();
 }
 
@@ -560,6 +560,34 @@ describe("the ready push: how each answer counts", () => {
 		expect(text).toContain("push 410");
 		expect(text).not.toContain("fcm.googleapis.com");
 		expect(text).not.toContain(DANA);
+	});
+});
+
+describe("the ready push: at most 5 devices per person (decision 149, spec §10)", () => {
+	it("sends to the 5 newest of a person's devices and no more, and counts the others out of the read", async () => {
+		await openHousehold();
+		await addMember(DANA, { seen: "-180 seconds" });
+		await addMember(RILEY, { seen: "-180 seconds" });
+		// Seven devices for Dana, one per day: the two oldest are not read at all.
+		for (let n = 1; n <= 7; n++) {
+			await addDevice(
+				DANA,
+				`https://fcm.googleapis.com/send/dana-${n}`,
+				`2026-10-0${n} 09:00:00`,
+			);
+		}
+		await addDevice(RILEY, SPARE, "2026-10-01 09:00:00");
+		const { fetchImpl, pushed } = fakeFetch();
+		await runReadyPush(pushing(), { fetchImpl });
+		expect(pushed).toEqual([
+			"https://fcm.googleapis.com/send/dana-3",
+			"https://fcm.googleapis.com/send/dana-4",
+			"https://fcm.googleapis.com/send/dana-5",
+			"https://fcm.googleapis.com/send/dana-6",
+			"https://fcm.googleapis.com/send/dana-7",
+			SPARE,
+		]);
+		expect(await pushedList()).toEqual([DANA, RILEY]);
 	});
 });
 

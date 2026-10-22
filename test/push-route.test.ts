@@ -580,6 +580,143 @@ describe("POST /push/subscribe: when Web Push is off, or the person isn't a memb
 	});
 });
 
+describe("POST /push/subscribe: at most 5 devices per person (decision 149, spec §10)", () => {
+	const deviceAt = (n: number) =>
+		`https://fcm.googleapis.com/fcm/send/device-${n}`;
+
+	/** A device stored for a person with its created_at, as the trim reads it: the five newest are kept. */
+	const seed = (email: string, n: number, createdAt: string) =>
+		env.DB.prepare(
+			"INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)",
+		)
+			.bind(email, deviceAt(n), UA_PUBLIC, AUTH, createdAt)
+			.run();
+
+	/** The endpoints stored for a person, sorted (the device numbers are single digits, so sorting keeps them in order). */
+	const endpointsFor = async (email: string) =>
+		(
+			await env.DB.prepare(
+				"SELECT endpoint FROM push_subscriptions WHERE member_email = ? ORDER BY endpoint",
+			)
+				.bind(email)
+				.all<{ endpoint: string }>()
+		).results.map((row) => row.endpoint);
+
+	/** Six devices, one per day in January 2026: device 1 is the oldest. */
+	const seedSix = async (email: string) => {
+		for (let n = 1; n <= 6; n++) {
+			await seed(email, n, `2026-01-0${n} 09:00:00`);
+		}
+	};
+
+	it("a 6th device evicts the oldest, and the five newest stay", async () => {
+		for (let n = 1; n <= 5; n++) {
+			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
+		}
+		const response = await subscribe({ ...good, endpoint: deviceAt(6) });
+		expect(response.status).toBe(204);
+		expect(await endpointsFor(PERSON)).toEqual([
+			deviceAt(2),
+			deviceAt(3),
+			deviceAt(4),
+			deviceAt(5),
+			deviceAt(6),
+		]);
+	});
+
+	it("a tap that moves another person's device keeps the count at 5, and keeps the device the person tapped", async () => {
+		await seed(RILEY, 0, "2025-12-01 09:00:00");
+		for (let n = 1; n <= 5; n++) {
+			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
+		}
+		const response = await subscribe({ ...good, endpoint: deviceAt(0) });
+		expect(response.status).toBe(204);
+		// The moved device is the newest (a tap stamps it), so the oldest of the person's own devices is the one dropped.
+		expect(await endpointsFor(PERSON)).toEqual([
+			deviceAt(0),
+			deviceAt(2),
+			deviceAt(3),
+			deviceAt(4),
+			deviceAt(5),
+		]);
+		expect(await endpointsFor(RILEY)).toEqual([]);
+	});
+
+	it("a tap on one of the person's own devices keeps the count at 5", async () => {
+		for (let n = 1; n <= 5; n++) {
+			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
+		}
+		const response = await subscribe({ ...good, endpoint: deviceAt(3) });
+		expect(response.status).toBe(204);
+		expect(await endpointsFor(PERSON)).toEqual([
+			deviceAt(1),
+			deviceAt(2),
+			deviceAt(3),
+			deviceAt(4),
+			deviceAt(5),
+		]);
+	});
+
+	it("another person's rows are untouched by the trim", async () => {
+		await seedSix(RILEY);
+		for (let n = 7; n <= 11; n++) {
+			await seed(PERSON, n, `2026-01-0${n - 5} 09:00:00`);
+		}
+		const response = await subscribe({ ...good, endpoint: deviceAt(12) });
+		expect(response.status).toBe(204);
+		expect(await endpointsFor(PERSON)).toHaveLength(5);
+		expect(await endpointsFor(RILEY)).toHaveLength(6);
+	});
+
+	it("a restore that changes nothing does not trim, and a restore that stores a lost device does", async () => {
+		await seedSix(PERSON);
+		const unchanged = await subscribe({
+			...good,
+			endpoint: deviceAt(3),
+			restore: "1",
+		});
+		expect(unchanged.status).toBe(204);
+		expect(await endpointsFor(PERSON)).toHaveLength(6);
+
+		const restored = await subscribe({
+			...good,
+			endpoint: deviceAt(9),
+			restore: "1",
+		});
+		expect(restored.status).toBe(204);
+		// The restored device is the newest; the two oldest are dropped.
+		expect(await endpointsFor(PERSON)).toEqual([
+			deviceAt(3),
+			deviceAt(4),
+			deviceAt(5),
+			deviceAt(6),
+			deviceAt(9),
+		]);
+	});
+
+	it("the trim is in the write's batch: when it fails, the new device is not stored either", async () => {
+		for (let n = 1; n <= 5; n++) {
+			await seed(PERSON, n, `2026-01-0${n} 09:00:00`);
+		}
+		await env.DB.prepare(
+			"CREATE TRIGGER refuse_trim BEFORE DELETE ON push_subscriptions BEGIN SELECT RAISE(ABORT, 'trim refused'); END",
+		).run();
+		try {
+			const response = await subscribe({ ...good, endpoint: deviceAt(6) });
+			expect(response.status).toBe(500);
+			expect(await endpointsFor(PERSON)).toEqual([
+				deviceAt(1),
+				deviceAt(2),
+				deviceAt(3),
+				deviceAt(4),
+				deviceAt(5),
+			]);
+		} finally {
+			await env.DB.prepare("DROP TRIGGER refuse_trim").run();
+		}
+	});
+});
+
 describe("POST /push/subscribe: other sites", () => {
 	it("refuses a form post from another site with 403", async () => {
 		expect(

@@ -5,13 +5,15 @@
 // is decoded. Input that fails answers 422. Web Push that is off (the demo, or no keys), and a person who isn't signed in or is
 // removed, answer 404 before the body is read. A body whose Content-Length is missing or over 4,096 bytes answers 413 before it
 // is read. Otherwise the device is stored for the signed-in person, or moved to them if it
-// was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
-// quiet re-post carries restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
+// was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A person keeps at
+// most five devices: the write and the trim of the oldest are one batch (push/devices.ts). A page load's quiet re-post carries
+// restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
 // 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
 
 import { Hono } from "hono";
 import { actor } from "../actor";
 import { fromBase64Url } from "../push/base64url";
+import { MAX_DEVICES_PER_PERSON } from "../push/devices";
 import { isPushServiceEndpoint } from "../push/endpoint";
 import { vapidKeys } from "../push/keys";
 
@@ -65,11 +67,23 @@ async function subscriptionOf(form: Record<string, unknown>) {
 const INSERT_SQL = `INSERT INTO push_subscriptions (member_email, endpoint, p256dh, auth)
 	SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM household_members WHERE email = ?1 AND removed_at IS NULL)`;
 
-/** A tap: the device is stored for the person who tapped, and moves to them from whoever had it. 0 changes: not a member. */
-const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth`;
+/**
+ * A tap: the device is stored for the person who tapped, and moves to them from whoever had it. A tap also stamps created_at, so
+ * the device the person just turned on is the newest, and the cap (TRIM_SQL) never drops it. 0 changes: not a member.
+ */
+const TAP_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO UPDATE SET member_email = excluded.member_email, p256dh = excluded.p256dh, auth = excluded.auth, created_at = datetime('now')`;
 
 /** The quiet re-post on a page load (restore=1): a lost row comes back, but an existing row is never changed (decision 149). */
 const RESTORE_SQL = `${INSERT_SQL} ON CONFLICT(endpoint) DO NOTHING`;
+
+/**
+ * The cap (decision 149, spec §10): drops the person's devices past the newest MAX_DEVICES_PER_PERSON, by created_at then id (?1 is
+ * the person). It runs after the write in the same batch, and only when that write changed a row: changes() is the count of the
+ * write the batch ran just before, so a restore that stores nothing, or a removed person's tap, trims nothing.
+ */
+const TRIM_SQL = `DELETE FROM push_subscriptions
+	WHERE member_email = ?1 AND changes() > 0 AND id NOT IN (
+		SELECT id FROM push_subscriptions WHERE member_email = ?1 ORDER BY created_at DESC, id DESC LIMIT ${MAX_DEVICES_PER_PERSON})`;
 
 /** The one person a device is stored for, if any. */
 const OWNER_SQL =
@@ -109,18 +123,21 @@ push.post("/push/subscribe", async (c) => {
 		subscription.p256dh,
 		subscription.auth,
 	];
+	// The write and the cap are one batch, so the cap holds atomically: a failed trim leaves the write undone too.
 	if (form.restore !== "1") {
-		const tapped = await c.env.DB.prepare(TAP_SQL)
-			.bind(...row)
-			.run();
-		return c.body(null, tapped.meta.changes ? 204 : 404);
+		const [tapped] = await c.env.DB.batch([
+			c.env.DB.prepare(TAP_SQL).bind(...row),
+			c.env.DB.prepare(TRIM_SQL).bind(member),
+		]);
+		return c.body(null, tapped?.meta.changes ? 204 : 404);
 	}
 	// A page load's quiet re-post: a missing row is stored for this person. An existing row must already be theirs, and is then
 	// left as it is; one that belongs to someone else is not moved here, so the answer is 409 and the page shows the device as Off.
-	const restored = await c.env.DB.prepare(RESTORE_SQL)
-		.bind(...row)
-		.run();
-	if (restored.meta.changes) return c.body(null, 204);
+	const [restored] = await c.env.DB.batch([
+		c.env.DB.prepare(RESTORE_SQL).bind(...row),
+		c.env.DB.prepare(TRIM_SQL).bind(member),
+	]);
+	if (restored?.meta.changes) return c.body(null, 204);
 	const owner = await c.env.DB.prepare(OWNER_SQL)
 		.bind(subscription.endpoint)
 		.first<{ member_email: string }>();

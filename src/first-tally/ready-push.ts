@@ -21,6 +21,7 @@
 // The minute run calls this before runReadyEmail; a failure here never stops the email (src/index.tsx).
 
 import { readFirstTally } from "../db/first-tally";
+import { MAX_DEVICES_PER_PERSON } from "../push/devices";
 import { isPushServiceEndpoint } from "../push/endpoint";
 import { type PushEnv, vapidKeys } from "../push/keys";
 import { type PushPayload, sendPush } from "../push/web-push";
@@ -92,10 +93,14 @@ export const PUSH_STAMP_SQL = `UPDATE household_settings
 
 /**
  * Every device with the person it belongs to, read before any claim (the join keeps a device with no member row out, and a
- * removed person's devices are deleted with them).
+ * removed person's devices are deleted with them). At most MAX_DEVICES_PER_PERSON per person, the newest (by created_at, then
+ * id), as a backstop to the route's cap (decision 149, spec §10).
  */
-const DEVICES_SQL = `SELECT s.id, s.member_email AS email, s.endpoint, s.p256dh, s.auth FROM push_subscriptions s
-	JOIN household_members m ON m.email = s.member_email ORDER BY s.member_email, s.id`;
+const DEVICES_SQL = `SELECT id, email, endpoint, p256dh, auth FROM (
+	SELECT s.id, s.member_email AS email, s.endpoint, s.p256dh, s.auth,
+		ROW_NUMBER() OVER (PARTITION BY s.member_email ORDER BY s.created_at DESC, s.id DESC) AS newest
+	FROM push_subscriptions s JOIN household_members m ON m.email = s.member_email
+) WHERE newest <= ${MAX_DEVICES_PER_PERSON} ORDER BY email, id`;
 
 type Device = {
 	id: number;
