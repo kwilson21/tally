@@ -89,8 +89,12 @@ const PARTS: [string, string][] = [
 		"Sends bank sign-in reminder emails and the first week's ready email; Cloudflare Email Service is the best-effort fallback for destinations verified in Cloudflare Email Routing (decision 86), except for a ready email Resend may already have accepted (decision 146).",
 	],
 	[
+		"Web Push",
+		"Tells a device you turned on that your first questions are ready, 2 minutes after you leave. Tally sends it from the Worker with no other service.",
+	],
+	[
 		"Cron Triggers",
-		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. Each minute, in the family app, it checks whether a new family's first questions have opened and emails each person who left the page 10 minutes ago, once; the 10:00 run sends due reconnect reminders and checks again. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions.",
+		"Run the daily bank sync (a backup for webhooks), one bank at a time so one failure doesn't stop the others, skipping any bank that needs reconnecting; then retry uncategorized transactions. Each minute, in the family app, it checks whether a new family's first questions have opened, pushes each device of a person who left the page 2 minutes ago (decision 148), and emails each person who left the page 10 minutes ago, once; the 10:00 run sends due reconnect reminders and checks again. The demo has no bank sync or email: each night it resets to the seed data, then retries uncategorized transactions.",
 	],
 	[
 		"Cloudflare Workflows",

@@ -124,6 +124,7 @@ import {
 } from "../views/new-category-choice";
 import { NotBudgetedRow } from "../views/not-budgeted-row";
 import { Notebook } from "../views/notebook";
+import { NotifyControl } from "../views/notify-control";
 import { PendingNote } from "../views/pending-note";
 import {
 	PlanBand,
@@ -663,7 +664,7 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
+				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). While the import is read, Notify me on this device sits under that line (NotifyControl, decision 148). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Before a bank: Link a bank, with its line">
 					<HomeSetup
@@ -692,6 +693,7 @@ function Brand() {
 				<State label="Sorting: the count of what is sorted, and the line says the questions open when it's done">
 					<HomeSetup
 						polls={false}
+						notify={{ vapidKey: NOTIFY_FAKE_KEY, shown: "off" }}
 						view={firstWeek(BANK_SYNCED, "reading", {
 							bankName: "Chase",
 							drawn: 1,
@@ -922,6 +924,27 @@ function Brand() {
 						)}
 					/>
 				</State>
+			</Specimen>
+			<Specimen
+				id="notify-control"
+				title="NotifyControl"
+				tier="visual"
+				components={["NotifyControl"]}
+				sentence="Notify me on this device (decision 148): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the iPhone hint, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
+			>
+				<State label="Off: the button, with its one line under it">
+					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="off" />
+				</State>
+				<State label="On: a check and the words that say it is on">
+					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="on" />
+				</State>
+				<State label="iPhone outside its Home Screen app: the hint in place of the button">
+					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="iphone" />
+				</State>
+				<State label="Blocked in this device's settings: the quiet line">
+					<NotifyControl vapidKey={NOTIFY_FAKE_KEY} shown="blocked" />
+				</State>
+				<UseSpec spec={NOTIFY_SPEC} />
 			</Specimen>
 		</Group>
 	);
@@ -1197,6 +1220,29 @@ const BANK_LINE_SPEC: UseSpecText = {
 		"A bank that needs signing in says so without a sync date. Dated banks come first, oldest first; equal dates and banks without dates sort by name. Up to three banks have their own line, followed by a count when more remain. The as-of tag uses the oldest available date. A long bank name wraps. No JavaScript: Fix is a plain link to Accounts.",
 	words:
 		"Tag: “as of Sep 20” · “Chase stopped updating Sep 20” · “Capital One needs signing in” · Fix.",
+};
+
+// The notify control's fake key: the catalog never subscribes, so the key only has to be a value the attribute can hold.
+const NOTIFY_FAKE_KEY = "catalog-fake-vapid-key";
+
+// The notify control's use spec (DESIGN.md, "Use"; decision 148): all eight answers, for sign-off.
+const NOTIFY_SPEC: UseSpecText = {
+	purpose:
+		"Let a person get one notification on this device when their first questions are ready, even after they've left Tally.",
+	affordance:
+		"An outlined, full-width button, Notify me on this device, with one muted line under it. Once on, a check and the words that say so take its place.",
+	states:
+		"Off: the button and its line. Busy: the button says Turning on… while the browser answers, and its ring turns. On: a check and the words Notifications are on for this device. iPhone outside its Home Screen app: the hint in place of the button. Blocked: the quiet line, in place of the button. Hover: no change (touch has none). Focus: the focus-visible ring on the button. Disabled: only while Turning on… shows. With no JavaScript, or in a browser without Web Push, none of the four shows.",
+	feedback:
+		"A tap asks the browser for permission at once, and the button says Turning on… until it answers. A granted tap saves the device and moves focus to the On line, which is read once. A dismissed prompt leaves the button as it was, with focus still on it and nothing said. A refused prompt shows the Blocked line and an alert. A save that fails goes back to the button, and a toast says Couldn't save. Check your connection and try again.",
+	input:
+		"Touch: the button is 44px tall and full width. Keyboard: Tab to the button; Enter or Space taps it. Screen reader: the button is read as Notify me on this device, with its one line as its description; On and Blocked take focus so each is read once, and nothing is announced while the page is only set up.",
+	motion:
+		"The busy ring turns while the browser answers, as every busy button's does; under reduced motion it stops and the words Turning on… stay. Nothing else moves.",
+	edges:
+		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. Long text wraps, and the button keeps its 44px height.",
+	words:
+		"Button: “Notify me on this device” · busy: “Turning on…” · line: “One notification when your questions are ready, if you've left Tally.” · On: “Notifications are on for this device.” · iPhone: “To get a notification on iPhone, add Tally to your Home Screen first: tap Share, then Add to Home Screen. Then open Tally from there and tap Notify me.” · Blocked: “Notifications are blocked for Tally in this device's settings.” · Save failed: “Couldn't save. Check your connection and try again.”",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
