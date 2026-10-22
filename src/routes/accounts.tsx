@@ -869,13 +869,15 @@ accounts.post("/accounts/apple-card/remove", async (c) => {
 					"UPDATE accounts SET removed_at = datetime('now'), balance_on = NULL WHERE subtype = 'apple_card' AND removed_at IS NULL",
 				),
 			];
+	// The count the failure page shows is read before the batch: a failed batch must not be followed by a read that can fail too.
+	const count = await cardTransactionCount(c.env.DB, card.id);
 	let results: D1Result[];
 	try {
 		results = await c.env.DB.batch(statements);
 	} catch {
 		return c.html(
 			<RemovePage
-				count={await cardTransactionCount(c.env.DB, card.id)}
+				count={count}
 				deleteHistory={deleteHistory}
 				error="Couldn't remove Apple Card. Try again."
 				plaid={enabled(c.env)}

@@ -397,4 +397,50 @@ describe("Remove Apple Card (#766)", () => {
 		expect(html).toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(html).toContain('src="/js/plaid-link.js"');
 	});
+
+	it("answers the 502 Remove page, with the box as it was, when the batch fails and every D1 call after it fails too", async () => {
+		// Once the batch has failed, every later D1 call fails as well (a D1 that is down). The page's count was read
+		// before the batch, so the failure page needs no read after it and still answers, rather than a bare 500.
+		let down = false;
+		const downAfterBatch = new Proxy(env.DB, {
+			get(target, prop) {
+				if (prop === "batch")
+					return async () => {
+						down = true;
+						throw new Error("D1 is down");
+					};
+				if (prop === "prepare")
+					return (sql: string) => {
+						if (down) throw new Error("D1 is down");
+						return target.prepare(sql);
+					};
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const historyBefore = await cardHistoryCount();
+		const { res, html } = await post(
+			"/accounts/apple-card/remove",
+			"delete=yes",
+			{ ...family, DB: downAfterBatch } as unknown as Env,
+		);
+		expect(res.status).toBe(502);
+		expect(html).toContain("<title>Remove Apple Card? · Tally</title>");
+		expect(html).toMatch(
+			/role="alert"[^>]*>Couldn't remove Apple Card\. Try again\.</,
+		);
+		expect(html).toContain(
+			"Its 2 transactions stay, so past months still add up, unless you tick the box below.",
+		);
+		// The box is as the person left it: ticked.
+		expect(html).toMatch(/<input[^>]*name="delete"[^>]*\schecked/);
+		// Nothing changed: the card is still kept, with the rows and history it had before the request.
+		expect(await cardCount()).toEqual({ n: 1 });
+		expect(await cardRowCount()).toEqual({ n: 2 });
+		const kept = await env.DB.prepare(
+			"SELECT removed_at FROM accounts WHERE subtype = 'apple_card'",
+		).first<{ removed_at: string | null }>();
+		expect(kept?.removed_at).toBeNull();
+		expect(await cardHistoryCount()).toEqual(historyBefore);
+	});
 });
