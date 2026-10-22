@@ -810,8 +810,8 @@ function RemovePage({
 			</h1>
 			<p class="mt-4 max-w-xl text-muted">
 				Tally leaves it out of net worth. Its {count}{" "}
-				{count === 1 ? "transaction" : "transactions"} stay, so past months
-				still add up, unless you tick the box below.
+				{count === 1 ? "transaction stays" : "transactions stay"}, so past
+				months still add up, unless you tick the box below.
 			</p>
 			{error && (
 				<p role="alert" class="mt-4 text-over">
@@ -869,9 +869,9 @@ accounts.get("/accounts/apple-card/remove", async (c) => {
 accounts.post("/accounts/apple-card/remove", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const card = await appleCardAccount(c.env.DB);
-	if (!card) return c.notFound();
 	const already = "Apple Card is already removed.";
-	if (card.removedAt !== null) return backToAccounts(c, already);
+	// No card (another tab deleted it with its transactions) or a removed one: there's nothing left to remove, as Disconnect's is.
+	if (!card || card.removedAt !== null) return backToAccounts(c, already);
 	const deleteHistory = (await c.req.formData()).get("delete") === "yes";
 	// Keeping the rows only marks the card removed and clears its balance, so it leaves net worth until a balance is typed.
 	// Deleting runs the pay cleanup first (it finds the card's rows), then the rows, their balances, and the account last,

@@ -129,6 +129,20 @@ describe("Remove Apple Card (#766)", () => {
 		expect(html).toContain("Cancel");
 	});
 
+	it("says its one transaction stays, in the singular, with its verb to match", async () => {
+		// Drop the card's newer row, so one is left: the page's count and its verb must agree.
+		await env.DB.prepare(
+			"DELETE FROM transactions WHERE id IN (SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' ORDER BY t.id DESC LIMIT 1)",
+		).run();
+		const html = (
+			await (await app.request("/accounts/apple-card/remove", {}, family)).text()
+		).replaceAll("&#39;", "'");
+		expect(html).toContain(
+			"Its 1 transaction stays, so past months still add up, unless you tick the box below.",
+		);
+		expect(html).not.toContain("transaction stay,");
+	});
+
 	it("keeps the rows and clears the balance by default: the card leaves net worth and Add Apple Card shows again", async () => {
 		const { res } = await post("/accounts/apple-card/remove", "");
 		expect(res.headers.get("HX-Trigger")).toContain("Removed Apple Card.");
@@ -193,7 +207,7 @@ describe("Remove Apple Card (#766)", () => {
 		expect(await cardRowCount()).toEqual({ n: 2 });
 	});
 
-	it("is not found before there is a card to remove", async () => {
+	it("is not found before there is a card to remove, and a remove with none says it's already removed", async () => {
 		await env.DB.batch([
 			env.DB.prepare(
 				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
@@ -203,9 +217,41 @@ describe("Remove Apple Card (#766)", () => {
 		expect(
 			(await app.request("/accounts/apple-card/remove", {}, family)).status,
 		).toBe(404);
-		expect(
-			(await post("/accounts/apple-card/remove", "", family)).res.status,
-		).toBe(404);
+		const { res } = await post("/accounts/apple-card/remove", "", family);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Apple Card is already removed.",
+		);
+	});
+
+	it("says it's already removed when the card was deleted in another tab, not not-found", async () => {
+		await post("/accounts/apple-card/remove", "delete=yes");
+		const { res } = await post("/accounts/apple-card/remove", "delete=yes");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Trigger")).toContain(
+			"Apple Card is already removed.",
+		);
+	});
+
+	it("answers a remove with no card without htmx as Disconnect does: back to Accounts", async () => {
+		await env.DB.batch([
+			env.DB.prepare(
+				"DELETE FROM transactions WHERE account_id IN (SELECT id FROM accounts WHERE subtype = 'apple_card')",
+			),
+			env.DB.prepare("DELETE FROM accounts WHERE subtype = 'apple_card'"),
+		]);
+		const res = await app.request(
+			"/accounts/apple-card/remove",
+			{
+				method: "POST",
+				headers: { "content-type": "application/x-www-form-urlencoded" },
+				body: "",
+			},
+			family,
+			ctx(),
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/accounts");
 	});
 
 	it("is not found in the demo, where the group has no Manage", async () => {
