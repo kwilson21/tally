@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, daysBefore, shortDay, todayIn } from "../src/dates";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
@@ -14,11 +14,14 @@ const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const HEADER =
 	"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)";
+/** Apple's MM/DD/YYYY for a YYYY-MM-DD day. */
+const apple = (day: string) =>
+	`${day.slice(5, 7)}/${day.slice(8, 10)}/${day.slice(0, 4)}`;
+// The rows are dated from the real today, so they stay inside Tally's history whenever this runs (never a fixed date).
+const CLEARED_A = daysBefore(TODAY, 10);
 // Made-up rows in Apple's layout (spec §8.10): the Rivera family's store, a card ending 1234, never a real export.
-const ROW_A =
-	'09/10/2026,09/11/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"';
-const ROW_B =
-	'09/12/2026,09/13/2026,"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"';
+const ROW_A = `${apple(daysBefore(TODAY, 11))},${apple(CLEARED_A)},"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"`;
+const ROW_B = `${apple(daysBefore(TODAY, 9))},${apple(daysBefore(TODAY, 8))},"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"`;
 const csv = (...rows: string[]) => [HEADER, ...rows].join("\n");
 
 // The actor the family's sign-in sets (the accounts app reads it for `updated_by`).
@@ -423,7 +426,7 @@ describe("Apple Card's upload sheet (#766)", () => {
 			const html = (
 				await (await app.request("/accounts", {}, family)).text()
 			).replaceAll("&#39;", "'");
-			expect(html).toContain("Updated through Sep 11");
+			expect(html).toContain(`Updated through ${shortDay(CLEARED_A, TODAY)}`);
 			expect(html).toContain("Balance as of");
 			expect(html).toContain("Upload a file");
 			expect(html).toContain("Remove Apple Card");
@@ -522,10 +525,7 @@ describe("the first week is untouched by an upload (spec §8.10, #766)", () => {
 	it("leaves the first-week record as it was, so an upload draws no stroke", async () => {
 		await resetDemo(env.DB, TODAY);
 		const before = await readFirstTally(env.DB);
-		const csv = [
-			"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)",
-			'09/10/2026,09/11/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"',
-		].join("\n");
+		const csv = [HEADER, ROW_A].join("\n");
 		const form = new FormData();
 		form.set("file", new File([csv], "apple.csv", { type: "text/csv" }));
 		form.set("balance", "1,240.18");

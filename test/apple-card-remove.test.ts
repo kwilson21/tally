@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { accounts } from "../src/routes/accounts";
 import { recordSorting } from "./record-sorting";
@@ -10,6 +10,9 @@ recordSorting({ sort: true });
 
 // Remove Apple Card (spec §8.10, #766): kept by default, deleted with its transactions when asked. Modelled on Disconnect.
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
+/** Apple's MM/DD/YYYY for a YYYY-MM-DD day. The rows are dated from the real today, never a fixed date. */
+const apple = (day: string) =>
+	`${day.slice(5, 7)}/${day.slice(8, 10)}/${day.slice(0, 4)}`;
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const demo = { ...env, DEMO: "true" } as unknown as Env;
 const PLAID_LINK_SCRIPT =
@@ -43,8 +46,8 @@ const ctx = () => ({
 async function uploadCard() {
 	const csv = [
 		"Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)",
-		'09/10/2026,09/11/2026,"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"',
-		'09/12/2026,09/13/2026,"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"',
+		`${apple(daysBefore(TODAY, 11))},${apple(daysBefore(TODAY, 10))},"GREENLEAF MARKET #12 100 MAIN ST SPRINGFIELD 00000 XX USA","Greenleaf Market #12","Grocery","Purchase","38.40"`,
+		`${apple(daysBefore(TODAY, 9))},${apple(daysBefore(TODAY, 8))},"THAI PALACE 4 OAK ST SPRINGFIELD 00000 XX USA","Thai Palace","Restaurants","Purchase","24.10"`,
 	].join("\n");
 	const form = new FormData();
 	form.set("file", new File([csv], "apple.csv", { type: "text/csv" }));
