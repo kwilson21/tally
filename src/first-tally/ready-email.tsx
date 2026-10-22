@@ -59,11 +59,13 @@ export const CLAIM_SQL = `UPDATE household_settings
 
 // Takes an address back off the list when neither provider delivered it, so the next minute's run tries it again. ?2 is the
 // address's hash and ?3 the kept try as JSON ({"mail", "at"}, decision 146), or NULL when none is kept: a definite failure
-// keeps no try, so it removes any kept before (json_patch takes a null away), and the next try uses fresh words.
+// keeps no try, so it removes any kept before (json_patch takes a null away), and the next try uses fresh words. The
+// address's old entry is removed first, so the new one replaces it whole: a patch alone would merge it into an entry the
+// merged code kept as its read line ({"line", "at"}), and leave that line behind.
 const RELEASE_SQL = `UPDATE household_settings
 	SET value = json_set(household_settings.value,
 		'$.readyEmailedTo', json((SELECT json_group_array(e.value) FROM json_each(household_settings.value, '$.readyEmailedTo') AS e WHERE e.value <> ?1)),
-		'$.heldReadyEmail', json(json_patch(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), json_object(?2, json(?3)))))
+		'$.heldReadyEmail', json(json_patch(json_remove(COALESCE(json_extract(household_settings.value, '$.heldReadyEmail'), '{}'), '$."' || ?2 || '"'), json_object(?2, json(?3)))))
 	WHERE key = 'first_tally'`;
 
 // Removes one address's kept try and leaves the address on the list: the kept try was delivered, or is too old to try again.
@@ -123,7 +125,9 @@ const addressHashOf = (address: string) => sha256Hex(address.toLowerCase());
 
 /**
  * The kept try for an address (RELEASE_SQL), or null when none is kept. The next try sends its stored email, so that try is
- * the same email under the same key (decision 146). An entry that isn't a stored email and a time is no kept try.
+ * the same email under the same key (decision 146). An entry the merged code kept before the whole email was stored (c5577a5)
+ * has its read line and no email: the email that line builds is the same one, since the template has not changed, so it is
+ * that kept try too. An entry that is neither a stored email nor a line, with a time, is no kept try.
  */
 async function keptTryOf(
 	db: D1Database,
@@ -135,9 +139,11 @@ async function keptTryOf(
 		await addressHashOf(address)
 	];
 	if (typeof entry !== "object" || entry === null) return null;
-	const { mail, at } = entry as Record<string, unknown>;
-	if (typeof at !== "string" || typeof mail !== "object" || mail === null)
-		return null;
+	const { mail, line, at } = entry as Record<string, unknown>;
+	if (typeof at !== "string") return null;
+	if (mail === undefined && typeof line === "string")
+		return { mail: renderReadyEmail(line), at };
+	if (typeof mail !== "object" || mail === null) return null;
 	const { subject, html, text } = mail as Record<string, unknown>;
 	return typeof subject === "string" &&
 		typeof html === "string" &&
@@ -235,8 +241,8 @@ async function currentRead(env: { DB: D1Database }): Promise<string | null> {
  * nothing more is sent. Another bank linked or removed changes the words from then on. An address no longer a member is
  * skipped on its own (CLAIM_SQL). A try Resend may hold keeps its whole email and the time of that first try (KeptTry). The
  * next try sends that stored email again under the same key, through Resend only, until Resend answers (decision 146). A
- * kept try a day old is dropped, and the address stays reached. The log line is written only when an address was claimed, so a quiet minute
- * logs nothing.
+ * kept try 23 hours old is dropped, and the address stays reached. The log line is written only when an address was
+ * claimed, so a quiet minute logs nothing.
  */
 export async function runReadyEmail(
 	env: DeliveryEnv & { DB: D1Database; DEMO?: string },

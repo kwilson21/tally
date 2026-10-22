@@ -1028,7 +1028,7 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			expect(next.keys).toEqual([await readyEmailKey(DANA, stored)]);
 		});
 
-		it("an entry 22 hours old is still retried: it sends the kept line, not the read now, under the key those words give, and drops the entry once delivered", async () => {
+		it("an entry 22 hours old is still retried: it sends the kept email, not the read now, under the key that email gives, and drops the entry once delivered", async () => {
 			await openKept(renderReadyEmail(HELD_LINE), 22 * HOUR_MS);
 			const send = EMAIL_SENDER();
 			const next = resendFake();
@@ -1086,6 +1086,104 @@ describe("the ready email: a try Resend may hold keeps its words (decision 146)"
 			expect(send).toHaveBeenCalledOnce();
 			expect(await storedList()).toEqual([DANA]);
 			expect(await heldOf()).toEqual({});
+		});
+
+		describe("a kept try stored as its read line, before the whole email was kept (c5577a5)", () => {
+			/** The UTC time `ageMs` ago, to the second, as the kept tries write it. */
+			const timeAgo = (ageMs: number) =>
+				`${new Date(Date.now() - ageMs).toISOString().slice(0, 19)}Z`;
+
+			/** A household whose DANA's kept try is the entry given, as the merged code before this stored it: `{ line, at }`. */
+			async function openHeldEntry(entry: Record<string, unknown>) {
+				await openHousehold({
+					members: [DANA],
+					record: {
+						strokes: { bank: STROKE_ONE },
+						budgets: {},
+						heldReadyEmail: { [await addressHashOf(DANA)]: entry },
+					},
+				});
+			}
+
+			it("sends the email that line built, under the key that email gives, and Cloudflare's email sends nothing", async () => {
+				await openHeldEntry({ line: HELD_LINE, at: timeAgo(HOUR_MS) });
+				const send = EMAIL_SENDER();
+				const next = resendFake();
+				await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+				expect(next.sent).toEqual([
+					{
+						to: DANA,
+						subject: renderReadyEmail(HELD_LINE).subject,
+						html: renderReadyEmail(HELD_LINE).html,
+						text: renderReadyEmail(HELD_LINE).text,
+					},
+				]);
+				expect(next.keys).toEqual([
+					await readyEmailKey(DANA, renderReadyEmail(HELD_LINE)),
+				]);
+				expect(send).not.toHaveBeenCalled();
+				expect(await storedList()).toEqual([DANA]);
+				expect(await heldOf()).toEqual({});
+			});
+
+			it("a timed-out retry keeps the first time, and the entry is kept as the whole email with no line left", async () => {
+				const at = timeAgo(5 * HOUR_MS);
+				await openHeldEntry({ line: HELD_LINE, at });
+				const send = EMAIL_SENDER();
+				await runReadyEmail(production({ EMAIL: { send } }), timesOut());
+				expect(await heldOf()).toEqual({
+					[await addressHashOf(DANA)]: {
+						mail: renderReadyEmail(HELD_LINE),
+						at,
+					},
+				});
+				expect(send).not.toHaveBeenCalled();
+				expect(await storedList()).toEqual([]);
+			});
+
+			it("a 503 retry keeps the first time too, and Cloudflare's email sends nothing", async () => {
+				const at = timeAgo(2 * HOUR_MS);
+				await openHeldEntry({ line: HELD_LINE, at });
+				const send = EMAIL_SENDER();
+				await runReadyEmail(
+					production({ EMAIL: { send } }),
+					resendFake(503).fetchImpl,
+				);
+				expect(send).not.toHaveBeenCalled();
+				expect(await heldOf()).toEqual({
+					[await addressHashOf(DANA)]: {
+						mail: renderReadyEmail(HELD_LINE),
+						at,
+					},
+				});
+			});
+
+			it("a delivery removes the entry, and the address stays reached", async () => {
+				await openHeldEntry({ line: HELD_LINE, at: timeAgo(HOUR_MS) });
+				const next = resendFake();
+				await runReadyEmail(production(), next.fetchImpl);
+				expect(next.sent).toHaveLength(1);
+				expect(await heldOf()).toEqual({});
+				expect(await storedList()).toEqual([DANA]);
+			});
+
+			it("an entry 23 hours and 1 minute old is dropped and not sent, as any kept try is", async () => {
+				await openHeldEntry({
+					line: HELD_LINE,
+					at: timeAgo(23 * HOUR_MS + 60_000),
+				});
+				const log = vi.spyOn(console, "error").mockImplementation(() => {});
+				const send = EMAIL_SENDER();
+				const next = resendFake();
+				await runReadyEmail(production({ EMAIL: { send } }), next.fetchImpl);
+				expect(next.fetchImpl).not.toHaveBeenCalled();
+				expect(send).not.toHaveBeenCalled();
+				expect(await heldOf()).toEqual({});
+				expect(await storedList()).toEqual([DANA]);
+				expect(log).toHaveBeenCalledWith(
+					"ready email: 0 sent, 1 failed (held over a day)",
+				);
+			});
 		});
 	});
 
