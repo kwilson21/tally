@@ -7,8 +7,6 @@ const SW_URL = "/sw.js";
 const SUBSCRIBE_URL = "/push/subscribe";
 const COULDNT_SAVE = "Couldn't save. Check your connection and try again.";
 const ON_WORDS = "Notifications are on for this device.";
-const BLOCKED_WORDS =
-	"Notifications are blocked for Tally in this device's settings.";
 
 /** The VAPID public key's bytes, from its base64url text. */
 function keyBytes(text) {
@@ -99,16 +97,6 @@ export function setupPush({
 			new CustomEvent("toast", { detail: { message, type: "error" } }),
 		);
 
-	/** The one-line alert for a refused tap: a fresh paragraph, so a screen reader reads it when it lands. */
-	const alertBlocked = (node) => {
-		const region = node.querySelector("[data-notify-alert]");
-		if (!region) return;
-		const alert = document.createElement("p");
-		alert.setAttribute("role", "alert");
-		alert.textContent = BLOCKED_WORDS;
-		region.replaceChildren(alert);
-	};
-
 	/** The subscription's keys, from getKey (or the JSON's keys where getKey is absent). */
 	const keysOf = (subscription) => {
 		if (typeof subscription.getKey === "function")
@@ -181,8 +169,8 @@ export function setupPush({
 		if (!live) return;
 		setBusy(live, false);
 		if (Notification.permission === "denied") {
+			// The Blocked line is the one thing said: it is shown and focused, as the On line is, so it is read once.
 			showState(live, "blocked");
-			alertBlocked(live);
 			focusOn(live, "blocked");
 			return;
 		}

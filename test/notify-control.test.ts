@@ -105,8 +105,10 @@ describe("the notify control's four states", () => {
 		expect(markup).not.toContain('id="notify-help"');
 	});
 
-	it("keeps an empty alert region for a tap that is refused", async () => {
-		expect(await control()).toContain('<div data-notify-alert="true"></div>');
+	it("draws no alert region: a refused tap says its words once, in the Blocked line", async () => {
+		const markup = await control();
+		expect(markup).not.toContain("data-notify-alert");
+		expect(markup).not.toContain('role="alert"');
 	});
 });
 
@@ -138,7 +140,7 @@ describe("the notify control's words and button", () => {
 		);
 	});
 
-	it("draws the quiet Blocked line, focusable for the script's alert", async () => {
+	it("draws the quiet Blocked line, focusable so a refused tap can move focus to it", async () => {
 		const markup = await control("blocked");
 		const tag = stateTag(markup, "blocked");
 		expect(tag).toContain('tabindex="-1"');

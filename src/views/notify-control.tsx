@@ -2,7 +2,8 @@
 // yet open. One wrapper, data-notify, holds four states, each hidden until push.js shows the one that applies (Off, On, the iPhone
 // hint, Blocked). With no JavaScript, or in a browser without Web Push, all four stay hidden, so nothing shows. A catalog drawing
 // passes `shown` to un-hide one state (only catalog drawings do). push.js finds the control by [data-notify] alone, so the
-// Home Screen page (#772) can draw it with no change here. The alert region is empty until a tap is refused.
+// Home Screen page (#772) can draw it with no change here. A refused tap shows the Blocked line and moves focus to it, so the
+// words are read once; there is no alert of its own.
 
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -73,7 +74,6 @@ export function NotifyControl({
 			>
 				{BLOCKED}
 			</p>
-			<div data-notify-alert />
 		</div>
 	);
 }
