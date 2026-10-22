@@ -139,6 +139,19 @@ describe("POST /home/seen: the presence check-in", () => {
 		expect(await seenOf(RILEY)).toBeNull();
 	});
 
+	it("answers a quiet presence ping (an empty form, no step) with 204 and no redraw, even once the step has moved on", async () => {
+		// The Plaid window's ping (plaid-link.js) sends no step, so it only says the person is there: the questions are open,
+		// the page still shows reading, and the answer redraws nothing.
+		await ready();
+		await setSeen(PERSON, "-31 seconds");
+		const before = await seenOf(PERSON);
+		const res = await checkIn(family, ORIGIN);
+		expect(res.status).toBe(204);
+		expect(await res.text()).toBe("");
+		expect(res.headers.get("HX-Trigger")).toBeNull();
+		expect(await seenOf(PERSON)).not.toBe(before);
+	});
+
 	it("writes nothing again inside 30 seconds of the last check-in", async () => {
 		await setSeen(PERSON, "-10 seconds");
 		const before = await seenOf(PERSON);

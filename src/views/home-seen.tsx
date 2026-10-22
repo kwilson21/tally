@@ -31,7 +31,8 @@ export function HomeSeenCheckIn({
 		"hx-status:4xx": "swap:none",
 		"hx-status:5xx": "swap:none",
 		"data-quiet": true,
-		// A Plaid Link window pauses the check-in too (plaid-link.js, decision 146), so its answer can't redraw Home mid-link.
+		// A Plaid Link window pauses the check-in too, so its answer can't redraw Home mid-link; a quiet ping with no step stands
+		// in for each skipped tick, so the person still counts as there (plaid-link.js, decisions 146 and 148).
 		"data-waits-for-link": true,
 		...(step ? { "hx-vals": JSON.stringify({ step }) } : {}),
 	};

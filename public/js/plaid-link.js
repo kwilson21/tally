@@ -343,11 +343,24 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	// is open they are skipped, so a sort that finishes mid-link can't redraw the first-week top and take the bank being linked
 	// away (decision 146). htmx 4.0.0 (node_modules/htmx.org/dist/htmx.js, #issueRequest) dispatches a cancelable
 	// htmx:before:request on a request's source element, and sends nothing when it is prevented. A skipped tick is not queued:
-	// the next tick after onSuccess or onExit runs as usual. A Plaid session longer than the email's 10 minutes counts as away,
-	// which is acceptable because linking a bank closes the questions again.
+	// the next tick after onSuccess or onExit runs as usual. The exchange is never skipped.
+	//
+	// A Plaid window still counts as the person being there. So the check-in's skipped tick is replaced by a quiet presence
+	// ping: a form post with no step, so /home/seen only moves home_seen_at and answers 204 (decision 146). Neither the push
+	// (2 minutes) nor the email (10 minutes) goes while someone is linking a bank (decision 148). The poll and the refreshes
+	// send nothing in its place.
+	const presencePing = () =>
+		fetch("/home/seen", {
+			method: "POST",
+			credentials: "same-origin",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: "",
+		}).catch(() => {});
 	const skipWhileLinking = (event) => {
-		if (linking && event.target?.hasAttribute?.("data-waits-for-link"))
-			event.preventDefault();
+		if (!linking || !event.target?.hasAttribute?.("data-waits-for-link"))
+			return;
+		event.preventDefault();
+		if (event.target.id === "home-seen") presencePing();
 	};
 
 	// One delegated listener for both buttons, so a button a refresh replaced still works.
