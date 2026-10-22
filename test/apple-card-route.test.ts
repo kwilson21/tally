@@ -151,23 +151,47 @@ describe("Apple Card's upload sheet (#766)", () => {
 	});
 
 	describe("GET /accounts/apple-card", () => {
-		it("returns the sheet in #sheet with the file field and the balance, for htmx", async () => {
+		it("returns the whole Accounts page for htmx, with the sheet in #sheet, as Savings' sheet GETs do", async () => {
 			const res = await app.request(
 				"/accounts/apple-card",
 				{ headers: { "HX-Request": "true" } },
 				family,
 			);
 			const html = (await res.text()).replaceAll("&#39;", "'");
-			expect(html).toContain('id="sheet"');
-			expect(html).toContain('id="apple-card-file"');
-			expect(html).toContain("Apple Card file (CSV)");
-			expect(html).toContain("Balance in Wallet");
+			// The opener's hx-select="#sheet" takes only the sheet out of the page, and Back can restore the whole page.
+			expect(html).toContain("<main");
+			expect(html).toContain('id="accounts-summary"');
+			const sheet = html.slice(html.indexOf('id="sheet"'));
+			expect(sheet).toContain('id="apple-card-file"');
+			expect(sheet).toContain("Apple Card file (CSV)");
+			expect(sheet).toContain("Balance in Wallet");
 			// The submit says Upload (spec §8.10: Cancel and Upload). "Upload a file" is the group's button that opens this sheet.
 			expect(submitLabel(html)).toBe("Upload");
-			expect(html).not.toContain("Upload a file");
-			expect(html).toContain('enctype="multipart/form-data"');
-			expect(html).toContain('hx-encoding="multipart/form-data"');
-			expect(html).toContain("hx-disable=");
+			expect(sheet).not.toContain("Upload a file");
+			expect(sheet).toContain('enctype="multipart/form-data"');
+			expect(sheet).toContain('hx-encoding="multipart/form-data"');
+			expect(sheet).toContain("hx-disable=");
+		});
+
+		it("answers a history restore (Back or Forward) with the whole page, so the nav and the summary come back", async () => {
+			// htmx restores a history entry by swapping the whole body with this answer (outerSync), so a bare sheet would empty it.
+			const res = await app.request(
+				"/accounts/apple-card",
+				{
+					headers: {
+						"HX-Request": "true",
+						"HX-History-Restore-Request": "true",
+					},
+				},
+				family,
+			);
+			const html = await res.text();
+			expect(res.status).toBe(200);
+			expect(html).toContain("<main");
+			expect(html).toContain('id="accounts-summary"');
+			expect(html).toContain('id="toasts"');
+			expect(html).toContain('id="announcer"');
+			expect(html.split('id="sheet"').length - 1).toBe(1);
 		});
 
 		it("returns Accounts with the sheet open, without htmx", async () => {

@@ -295,11 +295,14 @@ accounts.get("/accounts", (c) => {
 	return accountsPage(c, undefined, { focus });
 });
 
-/** The upload sheet: Upload a file and Add Apple Card open it in #sheet; without JavaScript it is the whole page. */
+/**
+ * The upload sheet: Upload a file and Add Apple Card open it in #sheet, which their hx-select takes out of the whole page.
+ * Every answer is the whole page, as Savings' sheet GETs are: htmx restores Back and Forward by swapping the whole body,
+ * and a bare sheet there would empty the nav and the summary.
+ */
 accounts.get("/accounts/apple-card", async (c) => {
 	const sheet = await uploadSheet(c.env, await householdToday(c.env.DB));
-	if (!c.req.header("HX-Request")) return accountsPage(c, undefined, { sheet });
-	return c.html(sheet);
+	return accountsPage(c, undefined, { sheet });
 });
 
 /** The body's fields, or none when it can't be read as a form (the upload then says there's no file). */
