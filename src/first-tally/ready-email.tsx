@@ -71,8 +71,10 @@ export function claimSql(
 			AND (m.home_seen_at IS NULL OR m.home_seen_at < datetime('now', '-${awayMs / 1000} seconds')))`;
 }
 
-// Not within EMAIL_AFTER_PUSH_MS of a ready push that reached one of the address's devices (decision 149): the push is seen first,
-// and the email waits for the person to come back or answer. ?2 is the address's hash, the key readyPushedAt stores the time under.
+// Not within EMAIL_AFTER_PUSH_MS of a ready push (decision 149). readyPushedAt is written when the push claims the person (holding the
+// email while the push is in flight), moved to the delivery's time when a device takes it, and removed when none does; if that removal
+// fails, it keeps the claim's time and the email waits 8 minutes from the claim. So the push is seen first, and the email waits for the
+// person to come back or answer. ?2 is the address's hash, the key readyPushedAt stores the time under.
 const PUSH_WAIT_GUARD = `\n\t\tAND (json_type(household_settings.value, '$.readyPushedAt."' || ?2 || '"') IS NULL
 		OR datetime(json_extract(household_settings.value, '$.readyPushedAt."' || ?2 || '"')) <= datetime('now', '-${EMAIL_AFTER_PUSH_MS / 1000} seconds'))`;
 

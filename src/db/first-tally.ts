@@ -90,8 +90,10 @@ export type FirstTally = {
 	 */
 	readyPushedTo?: string[];
 	/**
-	 * The time a ready push reached one of a person's devices (decision 149), keyed by the address's hash as heldReadyEmail is
-	 * (`YYYY-MM-DDTHH:MM:SSZ`). The ready email waits EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). Absent until one reaches.
+	 * readyPushedAt is written when the push claims the person (holding the email while the push is in flight), moved to the
+	 * delivery's time when a device takes it, and removed when none does; if that removal fails, it keeps the claim's time and the
+	 * email waits 8 minutes from the claim. Keyed by the address's hash as heldReadyEmail is (`YYYY-MM-DDTHH:MM:SSZ`), and the ready
+	 * email waits EMAIL_AFTER_PUSH_MS from it (ready-email.tsx). Absent until a claim writes one (decision 149).
 	 */
 	readyPushedAt?: Record<string, string>;
 	/**

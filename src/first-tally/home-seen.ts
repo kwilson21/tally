@@ -12,5 +12,10 @@ export const EMAIL_AWAY_AFTER_MS = 600_000;
 /** How long after its last check-in a person counts as away, so the ready push is sent to each of their devices (ready-push.ts). */
 export const PUSH_AWAY_AFTER_MS = 120_000;
 
-/** How long after a delivered ready push its person's ready email waits, so the push is seen first (ready-email.tsx). */
+/**
+ * How long the person's ready email waits after their readyPushedAt stamp, so the push is seen first (ready-email.tsx).
+ * readyPushedAt is written when the push claims the person (holding the email while the push is in flight), moved to the
+ * delivery's time when a device takes it, and removed when none does; if that removal fails, it keeps the claim's time and the
+ * email waits 8 minutes from the claim.
+ */
 export const EMAIL_AFTER_PUSH_MS = 480_000;
