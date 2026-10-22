@@ -94,6 +94,25 @@ function failingDb(fails: string): D1Database {
 	});
 }
 
+/** A D1 whose first statement containing `fails` throws when prepared, and whose later statements work, as a blip does. */
+function blipDb(fails: string): D1Database {
+	let blipped = false;
+	return new Proxy(env.DB, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (sql: string) => {
+					if (!blipped && sql.includes(fails)) {
+						blipped = true;
+						throw new Error("D1 is down");
+					}
+					return target.prepare(sql);
+				};
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
 /** A multipart form, sent as bytes with an explicit Content-Length, as a browser sends it. */
 async function multipart(fields: Record<string, string | File>) {
 	const form = new FormData();
@@ -564,6 +583,130 @@ describe("Apple Card's upload sheet (#766)", () => {
 				});
 				// The log names the step in fixed words, never the error or a row.
 				expect(logged).toHaveBeenCalledWith("apple card rules failed");
+			} finally {
+				logged.mockRestore();
+			}
+		});
+
+		// A bill due on the day the Juniper row cleared, for its amount: the row is the bill's payment once bills can be read.
+		const JUNIPER_CLEARED = daysBefore(TODAY, 8);
+		const ROW_JUNIPER = `${apple(daysBefore(TODAY, 9))},${apple(JUNIPER_CLEARED)},"JUNIPER PHARMACY 2 PINE RD SPRINGFIELD 00000 XX USA","Juniper Pharmacy","Health","Purchase","17.25"`;
+		const addJuniperBill = () =>
+			env.DB.prepare(
+				"INSERT INTO bills(id,name,amount_cents,due_day,frequency,merchant_raw_name,merchant_raw_text) VALUES(9001,'Juniper Pharmacy',1725,?,'monthly','Juniper Pharmacy',0)",
+			)
+				.bind(Number(JUNIPER_CLEARED.slice(8, 10)))
+				.run();
+		const linkedCardPayments = () =>
+			env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM bill_payments bp JOIN transactions t ON t.id = bp.transaction_id JOIN accounts a ON a.id = t.account_id WHERE a.subtype = 'apple_card' AND bp.status = 'linked'",
+			).first<{ n: number }>();
+
+		it("keeps the rows when bill matching fails once, answers the success redraw, and matches the payment in a background retry", async () => {
+			await addJuniperBill();
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const context = ctx();
+			// Only the matcher's first read of the bills fails: the rows, the rules and the retry are the real D1's.
+			const bindings = {
+				...family,
+				DB: blipDb("FROM bills WHERE active=1"),
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			try {
+				const { res, html } = await post(
+					{ file: file(csv(ROW_JUNIPER)), balance: "" },
+					{ htmx: true, bindings, context },
+				);
+				expect(res.status).toBe(200);
+				expect(res.headers.get("HX-Push-Url")).toBe("/accounts");
+				expect(res.headers.get("HX-Trigger")).toContain(
+					"Added 1 from Apple Card.",
+				);
+				expect(html).toContain('id="accounts-summary"');
+				await settled(context);
+				expect(await cardRows()).toEqual({ n: 1 });
+				// The first run's failure is logged in fixed words; its retry in the background links the payment.
+				expect(logged).toHaveBeenCalledWith("apple card bills failed");
+				expect(await linkedCardPayments()).toEqual({ n: 1 });
+				// The rules step did not fail, so the sorting is told they were applied.
+				expect(create).toHaveBeenCalledTimes(1);
+				expect(create.mock.calls[0]?.[0].params).toMatchObject({
+					bySync: true,
+					rulesApplied: true,
+				});
+			} finally {
+				logged.mockRestore();
+			}
+		});
+
+		it("answers the success redraw and logs fixed words when bill matching fails on its retry too", async () => {
+			await addJuniperBill();
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const context = ctx();
+			const bindings = {
+				...family,
+				DB: failingDb("FROM bills WHERE active=1"),
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			try {
+				const { res } = await post(
+					{ file: file(csv(ROW_JUNIPER)), balance: "" },
+					{ htmx: true, bindings, context },
+				);
+				expect(res.status).toBe(200);
+				expect(res.headers.get("HX-Trigger")).toContain(
+					"Added 1 from Apple Card.",
+				);
+				await settled(context);
+				expect(await cardRows()).toEqual({ n: 1 });
+				expect(logged).toHaveBeenCalledWith("apple card bills failed");
+				// The log holds the fixed words only, never the error's text.
+				expect(JSON.stringify(logged.mock.calls)).not.toContain("D1 is down");
+				expect(create.mock.calls[0]?.[0].params).toMatchObject({
+					rulesApplied: true,
+				});
+			} finally {
+				logged.mockRestore();
+			}
+		});
+
+		it("still matches the bills when the rules step fails, so a rule error never leaves a payment unmatched", async () => {
+			await addJuniperBill();
+			const create = vi.fn<(input: { params: SortParams }) => Promise<unknown>>(
+				async () => ({ id: "fake" }),
+			);
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const context = ctx();
+			const bindings = {
+				...family,
+				DB: failingDb(
+					"WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')",
+				),
+				JEV_API_KEY: "test-key",
+				SORT: { create },
+			} as unknown as Env;
+			try {
+				const { res } = await post(
+					{ file: file(csv(ROW_JUNIPER)), balance: "" },
+					{ htmx: true, bindings, context },
+				);
+				expect(res.status).toBe(200);
+				await settled(context);
+				// The bill step ran on its own, so it matched the payment without a retry.
+				expect(await linkedCardPayments()).toEqual({ n: 1 });
+				expect(logged).toHaveBeenCalledWith("apple card rules failed");
+				expect(logged).not.toHaveBeenCalledWith("apple card bills failed");
+				expect(create.mock.calls[0]?.[0].params).toMatchObject({
+					rulesApplied: false,
+				});
 			} finally {
 				logged.mockRestore();
 			}
