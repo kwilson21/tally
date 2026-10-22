@@ -5,8 +5,8 @@
 
 // The fallback copies PUSH_PAYLOAD (src/first-tally/ready-push.ts), whose url is QUESTIONS_PATH; test/sw-js.test.ts keeps them equal.
 const FALLBACK = {
-	title: "Tally",
-	body: "Your three questions are ready. About three minutes to finish setting up your budget.",
+	title: "Set up your budget",
+	body: "Your transactions are sorted. Three quick questions, about three minutes.",
 	url: "/first-page",
 };
 

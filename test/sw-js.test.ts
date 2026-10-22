@@ -75,6 +75,23 @@ describe("the service worker's push", () => {
 		);
 	});
 
+	it("shows the owner's words as the fallback, so a push that can't be read still says them", async () => {
+		const { scope, send } = worker();
+		await send(
+			"push",
+			pushWith(() => {
+				throw new SyntaxError("not json");
+			}),
+		);
+		expect(scope.registration.showNotification).toHaveBeenCalledWith(
+			"Set up your budget",
+			expect.objectContaining({
+				body: "Your transactions are sorted. Three quick questions, about three minutes.",
+				data: { url: "/first-page" },
+			}),
+		);
+	});
+
 	it("shows the fallback words when the push has no data at all", async () => {
 		const { scope, send } = worker();
 		await send("push", {});

@@ -4,7 +4,11 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { runReadyEmail } from "../src/first-tally/ready-email";
-import { PUSH_RELEASE_SQL, runReadyPush } from "../src/first-tally/ready-push";
+import {
+	PUSH_PAYLOAD,
+	PUSH_RELEASE_SQL,
+	runReadyPush,
+} from "../src/first-tally/ready-push";
 import handler from "../src/index";
 
 // The ready push (decision 149, spec §8.8): once a new family's first questions are open and nobody has answered one, each
@@ -249,6 +253,16 @@ beforeEach(async () => resetDemo(env.DB, "2026-10-07"));
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
+});
+
+describe("the ready push: its words", () => {
+	it("says the owner's words: the title Set up your budget, and the body, and opens the questions page", () => {
+		expect(PUSH_PAYLOAD).toEqual({
+			title: "Set up your budget",
+			body: "Your transactions are sorted. Three quick questions, about three minutes.",
+			url: "/first-page",
+		});
+	});
 });
 
 describe("the ready push: who gets it, and when", () => {

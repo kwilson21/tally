@@ -149,8 +149,8 @@ const SUBSCRIPTION = {
 };
 
 const PAYLOAD: PushPayload = {
-	title: "Tally",
-	body: "Your three questions are ready. About three minutes to finish setting up your budget.",
+	title: "Set up your budget",
+	body: "Your transactions are sorted. Three quick questions, about three minutes.",
 	url: "/first-page",
 };
 

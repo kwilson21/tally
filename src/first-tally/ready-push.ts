@@ -28,8 +28,8 @@ import {
 
 /** The push's words: the title and the body the notification shows, and the page it opens (sw.js). */
 export const PUSH_PAYLOAD: PushPayload = {
-	title: "Tally",
-	body: "Your three questions are ready. About three minutes to finish setting up your budget.",
+	title: "Set up your budget",
+	body: "Your transactions are sorted. Three quick questions, about three minutes.",
 	url: QUESTIONS_PATH,
 };
 
