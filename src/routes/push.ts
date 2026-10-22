@@ -1,9 +1,9 @@
 // POST /push/subscribe (decision 149): one device's Web Push subscription, from the notify control's script (public/js/push.js).
 // A form post, so Hono's csrf check applies (sameOrigin). The three fields are checked before anything is stored: the endpoint
 // is at most 2,000 characters and a browser's push service over https (push/endpoint.ts); the key is an uncompressed P-256
-// point that imports on the curve (RFC 8291 §7); the
-// auth secret is 16 bytes. Input that fails answers 422. Web Push that is off (the demo, or no keys) answers 404, as does a
-// person who isn't signed in or is removed. Otherwise the device is stored for the signed-in person, or moved to them if it
+// point that imports on the curve (RFC 8291 §7); the auth secret is 16 bytes. The encoded lengths are checked before any field
+// is decoded. Input that fails answers 422. Web Push that is off (the demo, or no keys), and a person who isn't signed in or is
+// removed, answer 404 before the body is read. Otherwise the device is stored for the signed-in person, or moved to them if it
 // was stored for someone else (a shared device belongs to whoever turned it on last), and the answer is 204. A page load's
 // quiet re-post carries restore=1: it brings a lost row back and never moves one. A device stored for someone else answers
 // 409, so opening Home on a shared device does not hand it to whoever is looking, and the page shows that device as Off.
@@ -21,6 +21,10 @@ export const push = new Hono<App>();
 /** The longest endpoint stored: a push service's URL is far shorter (decision 149). */
 const MAX_ENDPOINT_LENGTH = 2000;
 
+/** The encoded lengths push.js sends, unpadded: 65 bytes of key is 87 base64url characters, and 16 bytes of secret is 22. */
+const P256DH_LENGTH = 87;
+const AUTH_LENGTH = 22;
+
 const P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 
 /** A form field as text, or null when it is missing or a file. */
@@ -31,21 +35,24 @@ const fieldOf = (form: Record<string, unknown>, name: string) => {
 
 /** The three subscription fields as the browser sent them, or null when any one is not a valid subscription. */
 async function subscriptionOf(form: Record<string, unknown>) {
+	// Every length is checked before any field is decoded, so an oversized value costs nothing more than the check.
 	const endpoint = fieldOf(form, "endpoint");
-	if (!endpoint || endpoint.length > MAX_ENDPOINT_LENGTH) return null;
-	if (!isPushServiceEndpoint(endpoint)) return null;
 	const p256dh = fieldOf(form, "p256dh");
-	const point = p256dh ? fromBase64Url(p256dh) : null;
-	if (!p256dh || point?.length !== 65 || point[0] !== 0x04) return null;
+	const auth = fieldOf(form, "auth");
+	if (!endpoint || endpoint.length > MAX_ENDPOINT_LENGTH) return null;
+	if (!p256dh || p256dh.length !== P256DH_LENGTH) return null;
+	if (!auth || auth.length !== AUTH_LENGTH) return null;
+	if (!isPushServiceEndpoint(endpoint)) return null;
+	const point = fromBase64Url(p256dh);
+	if (point?.length !== 65 || point[0] !== 0x04) return null;
 	try {
 		// RFC 8291 §7: the key must be on the curve, which an import checks.
 		await crypto.subtle.importKey("raw", point, P256, false, []);
 	} catch {
 		return null;
 	}
-	const auth = fieldOf(form, "auth");
-	const secret = auth ? fromBase64Url(auth) : null;
-	if (!auth || secret?.length !== 16) return null;
+	const secret = fromBase64Url(auth);
+	if (secret?.length !== 16) return null;
 	return { endpoint, p256dh, auth };
 }
 
@@ -65,9 +72,7 @@ const OWNER_SQL =
 	"SELECT member_email FROM push_subscriptions WHERE endpoint = ?";
 
 push.post("/push/subscribe", async (c) => {
-	const form = (await c.req.parseBody()) as Record<string, unknown>;
-	const subscription = await subscriptionOf(form);
-	if (!subscription) return c.body(null, 422);
+	// Web Push off (the demo reads nothing; no keys) and no member signed in are answered before the body is read or parsed.
 	if (!(await vapidKeys(c.env))) return c.body(null, 404);
 	let member: string;
 	try {
@@ -82,6 +87,9 @@ push.post("/push/subscribe", async (c) => {
 		.bind(member)
 		.first();
 	if (!current) return c.body(null, 404);
+	const form = (await c.req.parseBody()) as Record<string, unknown>;
+	const subscription = await subscriptionOf(form);
+	if (!subscription) return c.body(null, 422);
 	const row = [
 		member,
 		subscription.endpoint,

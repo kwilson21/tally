@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { push } from "../src/routes/push";
 import { sameOrigin } from "../src/security";
 
@@ -324,6 +324,111 @@ describe("POST /push/subscribe: only a browser's push service (422 otherwise)", 
 	])("answers 422 and stores nothing for %s", async (endpoint) => {
 		expect((await subscribe({ ...good, endpoint })).status).toBe(422);
 		expect(await rowsFor()).toEqual([]);
+	});
+});
+
+describe("POST /push/subscribe: the encoded lengths are checked before anything decodes them", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	/**
+	 * Watches atob, which base64url decoding calls (src/push/base64url.ts). The texts it is asked to decode come back from the
+	 * function, so a test sees whether a value was decoded at all. The filler Q is in no VAPID key or test key.
+	 */
+	const watchDecoding = () => {
+		const spy = vi.spyOn(globalThis, "atob");
+		return () => spy.mock.calls.map(([text]) => String(text));
+	};
+
+	it("refuses a 1 MB key without decoding it", async () => {
+		const decoded = watchDecoding();
+		const huge = "Q".repeat(1_000_000);
+		expect((await subscribe({ ...good, p256dh: huge })).status).toBe(422);
+		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
+	});
+
+	it.each([
+		["one character short", "Q".repeat(86)],
+		["one character long, unpadded", "Q".repeat(88)],
+		[
+			"88 characters with one '=' of padding (push.js sends none)",
+			`${"Q".repeat(87)}=`,
+		],
+	])("refuses a key %s without decoding it", async (_name, p256dh) => {
+		const decoded = watchDecoding();
+		expect((await subscribe({ ...good, p256dh })).status).toBe(422);
+		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
+	});
+
+	it("refuses a 1 MB auth secret without decoding it", async () => {
+		const decoded = watchDecoding();
+		expect(
+			(await subscribe({ ...good, auth: "Q".repeat(1_000_000) })).status,
+		).toBe(422);
+		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
+	});
+
+	it.each([
+		["one character short", "Q".repeat(21)],
+		["24 characters with '==' of padding", `${"Q".repeat(22)}==`],
+	])("refuses an auth secret %s without decoding it", async (_name, auth) => {
+		const decoded = watchDecoding();
+		expect((await subscribe({ ...good, auth })).status).toBe(422);
+		expect(decoded().some((text) => text.startsWith("QQQ"))).toBe(false);
+	});
+
+	it("still decodes a valid subscription's keys, and stores it", async () => {
+		const decoded = watchDecoding();
+		expect((await subscribe(good)).status).toBe(204);
+		expect(decoded().some((text) => text.startsWith("BCVxsr7N"))).toBe(true);
+		expect(decoded().some((text) => text.startsWith("BTBZMqHH"))).toBe(true);
+	});
+});
+
+// A multipart body that is not one, so reading it throws: an answer other than 404 shows the body was read.
+const unreadable = (bindings: Env, who: string | null = PERSON) =>
+	router.request(
+		"/push/subscribe",
+		{
+			method: "POST",
+			headers: {
+				Origin: ORIGIN,
+				"Content-Type": "multipart/form-data; boundary=x",
+				...(who === null ? {} : { "x-test-actor": who }),
+			},
+			body: "this is not a multipart body",
+		},
+		bindings,
+	);
+
+describe("POST /push/subscribe: the checks before the body is read (404 without parsing)", () => {
+	it("answers 404 in the demo without reading the body", async () => {
+		expect(
+			(await unreadable({ ...family, DEMO: "true" } as unknown as Env)).status,
+		).toBe(404);
+	});
+
+	it("answers 404 with no keys without reading the body", async () => {
+		expect(
+			(await unreadable({ DB: env.DB, DEMO: "false" } as unknown as Env))
+				.status,
+		).toBe(404);
+	});
+
+	it("answers 404 when no one is signed in without reading the body", async () => {
+		expect((await unreadable(family, null)).status).toBe(404);
+	});
+
+	it("answers 404 for a removed person without reading the body", async () => {
+		await env.DB.prepare(
+			"UPDATE household_members SET removed_at = datetime('now') WHERE email = ?",
+		)
+			.bind(PERSON)
+			.run();
+		expect((await unreadable(family)).status).toBe(404);
+	});
+
+	it("reads the body for a member with keys, so the same unreadable body is not a 404", async () => {
+		expect((await unreadable(family)).status).not.toBe(404);
 	});
 });
 
