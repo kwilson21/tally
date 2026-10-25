@@ -611,12 +611,7 @@ home.get("/", async (c) => {
 	let setupRead: Awaited<ReturnType<typeof readSetupForHome>> | undefined;
 	if (!demo && viewMonth === currentMonth) {
 		setupRead = await readSetupForHome(c.env.DB, today);
-		const phase = setupRead.setup?.phase;
-		if (
-			setupRead.setup &&
-			!setupRead.setup.fifth &&
-			(phase === "before" || phase === "reading" || phase === "ready")
-		) {
+		if (setupDue(setupRead.setup)) {
 			if (c.req.header("HX-Request")) {
 				c.header("HX-Redirect", "/setup");
 				return c.body(null, 204);
@@ -646,6 +641,35 @@ home.get("/", async (c) => {
 async function readSetupForHome(db: D1Database, today: string) {
 	const flagged = flaggedBanks(await bankSyncs(db), today);
 	return { flagged, setup: await readSetup(db, { today, flagged }) };
+}
+
+/** Setup is due (decision 148): before a bank, while the import is read, or once the questions are open, and not on the fifth day. */
+function setupDue(setup: SetupView | null): boolean {
+	return (
+		setup !== null &&
+		!setup.fifth &&
+		(setup.phase === "before" ||
+			setup.phase === "reading" ||
+			setup.phase === "ready")
+	);
+}
+
+/**
+ * Decision 148: until the questions are answered, Home's routes are setup's, so they send the family there before doing
+ * anything, a save included. Null when Home answers; otherwise the redirect to /setup (an htmx request gets HX-Redirect).
+ */
+async function setupFirst(c: Context<App>): Promise<Response | null> {
+	if (c.env.DEMO === "true") return null;
+	const { setup } = await readSetupForHome(
+		c.env.DB,
+		await householdToday(c.env.DB),
+	);
+	if (!setupDue(setup)) return null;
+	if (c.req.header("HX-Request")) {
+		c.header("HX-Redirect", "/setup");
+		return c.body(null, 204);
+	}
+	return c.redirect("/setup", 303);
 }
 
 /** The steps the presence check-in may name (decisions 146 and 150). Any other value is no step at all. */
@@ -706,6 +730,8 @@ home.post("/home/seen", async (c) => {
 
 // A category's budget sheet over Home (#66). A real URL: it works without JavaScript and can be linked to.
 home.get("/budget/:id{[0-9]+}", async (c) => {
+	const toSetup = await setupFirst(c);
+	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
 	if (!active) return c.notFound();
 	const { category, today, month } = active;
@@ -744,6 +770,8 @@ home.get("/budget/:id{[0-9]+}", async (c) => {
 });
 
 home.get("/savings-goal", async (c) => {
+	const toSetup = await setupFirst(c);
+	if (toSetup) return toSetup;
 	const today = await householdToday(c.env.DB);
 	return renderHome(c, today, {
 		sheet: (_spent, amountCents) => (
@@ -768,6 +796,8 @@ home.get("/savings-goal", async (c) => {
 });
 
 home.post("/savings-goal", async (c) => {
+	const toSetup = await setupFirst(c);
+	if (toSetup) return toSetup;
 	const today = await householdToday(c.env.DB);
 	const month = today.slice(0, 7);
 	const typed = String((await c.req.formData()).get("goal") ?? "");
@@ -820,6 +850,8 @@ home.post("/savings-goal", async (c) => {
 
 // Saving a budget, from this month on (spec §7). htmx gets Home back with a toast; plain browsers are redirected.
 home.post("/budget/:id{[0-9]+}", async (c) => {
+	const toSetup = await setupFirst(c);
+	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
 	if (!active) return c.notFound();
 	const { category, today, month } = active;
@@ -878,6 +910,8 @@ home.post("/budget/:id{[0-9]+}", async (c) => {
 // One tap in Adjust mode (#94, decision 48): the budget moves to the next round $10, from this month
 // on, as the sheet saves it. htmx gets Home back in Adjust mode; plain browsers are redirected there.
 home.post("/budget/:id{[0-9]+}/nudge/:direction{up|down}", async (c) => {
+	const toSetup = await setupFirst(c);
+	if (toSetup) return toSetup;
 	const active = await activeCategory(c);
 	// Only a budgeted category has buttons; one without a budget gets it from its sheet.
 	if (!active || active.category.budgetCents === null) return c.notFound();

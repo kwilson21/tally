@@ -387,3 +387,220 @@ describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () 
 		},
 	);
 });
+
+// Home's own routes are setup's until the questions are answered (decision 148, #772): a stale Home page's save or sheet sends
+// the family to /setup, with no write, toast or 422 of its own. The answered phase, the fifth day and the demo are Home's.
+describe("Home's routes are setup's until the questions are answered (decision 148, #772)", () => {
+	const today = () => todayIn(DEFAULT_TIME_ZONE);
+	const yesterday = () => daysBefore(today(), 1);
+	const ORIGIN = "http://localhost";
+
+	/** One bank connected, its history not in: the reading phase. */
+	const readingOneBank = async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_synced_at = NULL, history_complete_at = NULL",
+		).run();
+	};
+	/** Every connected bank's history is in and nothing waits for Jev: the questions are open (the ready phase). */
+	const historyInAndSorted = async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_transaction_id = 'plaid-' || id WHERE plaid_transaction_id IS NULL",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
+		).run();
+	};
+	/** Every bank disconnected: the before phase. */
+	const noBank = async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+	};
+	/** The first category's id: the budget routes' :id. */
+	const firstCategory = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM categories ORDER BY id LIMIT 1",
+			).first<{
+				id: number;
+			}>()
+		)?.id ?? 1;
+	/** The rows a save writes, so a save that goes to setup can be seen to write nothing. */
+	const savedRows = async () =>
+		JSON.stringify([
+			(
+				await env.DB.prepare(
+					"SELECT * FROM budget_amounts ORDER BY category_id, effective_month",
+				).all()
+			).results,
+			(
+				await env.DB.prepare(
+					"SELECT * FROM savings_goal_amounts ORDER BY effective_month",
+				).all()
+			).results,
+		]);
+	/** A save as the Home sheets and the nudge send it: htmx, form-encoded, from this origin. */
+	const save = (
+		path: string,
+		fields: Record<string, string>,
+		bindings: Env = family,
+	) =>
+		home.request(
+			path,
+			{
+				method: "POST",
+				headers: {
+					Origin: ORIGIN,
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+				},
+				body: new URLSearchParams(fields).toString(),
+			},
+			bindings,
+		);
+	/** Stroke one and the three questions drawn on `day`: the answered phase, with no budget answers kept. */
+	const answeredOn = (day: string) => ({
+		strokes: { bank: day, pay: day, bills: day, budgets: day },
+		budgets: {},
+	});
+
+	describe("while reading (the bank's history is coming in)", () => {
+		beforeEach(async () => {
+			await readingOneBank();
+			await writeRecord({ strokes: { bank: today() }, budgets: {} });
+		});
+
+		it("GET /budget/:id is 303 to /setup", async () => {
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/setup");
+		});
+
+		it("an htmx GET /budget/:id answers 204 with HX-Redirect to /setup", async () => {
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{ headers: { "HX-Request": "true" } },
+				family,
+			);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/setup");
+		});
+
+		it("GET /savings-goal is 303 to /setup", async () => {
+			const res = await home.request("/savings-goal", {}, family);
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/setup");
+		});
+
+		it.each([
+			["a budget", (id: number) => `/budget/${id}`, { budget: "650" }],
+			["the savings goal", () => "/savings-goal", { goal: "500" }],
+			["a nudge up", (id: number) => `/budget/${id}/nudge/up`, {}],
+		])(
+			"a stale page's save of %s writes nothing and answers HX-Redirect to /setup",
+			async (_, pathFor, fields) => {
+				const before = await savedRows();
+				const res = await save(pathFor(await firstCategory()), fields);
+				expect(res.status).toBe(204);
+				expect(res.headers.get("HX-Redirect")).toBe("/setup");
+				expect(await savedRows()).toBe(before);
+			},
+		);
+
+		it("a refused amount is never answered 422 while reading", async () => {
+			const res = await save(`/budget/${await firstCategory()}`, {
+				budget: "12.345",
+			});
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/setup");
+		});
+	});
+
+	it("GET /budget/:id before a bank is 303 to /setup", async () => {
+		await noBank();
+		await writeRecord({ strokes: {}, budgets: {} });
+		const res = await home.request(
+			`/budget/${await firstCategory()}`,
+			{},
+			family,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/setup");
+	});
+
+	it("GET /budget/:id once the questions are open is 303 to /setup", async () => {
+		await historyInAndSorted();
+		await writeRecord({ strokes: { bank: today() }, budgets: {} });
+		const res = await home.request(
+			`/budget/${await firstCategory()}`,
+			{},
+			family,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/setup");
+	});
+
+	describe("not redirected: the answered phase, the fifth day and the demo", () => {
+		it("GET /budget/:id in the answered phase draws the sheet as today", async () => {
+			await historyInAndSorted();
+			await writeRecord(answeredOn(today()));
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("GET /budget/:id on the fifth day draws the sheet as today", async () => {
+			await historyInAndSorted();
+			await writeRecord({
+				...answeredOn(yesterday()),
+				night: { brought: 0, needYou: 0 },
+			});
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("GET /budget/:id in the demo draws the sheet, whatever the record says", async () => {
+			await readingOneBank();
+			await writeRecord({ strokes: { bank: today() }, budgets: {} });
+			const res = await home.request(`/budget/${await firstCategory()}`, {}, {
+				...env,
+				DEMO: "true",
+			} as unknown as Env);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("a save in the answered phase still saves, and says so", async () => {
+			await historyInAndSorted();
+			await writeRecord(answeredOn(today()));
+			const res = await save(`/budget/${await firstCategory()}`, {
+				budget: "650",
+			});
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Trigger")).toContain("Saved the");
+		});
+	});
+});
