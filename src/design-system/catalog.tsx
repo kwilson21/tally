@@ -150,9 +150,12 @@ import {
 	SubpageHead,
 	settingsPlaces,
 } from "../views/settings-pages";
+import { SetupReading } from "../views/setup-reading";
+import { SetupWelcome } from "../views/setup-welcome";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
 import { StartHere } from "../views/start-here";
+import { READING_STEP, StepBar } from "../views/step-bar";
 import {
 	NewCategoryCard,
 	OrganizeNewCategoryCard,
@@ -207,6 +210,7 @@ import {
 import {
 	MotionSpec,
 	PhoneFrame,
+	SetupFrame,
 	SheetFrame,
 	Specimen,
 	State,
@@ -992,6 +996,8 @@ const firstWeek = (
 		refreshes: false,
 		sorted: 0,
 		total: 0,
+		waitsForRun: false,
+		runTime: "5 AM",
 		...extra,
 	};
 	return {
@@ -1035,6 +1041,13 @@ const CHASE_IN: YourBank = {
 	historyCompleteAt: "2026-10-13 09:00:00",
 	fresh: false,
 	count: 412,
+};
+/** Chase while its history comes in (the reading screen, P142 A): linked within the hour, 86 transactions so far. */
+const CHASE_READING: YourBank = {
+	...CHASE_IN,
+	historyCompleteAt: null,
+	fresh: true,
+	count: 86,
 };
 const AMEX_READING: YourBank = {
 	id: 5,
@@ -1338,6 +1351,46 @@ const NOTIFY_SPEC: UseSpecText = {
 		"No Web Push, no keys, or the demo: nothing shows. Blocked before a tap: the Blocked line, with no button. An iPhone or iPad outside its Home Screen app gets the hint, not the button. A subscription made with old keys is removed, and the button returns. A device someone else turned on shows the button, quietly, and a tap moves it to you (decision 149). Long text wraps, and the button keeps its 44px height.",
 	words:
 		"Button: “Notify me on this device” · busy: “Turning on…” · line: “One notification when your questions are ready, if you've left Tally.” · On: “Notifications are on for this device.” · iPhone: “To get a notification on iPhone, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPhones), then Add to Home Screen. Then open Tally from there and tap Notify me.” · iPad: “To get a notification on iPad, add Tally to your Home Screen first: tap Share (under the ⋯ button on newer iPads), then Add to Home Screen. Then open Tally from there and tap Notify me.” · Blocked: “Notifications are blocked for Tally in this device's settings.” · Save failed: “Couldn't save. Check your connection and try again.”",
+};
+
+// The welcome's use spec (P142 A, decision 148): all eight answers, for sign-off.
+const SETUP_WELCOME_SPEC: UseSpecText = {
+	purpose:
+		"Tell a new family what Tally does and what setup asks of them, then start it with their bank.",
+	affordance:
+		"One filled button, Link your bank, at the screen's foot, pinned there on a phone. The four steps above it are to read, not to tap.",
+	states:
+		"Default: the drawing, the heading, the two lines, the four steps and the button. Busy: the button says Linking… and its ring turns while Plaid Link opens. Error: what went wrong, in the alert region under the button. Plaid off (no keys): no button, only the line that Tally can only read the bank. Focus: the focus-visible ring on the button. Hover: the button's own.",
+	feedback:
+		"Link your bank opens Plaid Link. Once a bank is linked, the screen is redrawn in place as Reading your bank and its status takes focus, so it is read once. A link that fails says why under the button, and the button can be tapped again.",
+	input:
+		"Touch: the button is 44px tall and full width. Keyboard: Tab reaches the button; Enter or Space opens Plaid Link. Screen reader: the heading is the page's one h1, the steps are an ordered list (each its name, what it's for and how long it takes), and the drawing is hidden.",
+	motion:
+		"Nothing of its own moves. The busy ring turns while Plaid Link opens; under reduced motion it stops and the words Linking… stay.",
+	edges:
+		"Long words wrap; each step's note keeps its place at the right. The demo never shows it. A household with a connected bank never sees it: setup opens Reading your bank.",
+	words:
+		"Heading: “Welcome to Tally.” · “Tally reads your bank, sorts your spending and shows what's safe to spend this month.” · “Four steps, about four minutes of your time.” · Link your bank: “Tally reads your last 90 days, so you don't start from zero.” · About a minute · Your pay: “So Tally knows what comes in.” · One question · Your bills: “So they're set aside before you spend.” · One question · Your budgets: “Suggested from what you really spend.” · One tap · Button: “Link your bank” · busy: “Linking…” · line: “Tally can only read your bank. It can't move money.”",
+};
+
+// The reading screen's use spec (P142 A, decisions 146, 148 and 150): all eight answers, for sign-off.
+const SETUP_READING_SPEC: UseSpecText = {
+	purpose:
+		"Show a new family that Tally is reading and sorting their bank, how far it has got and what comes next, until their questions open.",
+	affordance:
+		"Link another bank, the outlined button at the screen's foot (pinned there on a phone); Fix beside a bank that needs it; Notify me on this device under the status. The status, the bar and the bank rows are to read.",
+	states:
+		"Reading: Tally's reading your last 90 days from the bank (or from 2 banks), and each bank's row. Sorting: the count and its bar. Taking longer than usual: the count and its bar, and Tally keeps trying on its own. Waiting for the daily run (Sort right away off, decision 150): the run's hour in the household's time zone, with no count and no bar. A bank that needs signing in: its line with Fix, and Paused in its row. Until the ready email has reached someone: the line that you can close the page; after, none. Busy: Link another bank says Linking….",
+	feedback:
+		"While a bank is being read, or Tally is sorting within the hour, the status, the bar and Your banks refresh every 5 seconds without moving focus. A bank whose history comes in is said once, with a toast and the announcer, and a change of step is announced once with its new status; a count that ticks on is never announced alone. While the tab is on screen the page checks in every 30 seconds, and once the questions open it moves on to them by itself. A bank linked here redraws the screen and its status takes focus.",
+	input:
+		"Touch: every button is 44px tall; Link another bank is full width. Keyboard: Tab reaches Notify me, Fix and Link another bank, in that order. Screen reader: the status is a plain paragraph, never a live region, and the announcer says each change once. The bar is hidden, since the status says the same count in words, and so are the step bar's segments, since its words say where setup is.",
+	motion:
+		"The busy ring turns beside a bank being read and in a busy button; under reduced motion it stops. The bar's fill takes its new width at each refresh, without animating.",
+	edges:
+		"One connected bank is named; more are counted (from 2 banks). No time is promised while the history comes in (decision 146). Waiting for the daily run never says taking longer than usual, and it holds until the questions open, even if Sort right away is turned back on meanwhile. A refresh that changes nothing says nothing. Long bank names wrap within their row.",
+	words:
+		"Step bar: “Step 1 of 4 done · Reading your bank” · Heading: “Reading your bank” · reading: “Tally's reading your last 90 days from Chase.” (or “from 2 banks”) · sorting: “Sorting your last 90 days: 318 of 412 done.” · slow: “Sorting is taking longer than usual: 900 of 1,500.” · the daily run: “Tally sorts your last 90 days in its daily run, at about 5 AM, as set in Settings.” · next, reading: “Next it sorts them, then you answer three quick questions and your budget is ready.” · next, sorting: “Your three questions open the moment it's done, usually in a few minutes.” · while it refreshes: “This page updates as it goes.” · next, slow: “Tally keeps trying on its own. Nothing for you to do.” · next, the daily run: “Your three questions open once they're sorted.” · email: “You can close this page. Tally emails you the moment your questions are ready.” · foot: “Link another bank” · “Link every bank and card you use, so your questions cover them all.”",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -8369,6 +8422,271 @@ function FirstWeekGroup() {
 	});
 	return (
 		<Group id="first-week" title="A new family's first week">
+			<Specimen
+				id="step-bar"
+				title="StepBar"
+				tier="visual"
+				components={["StepBar"]}
+				sentence="Setup's step bar (P142 A, decision 148): where setup is, in words, over four short segments, one inked for each step done and the next half inked. The words say it; the segments are hidden from screen readers."
+			>
+				<State label="Reading your bank: step 1 done">
+					<StepBar done={1} label={READING_STEP} />
+				</State>
+				<State label="A question: step 2 of 4">
+					<StepBar done={1} label="Step 2 of 4 · Your pay" />
+				</State>
+				<State label="The last question">
+					<StepBar done={3} label="Step 4 of 4 · Your budgets" />
+				</State>
+				<State label="Setup done">
+					<StepBar done={4} label="Setup done" />
+				</State>
+			</Specimen>
+			<Specimen
+				id="setup-welcome"
+				title="SetupWelcome"
+				tier="visual"
+				components={["SetupWelcome", "SetupScreen"]}
+				sentence="The welcome, setup's first screen before a bank (P142 A, decision 148): what Tally does, the four steps with what each is for and how long it takes, and Link your bank, the one button, at the screen's foot with the line that Tally can only read the bank. In the family app only, until a bank is linked."
+			>
+				<State label="Before a bank: Link your bank at the foot">
+					<SetupFrame label="Before a bank: Link your bank at the foot">
+						<SetupWelcome
+							linkBank={
+								<Button type="button" class="w-full">
+									Link your bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="With Plaid off: the line alone">
+					<SetupFrame label="With Plaid off: the line alone">
+						<SetupWelcome />
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_WELCOME_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-reading"
+				title="SetupReading"
+				tier="visual"
+				components={["SetupReading", "SortBar", "EmailLine"]}
+				sentence="Reading your bank, setup's screen from a bank linked until the questions open (P142 A, decisions 146, 148 and 150): the step bar, where Tally is (reading, sorting with its bar, taking longer than usual, or waiting for the daily run when Sort right away is off), what comes next, Notify me on this device, Your banks, the email line until the email has reached someone, and Link another bank at the foot. The page checks in every 30 seconds while its tab is on screen and refreshes while Tally reads or sorts, so it moves on to the questions by itself; this drawing does not, since a picture fires nothing by itself."
+			>
+				<State label="Reading, one bank: its history coming in, the page updating, Notify me, the email line">
+					<SetupFrame label="Reading your bank, reading, one bank: its history coming in, the page updating, Notify me, the email line">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								historyIn: false,
+								refreshes: true,
+								emailed: false,
+								total: 86,
+							})}
+							polls={false}
+							notify={{
+								vapidKey: NOTIFY_FAKE_KEY,
+								shown: "off",
+								idSuffix: "setup-reading",
+							}}
+							yourBanks={{
+								banks: [CHASE_READING],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Sorting: the count and its bar">
+					<SetupFrame label="Reading your bank, sorting: the count and its bar">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								sorting: true,
+								sorted: 318,
+								total: 412,
+								refreshes: true,
+								emailed: false,
+							})}
+							polls={false}
+							yourBanks={{
+								banks: [CHASE_IN],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Two banks: from 2 banks, and each bank's state">
+					<SetupFrame label="Reading your bank, two banks: from 2 banks, and each bank's state">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								bankCount: 2,
+								historyIn: false,
+								refreshes: true,
+								emailed: false,
+								total: 498,
+							})}
+							polls={false}
+							yourBanks={{
+								banks: [CHASE_IN, AMEX_READING],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Taking longer than usual: the count and its bar, and Tally keeps trying">
+					<SetupFrame label="Reading your bank, taking longer than usual: the count and its bar, and Tally keeps trying">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								sorting: true,
+								slow: true,
+								sorted: 900,
+								total: 1500,
+								emailed: false,
+							})}
+							polls={false}
+							yourBanks={{
+								banks: [CHASE_IN],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Waiting for the daily run (Sort right away off, decision 150): the run's hour, no count and no bar">
+					<SetupFrame label="Reading your bank, waiting for the daily run (Sort right away off, decision 150): the run's hour, no count and no bar">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								sorting: true,
+								waitsForRun: true,
+								runTime: "5 AM",
+								sorted: 0,
+								total: 412,
+								emailed: false,
+							})}
+							polls={false}
+							yourBanks={{
+								banks: [CHASE_IN],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Waiting for the daily run in London in summer: 10 AM">
+					<SetupFrame label="Reading your bank, waiting for the daily run in London in summer: 10 AM">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								sorting: true,
+								waitsForRun: true,
+								runTime: "10 AM",
+								sorted: 0,
+								total: 412,
+								emailed: false,
+							})}
+							polls={false}
+							yourBanks={{
+								banks: [CHASE_IN],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="A bank that needs signing in: its line and Fix, and Paused in its row">
+					<SetupFrame label="Reading your bank, a bank that needs signing in: its line and Fix, and Paused in its row">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								bankCount: 2,
+								historyIn: false,
+								emailed: false,
+								total: 498,
+							})}
+							polls={false}
+							bankLine={["American Express needs signing in"]}
+							yourBanks={{
+								banks: [CHASE_IN, AMEX_PAUSED],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="The email has reached someone, and notifications are on: no email line">
+					<SetupFrame label="Reading your bank, the email has reached someone, and notifications are on: no email line">
+						<SetupReading
+							view={firstWeek(BANK_SYNCED, "reading", {
+								bankName: "Chase",
+								sorting: true,
+								sorted: 318,
+								total: 412,
+								refreshes: true,
+								emailed: true,
+							})}
+							polls={false}
+							notify={{
+								vapidKey: NOTIFY_FAKE_KEY,
+								shown: "on",
+								idSuffix: "setup-reading-on",
+							}}
+							yourBanks={{
+								banks: [CHASE_IN],
+								today: FIRST_WEEK_TODAY,
+								polls: false,
+							}}
+							linkBank={
+								<Button kind="secondary" type="button" class="w-full">
+									Link another bank
+								</Button>
+							}
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_READING_SPEC} />
+			</Specimen>
 			<Specimen
 				id="first-week-part"
 				title="How Tally works · Your first week"

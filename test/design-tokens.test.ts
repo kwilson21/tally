@@ -338,6 +338,18 @@ describe("design tokens (DESIGN.md)", () => {
 		expect(feedback).not.toContain("var(--feedback-");
 	});
 
+	it("keeps focus clear of setup's pinned foot in the phone media query, where the foot replaces the tab bar (decision 148)", () => {
+		const footRules = cssRules(stripCssComments(css)).filter(
+			({ selector }) => selector === "html:has(#setup-foot)",
+		);
+		expect(footRules).toHaveLength(1);
+		const rule = footRules[0];
+		expect(rule?.within).toContain("@media (max-width: 63.999rem)");
+		expect(rule?.body).toMatch(
+			/scroll-padding-bottom:\s*calc\(\s*10rem\s*\+\s*var\(--focus-scroll-gap\)\s*\+\s*var\(--safe-area-bottom\)\s*\)/,
+		);
+	});
+
 	it("reads the views, routes and scripts", () => {
 		expect(Object.keys(SOURCES)).toContain("../src/views/money-input.tsx");
 		expect(Object.keys(SOURCES)).toContain("../public/js/toast.js");

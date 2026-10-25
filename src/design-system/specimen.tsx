@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { Wordmark } from "../views/brand";
+import { FeedbackButton } from "../views/feedback-button";
 import { DemoBanner } from "../views/layout";
 
 export type Tier = "visual" | "interactive" | "flow";
@@ -152,6 +153,40 @@ export function SheetFrame({ children }: { children?: Child }) {
 			class="h-[40rem] max-w-xl overflow-hidden contain-paint rounded-t-sheet border border-rule bg-paper"
 		>
 			{children}
+		</div>
+	);
+}
+
+/**
+ * A setup page drawn on the catalog page as /setup will draw it (P142 A, decision 148): one labelled, inert picture. Below lg
+ * it is a phone's height and clips, and its overflow-hidden makes it the scrollport of the screen's sticky foot, so the foot
+ * sits at the picture's foot as on a phone; from lg it is as tall as the screen, its column centred, as on desktop.
+ */
+export function SetupFrame({
+	label,
+	children,
+}: {
+	label: string;
+	children?: Child;
+}) {
+	return (
+		<div
+			role="img"
+			aria-label={label}
+			class="h-[780px] overflow-hidden rounded-control border border-ink bg-paper lg:h-auto"
+		>
+			<div
+				inert
+				class="flex h-full flex-col px-5 pt-6 lg:block lg:h-auto lg:px-8 lg:pb-8"
+			>
+				<div class="mx-auto max-w-md flex w-full flex-1 flex-col lg:block">
+					<div class="mb-2 flex items-center justify-between gap-3">
+						<Wordmark />
+						<FeedbackButton />
+					</div>
+					{children}
+				</div>
+			</div>
 		</div>
 	);
 }
