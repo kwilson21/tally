@@ -10,6 +10,7 @@ import { resetDemo } from "../src/demo/reset";
 import { runScheduled } from "../src/index";
 import { sortAfterSync, syncItemAndSort } from "../src/plaid/sort-after-sync";
 import { encryptToken } from "../src/plaid/token-crypto";
+import { GROUP_SIZE } from "../src/sort-groups";
 import { runSortInstance } from "../src/sort-instance";
 import { fakeSteps } from "./fake-sort-steps";
 import { recordSorting, sortInProcess } from "./record-sorting";
@@ -868,5 +869,82 @@ describe("a sync's sort with Sort right away off marks what waits for the daily 
 		await sortAfterSync(withKey, { changedIds: ids });
 		expect(await pendingForJev(db, 100)).toHaveLength(ids.length);
 		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+	});
+
+	/**
+	 * Sorts `ids` as a sync does, with the switch on when the group is read and turned off just before its save (the batch).
+	 * The save's guards then drop the group's answers. Returns the calls Jev was asked, and the steps the instance ran.
+	 */
+	const sortSwitchedOffBeforeSave = async (ids: number[]) => {
+		let asked = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				asked += 1;
+				return reply(0.95);
+			}),
+		);
+		let turnedOff = false;
+		const beforeSave = new Proxy(db, {
+			get(target, prop) {
+				if (prop === "batch") {
+					return async (statements: D1PreparedStatement[]) => {
+						if (asked > 0 && !turnedOff) {
+							turnedOff = true;
+							await saveAiSwitches(db, { sortOnArrival: false });
+						}
+						return db.batch(statements);
+					};
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const night = sortInProcess(
+			{ ...withKey, DB: beforeSave } as Parameters<typeof sortInProcess>[0],
+			{},
+		);
+		await sortAfterSync({ ...withKey, SORT: night.SORT }, { changedIds: ids });
+		return {
+			turnedOff,
+			asked,
+			steps: night.runs.flatMap((run) => run.names()),
+		};
+	};
+
+	it("marks a short group whose switch goes off before its save, and stops the run there (#772)", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		const waiting = await waitingIds();
+		// Three of the bank's rows: a short group, so the run ends after it on its own, and only the mark tells setup.
+		const ids = waiting.slice(0, 3);
+		await fromBank(ids);
+		const run = await sortSwitchedOffBeforeSave(ids);
+		expect(run.turnedOff).toBe(true);
+		expect(run.asked).toBe(ids.length);
+		expect(await waitingIds()).toEqual(waiting);
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+		expect(run.steps).not.toContain("group-2-read");
+	});
+
+	it("stops after a full group whose switch goes off before its save, and reads no next group (#772)", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		// The demo's seed has fewer waiting rows than a full group, so its rows are made to wait for Jev's category.
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = NULL, category_source = NULL, category_confidence = NULL",
+			)
+			.run();
+		const waiting = await waitingIds();
+		expect(waiting.length).toBeGreaterThan(GROUP_SIZE);
+		// A full group: the next group's read would write the mark too, so the test checks that the run doesn't read it.
+		const ids = waiting.slice(0, GROUP_SIZE);
+		await fromBank(ids);
+		const run = await sortSwitchedOffBeforeSave(ids);
+		expect(run.turnedOff).toBe(true);
+		expect(run.asked).toBe(GROUP_SIZE);
+		expect(run.steps).toContain("group-1-read");
+		expect(run.steps).not.toContain("group-2-read");
 	});
 });

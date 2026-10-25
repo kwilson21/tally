@@ -633,13 +633,17 @@ export async function writeGroup(
 		)
 			applied += 1;
 	// Sort right away was turned off partway (decision 150): the rows this group didn't save wait for the daily run, so the
-	// mark is kept while anything still waits. Written after the batch, so a save that lost the turn writes nothing.
+	// mark is kept while anything still waits. The switches are read again after the save, since the switch can go off
+	// between the read above and the save: the save's guards then drop this group's answers, and the mark has to say so.
+	// The read above still counts, as the switch was off when the group was read. Written after the batch, so a save that
+	// lost the turn writes nothing.
+	const after = plan.bySync ? await readAiSwitches(db) : now;
 	if (
 		plan.bySync &&
-		!now.sortOnArrival &&
+		(!now.sortOnArrival || !after.sortOnArrival) &&
 		(await countWaitingForJev(db, {
-			categories: now.categories,
-			income: now.income,
+			categories: after.categories,
+			income: after.income,
 		})) > 0
 	)
 		await waitsForRunStatement(db).run();
@@ -649,9 +653,10 @@ export async function writeGroup(
 	// asked nothing because its budget was already spent stops the run: its rows would be read again.
 	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
 	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
+	// A switch turned off since the read stops the run here too, so the run doesn't start another group that would find it off.
 	const stop =
 		!asksJev(now) ||
-		(plan.bySync && !now.sortOnArrival) ||
+		(plan.bySync && (!now.sortOnArrival || !after.sortOnArrival)) ||
 		(!waitsOnBusy && plan.rows.length < GROUP_SIZE && !endedOutOfTime) ||
 		askedNothingOutOfTime ||
 		(!waitsOnBusy && runStops(results, failuresBefore));
