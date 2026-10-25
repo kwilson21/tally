@@ -119,7 +119,7 @@ describe("GET /setup before a bank: the welcome", () => {
 		await noBank();
 		const { res, html } = await setup(plaidFamily);
 		expect(res.status).toBe(200);
-		expect(html).toContain("<title>Welcome to Tally</title>");
+		expect(html).toContain("<title>Setup · Tally</title>");
 		expect(html).toContain("Welcome to Tally.");
 		expect(html).toContain("Link your bank");
 		expect(html).toContain('data-link-bank-refresh="/setup"');
@@ -157,7 +157,7 @@ describe("GET /setup after a bank: Reading your bank", () => {
 
 	it("reads Reading your bank, with the step bar's words and the status", async () => {
 		const { html } = await setup(plaidFamily);
-		expect(html).toContain("<title>Reading your bank · Tally</title>");
+		expect(html).toContain("<title>Setup · Tally</title>");
 		expect(html).toContain("Step 1 of 4 done · Reading your bank");
 		expect(html).toContain("Tally's reading your last 90 days from ");
 		expect(html).toContain("Your banks");

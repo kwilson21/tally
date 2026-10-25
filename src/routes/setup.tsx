@@ -166,7 +166,7 @@ setupRoute.get("/setup", async (c) => {
 		return c.html(
 			<Layout
 				setup
-				title="Welcome to Tally"
+				title="Setup · Tally"
 				demo={false}
 				currentPath={addressOf(c)}
 				{...plaid}
@@ -180,7 +180,7 @@ setupRoute.get("/setup", async (c) => {
 	return c.html(
 		<Layout
 			setup
-			title="Reading your bank · Tally"
+			title="Setup · Tally"
 			demo={false}
 			currentPath={addressOf(c)}
 			{...plaid}
