@@ -1,4 +1,4 @@
-// Home's setup during a new family's first week (P125 E, spec §8.8, decision 114): which state Home shows, its five
+// Setup during a new family's first week (P125 E, spec §8.8, decisions 114 and 148): which state setup shows, its five
 // lines, and the counts its sentences use. `setupView` is pure over what it's given, so the rules are tested without a
 // database; `readSetup` reads the household. The caller shows it in the family app only: the demo never shows setup.
 import { dayLabel, householdTimeZone } from "../dates";
@@ -52,13 +52,14 @@ export type SetupView = {
 	sorting: boolean;
 	/**
 	 * Sorting, and the newest bank's history came in over an hour ago: Tally keeps trying on its own, and no time is
-	 * promised (decision 146).
+	 * promised (decision 146). Never while waitsForRun: the run sorts it, and no sort is under way to be slow.
 	 */
 	slow: boolean;
 	/**
 	 * Reading, with something moving (a bank still coming in that nothing flags, or the sort once every history is in and it
 	 * is not slow) and a bank linked or its history in during the last hour: Home refreshes itself while it can, and says so
-	 * (decision 146). A flagged bank still loading, or a stale import, stops it.
+	 * (decision 146). A flagged bank still loading, or a stale import, stops it. Never during waitsForRun (decision 150):
+	 * Tally isn't sorting then, so there is nothing to refresh, and the 30-second check-in moves the page on.
 	 */
 	refreshes: boolean;
 	/** Transactions from the banks that Tally has finished with, and how many the banks sent. */
@@ -80,8 +81,9 @@ export type SetupView = {
 	 */
 	emailed: boolean;
 	/**
-	 * Reading, every history in, and the import left for the daily run's sorting (Sort right away off, decision 150): the
-	 * reading screen says when the run sorts it, with no count and no bar. Part 2 sets it; until then it is false.
+	 * Reading, every history in, something waiting, and the import left for the daily run's sorting: Sort right away is off, or
+	 * the record's mark (waitsForRun in first_tally) says so, since the switch can be turned back on meanwhile (decision 150).
+	 * The reading screen says when the run sorts it, with no count and no bar.
 	 */
 	waitsForRun: boolean;
 	/**
@@ -401,6 +403,7 @@ export function setupView({
 	today,
 	nowMs,
 	timeZone,
+	sortOnArrival,
 }: {
 	record: FirstTally | null;
 	banks: GateBank[];
@@ -414,6 +417,8 @@ export function setupView({
 	nowMs: number;
 	/** The household's time zone, in which the reading screen says the daily run's hour (householdTimeZone in readSetup). */
 	timeZone: string;
+	/** Sort right away (the switch the sync's sort follows): off leaves an import waiting for the daily run (decision 150). */
+	sortOnArrival: boolean;
 }): SetupView | null {
 	const fifthDay =
 		record?.strokes.count === today && record.night !== undefined;
@@ -435,10 +440,18 @@ export function setupView({
 					? "ready"
 					: "reading";
 	const sorting = phase === "reading" && historyIn && waiting > 0;
+	// With Sort right away off, a sync's sort asks Jev nothing, so the import waits for the daily run (decision 150). The
+	// record's mark keeps that while the switch is on again, until the night's run finds nothing waiting.
+	const waitsForRun =
+		sorting && (!sortOnArrival || record?.waitsForRun === true);
 	const historyAt = newestMs(
 		banks.map((bank) => storedTimeMs(bank.historyCompleteAt)),
 	);
-	const slow = sorting && historyAt !== null && nowMs - historyAt > HOUR_MS;
+	const slow =
+		sorting &&
+		!waitsForRun &&
+		historyAt !== null &&
+		nowMs - historyAt > HOUR_MS;
 	const linkedAt = newestMs(banks.map((bank) => storedTimeMs(bank.linkedAt)));
 	const recent = newestMs([linkedAt, historyAt]);
 	// Something is moving: once every history is in, the sort (not slow). While one is still coming in, a bank that nothing
@@ -448,6 +461,7 @@ export function setupView({
 		flagged.some((flag) => flag.id === bank.id);
 	const moving =
 		phase === "reading" &&
+		!waitsForRun &&
 		(historyIn
 			? sorting && !slow
 			: banks.some(
@@ -470,7 +484,7 @@ export function setupView({
 		answeredWaiting:
 			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
 		emailed: (record?.readyEmailedTo ?? []).length > 0,
-		waitsForRun: false,
+		waitsForRun,
 		runTime: dailyRunTime(timeZone, nowMs),
 	};
 }
@@ -498,7 +512,7 @@ export async function readSetup(
 	}
 	// Set up is shown only on the day stroke five is drawn (the fifth-day view); from the next household day, Home is Home.
 	if (isSetUp(record) && record?.strokes.count !== today) return null;
-	const { banks, waiting } = await readGateInputs(db);
+	const { banks, waiting, sortOnArrival } = await readGateInputs(db);
 	// A connected bank with no stroke one (linked before the first week shipped, in a household with no budgets, so
 	// migration 0057 didn't set it up) draws stroke one today, or the gate would never open. The write checks for a
 	// connected bank in the same statement (BANK_CONNECTED_SQL), so a last bank disconnected since the read above draws
@@ -524,5 +538,6 @@ export async function readSetup(
 		today,
 		nowMs: Date.now(),
 		timeZone: await householdTimeZone(db),
+		sortOnArrival,
 	});
 }

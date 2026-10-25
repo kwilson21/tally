@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { categorizePending } from "../src/categorize-pending";
 import { DEFAULT_TIME_ZONE, householdToday, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
-import { markStroke, STROKES } from "../src/db/first-tally";
+import { markStroke, readFirstTally, STROKES } from "../src/db/first-tally";
 import { reserveJevCalls } from "../src/db/jev-calls";
 import { pendingForJev } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
@@ -66,6 +66,20 @@ const newDay = () =>
 		.run();
 /** The rows waiting for Jev, as the ids a sync would report for them. */
 const waitingIds = async () => (await pendingForJev(db, 1000)).map((t) => t.id);
+/**
+ * Gives the rows Plaid ids, as a bank's sync does: the gate's count of what waits (countWaitingForJev, which the daily run's
+ * mark reads) counts only rows a bank brought in, and the demo's seed has none.
+ */
+const fromBank = (ids: number[]) =>
+	db.batch(
+		ids.map((id) =>
+			db
+				.prepare(
+					"UPDATE transactions SET plaid_transaction_id = ? WHERE id = ?",
+				)
+				.bind(`plaid-${id}`, id),
+		),
+	);
 /** How many of the household day's calls are spoken for. */
 const callsUsed = async () =>
 	Number(
@@ -792,5 +806,67 @@ describe("syncItemAndSort", () => {
 			"Plaid request failed",
 		);
 		expect(asked).toEqual([]);
+	});
+});
+
+describe("a sync's sort with Sort right away off marks what waits for the daily run (decision 150)", () => {
+	const sortRightAwayOff = () =>
+		saveAiSwitches(db, {
+			...AI_SWITCHES_ALL_ON,
+			details: false,
+			sortOnArrival: false,
+		});
+
+	it("writes the mark once setup has stroke one and something waits, and asks Jev nothing", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		await sortRightAwayOff();
+		const ids = await waitingIds();
+		await fromBank(ids);
+		const jev = fakeJev();
+		await sortAfterSync(withKey, { changedIds: ids });
+		expect(jev.asked).toEqual([]);
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+	});
+
+	it("writes nothing when nothing waits", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		await sortRightAwayOff();
+		const ids = await waitingIds();
+		await db
+			.prepare("UPDATE transactions SET jev_failed_at = datetime('now')")
+			.run();
+		await sortAfterSync(withKey, { changedIds: ids });
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("writes nothing once the count stroke is drawn, so a finished setup is left alone", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		await markStroke(db, "count", await householdToday(db));
+		await sortRightAwayOff();
+		await sortAfterSync(withKey, { changedIds: await waitingIds() });
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("marks a group that the switch cut short, when its rows are left waiting", async () => {
+		quiet();
+		await markStroke(db, "bank", await householdToday(db));
+		const ids = await waitingIds();
+		await fromBank(ids);
+		// The switch is turned off while the group's second answer is on its way, so the group saves none of its answers.
+		let asked = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				asked += 1;
+				if (asked === 2) await sortRightAwayOff();
+				return reply(0.95);
+			}),
+		);
+		await sortAfterSync(withKey, { changedIds: ids });
+		expect(await pendingForJev(db, 100)).toHaveLength(ids.length);
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
 	});
 });

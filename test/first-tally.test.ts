@@ -4,6 +4,7 @@ import type { BillSuggestion } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
 	type BudgetAnswer,
+	clearWaitsForRunStatement,
 	forgetPayDeposits,
 	isSetUp,
 	keepBudgetStatement,
@@ -17,6 +18,7 @@ import {
 	strokeStatement,
 	takeBackBankStrokes,
 	takeBackQuestionStrokes,
+	waitsForRunStatement,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import {
@@ -879,6 +881,53 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 			on: "2026-10-13",
 			ok: true,
 		}).run();
+		await takeBackBankStrokes(db, 999).run();
+		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
+	});
+});
+
+describe("the daily run's wait mark (decision 150)", () => {
+	it("is written only on a record that exists, and only while the count stroke isn't drawn", async () => {
+		await waitsForRunStatement(db).run();
+		expect(await stored()).toBeNull();
+		await markStroke(db, "bank", "2026-10-12");
+		await waitsForRunStatement(db).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+		await clearWaitsForRunStatement(db).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+		await markStroke(db, "count", "2026-10-13");
+		await waitsForRunStatement(db).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("leaves every other field as it is, and writing it twice changes nothing", async () => {
+		await markStroke(db, "bank", "2026-10-12");
+		await keepBudget(3, { kind: "suggested", cents: 65000 });
+		await waitsForRunStatement(db).run();
+		await waitsForRunStatement(db).run();
+		expect(await readFirstTally(db)).toEqual({
+			strokes: { bank: "2026-10-12" },
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			waitsForRun: true,
+		});
+	});
+
+	it("is removed by a take-back of the questions, since nothing waits once they are taken back", async () => {
+		await answeredQuestions("2026-10-12");
+		await waitsForRunStatement(db).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+		expect((await readFirstTally(db))?.reAsk).toEqual({
+			bank: "Wells Fargo",
+		});
+	});
+
+	it("is removed by a take-back of the bank strokes when the last bank goes before setup is done", async () => {
+		await answeredQuestions("2026-10-12");
+		await waitsForRunStatement(db).run();
+		await db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
 		await takeBackBankStrokes(db, 999).run();
 		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
 	});

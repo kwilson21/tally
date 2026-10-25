@@ -2,8 +2,13 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { bankSyncs } from "../src/db/accounts";
+import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
 import type { FirstTally } from "../src/db/first-tally";
-import { readFirstTally, takeBackBankStrokes } from "../src/db/first-tally";
+import {
+	markStroke,
+	readFirstTally,
+	takeBackBankStrokes,
+} from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { readSetup, setupView, storedTimeMs } from "../src/first-tally/setup";
 import { flaggedBanks, homeBankNotice } from "../src/stale-bank";
@@ -74,11 +79,111 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 		today: TODAY,
 		nowMs: NOW,
 		timeZone: "America/New_York",
+		sortOnArrival: true,
 		...input,
 	});
 
+describe("setupView: the daily run's wait (decision 150)", () => {
+	// Reading: stroke one drawn, every history in, and something still waiting for Jev.
+	const READING: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
+	/** A bank whose history came in two hours before NOW: the sort is slow, were it running. */
+	const SLOW = { ...BANK, historyCompleteAt: "2026-10-14 10:00:00" };
+
+	it("with Sort right away off, the import waits for the run: never slow, and nothing refreshes (decision 150)", () => {
+		const slow = view({
+			record: READING,
+			banks: [SLOW],
+			waiting: 500,
+			total: 1500,
+			sortOnArrival: false,
+		});
+		expect(slow?.phase).toBe("reading");
+		expect(slow?.sorting).toBe(true);
+		expect(slow?.waitsForRun).toBe(true);
+		expect(slow?.slow).toBe(false);
+		expect(slow?.refreshes).toBe(false);
+		// The same history an hour and a half before NOW: a sort that is not slow would refresh, so only the wait stops it.
+		const recent = view({
+			record: READING,
+			banks: [RECENT],
+			waiting: 500,
+			total: 1500,
+			sortOnArrival: false,
+		});
+		expect(recent?.waitsForRun).toBe(true);
+		expect(recent?.refreshes).toBe(false);
+		expect(
+			view({
+				record: READING,
+				banks: [RECENT],
+				waiting: 500,
+				total: 1500,
+				sortOnArrival: true,
+			})?.refreshes,
+		).toBe(true);
+	});
+
+	it("with Sort right away on, the record's mark keeps the run's words, and with no mark the sort is the usual one", () => {
+		const marked = view({
+			record: { ...READING, waitsForRun: true },
+			banks: [RECENT],
+			waiting: 500,
+			total: 1500,
+			sortOnArrival: true,
+		});
+		expect(marked?.waitsForRun).toBe(true);
+		expect(marked?.refreshes).toBe(false);
+		const unmarked = view({
+			record: READING,
+			banks: [RECENT],
+			waiting: 500,
+			total: 1500,
+			sortOnArrival: true,
+		});
+		expect(unmarked?.waitsForRun).toBe(false);
+		expect(unmarked?.sorting).toBe(true);
+		expect(unmarked?.refreshes).toBe(true);
+	});
+
+	it("is never the wait outside reading, before a bank, before the history is in, or with nothing waiting", () => {
+		const waiting = {
+			record: READING,
+			banks: [RECENT],
+			waiting: 500,
+			total: 1500,
+			sortOnArrival: false,
+		};
+		// Nothing waiting: the questions are open.
+		expect(view({ ...waiting, waiting: 0 })?.phase).toBe("ready");
+		expect(view({ ...waiting, waiting: 0 })?.waitsForRun).toBe(false);
+		// Answered: the count line waits for the night, not for the run.
+		const answered: FirstTally = {
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		};
+		expect(view({ ...waiting, record: answered })?.phase).toBe("answered");
+		expect(view({ ...waiting, record: answered })?.waitsForRun).toBe(false);
+		// No bank yet.
+		expect(view({ ...waiting, banks: [] })?.phase).toBe("before");
+		expect(view({ ...waiting, banks: [] })?.waitsForRun).toBe(false);
+		// A history still coming in: nothing is sorting yet, so there is no wait.
+		const loading = view({
+			...waiting,
+			banks: [{ ...RECENT, historyCompleteAt: null }],
+		});
+		expect(loading?.phase).toBe("reading");
+		expect(loading?.waitsForRun).toBe(false);
+		expect(loading?.sorting).toBe(false);
+	});
+});
+
 describe("setupView: which setup state Home shows", () => {
-	it("gives the reading screen the daily run's time in the zone it is given, and no wait until part 2 sets one (decision 150)", () => {
+	it("gives the reading screen the daily run's time in the zone it is given, and no wait with nothing waiting (decision 150)", () => {
 		expect(view({ banks: [BANK] })?.runTime).toBe("5 AM");
 		expect(view({ banks: [BANK], timeZone: "Europe/London" })?.runTime).toBe(
 			"10 AM",
@@ -721,6 +826,45 @@ describe("readSetup", () => {
 		expect(
 			(await readSetup(env.DB, { today: TODAY, flagged: [] }))?.phase,
 		).toBe("before");
+	});
+});
+
+describe("readSetup: the daily run's wait (decision 150)", () => {
+	beforeEach(async () => {
+		await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'first_tally'",
+		).run();
+		// Every bank's history is in, so the only thing left is the sort. The unsorted rows came from a bank, as the gate's
+		// count (countWaitingForJev) requires of a row it counts.
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = ?, history_complete_at = ?",
+		)
+			.bind(TODAY, TODAY)
+			.run();
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_transaction_id = 'plaid-' || id WHERE plaid_transaction_id IS NULL",
+		).run();
+		await markStroke(env.DB, "bank", TODAY);
+	});
+
+	it("reads the wait from Sort right away and the record's mark, the way setupView does", async () => {
+		const read = () =>
+			readSetup(env.DB, { today: TODAY, flagged: [] }).then(
+				(setup) => setup?.waitsForRun,
+			);
+		await saveAiSwitches(env.DB, {
+			...AI_SWITCHES_ALL_ON,
+			details: false,
+			sortOnArrival: false,
+		});
+		expect(await read()).toBe(true);
+		await saveAiSwitches(env.DB, { sortOnArrival: true });
+		expect(await read()).toBe(false);
+		await env.DB.prepare(
+			"UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = 'first_tally'",
+		).run();
+		expect(await read()).toBe(true);
 	});
 });
 

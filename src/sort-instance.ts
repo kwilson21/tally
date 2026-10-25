@@ -8,6 +8,9 @@ import {
 	categoryCallLimit,
 	suggestNewCategories,
 } from "./category-suggestions-pending";
+import { readAiSwitches } from "./db/ai-switches";
+import { clearWaitsForRunStatement } from "./db/first-tally";
+import { countWaitingForJev } from "./db/transactions";
 import { keepNightCounts } from "./first-tally/night";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -100,6 +103,26 @@ export async function runSortInstance(
 	}
 	const night = params.night;
 	if (!night) return;
+
+	// Production only, as the counts are: once nothing waits for Jev, the daily run's mark goes (decision 150), so setup's reading
+	// screen stops saying the import waits for the run.
+	if (env.DEMO === "false") {
+		try {
+			await runStep("night-run-wait", NIGHT_STEPS.counts, async () => {
+				const switches = await readAiSwitches(env.DB);
+				const waiting = await countWaitingForJev(env.DB, {
+					categories: switches.categories,
+					income: switches.income,
+				});
+				if (waiting === 0) await clearWaitsForRunStatement(env.DB).run();
+				return true;
+			});
+		} catch (error) {
+			console.error(
+				`first night: wait mark step failed ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
+	}
 
 	try {
 		await runStep("night-names", NIGHT_STEPS.ai, async ({ attempt }) => {

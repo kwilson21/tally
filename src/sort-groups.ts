@@ -16,7 +16,11 @@ import {
 	readAiSwitches,
 	stillOnKeys,
 } from "./db/ai-switches";
-import { questionsAnswered, readFirstTally } from "./db/first-tally";
+import {
+	questionsAnswered,
+	readFirstTally,
+	waitsForRunStatement,
+} from "./db/first-tally";
 import {
 	dropReservedJevCallsStatement,
 	giveBackReservedJevCallsStatement,
@@ -31,6 +35,7 @@ import {
 } from "./db/sorting-turn";
 import {
 	applyMerchantRules,
+	countWaitingForJev,
 	markJevFailedStatement,
 	merchantCategoryHistoryForJev,
 	pendingForJev,
@@ -333,8 +338,17 @@ async function readGroup(
 	};
 	try {
 		const switches = await readAiSwitches(db);
-		if (!asksJev(switches) || (options.bySync && !switches.sortOnArrival))
+		if (!asksJev(switches)) return await none();
+		// With Sort right away off, a sync's sort asks nothing, so an import still waiting is left for the daily run. The mark
+		// tells setup's reading screen so (decision 150).
+		if (options.bySync && !switches.sortOnArrival) {
+			const waiting = await countWaitingForJev(db, {
+				categories: switches.categories,
+				income: switches.income,
+			});
+			if (waiting > 0) await waitsForRunStatement(db).run();
 			return await none();
+		}
 		const { results: categories } = await db
 			.prepare(
 				"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order",
@@ -618,6 +632,17 @@ export async function writeGroup(
 			(saved[apply.index]?.meta.changes ?? 0) > 0
 		)
 			applied += 1;
+	// Sort right away was turned off partway (decision 150): the rows this group didn't save wait for the daily run, so the
+	// mark is kept while anything still waits. Written after the batch, so a save that lost the turn writes nothing.
+	if (
+		plan.bySync &&
+		!now.sortOnArrival &&
+		(await countWaitingForJev(db, {
+			categories: now.categories,
+			income: now.income,
+		})) > 0
+	)
+		await waitsForRunStatement(db).run();
 
 	// A group whose budget ended its asking hands the rows it didn't reach to the next group, so a short group stops the
 	// run only when the asking wasn't cut short by the budget, nor waits out a busy Jev (decision 145). A group that
