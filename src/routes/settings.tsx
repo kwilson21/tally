@@ -24,6 +24,7 @@ import {
 	type PendingSuggestion,
 	pendingSuggestions,
 } from "../db/category-suggestions";
+import { waitsForRunStatement } from "../db/first-tally";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
 import {
 	neverSuggestRuleLine,
@@ -37,6 +38,7 @@ import {
 } from "../db/reconnect";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
+import { waitingForJevSql } from "../db/transactions";
 import { hxTrigger } from "../htmx";
 import { reconnectRecipients } from "../reconnect/reminders";
 import {
@@ -1137,7 +1139,21 @@ settings.post("/settings/ai", async (c) => {
 				(next[f.key] !== drawn.includes(f.key) || f.key === posted),
 		).map((f) => [f.key, next[f.key]]),
 	) as Partial<AiSwitches>;
-	await saveAiSwitches(c.env.DB, changed);
+	// Decision 150: the rows the switch left wait for the daily run, so setup keeps the run's words once it's back on. The
+	// wait mark goes in the save's own batch, and its guards decide whether it writes.
+	const switchesAfter = { ...before, ...changed };
+	const waiting =
+		!before.sortOnArrival && changed.sortOnArrival === true
+			? waitingForJevSql({
+					categories: switchesAfter.categories,
+					income: switchesAfter.income,
+				})
+			: null;
+	await saveAiSwitches(
+		c.env.DB,
+		changed,
+		waiting === null ? [] : [waitsForRunStatement(c.env.DB, waiting)],
+	);
 	const now = await readAiSwitches(c.env.DB);
 	// The switch that was flipped keeps focus after the save (#606). A flip posts its own key (FLIPPED, from its own
 	// request). A plain Save, with no script, posts none, so it's the one that differs from what the page drew On

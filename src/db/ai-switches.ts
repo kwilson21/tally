@@ -85,23 +85,26 @@ export async function readAiSwitches(db: D1Database): Promise<AiSwitches> {
 
 /**
  * Saves the switches it's given, together, and leaves the rest as they were: Settings shows only the
- * switches whose feature exists, and saving those must never change the others.
+ * switches whose feature exists, and saving those must never change the others. `alongside` statements
+ * go in the same batch, so they land with the switches or not at all (none when no switch is given).
  */
 export async function saveAiSwitches(
 	db: D1Database,
 	switches: Partial<AiSwitches>,
+	alongside: D1PreparedStatement[] = [],
 ): Promise<void> {
 	const given = (Object.keys(KEYS) as (keyof AiSwitches)[]).filter(
 		(name) => switches[name] !== undefined,
 	);
 	if (given.length === 0) return;
-	await db.batch(
-		given.map((name) =>
+	await db.batch([
+		...given.map((name) =>
 			db
 				.prepare(
 					"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 				)
 				.bind(KEYS[name], switches[name] ? "on" : "off"),
 		),
-	);
+		...alongside,
+	]);
 }

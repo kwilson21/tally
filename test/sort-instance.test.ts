@@ -6,6 +6,7 @@ import {
 	readFirstTally,
 	waitsForRunStatement,
 } from "../src/db/first-tally";
+import { waitingForJevSql } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { recordNightSync } from "../src/first-tally/night";
 import type { SyncAllResult } from "../src/plaid/sync-all";
@@ -485,12 +486,6 @@ describe("runSortInstance passes its sleep to the sorting groups (decision 145)"
 });
 
 describe("the night's run clears the daily run's wait mark once nothing waits (decision 150)", () => {
-	const marked = async () => {
-		for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
-			await markStroke(db, stroke, "2026-10-12");
-		}
-		await waitsForRunStatement(db).run();
-	};
 	/** One categorised-by-Jev-able charge that a sync brought in, so the count sees it waiting. */
 	const waitingCharge = () =>
 		db
@@ -499,6 +494,19 @@ describe("the night's run clears the daily run's wait mark once nothing waits (d
 			)
 			.bind(TODAY)
 			.run();
+	/** The mark, written while a charge waits, as the switch's turn-on writes it. */
+	const marked = async () => {
+		for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
+			await markStroke(db, stroke, "2026-10-12");
+		}
+		await waitingCharge();
+		// Both switches are on, so the SQL is never null.
+		const waitingSql = waitingForJevSql({
+			categories: true,
+			income: true,
+		}) as string;
+		await waitsForRunStatement(db, waitingSql).run();
+	};
 
 	beforeEach(async () => {
 		await db

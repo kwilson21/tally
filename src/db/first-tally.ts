@@ -77,9 +77,9 @@ export type FirstTally = {
 	 */
 	reAsk?: { bank: string };
 	/**
-	 * Set when a sync's sort finds Sort right away off while setup isn't done and something still waits for Jev (decision 150):
-	 * that import waits for the daily run's sorting, so setup's reading screen says so, even if the switch is turned back on
-	 * meanwhile. Removed by the night's run once nothing waits, and when the questions or the bank are taken back. Absent otherwise.
+	 * Set when Sort right away is turned back on while setup isn't done and an import still waits for Jev (decision 150): the
+	 * rows a sync left with the switch off wait for the daily run, so setup's reading screen keeps saying so. Removed by the
+	 * night's run once nothing waits, and when the questions or the bank are taken back. Absent otherwise.
 	 */
 	waitsForRun?: true;
 	/**
@@ -203,23 +203,36 @@ export async function markStroke(
 }
 
 /**
- * The statement that marks the import as waiting for the daily run (decision 150), for a sync's sort that finds Sort right
- * away off. It is an UPDATE, so the record must exist (stroke one is drawn before any sync's import can be waiting), and it
- * writes nothing once the count stroke is drawn.
+ * The statement that marks the import as waiting for the daily run (decision 150), written with Sort right away's turn-on
+ * (saveAiSwitches' `alongside`). It is an UPDATE, so the record must exist (stroke one is drawn before any sync's import can
+ * be waiting), it writes nothing once the count stroke is drawn, and it writes only while a row still waits for Jev:
+ * `waitingSql` is waitingForJevSql's FROM and WHERE for the switches as they are once saved.
  */
-export function waitsForRunStatement(db: D1Database): D1PreparedStatement {
+export function waitsForRunStatement(
+	db: D1Database,
+	waitingSql: string,
+): D1PreparedStatement {
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL`,
+			`UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL AND EXISTS (SELECT 1 ${waitingSql})`,
 		)
 		.bind(KEY);
 }
 
-/** The statement that removes the daily run's wait mark, once the night's sort leaves nothing waiting (decision 150). */
-export function clearWaitsForRunStatement(db: D1Database): D1PreparedStatement {
+/**
+ * The statement that removes the daily run's wait mark once nothing waits for Jev (decision 150). `waitingSql` is
+ * waitingForJevSql's for the switches, so the mark stays while a row still waits; null (both switches off, so nothing can
+ * wait) always removes it.
+ */
+export function clearWaitsForRunStatement(
+	db: D1Database,
+	waitingSql: string | null,
+): D1PreparedStatement {
+	const nothingWaiting =
+		waitingSql === null ? "" : ` AND NOT EXISTS (SELECT 1 ${waitingSql})`;
 	return db
 		.prepare(
-			"UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1",
+			`UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1${nothingWaiting}`,
 		)
 		.bind(KEY);
 }
