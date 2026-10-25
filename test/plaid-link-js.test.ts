@@ -65,6 +65,11 @@ function harness({
 		text: async () =>
 			'<main id="page" data-version="new"><p id="setup-status" data-link-bank-focus></p></main>',
 	},
+	setupRefreshResponse = {
+		ok: true,
+		text: async () =>
+			'<main id="setup-screen" data-version="new"><p id="setup-status" data-link-bank-focus></p></main>',
+	},
 }: {
 	linkBank?: boolean;
 	/** False when no [data-link-bank-error] is on screen (a first-week redraw can take it away). */
@@ -80,10 +85,19 @@ function harness({
 	ajax?: ReturnType<typeof vi.fn>;
 	refreshResponse?: {
 		ok: boolean;
+		redirected?: boolean;
+		url?: string;
 		text: () => Promise<string>;
 	};
 	homeRefreshResponse?: {
 		ok: boolean;
+		text: () => Promise<string>;
+	};
+	/** Setup's refresh (/setup). A redirect there means setup has moved on (decision 146's screens). */
+	setupRefreshResponse?: {
+		ok: boolean;
+		redirected?: boolean;
+		url?: string;
 		text: () => Promise<string>;
 	};
 } = {}) {
@@ -168,6 +182,12 @@ function harness({
 		}),
 	};
 	const parsedPages: Array<{ version: string }> = [];
+	// Setup's screen (#setup-screen), which a setup link's refresh swaps in.
+	const currentSetup = {
+		version: "old",
+		replaceWith: vi.fn(),
+	};
+	const parsedSetups: Array<{ version: string }> = [];
 	const status = { focus: vi.fn() };
 	// The document body, which an exchange with no Link a bank on screen uses as its source (plaid-link.js).
 	const body = {
@@ -179,6 +199,8 @@ function harness({
 	const documentEvents = elementListeners();
 	const document = {
 		body,
+		// Where a setup refresh that redirected sends the person (plaid-link.js uses document.location, not window.location).
+		location: { assign: vi.fn() },
 		// A tab on screen, unless the test says otherwise. The presence ping ignores it while a link is open (decision 149).
 		visibilityState,
 		addEventListener: (name: string, listener: never) => {
@@ -194,6 +216,7 @@ function harness({
 				return errorRegionOnScreen ? liveErrorRegion : undefined;
 			if (selector === "#accounts-summary") return currentSummary;
 			if (selector === "#page") return currentPage;
+			if (selector === "#setup-screen") return currentSetup;
 			// Only Home has the status line (home-setup.tsx), and Home is the refresh that targets #page.
 			if (selector === "[data-link-bank-focus]")
 				return dataset?.linkBankTarget === "#page" ? status : undefined;
@@ -211,6 +234,7 @@ function harness({
 	const fetch = vi.fn(async (url: string) => {
 		if (url === "/accounts") return refreshResponse;
 		if (url === "/") return homeRefreshResponse;
+		if (url === "/setup") return setupRefreshResponse;
 		return tokenResponse;
 	});
 	const create = vi.fn((options) => {
@@ -241,15 +265,22 @@ function harness({
 			);
 			const page = pageMatch?.[1] ? { version: pageMatch[1] } : undefined;
 			if (page) parsedPages.push(page);
+			const setupMatch = text.match(
+				/id=["']setup-screen["'][^>]*data-version=["']([^"']*)/,
+			);
+			const setup = setupMatch?.[1] ? { version: setupMatch[1] } : undefined;
+			if (setup) parsedSetups.push(setup);
 			return {
 				querySelector: (selector: string) =>
 					selector === "#accounts-summary"
 						? summary
 						: selector === "#page"
 							? page
-							: match
-								? { textContent: match[1] }
-								: undefined,
+							: selector === "#setup-screen"
+								? setup
+								: match
+									? { textContent: match[1] }
+									: undefined,
 			};
 		}
 	}
@@ -321,6 +352,8 @@ function harness({
 		parsedSummaries,
 		currentPage,
 		parsedPages,
+		currentSetup,
+		parsedSetups,
 		status,
 		process,
 		replaceRepairError(region: typeof repairError) {
@@ -659,6 +692,77 @@ describe("plaid-link.js", () => {
 		expect(h.status.focus).not.toHaveBeenCalled();
 		expect(h.button.focus).not.toHaveBeenCalled();
 		expect(h.button.disabled).toBe(false);
+	});
+
+	it("on setup, a refresh that redirected (setup has moved on) goes to the page it reached, with no swap, alert or announce", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				const ctx = {
+					response: { status: 204 },
+					text: "",
+					hx: {
+						trigger: JSON.stringify({
+							announce:
+								"First Bank is linked. Tally's reading your last 90 days.",
+						}),
+					},
+				};
+				h.button.dispatchRequest("htmx:after:request", ctx);
+				h.button.dispatchRequest("htmx:finally:request", ctx);
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/setup", linkBankTarget: "#setup-screen" },
+			setupRefreshResponse: {
+				ok: true,
+				redirected: true,
+				url: "https://tally.example/first-page",
+				text: async () => '<main id="setup-screen" data-version="new"></main>',
+			},
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.fetch).toHaveBeenCalledWith("/setup");
+		expect(h.document.location.assign).toHaveBeenCalledOnce();
+		expect(h.document.location.assign).toHaveBeenCalledWith(
+			"https://tally.example/first-page",
+		);
+		expect(h.parsedSetups).toHaveLength(0);
+		expect(h.currentSetup.replaceWith).not.toHaveBeenCalled();
+		expect(h.children).toHaveLength(0);
+		expect(h.document.body.dispatchEvent).not.toHaveBeenCalled();
+		expect(h.button.disabled).toBe(false);
+	});
+
+	it("on setup, a refresh that did not redirect swaps its screen in as before", async () => {
+		const ajax = vi.fn(async (method: string) => {
+			if (method === "POST") {
+				const ctx = { response: { status: 204 }, text: "" };
+				h.button.dispatchRequest("htmx:after:request", ctx);
+				h.button.dispatchRequest("htmx:finally:request", ctx);
+			}
+		});
+		const h = harness({
+			ajax,
+			dataset: { linkBankRefresh: "/setup", linkBankTarget: "#setup-screen" },
+			setupRefreshResponse: {
+				ok: true,
+				redirected: false,
+				text: async () => '<main id="setup-screen" data-version="new"></main>',
+			},
+		});
+
+		await h.click();
+		await h.linkOptions?.onSuccess("public-secret");
+
+		expect(h.fetch).toHaveBeenCalledWith("/setup");
+		expect(h.parsedSetups).toHaveLength(1);
+		expect(h.currentSetup.replaceWith).toHaveBeenCalledWith(h.parsedSetups[0]);
+		expect(h.document.location.assign).not.toHaveBeenCalled();
+		expect(h.button.focus).toHaveBeenCalledOnce();
 	});
 
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {

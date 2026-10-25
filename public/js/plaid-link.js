@@ -282,6 +282,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						let refreshed = false;
 						try {
 							const refreshResponse = await fetch(refreshUrl);
+							// Setup has moved on (the questions or Home), so show the page the redirect reached, not a swap.
+							if (refreshResponse.ok && refreshResponse.redirected) {
+								document.location.assign(refreshResponse.url);
+								return;
+							}
 							if (refreshResponse.ok) {
 								const parsed = new DOMParser().parseFromString(
 									await refreshResponse.text(),
