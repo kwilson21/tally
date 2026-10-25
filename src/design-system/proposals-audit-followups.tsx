@@ -8,6 +8,7 @@
 // /plans/1 (Lawn service, $90, and its payment candidates). Pictures are drawn at their full height, so none is cut.
 
 import type { Child } from "hono/jsx";
+import type { YourBank } from "../first-tally/your-banks";
 import { FORECAST_START_DAY } from "../home-forecast";
 import { budgetExample } from "../how-it-works/examples";
 import { formatCents } from "../money";
@@ -21,8 +22,10 @@ import { BudgetDiagram } from "../views/how-diagrams";
 import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
+import { Notebook } from "../views/notebook";
 import { SplitLine } from "../views/split-form";
 import { type StepLine, TallySteps } from "../views/tally-steps";
+import { YourBanks } from "../views/your-banks";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -1056,15 +1059,8 @@ export function SplitCategoryProposal() {
 }
 
 // P140 (#719, decision 133): Home's first week while two banks are read. Today is the reading phase as it was; A, the owner's
-// pick, is frozen as the markup it drew (BANKS_A_MARKUP); B nests the banks under Link your bank. Drawn at 390 px: a 1280 px
+// pick, is drawn as JSX with the words it drew, as P142's Today is; B nests the banks under Link your bank. Drawn at 390 px: a 1280 px
 // picture would draw the same fixed ids a second time on this page.
-/**
- * The A picture as it was drawn when setup's Home top was the reading phase (P140 A, decision 133), frozen as literal markup so the
- * live words never reach this picture (P140's pattern, as P142's Today does). Home's top draws the answered phase only now; the
- * reading screen is setup's own (/setup), and this picture stays as it was picked.
- */
-const BANKS_A_MARKUP = `<section id="setup-top" class="mt-2" aria-labelledby="setup-title"><div class="flex items-center gap-4 justify-end"><h1 id="setup-title" class="sr-only">Your first week</h1><svg class="size-24 shrink-0" viewBox="0 0 120 120" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g class="stroke-ink" transform="rotate(-6 56 58)"><rect x="26" y="16" width="58" height="80" rx="4"></rect><circle cx="26" cy="26" r="3.5"></circle><circle cx="26" cy="36" r="3.5"></circle><circle cx="26" cy="46" r="3.5"></circle><circle cx="26" cy="56" r="3.5"></circle><circle cx="26" cy="66" r="3.5"></circle><circle cx="26" cy="76" r="3.5"></circle><circle cx="26" cy="86" r="3.5"></circle><line x1="46" y1="38" x2="46" y2="60" class="stroke-ink"></line></g><g class="stroke-accent fill-paper"><path d="M96 26 L106 30 L88 96 L78 92 Z"></path><path d="M78 92 L88 96 L80 106 Z"></path><line x1="94" y1="33" x2="104" y2="37"></line><line x1="104" y1="16" x2="110" y2="8"></line><line x1="96" y1="12" x2="98" y2="4"></line></g></svg></div><p id="setup-status" tabindex="-1" data-link-bank-focus="true" class="mt-3 font-serif text-lg italic">Tally&#39;s reading your last 90 days from 2 banks.</p><p id="setup-next" class="mt-2 text-muted">Next it sorts them, then you answer three quick questions and your budget is ready. Tally will email you the moment they&#39;re ready.</p><section id="your-banks" class="mt-4" aria-labelledby="your-banks-label"><p id="your-banks-label" class="text-sm text-muted">Your banks</p><ul class="mt-2 border-t border-rule"><li class="flex min-h-11 items-center gap-3 border-b border-rule"><span class="shrink-0 text-muted"><svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="bank"><path d="M10 18v-7"></path><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"></path><path d="M14 18v-7"></path><path d="M18 18v-7"></path><path d="M3 22h18"></path><path d="M6 18v-7"></path></svg></span><span class="min-w-0 flex-1 py-2 text-base text-ink">Chase</span><span class="flex shrink-0 items-center gap-2 text-sm text-muted tabular-nums">90 days in · 412</span></li><li class="flex min-h-11 items-center gap-3 border-b border-rule"><span class="shrink-0 text-muted"><svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-icon="bank"><path d="M10 18v-7"></path><path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z"></path><path d="M14 18v-7"></path><path d="M18 18v-7"></path><path d="M3 22h18"></path><path d="M6 18v-7"></path></svg></span><span class="min-w-0 flex-1 py-2 text-base text-ink">American Express</span><span class="flex shrink-0 items-center gap-2 text-sm text-muted tabular-nums"><svg class="button-spinner size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><circle cx="12" cy="12" r="9" opacity="0.25"></circle><path d="M12 3a9 9 0 0 1 9 9" stroke-linecap="round"></path></svg>Reading · 86 so far</span></li></ul></section><div class="mt-6"><h2 class="text-lg font-semibold">Have more accounts?</h2><p class="mt-1 text-muted">Link every bank and card you use now, so your first questions cover them all.</p><div class="mt-3"><button type="button" class="min-h-11 rounded-control bg-ink px-5 text-paper w-full disabled:opacity-40">Link a bank</button></div></div><div class="mt-4"><p class="text-sm text-muted">Your first tally · 1 of 5</p><ul class="mt-2 border-t border-rule"><li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule"><svg class="h-6 w-3 shrink-0" viewBox="0 0 12 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="2" x2="6" y2="22" class="stroke-ink"></line></svg><span class="min-w-0 flex-1 py-2 text-base text-ink">Link your bank<span class="sr-only">, done</span></span><span class="shrink-0 text-sm text-muted">2 banks, linked</span></li><li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule"><svg class="h-6 w-3 shrink-0" viewBox="0 0 12 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="2" x2="6" y2="22" class="stroke-muted" stroke-dasharray="3 3"></line></svg><span class="min-w-0 flex-1 py-2 text-base text-muted">Your pay</span><span class="shrink-0 text-sm text-muted">After sorting</span></li><li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule"><svg class="h-6 w-3 shrink-0" viewBox="0 0 12 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="2" x2="6" y2="22" class="stroke-muted" stroke-dasharray="3 3"></line></svg><span class="min-w-0 flex-1 py-2 text-base text-muted">Your bills</span><span class="shrink-0 text-sm text-muted">After sorting</span></li><li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule"><svg class="h-6 w-3 shrink-0" viewBox="0 0 12 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="2" x2="6" y2="22" class="stroke-muted" stroke-dasharray="3 3"></line></svg><span class="min-w-0 flex-1 py-2 text-base text-muted">Your budgets</span><span class="shrink-0 text-sm text-muted">After sorting</span></li><li class="flex min-h-11 flex-wrap items-center gap-3 border-b border-rule"><svg class="h-6 w-3 shrink-0" viewBox="0 0 12 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="1" y1="22" x2="11" y2="2" class="stroke-muted" stroke-dasharray="3 3"></line></svg><span class="min-w-0 flex-1 py-2 text-base text-muted">Tomorrow · Tally keeps count on its own</span><span class="shrink-0 text-sm text-muted">Later</span></li></ul></div></section>`;
-
 /**
  * Today's five lines as they were drawn, frozen as literal data: the live setup's words (After sorting) must not reach this
  * picture, which stays as it was (P140's "Today" is a record, and only A draws the live HomeSetup).
@@ -1092,6 +1088,80 @@ function BanksToday() {
 			</p>
 			<p class="mt-2 text-muted">Nothing for you to do until then.</p>
 			<TallySteps steps={BANKS_TODAY_STEPS} />
+		</section>
+	);
+}
+
+/** A's two banks as the picture drew them: Chase in, American Express still being read. */
+const BANKS_TODAY = "2026-10-14";
+const BANKS_CHASE: YourBank = {
+	id: 3,
+	name: "Chase",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: "2026-10-13 09:00:00",
+	fresh: false,
+	count: 412,
+};
+const BANKS_AMEX: YourBank = {
+	id: 5,
+	name: "American Express",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: null,
+	fresh: true,
+	count: 86,
+};
+
+/** A's five lines as the picture drew them: Link your bank done with its two banks, three after sorting, and the last one later. */
+const BANKS_A_STEPS: StepLine[] = [
+	{ name: "Link your bank", done: true, note: "2 banks, linked" },
+	{ name: "Your pay", done: false, note: "After sorting" },
+	{ name: "Your bills", done: false, note: "After sorting" },
+	{ name: "Your budgets", done: false, note: "After sorting" },
+	{
+		name: "Tomorrow · Tally keeps count on its own",
+		done: false,
+		note: "Later",
+	},
+];
+
+/**
+ * A, the owner's pick: the banks under the status, Have more accounts? beneath them, and the five lines. Drawn as JSX with its
+ * own words, so the live setup's words never reach this picture (P140's pattern, as P142's Today does).
+ */
+function BanksA() {
+	return (
+		<section id="setup-top" class="mt-2">
+			<div class="flex items-center justify-end gap-4">
+				<h1 class="sr-only">Your first week</h1>
+				<Notebook strokes={1} ink size="size-24" />
+			</div>
+			<p class="mt-3 font-serif text-lg italic">
+				Tally's reading your last 90 days from 2 banks.
+			</p>
+			<p class="mt-2 text-muted">
+				Next it sorts them, then you answer three quick questions and your
+				budget is ready. Tally will email you the moment they're ready.
+			</p>
+			<YourBanks
+				banks={[BANKS_CHASE, BANKS_AMEX]}
+				today={BANKS_TODAY}
+				polls={false}
+			/>
+			<div class="mt-6">
+				<h2 class="text-lg font-semibold">Have more accounts?</h2>
+				<p class="mt-1 text-muted">
+					Link every bank and card you use now, so your first questions cover
+					them all.
+				</p>
+				<div class="mt-3">
+					<Button type="button" class="w-full">
+						Link a bank
+					</Button>
+				</div>
+			</div>
+			<TallySteps steps={BANKS_A_STEPS} />
 		</section>
 	);
 }
@@ -1170,7 +1240,7 @@ export function BanksProposal() {
 					width="w-[392px]"
 				>
 					<Phone label="A, two banks being read" demo={false} tab="home">
-						<div dangerouslySetInnerHTML={{ __html: BANKS_A_MARKUP }} />
+						<BanksA />
 					</Phone>
 				</Choice>
 				<Choice
