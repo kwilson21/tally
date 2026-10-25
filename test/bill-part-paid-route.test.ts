@@ -1,14 +1,15 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillRows } from "../src/bills/rows";
-import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 
 // A bill paid in parts on its page and in its link picker (Phase 5, decision 101, #205): each payment has its
 // own Not this one, a part-paid month says what it has, and the picker sorts by what's still unpaid.
 
 const BASE = "http://tally.test";
 const RENT = 9500;
-const today = todayIn(DEFAULT_TIME_ZONE);
+// Pinned to a mid-month day: from about the 25th, Bills counts next month's rent as due within 7 days.
+const TODAY = "2026-10-15";
+const today = TODAY;
 const PERIOD = today.slice(0, 7);
 const DUE = `${PERIOD}-01`;
 
@@ -43,8 +44,14 @@ const dismissedIds = async () =>
 			.all<{ id: number }>()
 	).results.map(({ id }) => id);
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 /** A $1,200 rent due on the 1st of this month, with `$600` paid by 9520 and three unclaimed payments to pick from. */
 beforeEach(async () => {
+	vi.useFakeTimers({ toFake: ["Date"] });
+	vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
 	await env.DB.batch([
 		env.DB.prepare("DELETE FROM bill_payments"),
 		env.DB.prepare("DELETE FROM bills"),
