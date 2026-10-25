@@ -288,6 +288,11 @@ describe("the setup frame (P142 A, decision 148)", () => {
 		decodeAttributes(
 			String(Layout({ demo: false, children: "body", ...props })),
 		);
+	/** The class tokens of the setup column: the div with max-w-md that holds the top line and the page's children. */
+	const column = (html: string) =>
+		(html.match(/<div class="([^"]*\bmax-w-md\b[^"]*)"/)?.[1] ?? "")
+			.split(" ")
+			.filter(Boolean);
 
 	it("has no sidebar and no tab bar, so neither nav landmark is drawn", () => {
 		const html = page({ setup: true });
@@ -311,8 +316,36 @@ describe("the setup frame (P142 A, decision 148)", () => {
 		expect(main).toContain("lg:pb-24");
 		expect(main).not.toContain("pb-[var(--focus-scroll-room)]");
 		expect(html).toMatch(
-			/<main id="main"[\s\S]*?<div class="mx-auto w-full max-w-md">[\s\S]*?body/,
+			/<main id="main"[\s\S]*?<div class="[^"]*\bmax-w-md\b[^"]*"[^>]*>[\s\S]*?body/,
 		);
+		expect(column(html)).toEqual(
+			expect.arrayContaining(["mx-auto", "w-full", "max-w-md"]),
+		);
+	});
+
+	it("makes the main and its column fill a phone's screen, so the setup foot sits at its foot (#772)", () => {
+		const html = page({ setup: true });
+		expect(classTokens(html, "main")).toEqual(
+			expect.arrayContaining([
+				"max-lg:flex",
+				"max-lg:flex-col",
+				"max-lg:min-h-[calc(100dvh-var(--safe-area-top))]",
+			]),
+		);
+		expect(column(html)).toEqual(
+			expect.arrayContaining([
+				"max-lg:flex",
+				"max-lg:flex-1",
+				"max-lg:flex-col",
+			]),
+		);
+	});
+
+	it("leaves the main and the page's column of a page without the setup frame as they were (#772)", () => {
+		const html = page();
+		expect(classTokens(html, "main")).not.toContain("max-lg:flex");
+		expect(classTokens(html, "main")).not.toContain("max-lg:flex-col");
+		expect(column(html)).toEqual([]);
 	});
 
 	it("puts the toasts at the top edge on a phone, and leaves desktop's placement alone", () => {

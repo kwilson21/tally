@@ -129,12 +129,12 @@ export function Layout({
 						id="main"
 						class={
 							setup
-								? "min-w-0 flex-1 pb-0 pt-6 lg:pb-24 lg:pt-8"
+								? "min-w-0 flex-1 pb-0 pt-6 lg:pb-24 lg:pt-8 max-lg:flex max-lg:flex-col max-lg:min-h-[calc(100dvh-var(--safe-area-top))]"
 								: "min-w-0 flex-1 pb-[var(--focus-scroll-room)] pt-6 lg:pb-24 lg:pt-8"
 						}
 					>
 						{setup ? (
-							<div class="mx-auto w-full max-w-md">
+							<div class="mx-auto w-full max-w-md max-lg:flex max-lg:flex-1 max-lg:flex-col">
 								<div
 									id="top-line"
 									class="mb-2 flex items-center justify-between gap-3"

@@ -11,8 +11,8 @@ export function SetupScreen({
 	foot?: Child;
 }) {
 	return (
-		<div id="setup-screen">
-			<div>{children}</div>
+		<div id="setup-screen" class="max-lg:flex max-lg:flex-1 max-lg:flex-col">
+			<div class="max-lg:flex-1">{children}</div>
 			{foot && (
 				<div
 					id="setup-foot"
