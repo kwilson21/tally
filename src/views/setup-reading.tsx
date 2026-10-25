@@ -19,6 +19,13 @@ export const EMAIL_LINE =
 export const MORE_BANKS_LINE =
 	"Link every bank and card you use, so your questions cover them all.";
 
+/** The email line, drawn only until the ready email has reached someone. Its region (#setup-email) is always drawn. */
+export function EmailLine({ emailed }: { emailed: boolean }) {
+	return emailed ? null : (
+		<p class="mt-6 rounded-control bg-band p-4">{EMAIL_LINE}</p>
+	);
+}
+
 const count = (n: number) => n.toLocaleString("en-US");
 
 /** The step the reading screen shows: the daily run's wait, slow, sorting, else reading. A poll and the check-in name it. */
@@ -72,11 +79,29 @@ export function sortedShare(sorted: number, total: number): number {
 }
 
 /**
+ * The sort's bar, under the status while Tally sorts (and while it takes longer than usual). Hidden from assistive technology:
+ * the status says the count, so the bar is only the picture of it.
+ */
+export function SortBar({ sorted, total }: { sorted: number; total: number }) {
+	return (
+		<svg class="mt-3 block h-2 w-full" aria-hidden="true">
+			<rect width="100%" height="100%" rx="4" class="fill-rule" />
+			<rect
+				width={`${sortedShare(sorted, total)}%`}
+				height="100%"
+				rx="4"
+				class="fill-ink"
+			/>
+		</svg>
+	);
+}
+
+/**
  * The screen. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), with its Fix
  * (BankBehind). `yourBanks` are the connected banks' rows (YourBanks). `notify` is Notify me on this device (decision 149),
  * given when the server has Web Push keys; `shown` and `idSuffix` are for drawings. `linkBank` is the foot's Link another
- * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on (part 2
- * of #772). `polls` false draws no presence check-in, so a drawing fires nothing by itself (decision 146).
+ * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on.
+ * `polls` false draws no presence check-in, so a drawing fires nothing by itself (decision 146).
  */
 export function SetupReading({
 	view,
@@ -126,18 +151,10 @@ export function SetupReading({
 			>
 				{readingStatus(view)}
 			</p>
-			{/* Always drawn, empty when there is no bar, so part 2's poll can swap what is inside it. */}
+			{/* Always drawn, empty when there is no bar, so a refresh can swap what is inside it. */}
 			<div id="setup-progress">
 				{(step === "sorting" || step === "slow") && (
-					<svg class="mt-3 block h-2 w-full" aria-hidden="true">
-						<rect width="100%" height="100%" rx="4" class="fill-rule" />
-						<rect
-							width={`${sortedShare(view.sorted, view.total)}%`}
-							height="100%"
-							rx="4"
-							class="fill-ink"
-						/>
-					</svg>
+					<SortBar sorted={view.sorted} total={view.total} />
 				)}
 			</div>
 			<p id="setup-next" class="mt-3 text-muted">
@@ -160,9 +177,10 @@ export function SetupReading({
 					step={step}
 				/>
 			)}
-			{!view.emailed && (
-				<p class="mt-6 rounded-control bg-band p-4">{EMAIL_LINE}</p>
-			)}
+			{/* Always drawn, empty once the email has reached someone, so a refresh can take the line away. */}
+			<div id="setup-email">
+				<EmailLine emailed={view.emailed} />
+			</div>
 			{polls && <HomeSeenCheckIn step={step} />}
 		</SetupScreen>
 	);

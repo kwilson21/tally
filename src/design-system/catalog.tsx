@@ -8471,7 +8471,7 @@ function FirstWeekGroup() {
 				id="setup-reading"
 				title="SetupReading"
 				tier="visual"
-				components={["SetupReading"]}
+				components={["SetupReading", "SortBar", "EmailLine"]}
 				sentence="Reading your bank, setup's screen from a bank linked until the questions open (P142 A, decisions 146, 148 and 150): the step bar, where Tally is (reading, sorting with its bar, taking longer than usual, or waiting for the daily run when Sort right away is off), what comes next, Notify me on this device, Your banks, the email line until the email has reached someone, and Link another bank at the foot. The page checks in every 30 seconds while its tab is on screen and refreshes while Tally reads or sorts, so it moves on to the questions by itself; this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Reading, one bank: its history coming in, the page updating, Notify me, the email line">

@@ -9,6 +9,12 @@ import {
 
 // A setup screen's frame (P142 A, decision 148): its body, then its foot. On a phone the foot is pinned to the screen's foot.
 const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
+/** The opening tag of the element with this id. */
+const tagWithId = (markup: string, id: string) =>
+	markup.match(new RegExp(`<div\\b[^>]*\\bid="${id}"[^>]*>`))?.[0] ?? "";
+/** The class tokens of an opening tag. */
+const classesOf = (tag: string) =>
+	(tag.match(/\bclass="([^"]*)"/)?.[1] ?? "").split(" ").filter(Boolean);
 
 describe("SetupScreen", () => {
 	it("draws its body, and no foot when none is given", () => {
@@ -17,10 +23,33 @@ describe("SetupScreen", () => {
 				<p>The body</p>
 			</SetupScreen>,
 		);
-		expect(markup).toContain('<div id="setup-screen">');
+		expect(markup).toMatch(/<div\b[^>]*\bid="setup-screen"[^>]*>/);
+		expect(classesOf(tagWithId(markup, "setup-screen"))).toEqual(
+			expect.arrayContaining([
+				"max-lg:flex",
+				"max-lg:flex-1",
+				"max-lg:flex-col",
+			]),
+		);
 		expect(markup).toContain("<p>The body</p>");
 		expect(markup).not.toContain("sticky");
 		expect(markup).not.toContain("lg:static");
+	});
+
+	it("lets the body take the room the foot leaves on a phone, so the foot sits at the screen's foot (#772)", () => {
+		const markup = html(
+			<SetupScreen foot={<button type="button">Link your bank</button>}>
+				<p>The body</p>
+			</SetupScreen>,
+		);
+		const body =
+			markup.match(
+				/<div\b[^>]*\bid="setup-screen"[^>]*>\s*<div([^>]*)>/,
+			)?.[1] ?? "";
+		expect(classesOf(`<div${body}>`)).toContain("max-lg:flex-1");
+		expect(classesOf(tagWithId(markup, "setup-foot"))).toEqual(
+			expect.arrayContaining(["sticky", "bottom-0", "mt-8"]),
+		);
 	});
 
 	it("draws its foot after the body, pinned to the screen's foot on a phone and under the body from lg", () => {
@@ -33,10 +62,28 @@ describe("SetupScreen", () => {
 			markup.indexOf("Link your bank"),
 		);
 		expect(markup).toMatch(
-			/<div class="[^"]*\bsticky bottom-0\b[^"]*\blg:static\b[^"]*">/,
+			/<div\b[^>]*\bclass="[^"]*\bsticky bottom-0\b[^"]*\blg:static\b[^"]*"[^>]*>/,
 		);
 		expect(markup).toContain("pb-[calc(1.5rem+var(--safe-area-bottom))]");
 		expect(markup).toContain('<button type="button">Link your bank</button>');
+	});
+
+	it("gives the foot the id setup-foot, which app.css reads to keep focus clear of it", () => {
+		const markup = html(
+			<SetupScreen foot={<button type="button">Link your bank</button>}>
+				<p>The body</p>
+			</SetupScreen>,
+		);
+		const foot = markup.match(/<div\b[^>]*\sid="setup-foot"[^>]*>/)?.[0] ?? "";
+		expect(foot).toMatch(/\bclass="[^"]*\bsticky bottom-0\b/);
+		expect(markup.match(/id="setup-foot"/g)).toHaveLength(1);
+		expect(
+			html(
+				<SetupScreen>
+					<p>The body</p>
+				</SetupScreen>,
+			),
+		).not.toContain("setup-foot");
 	});
 });
 

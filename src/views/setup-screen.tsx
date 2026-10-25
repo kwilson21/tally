@@ -11,10 +11,13 @@ export function SetupScreen({
 	foot?: Child;
 }) {
 	return (
-		<div id="setup-screen">
-			<div>{children}</div>
+		<div id="setup-screen" class="max-lg:flex max-lg:flex-1 max-lg:flex-col">
+			<div class="max-lg:flex-1">{children}</div>
 			{foot && (
-				<div class="sticky bottom-0 -mx-5 mt-8 border-t border-rule bg-paper px-5 pt-4 pb-[calc(1.5rem+var(--safe-area-bottom))] lg:static lg:mx-0 lg:border-t-0 lg:bg-transparent lg:px-0 lg:pt-0 lg:pb-0">
+				<div
+					id="setup-foot"
+					class="sticky bottom-0 -mx-5 mt-8 border-t border-rule bg-paper px-5 pt-4 pb-[calc(1.5rem+var(--safe-area-bottom))] lg:static lg:mx-0 lg:border-t-0 lg:bg-transparent lg:px-0 lg:pt-0 lg:pb-0"
+				>
 					{foot}
 				</div>
 			)}

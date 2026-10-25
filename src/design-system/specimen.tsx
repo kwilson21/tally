@@ -175,8 +175,11 @@ export function SetupFrame({
 			aria-label={label}
 			class="h-[780px] overflow-hidden rounded-control border border-ink bg-paper lg:h-auto"
 		>
-			<div inert class="px-5 pt-6 lg:px-8 lg:pb-8">
-				<div class="mx-auto max-w-md">
+			<div
+				inert
+				class="flex h-full flex-col px-5 pt-6 lg:block lg:h-auto lg:px-8 lg:pb-8"
+			>
+				<div class="mx-auto max-w-md flex w-full flex-1 flex-col lg:block">
 					<div class="mb-2 flex items-center justify-between gap-3">
 						<Wordmark />
 						<FeedbackButton />
