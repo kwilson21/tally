@@ -10,7 +10,7 @@ import {
 } from "./category-suggestions-pending";
 import { readAiSwitches } from "./db/ai-switches";
 import { clearWaitsForRunStatement } from "./db/first-tally";
-import { countWaitingForJev } from "./db/transactions";
+import { waitingForJevSql } from "./db/transactions";
 import { keepNightCounts } from "./first-tally/night";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -110,11 +110,10 @@ export async function runSortInstance(
 		try {
 			await runStep("night-run-wait", NIGHT_STEPS.counts, async () => {
 				const switches = await readAiSwitches(env.DB);
-				const waiting = await countWaitingForJev(env.DB, {
-					categories: switches.categories,
-					income: switches.income,
-				});
-				if (waiting === 0) await clearWaitsForRunStatement(env.DB).run();
+				await clearWaitsForRunStatement(
+					env.DB,
+					waitingForJevSql(switches),
+				).run();
 				return true;
 			});
 		} catch (error) {
