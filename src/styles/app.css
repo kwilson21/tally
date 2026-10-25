@@ -108,6 +108,14 @@
 		html {
 			scroll-padding-bottom: var(--focus-scroll-room);
 		}
+		/* Setup's pinned foot (decision 148) replaces the tab bar, so focused content keeps clear of it. */
+		html:has(#setup-foot) {
+			scroll-padding-bottom: calc(
+				10rem +
+				var(--focus-scroll-gap) +
+				var(--safe-area-bottom)
+			);
+		}
 	}
 	a {
 		color: var(--color-accent);

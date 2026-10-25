@@ -812,6 +812,40 @@ describe("GET /design-system in the demo", () => {
 		},
 	);
 
+	it.each(["setup-welcome", "setup-reading"])(
+		"gives %s its whole use spec, as a visual component, from its own section (decision 148, DESIGN.md section 3)",
+		async (id) => {
+			const { html } = await get("/design-system");
+			const tag = specimens(html).find((t) => t.includes(`id="${id}"`));
+			expect(tag).toContain('data-ds-tier="visual"');
+			// The section draws its own Your banks list and frame, so it is sliced to the next specimen, not to its </section>.
+			const section =
+				html.split(`id="${id}"`)[1]?.split(/<section[^>]*data-ds-tier=/)[0] ??
+				"";
+			for (const [, label] of USE_SPEC_PARTS) {
+				expect(section).toContain(`<dt class="font-medium">${label}</dt>`);
+			}
+		},
+	);
+
+	it("draws the reading screen's words in its states, and no presence check-in, since a drawing fires nothing (decision 146)", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html
+				.split('id="setup-reading"')[1]
+				?.split(/<section[^>]*data-ds-tier=/)[0] ?? "";
+		for (const words of [
+			"at about 5 AM",
+			"at about 10 AM",
+			"Sorting your last 90 days: 318 of 412 done.",
+			"Sorting is taking longer than usual: 900 of 1,500.",
+			"Link another bank",
+		]) {
+			expect(section).toContain(words);
+		}
+		expect(section).not.toContain('hx-post="/home/seen"');
+	});
+
 	it("gives each AppleCardSheet state its own ids, so each label and description reads its own field (#766)", async () => {
 		const { html } = await get("/design-system");
 		const section =
@@ -1466,11 +1500,12 @@ describe("GET /design-system in the demo", () => {
 	it("gives each notify control drawing its own help line, so no button points at another drawing's paragraph (#763)", async () => {
 		const { html } = await get("/design-system");
 		// Each NotifyControl drawing, and HomeSetup's Sorting state, draws a button described by its help line. A shared id would
-		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help.
+		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help. The reading screen's
+		// two drawings (its reading state and its on state, #772) each draw their own.
 		const described = [
 			...html.matchAll(/aria-describedby="(notify-help[^"]*)"/g),
 		].map((match) => match[1] ?? "");
-		expect(described).toHaveLength(5);
+		expect(described).toHaveLength(7);
 		expect(new Set(described).size).toBe(described.length);
 		for (const id of described)
 			expect(html.match(new RegExp(`\\sid="${id}"`, "g")), id).toHaveLength(1);

@@ -41,6 +41,8 @@ const base: SetupView = {
 	fifth: null,
 	answeredWaiting: null,
 	emailed: false,
+	waitsForRun: false,
+	runTime: "5 AM",
 };
 
 const TODAY = "2026-10-22";

@@ -12,7 +12,7 @@ import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 export const HOME_SEEN_ID = "home-seen";
 
 /** The step Home's page shows: the words the banks refresh's poll names too (home.tsx). */
-export type ShownStep = "reading" | "sorting" | "slow" | "ready";
+export type ShownStep = "reading" | "sorting" | "slow" | "run" | "ready";
 
 /**
  * The check-in. `step` is given by Home only, as a form value; the questions page sends none. `oob` swaps this check-in in
