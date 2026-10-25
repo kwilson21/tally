@@ -16,6 +16,7 @@ import { HomeSeenCheckIn } from "../views/home-seen";
 import { Layout } from "../views/layout";
 import { LinkBank, plaidScripts } from "../views/link-bank";
 import {
+	EmailLine,
 	readingNextLine,
 	readingStatus,
 	readingStep,
@@ -198,7 +199,7 @@ setupRoute.get("/setup", async (c) => {
 });
 
 /**
- * The reading screen's status, bar and next line, swapped out of band by a refresh (the Your banks poll and the presence
+ * The reading screen's status, bar, next line and email line, swapped out of band by a refresh (the Your banks poll and the presence
  * check-in's answer both draw them this way), so the focused status is replaced only by these swaps, never by the poll's own.
  */
 export function ReadingSwaps({
@@ -222,6 +223,9 @@ export function ReadingSwaps({
 			<p id="setup-next" hx-swap-oob="innerHTML">
 				{readingNextLine(view, bankLine)}
 			</p>
+			<div id="setup-email" hx-swap-oob="innerHTML">
+				<EmailLine emailed={view.emailed} />
+			</div>
 		</>
 	);
 }

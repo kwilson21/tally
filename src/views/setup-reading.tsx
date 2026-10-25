@@ -19,6 +19,13 @@ export const EMAIL_LINE =
 export const MORE_BANKS_LINE =
 	"Link every bank and card you use, so your questions cover them all.";
 
+/** The email line, drawn only until the ready email has reached someone. Its region (#setup-email) is always drawn. */
+export function EmailLine({ emailed }: { emailed: boolean }) {
+	return emailed ? null : (
+		<p class="mt-6 rounded-control bg-band p-4">{EMAIL_LINE}</p>
+	);
+}
+
 const count = (n: number) => n.toLocaleString("en-US");
 
 /** The step the reading screen shows: the daily run's wait, slow, sorting, else reading. A poll and the check-in name it. */
@@ -171,9 +178,10 @@ export function SetupReading({
 					step={step}
 				/>
 			)}
-			{!view.emailed && (
-				<p class="mt-6 rounded-control bg-band p-4">{EMAIL_LINE}</p>
-			)}
+			{/* Always drawn, empty once the email has reached someone, so a refresh (ReadingSwaps) can take the line away. */}
+			<div id="setup-email">
+				<EmailLine emailed={view.emailed} />
+			</div>
 			{polls && <HomeSeenCheckIn step={step} />}
 		</SetupScreen>
 	);

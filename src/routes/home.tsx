@@ -678,7 +678,7 @@ home.post("/home/seen", async (c) => {
 	// Still reading, at the step the page shows: nothing changes.
 	const stepNow = readingStep(setup);
 	if (stepNow === shown) return c.body(null, 204);
-	// Still reading, and the step moved on: the status, the bar, the next line and the list change in place (the list names the
+	// Still reading, and the step moved on: the status, the bar, the next line, the email line and the list change in place (the list names the
 	// step it shows, and polls while Tally refreshes, as the poll draws it), the check-in moves to the new step, and the new
 	// status is announced once (as the poll announces it).
 	const message = readingStatus(setup);

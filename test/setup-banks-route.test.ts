@@ -128,6 +128,29 @@ describe("GET /setup/banks: the list while a bank is read", () => {
 		expect(html).not.toContain('hx-swap-oob="delete"');
 	});
 
+	it("answers the email region out of band, empty, once the ready email has reached someone", async () => {
+		await readingBanks();
+		// readingBanks writes the record whole, so the emailed record is written after it; the phase still follows the strokes.
+		await writeRecord({
+			strokes: { bank: TODAY },
+			budgets: {},
+			readyEmailedTo: ["someone@example.com"],
+		});
+		const { html } = await refresh();
+		expect(html).toContain(
+			'<div id="setup-email" hx-swap-oob="innerHTML"></div>',
+		);
+		expect(html).not.toContain("You can close this page.");
+	});
+
+	it("answers the email line out of band inside the email region while the ready email has reached no one", async () => {
+		await readingBanks();
+		const { html } = await refresh();
+		expect(html).toMatch(
+			/<div id="setup-email" hx-swap-oob="innerHTML"><p class="mt-6 rounded-control bg-band p-4">You can close this page\./,
+		);
+	});
+
 	it("marks the poll so a Plaid Link window pauses it while it is open (decision 146)", async () => {
 		await readingBanks();
 		const { html } = await refresh();

@@ -279,6 +279,18 @@ describe("SetupReading", () => {
 		);
 	});
 
+	it("always draws the email region, so a refresh can swap the line in or out of it", () => {
+		const notEmailed = reading({ view: view({ emailed: false }) });
+		expect(notEmailed).toContain('<div id="setup-email">');
+		expect(notEmailed).toMatch(
+			/<div id="setup-email"><p class="mt-6 rounded-control bg-band p-4">You can close this page\. Tally emails you the moment your questions are ready\.<\/p><\/div>/,
+		);
+
+		const emailed = reading({ view: view({ emailed: true }) });
+		expect(emailed).toContain('<div id="setup-email"></div>');
+		expect(emailed).not.toContain(EMAIL_LINE);
+	});
+
 	it("draws the notify control only when notify is given", () => {
 		expect(reading()).not.toContain("data-notify");
 		expect(
