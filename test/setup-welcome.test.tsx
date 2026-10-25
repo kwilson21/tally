@@ -33,10 +33,28 @@ describe("SetupScreen", () => {
 			markup.indexOf("Link your bank"),
 		);
 		expect(markup).toMatch(
-			/<div class="[^"]*\bsticky bottom-0\b[^"]*\blg:static\b[^"]*">/,
+			/<div\b[^>]*\bclass="[^"]*\bsticky bottom-0\b[^"]*\blg:static\b[^"]*"[^>]*>/,
 		);
 		expect(markup).toContain("pb-[calc(1.5rem+var(--safe-area-bottom))]");
 		expect(markup).toContain('<button type="button">Link your bank</button>');
+	});
+
+	it("gives the foot the id setup-foot, which app.css reads to keep focus clear of it", () => {
+		const markup = html(
+			<SetupScreen foot={<button type="button">Link your bank</button>}>
+				<p>The body</p>
+			</SetupScreen>,
+		);
+		const foot = markup.match(/<div\b[^>]*\sid="setup-foot"[^>]*>/)?.[0] ?? "";
+		expect(foot).toMatch(/\bclass="[^"]*\bsticky bottom-0\b/);
+		expect(markup.match(/id="setup-foot"/g)).toHaveLength(1);
+		expect(
+			html(
+				<SetupScreen>
+					<p>The body</p>
+				</SetupScreen>,
+			),
+		).not.toContain("setup-foot");
 	});
 });
 
