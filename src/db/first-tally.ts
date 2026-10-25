@@ -77,6 +77,12 @@ export type FirstTally = {
 	 */
 	reAsk?: { bank: string };
 	/**
+	 * Set when a sync's sort finds Sort right away off while setup isn't done and something still waits for Jev (decision 150):
+	 * that import waits for the daily run's sorting, so setup's reading screen says so, even if the switch is turned back on
+	 * meanwhile. Removed by the night's run once nothing waits, and when the questions or the bank are taken back. Absent otherwise.
+	 */
+	waitsForRun?: true;
+	/**
 	 * The addresses the ready email (decision 134) has reached or is sending to. An address is added before its email goes
 	 * and taken off again if neither provider delivers, so each person gets it once (src/first-tally/ready-email.tsx).
 	 * Absent until one is added.
@@ -196,6 +202,28 @@ export async function markStroke(
 	await strokeStatement(db, stroke, day, guard).run();
 }
 
+/**
+ * The statement that marks the import as waiting for the daily run (decision 150), for a sync's sort that finds Sort right
+ * away off. It is an UPDATE, so the record must exist (stroke one is drawn before any sync's import can be waiting), and it
+ * writes nothing once the count stroke is drawn.
+ */
+export function waitsForRunStatement(db: D1Database): D1PreparedStatement {
+	return db
+		.prepare(
+			`UPDATE household_settings SET value = json_set(value, '$.waitsForRun', json('true')) WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL`,
+		)
+		.bind(KEY);
+}
+
+/** The statement that removes the daily run's wait mark, once the night's sort leaves nothing waiting (decision 150). */
+export function clearWaitsForRunStatement(db: D1Database): D1PreparedStatement {
+	return db
+		.prepare(
+			"UPDATE household_settings SET value = json_remove(value, '$.waitsForRun') WHERE key = ?1",
+		)
+		.bind(KEY);
+}
+
 /** The four strokes a disconnected bank takes back before setup is done: all but the night's count. */
 const BANK_STROKES = STROKES.slice(0, 4);
 
@@ -220,7 +248,7 @@ export function takeBackBankStrokes(
 	).join(" AND ");
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.night', '$.nightSync', '$.reAsk')
+			`UPDATE household_settings SET value = json_remove(value, ${BANK_STROKES.map((s) => `'$.strokes.${s}'`).join(", ")}, '$.night', '$.nightSync', '$.reAsk', '$.waitsForRun')
 			WHERE key = ?1 AND NOT (${notSetUp})
 				AND NOT EXISTS (SELECT 1 FROM plaid_items WHERE disconnected_at IS NULL AND id != ?2)`,
 		)
@@ -374,7 +402,7 @@ export function takeBackQuestionStrokes(
 ): D1PreparedStatement {
 	return db
 		.prepare(
-			`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.strokes.budgets', '$.night', '$.nightSync'),
+			`UPDATE household_settings SET value = json_set(json_remove(value, '$.strokes.pay', '$.strokes.bills', '$.strokes.budgets', '$.night', '$.nightSync', '$.waitsForRun'),
 				'$.reAsk', json_object('bank', ?2))
 			WHERE key = ?1 AND json_type(value, '$.strokes.count') IS NULL
 				AND (json_type(value, '$.strokes.pay') IS NOT NULL OR json_type(value, '$.strokes.bills') IS NOT NULL

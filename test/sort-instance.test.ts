@@ -1,7 +1,11 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_SWITCHES_ALL_ON, saveAiSwitches } from "../src/db/ai-switches";
-import { markStroke, readFirstTally } from "../src/db/first-tally";
+import {
+	markStroke,
+	readFirstTally,
+	waitsForRunStatement,
+} from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 import { recordNightSync } from "../src/first-tally/night";
 import type { SyncAllResult } from "../src/plaid/sync-all";
@@ -321,7 +325,7 @@ describe("no step asks Workers AI twice when it runs again", () => {
 });
 
 describe("no Jev key", () => {
-	it("the night's names, suggestions and counts still run, with no sort, no Jev call and no rules step", async () => {
+	it("the night's wait-mark step, names, suggestions and counts still run, with no sort, no Jev call and no rules step", async () => {
 		await onlyCharges(["SHOP A"]);
 		const fetchImpl = vi.fn(async () => jevAnswer());
 		const steps = await runInstance(
@@ -330,6 +334,7 @@ describe("no Jev key", () => {
 			{ fetchImpl },
 		);
 		expect(steps.names()).toEqual([
+			"night-run-wait",
 			"night-names",
 			"night-suggestions",
 			"night-counts",
@@ -476,5 +481,69 @@ describe("runSortInstance passes its sleep to the sorting groups (decision 145)"
 		expect(sleep).toHaveBeenCalledTimes(1);
 		expect(sleep).toHaveBeenCalledWith("wait-1", 30_000);
 		expect(fetchImpl).toHaveBeenCalledTimes(3);
+	});
+});
+
+describe("the night's run clears the daily run's wait mark once nothing waits (decision 150)", () => {
+	const marked = async () => {
+		for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
+			await markStroke(db, stroke, "2026-10-12");
+		}
+		await waitsForRunStatement(db).run();
+	};
+	/** One categorised-by-Jev-able charge that a sync brought in, so the count sees it waiting. */
+	const waitingCharge = () =>
+		db
+			.prepare(
+				"INSERT INTO transactions(account_id,plaid_transaction_id,date,amount_cents,raw_name) VALUES(1,'plaid-waiting',?,-500,'SHOP W')",
+			)
+			.bind(TODAY)
+			.run();
+
+	beforeEach(async () => {
+		await db
+			.prepare("DELETE FROM household_settings WHERE key = 'first_tally'")
+			.run();
+	});
+
+	it("removes the mark once the night's sort leaves nothing waiting", async () => {
+		await marked();
+		await onlyCharges([]);
+		await runInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: aiThatHears() },
+			night,
+			{ fetchImpl: vi.fn(async () => jevAnswer()) },
+		);
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("keeps the mark while something still waits for Jev", async () => {
+		await marked();
+		await onlyCharges([]);
+		await waitingCharge();
+		// No Jev key: the sort asks nothing, so the charge still waits when the night's steps have run.
+		const steps = await runInstance(
+			{ DB: db, DEMO: "false", AI: aiThatHears() },
+			night,
+		);
+		expect(steps.names()).toContain("night-names");
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+	});
+
+	it("leaves the mark alone in the demo, and for a daytime instance with no night", async () => {
+		await marked();
+		await onlyCharges([]);
+		await runInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "true", AI: aiThatHears() },
+			night,
+			{ fetchImpl: vi.fn(async () => jevAnswer()) },
+		);
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+		await runInstance(
+			{ DB: db, JEV_API_KEY: "jev", DEMO: "false", AI: aiThatHears() },
+			{ bySync: false, rulesApplied: false },
+			{ fetchImpl: vi.fn(async () => jevAnswer()) },
+		);
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
 	});
 });
