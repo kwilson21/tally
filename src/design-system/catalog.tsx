@@ -673,156 +673,10 @@ function Brand() {
 				title="HomeSetup"
 				tier="visual"
 				components={["HomeSetup"]}
-				sentence="Home's top during a new family's first week (P125 E, decision 114): it replaces the headline area until all five strokes are drawn. Before a bank, the headline is 'Five strokes, and you're set up.' and Link a bank is the one button. While the import is read, the status says where Tally is (reading, sorting, or taking longer than usual) and promises no time, and a line under it says what comes next, whether the page updates as it goes, and whether the email comes (decision 146). While the import is read, Notify me on this device sits under that line (NotifyControl, decision 149). Under the status, Your banks lists each bank's state (P140 A, decision 133), and Have more accounts? with Link a bank sits under it. Once every transaction is sorted and the questions are open, the status says so and the band under it reads 'Set up your budget'. While the import is read or the questions are ready, the page checks in every 30 seconds while its tab is on screen, and a page whose step has moved on redraws itself, so someone watching sees the questions appear (decision 146); this drawing does not, since a picture fires nothing by itself."
+				sentence="Home's top once a new family's three questions are answered (P125 E, decision 114): it replaces the headline area until all five strokes are drawn, with the notebook, the status and the five lines. Its phases before the answers are setup's own screens (the welcome and Reading your bank, decision 148), so this picture draws only the answered phase and the fifth day: the status says what Tally waits for while a bank reads its history or needs signing in (#671), and on the fifth day Safe to spend, what the night did, and the link to what needs a person sit at the top (#586)."
 			>
-				<State label="Before a bank: Link a bank, with its line">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(null, "before")}
-						linkBank={
-							<Button type="button" class="w-full">
-								Link a bank
-							</Button>
-						}
-					/>
-				</State>
-				<State label="Reading, the history still coming in: the line says the page updates and the email comes">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 40,
-							historyIn: false,
-							refreshes: true,
-							emailed: false,
-						})}
-					/>
-				</State>
-				<State label="Sorting: the count of what is sorted, and the line says the questions open when it's done">
-					<HomeSetup
-						polls={false}
-						notify={{
-							vapidKey: NOTIFY_FAKE_KEY,
-							shown: "off",
-							idSuffix: "sorting",
-						}}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 1500,
-							sorted: 900,
-							sorting: true,
-							refreshes: true,
-							emailed: false,
-						})}
-					/>
-				</State>
-				<State label="Taking longer than usual: the count, no time promised, and Tally keeps trying on its own">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 1500,
-							sorted: 900,
-							sorting: true,
-							slow: true,
-							refreshes: false,
-							emailed: false,
-						})}
-					/>
-				</State>
-				<State label="Reading, the history still coming in, and nothing read for an hour: no time promised, and the page does not refresh">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 40,
-							historyIn: false,
-						})}
-					/>
-				</State>
-				<State label="Reading, two banks: the status says from 2 banks, and the list shows each bank's state, then Have more accounts?">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							bankCount: 2,
-							drawn: 1,
-							total: 40,
-						})}
-						linkBank={
-							<Button type="button" class="w-full">
-								Link a bank
-							</Button>
-						}
-						yourBanks={{
-							banks: [CHASE_IN, AMEX_READING],
-							today: FIRST_WEEK_TODAY,
-							polls: false,
-						}}
-					/>
-				</State>
-				<State label="Reading, a bank that needs signing in: its line and Fix above the list, and Paused with no ring">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							bankCount: 2,
-							drawn: 1,
-							total: 40,
-						})}
-						bankLine={["American Express needs signing in"]}
-						yourBanks={{
-							banks: [CHASE_IN, AMEX_PAUSED],
-							today: FIRST_WEEK_TODAY,
-							polls: false,
-						}}
-					/>
-				</State>
-				<State label="Reading, a bank linked over an hour ago: Reading with no ring">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							bankCount: 2,
-							drawn: 1,
-							total: 40,
-						})}
-						yourBanks={{
-							banks: [CHASE_IN, AMEX_PAST_HOUR],
-							today: FIRST_WEEK_TODAY,
-							polls: false,
-						}}
-					/>
-				</State>
-				<State label="Reading, with a bank that stopped updating: its line under the status">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "reading", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 40,
-						})}
-						bankLine={["Chase stopped updating Oct 9"]}
-					/>
-				</State>
-				<State label="Ready: all sorted, the questions are next, and the band sits under the status">
-					<HomeSetup
-						polls={false}
-						view={firstWeek(BANK_SYNCED, "ready", {
-							bankName: "Chase",
-							drawn: 1,
-							total: 362,
-							sorted: 362,
-						})}
-					/>
-				</State>
 				<State label="The fifth day, all sorted: Safe to spend, what the night did, and the five lines">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(FIFTH_RECORD, "answered", {
 							bankName: "Chase",
 							drawn: 5,
@@ -835,7 +689,6 @@ function Brand() {
 				</State>
 				<State label="The fifth day, one needs you: the link to what needs a person">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(FIFTH_RECORD, "answered", {
 							bankName: "Chase",
 							drawn: 5,
@@ -848,7 +701,6 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank still reads its history: what Tally waits for, not tomorrow">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -872,7 +724,6 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank needs signing in: its line under the status, and no promise beside its Fix">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -897,7 +748,6 @@ function Brand() {
 				</State>
 				<State label="Answered, a bank stopped updating: its line and Fix under a bare count, with no promise">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -921,7 +771,6 @@ function Brand() {
 				</State>
 				<State label="Questions answered: the ruled total, and no Band">
 					<HomeSetup
-						polls={false}
 						view={firstWeek(
 							{
 								strokes: {
@@ -8471,7 +8320,7 @@ function FirstWeekGroup() {
 				id="setup-reading"
 				title="SetupReading"
 				tier="visual"
-				components={["SetupReading"]}
+				components={["SetupReading", "SortBar"]}
 				sentence="Reading your bank, setup's screen from a bank linked until the questions open (P142 A, decisions 146, 148 and 150): the step bar, where Tally is (reading, sorting with its bar, taking longer than usual, or waiting for the daily run when Sort right away is off), what comes next, Notify me on this device, Your banks, the email line until the email has reached someone, and Link another bank at the foot. The page checks in every 30 seconds while its tab is on screen and refreshes while Tally reads or sorts, so it moves on to the questions by itself; this drawing does not, since a picture fires nothing by itself."
 			>
 				<State label="Reading, one bank: its history coming in, the page updating, Notify me, the email line">

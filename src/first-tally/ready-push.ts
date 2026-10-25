@@ -27,18 +27,13 @@ import { type PushEnv, vapidKeys } from "../push/keys";
 import { type PushPayload, sendPush } from "../push/web-push";
 import { logDeliveries } from "../reconnect/deliver";
 import { PUSH_AWAY_AFTER_MS } from "./home-seen";
-import {
-	addressHashOf,
-	claimSql,
-	openRead,
-	QUESTIONS_PATH,
-} from "./ready-email";
+import { addressHashOf, claimSql, openRead, SETUP_PATH } from "./ready-email";
 
 /** The push's words: the title and the body the notification shows, and the page it opens (sw.js). */
 export const PUSH_PAYLOAD: PushPayload = {
 	title: "Set up your budget",
 	body: "Your transactions are sorted. Three quick questions, about three minutes.",
-	url: QUESTIONS_PATH,
+	url: SETUP_PATH,
 };
 
 // Not once the email has gone: a person in readyEmailedTo is never pushed (the push is moot after the email).

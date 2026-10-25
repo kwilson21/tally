@@ -1499,13 +1499,13 @@ describe("GET /design-system in the demo", () => {
 
 	it("gives each notify control drawing its own help line, so no button points at another drawing's paragraph (#763)", async () => {
 		const { html } = await get("/design-system");
-		// Each NotifyControl drawing, and HomeSetup's Sorting state, draws a button described by its help line. A shared id would
-		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help. The reading screen's
-		// two drawings (its reading state and its on state, #772) each draw their own.
+		// Each NotifyControl drawing, and the reading screen's drawings, draws a button described by its help line. A shared id would
+		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help. HomeSetup's sorting
+		// drawing went with Home's setup (#772, part 2), so the reading screen's own drawings are the ones counted here.
 		const described = [
 			...html.matchAll(/aria-describedby="(notify-help[^"]*)"/g),
 		].map((match) => match[1] ?? "");
-		expect(described).toHaveLength(7);
+		expect(described).toHaveLength(6);
 		expect(new Set(described).size).toBe(described.length);
 		for (const id of described)
 			expect(html.match(new RegExp(`\\sid="${id}"`, "g")), id).toHaveLength(1);

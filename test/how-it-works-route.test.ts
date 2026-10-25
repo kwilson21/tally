@@ -521,6 +521,23 @@ describe("outside the demo", () => {
 	});
 
 	it("shows no Things to try but does show How this works on Home", async () => {
+		// A set-up household (every stroke drawn, with no day, as a household set up before the feature has): Home is Home, not setup.
+		await env.DB.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+			.bind(
+				JSON.stringify({
+					strokes: {
+						bank: null,
+						pay: null,
+						bills: null,
+						budgets: null,
+						count: null,
+					},
+					budgets: {},
+				}),
+			)
+			.run();
 		const html = await (await home.request("/", {}, notDemo)).text();
 		expect(html).not.toContain("Things to try");
 		expect(html).toContain('href="/how-it-works#budget"');

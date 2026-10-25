@@ -24,7 +24,7 @@ const SUBJECT = "Three questions to finish setting up";
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
-const LINK = "https://tally.thesuperhuman.us/first-page";
+const LINK = "https://tally.thesuperhuman.us/setup";
 const DANA = "dana@example.com";
 const RILEY = "riley@example.com";
 

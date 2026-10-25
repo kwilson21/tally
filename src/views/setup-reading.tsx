@@ -72,6 +72,24 @@ export function sortedShare(sorted: number, total: number): number {
 }
 
 /**
+ * The sort's bar, under the status while Tally sorts (and while it takes longer than usual). Hidden from assistive technology:
+ * the status says the count, so the bar is only the picture of it.
+ */
+export function SortBar({ sorted, total }: { sorted: number; total: number }) {
+	return (
+		<svg class="mt-3 block h-2 w-full" aria-hidden="true">
+			<rect width="100%" height="100%" rx="4" class="fill-rule" />
+			<rect
+				width={`${sortedShare(sorted, total)}%`}
+				height="100%"
+				rx="4"
+				class="fill-ink"
+			/>
+		</svg>
+	);
+}
+
+/**
  * The screen. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), with its Fix
  * (BankBehind). `yourBanks` are the connected banks' rows (YourBanks). `notify` is Notify me on this device (decision 149),
  * given when the server has Web Push keys; `shown` and `idSuffix` are for drawings. `linkBank` is the foot's Link another
@@ -129,15 +147,7 @@ export function SetupReading({
 			{/* Always drawn, empty when there is no bar, so part 2's poll can swap what is inside it. */}
 			<div id="setup-progress">
 				{(step === "sorting" || step === "slow") && (
-					<svg class="mt-3 block h-2 w-full" aria-hidden="true">
-						<rect width="100%" height="100%" rx="4" class="fill-rule" />
-						<rect
-							width={`${sortedShare(view.sorted, view.total)}%`}
-							height="100%"
-							rx="4"
-							class="fill-ink"
-						/>
-					</svg>
+					<SortBar sorted={view.sorted} total={view.total} />
 				)}
 			</div>
 			<p id="setup-next" class="mt-3 text-muted">

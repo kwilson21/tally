@@ -5,14 +5,15 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { setupRoute } from "../src/routes/setup";
 import { sameOrigin } from "../src/security";
 
-// The presence check-in (decision 146): POST /home/seen, posted every 30 seconds while Home's first-week setup or the
-// questions page is open. It writes the signed-in member's own home_seen_at, at most once in each 30 seconds. It answers
-// 204 with no body while the step the page shows is still the step now. Once that step has moved on, it answers without a
-// reload (a reload would close Plaid Link's window): the top is redrawn once, or, while still reading, only its status,
-// next line and check-in are swapped out of band; with no top to draw (set up, before a bank, the fifth day), Home is drawn
-// in full into #page. The router mounts sameOrigin and the Access identity as src/index.tsx does.
+// The presence check-in (decision 146): POST /home/seen, posted every 30 seconds while setup's reading screen or the questions page
+// is open. It writes the signed-in member's own home_seen_at, at most once in each 30 seconds. It answers 204 with no body while the
+// reading step the page shows is still the step now. Once that step has moved on, it answers without a reload (a reload would close
+// Plaid Link's window): the status, the bar, the next line, the list and the check-in are swapped out of band; once the phase has left
+// reading, the page is redrawn or moved on in place (redrawSetup, setup.tsx). The router mounts sameOrigin and the Access identity as
+// src/index.tsx does.
 const PERSON = "person@example.com";
 const RILEY = "riley@example.com";
 const ORIGIN = "http://localhost";
@@ -218,7 +219,7 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(res.headers.get("HX-Refresh")).toBeNull();
 	});
 
-	it("redraws the top, with no reload, once a slow page's questions open, and still writes its check-in", async () => {
+	it("moves a slow page on to the questions once they open, with HX-Redirect, and still writes its check-in", async () => {
 		await sorting();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now', '-2 hours')",
@@ -227,32 +228,20 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(slow.status).toBe(204);
 		await ready();
 		const res = await checkIn(family, ORIGIN, "slow");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
-		const html = await res.text();
-		expect(html).toContain('id="setup-top"');
-		expect(html).toContain("Set up your budget");
-		expect(announced(res)).toContain(
-			"Now answer three quick questions to set up your budget.",
-		);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
 		expect(await seenOf(PERSON)).not.toBeNull();
 	});
-
-	it("redraws the top once the sort the page shows has finished and the questions open", async () => {
+	it("moves the page on to the questions once the sort it shows has finished and they open", async () => {
 		await sorting();
 		await saveAiSwitches(env.DB, { categories: false, income: false });
 		await env.DB.prepare(
 			"DELETE FROM transactions WHERE plaid_transaction_id = 'waiting-seen'",
 		).run();
 		const res = await checkIn(family, ORIGIN, "sorting");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(await res.text()).toContain("Set up your budget");
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
 	});
-
 	it("swaps the status, the next line and the check-in out of band, with no reload, while still reading, and announces the new step once", async () => {
 		await sorting();
 		const res = await checkIn(family, ORIGIN, "reading");
@@ -289,12 +278,11 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 			/hx-get="([^"]+)"/
 				.exec(openingTag(html, "your-banks"))?.[1]
 				?.replaceAll("&amp;", "&") ?? "";
-		expect(url).toContain("/home/banks?");
-		const poll = await home.request(url, {}, family);
+		expect(url).toContain("/setup/banks?");
+		const poll = await setupRoute.request(url, {}, family);
 		expect(poll.status).toBe(200);
 		expect(poll.headers.get("HX-Trigger")).toBeNull();
 	});
-
 	it("a check-in that finds the sort back from slow puts the list's poll back on, so the count keeps up (decision 146)", async () => {
 		// The page drew slow, then the sort picked up again: every history came in just now, and something still waits.
 		await sorting();
@@ -305,34 +293,25 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(list).toContain("data-waits-for-link");
 	});
 
-	it("redraws the top once the page showed ready and the questions close again, so the bank's list and Link come back", async () => {
-		await ready();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = NULL",
-		).run();
-		const res = await checkIn(family, ORIGIN, "ready");
+	it("a page that showed the questions' step still names no step once they close again: a reading page moves in place, not to the questions", async () => {
+		await reading();
+		const res = await checkIn(family, ORIGIN, "sorting");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(await res.text()).toContain('id="your-banks"');
+		expect(res.headers.get("HX-Retarget")).toBeNull();
+		expect(res.headers.get("HX-Redirect")).toBeNull();
+		expect(announced(res)).toContain("Tally's reading your last 90 days");
 	});
-
-	it("redraws the top to the answered phase once the questions are answered, and announces its status", async () => {
+	it("moves the page on to Home once the questions are answered, with HX-Redirect to /", async () => {
 		await ready();
 		await writeRecord({
 			strokes: { bank: TODAY, pay: TODAY, bills: TODAY, budgets: TODAY },
 			budgets: {},
 		});
-		const res = await checkIn(family, ORIGIN, "ready");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(announced(res)).toBe(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		const res = await checkIn(family, ORIGIN, "reading");
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 	});
-
-	it("redraws Home in full, with no reload, once the setup is done and no longer drawn", async () => {
+	it("moves the page on to Home once the setup is done and no longer drawn", async () => {
 		await reading();
 		await writeRecord({
 			strokes: {
@@ -345,21 +324,10 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 			budgets: {},
 		});
 		const res = await checkIn(family, ORIGIN, "reading");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#page");
-		expect(res.headers.get("HX-Reselect")).toBe("#page");
-		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
-		const html = await res.text();
-		expect(html).toContain('id="page"');
-		// Home's status is announced as the page draws it, and it takes focus: the Link a bank or Fix button that had focus is gone.
-		const drawn = focusedText(html);
-		expect(drawn).toBeTruthy();
-		expect(announced(res)).toBe(drawn);
-		expect(autofocusCount(html)).toBe(1);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 	});
-
-	it("redraws Home in full on the fifth day, with its view and the night announced, and no reload", async () => {
+	it("the fifth day moves the page on to Home, which draws the night's view, with no reload", async () => {
 		await reading();
 		await writeRecord({
 			strokes: {
@@ -373,38 +341,23 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 			night: { brought: 3, needYou: 0 },
 		});
 		const res = await checkIn(family, ORIGIN, "reading");
-		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#page");
-		expect(announced(res)).toBe(
-			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
-		);
-		const html = await res.text();
-		expect(html).toContain(
-			"From tomorrow this list goes, and Home is just Home.",
-		);
-		// The night's sentence takes focus: the page's status is the one thing that changed (decision 146).
-		expect(focusedText(html)).toBe(announced(res));
-		expect(autofocusCount(html)).toBe(1);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 	});
-
-	it("redraws Home in full, with no reload, once the last connected bank is disconnected (before a bank)", async () => {
+	it("redraws the welcome into #setup-screen once the last connected bank is disconnected, announcing its headline and taking focus", async () => {
 		await reading();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		const res = await checkIn(family, ORIGIN, "reading");
 		expect(res.status).toBe(200);
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#page");
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
 		const html = await res.text();
-		expect(html).toContain('id="page"');
-		// Before a bank, Home's headline is announced and takes focus, as the page draws it (decision 146).
-		expect(announced(res)).toBe("Five strokes, and you're set up.");
-		expect(focusedText(html)).toBe("Five strokes, and you're set up.");
+		expect(html).toContain('id="setup-screen"');
+		expect(announced(res)).toBe("Welcome to Tally.");
+		expect(focusedText(html)).toBe("Welcome to Tally.");
 		expect(autofocusCount(html)).toBe(1);
 	});
-
 	it("never answers HX-Refresh to the questions page's check-in, which sends no step", async () => {
 		await ready();
 		const open = await checkIn(family, ORIGIN);

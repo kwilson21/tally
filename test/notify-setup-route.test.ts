@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
+import { setupRoute } from "../src/routes/setup";
 import { sameOrigin } from "../src/security";
 
-// Home's notify control and its script (decision 149), through the routes: Home's full load (GET /) and the check-in's redraw
-// (POST /home/seen) draw the control while the first week is reading and the server has VAPID keys. The control's script loads
-// on every full load with the keys, in any phase and on any month, so Plaid's success, a check-in's redraw back to reading and
-// a swap onto this month still find it. Neither shows anything in the demo, and the demo loads no script.
+// Setup's notify control and its script (decision 149, #772 part 2), through the routes: GET /setup draws the control while the import
+// is read and the server has VAPID keys, and its script loads on every setup page with the keys. Home has no control and loads no
+// script (Home's own pages are answered-only now). Neither shows anything in the demo.
 
 const PERSON = "person@example.com";
 const ORIGIN = "http://localhost";
@@ -44,7 +44,9 @@ router.use("*", async (c, next) => {
 router.route("/", home);
 
 const page = async (bindings: Env) =>
-	(await home.request("/", {}, bindings)).text();
+	(await setupRoute.request("/setup", {}, bindings)).text();
+const homePage = async (bindings: Env, path = "/") =>
+	(await home.request(path, {}, bindings)).text();
 
 const writeRecord = (value: unknown) =>
 	env.DB.prepare(
@@ -53,7 +55,7 @@ const writeRecord = (value: unknown) =>
 		.bind(JSON.stringify(value))
 		.run();
 
-/** The check-in's form post for the step the page shows, as Home's page sends it. */
+/** The check-in's form post for the step the reading screen shows. */
 const checkIn = (bindings: Env, step: string) =>
 	router.request(
 		"/home/seen",
@@ -76,7 +78,7 @@ beforeEach(async () => {
 	await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 });
 
-describe("Home's full load: the control and its script", () => {
+describe("setup's reading screen: the control and its script", () => {
 	it("while the import is read, with the keys: the control and push.js", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
 		const html = await page(pushing);
@@ -92,16 +94,17 @@ describe("Home's full load: the control and its script", () => {
 		expect(html).not.toContain(PUSH_MODULE);
 	});
 
-	it("before a bank, with the keys: push.js loads for a bank linked on this page, but no control yet", async () => {
+	it("before a bank, with the keys: push.js loads for the welcome, but no control yet", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		const html = await page(pushing);
+		expect(html).toContain("Welcome to Tally.");
 		expect(html).toContain(PUSH_MODULE);
 		expect(html).not.toContain(CONTROL);
 	});
 
-	it("once the questions are open, with the keys: push.js but no control yet (a redraw back to reading draws it)", async () => {
+	it("once the questions are open, with the keys: the page moves on to the questions, with no control to draw", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
@@ -109,53 +112,40 @@ describe("Home's full load: the control and its script", () => {
 			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
 			budgets: {},
 		});
-		const html = await page(pushing);
-		expect(html).toContain("Set up your budget");
-		expect(html).not.toContain("data-notify");
-		expect(html).toContain(PUSH_MODULE);
+		const response = await setupRoute.request("/setup", {}, pushing);
+		expect(response.status).toBe(303);
+		expect(response.headers.get("location")).toBe("/first-page");
 	});
 
-	it("once the questions are answered, with the keys: push.js but no control (a later redraw back to reading still finds the script)", async () => {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = datetime('now')",
-		).run();
-		await writeRecord({
-			strokes: {
-				bank: TODAY,
-				pay: TODAY,
-				bills: TODAY,
-				budgets: TODAY,
-			},
-			budgets: {},
-		});
-		const html = await page(pushing);
-		expect(html).not.toContain("data-notify");
-		expect(html).toContain(PUSH_MODULE);
-	});
-
-	it("on a past month, with the keys: push.js but no control (the control is drawn on this month only, and a swap back to it finds the script)", async () => {
+	it("on a past month, and once the questions are answered, Home draws no control and loads no push.js", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
 		const previous = new Date(`${TODAY.slice(0, 7)}-01T00:00:00Z`);
 		previous.setUTCMonth(previous.getUTCMonth() - 1);
-		const html = await (
-			await home.request(
-				`/?month=${previous.toISOString().slice(0, 7)}`,
-				{},
-				pushing,
-			)
-		).text();
+		const html = await homePage(
+			pushing,
+			`/?month=${previous.toISOString().slice(0, 7)}`,
+		);
 		expect(html).not.toContain("data-notify");
-		expect(html).toContain(PUSH_MODULE);
+		expect(html).not.toContain(PUSH_MODULE);
+		await writeRecord({
+			strokes: { bank: TODAY, pay: TODAY, bills: TODAY, budgets: TODAY },
+			budgets: {},
+		});
+		const answered = await homePage(pushing);
+		expect(answered).not.toContain("data-notify");
+		expect(answered).not.toContain(PUSH_MODULE);
 	});
 
-	it("in the demo, never: no control and no push.js", async () => {
+	it("in the demo, never: no setup, no control and no push.js", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
-		const html = await page(demo);
+		const response = await setupRoute.request("/setup", {}, demo);
+		expect(response.status).toBe(404);
+		const html = await homePage(demo);
 		expect(html).not.toContain("data-notify");
 		expect(html).not.toContain(PUSH_MODULE);
 	});
 
-	it("keeps Plaid Link's module alongside push.js on a page that loads both (before a bank, Plaid on)", async () => {
+	it("keeps Plaid Link's module alongside push.js on the welcome (before a bank, Plaid on)", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
@@ -170,17 +160,18 @@ describe("Home's full load: the control and its script", () => {
 	});
 });
 
-describe("the check-in's redraw draws the control too", () => {
-	it("draws it when the page asks for the questions and the server is still reading, with the keys", async () => {
+describe("the reading screen's in-place refresh draws no control again", () => {
+	it("a check-in whose step moved swaps the status, the list and the check-in, and not the control", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
-		const response = await checkIn(pushing, "ready");
+		const response = await checkIn(pushing, "sorting");
 		expect(response.status).toBe(200);
-		expect(await response.text()).toContain(CONTROL);
+		const html = await response.text();
+		expect(html).not.toContain("data-notify");
 	});
 
 	it("draws none with no keys", async () => {
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
-		const response = await checkIn(family, "ready");
+		const response = await checkIn(family, "sorting");
 		expect(await response.text()).not.toContain("data-notify");
 	});
 });

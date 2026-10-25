@@ -282,11 +282,11 @@ afterEach(() => {
 });
 
 describe("the ready push: its words", () => {
-	it("says the owner's words: the title Set up your budget, and the body, and opens the questions page", () => {
+	it("says the owner's words: the title Set up your budget, and the body, and opens setup, which moves on to the questions", () => {
 		expect(PUSH_PAYLOAD).toEqual({
 			title: "Set up your budget",
 			body: "Your transactions are sorted. Three quick questions, about three minutes.",
-			url: "/first-page",
+			url: "/setup",
 		});
 	});
 });

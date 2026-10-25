@@ -87,7 +87,7 @@ describe("the service worker's push", () => {
 			"Set up your budget",
 			expect.objectContaining({
 				body: "Your transactions are sorted. Three quick questions, about three minutes.",
-				data: { url: "/first-page" },
+				data: { url: "/setup" },
 			}),
 		);
 	});

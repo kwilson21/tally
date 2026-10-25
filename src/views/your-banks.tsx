@@ -1,6 +1,6 @@
 // Home's Your banks list during a new family's first week (P140 A, decision 133, spec §8.8): one ruled row per connected bank,
 // in link order, with the bank icon, its name and how far Tally has got at the right. While a bank is being read, the list
-// polls itself every 5 seconds (the fragment route /home/banks); it stops once none is, and never swaps an error in.
+// polls itself every 5 seconds (the fragment route /setup/banks); it stops once none is, and never swaps an error in.
 import {
 	type BankState,
 	bankState,
@@ -58,7 +58,7 @@ export function YourBanks({
 			{...(oob ? { "hx-swap-oob": "outerHTML" } : {})}
 			{...(polling
 				? {
-						"hx-get": `/home/banks?in=${inIds.join(",")}${step ? `&step=${step}` : ""}`,
+						"hx-get": `/setup/banks?in=${inIds.join(",")}${step ? `&step=${step}` : ""}`,
 						"hx-trigger": "every 5s",
 						"hx-swap": "outerHTML",
 						"hx-status:4xx": "swap:none",

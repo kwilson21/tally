@@ -1,4 +1,4 @@
-// The presence check-in (decision 146): Home's first-week setup and the questions page post to /home/seen every 30 seconds
+// The presence check-in (decision 146): setup's reading screen and the questions page post to /home/seen every 30 seconds
 // while they are open, so Tally knows who is still there and emails only the people who have left (ready-email.tsx). Home's
 // check-in also sends the step its page shows (`step`), so /home/seen redraws the page's first-week top once that step has
 // moved on, and someone watching sees the questions appear (it never reloads the page). It is a hidden element that swaps
@@ -11,8 +11,8 @@ import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 /** The id lets a refresh swap a new check-in in for the one the page shows (hx-swap-oob="outerHTML"). */
 export const HOME_SEEN_ID = "home-seen";
 
-/** The step Home's page shows: the words the banks refresh's poll names too (home.tsx). */
-export type ShownStep = "reading" | "sorting" | "slow" | "run" | "ready";
+/** The reading step setup's page shows: the words the banks refresh's poll names too (setup-reading.tsx's readingStep). */
+export type ShownStep = "reading" | "sorting" | "slow" | "run";
 
 /**
  * The check-in. `step` is given by Home only, as a form value; the questions page sends none. `oob` swaps this check-in in
