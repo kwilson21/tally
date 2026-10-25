@@ -1,7 +1,11 @@
 /** @jsxImportSource hono/jsx */
 import { describe, expect, it } from "vitest";
 import { SetupScreen } from "../src/views/setup-screen";
-import { SetupWelcome, WELCOME_HEADING, WELCOME_STEPS } from "../src/views/setup-welcome";
+import {
+	SetupWelcome,
+	WELCOME_HEADING,
+	WELCOME_STEPS,
+} from "../src/views/setup-welcome";
 
 // A setup screen's frame (P142 A, decision 148): its body, then its foot. On a phone the foot is pinned to the screen's foot.
 const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
@@ -52,17 +56,18 @@ describe("SetupWelcome", () => {
 		expect(markup).toContain("Four steps, about four minutes of your time.");
 		expect(markup).toContain(LINE);
 		expect(WELCOME_HEADING).toBe("Welcome to Tally.");
-		expect(WELCOME_STEPS.map((step) => [step.name, step.benefit, step.note]))
-			.toEqual([
-				[
-					"Link your bank",
-					"Tally reads your last 90 days, so you don't start from zero.",
-					"About a minute",
-				],
-				["Your pay", "So Tally knows what comes in.", "One question"],
-				["Your bills", "So they're set aside before you spend.", "One question"],
-				["Your budgets", "Suggested from what you really spend.", "One tap"],
-			]);
+		expect(
+			WELCOME_STEPS.map((step) => [step.name, step.benefit, step.note]),
+		).toEqual([
+			[
+				"Link your bank",
+				"Tally reads your last 90 days, so you don't start from zero.",
+				"About a minute",
+			],
+			["Your pay", "So Tally knows what comes in.", "One question"],
+			["Your bills", "So they're set aside before you spend.", "One question"],
+			["Your budgets", "Suggested from what you really spend.", "One tap"],
+		]);
 		for (const step of WELCOME_STEPS) {
 			expect(markup).toContain(step.name);
 			expect(markup).toContain(step.benefit);
@@ -99,7 +104,7 @@ describe("SetupWelcome", () => {
 			/<h1[^>]*id="setup-title"[^>]*tabindex="-1"[^>]*autofocus/,
 		);
 		const plain = welcome({});
-		expect(plain).toContain('<h1');
+		expect(plain).toContain("<h1");
 		expect(plain).not.toContain("autofocus");
 		expect(plain).not.toContain('tabindex="-1"');
 	});

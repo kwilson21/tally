@@ -66,7 +66,9 @@ export function SetupWelcome({
 				Tally reads your bank, sorts your spending and shows what's safe to
 				spend this month.
 			</p>
-			<p class="mt-2 text-muted">Four steps, about four minutes of your time.</p>
+			<p class="mt-2 text-muted">
+				Four steps, about four minutes of your time.
+			</p>
 			<ol class="mt-6 border-t border-rule">
 				{WELCOME_STEPS.map((step, i) => (
 					<li class="flex items-start gap-3 border-b border-rule py-3">

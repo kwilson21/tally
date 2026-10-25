@@ -33,7 +33,10 @@ const base: SetupView = {
 	waitsForRun: false,
 	runTime: "5 AM",
 };
-const view = (over: Partial<SetupView> = {}): SetupView => ({ ...base, ...over });
+const view = (over: Partial<SetupView> = {}): SetupView => ({
+	...base,
+	...over,
+});
 
 const html = (node: unknown) => String(node).replaceAll("&#39;", "'");
 
@@ -86,9 +89,7 @@ describe("readingStatus", () => {
 		).toBe(
 			"Tally sorts your last 90 days in its daily run, at about 5 AM, as set in Settings.",
 		);
-		expect(
-			readingStatus(view({ waitsForRun: true, runTime: "10 AM" })),
-		).toBe(
+		expect(readingStatus(view({ waitsForRun: true, runTime: "10 AM" }))).toBe(
 			"Tally sorts your last 90 days in its daily run, at about 10 AM, as set in Settings.",
 		);
 	});
@@ -101,7 +102,9 @@ describe("readingStatus", () => {
 
 	it("says taking longer than usual, with the count, once the sort is slow", () => {
 		expect(
-			readingStatus(view({ sorting: true, slow: true, sorted: 900, total: 1500 })),
+			readingStatus(
+				view({ sorting: true, slow: true, sorted: 900, total: 1500 }),
+			),
 		).toBe("Sorting is taking longer than usual: 900 of 1,500.");
 	});
 
@@ -112,9 +115,9 @@ describe("readingStatus", () => {
 	});
 
 	it("says from 2 banks with more than one, and no bank name with none", () => {
-		expect(
-			readingStatus(view({ bankName: "Chase", bankCount: 2 })),
-		).toBe("Tally's reading your last 90 days from 2 banks.");
+		expect(readingStatus(view({ bankName: "Chase", bankCount: 2 }))).toBe(
+			"Tally's reading your last 90 days from 2 banks.",
+		);
 		expect(readingStatus(view({ bankName: null, bankCount: 0 }))).toBe(
 			"Tally's reading your last 90 days.",
 		);
@@ -201,9 +204,7 @@ describe("the reading screen's fixed words", () => {
 });
 
 describe("SetupReading", () => {
-	const reading = (
-		props: Partial<Parameters<typeof SetupReading>[0]> = {},
-	) =>
+	const reading = (props: Partial<Parameters<typeof SetupReading>[0]> = {}) =>
 		html(
 			SetupReading({
 				view: view(),
@@ -282,7 +283,11 @@ describe("SetupReading", () => {
 		expect(reading()).not.toContain("data-notify");
 		expect(
 			reading({
-				notify: { vapidKey: "catalog-fake-vapid-key", shown: "off", idSuffix: "x" },
+				notify: {
+					vapidKey: "catalog-fake-vapid-key",
+					shown: "off",
+					idSuffix: "x",
+				},
 			}),
 		).toContain("data-notify");
 	});
@@ -306,7 +311,9 @@ describe("SetupReading", () => {
 		const markup = reading({
 			linkBank: <button type="button">Link another bank</button>,
 		});
-		const button = markup.indexOf('<button type="button">Link another bank</button>');
+		const button = markup.indexOf(
+			'<button type="button">Link another bank</button>',
+		);
 		expect(button).toBeGreaterThan(0);
 		expect(button).toBeLessThan(markup.indexOf(MORE_BANKS_LINE));
 		expect(markup.indexOf(MORE_BANKS_LINE)).toBeGreaterThan(
@@ -326,7 +333,9 @@ describe("SetupReading", () => {
 			polls: true,
 			view: view({ sorting: true, sorted: 318, total: 412 }),
 		});
-		expect(sorting).toContain('hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"');
+		expect(sorting).toContain(
+			'hx-vals="{&quot;step&quot;:&quot;sorting&quot;}"',
+		);
 
 		expect(reading({ polls: false })).not.toContain('hx-post="/home/seen"');
 	});

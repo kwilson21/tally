@@ -35,7 +35,9 @@ describe("StepBar", () => {
 
 	it("says where setup is in a paragraph, and hides the segments from assistive technology", async () => {
 		const { html } = await bars(1, "Step 2 of 4 · Your pay");
-		expect(html).toContain('<p class="text-sm text-muted">Step 2 of 4 · Your pay</p>');
+		expect(html).toContain(
+			'<p class="text-sm text-muted">Step 2 of 4 · Your pay</p>',
+		);
 		expect(html).toMatch(
 			/<div class="mt-2 grid grid-cols-4 gap-1\.5" aria-hidden="true">/,
 		);
