@@ -93,8 +93,9 @@ export function SortBar({ sorted, total }: { sorted: number; total: number }) {
  * The screen. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), with its Fix
  * (BankBehind). `yourBanks` are the connected banks' rows (YourBanks). `notify` is Notify me on this device (decision 149),
  * given when the server has Web Push keys; `shown` and `idSuffix` are for drawings. `linkBank` is the foot's Link another
- * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on (part 2
- * of #772). `polls` false draws no presence check-in, so a drawing fires nothing by itself (decision 146).
+ * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on
+ * (redrawSetup, src/routes/setup.tsx). `polls` false draws no presence check-in, so a drawing fires nothing by itself
+ * (decision 146).
  */
 export function SetupReading({
 	view,
@@ -144,7 +145,7 @@ export function SetupReading({
 			>
 				{readingStatus(view)}
 			</p>
-			{/* Always drawn, empty when there is no bar, so part 2's poll can swap what is inside it. */}
+			{/* Always drawn, empty when there is no bar, so the poll (/setup/banks) and the check-in swap what is inside it. */}
 			<div id="setup-progress">
 				{(step === "sorting" || step === "slow") && (
 					<SortBar sorted={view.sorted} total={view.total} />
