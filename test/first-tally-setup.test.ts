@@ -73,10 +73,19 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 		total: 0,
 		today: TODAY,
 		nowMs: NOW,
+		timeZone: "America/New_York",
 		...input,
 	});
 
 describe("setupView: which setup state Home shows", () => {
+	it("gives the reading screen the daily run's time in the zone it is given, and no wait until part 2 sets one (decision 150)", () => {
+		expect(view({ banks: [BANK] })?.runTime).toBe("5 AM");
+		expect(view({ banks: [BANK], timeZone: "Europe/London" })?.runTime).toBe(
+			"10 AM",
+		);
+		expect(view({ banks: [BANK] })?.waitsForRun).toBe(false);
+	});
+
 	it("shows nothing once all five strokes are drawn, whatever the day", () => {
 		expect(view({ record: ALL_DRAWN, banks: [BANK] })).toBeNull();
 	});
