@@ -151,6 +151,29 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 		expect((await storedRecord()).strokes.count).toBe(today());
 	});
 
+	it("keeps the fifth day's recap when the last bank is disconnected that day (#772)", async () => {
+		await bankHistoryIn();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		await writeRecord({
+			...answeredOn(yesterday()),
+			night: { brought: 3, needYou: 0 },
+		});
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+		const res = await home.request("/", {}, family);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		const html = (await res.text()).replaceAll("&#39;", "'");
+		expect(html).toContain(
+			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
+		);
+		expect(html).toContain("Safe to spend");
+		expect(html).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
+	});
+
 	it("says what needs a person, and links to the full list when nothing else is waiting (#714)", async () => {
 		await bankHistoryIn();
 		await env.DB.prepare("DELETE FROM transactions").run();

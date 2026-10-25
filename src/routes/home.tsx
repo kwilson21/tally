@@ -316,7 +316,7 @@ async function renderHome(
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
-						{setup?.phase === "answered" ? (
+						{setup?.phase === "answered" || setup?.fifth ? (
 							<HomeSetup
 								view={setup}
 								bankLine={bankNotice?.words}
