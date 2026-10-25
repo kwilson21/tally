@@ -992,6 +992,8 @@ const firstWeek = (
 		refreshes: false,
 		sorted: 0,
 		total: 0,
+		waitsForRun: false,
+		runTime: "5 AM",
 		...extra,
 	};
 	return {

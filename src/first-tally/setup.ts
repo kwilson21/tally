@@ -1,7 +1,7 @@
 // Home's setup during a new family's first week (P125 E, spec §8.8, decision 114): which state Home shows, its five
 // lines, and the counts its sentences use. `setupView` is pure over what it's given, so the rules are tested without a
 // database; `readSetup` reads the household. The caller shows it in the family app only: the demo never shows setup.
-import { dayLabel } from "../dates";
+import { dayLabel, householdTimeZone } from "../dates";
 import {
 	type FirstTally,
 	isSetUp,
@@ -79,6 +79,16 @@ export type SetupView = {
 	 * false, Home says Tally will email when they're ready.
 	 */
 	emailed: boolean;
+	/**
+	 * Reading, every history in, and the import left for the daily run's sorting (Sort right away off, decision 150): the
+	 * reading screen says when the run sorts it, with no count and no bar. Part 2 sets it; until then it is false.
+	 */
+	waitsForRun: boolean;
+	/**
+	 * The daily 09:00 UTC run's time in the household's time zone, as the reading screen says it ("5 AM"; "10 AM" in London in
+	 * summer; "2:30 PM" in Kolkata), from dailyRunTime.
+	 */
+	runTime: string;
 };
 
 /** The five lines' names (spec §8.8). */
@@ -317,6 +327,40 @@ export async function readFirstWeek(
 }
 
 const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+/**
+ * The hour (UTC) of the daily run: wrangler.jsonc's `0 9 * * *` cron, the run that syncs and starts the night's sort
+ * (src/index.tsx `runScheduled`).
+ */
+export const DAILY_RUN_UTC_HOUR = 9;
+
+/**
+ * The next daily run's time in `timeZone`, as the reading screen says it: "5 AM", "10 AM" in London in summer, "2:30 PM" in
+ * Kolkata (decision 150). The run is today's 09:00 UTC while `nowMs` is before it, otherwise tomorrow's, and the zone's clock
+ * is read at that instant. The words are built from the parts: the minutes only when they aren't "00", then a plain space
+ * (never the narrow no-break space newer ICU puts before AM and PM), then the day period.
+ */
+export function dailyRunTime(timeZone: string, nowMs: number): string {
+	const now = new Date(nowMs);
+	const todayRun = Date.UTC(
+		now.getUTCFullYear(),
+		now.getUTCMonth(),
+		now.getUTCDate(),
+		DAILY_RUN_UTC_HOUR,
+	);
+	const run = nowMs < todayRun ? todayRun : todayRun + DAY_MS;
+	const parts = new Intl.DateTimeFormat("en-US", {
+		timeZone,
+		hour: "numeric",
+		minute: "2-digit",
+	}).formatToParts(run);
+	const part = (type: Intl.DateTimeFormatPartTypes) =>
+		parts.find((p) => p.type === type)?.value ?? "";
+	const minute = part("minute");
+	const clock = minute === "00" ? part("hour") : `${part("hour")}:${minute}`;
+	return `${clock} ${part("dayPeriod")}`;
+}
 
 /**
  * A stored time as milliseconds: D1's UTC `YYYY-MM-DD HH:MM:SS`, an ISO time ending in Z, or a bare `YYYY-MM-DD` (midnight
@@ -356,6 +400,7 @@ export function setupView({
 	total,
 	today,
 	nowMs,
+	timeZone,
 }: {
 	record: FirstTally | null;
 	banks: GateBank[];
@@ -367,6 +412,8 @@ export function setupView({
 	today: string;
 	/** The clock the sort's times are read against (Date.now in readSetup). */
 	nowMs: number;
+	/** The household's time zone, in which the reading screen says the daily run's hour (householdTimeZone in readSetup). */
+	timeZone: string;
 }): SetupView | null {
 	const fifthDay =
 		record?.strokes.count === today && record.night !== undefined;
@@ -423,6 +470,8 @@ export function setupView({
 		answeredWaiting:
 			phase === "answered" ? answeredWaitingFor(banks, flagged) : null,
 		emailed: (record?.readyEmailedTo ?? []).length > 0,
+		waitsForRun: false,
+		runTime: dailyRunTime(timeZone, nowMs),
 	};
 }
 
@@ -474,5 +523,6 @@ export async function readSetup(
 		total,
 		today,
 		nowMs: Date.now(),
+		timeZone: await householdTimeZone(db),
 	});
 }

@@ -19,6 +19,8 @@ const base: SetupView = {
 	fifth: null,
 	answeredWaiting: null,
 	emailed: false,
+	waitsForRun: false,
+	runTime: "5 AM",
 };
 const top = async (
 	view: Partial<SetupView>,
