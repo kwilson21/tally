@@ -6,6 +6,7 @@ import {
 	readAiSwitches,
 	saveAiSwitches,
 } from "../src/db/ai-switches";
+import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
 
 // The AI suggestions group in Settings (spec §8.6, decision 73, P41 B): switches with On or Off in
@@ -706,5 +707,86 @@ describe("the sorting switch with categories, income and details all off", () =>
 		await saveAiSwitches(env.DB, { ...greyed, sortOnArrival: true });
 		await get("/settings/ai");
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
+	});
+});
+
+// Turning Sort right away back on while setup isn't done writes the daily run's wait mark with the switch (decision 150):
+// an import that the switch left waiting stays with the run, so setup keeps the run's words once it's back on.
+describe("POST /settings/ai: turning Sort right away back on (decision 150)", () => {
+	const WITHOUT_SORT = {
+		names: "on",
+		details: "on",
+		categories: "on",
+		income: "on",
+	};
+	const TURN_ON = { ...WITHOUT_SORT, sortOnArrival: "on" };
+
+	/** An import Jev hasn't answered, as a sync brings one in, so the count sees it waiting (countWaitingForJev). */
+	const waitingCharge = () =>
+		env.DB.prepare(
+			"INSERT INTO transactions(account_id,plaid_transaction_id,date,amount_cents,raw_name) VALUES(1,'plaid-waiting','2026-10-12',-500,'SHOP W')",
+		).run();
+
+	beforeEach(async () => {
+		// Sort right away off, as it is after a turn-off, and nothing waiting unless a test adds it.
+		await post("/settings/ai", WITHOUT_SORT);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(false);
+		await env.DB.batch([
+			env.DB.prepare("DELETE FROM bill_payments"),
+			env.DB.prepare("DELETE FROM transactions"),
+		]);
+	});
+
+	it("writes the wait mark with the switch while an import waits for Jev", async () => {
+		await markStroke(env.DB, "bank", "2026-10-12");
+		await waitingCharge();
+		const { res } = await post("/settings/ai", TURN_ON);
+		expect(res.status).toBe(200);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
+		expect((await readFirstTally(env.DB))?.waitsForRun).toBe(true);
+	});
+
+	it("writes no mark with nothing waiting for Jev", async () => {
+		await markStroke(env.DB, "bank", "2026-10-12");
+		await post("/settings/ai", TURN_ON);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
+		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
+	});
+
+	it("writes no mark once the count stroke is drawn", async () => {
+		await markStroke(env.DB, "bank", "2026-10-12");
+		await markStroke(env.DB, "count", "2026-10-13");
+		await waitingCharge();
+		await post("/settings/ai", TURN_ON);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
+		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
+	});
+
+	it("writes no record when there is none, as a set-up household or the demo has none", async () => {
+		await waitingCharge();
+		await post("/settings/ai", TURN_ON);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);
+		expect(await readFirstTally(env.DB)).toBeNull();
+	});
+
+	it("writes no mark when another switch is turned on", async () => {
+		await saveAiSwitches(env.DB, { income: false });
+		await markStroke(env.DB, "bank", "2026-10-12");
+		await waitingCharge();
+		await post("/settings/ai", WITHOUT_SORT);
+		expect(await readAiSwitches(env.DB)).toMatchObject({
+			income: true,
+			sortOnArrival: false,
+		});
+		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
+	});
+
+	it("writes no mark when Sort right away is turned off", async () => {
+		await saveAiSwitches(env.DB, { sortOnArrival: true });
+		await markStroke(env.DB, "bank", "2026-10-12");
+		await waitingCharge();
+		await post("/settings/ai", WITHOUT_SORT);
+		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(false);
+		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
 	});
 });
