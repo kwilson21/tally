@@ -4,6 +4,7 @@ import type { BillSuggestion } from "../src/bills/find";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import {
 	type BudgetAnswer,
+	clearWaitsForRunStatement,
 	forgetPayDeposits,
 	isSetUp,
 	keepBudgetStatement,
@@ -17,7 +18,9 @@ import {
 	strokeStatement,
 	takeBackBankStrokes,
 	takeBackQuestionStrokes,
+	waitsForRunStatement,
 } from "../src/db/first-tally";
+import { waitingForJevSql } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import {
 	answerPay,
@@ -879,6 +882,100 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 			on: "2026-10-13",
 			ok: true,
 		}).run();
+		await takeBackBankStrokes(db, 999).run();
+		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
+	});
+});
+
+describe("the daily run's wait mark (decision 150)", () => {
+	// Both switches are on, so the SQL is never null (null is for both off).
+	const waitingSql = waitingForJevSql({
+		categories: true,
+		income: true,
+	}) as string;
+	/** One imported charge Jev hasn't answered, as a sync brings one in, so the count sees it waiting (countWaitingForJev). */
+	const waitingCharge = () =>
+		db
+			.prepare(
+				"INSERT INTO transactions(account_id,plaid_transaction_id,date,amount_cents,raw_name) VALUES(1,'plaid-waiting','2026-10-12',-500,'SHOP W')",
+			)
+			.run();
+	/** Takes every charge away, so nothing waits for Jev. */
+	const nothingWaits = () =>
+		db.batch([
+			db.prepare("DELETE FROM bill_payments"),
+			db.prepare("DELETE FROM transactions"),
+		]);
+
+	beforeEach(async () => {
+		await waitingCharge();
+	});
+
+	it("is written only on a record that exists, and only while the count stroke isn't drawn", async () => {
+		await waitsForRunStatement(db, waitingSql).run();
+		expect(await stored()).toBeNull();
+		await markStroke(db, "bank", "2026-10-12");
+		await waitsForRunStatement(db, waitingSql).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+		await clearWaitsForRunStatement(db, null).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+		await markStroke(db, "count", "2026-10-13");
+		await waitsForRunStatement(db, waitingSql).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("is not written when no row waits for Jev", async () => {
+		await markStroke(db, "bank", "2026-10-12");
+		await nothingWaits();
+		await waitsForRunStatement(db, waitingSql).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("leaves every other field as it is, and writing it twice changes nothing", async () => {
+		await markStroke(db, "bank", "2026-10-12");
+		await keepBudget(3, { kind: "suggested", cents: 65000 });
+		await waitsForRunStatement(db, waitingSql).run();
+		await waitsForRunStatement(db, waitingSql).run();
+		expect(await readFirstTally(db)).toEqual({
+			strokes: { bank: "2026-10-12" },
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
+			waitsForRun: true,
+		});
+	});
+
+	it("the night's clear keeps the mark while a row waits, and removes it once none does", async () => {
+		await markStroke(db, "bank", "2026-10-12");
+		await waitsForRunStatement(db, waitingSql).run();
+		await clearWaitsForRunStatement(db, waitingSql).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
+		await nothingWaits();
+		await clearWaitsForRunStatement(db, waitingSql).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("the clear with no waiting SQL removes the mark even while a row waits", async () => {
+		await markStroke(db, "bank", "2026-10-12");
+		await waitsForRunStatement(db, waitingSql).run();
+		await clearWaitsForRunStatement(db, null).run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+	});
+
+	it("is removed by a take-back of the questions, since nothing waits once they are taken back", async () => {
+		await answeredQuestions("2026-10-12");
+		await waitsForRunStatement(db, waitingSql).run();
+		await takeBackQuestionStrokes(db, "Wells Fargo").run();
+		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
+		expect((await readFirstTally(db))?.reAsk).toEqual({
+			bank: "Wells Fargo",
+		});
+	});
+
+	it("is removed by a take-back of the bank strokes when the last bank goes before setup is done", async () => {
+		await answeredQuestions("2026-10-12");
+		await waitsForRunStatement(db, waitingSql).run();
+		await db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
 		await takeBackBankStrokes(db, 999).run();
 		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
 	});

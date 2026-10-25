@@ -1,6 +1,7 @@
 // When the first week's questions open (spec §8.8, decision 146): once stroke one is drawn, every connected bank's first
 // sync and its 90-day history done, and no imported transaction still waiting for Jev's category or income answer. There
-// is no wait for a later day. Nothing here polls; the pages that show it do. Once the first week is set up they stay shut
+// is no wait for a later day while Sort right away is on; with it off, a sync asks Jev nothing, so the import waits for the
+// daily run's sorting (decision 150). Nothing here polls; the pages that show it do. Once the first week is set up they stay shut
 // (readQuestionsGate).
 import { readAiSwitches } from "../db/ai-switches";
 import { isSetUp, readFirstTally } from "../db/first-tally";
@@ -64,9 +65,12 @@ export const BANK_CONNECTED_SQL =
  * What the gate reads besides the record: each connected bank, and what Jev is still owed, counted with the AI switches
  * that decide it. One place, so Home's setup and the gate count the same things.
  */
-export async function readGateInputs(
-	db: D1Database,
-): Promise<{ banks: GateBank[]; waiting: number }> {
+export async function readGateInputs(db: D1Database): Promise<{
+	banks: GateBank[];
+	waiting: number;
+	/** Sort right away (the switch the sync's sort follows, decision 150). */
+	sortOnArrival: boolean;
+}> {
 	const { results: banks } = await db
 		.prepare(
 			"SELECT id, institution_name AS name, created_at AS linkedAt, last_synced_at AS lastSyncedAt, history_complete_at AS historyCompleteAt FROM plaid_items WHERE disconnected_at IS NULL ORDER BY id",
@@ -77,7 +81,7 @@ export async function readGateInputs(
 		categories: switches.categories,
 		income: switches.income,
 	});
-	return { banks, waiting };
+	return { banks, waiting, sortOnArrival: switches.sortOnArrival };
 }
 
 /**
