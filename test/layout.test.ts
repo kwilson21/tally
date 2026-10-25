@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import transactionsRoute from "../src/routes/transactions.tsx?raw";
 import css from "../src/styles/app.css?raw";
 import { BottomSheet } from "../src/views/bottom-sheet";
+import { Layout } from "../src/views/layout";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -269,5 +270,74 @@ describe("a phone sheet's room for a toast", () => {
 		expect(css).toMatch(
 			/--toast-top-room:\s*max\(5\.625rem,\s*calc\(var\(--toasts-height\)\s*\+\s*1\.5rem\)\);/,
 		);
+	});
+});
+
+/** The class names of one element in a rendered page, as the browser reads them (tokens, not substrings). */
+const classTokens = (html: string, id: string) =>
+	(
+		decodeAttributes(html).match(
+			new RegExp(`id="${id}" class="([^"]*)"`),
+		)?.[1] ?? ""
+	)
+		.split(" ")
+		.filter(Boolean);
+
+describe("the setup frame (P142 A, decision 148)", () => {
+	const page = (props: { setup?: boolean } = {}) =>
+		decodeAttributes(
+			String(Layout({ demo: false, children: "body", ...props })),
+		);
+
+	it("has no sidebar and no tab bar, so neither nav landmark is drawn", () => {
+		const html = page({ setup: true });
+		expect(html).not.toContain("<aside");
+		expect(html).not.toContain('aria-label="Main"');
+		expect(html).not.toContain('aria-label="Tabs"');
+	});
+
+	it("keeps the top line at every width, with its Feedback pill", () => {
+		const html = page({ setup: true });
+		const top = classTokens(html, "top-line");
+		expect(top).not.toContain("lg:hidden");
+		expect(top).not.toContain("hidden");
+		expect(html).toMatch(/<div id="top-line"[\s\S]*?href="\/feedback"/);
+	});
+
+	it("sits its children in one centred column, with no tab-bar room at the foot", () => {
+		const html = page({ setup: true });
+		const main = classTokens(html, "main");
+		expect(main).toContain("pb-0");
+		expect(main).toContain("lg:pb-24");
+		expect(main).not.toContain("pb-[var(--focus-scroll-room)]");
+		expect(html).toMatch(
+			/<main id="main"[\s\S]*?<div class="mx-auto w-full max-w-md">[\s\S]*?body/,
+		);
+	});
+
+	it("puts the toasts at the top edge on a phone, and leaves desktop's placement alone", () => {
+		const setupToasts = classTokens(page({ setup: true }), "toasts");
+		expect(setupToasts).toContain(
+			"max-lg:top-[calc(0.75rem+var(--safe-area-top))]",
+		);
+		expect(setupToasts).toContain("max-lg:bottom-auto");
+		expect(setupToasts).toContain("lg:bottom-6");
+		const plainToasts = classTokens(page(), "toasts");
+		expect(plainToasts).not.toContain(
+			"max-lg:top-[calc(0.75rem+var(--safe-area-top))]",
+		);
+		expect(plainToasts).not.toContain("max-lg:bottom-auto");
+	});
+
+	it("without the prop, every page keeps its sidebar, tab bar and top line on phones", () => {
+		const html = page();
+		expect(html).toContain("<aside");
+		expect(html).toContain('aria-label="Main"');
+		expect(html).toContain('aria-label="Tabs"');
+		expect(classTokens(html, "top-line")).toContain("lg:hidden");
+		expect(classTokens(html, "main")).toContain(
+			"pb-[var(--focus-scroll-room)]",
+		);
+		expect(html).not.toContain('class="mx-auto w-full max-w-md"');
 	});
 });
