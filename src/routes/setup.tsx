@@ -2,7 +2,7 @@ import { type Context, Hono } from "hono";
 import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { bankSyncs } from "../db/accounts";
-import { settleAndLoad } from "../first-tally/first-page";
+import { readFinish, settleAndLoad } from "../first-tally/first-page";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import {
 	bankState,
@@ -28,6 +28,7 @@ import { SetupWelcome, WELCOME_HEADING } from "../views/setup-welcome";
 import { YourBanks } from "../views/your-banks";
 import {
 	drawQuestionScreen,
+	finishPage,
 	questionHeading,
 	questionsPage,
 } from "./first-page";
@@ -166,13 +167,14 @@ export async function redrawSetup(
 /**
  * The setup's full page: the welcome before a bank, Reading your bank after one, and the questions once they are open (one
  * screen each; `?budgets=one` asks the budgets one category at a time, with its question focused). The family app only. The
- * demo has no setup and answers 404. Once the questions are answered, or the fifth day is drawn, Home. So, unlike the old
- * question page, a reload after the last answer opens Home rather than drawing the ruled-off total. A settle on this load that
- * completes the budgets step draws the ruled-off total, at 200.
+ * demo has no setup and answers 404. Once the budgets stroke is drawn, the setup finish (readFinish, from the record) is drawn
+ * at 200 for a reload or a later visit, and it comes before any other phase. Otherwise the phases as above.
  */
 setupRoute.get("/setup", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
+	const finish = await readFinish(c.env.DB, today);
+	if (finish) return c.html(finishPage(finish, false));
 	const flagged = flaggedBanks(await bankSyncs(c.env.DB), today);
 	const view = await readSetup(c.env.DB, { today, flagged });
 	if (!view || view.fifth || view.phase === "answered")

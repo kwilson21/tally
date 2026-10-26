@@ -7,15 +7,19 @@ import {
 	type BudgetAsk,
 	keepAllQuestion,
 } from "../src/first-tally/budgets";
+import { FINISH_HEADING, finishBudgetsLine } from "../src/first-tally/finish";
 import type {
 	BudgetsStep,
+	FinishRead,
 	FirstPageModel,
 	PayMerchant,
 } from "../src/first-tally/first-page";
 import { questionHeading, questionScreen } from "../src/routes/first-page";
+import { safeToSpendText } from "../src/views/home-top";
 
 // The screen a model draws at /setup (P142 A, decision 148, #773): the question its step asks, one screen at a time, and the
-// heading each draws, which the in-place redraw announces. Each branch of questionScreen is drawn here.
+// heading each draws, which the in-place redraw announces. Each branch of questionScreen is drawn here, the setup finish (#774)
+// included.
 
 const EVERY_OTHER_FRIDAY = ["2026-09-11", "2026-09-25", "2026-10-09"];
 const PAY: PayMerchant = {
@@ -78,8 +82,22 @@ const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 	budgets: null,
 	budgetsAnswered: false,
 	watching: false,
+	finish: null,
 	...over,
 });
+
+/** The finish as readFinish reads it once the budgets stroke is drawn: Safe to spend and one budgets row. */
+const FINISH: FinishRead = {
+	month: "2026-10",
+	safeCents: 70000,
+	rows: {
+		pay: [],
+		bills: null,
+		budgets: finishBudgetsLine(12, 405000),
+		savings: null,
+	},
+	sortsOnArrival: true,
+};
 
 /** A budgets step not yet done, with the asks and the flags given. */
 const notDone = (over: Partial<Extract<BudgetsStep, { done: false }>> = {}) =>
@@ -164,33 +182,34 @@ describe("questionScreen", () => {
 		expect(markup).toContain('action="/setup/savings"');
 	});
 
-	it("draws the ruled-off total with no step bar once the budgets step is done", () => {
+	it("draws the setup finish once the budgets stroke is drawn: the heading, Safe to spend and Go to Home, in setup's screen", () => {
 		const markup = render(
-			modelOf({
-				payAnswered: true,
-				budgets: { done: true, safeCents: 70000, nothingAsked: null },
-			}),
+			modelOf({ payAnswered: true, budgets: { done: true }, finish: FINISH }),
 		);
 		expect(markup).toContain('id="setup-screen"');
-		expect(markup).toContain("Safe to spend");
+		expect(h1Of(markup)).toBe(FINISH_HEADING);
+		expect(markup).toContain("Safe to spend in October");
+		expect(markup).toContain(safeToSpendText(70000));
 		expect(markup).toContain("Go to Home");
+		expect(markup).toContain("Setup done");
 		expect(markup).not.toContain("Step 4 of 4");
-		expect(markup).not.toContain("<h1");
-		expect(markup).not.toContain('id="setup-foot"');
+		expect(markup).toContain(finishBudgetsLine(12, 405000));
+		expect(markup).toContain('id="setup-foot"');
 	});
 
-	it("draws the ruled-off total's reason above the rule, when the step asked nothing", () => {
+	it("draws the finish before any question, whatever pay or bills still asks (the finish comes from the record)", () => {
 		const markup = render(
 			modelOf({
-				payAnswered: true,
-				budgets: {
-					done: true,
-					safeCents: 70000,
-					nothingAsked: "every-category-budgeted",
-				},
+				pay: [PAY],
+				keep: KEEP,
+				budgets: { done: true },
+				finish: FINISH,
 			}),
 		);
-		expect(markup).toContain("Every category already has a budget.");
+		expect(h1Of(markup)).toBe(FINISH_HEADING);
+		expect(markup).not.toContain("Is this your pay?");
+		expect(markup).not.toContain('action="/setup/pay"');
+		expect(markup).not.toContain('action="/setup/bills"');
 	});
 
 	it("draws no screen for a page with no budgets step read (the type's null, which settleAndLoad never leaves)", () => {
@@ -206,13 +225,14 @@ describe("questionScreen", () => {
 		}
 	});
 
-	it("gives the ruled-off total's Safe to spend the focus when focus is given", () => {
-		const done = modelOf({
+	it("gives the finish's heading the focus only when focus is given, as the last answer's reply does", () => {
+		const finish = modelOf({
 			payAnswered: true,
-			budgets: { done: true, safeCents: 70000, nothingAsked: null },
+			budgets: { done: true },
+			finish: FINISH,
 		});
-		expect(render(done, true)).toMatch(/<p[^>]*\sautofocus/);
-		expect(render(done, false)).not.toMatch(/<p[^>]*\sautofocus/);
+		expect(h1Focused(render(finish, true))).toBe(true);
+		expect(h1Focused(render(finish, false))).toBe(false);
 	});
 
 	it("moves the focus from a refused amount's heading to its field, as the one-at-a-time screen does", () => {
@@ -283,7 +303,7 @@ describe("questionScreen", () => {
 		);
 	});
 
-	it("draws no notes on the pay screen or on the ruled-off total", () => {
+	it("draws no notes on the pay screen or on the finish", () => {
 		// A note names its step in ink, as the step bar's own label does not.
 		const NOTE = (step: string) => `<span class="text-ink">${step}</span>`;
 		expect(render(modelOf({ pay: [PAY] }))).not.toContain(NOTE("Your pay"));
@@ -291,11 +311,8 @@ describe("questionScreen", () => {
 			render(
 				modelOf({
 					payAnswered: true,
-					budgets: {
-						done: true,
-						safeCents: 1,
-						nothingAsked: "no-categories",
-					},
+					budgets: { done: true },
+					finish: FINISH,
 				}),
 			),
 		).not.toContain(NOTE("Your budgets"));
@@ -326,15 +343,16 @@ describe("questionHeading", () => {
 		expect(h1Of(render(model))).toBe(keepAllQuestion(1));
 	});
 
-	it("is null for the ruled-off total and for a page with no budgets step", () => {
+	it("is the finish's heading once the finish is drawn, and null for a page with no budgets step", () => {
 		expect(
 			questionHeading(
 				modelOf({
 					payAnswered: true,
-					budgets: { done: true, safeCents: 1, nothingAsked: null },
+					budgets: { done: true },
+					finish: FINISH,
 				}),
 			),
-		).toBeNull();
+		).toBe(FINISH_HEADING);
 		expect(questionHeading(modelOf({ payAnswered: true }))).toBeNull();
 	});
 

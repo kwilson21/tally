@@ -178,7 +178,7 @@ describe("GET /setup after a bank: Reading your bank", () => {
 		expect(without.html).not.toContain("/js/push.js");
 	});
 
-	it("draws the questions for a family whose questions are open, and sends one with them answered Home", async () => {
+	it("draws the questions for a family whose questions are open, and draws the finish once they are answered", async () => {
 		await sortingAndHistoryIn();
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
@@ -198,8 +198,8 @@ describe("GET /setup after a bank: Reading your bank", () => {
 			budgets: {},
 		});
 		const answered = await setup(family);
-		expect(answered.res.status).toBe(303);
-		expect(answered.res.headers.get("location")).toBe("/");
+		expect(answered.res.status).toBe(200);
+		expect(answered.html).toContain("You're set up.");
 	});
 });
 

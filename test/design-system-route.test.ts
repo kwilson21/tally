@@ -275,48 +275,11 @@ describe("GET /design-system in the demo", () => {
 		}
 	});
 
-	it("shows the budgets step's nothing-to-ask state with its line above the ruled-off total (#590)", async () => {
-		const { html } = await get("/design-system");
-		// The state's own page: from its id to the no-categories state's (the line sits above the double rule).
-		const section =
-			html
-				.split('id="setup-ruled-total-nothing-asked"')[1]
-				?.split('id="setup-ruled-total-no-categories"')[0] ?? "";
-		expect(section).toContain("Every category already has a budget.");
-		expect(section).not.toContain("No categories to budget yet.");
-		expect(
-			section.indexOf("Every category already has a budget."),
-		).toBeLessThan(section.indexOf("border-double"));
-	});
-
-	it("shows the budgets step's no-categories state with its own line above the ruled-off total (#692)", async () => {
-		const { html } = await get("/design-system");
-		// The state's own page: from its id to the accounts group's (the group closes the first-week section).
-		const section =
-			html
-				.split('id="setup-ruled-total-no-categories"')[1]
-				?.split('id="accounts"')[0] ?? "";
-		expect(section).toContain("No categories to budget yet.");
-		expect(section).not.toContain("Every category already has a budget.");
-		expect(section.indexOf("No categories to budget yet.")).toBeLessThan(
-			section.indexOf("border-double"),
-		);
-	});
-
-	it("draws no old first page ids, and setup's ruled-off total holds Safe to spend and Go to Home with no nothing-to-ask line (#773)", async () => {
+	it("draws no old first page ids in the catalog (#773)", async () => {
 		const { html } = await get("/design-system");
 		expect(html).not.toContain('id="first-page"');
 		expect(html).not.toContain('id="first-page-questions"');
 		expect(html).not.toContain('id="first-page-budgets"');
-		const done =
-			html
-				.split('id="setup-ruled-total-done"')[1]
-				?.split('id="setup-ruled-total-nothing-asked"')[0] ?? "";
-		expect(done).toContain("Safe to spend");
-		expect(done).toContain("border-double");
-		expect(done).toContain("Go to Home");
-		expect(done).not.toContain("Every category already has a budget.");
-		expect(done).not.toContain("No categories to budget yet.");
 	});
 
 	it("draws setup's finish as four states, after setup's savings and before the first week part (#774)", async () => {
@@ -852,7 +815,6 @@ describe("GET /design-system in the demo", () => {
 		"setup-one-budget",
 		"setup-savings",
 		"setup-finish",
-		"setup-ruled-total",
 	])(
 		"gives %s its whole use spec, as a visual component, from its own section (decision 148, DESIGN.md section 3)",
 		async (id) => {

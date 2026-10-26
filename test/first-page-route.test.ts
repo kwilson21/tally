@@ -336,11 +336,12 @@ describe("the gate", () => {
 					.all()
 			).results;
 
-		it("sends the page Home with a 303, and a plain answer Home too", async () => {
+		it("draws the setup finish at 200 for a reload, and a plain answer Home too", async () => {
 			await setUp();
-			const { res } = await get("/setup");
-			expect(res.status).toBe(303);
-			expect(res.headers.get("Location")).toBe("/");
+			const { res, html } = await get("/setup");
+			expect(res.status).toBe(200);
+			expect(html).toContain("You&#39;re set up.");
+			expect(html).toContain('href="/"');
 			const answer = await post("/setup/pay", [["answer", "yes"]]);
 			expect(answer.res.status).toBe(303);
 			expect(answer.res.headers.get("Location")).toBe("/");

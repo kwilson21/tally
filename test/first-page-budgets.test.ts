@@ -45,6 +45,8 @@ const CUR = TODAY.slice(0, 7);
 const MONTH_2 = monthsBefore(CUR, 2);
 const MONTH_1 = monthsBefore(CUR, 1);
 const STROKE_ONE = daysBefore(TODAY, 2);
+/** The setup finish's heading, as the page's text reads it (P142 A, decision 148, #774). */
+const SET_UP = "You're set up.";
 
 /**
  * The app with the page mounted, as the family app serves it, with a verified identity. `DB` is the database the page
@@ -673,7 +675,7 @@ describe("the step's end", () => {
 		expect(record?.strokes.budgets).toBe(TODAY);
 	});
 
-	it("rules off the month's Safe to spend, the number Home shows, under the Four line", async () => {
+	it("draws the setup finish with the month's Safe to spend, the number Home shows, once the budgets step is done", async () => {
 		await spend(A, 10000, TODAY);
 		await post("/setup/budgets", [
 			["category", String(A)],
@@ -699,16 +701,14 @@ describe("the step's end", () => {
 		// The month's budgets ($650 and $150) less this month's $100 of spending.
 		expect(summary.safeToSpendCents).toBe(70000);
 		const text = textOf(last.html);
-		expect(text).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
-		expect(text).toContain("Safe to spend");
+		expect(text).toContain(SET_UP);
+		expect(text).toContain("Safe to spend in October");
 		expect(text).toContain(safeToSpendText(summary.safeToSpendCents));
 		expect(last.html).toContain('href="/"');
 		expect(text).toContain("Go to Home");
 	});
 
-	it("draws the total as the reply to the last answer, and a reload opens Home", async () => {
+	it("draws the finish as the reply to the last answer, and a reload of /setup draws it too (#774)", async () => {
 		for (const id of [A, B, C, D]) {
 			await post("/setup/budgets", [
 				["category", String(id)],
@@ -717,11 +717,11 @@ describe("the step's end", () => {
 		}
 		const { html } = await post("/setup/savings", [["answer", "skip"]]);
 		const reload = await get("/setup");
-		expect(reload.res.status).toBe(303);
-		expect(reload.res.headers.get("Location")).toBe("/");
-		expect(textOf(html)).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(reload.res.status).toBe(200);
+		expect(textOf(reload.html)).toContain(SET_UP);
+		expect(reload.html).toContain('href="/"');
+		expect(focusedHeading(reload.html)).toBeNull();
+		expect(textOf(html)).toContain(SET_UP);
 		expect(textOf(html)).not.toContain("Keep all");
 		expect(html).not.toContain("budget?");
 		// Every category was answered (skipped), so the line for a step with nothing to ask is not the one said.
@@ -740,9 +740,7 @@ describe("the step's end", () => {
 		const text = textOf(
 			(await post("/setup/savings", [["answer", "skip"]])).html,
 		);
-		expect(text).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(text).toContain(SET_UP);
 		expect(text).not.toContain("Every category already has a budget.");
 		expect(text).not.toContain("No categories to budget yet.");
 	});
@@ -1289,31 +1287,25 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 });
 
 describe("the budgets step with nothing to ask (#590 review)", () => {
-	it("says every category already has a budget, above the ruled-off Safe to spend, when Home budgeted them all", async () => {
+	it("draws the finish with no reason line when Home budgeted every category: the finish has no line for why a step asked nothing (#774)", async () => {
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
 		await get("/setup");
 		const { html } = await post("/setup/savings", [["answer", "skip"]]);
 		const text = textOf(html);
-		expect(text).toContain("Every category already has a budget.");
-		expect(text.indexOf("Every category already has a budget.")).toBeLessThan(
-			text.indexOf("Safe to spend"),
-		);
-		expect(text).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(text).toContain(SET_UP);
+		expect(text).toContain("Safe to spend");
+		expect(text).not.toContain("Every category already has a budget.");
 		expect(text).not.toContain("No categories to budget yet.");
 	});
 
-	it("says there are no categories to budget, not that they are budgeted, when every category is archived (#692 review)", async () => {
+	it("draws the finish with no reason line when every category is archived (#692 review)", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
 		await get("/setup");
 		const text = textOf(
 			(await post("/setup/savings", [["answer", "skip"]])).html,
 		);
-		expect(text).toContain("No categories to budget yet.");
-		expect(text.indexOf("No categories to budget yet.")).toBeLessThan(
-			text.indexOf("Safe to spend"),
-		);
+		expect(text).toContain(SET_UP);
+		expect(text).not.toContain("No categories to budget yet.");
 		expect(text).not.toContain("Every category already has a budget.");
 	});
 
@@ -1334,9 +1326,7 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 		const text = textOf(
 			String(questionScreen(await settleAndLoad(db, TODAY), { focus: false })),
 		);
-		expect(text).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(text).toContain(SET_UP);
 		expect(text).not.toContain("Every category already has a budget.");
 		expect(text).not.toContain("No categories to budget yet.");
 	});
@@ -1514,8 +1504,6 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		"Safe to spend sets it aside from the 1st, before anything else. You can change it on Home any time.";
 	const LABEL = `Save each month, from ${monthName(CUR)} on`;
 	const BLANK = "Enter an amount greater than $0, or choose Not now.";
-	const FOUR =
-		"Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
 
 	/** The goal row for a month, in cents, or undefined when there is none. */
 	async function goalFor(month = CUR): Promise<number | undefined> {
@@ -1594,13 +1582,13 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		});
 	}
 
-	it("asks Save some each month? after the last category, with the field blank, and no Four line yet", async () => {
+	it("asks Save some each month? after the last category, with the field blank, and no finish yet", async () => {
 		const { html } = await skipAll();
 		const text = textOf(html);
 		expect(text).toContain(QUESTION);
 		expect(text).toContain(HELP);
 		expect(text).toContain(LABEL);
-		expect(text).not.toContain(FOUR);
+		expect(text).not.toContain(SET_UP);
 		expect(focusedHeading(html)).toBe(QUESTION);
 		const forms = savingsFormsOf(html);
 		expect(forms).toHaveLength(2);
@@ -1618,18 +1606,18 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
 	});
 
-	it("asks it at load when no category is left, not the Four line", async () => {
+	it("asks it at load when no category is left, not the finish", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
 		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(QUESTION);
-		expect(textOf(html)).not.toContain(FOUR);
+		expect(textOf(html)).not.toContain(SET_UP);
 	});
 
 	it("asks it at load when every category already has a budget", async () => {
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000)(db);
 		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(QUESTION);
-		expect(textOf(html)).not.toContain(FOUR);
+		expect(textOf(html)).not.toContain(SET_UP);
 	});
 
 	it("treats a $0 goal row for this month as no goal, so the question still asks", async () => {
@@ -1654,7 +1642,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			.bind(CUR)
 			.run();
 		const { html } = await skipAll();
-		expect(textOf(html)).toContain(FOUR);
+		expect(textOf(html)).toContain(SET_UP);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
 	});
@@ -1668,12 +1656,12 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			.bind(CUR)
 			.run();
 		const { html } = await get("/setup");
-		expect(textOf(html)).toContain(FOUR);
+		expect(textOf(html)).toContain(SET_UP);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
 	});
 
-	it("answers the load at 200 with the ruled-off total and no question, when that settle completes the budgets step", async () => {
+	it("answers the load at 200 with the finish and no question, when that settle completes the budgets step", async () => {
 		// Home budgeted every category and set a goal above $0, so the load's settle draws stroke four and no question is left.
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
 		await db
@@ -1690,7 +1678,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		const { summary } = await readMonthSummary(db, TODAY, CUR);
 		expect(text).toContain("Safe to spend");
 		expect(text).toContain(safeToSpendText(summary.safeToSpendCents));
-		expect(text).toContain(FOUR);
+		expect(text).toContain(SET_UP);
 		expect(text).not.toContain(QUESTION);
 		expect(savingsFormsOf(html)).toHaveLength(0);
 		expect(budgetFormsOf(html)).toHaveLength(0);
@@ -1709,7 +1697,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(30000);
 		expect(await savingsOf()).toBe(30000);
 		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
-		expect(textOf(res.html)).toContain(FOUR);
+		expect(textOf(res.html)).toContain(SET_UP);
 		expect(trigger(res.res).toast).toEqual({
 			message: "Saved the savings goal: $300 a month.",
 			type: "success",
@@ -1846,7 +1834,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(res.status).toBe(200);
 		expect(await savingsOf()).toBe("skipped");
 		expect(await goalRows()).toBe(0);
-		expect(textOf(html)).toContain(FOUR);
+		expect(textOf(html)).toContain(SET_UP);
 		expect(trigger(res).toast).toEqual({
 			message: "No savings goal for now.",
 			type: "success",
@@ -1869,7 +1857,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(20000);
 		expect(await goalRows()).toBe(1);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain(FOUR);
+		expect(textOf(res.html)).toContain(SET_UP);
 		expect(trigger(res.res).toast).toEqual({
 			message: "Home already has a savings goal: $200 a month.",
 			type: "info",
@@ -1890,7 +1878,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		const res = await post("/setup/savings", [["answer", "skip"]]);
 		expect(await goalFor()).toBe(20000);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain(FOUR);
+		expect(textOf(res.html)).toContain(SET_UP);
 		expect(trigger(res.res).toast?.message).toBe(
 			"Home already has a savings goal: $200 a month.",
 		);
@@ -1916,7 +1904,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(20000);
 		expect(await goalRows()).toBe(1);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain(FOUR);
+		expect(textOf(res.html)).toContain(SET_UP);
 		expect(res.html).not.toContain(QUESTION);
 		expect(textOf(res.html)).not.toContain(BLANK);
 		expect(res.html).not.toContain('role="alert"');
@@ -2102,7 +2090,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		]);
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		const { html } = await get("/setup");
-		expect(textOf(html)).toContain(FOUR);
+		expect(textOf(html)).toContain(SET_UP);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
 		expect(await goalFor()).toBe(30000);

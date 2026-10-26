@@ -157,7 +157,6 @@ import {
 } from "../views/settings-pages";
 import { SetupFinish } from "../views/setup-finish";
 import {
-	RuledTotal,
 	SetupBills,
 	SetupBudgets,
 	SetupOneBudget,
@@ -165,7 +164,6 @@ import {
 	SetupSavings,
 } from "../views/setup-questions";
 import { SetupReading } from "../views/setup-reading";
-import { SetupScreen } from "../views/setup-screen";
 import { SetupWelcome } from "../views/setup-welcome";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
@@ -1353,26 +1351,6 @@ const SETUP_SAVINGS_SPEC: UseSpecText = {
 		"A blank amount and $0 are refused in the words below. A goal Home set since the screen drew is kept, and the reply says so. Long skipped notes wrap.",
 	words:
 		"Step bar: “Step 4 of 4 · Your budgets” · Heading: “Save some each month?” · lead: “Safe to spend sets it aside from the 1st, before anything else. You can change it on Home any time.” · field: “Save each month, from October on” · Buttons: “Save it” and “Not now” · refused: “Enter an amount greater than $0, or choose Not now.”",
-};
-
-// The ruled-off total's use spec (decisions 114 and 148, #590, #773): all eight answers, for sign-off. It is setup's last screen
-// until the finish (#774), so its words are the budgets step's.
-const SETUP_RULED_TOTAL_SPEC: UseSpecText = {
-	purpose:
-		"Show a new family the month's Safe to spend once the budgets step is done, with the Four line and a way to Home. It is setup's last screen until the finish (#774).",
-	affordance:
-		"Go to Home, the full-width button at the screen's foot, and Why?, the link beside Safe to spend, which opens how Safe to spend is worked out. A step with nothing to ask says why in a muted line above the double rule.",
-	states:
-		"Done: the double rule, Safe to spend with the month's number, the Four line and Go to Home, and no line above the rule. Nothing to ask, every category budgeted on Home: the line for that reason above the rule. Nothing to ask, no categories yet: the line for that reason above the rule. Neither line shows once a budget answer is recorded on the step, or for a category added after the budgets stroke that has no budget.",
-	feedback:
-		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by the budgets step's last answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
-	input:
-		"Touch: Go to Home is 44px tall and full width, and Why? is a 44px target. Keyboard: Tab reaches Why?, then Go to Home. Screen reader: the Safe to spend line takes focus after the last answer, as the screen's focus says; a nothing-asked line is plain text above the rule, read before it.",
-	motion: "Nothing of its own moves. Reduced motion changes nothing.",
-	edges:
-		"A negative Safe to spend shows its minus sign before the number, as Home does. A step that asked something shows no line above the rule.",
-	words:
-		"Heading: none. “Safe to spend · Why?”, the month's number in the serif, “Four. Tomorrow Tally keeps count on its own, and that's the fifth.” and “Go to Home”. Above the rule, when nothing was asked: the one line for its reason, in nothingAskedLine's words (budgets.ts).",
 };
 
 // The setup finish's use spec (P142 A, decision 148, #774): all eight answers, for sign-off. It is setup's last screen, drawn by
@@ -9113,54 +9091,6 @@ function FirstWeekGroup() {
 						today={FIRST_WEEK_TODAY}
 					/>
 				</State>
-			</Specimen>
-			<Specimen
-				id="setup-ruled-total"
-				title="RuledTotal"
-				tier="visual"
-				components={["RuledTotal"]}
-				sentence="Setup's last screen until the finish (#774): the month's Safe to spend ruled off under a double rule, with the Four line and Go to Home. A budgets step with nothing to ask says why above the rule: every category already budgeted on Home, or no categories to budget yet."
-			>
-				<State label="Done: Safe to spend ruled off, with no line above the rule">
-					<SetupFrame label="Done: Safe to spend ruled off under a double rule, with the Four line and Go to Home">
-						<div id="setup-ruled-total-done">
-							<SetupScreen>
-								<RuledTotal
-									safeCents={70000}
-									focus={false}
-									nothingAsked={null}
-								/>
-							</SetupScreen>
-						</div>
-					</SetupFrame>
-				</State>
-				<State label="Nothing to ask, every category budgeted on Home: its line above the rule">
-					<SetupFrame label="Nothing to ask, every category budgeted on Home: its line above the double rule">
-						<div id="setup-ruled-total-nothing-asked">
-							<SetupScreen>
-								<RuledTotal
-									safeCents={70000}
-									focus={false}
-									nothingAsked="every-category-budgeted"
-								/>
-							</SetupScreen>
-						</div>
-					</SetupFrame>
-				</State>
-				<State label="Nothing to ask, no categories yet: its line above the rule">
-					<SetupFrame label="Nothing to ask, no categories yet: its line above the double rule">
-						<div id="setup-ruled-total-no-categories">
-							<SetupScreen>
-								<RuledTotal
-									safeCents={70000}
-									focus={false}
-									nothingAsked="no-categories"
-								/>
-							</SetupScreen>
-						</div>
-					</SetupFrame>
-				</State>
-				<UseSpec spec={SETUP_RULED_TOTAL_SPEC} />
 			</Specimen>
 		</Group>
 	);

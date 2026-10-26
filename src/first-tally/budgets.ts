@@ -70,7 +70,7 @@ export function shownBudgetIds(values: string[]): number[] {
  */
 export type NothingAsked = "every-category-budgeted" | "no-categories";
 
-/** The muted line above the ruled-off total when the budgets step asked nothing, for the reason given. */
+/** The muted line for a budgets step that asked nothing, for the reason given. */
 export function nothingAskedLine(reason: NothingAsked): string {
 	return reason === "every-category-budgeted"
 		? "Every category already has a budget."
@@ -228,10 +228,6 @@ export function needsTail(count: number, meanCents: number | null): string {
 			: "";
 	return ` · ${count} ${noun}${about}`;
 }
-
-/** The ruled-off total's status line, once the budgets stroke is drawn (the fourth stroke, spec §8.8). */
-export const RULED_STATUS =
-	"Four. Tomorrow Tally keeps count on its own, and that's the fifth.";
 
 /**
  * The savings question at the end of the budgets step (spec §8.8, decision 135, #721): its ledger line, the replies, and

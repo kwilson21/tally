@@ -97,6 +97,7 @@ const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 	budgets: null,
 	budgetsAnswered: false,
 	watching: false,
+	finish: null,
 	...over,
 });
 
@@ -166,8 +167,8 @@ describe("skippedNotes", () => {
 		).toEqual([]);
 	});
 
-	it("draws no note on the ruled-off total", () => {
-		const done = { done: true, safeCents: 70000, nothingAsked: null } as const;
+	it("draws no note on the finish, once the budgets stroke is drawn", () => {
+		const done = { done: true } as const;
 		expect(skippedNotes(modelOf({ budgets: done }))).toEqual([]);
 	});
 

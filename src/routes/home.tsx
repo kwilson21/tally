@@ -173,7 +173,7 @@ async function renderHome(
 	const currentMonth = today.slice(0, 7);
 	const month = viewMonth ?? currentMonth;
 	const current = month === currentMonth;
-	// The month's numbers and Safe to spend, as readMonthSummary reads them (the first page's ruled-off total reads it too).
+	// The month's numbers and Safe to spend, as readMonthSummary reads them (the setup finish reads it too).
 	const { data, billData, activeBills, billTotals, summary } =
 		await readMonthSummary(c.env.DB, today, month);
 	// The list is the bills due soon, judged by the same totals Bills uses. Safe to spend sets aside only this month's
