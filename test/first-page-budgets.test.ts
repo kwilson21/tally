@@ -539,7 +539,8 @@ describe("categories the step does not ask", () => {
 			.first<{ icon: string; color: string }>();
 		const pending = (await settleAndLoad(db, TODAY, { oneAtATime: true }))
 			.budgets;
-		if (!pending || pending.done) throw new Error("the budgets question is open");
+		if (!pending || pending.done)
+			throw new Error("the budgets question is open");
 		const ask = pending.asks.find((candidate) => candidate.id === A);
 		expect(row?.icon).toBeTruthy();
 		expect(row?.color).toBeTruthy();
