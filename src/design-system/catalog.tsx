@@ -1376,21 +1376,21 @@ const SETUP_RULED_TOTAL_SPEC: UseSpecText = {
 };
 
 // The setup finish's use spec (P142 A, decision 148, #774): all eight answers, for sign-off. It is setup's last screen, drawn by
-// the savings question's answer, and its words are the finish's (first-tally/finish.ts).
+// setup's last answer, and its words are the finish's (first-tally/finish.ts).
 const SETUP_FINISH_SPEC: UseSpecText = {
 	purpose:
 		"Tell a new family that setup is done: what Tally set up for them, and the month's Safe to spend, with one way on to Home.",
 	affordance:
 		"Go to Home, the full-width button at the screen's foot, a link to Home. While Sort right away is on, one muted line under it says that Tally sorts new transactions as the bank sends them.",
 	states:
-		"Everything set up: a row for each step. Two employers: one Pay row with both merchants, no Savings row when that step was skipped, and no sort line when Sort right away is off. Nothing to set up: no heading and no rows at all. A long employer name and a negative Safe to spend: the name wraps, and the number keeps its minus sign.",
+		"Everything set up: a row for each step. Two employers: one Pay row with both merchants, no Savings row when that step was skipped, and no sort line when Sort right away is off. Nothing to set up: no What you set up and no rows. A long employer name and a negative Safe to spend: the name wraps, and the number keeps its minus sign.",
 	feedback:
-		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by the savings question's answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
+		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by setup's last answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
 	input:
-		"Touch: Go to Home is 44px tall and full width, and the sort line is plain text under it. Keyboard: Tab reaches Go to Home, the screen's one control. Screen reader: the step bar's words are read first, then the heading, You're set up., the screen's one h1, which takes focus when a swap draws the screen, so the screen is read once. Each step's row is a label and its value; the notebook is decoration and hidden.",
+		"Touch: Go to Home is 44px tall and full width, and the sort line is plain text under it. Keyboard: after the masthead's Feedback, Tab reaches Go to Home, the body's one control. Screen reader: the step bar's words are read first, then the heading, You're set up., the screen's one h1, which takes focus when a swap draws the screen, so the screen is read once. Each step's row is a label and its value; the notebook is decoration and hidden.",
 	motion: "Nothing of its own moves. Reduced motion changes nothing.",
 	edges:
-		"A step that set nothing has no row, and with no rows at all the heading and the list are left out. Two merchants share one Pay row, one line each. Long names wrap at their words, never inside one. A negative Safe to spend shows its minus sign, as Home does.",
+		"A step that set nothing has no row, and with no rows at all What you set up and its list are left out. Two merchants share one Pay row, one line each. Long names wrap at their words, and a word too long for its line breaks inside it. A negative Safe to spend shows its minus sign, as Home does.",
 	words:
 		"Step bar: “Setup done” · Heading: “You're set up.” · “Safe to spend in October”, the month's number, then “What's left of October's budgets after what you've spent, the bills still to pay and your savings.” · “What you set up”, with a row for each step that set something: “Pay” with “ACME Corp · $2,450 every other Friday”, “Bills” with “8 bills · $1,240 a month”, “Budgets” with “12 budgets · $4,050 a month”, and “Savings” with “$150 a month” · Button: “Go to Home” · “From now on Tally sorts new transactions as your bank sends them.”",
 };
@@ -9027,8 +9027,8 @@ function FirstWeekGroup() {
 						/>
 					</SetupFrame>
 				</State>
-				<State label="Nothing to set up: no heading and no rows, the month's number, and the sort line">
-					<SetupFrame label="Finish, nothing to set up: no heading and no rows, Safe to spend $700, and the sort line under Go to Home">
+				<State label="Nothing to set up: no What you set up and no rows, the month's number, and the sort line">
+					<SetupFrame label="Finish, nothing to set up: no What you set up and no rows, Safe to spend $700, and the sort line under Go to Home">
 						<SetupFinish
 							month={FIRST_WEEK_MONTH}
 							safeCents={70000}

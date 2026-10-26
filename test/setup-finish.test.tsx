@@ -199,7 +199,7 @@ describe("SetupFinish", () => {
 		);
 	});
 
-	it("wraps a long name at its words, never inside a word", () => {
+	it("wraps a long name at its words, breaking only a word too long for its line", () => {
 		const markup = finish({
 			rows: {
 				pay: [
