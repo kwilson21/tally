@@ -10,6 +10,8 @@ export const PAY_STEP = "Step 2 of 4 · Your pay";
 export const BILLS_STEP = "Step 3 of 4 · Your bills";
 /** The budgets question's step label (step four of four; three steps done before it, the savings question included). */
 export const BUDGETS_STEP = "Step 4 of 4 · Your budgets";
+/** The finish's step label (all four steps done, so every segment is inked). */
+export const FINISH_STEP = "Setup done";
 
 /** Four segments: the steps done in ink, the next one half inked while setup has steps left, the rest in rule. */
 export function StepBar({ done, label }: { done: number; label: string }) {
