@@ -18,8 +18,6 @@ import {
 	COUNTED_SPENDING,
 	countedCategorySql,
 	countedMonthSql,
-	includedSql,
-	markedTransferSql,
 } from "../db/counted-month";
 import {
 	anyQuestionAnswered,
@@ -64,19 +62,9 @@ export type PayMerchant = {
 	ids: number[];
 };
 
-/** The connected banks' lines, before any answer: the head lines (spec §8.8, the first page's muted lines). */
-export type BankHead = {
-	banks: string;
-	lines: number;
-	first: string;
-	last: string;
-	left: number;
-};
-
 export type FirstPageModel = {
 	/** The strokes drawn so far, of five. */
 	drawn: number;
-	head: BankHead | null;
 	/**
 	 * The answers so far, in ledger order. `id` names the line for the reply that wrote it (`pay:` and the merchant key for
 	 * a pay line, `bills` for the bills line), so a reply finds its own line even when two lines read the same.
@@ -220,37 +208,6 @@ export async function answerPay(
 		payAnswerStatement(db, merchant.key, { [answer]: deposits }),
 	]);
 	return changed?.meta.changes ?? 0;
-}
-
-/** The connected banks' head lines: their names, how many bank lines, their first and last dates, and transfers still left out of the budget. */
-export async function bankHead(db: D1Database): Promise<BankHead | null> {
-	const banks = await db
-		.prepare(
-			"SELECT institution_name AS name FROM plaid_items WHERE disconnected_at IS NULL ORDER BY institution_name",
-		)
-		.all<{ name: string }>();
-	const lines = await db
-		.prepare(
-			`SELECT COUNT(*) AS lines, MIN(t.date) AS first, MAX(t.date) AS last,
-				COALESCE(SUM(CASE WHEN ${markedTransferSql("t")} AND NOT ${includedSql("t")} THEN 1 ELSE 0 END), 0) AS leftOut
-			FROM transactions t JOIN accounts a ON a.id = t.account_id
-			JOIN plaid_items p ON p.id = a.plaid_item_id
-			WHERE p.disconnected_at IS NULL AND t.parent_id IS NULL`,
-		)
-		.first<{
-			lines: number;
-			first: string | null;
-			last: string | null;
-			leftOut: number;
-		}>();
-	if (!lines || lines.lines === 0 || !lines.first || !lines.last) return null;
-	return {
-		banks: banks.results.map((bank) => bank.name).join(", "),
-		lines: lines.lines,
-		first: lines.first,
-		last: lines.last,
-		left: lines.leftOut,
-	};
 }
 
 /**
@@ -712,11 +669,9 @@ export async function settleAndLoad(
 		...(budgetLine ? [budgetLine] : []),
 		...(savingsLine ? [savingsLine] : []),
 	];
-	const head = ledger.length === 0 ? await bankHead(db) : null;
 	return {
 		drawn: STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
 			.length,
-		head,
 		ledger,
 		payAnswered: Object.keys(record?.pay ?? {}).length > 0,
 		pay,
