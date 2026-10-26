@@ -184,7 +184,10 @@ describe("SetupPay", () => {
 	it("draws the card: the bank's text, the amount, the cadence, the last three deposits and the earlier count", () => {
 		const markup = pay();
 		expect(markup).toContain(
-			'<p class="min-w-0 flex-1 wrap-anywhere font-medium">ACME CORP PAYROLL</p>',
+			'<p class="min-w-0 wrap-break-word font-medium">ACME CORP PAYROLL</p>',
+		);
+		expect(markup).not.toMatch(
+			/<p class="[^"]*\b(flex-1|wrap-anywhere)\b[^"]*">ACME CORP PAYROLL<\/p>/,
 		);
 		expect(markup).toContain("$2,450");
 		expect(markup).toContain("Every other Friday · 7 times since Jul 17");
@@ -872,18 +875,22 @@ describe("ids and form references across the screens", () => {
 });
 
 // A long name with no spaces must wrap inside the screen, not run past its edge (Codex's review of #773's part 1, PR 787). The
-// names wrap as the app's other rows do (wrap-anywhere on the name, shrink-0 on the amount).
+// bills and budgets rows use wrap-anywhere on the name and shrink-0 on the amount. SetupPay's card is the exception: its name
+// is wrap-break-word and its amount may wrap, so a range wraps beside a long name at a phone's width and the name keeps whole words.
 describe("long names wrap inside the setup screens", () => {
 	const LONG = "Unbrokenbankname".repeat(5);
 
-	it("wraps the bank's text in SetupPay's card, and keeps the amount's width", () => {
+	it("wraps the bank's text in SetupPay's card, and lets the amount wrap beside it", () => {
 		const markup = html(
 			SetupPay({ merchant: { ...PAY, key: LONG, name: LONG }, focus: false }),
 		);
-		expect(markup).toMatch(
-			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*">${LONG}<`),
+		expect(markup).toContain(
+			`<p class="min-w-0 wrap-break-word font-medium">${LONG}</p>`,
 		);
-		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$2,450</);
+		expect(markup).toMatch(
+			/<p class="font-serif text-2xl font-semibold tabular-nums">\$2,450</,
+		);
+		expect(markup).not.toMatch(/<p class="[^"]*\bshrink-0\b[^"]*">\$2,450</);
 	});
 
 	it("wraps a bill's name in the bills list, and keeps its amount's width", () => {

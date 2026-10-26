@@ -157,11 +157,10 @@ export function SetupPay({
 			</p>
 			<div class="mt-6 rounded-control border border-rule">
 				<div class="px-4 py-3">
+					{/* The amount may wrap: a range wraps at "to", so the name keeps room for whole words beside it. */}
 					<div class="flex items-baseline justify-between gap-3">
-						<p class="min-w-0 flex-1 wrap-anywhere font-medium">
-							{merchant.key}
-						</p>
-						<p class="shrink-0 font-serif text-2xl font-semibold tabular-nums">
+						<p class="min-w-0 wrap-break-word font-medium">{merchant.key}</p>
+						<p class="font-serif text-2xl font-semibold tabular-nums">
 							{amountWords(merchant.deposits)}
 						</p>
 					</div>
