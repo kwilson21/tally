@@ -319,6 +319,77 @@ describe("GET /design-system in the demo", () => {
 		expect(done).not.toContain("No categories to budget yet.");
 	});
 
+	it("draws setup's finish as four states, after setup's savings and before the first week part (#774)", async () => {
+		const { html } = await get("/design-system");
+		const savings = html.indexOf('id="setup-savings"');
+		const finish = html.indexOf('id="setup-finish"');
+		expect(savings).toBeGreaterThan(-1);
+		expect(finish).toBeGreaterThan(savings);
+		expect(html.indexOf('id="first-week-part"')).toBeGreaterThan(finish);
+		const tag = specimens(html).find((t) => t.includes('id="setup-finish"'));
+		expect(tag).toContain('data-ds-tier="visual"');
+		expect(tag).toContain('data-ds-components="SetupFinish"');
+	});
+
+	it("shows the finish's four drawings, each in its own frame, with the words the finish draws (#774)", async () => {
+		const { html } = await get("/design-system");
+		const specimen =
+			html
+				.split('id="setup-finish"')[1]
+				?.split(/<section[^>]*data-ds-tier=/)[0] ?? "";
+		// The drawings only: the use spec below lists every string, so each state is sliced from its frame to the next one's.
+		const drawn =
+			specimen.split(
+				'<dl class="mt-2 divide-y divide-rule border-y border-rule">',
+			)[0] ?? "";
+		const frames = [
+			...drawn.matchAll(/role="img" aria-label="(Finish[^"]*)"/g),
+		];
+		expect(frames).toHaveLength(4);
+		const state = (n: number) =>
+			drawn.slice(frames[n]?.index, frames[n + 1]?.index ?? drawn.length);
+
+		// 1. Everything set up: the step bar full, the title, the month's number, every row and the sort line.
+		const everything = state(0);
+		expect(everything).toContain("You&#39;re set up.");
+		expect(everything).toContain("Setup done");
+		expect(everything).toContain("Safe to spend in October");
+		expect(everything).toContain("$1,284");
+		expect(everything).toContain("ACME Corp · $2,450 every other Friday");
+		expect(everything).toContain("8 bills · $1,240 a month");
+		expect(everything).toContain("12 budgets · $4,050 a month");
+		expect(everything).toContain("$150 a month");
+		for (const label of ["Pay", "Bills", "Budgets", "Savings"])
+			expect(everything).toContain(`<dt class="col-start-1">${label}</dt>`);
+		expect(everything).toContain(
+			"From now on Tally sorts new transactions as your bank sends them.",
+		);
+
+		// 2. Two employers: one Pay row with both merchants, no Savings row, and no sort line.
+		const employers = state(1);
+		expect(employers).toContain("ACME Corp · $2,450 every other Friday");
+		expect(employers).toContain("Riverside Clinic · $2,450 every other Friday");
+		expect(employers).not.toContain('<dt class="col-start-1">Savings</dt>');
+		expect(employers).not.toContain("From now on Tally sorts");
+
+		// 3. Nothing to set up: no heading and no list for What you set up, and the month's number.
+		const nothing = state(2);
+		expect(nothing).not.toContain("What you set up");
+		expect(nothing).not.toContain("<dl");
+		expect(nothing).toContain("Safe to spend in October");
+		expect(nothing).toContain("$700");
+		expect(nothing).toContain("Go to Home");
+
+		// 4. A long name with no spaces, and a negative Safe to spend with its minus sign.
+		const long = state(3);
+		expect(long).toContain(
+			"STATEOFCALIFORNIAEMPLOYMENTDEVELOPMENTDEPT · $2,450 every other Friday",
+		);
+		expect(long).toContain("wrap-break-word");
+		expect(long).toContain("−$45");
+		expect(long).not.toContain("-$45");
+	});
+
 	it("keeps every sheet and backdrop on the catalog inside a contained frame, so none covers the page (#610)", async () => {
 		const { html } = await get("/design-system");
 		const main = html.match(/<main[^>]*>[\s\S]*?<\/main>/)?.[0] ?? "";
@@ -780,6 +851,7 @@ describe("GET /design-system in the demo", () => {
 		"setup-budgets",
 		"setup-one-budget",
 		"setup-savings",
+		"setup-finish",
 		"setup-ruled-total",
 	])(
 		"gives %s its whole use spec, as a visual component, from its own section (decision 148, DESIGN.md section 3)",

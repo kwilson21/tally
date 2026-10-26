@@ -9,6 +9,12 @@ import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { type BudgetAsk, SAVINGS_BLANK_WORDS } from "../first-tally/budgets";
+import {
+	finishBillsLine,
+	finishBudgetsLine,
+	finishPayLine,
+	finishSavingsLine,
+} from "../first-tally/finish";
 import type { PayMerchant } from "../first-tally/first-page";
 import {
 	type SetupPhase,
@@ -149,6 +155,7 @@ import {
 	SubpageHead,
 	settingsPlaces,
 } from "../views/settings-pages";
+import { SetupFinish } from "../views/setup-finish";
 import {
 	RuledTotal,
 	SetupBills,
@@ -1366,6 +1373,26 @@ const SETUP_RULED_TOTAL_SPEC: UseSpecText = {
 		"A negative Safe to spend shows its minus sign before the number, as Home does. A step that asked something shows no line above the rule.",
 	words:
 		"Heading: none. “Safe to spend · Why?”, the month's number in the serif, “Four. Tomorrow Tally keeps count on its own, and that's the fifth.” and “Go to Home”. Above the rule, when nothing was asked: the one line for its reason, in nothingAskedLine's words (budgets.ts).",
+};
+
+// The setup finish's use spec (P142 A, decision 148, #774): all eight answers, for sign-off. It is setup's last screen, drawn by
+// the savings question's answer, and its words are the finish's (first-tally/finish.ts).
+const SETUP_FINISH_SPEC: UseSpecText = {
+	purpose:
+		"Tell a new family that setup is done: what Tally set up for them, and the month's Safe to spend, with one way on to Home.",
+	affordance:
+		"Go to Home, the full-width button at the screen's foot, a link to Home. While Sort right away is on, one muted line under it says that Tally sorts new transactions as the bank sends them.",
+	states:
+		"Everything set up: a row for each step. Two employers: one Pay row with both merchants, no Savings row when that step was skipped, and no sort line when Sort right away is off. Nothing to set up: no heading and no rows at all. A long employer name and a negative Safe to spend: the name wraps, and the number keeps its minus sign.",
+	feedback:
+		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by the savings question's answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
+	input:
+		"Touch: Go to Home is 44px tall and full width, and the sort line is plain text under it. Keyboard: Tab reaches Go to Home, the screen's one control. Screen reader: the step bar's words are read first, then the heading, You're set up., the screen's one h1, which takes focus when a swap draws the screen, so the screen is read once. Each step's row is a label and its value; the notebook is decoration and hidden.",
+	motion: "Nothing of its own moves. Reduced motion changes nothing.",
+	edges:
+		"A step that set nothing has no row, and with no rows at all the heading and the list are left out. Two merchants share one Pay row, one line each. Long names wrap at their words, never inside one. A negative Safe to spend shows its minus sign, as Home does.",
+	words:
+		"Step bar: “Setup done” · Heading: “You're set up.” · “Safe to spend in October”, the month's number, then “What's left of October's budgets after what you've spent, the bills still to pay and your savings.” · “What you set up”, with a row for each step that set something: “Pay” with “ACME Corp · $2,450 every other Friday”, “Bills” with “8 bills · $1,240 a month”, “Budgets” with “12 budgets · $4,050 a month”, and “Savings” with “$150 a month” · Button: “Go to Home” · “From now on Tally sorts new transactions as your bank sends them.”",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -8466,6 +8493,13 @@ const SETUP_BLANK_ERROR = {
 	typed: "lots",
 };
 
+/** The finish's drawn rows (P142 A, decision 148, #774): the drawing's own numbers, in cents, worded by finish.ts. */
+const FINISH_PAY = (name: string) =>
+	finishPayLine({ name, deposits: FIRST_WEEK_PAY_DEPOSITS });
+const FINISH_BILLS = finishBillsLine(8, 124000);
+const FINISH_BUDGETS = finishBudgetsLine(12, 405000);
+const FINISH_SAVINGS = finishSavingsLine(15000);
+
 function FirstWeekGroup() {
 	return (
 		<Group id="first-week" title="A new family's first week">
@@ -8953,6 +8987,74 @@ function FirstWeekGroup() {
 					</SetupFrame>
 				</State>
 				<UseSpec spec={SETUP_SAVINGS_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-finish"
+				title="SetupFinish"
+				tier="visual"
+				components={["SetupFinish"]}
+				sentence="Setup's finish (P142 A, decision 148): the step bar full, You're set up., the month's Safe to spend with one sentence on what it is, what each step set up, and Go to Home. A step that set nothing has no row."
+			>
+				<State label="Everything set up: a row for each step, the month's number, and the sort line">
+					<SetupFrame label="Finish, everything set up: a row for each step, Safe to spend $1,284, and the sort line under Go to Home">
+						<SetupFinish
+							month={FIRST_WEEK_MONTH}
+							safeCents={128400}
+							rows={{
+								pay: [FINISH_PAY("ACME Corp")],
+								bills: FINISH_BILLS,
+								budgets: FINISH_BUDGETS,
+								savings: FINISH_SAVINGS,
+							}}
+							sortsOnArrival
+							focus={false}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Two employers: one Pay row with both, no Savings row, and no sort line">
+					<SetupFrame label="Finish, two employers: one Pay row with both, no Savings row, and no sort line, Safe to spend $1,284">
+						<SetupFinish
+							month={FIRST_WEEK_MONTH}
+							safeCents={128400}
+							rows={{
+								pay: [FINISH_PAY("ACME Corp"), FINISH_PAY("Riverside Clinic")],
+								bills: FINISH_BILLS,
+								budgets: FINISH_BUDGETS,
+								savings: null,
+							}}
+							sortsOnArrival={false}
+							focus={false}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Nothing to set up: no heading and no rows, the month's number, and the sort line">
+					<SetupFrame label="Finish, nothing to set up: no heading and no rows, Safe to spend $700, and the sort line under Go to Home">
+						<SetupFinish
+							month={FIRST_WEEK_MONTH}
+							safeCents={70000}
+							rows={{ pay: [], bills: null, budgets: null, savings: null }}
+							sortsOnArrival
+							focus={false}
+						/>
+					</SetupFrame>
+				</State>
+				<State label="A long employer name with no spaces, and a negative Safe to spend: the name wraps, the number keeps its minus sign">
+					<SetupFrame label="Finish, a long employer name and a negative Safe to spend: the name wraps at its words, and −$45 keeps its minus sign">
+						<SetupFinish
+							month={FIRST_WEEK_MONTH}
+							safeCents={-4500}
+							rows={{
+								pay: [FINISH_PAY("STATEOFCALIFORNIAEMPLOYMENTDEVELOPMENTDEPT")],
+								bills: FINISH_BILLS,
+								budgets: FINISH_BUDGETS,
+								savings: FINISH_SAVINGS,
+							}}
+							sortsOnArrival
+							focus={false}
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_FINISH_SPEC} />
 			</Specimen>
 			<Specimen
 				id="first-week-part"
