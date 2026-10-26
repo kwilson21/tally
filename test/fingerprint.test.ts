@@ -323,8 +323,34 @@ describe("cleanSelector", () => {
 		expect(cleanSelector(".a:hover.b")).toBe(".a.b");
 	});
 
-	it("does not split a comma inside a function's argument, and takes out what is inside it", () => {
-		expect(cleanSelector(":is(.a,:hover)")).toBe(":is(.a,)");
+	it("does not split a comma inside a function's argument, and takes out a function whose argument lost something", () => {
+		expect(cleanSelector(":is(.a,:hover)")).toBe("*");
+		expect(cleanSelector(".b:is(.a,:hover)")).toBe(".b");
+	});
+
+	it("takes out a functional pseudo-class whose argument had a user-action pseudo-class", () => {
+		expect(cleanSelector(":is(.missing,:hover)")).toBe("*");
+		expect(cleanSelector(".a:not(:hover)")).toBe(".a");
+		expect(cleanSelector(".z:not(.a:hover)")).toBe(".z");
+		expect(cleanSelector(".x:has(:focus-visible)")).toBe(".x");
+	});
+
+	it("takes out a Tailwind group-hover variant's :is(:where(.group):hover *) whole", () => {
+		expect(
+			cleanSelector(".group-hover\\:underline:is(:where(.group):hover *)"),
+		).toBe(".group-hover\\:underline");
+	});
+
+	it("keeps a functional pseudo-class whose argument is unchanged", () => {
+		for (const selector of [
+			".a:not(.b)",
+			":is(.a,.b)",
+			".a:has(> img)",
+			":nth-child(2n+1)",
+			'.a:has([data-x=":hover"])',
+		]) {
+			expect(cleanSelector(selector)).toBe(selector);
+		}
 	});
 
 	it("cleans each part of a selector list on its own", () => {
@@ -341,6 +367,8 @@ describe("cleanSelector", () => {
 			'[data-x=":hover"]',
 			":is(.a,:hover)",
 			".a:focus-visible, .b::part(x)",
+			":is(.missing,:hover)",
+			".group-hover\\:underline:is(:where(.group):hover *)",
 		]) {
 			expect(page(selector)).toBe(cleanSelector(selector));
 		}

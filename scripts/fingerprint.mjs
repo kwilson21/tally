@@ -130,8 +130,10 @@ export function needsCapture({ head, base }) {
  * pseudo-classes :hover, :focus, :focus-visible, :focus-within, :active and :visited. A compound left
  * empty becomes `*`, in each top-level part of a selector list. Escapes, brackets and quotes are
  * respected, so `.hover\:underline:hover` becomes `.hover\:underline` and `[data-x=":hover"]` stays.
- * Returns an invalid selector when a removal leaves a function argument empty (`:not(:hover)` becomes
- * `:not()`); querySelector then throws, and the rule is kept.
+ * A functional pseudo-class (`:is(`, `:not(`, `:has(`, any `:name(`) is cleaned recursively, and when
+ * its argument had something taken out it is taken out whole: `:not(.a:hover)` becomes `.a`, and a
+ * Tailwind group-hover `:is(:where(.group):hover *)` is dropped. Keeping it would narrow the rule, so
+ * the whole function goes, which only ever makes the rule broader.
  *
  * Self-contained on purpose: scripts/screenshots.mjs sends this function's source into the page with
  * toString(), so everything it needs lives inside it.
@@ -139,125 +141,141 @@ export function needsCapture({ head, base }) {
  * @returns {string}
  */
 export function cleanSelector(selectorText) {
-	const UNTESTABLE = new Set([
-		":hover",
-		":focus",
-		":focus-visible",
-		":focus-within",
-		":active",
-		":visited",
-		":before",
-		":after",
-		":first-line",
-		":first-letter",
-	]);
-	const isNameChar = (ch) => /[\w-]/.test(ch) || ch >= "\u0080";
-	// The index just past the identifier that starts at i (an escape is part of it).
-	const identEnd = (text, i) => {
-		let j = i;
-		while (j < text.length) {
-			if (text[j] === "\\") j += 2;
-			else if (isNameChar(text[j])) j++;
-			else break;
-		}
-		return Math.min(j, text.length);
-	};
-	// The index just past the ")" or "]" that closes the bracket opened at i.
-	const closeOf = (text, i) => {
+	// The cleaning of one selector list. A functional pseudo-class's argument is cleaned by this same
+	// function, so it is defined here, inside cleanSelector, and not by its name: the source must run
+	// on its own in the page (see the toString test).
+	const clean = (selectorText) => {
+		const UNTESTABLE = new Set([
+			":hover",
+			":focus",
+			":focus-visible",
+			":focus-within",
+			":active",
+			":visited",
+			":before",
+			":after",
+			":first-line",
+			":first-letter",
+		]);
+		const isNameChar = (ch) => /[\w-]/.test(ch) || ch >= "\u0080";
+		// The index just past the identifier that starts at i (an escape is part of it).
+		const identEnd = (text, i) => {
+			let j = i;
+			while (j < text.length) {
+				if (text[j] === "\\") j += 2;
+				else if (isNameChar(text[j])) j++;
+				else break;
+			}
+			return Math.min(j, text.length);
+		};
+		// The index just past the ")" or "]" that closes the bracket opened at i.
+		const closeOf = (text, i) => {
+			let depth = 0;
+			let quote = "";
+			for (let j = i; j < text.length; j++) {
+				const ch = text[j];
+				if (ch === "\\") j++;
+				else if (quote) {
+					if (ch === quote) quote = "";
+				} else if (ch === '"' || ch === "'") quote = ch;
+				else if (ch === "(" || ch === "[") depth++;
+				else if (ch === ")" || ch === "]") {
+					depth--;
+					if (depth === 0) return j + 1;
+				}
+			}
+			return text.length;
+		};
+		// A compound with its pseudo-elements and user-action pseudo-classes taken out.
+		const takeOut = (text) => {
+			let out = "";
+			let bracket = 0;
+			let quote = "";
+			for (let i = 0; i < text.length; ) {
+				const ch = text[i];
+				if (ch === "\\") {
+					out += text.slice(i, i + 2);
+					i += 2;
+					continue;
+				}
+				if (quote) {
+					if (ch === quote) quote = "";
+				} else if (ch === '"' || ch === "'") quote = ch;
+				else if (ch === "[") bracket++;
+				else if (ch === "]") bracket = Math.max(0, bracket - 1);
+				else if (ch === ":" && bracket === 0) {
+					let end = -1;
+					if (text[i + 1] === ":") {
+						end = identEnd(text, i + 2);
+						if (text[end] === "(") end = closeOf(text, end);
+					} else {
+						const name = text.slice(i, identEnd(text, i + 1));
+						const open = i + name.length;
+						if (UNTESTABLE.has(name.toLowerCase())) end = open;
+						else if (text[open] === "(") {
+							// A functional pseudo-class: its argument is cleaned, and the whole function is
+							// taken out when the argument lost anything.
+							const close = closeOf(text, open);
+							if (text[close - 1] === ")") {
+								const argument = text.slice(open + 1, close - 1);
+								if (clean(argument) !== argument) end = close;
+							}
+						}
+					}
+					if (end > i) {
+						i = end;
+						continue;
+					}
+				}
+				out += ch;
+				i++;
+			}
+			return out;
+		};
+		// Compounds and the separators between them (whitespace, >, + and ~ outside brackets) are cut
+		// apart, so a compound that is emptied can become `*`. Commas outside brackets split the parts.
+		let out = "";
+		let run = "";
+		let kind = "";
 		let depth = 0;
 		let quote = "";
-		for (let j = i; j < text.length; j++) {
-			const ch = text[j];
-			if (ch === "\\") j++;
-			else if (quote) {
-				if (ch === quote) quote = "";
-			} else if (ch === '"' || ch === "'") quote = ch;
-			else if (ch === "(" || ch === "[") depth++;
-			else if (ch === ")" || ch === "]") {
-				depth--;
-				if (depth === 0) return j + 1;
-			}
-		}
-		return text.length;
-	};
-	// A compound with its pseudo-elements and user-action pseudo-classes taken out.
-	const takeOut = (text) => {
-		let out = "";
-		let bracket = 0;
-		let quote = "";
-		for (let i = 0; i < text.length; ) {
-			const ch = text[i];
+		const flush = () => {
+			out += kind === "compound" ? takeOut(run) || "*" : run;
+			run = "";
+			kind = "";
+		};
+		const add = (type, text) => {
+			if (kind !== type) flush();
+			kind = type;
+			run += text;
+		};
+		for (let i = 0; i < selectorText.length; ) {
+			const ch = selectorText[i];
 			if (ch === "\\") {
-				out += text.slice(i, i + 2);
+				add("compound", selectorText.slice(i, i + 2));
 				i += 2;
 				continue;
 			}
 			if (quote) {
+				add("compound", ch);
 				if (ch === quote) quote = "";
-			} else if (ch === '"' || ch === "'") quote = ch;
-			else if (ch === "[") bracket++;
-			else if (ch === "]") bracket = Math.max(0, bracket - 1);
-			else if (ch === ":" && bracket === 0) {
-				let end = -1;
-				if (text[i + 1] === ":") {
-					end = identEnd(text, i + 2);
-					if (text[end] === "(") end = closeOf(text, end);
-				} else {
-					const name = text.slice(i, identEnd(text, i + 1));
-					if (UNTESTABLE.has(name.toLowerCase())) end = i + name.length;
-				}
-				if (end > i) {
-					i = end;
-					continue;
-				}
+			} else if (ch === '"' || ch === "'") {
+				quote = ch;
+				add("compound", ch);
+			} else if (depth === 0 && ch === ",") {
+				flush();
+				out += ",";
+			} else if (depth === 0 && /[\s>+~]/.test(ch)) {
+				add("separator", ch);
+			} else {
+				if (ch === "(" || ch === "[") depth++;
+				else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+				add("compound", ch);
 			}
-			out += ch;
 			i++;
 		}
+		flush();
 		return out;
 	};
-	// Compounds and the separators between them (whitespace, >, + and ~ outside brackets) are cut
-	// apart, so a compound that is emptied can become `*`. Commas outside brackets split the parts.
-	let out = "";
-	let run = "";
-	let kind = "";
-	let depth = 0;
-	let quote = "";
-	const flush = () => {
-		out += kind === "compound" ? takeOut(run) || "*" : run;
-		run = "";
-		kind = "";
-	};
-	const add = (type, text) => {
-		if (kind !== type) flush();
-		kind = type;
-		run += text;
-	};
-	for (let i = 0; i < selectorText.length; ) {
-		const ch = selectorText[i];
-		if (ch === "\\") {
-			add("compound", selectorText.slice(i, i + 2));
-			i += 2;
-			continue;
-		}
-		if (quote) {
-			add("compound", ch);
-			if (ch === quote) quote = "";
-		} else if (ch === '"' || ch === "'") {
-			quote = ch;
-			add("compound", ch);
-		} else if (depth === 0 && ch === ",") {
-			flush();
-			out += ",";
-		} else if (depth === 0 && /[\s>+~]/.test(ch)) {
-			add("separator", ch);
-		} else {
-			if (ch === "(" || ch === "[") depth++;
-			else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
-			add("compound", ch);
-		}
-		i++;
-	}
-	flush();
-	return out;
+	return clean(selectorText);
 }

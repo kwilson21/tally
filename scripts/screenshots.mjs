@@ -54,7 +54,9 @@ function hashAsset(response, url) {
 // cleanSelector's source passed in as `clean`. Each same-origin sheet is marked by its path, and its
 // rules are kept when their selector matches an element (or can't be tested) and always when they
 // aren't style rules. A rule inside @media, @supports, @layer or @container is kept with its condition.
-// A rule's whole cssText is kept, so its nested rules come with it.
+// A @layer block always leaves its marker, even when no rule in it matches, since it sets the layer
+// order. An @import's sheet is walked like any other. A rule's whole cssText is kept, so its nested
+// rules come with it.
 function usedCss(clean) {
 	const out = [];
 	const groups = [
@@ -76,8 +78,21 @@ function usedCss(clean) {
 				}
 				if (used) out.push([...conditions, rule.cssText].join(" "));
 			} else if (groups.some((name) => isA(rule, name))) {
-				const condition = rule.cssText.slice(0, rule.cssText.indexOf("{"));
-				walk(rule.cssRules, [...conditions, condition.trim()]);
+				const condition = rule.cssText
+					.slice(0, rule.cssText.indexOf("{"))
+					.trim();
+				// The layer's prelude goes in before its rules, whether or not any of them match.
+				if (isA(rule, "CSSLayerBlockRule"))
+					out.push([...conditions, condition].join(" "));
+				walk(rule.cssRules, [...conditions, condition]);
+			} else if (isA(rule, "CSSImportRule")) {
+				out.push([...conditions, rule.cssText].join(" "));
+				if (rule.styleSheet === null) continue;
+				try {
+					walk(rule.styleSheet.cssRules, conditions);
+				} catch {
+					out.push(`sheet-unreadable:${rule.href}`);
+				}
 			} else out.push([...conditions, rule.cssText].join(" "));
 		}
 	};
