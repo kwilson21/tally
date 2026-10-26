@@ -183,7 +183,9 @@ describe("SetupPay", () => {
 
 	it("draws the card: the bank's text, the amount, the cadence, the last three deposits and the earlier count", () => {
 		const markup = pay();
-		expect(markup).toContain('<p class="font-medium">ACME CORP PAYROLL</p>');
+		expect(markup).toContain(
+			'<p class="min-w-0 flex-1 wrap-anywhere font-medium">ACME CORP PAYROLL</p>',
+		);
 		expect(markup).toContain("$2,450");
 		expect(markup).toContain("Every other Friday · 7 times since Jul 17");
 		expect(markup).toContain("Fri, Oct 9");
@@ -866,5 +868,70 @@ describe("ids and form references across the screens", () => {
 			}),
 		);
 		expect(one.slice(one.indexOf('id="setup-foot"'))).toContain("Yes, $650");
+	});
+});
+
+// A long name with no spaces must wrap inside the screen, not run past its edge (Codex's review of #773's part 1, PR 787). The
+// names wrap as the app's other rows do (wrap-anywhere on the name, shrink-0 on the amount).
+describe("long names wrap inside the setup screens", () => {
+	const LONG = "Unbrokenbankname".repeat(5);
+
+	it("wraps the bank's text in SetupPay's card, and keeps the amount's width", () => {
+		const markup = html(
+			SetupPay({ merchant: { ...PAY, key: LONG, name: LONG }, focus: false }),
+		);
+		expect(markup).toMatch(
+			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*">${LONG}<`),
+		);
+		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$2,450</);
+	});
+
+	it("wraps a bill's name in the bills list, and keeps its amount's width", () => {
+		const markup = html(
+			SetupBills({
+				keep: [charge({ displayName: LONG, amountCents: 1549, dueDay: 5 })],
+				waiting: [],
+				focus: false,
+			}),
+		);
+		expect(markup).toMatch(
+			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
+		);
+		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$15\.49</);
+	});
+
+	it("wraps a category's name in the budgets list, and keeps its amount's width", () => {
+		const markup = html(
+			SetupBudgets({
+				asks: [{ ...GROCERIES, name: LONG }],
+				month: "2026-10",
+				needs: null,
+				focus: false,
+			}),
+		);
+		expect(markup).toMatch(
+			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
+		);
+		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$650</);
+	});
+
+	it("wraps the category's name in the one-category question's heading", () => {
+		const markup = html(
+			SetupOneBudget({
+				ask: { ...GROCERIES, name: LONG },
+				month: "2026-10",
+				needs: null,
+				focus: false,
+				error: null,
+				amountOpen: false,
+			}),
+		);
+		expect(markup).toContain(LONG);
+		expect(markup).toMatch(/<h1 class="[^"]*\bwrap-anywhere\b[^"]*"/);
+	});
+
+	it("leaves the other headings unwrapped", () => {
+		const markup = html(SetupPay({ merchant: PAY, focus: false }));
+		expect(markup).not.toMatch(/<h1 class="[^"]*\bwrap-anywhere\b/);
 	});
 });
