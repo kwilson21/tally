@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
+import { insertBill } from "../src/bills/write";
 import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { AI_SWITCHES_ALL_ON } from "../src/db/ai-switches";
 import {
@@ -15,6 +16,7 @@ import {
 	answerPay,
 	type PayMerchant,
 	payMerchants,
+	settleAndLoad,
 } from "../src/first-tally/first-page";
 import { shownPayValues } from "../src/first-tally/pay";
 import { firstPage } from "../src/routes/first-page";
@@ -809,6 +811,63 @@ describe("a merchant asked again keeps every Yes in its pay line", () => {
 	});
 });
 
+describe("a Yes's pay line covers only the deposits the question showed", () => {
+	/**
+	 * Acme Corp, with the two deposits the pay question asks about (flagged income, not yet decided), and two it leaves
+	 * out: a deposit the Transactions panel marked as income, and a split part. Yes answers the two.
+	 */
+	async function acmeYesWithExtras() {
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, display_name) VALUES ('ACME CORP', 'Acme Corp')",
+			)
+			.run();
+		await deposits("ACME CORP", 245000, 2);
+		await deposits("ACME CORP", 90000, 1, 14, { income_source: "user" });
+		await txn({
+			raw_name: "ACME CORP",
+			date: TODAY,
+			amount_cents: 18742,
+			is_split: 1,
+		});
+		const parent = await db
+			.prepare(
+				"SELECT id FROM transactions WHERE raw_name = 'ACME CORP' AND is_split = 1",
+			)
+			.first<{ id: number }>();
+		await txn({
+			raw_name: "ACME CORP",
+			date: TODAY,
+			amount_cents: -6000,
+			parent_id: parent?.id,
+			flag_income: 1,
+			income_source: "user",
+		});
+		await answerAsShown("yes");
+	}
+
+	it("a deposit the Transactions panel marked adds nothing to a Yes's pay line", async () => {
+		await acmeYesWithExtras();
+		const { ledger } = await settleAndLoad(db, TODAY);
+		expect(ledger).toHaveLength(1);
+		expect(ledger[0]?.id).toBe("pay:ACME CORP");
+		expect(ledger[0]?.text).toMatch(
+			/^Pay · Acme Corp, \$2,450 every other \w+$/,
+		);
+		expect(ledger[0]?.text).not.toContain("$900");
+	});
+
+	it("a split part adds nothing to a Yes's pay line, and no extra line appears", async () => {
+		await acmeYesWithExtras();
+		const { ledger } = await settleAndLoad(db, TODAY);
+		expect(ledger).toHaveLength(1);
+		expect(ledger[0]?.text).toMatch(
+			/^Pay · Acme Corp, \$2,450 every other \w+$/,
+		);
+		expect(ledger[0]?.text).not.toContain("$60");
+	});
+});
+
 describe("A pay answer answers what the page showed", () => {
 	const REFUSED =
 		"Nothing saved. The deposits from Acme Corp changed since the page drew, so the question is asked again below.";
@@ -1303,6 +1362,42 @@ describe("a Keep that fails part-way", () => {
 	});
 });
 
+describe("the bills line counts what the step itself kept", () => {
+	/** A bill added from the Bills page: the Add bill write, as the page's own Rent (no charge matches it). */
+	const rentBill = async () =>
+		insertBill(
+			db,
+			{
+				name: "Rent",
+				amountCents: 100000,
+				dueDay: 1,
+				frequency: "monthly",
+				anchorMonth: null,
+				categoryId: await categoryId(),
+				merchantRawName: "RENT CO",
+			},
+			TODAY,
+		);
+
+	it("doesn't count a bill added on the Bills page the same day", async () => {
+		await charge("NETFLIX", 1500);
+		await keepAsShown();
+		await rentBill();
+		const { ledger } = await settleAndLoad(db, TODAY);
+		expect(ledger).toEqual([
+			{ id: "bills", text: "Bills · 1 kept, about $15 a month" },
+		]);
+	});
+
+	it("shows no kept line for an empty step, when a bill is added that day", async () => {
+		await charge("GYM", 4500, false);
+		await settleAndLoad(db, TODAY);
+		await rentBill();
+		const { ledger } = await settleAndLoad(db, TODAY);
+		expect(ledger).toEqual([]);
+	});
+});
+
 describe("the pay question's scope", () => {
 	it("asks a flagged income that a credit review reviewed, and Yes writes the person's choice", async () => {
 		await deposits("CREDIT PAY", 245000, 2, 14, {
@@ -1584,6 +1679,7 @@ describe("the questions at /setup, and the old page's addresses (#773)", () => {
 describe("a stale answer's reply (#773)", () => {
 	it("says a stale answer is already answered, with its toast and announcement, and writes nothing", async () => {
 		await deposits("ACME CORP PAYROLL", 245000, 2);
+		const before = await readFirstTally(db);
 		const { res, html } = await answerFor("GONE MERCHANT", "yes", true);
 		expect(trigger(res).announce).toBe("That one is already answered.");
 		expect(trigger(res).toast).toEqual({
@@ -1597,5 +1693,6 @@ describe("a stale answer's reply (#773)", () => {
 			)
 			.first<{ n: number }>();
 		expect(count?.n).toBe(0);
+		expect(await readFirstTally(db)).toEqual(before);
 	});
 });
