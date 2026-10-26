@@ -532,6 +532,21 @@ describe("the budgets question, keep all or one at a time", () => {
 });
 
 describe("categories the step does not ask", () => {
+	it("gives each category the step asks its icon and colour, as the setup screen's rows draw them (#773)", async () => {
+		const row = await db
+			.prepare("SELECT icon, color FROM categories WHERE id = ?1")
+			.bind(A)
+			.first<{ icon: string; color: string }>();
+		const pending = (await settleAndLoad(db, TODAY, { oneAtATime: true }))
+			.budgets;
+		if (!pending || pending.done) throw new Error("the budgets question is open");
+		const ask = pending.asks.find((candidate) => candidate.id === A);
+		expect(row?.icon).toBeTruthy();
+		expect(row?.color).toBeTruthy();
+		expect(ask?.icon).toBe(row?.icon);
+		expect(ask?.color).toBe(row?.color);
+	});
+
 	it("keeps a category's budget set on Home, and does not ask it", async () => {
 		await db
 			.prepare(
@@ -765,6 +780,8 @@ describe("the bank line's months", () => {
 		const ask: BudgetAsk = {
 			id: 1,
 			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
 			months: [
 				{ month: "2026-08", spentCents: 61000 },
 				{ month: "2026-09", spentCents: 67400 },

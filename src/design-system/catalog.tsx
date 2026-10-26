@@ -8220,6 +8220,8 @@ const FIRST_WEEK_MONTHS = [
 const FIRST_WEEK_GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
+	icon: "groceries",
+	color: "cat-blue",
 	months: FIRST_WEEK_MONTHS,
 	suggestion: { amountCents: 65000, months: FIRST_WEEK_MONTHS },
 };
@@ -8230,12 +8232,16 @@ const FIRST_WEEK_EATING_OUT_MONTHS = [
 const FIRST_WEEK_EATING_OUT: BudgetAsk = {
 	id: 2,
 	name: "Eating out",
+	icon: "eating-out",
+	color: "cat-plum",
 	months: FIRST_WEEK_EATING_OUT_MONTHS,
 	suggestion: { amountCents: 10000, months: FIRST_WEEK_EATING_OUT_MONTHS },
 };
 const FIRST_WEEK_GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
+	icon: "gas",
+	color: "cat-slate",
 	months: [
 		{ month: "2026-08", spentCents: 0 },
 		{ month: "2026-09", spentCents: 0 },

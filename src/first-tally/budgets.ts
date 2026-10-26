@@ -17,6 +17,9 @@ import { dollarsWords } from "./pay";
 export type BudgetAsk = {
 	id: number;
 	name: string;
+	/** The category's line icon and colour token, as its row draws them (CategoryIcon; the setup screen's list). */
+	icon: string;
+	color: string;
 	months: MonthSpent[];
 	suggestion: FirstBudgetSuggestion | null;
 };

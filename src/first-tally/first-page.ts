@@ -482,10 +482,10 @@ async function budgetsStep(
 	}
 	const { results: categories } = await db
 		.prepare(
-			`SELECT c.id AS id, c.name AS name FROM categories c WHERE ${budgetAskedSql("c", month)}
+			`SELECT c.id AS id, c.name AS name, c.icon AS icon, c.color AS color FROM categories c WHERE ${budgetAskedSql("c", month)}
 			ORDER BY c.sort_order, c.id`,
 		)
-		.all<{ id: number; name: string }>();
+		.all<{ id: number; name: string; icon: string; color: string }>();
 	if (categories.length === 0)
 		return {
 			done: false,
@@ -513,6 +513,8 @@ async function budgetsStep(
 		return {
 			id: category.id,
 			name: category.name,
+			icon: category.icon,
+			color: category.color,
 			months: monthsSpent,
 			suggestion: firstBudgetSuggestion(monthsSpent),
 		};
