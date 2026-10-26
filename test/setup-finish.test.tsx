@@ -45,6 +45,11 @@ const rowsOf = (markup: string) =>
 /** The h2 of the list, if drawn. */
 const listHeadingOf = (markup: string) =>
 	markup.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/)?.[1] ?? null;
+/** The Safe to spend number's <p>: its classes and its text. */
+const amountOf = (markup: string) => {
+	const match = markup.match(/<p class="([^"]*text-6xl[^"]*)">([^<]*)<\/p>/);
+	return { classes: match?.[1] ?? "", text: match?.[2] ?? "" };
+};
 
 const EVERY_OTHER_FRIDAY = [
 	"2026-07-17",
@@ -130,6 +135,24 @@ describe("SetupFinish", () => {
 		expect(markup).not.toContain("-$45");
 	});
 
+	it("draws a nine-character Safe to spend one size smaller on a phone, on one line, as Home does (decision 110)", () => {
+		const million = amountOf(finish({ safeCents: 100000000 }));
+		expect(million.text).toBe("$1,000,000");
+		expect(million.classes).toContain("max-sm:text-5xl");
+		expect(million.classes).toContain("whitespace-nowrap");
+		const negative = amountOf(finish({ safeCents: -99999900 }));
+		expect(negative.text).toBe("−$999,999");
+		expect(negative.classes).toContain("max-sm:text-5xl");
+		expect(negative.classes).toContain("whitespace-nowrap");
+	});
+
+	it("keeps a short Safe to spend at the full size on every phone, still on one line", () => {
+		const short = amountOf(finish());
+		expect(short.text).toBe("$1,284");
+		expect(short.classes).toContain("whitespace-nowrap");
+		expect(short.classes).not.toContain("max-sm:text-5xl");
+	});
+
 	it("draws What you set up as its h2 over the ruled list, in the order Pay, Bills, Budgets, Savings", () => {
 		const markup = finish();
 		expect(listHeadingOf(markup)).toBe("What you set up");
@@ -158,8 +181,8 @@ describe("SetupFinish", () => {
 			},
 		});
 		expect(rowsOf(markup).map((row) => row.label)).toEqual(["Pay", "Budgets"]);
-		expect(markup).not.toContain("<dt>Bills</dt>");
-		expect(markup).not.toContain("<dt>Savings</dt>");
+		expect(markup).not.toContain('<dt class="col-start-1">Bills</dt>');
+		expect(markup).not.toContain('<dt class="col-start-1">Savings</dt>');
 	});
 
 	it("draws a Pay row with one dd per merchant, all in the one row", () => {
@@ -199,7 +222,7 @@ describe("SetupFinish", () => {
 		);
 	});
 
-	it("wraps a long name at its words, never inside a word", () => {
+	it("wraps a long name at its words, breaking only a word too long for its line", () => {
 		const markup = finish({
 			rows: {
 				pay: [

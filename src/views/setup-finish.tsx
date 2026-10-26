@@ -8,6 +8,7 @@ import {
 	safeToSpendIn,
 } from "../first-tally/finish";
 import { Button } from "./button";
+import { headlineAmountClass } from "./headline-amount";
 import { safeToSpendText } from "./home-top";
 import { Notebook } from "./notebook";
 import { Heading } from "./setup-questions";
@@ -40,6 +41,7 @@ export function SetupFinish({
 	/** The heading takes focus, when the screen is drawn by a swap. */
 	focus: boolean;
 }) {
+	const amount = safeToSpendText(safeCents);
 	const listed = [
 		...(rows.pay.length > 0 ? [{ label: "Pay", values: rows.pay }] : []),
 		...(rows.bills !== null ? [{ label: "Bills", values: [rows.bills] }] : []),
@@ -73,8 +75,10 @@ export function SetupFinish({
 				{FINISH_HEADING}
 			</Heading>
 			<p class="mt-4 text-lg text-muted">{safeToSpendIn(month)}</p>
-			<p class="font-serif text-6xl font-semibold tracking-tight tabular-nums">
-				{safeToSpendText(safeCents)}
+			<p
+				class={`whitespace-nowrap font-serif text-6xl font-semibold tracking-tight tabular-nums ${headlineAmountClass(amount)}`}
+			>
+				{amount}
 			</p>
 			<p class="mt-2 text-muted">{finishLead(month)}</p>
 			{listed.length > 0 && (

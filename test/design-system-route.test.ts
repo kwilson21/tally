@@ -336,7 +336,7 @@ describe("GET /design-system in the demo", () => {
 
 		// 3. Nothing to set up: no heading and no list for What you set up, and the month's number.
 		const nothing = state(2);
-		expect(nothing).not.toContain("What you set up");
+		expect(nothing).not.toContain(">What you set up</h2>");
 		expect(nothing).not.toContain("<dl");
 		expect(nothing).toContain("Safe to spend in October");
 		expect(nothing).toContain("$700");
