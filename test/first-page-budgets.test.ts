@@ -1974,17 +1974,14 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await savingsOf()).toBe(await goalFor());
 	});
 
-	it("writes nothing for an answer after stroke four, and gets the stale reply", async () => {
+	it("writes nothing for an answer once setup is done (the budgets stroke drawn), and sends Home (decision 148)", async () => {
 		await skipAll();
 		await post("/setup/savings", [["answer", "skip"]]);
 		const { res } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "500"],
 		]);
-		expect(trigger(res).toast).toEqual({
-			message: "That one is already answered.",
-			type: "info",
-		});
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 		expect(await goalRows()).toBe(0);
 		expect(await savingsOf()).toBe("skipped");
 	});

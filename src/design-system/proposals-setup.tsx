@@ -9,8 +9,13 @@ import { CategoryIcon } from "../views/category";
 import { FeedbackButton } from "../views/feedback-button";
 import { Icon } from "../views/icons";
 import { Notebook } from "../views/notebook";
-import { type StepLine, TallySteps } from "../views/tally-steps";
-import { FirstPage, Fixed, SmallNotebook } from "./proposal-parts";
+import {
+	FirstPage,
+	Fixed,
+	SmallNotebook,
+	type StepLine,
+	TallySteps,
+} from "./proposal-parts";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 

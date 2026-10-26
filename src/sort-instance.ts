@@ -1,6 +1,6 @@
 // What one sorting instance does (spec §7, §8.6, decision 139): it sorts its rows in groups of 25 (sort-groups.ts), and the
-// night's instance then makes the night's notes and names, then new-category suggestions, then, in production, keeps the
-// first night's counts. Each is a step of its own; one that fails is logged by its error's name and the next still runs.
+// night's instance then clears the daily run's wait mark, makes the night's notes and names, then new-category suggestions.
+// Each is a step of its own; one that fails is logged by its error's name and the next still runs.
 // SortWorkflow (sort-workflow.ts) runs it with Workflows' steps, and waits out a busy Jev with step.sleep (decision 145);
 // the tests run it with a fake step runner.
 
@@ -11,7 +11,6 @@ import {
 import { readAiSwitches } from "./db/ai-switches";
 import { clearWaitsForRunStatement } from "./db/first-tally";
 import { waitingForJevSql } from "./db/transactions";
-import { keepNightCounts } from "./first-tally/night";
 import { runTimeBudgetMs } from "./run-budget";
 import {
 	type SortEnv,
@@ -39,7 +38,7 @@ const NIGHT_STEPS = {
 		timeout: "15 minutes",
 		sensitive: "output",
 	},
-	// D1 only, so a failed save may run again.
+	// D1 only, so a failed save may run again: the night-run-wait step's clear of the daily run's wait mark (decision 150).
 	counts: {
 		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 		timeout: "1 minute",
@@ -72,7 +71,8 @@ export function instanceSortOptions(
 
 /**
  * Runs one sorting instance's steps through `runStep` (see StepRunner). The sort is the same as ever. With `params.night`
- * (the 09:00 run's instance), the night's names, new-category suggestions and, in production, first-night counts follow.
+ * (the 09:00 run's instance), the daily run's wait mark is cleared in production, and the night's names and new-category
+ * suggestions follow.
  */
 export async function runSortInstance(
 	env: InstanceEnv,
@@ -101,11 +101,10 @@ export async function runSortInstance(
 			`sorting: stopped ${error instanceof Error ? error.name : "unknown"}`,
 		);
 	}
-	const night = params.night;
-	if (!night) return;
+	if (!params.night) return;
 
-	// Production only, as the counts are: once nothing waits for Jev, the daily run's mark goes (decision 150), so setup's reading
-	// screen stops saying the import waits for the run.
+	// Production only: the demo has no banks, so it has no import waiting for the daily run. Once nothing waits for Jev, the
+	// daily run's mark goes (decision 150), so setup's reading screen stops saying the import waits for the run.
 	if (env.DEMO === "false") {
 		try {
 			await runStep("night-run-wait", NIGHT_STEPS.counts, async () => {
@@ -118,7 +117,7 @@ export async function runSortInstance(
 			});
 		} catch (error) {
 			console.error(
-				`first night: wait mark step failed ${error instanceof Error ? error.name : "unknown"}`,
+				`night: wait mark step failed ${error instanceof Error ? error.name : "unknown"}`,
 			);
 		}
 	}
@@ -153,19 +152,5 @@ export async function runSortInstance(
 		console.error(
 			`workers-ai: category suggestions step failed ${error instanceof Error ? error.name : "unknown"}`,
 		);
-	}
-
-	// Production only: the demo has no banks, so it has no first night to count.
-	if (env.DEMO === "false") {
-		try {
-			await runStep("night-counts", NIGHT_STEPS.counts, async () => {
-				await keepNightCounts(env.DB, env, night);
-				return true;
-			});
-		} catch (error) {
-			console.error(
-				`first night: counts step failed ${error instanceof Error ? error.name : "unknown"}`,
-			);
-		}
 	}
 }

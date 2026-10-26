@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import {
+	type StepLine,
+	stepsOf,
+	TallySteps,
+} from "../src/design-system/proposal-parts";
 import { Notebook } from "../src/views/notebook";
-import { type StepLine, stepsOf, TallySteps } from "../src/views/tally-steps";
 
 const NAMES = [
 	"Link your bank",

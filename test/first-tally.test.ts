@@ -8,9 +8,7 @@ import {
 	forgetPayDeposits,
 	isSetUp,
 	keepBudgetStatement,
-	keepNightStatement,
 	markStroke,
-	nightSyncStatement,
 	type PayAnswerRecord,
 	payAnswerStatement,
 	readFirstTally,
@@ -40,9 +38,16 @@ const stored = async () =>
 		.prepare("SELECT value FROM household_settings WHERE key = 'first_tally'")
 		.first<{ value: string }>();
 
-/** The three questions answered (pay, bills, budgets drawn on `day`), so the night's writes can land. */
-const answeredQuestions = async (day: string) => {
+/** Setup done: all four strokes drawn on `day` (decision 148: the budgets stroke is the last). */
+const setUpHousehold = async (day: string) => {
 	for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
+		await markStroke(db, stroke, day);
+	}
+};
+
+/** Setup not done yet: the bank, pay and bills strokes drawn on `day`, and no budgets stroke. */
+const midSetup = async (day: string) => {
+	for (const stroke of ["bank", "pay", "bills"] as const) {
 		await markStroke(db, stroke, day);
 	}
 };
@@ -108,9 +113,13 @@ describe("first_tally record", () => {
 		expect((await readFirstTally(db))?.strokes).toEqual({ bank: null });
 	});
 
-	it("is set up once all five strokes are drawn, days or not", async () => {
-		expect(STROKES).toEqual(["bank", "pay", "bills", "budgets", "count"]);
-		for (const stroke of STROKES) await markStroke(db, stroke, null);
+	it("is set up once all four strokes are drawn, days or not, and not before the budgets stroke (decision 148)", async () => {
+		expect(STROKES).toEqual(["bank", "pay", "bills", "budgets"]);
+		for (const stroke of ["bank", "pay", "bills"] as const) {
+			await markStroke(db, stroke, null);
+		}
+		expect(isSetUp(await readFirstTally(db))).toBe(false);
+		await markStroke(db, "budgets", null);
 		expect(isSetUp(await readFirstTally(db))).toBe(true);
 	});
 
@@ -124,26 +133,6 @@ describe("first_tally record", () => {
 		});
 	});
 
-	it("keeps the first night's counts beside the strokes and answers", async () => {
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-13", 1).run();
-		expect(await readFirstTally(db)).toEqual({
-			strokes: {
-				bank: "2026-10-12",
-				pay: "2026-10-12",
-				bills: "2026-10-12",
-				budgets: "2026-10-12",
-			},
-			budgets: {},
-			night: { brought: 3, needYou: 1 },
-		});
-	});
-
 	it("stores the record as one JSON value under first_tally", async () => {
 		await markStroke(db, "bank", "2026-10-10");
 		expect(await stored()).toEqual({
@@ -152,20 +141,18 @@ describe("first_tally record", () => {
 	});
 
 	it("keeps every field when the writes overlap, since each one changes only its own part", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await Promise.all([
 			keepBudget(3, { kind: "suggested", cents: 65000 }),
 			keepBudget(4, { kind: "skipped", cents: null }),
-			markStroke(db, "count", "2026-10-13", "1"),
-			nightSyncStatement(db, { brought: 3, on: "2026-10-13", ok: true }).run(),
+			markStroke(db, "budgets", "2026-10-13"),
 		]);
 		expect(await readFirstTally(db)).toEqual({
 			strokes: {
 				bank: "2026-10-12",
 				pay: "2026-10-12",
 				bills: "2026-10-12",
-				budgets: "2026-10-12",
-				count: "2026-10-13",
+				budgets: "2026-10-13",
 			},
 			budgets: {
 				"3": { kind: "suggested", cents: 65000 },
@@ -175,13 +162,7 @@ describe("first_tally record", () => {
 	});
 
 	it("is gone after the demo's nightly reset, so the demo never shows setup", async () => {
-		await answeredQuestions("2026-10-01");
-		await nightSyncStatement(db, {
-			brought: 0,
-			on: "2026-10-01",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-01", 0).run();
+		await setUpHousehold("2026-10-01");
 		expect(await readFirstTally(db)).not.toBeNull();
 		await resetDemo(db, todayIn(DEFAULT_TIME_ZONE));
 		expect(await readFirstTally(db)).toBeNull();
@@ -606,133 +587,10 @@ describe("a bank's history takes its pay deposits with it (P125 E, decision 114)
 	});
 });
 
-describe("the first night's counts (P125 E, #586)", () => {
-	it("keeps the 09:00 sync's result only once the three questions are answered", async () => {
-		await markStroke(db, "bank", "2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		expect((await readFirstTally(db))?.nightSync).toBeUndefined();
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		expect((await readFirstTally(db))?.nightSync).toEqual({
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		});
-	});
-
-	it("keeps the 09:00 sync's result as ok false too, so the night's Workflow keeps nothing", async () => {
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 2,
-			on: "2026-10-13",
-			ok: false,
-		}).run();
-		await keepNightStatement(db, "2026-10-13", 0).run();
-		expect((await readFirstTally(db))?.nightSync).toEqual({
-			brought: 2,
-			on: "2026-10-13",
-			ok: false,
-		});
-		expect((await readFirstTally(db))?.night).toBeUndefined();
-	});
-
-	it("keeps nothing in the night's Workflow when the 09:00 sync was for another day", async () => {
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-12",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-13", 1).run();
-		expect((await readFirstTally(db))?.night).toBeUndefined();
-	});
-
-	it("keeps nothing when no 09:00 sync was kept at all", async () => {
-		await answeredQuestions("2026-10-12");
-		await keepNightStatement(db, "2026-10-13", 1).run();
-		expect((await readFirstTally(db))?.night).toBeUndefined();
-	});
-
-	it("a later 09:00 run replaces the sync of a night that did not finish", async () => {
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: false,
-		}).run();
-		await nightSyncStatement(db, {
-			brought: 5,
-			on: "2026-10-14",
-			ok: true,
-		}).run();
-		expect((await readFirstTally(db))?.nightSync).toEqual({
-			brought: 5,
-			on: "2026-10-14",
-			ok: true,
-		});
-		await keepNightStatement(db, "2026-10-14", 2).run();
-		expect((await readFirstTally(db))?.night).toEqual({
-			brought: 5,
-			needYou: 2,
-		});
-	});
-
-	it("keeps the counts once: a second keep changes nothing, and a 09:00 run after it writes nothing", async () => {
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-13", 1).run();
-		await nightSyncStatement(db, {
-			brought: 9,
-			on: "2026-10-14",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-14", 4).run();
-		expect(await readFirstTally(db)).toEqual({
-			strokes: {
-				bank: "2026-10-12",
-				pay: "2026-10-12",
-				bills: "2026-10-12",
-				budgets: "2026-10-12",
-			},
-			budgets: {},
-			night: { brought: 3, needYou: 1 },
-		});
-	});
-
-	it("writes nothing once the count stroke is drawn", async () => {
-		await answeredQuestions("2026-10-12");
-		await markStroke(db, "count", "2026-10-13");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		expect((await readFirstTally(db))?.nightSync).toBeUndefined();
-	});
-});
-
 describe("a second bank during setup takes the questions back (#578)", () => {
-	it("takes back pay, bills, budgets, the night and its sync, and keeps stroke one and the answers", async () => {
-		await answeredQuestions("2026-10-12");
+	it("takes back pay and bills, and keeps stroke one, the budget answers and the marker's bank", async () => {
+		await midSetup("2026-10-12");
 		await keepBudget(3, { kind: "suggested", cents: 65000 });
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
-		await keepNightStatement(db, "2026-10-13", 1).run();
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect(await readFirstTally(db)).toEqual({
 			strokes: { bank: "2026-10-12" },
@@ -742,22 +600,22 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 	});
 
 	it("names the bank it took the questions back for in reAsk, the marker the re-ask note reads", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect((await readFirstTally(db))?.reAsk).toEqual({ bank: "Wells Fargo" });
 	});
 
 	it("stores a bank name with quotes and a path in it as the name itself", async () => {
-		const name = `O'Brien "Savings" $.strokes.count`;
-		await answeredQuestions("2026-10-12");
+		const name = `O'Brien "Savings" $.strokes.budgets`;
+		await midSetup("2026-10-12");
 		await takeBackQuestionStrokes(db, name).run();
 		const record = await readFirstTally(db);
 		expect(record?.reAsk).toEqual({ bank: name });
-		expect(record?.strokes.count).toBeUndefined();
+		expect(record?.strokes.budgets).toBeUndefined();
 	});
 
 	it("a third bank linked while the re-ask is still open names itself in the marker, not the second", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		// Nothing is drawn now, so only the open marker lets this link take its place.
 		await takeBackQuestionStrokes(db, "Capital One").run();
@@ -765,7 +623,7 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 	});
 
 	it("the marker goes once budgets is drawn again, after pay and bills", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		await markStroke(db, "pay", "2026-10-13");
 		await markStroke(db, "bills", "2026-10-13");
@@ -842,7 +700,7 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 	});
 
 	it("takes the re-ask marker with the bank strokes when the last bank goes before setup is done", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		await db
 			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
@@ -851,16 +709,17 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
 	});
 
-	it("takes nothing back once the count stroke is drawn, so a finished setup stays", async () => {
-		await answeredQuestions("2026-10-12");
-		await markStroke(db, "count", "2026-10-13");
+	it("takes nothing back once the budgets stroke is drawn, so a finished setup stays", async () => {
+		await setUpHousehold("2026-10-12");
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
-		expect((await readFirstTally(db))?.strokes).toEqual({
-			bank: "2026-10-12",
-			pay: "2026-10-12",
-			bills: "2026-10-12",
-			budgets: "2026-10-12",
-			count: "2026-10-13",
+		expect(await readFirstTally(db)).toEqual({
+			strokes: {
+				bank: "2026-10-12",
+				pay: "2026-10-12",
+				bills: "2026-10-12",
+				budgets: "2026-10-12",
+			},
+			budgets: {},
 		});
 	});
 
@@ -871,19 +730,32 @@ describe("a second bank during setup takes the questions back (#578)", () => {
 		expect((await readFirstTally(db))?.reAsk).toBeUndefined();
 	});
 
-	it("takes the night and its sync back with the bank strokes when the last bank goes before setup is done", async () => {
+	it("takes the four strokes back with the bank when the last bank goes before setup is done, and keeps the answers", async () => {
 		// The demo's banks are connected; the last one going is the case under test.
 		await db
 			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
 			.run();
-		await answeredQuestions("2026-10-12");
-		await nightSyncStatement(db, {
-			brought: 3,
-			on: "2026-10-13",
-			ok: true,
-		}).run();
+		await midSetup("2026-10-12");
+		await keepBudget(3, { kind: "suggested", cents: 65000 });
 		await takeBackBankStrokes(db, 999).run();
-		expect(await readFirstTally(db)).toEqual({ strokes: {}, budgets: {} });
+		expect(await readFirstTally(db)).toEqual({
+			strokes: {},
+			budgets: { "3": { kind: "suggested", cents: 65000 } },
+		});
+	});
+
+	it("takes nothing back when the last bank goes after setup is done, so a finished setup stays", async () => {
+		await db
+			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")
+			.run();
+		await setUpHousehold("2026-10-12");
+		await takeBackBankStrokes(db, 999).run();
+		expect((await readFirstTally(db))?.strokes).toEqual({
+			bank: "2026-10-12",
+			pay: "2026-10-12",
+			bills: "2026-10-12",
+			budgets: "2026-10-12",
+		});
 	});
 });
 
@@ -911,7 +783,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 		await waitingCharge();
 	});
 
-	it("is written only on a record that exists, and only while the count stroke isn't drawn", async () => {
+	it("is written only on a record that exists, and only while setup isn't done (the budgets stroke isn't drawn)", async () => {
 		await waitsForRunStatement(db, waitingSql).run();
 		expect(await stored()).toBeNull();
 		await markStroke(db, "bank", "2026-10-12");
@@ -919,7 +791,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 		expect((await readFirstTally(db))?.waitsForRun).toBe(true);
 		await clearWaitsForRunStatement(db, null).run();
 		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
-		await markStroke(db, "count", "2026-10-13");
+		await markStroke(db, "budgets", "2026-10-13");
 		await waitsForRunStatement(db, waitingSql).run();
 		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
 	});
@@ -943,7 +815,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 		});
 	});
 
-	it("the night's clear keeps the mark while a row waits, and removes it once none does", async () => {
+	it("the daily run's clear keeps the mark while a row waits, and removes it once none does", async () => {
 		await markStroke(db, "bank", "2026-10-12");
 		await waitsForRunStatement(db, waitingSql).run();
 		await clearWaitsForRunStatement(db, waitingSql).run();
@@ -961,7 +833,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 	});
 
 	it("is removed by a take-back of the questions, since nothing waits once they are taken back", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await waitsForRunStatement(db, waitingSql).run();
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
 		expect((await readFirstTally(db))?.waitsForRun).toBeUndefined();
@@ -971,7 +843,7 @@ describe("the daily run's wait mark (decision 150)", () => {
 	});
 
 	it("is removed by a take-back of the bank strokes when the last bank goes before setup is done", async () => {
-		await answeredQuestions("2026-10-12");
+		await midSetup("2026-10-12");
 		await waitsForRunStatement(db, waitingSql).run();
 		await db
 			.prepare("UPDATE plaid_items SET disconnected_at = datetime('now')")

@@ -18,7 +18,6 @@ import { MoneyInput } from "../views/money-input";
 import { Notebook as NotebookDrawing } from "../views/notebook";
 import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
-import { type StepLine, stepsOf, TallySteps } from "../views/tally-steps";
 import { WhyLink } from "../views/why-link";
 import {
 	FirstPage,
@@ -26,6 +25,9 @@ import {
 	type LedgerLine,
 	Sheet,
 	SmallNotebook,
+	type StepLine,
+	stepsOf,
+	TallySteps,
 } from "./proposal-parts";
 import { EATING_OUT, TITLE, tx } from "./proposals-phase5-transactions";
 import {

@@ -32,7 +32,6 @@ import {
 	type PayRecord,
 	payAnswerStatement,
 	readFirstTally,
-	STROKES,
 	strokeStatement,
 } from "../db/first-tally";
 import { PERSON_INCOME_SET_SQL } from "../db/income";
@@ -84,8 +83,6 @@ export type FinishRead = {
 };
 
 export type FirstPageModel = {
-	/** The strokes drawn so far, of five. */
-	drawn: number;
 	/**
 	 * The answers so far, in ledger order. `id` names the line for the reply that wrote it (`pay:` and the merchant key for
 	 * a pay line, `bills` for the bills line), so a reply finds its own line even when two lines read the same.
@@ -749,8 +746,6 @@ export async function settleAndLoad(
 		...(savingsLine ? [savingsLine] : []),
 	];
 	return {
-		drawn: STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
-			.length,
 		ledger,
 		payAnswered: Object.keys(record?.pay ?? {}).length > 0,
 		pay,

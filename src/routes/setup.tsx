@@ -35,9 +35,9 @@ import {
 import { enabled } from "./plaid";
 
 // Setup (P142 A, decision 148, spec §8.8): a new family's first screens: the welcome before a bank, Reading your bank after
-// one, and the questions once they open (one screen each, routes/first-page.tsx). Home sends a new family here until the
-// questions are answered, and then to Home. The setup screen's refresh and check-in draw and move it in place (redrawSetup),
-// so nothing reloads the page.
+// one, and the questions once they open (one screen each, routes/first-page.tsx). Home sends a new family here until setup
+// is done (the budgets stroke drawn); then /setup draws the finish, with the month's numbers, and Home is plain Home. The
+// setup screen's refresh and check-in draw and move it in place (redrawSetup), so nothing reloads the page.
 
 type App = { Bindings: Env };
 export const setupRoute = new Hono<App>();
@@ -108,9 +108,10 @@ function anotherBankLink(env: Env) {
 /**
  * The setup screen moved on in place (decision 146): a phase that left the reading screen is answered here, with no reload.
  * The questions open: the first question is drawn into #setup-screen in place, announced with the words of the question
- * (`said` first, then "Your questions are ready." and the question's heading), and its heading takes the focus. Set up,
- * answered or the fifth day: Home is. Otherwise the screen is redrawn into #setup-screen, with the words it draws announced
- * (`said` first) and its heading or status taking focus, since the control that had it has gone.
+ * (`said` first, then "Your questions are ready." and the question's heading), and its heading takes the focus. Set up
+ * (the budgets stroke drawn): the page is sent to /setup, which draws the finish. Otherwise the screen is redrawn into
+ * #setup-screen, with the words it draws announced (`said` first) and its heading or status taking focus, since the control
+ * that had it has gone.
  */
 export async function redrawSetup(
 	c: Context<App>,
@@ -132,8 +133,8 @@ export async function redrawSetup(
 		);
 		return c.html(drawQuestionScreen(model, { focus: true }));
 	}
-	if (!setup || setup.fifth || setup.phase === "answered") {
-		c.header("HX-Redirect", "/");
+	if (!setup) {
+		c.header("HX-Redirect", "/setup");
 		return c.body(null, 204);
 	}
 	c.header("HX-Retarget", "#setup-screen");
@@ -167,18 +168,20 @@ export async function redrawSetup(
 /**
  * The setup's full page: the welcome before a bank, Reading your bank after one, and the questions once they are open (one
  * screen each; `?budgets=one` asks the budgets one category at a time, with its question focused). The family app only. The
- * demo has no setup and answers 404. Once the budgets stroke is drawn, the setup finish (readFinish, from the record) is drawn
- * at 200 for a reload or a later visit, and it comes before any other phase. Otherwise the phases as above.
+ * demo has no setup and answers 404. Once setup is done (the budgets stroke drawn, decision 148), the setup finish is drawn at
+ * 200 for a reload or a later visit, from the record and this month's numbers (readFinish, with focus false).
  */
 setupRoute.get("/setup", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
 	const today = await householdToday(c.env.DB);
-	const finish = await readFinish(c.env.DB, today);
-	if (finish) return c.html(finishPage(finish, false));
 	const flagged = flaggedBanks(await bankSyncs(c.env.DB), today);
 	const view = await readSetup(c.env.DB, { today, flagged });
-	if (!view || view.fifth || view.phase === "answered")
-		return c.redirect("/", 303);
+	if (!view) {
+		// Setup is done (readSetup is null only once the budgets stroke is drawn, which never goes back), so the finish is
+		// read from the record. The redirect is a guard for a record that has no budgets stroke after all.
+		const finish = await readFinish(c.env.DB, today);
+		return finish ? c.html(finishPage(finish, false)) : c.redirect("/", 303);
+	}
 	if (view.phase === "ready") {
 		const oneAtATime = c.req.query("budgets") === "one";
 		const model = await settleAndLoad(c.env.DB, today, { oneAtATime });

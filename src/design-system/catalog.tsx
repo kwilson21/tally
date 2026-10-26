@@ -4,7 +4,6 @@ import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { parseBudgetAmount } from "../budgets/amount";
 import type { Bank } from "../db/accounts";
-import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
@@ -16,12 +15,7 @@ import {
 	finishSavingsLine,
 } from "../first-tally/finish";
 import type { PayMerchant } from "../first-tally/first-page";
-import {
-	type SetupPhase,
-	type SetupView,
-	setupSteps,
-	strokesDrawn,
-} from "../first-tally/setup";
+import type { SetupPhase, SetupView } from "../first-tally/setup";
 import {
 	skippedBills,
 	skippedBudgets,
@@ -90,7 +84,6 @@ import { FileField } from "../views/file-field";
 import { FilterSelect } from "../views/filter-select";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
-import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HouseholdPeople } from "../views/household-people";
 import {
@@ -175,7 +168,6 @@ import {
 import { AskFirst, SuggestionCard } from "../views/suggestion-review";
 import { Switch } from "../views/switch";
 import { SystemDiagram } from "../views/system-diagram";
-import { TallySteps } from "../views/tally-steps";
 import { TextInput } from "../views/text-input";
 import { ThingsToTry } from "../views/things-to-try";
 import { TimeZoneRow } from "../views/time-zone-row";
@@ -549,95 +541,6 @@ function Brand() {
 				</State>
 			</Specimen>
 			<Specimen
-				id="tally-steps"
-				title="TallySteps"
-				tier="visual"
-				components={["TallySteps"]}
-				sentence="The first week's five strokes as a list under the notebook: each line's glyph is its stroke, its name, and a note that says what was done or when it comes. A done line says so to a screen reader; Next marks the line to act on once the questions are open, and the words carry the state."
-			>
-				<State label="Before a bank: none done, each line says how long it takes">
-					<TallySteps
-						steps={setupSteps(null, "before", null, FIRST_WEEK_TODAY, 0)}
-					/>
-				</State>
-				<State label="While Tally reads and sorts: Chase, linked; steps 2 to 4 say After sorting, and the fifth says Later">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-				<State label="Questions ready: Your pay is next">
-					<TallySteps
-						steps={setupSteps(
-							BANK_SYNCED,
-							"ready",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-				<State label="Four drawn, the questions answered: the count line is later, and no line says Next">
-					<TallySteps
-						steps={setupSteps(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-								},
-								budgets: {},
-							},
-							"answered",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-				<State label="A bank linked during setup: a line under step one says Tally asks again about the questions">
-					<TallySteps
-						steps={setupSteps(
-							{
-								strokes: { bank: "2026-10-13" },
-								budgets: { "3": { kind: "suggested", cents: 65000 } },
-								reAsk: { bank: "Wells Fargo" },
-							},
-							"reading",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							2,
-						)}
-					/>
-				</State>
-				<State label="All five drawn, each with its day">
-					<TallySteps
-						steps={setupSteps(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-									count: FIRST_WEEK_TODAY,
-								},
-								budgets: {},
-							},
-							"ready",
-							"Chase",
-							FIRST_WEEK_TODAY,
-							1,
-						)}
-					/>
-				</State>
-			</Specimen>
-			<Specimen
 				id="yourbanks"
 				title="YourBanks"
 				tier="visual"
@@ -681,125 +584,6 @@ function Brand() {
 				</State>
 			</Specimen>
 			<Specimen
-				id="home-setup"
-				title="HomeSetup"
-				tier="visual"
-				components={["HomeSetup"]}
-				sentence="Home's top once a new family's three questions are answered (P125 E, decision 114): it replaces the headline area until all five strokes are drawn, with the notebook, the status and the five lines. Its phases before the answers are setup's own screens (the welcome and Reading your bank, decision 148), so this picture draws only the answered phase and the fifth day: the status says what Tally waits for while a bank reads its history or needs signing in (#671), and on the fifth day Safe to spend, what the night did, and the link to what needs a person sit at the top (#586)."
-			>
-				<State label="The fifth day, all sorted: Safe to spend, what the night did, and the five lines">
-					<HomeSetup
-						view={firstWeek(FIFTH_RECORD, "answered", {
-							bankName: "Chase",
-							drawn: 5,
-							total: 362,
-							sorted: 362,
-							fifth: { brought: 3, needYou: 0 },
-						})}
-						fifthDay={FIFTH_DAY}
-					/>
-				</State>
-				<State label="The fifth day, one needs you: the link to what needs a person">
-					<HomeSetup
-						view={firstWeek(FIFTH_RECORD, "answered", {
-							bankName: "Chase",
-							drawn: 5,
-							total: 362,
-							sorted: 362,
-							fifth: { brought: 3, needYou: 1 },
-						})}
-						fifthDay={FIFTH_DAY}
-					/>
-				</State>
-				<State label="Answered, a bank still reads its history: what Tally waits for, not tomorrow">
-					<HomeSetup
-						view={firstWeek(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-								},
-								budgets: {},
-							},
-							"answered",
-							{
-								bankName: "Chase",
-								drawn: 4,
-								total: 362,
-								sorted: 362,
-								answeredWaiting: "once Chase's history is in.",
-							},
-						)}
-					/>
-				</State>
-				<State label="Answered, a bank needs signing in: its line under the status, and no promise beside its Fix">
-					<HomeSetup
-						view={firstWeek(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-								},
-								budgets: {},
-							},
-							"answered",
-							{
-								bankName: "Chase",
-								drawn: 4,
-								total: 362,
-								sorted: 362,
-								answeredWaiting: "once Chase is signed in again.",
-							},
-						)}
-						bankLine={["Chase needs signing in"]}
-					/>
-				</State>
-				<State label="Answered, a bank stopped updating: its line and Fix under a bare count, with no promise">
-					<HomeSetup
-						view={firstWeek(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-								},
-								budgets: {},
-							},
-							"answered",
-							{
-								bankName: "Chase",
-								drawn: 4,
-								total: 362,
-								sorted: 362,
-							},
-						)}
-						bankLine={["Chase stopped updating Oct 12"]}
-					/>
-				</State>
-				<State label="Questions answered: the ruled total, and no Band">
-					<HomeSetup
-						view={firstWeek(
-							{
-								strokes: {
-									bank: "2026-10-13",
-									pay: "2026-10-13",
-									bills: "2026-10-13",
-									budgets: "2026-10-13",
-								},
-								budgets: {},
-							},
-							"answered",
-							{ bankName: "Chase", drawn: 4, total: 362, sorted: 362 },
-						)}
-					/>
-				</State>
-			</Specimen>
-			<Specimen
 				id="notify-control"
 				title="NotifyControl"
 				tier="visual"
@@ -836,63 +620,26 @@ function Brand() {
 	);
 }
 
-/** The first week's fake setup (P125 E): the household's day, and a setup view built from a fake record. */
+/** The first week's fake setup (P125 E): the household's day, and the reading screen's setup view from its fields. */
 const FIRST_WEEK_TODAY = "2026-10-14";
 const firstWeek = (
-	record: FirstTally | null,
 	phase: SetupPhase,
 	extra: Partial<SetupView> = {},
-): SetupView => {
-	const view = {
-		phase,
-		drawn: strokesDrawn(record),
-		fifth: null,
-		answeredWaiting: null,
-		emailed: false,
-		bankName: null,
-		bankCount: 1,
-		historyIn: true,
-		sorting: false,
-		slow: false,
-		refreshes: false,
-		sorted: 0,
-		total: 0,
-		waitsForRun: false,
-		runTime: "5 AM",
-		...extra,
-	};
-	return {
-		...view,
-		steps: setupSteps(
-			record,
-			phase,
-			view.bankName,
-			FIRST_WEEK_TODAY,
-			view.bankCount,
-		),
-	};
-};
-/** The fifth day's fake record: stroke five drawn today, and the night kept with its counts (P125 E, #586). */
-const FIFTH_RECORD: FirstTally = {
-	strokes: {
-		bank: "2026-10-13",
-		pay: "2026-10-13",
-		bills: "2026-10-13",
-		budgets: "2026-10-13",
-		count: FIRST_WEEK_TODAY,
-	},
-	budgets: {},
-	night: { brought: 3, needYou: 0 },
-};
-/** The fifth day's Safe to spend, as the proposal draws it ($1,398), and where "See what needs you" goes. */
-const FIFTH_DAY = {
-	safeToSpendCents: 139800,
-	needsHref: "/transactions/organize",
-};
-const BANK_SYNCED: FirstTally = {
-	strokes: { bank: "2026-10-13" },
-	budgets: {},
-};
+): SetupView => ({
+	phase,
+	emailed: false,
+	bankName: null,
+	bankCount: 1,
+	historyIn: true,
+	sorting: false,
+	slow: false,
+	refreshes: false,
+	sorted: 0,
+	total: 0,
+	waitsForRun: false,
+	runTime: "5 AM",
+	...extra,
+});
 /** The Your banks list's fake rows (P140 A): Chase is in, American Express is being read, and its two variants. */
 const CHASE_IN: YourBank = {
 	id: 3,
@@ -8535,7 +8282,7 @@ function FirstWeekGroup() {
 				<State label="Reading, one bank: its history coming in, the page updating, Notify me, the email line">
 					<SetupFrame label="Reading your bank, reading, one bank: its history coming in, the page updating, Notify me, the email line">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								historyIn: false,
 								refreshes: true,
@@ -8564,7 +8311,7 @@ function FirstWeekGroup() {
 				<State label="Sorting: the count and its bar">
 					<SetupFrame label="Reading your bank, sorting: the count and its bar">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								sorting: true,
 								sorted: 318,
@@ -8589,7 +8336,7 @@ function FirstWeekGroup() {
 				<State label="Two banks: from 2 banks, and each bank's state">
 					<SetupFrame label="Reading your bank, two banks: from 2 banks, and each bank's state">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								bankCount: 2,
 								historyIn: false,
@@ -8614,7 +8361,7 @@ function FirstWeekGroup() {
 				<State label="Taking longer than usual: the count and its bar, and Tally keeps trying">
 					<SetupFrame label="Reading your bank, taking longer than usual: the count and its bar, and Tally keeps trying">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								sorting: true,
 								slow: true,
@@ -8639,7 +8386,7 @@ function FirstWeekGroup() {
 				<State label="Waiting for the daily run (Sort right away off, decision 150): the run's hour, no count and no bar">
 					<SetupFrame label="Reading your bank, waiting for the daily run (Sort right away off, decision 150): the run's hour, no count and no bar">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								sorting: true,
 								waitsForRun: true,
@@ -8665,7 +8412,7 @@ function FirstWeekGroup() {
 				<State label="Waiting for the daily run in London in summer: 10 AM">
 					<SetupFrame label="Reading your bank, waiting for the daily run in London in summer: 10 AM">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								sorting: true,
 								waitsForRun: true,
@@ -8691,7 +8438,7 @@ function FirstWeekGroup() {
 				<State label="A bank that needs signing in: its line and Fix, and Paused in its row">
 					<SetupFrame label="Reading your bank, a bank that needs signing in: its line and Fix, and Paused in its row">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								bankCount: 2,
 								historyIn: false,
@@ -8716,7 +8463,7 @@ function FirstWeekGroup() {
 				<State label="The email has reached someone, and notifications are on: no email line">
 					<SetupFrame label="Reading your bank, the email has reached someone, and notifications are on: no email line">
 						<SetupReading
-							view={firstWeek(BANK_SYNCED, "reading", {
+							view={firstWeek("reading", {
 								bankName: "Chase",
 								sorting: true,
 								sorted: 318,

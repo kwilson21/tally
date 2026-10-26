@@ -7,13 +7,8 @@ import { markStroke, readFirstTally } from "../src/db/first-tally";
 import { loadMonth } from "../src/db/month";
 import { resetDemo as resetDemoBase } from "../src/demo/reset";
 import { monthOffset } from "../src/demo/seed";
-import {
-	needsYouCount,
-	recordNightSync,
-	utcDay,
-} from "../src/first-tally/night";
+import { utcDay } from "../src/first-tally/night";
 import handler, { runScheduled } from "../src/index";
-import type { SyncAllResult } from "../src/plaid/sync-all";
 import { encryptToken } from "../src/plaid/token-crypto";
 import { runSortInstance } from "../src/sort-instance";
 import {
@@ -1065,9 +1060,9 @@ describe("scheduled handler: each run stays under D1's 1,000 queries", () => {
 		).toEqual(["new"]);
 		expect(many).toBeLessThan(100);
 		expect(many).toBe(few);
-		// The cash cleanup is one statement, and the 09:00 run's night sync (#586) is one more, whatever the count.
-		expect(few).toBe(2);
-		expect(many).toBe(2);
+		// The cash cleanup is one statement, whatever the count: the 09:00 run keeps no first-night sync any more (decision 148).
+		expect(few).toBe(1);
+		expect(many).toBe(1);
 	});
 
 	/** `n` charges nobody has sorted or named, each from a store of its own. */
@@ -1307,7 +1302,7 @@ const switches = (categories: boolean, names = false) =>
 		sortOnArrival: false,
 	});
 
-describe("scheduled handler: the first night's counts (P125 E, #586)", () => {
+describe("scheduled handler: the 09:00 run keeps no first-night sync (decision 148)", () => {
 	beforeEach(async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1318,7 +1313,7 @@ describe("scheduled handler: the first night's counts (P125 E, #586)", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("keeps the night's counts in the night's instance once the sync was clean and nothing waits", async () => {
+	it("starts the night's instance and writes no nightSync, once the household is set up", async () => {
 		await answeredHousehold();
 		const prod = production();
 		const night = sortInProcess(prod);
@@ -1331,322 +1326,8 @@ describe("scheduled handler: the first night's counts (P125 E, #586)", () => {
 		expect(night.create).toHaveBeenCalledWith({
 			params: { bySync: false, rulesApplied: false, night: "2026-10-13" },
 		});
-
-		// The instance keeps the night at the end of the 09:00 run: both new transactions need a category, and
-		// nothing else asks a question.
-		expect((await readFirstTally(env.DB))?.night).toEqual({
-			brought: 2,
-			needYou: 2,
-		});
-		expect((await readFirstTally(env.DB))?.nightSync).toBeUndefined();
-	});
-
-	it("records no sync before the three questions are answered", async () => {
-		await answeredHousehold();
-		await env.DB.prepare(
-			"DELETE FROM household_settings WHERE key = 'first_tally'",
-		).run();
-		await markStroke(env.DB, "bank", "2026-10-12");
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		expect((await readFirstTally(env.DB))?.nightSync).toBeUndefined();
-	});
-
-	it("records the night not ok when a bank's sync failed, and keeps nothing", async () => {
-		await answeredHousehold();
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", {
-				added: 1,
-				failSync: true,
-			}) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
-			brought: 0,
-			on: "2026-10-13",
-			ok: false,
-		});
-		await runNight(production(), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-	});
-
-	it("records the night not ok when a connected bank needs signing in, though the others synced", async () => {
-		await answeredHousehold();
-		await linkBank("Wells Fargo", "needs_attention");
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
-			brought: 1,
-			on: "2026-10-13",
-			ok: false,
-		});
-		await runNight(production(), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-	});
-
-	it("keeps nothing in the night's instance while Jev still has a transaction waiting for its category", async () => {
-		await answeredHousehold();
-		await switches(true);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		await runNight(production(), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-	});
-
-	it("keeps nothing while a bank text is still waiting for its name, when Workers AI is bound and the switch is on", async () => {
-		await answeredHousehold();
-		await switches(false, true);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		// The names step fails before it asks, so the bank text is still waiting for its name when the counts step runs.
-		await runNight(production({ AI: aiThatSays("Some Place Name") }), {
-			night: "2026-10-13",
-			fails: ["night-names"],
-		});
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-	});
-
-	it("does not wait for names when Workers AI is unbound, though the names switch is on", async () => {
-		await answeredHousehold();
-		await switches(false, true);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		await runNight(production({ AI: undefined }), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toEqual({
-			brought: 1,
-			needYou: 1,
-		});
-	});
-
-	it("does not wait for names when the names switch is off, though Workers AI is bound", async () => {
-		await answeredHousehold();
-		await switches(false, false);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		await runNight(production({ AI: aiThatSays("[]") }), {
-			night: "2026-10-13",
-		});
-		expect((await readFirstTally(env.DB))?.night).toEqual({
-			brought: 1,
-			needYou: 1,
-		});
-	});
-
-	it("counts a bank text whose name call failed as done, so it never holds the night", async () => {
-		await answeredHousehold();
-		await switches(false, true);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		// The name call fails, so its failure is recorded, and a failed name counts as done.
-		const failing = {
-			run: vi.fn(async () => {
-				throw new Error("capacity");
-			}),
-		} as unknown as Ai;
-		await runNight(production({ AI: failing }), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toEqual({
-			brought: 1,
-			needYou: 1,
-		});
-	});
-
-	it("replaces a sync of a night that did not finish with the next 09:00 run's", async () => {
-		await answeredHousehold();
-		await switches(true);
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 3 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		await runNight(production(), { night: "2026-10-13" });
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-
-		await switches(false);
-		await runScheduled(
-			production(),
-			plaidBank("LATER", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-14T09:00:00Z"),
-		);
-		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
-			brought: 1,
-			on: "2026-10-14",
-			ok: true,
-		});
-		await runNight(production(), { night: "2026-10-14" });
-		// The three from the unfinished night still need a category too.
-		expect((await readFirstTally(env.DB))?.night).toEqual({
-			brought: 1,
-			needYou: 4,
-		});
-	});
-
-	it("keeps nothing in the night's instance when the 09:00 sync was for another day", async () => {
-		await answeredHousehold();
-
-		await runScheduled(
-			production(),
-			plaidBank("CHASE", { added: 1 }) as unknown as typeof fetch,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		await runNight(production(), { night: "2026-10-14" });
-		expect((await readFirstTally(env.DB))?.night).toBeUndefined();
-	});
-
-	it("records no sync in the demo's 09:00 run, whose night has no counts step", async () => {
-		await answeredHousehold();
-		const demo = { ...env, DEMO: "true", AI: undefined };
-		const night = sortInProcess(demo);
-
-		await runScheduled(
-			{ ...demo, SORT: night.SORT },
-			undefined,
-			runAt("2026-10-13T09:00:00Z"),
-		);
-		expect(await readFirstTally(env.DB)).toBeNull();
-		expect(night.runs[0]?.names()).not.toContain("night-counts");
-	});
-});
-
-describe("the night's needs-you count (P125 E, #586)", () => {
-	beforeEach(async () => {
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM transactions"),
-			env.DB.prepare("DELETE FROM merchants"),
-			env.DB.prepare("DELETE FROM merchant_name_failures"),
-		]);
-	});
-
-	const all = {
-		names: false,
-		details: false,
-		categories: true,
-		income: true,
-		sortOnArrival: false,
-	};
-
-	it("counts a transaction once, even when it needs a category and is also a category Maybe", async () => {
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'needs-once', '2026-10-13', 1000, 'ONCE SHOP')",
-		).run();
-		await env.DB.prepare(
-			"UPDATE transactions SET jev_category_id = (SELECT id FROM categories WHERE archived = 0 LIMIT 1), category_confidence = 0.5 WHERE plaid_transaction_id = 'needs-once'",
-		).run();
-		expect(await needsYouCount(env.DB, all)).toBe(1);
-	});
-
-	it("counts a held credit once, though it is also an income Maybe", async () => {
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'held-credit', '2026-10-13', -5000, 'HELD CREDIT')",
-		).run();
-		await env.DB.prepare(
-			"UPDATE transactions SET income_confidence = 0.6 WHERE plaid_transaction_id = 'held-credit'",
-		).run();
-		expect(await needsYouCount(env.DB, all)).toBe(1);
-	});
-
-	it("adds the name suggestion a person still has to choose", async () => {
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) VALUES ((SELECT MIN(id) FROM accounts), 'named', '2026-10-13', 1000, 'SHOP NAMED')",
-		).run();
-		await env.DB.prepare(
-			"INSERT INTO merchants (raw_name, suggested_name, suggestion_status) VALUES ('SHOP NAMED', 'Named Shop', 'pending')",
-		).run();
-		// The transaction needs a category, and its name is waiting for a choice.
-		expect(await needsYouCount(env.DB, { ...all, names: true })).toBe(2);
-	});
-});
-
-describe("recordNightSync's result", () => {
-	const synced = (over: Partial<SyncAllResult>): SyncAllResult => ({
-		added: 2,
-		modified: 0,
-		changedIds: [],
-		synced: 1,
-		skipped: 0,
-		busy: 0,
-		failed: 0,
-		failedBanks: [],
-		...over,
-	});
-
-	beforeEach(async () => {
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM transactions"),
-			env.DB.prepare("DELETE FROM accounts"),
-			env.DB.prepare("DELETE FROM plaid_items"),
-			env.DB.prepare(
-				"DELETE FROM household_settings WHERE key = 'first_tally'",
-			),
-		]);
-		await linkBank("Chase", "ok");
-		for (const stroke of ["bank", "pay", "bills", "budgets"] as const) {
-			await markStroke(env.DB, stroke, "2026-10-12");
-		}
-	});
-
-	it.each([
-		["a failed bank", { failed: 1 }],
-		["a skipped bank", { skipped: 1 }],
-		[
-			"a failed household step after the banks",
-			{ afterSyncFailed: true as const },
-		],
-		// Plaid switched off is no sync at all, so the night isn't clean (#714).
-		["Plaid switched off", { disabled: true as const }],
-	])("is not ok with %s", async (_, over) => {
-		await recordNightSync(env.DB, synced(over), "2026-10-13");
-		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
-			brought: 2,
-			on: "2026-10-13",
-			ok: false,
-		});
-	});
-
-	it("is ok only when every connected bank is ok and nothing failed or was skipped", async () => {
-		await recordNightSync(env.DB, synced({}), "2026-10-13");
-		expect((await readFirstTally(env.DB))?.nightSync).toEqual({
-			brought: 2,
-			on: "2026-10-13",
-			ok: true,
-		});
-	});
-
-	it("ignores a disconnected bank that needs signing in", async () => {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET status = 'needs_attention', disconnected_at = datetime('now')",
-		).run();
-		await recordNightSync(env.DB, synced({}), "2026-10-13");
-		expect((await readFirstTally(env.DB))?.nightSync?.ok).toBe(true);
+		const record = await readFirstTally(env.DB);
+		expect(record).not.toHaveProperty("nightSync");
+		expect(record).not.toHaveProperty("night");
 	});
 });

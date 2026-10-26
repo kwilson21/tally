@@ -64,8 +64,9 @@ const BANK = {
 };
 /** A bank whose history came in half an hour before NOW: the sort is recent. */
 const RECENT = { ...BANK, historyCompleteAt: "2026-10-14 11:30:00" };
+/** Set up (decision 148): all four strokes drawn, with no days (as migration 0057 leaves them). */
 const ALL_DRAWN: FirstTally = {
-	strokes: { bank: null, pay: null, bills: null, budgets: null, count: null },
+	strokes: { bank: null, pay: null, bills: null, budgets: null },
 	budgets: {},
 };
 
@@ -76,7 +77,6 @@ const view = (input: Partial<Parameters<typeof setupView>[0]> = {}) =>
 		flagged: [],
 		waiting: 0,
 		total: 0,
-		today: TODAY,
 		nowMs: NOW,
 		timeZone: "America/New_York",
 		sortOnArrival: true,
@@ -156,18 +156,8 @@ describe("setupView: the daily run's wait (decision 150)", () => {
 		// Nothing waiting: the questions are open.
 		expect(view({ ...waiting, waiting: 0 })?.phase).toBe("ready");
 		expect(view({ ...waiting, waiting: 0 })?.waitsForRun).toBe(false);
-		// Answered: the count line waits for the night, not for the run.
-		const answered: FirstTally = {
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		};
-		expect(view({ ...waiting, record: answered })?.phase).toBe("answered");
-		expect(view({ ...waiting, record: answered })?.waitsForRun).toBe(false);
+		// Set up (the budgets stroke drawn): there is no setup view, so no wait either.
+		expect(view({ ...waiting, record: ALL_DRAWN })).toBeNull();
 		// No bank yet.
 		expect(view({ ...waiting, banks: [] })?.phase).toBe("before");
 		expect(view({ ...waiting, banks: [] })?.waitsForRun).toBe(false);
@@ -191,23 +181,26 @@ describe("setupView: which setup state Home shows", () => {
 		expect(view({ banks: [BANK] })?.waitsForRun).toBe(false);
 	});
 
-	it("shows nothing once all five strokes are drawn, whatever the day", () => {
+	it("shows nothing once all four strokes are drawn, whatever the day, and even with a bank linked since (decision 148)", () => {
 		expect(view({ record: ALL_DRAWN, banks: [BANK] })).toBeNull();
+		expect(
+			view({
+				record: ALL_DRAWN,
+				banks: [
+					BANK,
+					{ ...BANK, id: 2, name: "Wells Fargo", historyCompleteAt: null },
+				],
+				waiting: 500,
+				total: 1500,
+			}),
+		).toBeNull();
 	});
 
-	it("is before a bank with no connected bank, and draws no strokes", () => {
+	it("is before a bank with no connected bank", () => {
 		const before = view();
 		expect(before?.phase).toBe("before");
-		expect(before?.drawn).toBe(0);
 		expect(before?.bankName).toBeNull();
-		expect(before?.steps.map((s) => [s.done, s.note])).toEqual([
-			[false, "About a minute"],
-			[false, "One question"],
-			[false, "One question"],
-			[false, "One tap, or one at a time"],
-			[false, "Later"],
-		]);
-		expect(before?.steps.some((s) => s.note === "Next")).toBe(false);
+		expect(before?.bankCount).toBe(0);
 	});
 
 	it("ignores a stroke one that is still drawn when no bank is connected (the disconnect retake)", () => {
@@ -223,24 +216,7 @@ describe("setupView: which setup state Home shows", () => {
 		});
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
-		expect(reading?.drawn).toBe(1);
 		expect(reading?.bankName).toBe("Chase");
-		expect(reading?.steps[0]).toEqual({
-			name: "Link your bank",
-			done: true,
-			note: "Chase, linked",
-		});
-		expect(reading?.steps[1]).toEqual({
-			name: "Your pay",
-			done: false,
-			note: "After sorting",
-		});
-		expect(reading?.steps.slice(1, 4).map((s) => s.note)).toEqual([
-			"After sorting",
-			"After sorting",
-			"After sorting",
-		]);
-		expect(reading?.steps[4]?.note).toBe("Later");
 	});
 
 	it("is sorting once every history is in and something waits, counting the sorted ones (decision 146)", () => {
@@ -415,7 +391,6 @@ describe("setupView: which setup state Home shows", () => {
 		const ready = view({ record, banks: [BANK], waiting: 0, total: 362 });
 		expect(ready?.phase).toBe("ready");
 		expect(ready?.sorted).toBe(362);
-		expect(ready?.steps[1]?.note).toBe("Next");
 	});
 
 	it("promises no time while any connected bank's history is still coming, even when another bank's is in", () => {
@@ -435,12 +410,6 @@ describe("setupView: which setup state Home shows", () => {
 		});
 		expect(reading?.phase).toBe("reading");
 		expect(reading?.historyIn).toBe(false);
-		expect(reading?.steps.slice(1).map((s) => s.note)).toEqual([
-			"After sorting",
-			"After sorting",
-			"After sorting",
-			"Later",
-		]);
 	});
 
 	it("counts the connected banks and names the first one's, not the second's", () => {
@@ -453,23 +422,7 @@ describe("setupView: which setup state Home shows", () => {
 		});
 		expect(two?.bankCount).toBe(2);
 		expect(two?.bankName).toBe("Chase");
-		expect(two?.steps[0]?.note).toBe("2 banks, linked");
 		expect(view({ record, banks: [BANK] })?.bankCount).toBe(1);
-		expect(view({ record, banks: [BANK] })?.steps[0]?.note).toBe(
-			"Chase, linked",
-		);
-	});
-
-	it("says '2 banks, linked' on step one in the ready phase too, and keeps the first bank's name in the done note", () => {
-		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const ready = view({
-			record,
-			banks: [BANK, { ...BANK, id: 2, name: "Northline" }],
-			waiting: 0,
-			total: 10,
-		});
-		expect(ready?.phase).toBe("ready");
-		expect(ready?.steps[0]?.note).toBe("2 banks, linked");
 	});
 
 	it("stays in reading while a bank's history is still coming", () => {
@@ -478,202 +431,6 @@ describe("setupView: which setup state Home shows", () => {
 			view({ record, banks: [{ ...BANK, historyCompleteAt: null }], total: 10 })
 				?.phase,
 		).toBe("reading");
-	});
-
-	it("reads 'After sorting' on lines two to four while the import is read, and 'Later' on the fifth (decision 146)", () => {
-		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const reading = view({ record, banks: [BANK], waiting: 600, total: 1500 });
-		expect(reading?.steps.slice(1).map((s) => s.note)).toEqual([
-			"After sorting",
-			"After sorting",
-			"After sorting",
-			"Later",
-		]);
-	});
-
-	it("gives no time on the lines even when every history is in and the sort is under way", () => {
-		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const sorting = view({
-			record,
-			banks: [RECENT],
-			waiting: 500,
-			total: 1500,
-		});
-		expect(sorting?.steps.slice(1).map((s) => s.note)).toEqual([
-			"After sorting",
-			"After sorting",
-			"After sorting",
-			"Later",
-		]);
-	});
-
-	it("says Next on the first line not drawn once the questions are open", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13", pay: "2026-10-13" },
-			budgets: {},
-		};
-		const ready = view({ record, banks: [BANK], waiting: 0, total: 362 });
-		expect(ready?.phase).toBe("ready");
-		expect(ready?.steps).toEqual([
-			{ name: "Link your bank", done: true, note: "Chase, linked" },
-			{ name: "Your pay", done: true, note: "Oct 13" },
-			{ name: "Your bills", done: false, note: "Next" },
-			{
-				name: "Your budgets",
-				done: false,
-				note: "One tap, or one at a time",
-			},
-			{
-				name: "Tomorrow · Tally keeps count on its own",
-				done: false,
-				note: "Later",
-			},
-		]);
-	});
-
-	it("is answered once pay, bills and budgets are drawn: the count line waits for the night, and no line says Next", () => {
-		const record: FirstTally = {
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		};
-		const answered = view({ record, banks: [BANK], waiting: 0, total: 362 });
-		expect(answered?.phase).toBe("answered");
-		expect(answered?.drawn).toBe(4);
-		expect(answered?.steps[4]).toEqual({
-			name: "Tomorrow · Tally keeps count on its own",
-			done: false,
-			note: "Later",
-		});
-		expect(answered?.steps.some((s) => s.note === "Next")).toBe(false);
-	});
-
-	it("a bank linked after the answers takes the questions back, so it reads again and says Tally asks again (#578)", () => {
-		// takeBackQuestionStrokes has removed the three strokes and set reAsk; the answers and stroke one stay.
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13" },
-			budgets: { "3": { kind: "suggested", cents: 65000 } },
-			reAsk: { bank: "Wells Fargo" },
-		};
-		const reading = view({
-			record,
-			banks: [
-				BANK,
-				{
-					name: "Wells Fargo",
-					linkedAt: "2026-10-13 09:00:00",
-					lastSyncedAt: null,
-					historyCompleteAt: null,
-					id: 2,
-				},
-			],
-		});
-		expect(reading?.phase).toBe("reading");
-		// The re-ask note is its own line under step one (#714), so step one's note stays the bank's own.
-		expect(reading?.steps[0]).toEqual({
-			name: "Link your bank",
-			done: true,
-			note: "2 banks, linked",
-			reAsk:
-				"Wells Fargo linked: Tally asks again about pay, bills and budgets.",
-		});
-	});
-
-	it("names the bank in the re-ask note with the marker's name, quotes and all", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13" },
-			budgets: {},
-			reAsk: { bank: `O'Brien "Savings"` },
-		};
-		const reading = view({
-			record,
-			banks: [
-				BANK,
-				{
-					name: "Chase",
-					linkedAt: "2026-10-13 09:00:00",
-					lastSyncedAt: null,
-					historyCompleteAt: null,
-					id: 2,
-				},
-			],
-		});
-		expect(reading?.steps[0]?.note).toBe("2 banks, linked");
-		expect(reading?.steps[0]?.reAsk).toBe(
-			`O'Brien "Savings" linked: Tally asks again about pay, bills and budgets.`,
-		);
-	});
-
-	it("shows no re-ask note for two banks linked before the questions open, with pay drawn: no marker, so no note", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13", pay: "2026-10-13" },
-			budgets: {},
-		};
-		const early = view({
-			record,
-			banks: [
-				BANK,
-				{
-					name: "Wells Fargo",
-					linkedAt: "2026-10-13 09:00:00",
-					lastSyncedAt: null,
-					historyCompleteAt: null,
-					id: 2,
-				},
-			],
-		});
-		expect(early?.steps[0]).toEqual({
-			name: "Link your bank",
-			done: true,
-			note: "2 banks, linked",
-		});
-	});
-
-	it("shows no re-ask note for a two-bank record mid pay step: the answers alone are not a retake", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13" },
-			budgets: {},
-			pay: {
-				"ACME CORP PAYROLL": {
-					yes: { "1": { date: "2026-10-03", cents: 245000 } },
-					at: 0,
-				},
-			},
-		};
-		const midPay = view({
-			record,
-			banks: [
-				BANK,
-				{
-					name: "Wells Fargo",
-					linkedAt: "2026-10-13 09:00:00",
-					lastSyncedAt: null,
-					historyCompleteAt: null,
-					id: 2,
-				},
-			],
-		});
-		expect(midPay?.steps[0]?.note).toBe("2 banks, linked");
-	});
-
-	it("names the done lines by their day, and an undated stroke has no day", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13", pay: "2026-10-13", bills: null },
-			budgets: {},
-		};
-		const partial = view({ record, banks: [BANK] });
-		expect(partial?.drawn).toBe(3);
-		expect(partial?.steps[1]).toEqual({
-			name: "Your pay",
-			done: true,
-			note: "Oct 13",
-		});
-		expect(partial?.steps[2]?.done).toBe(true);
-		expect(partial?.steps[2]?.note).toBe("");
 	});
 });
 
@@ -714,7 +471,7 @@ describe("readSetup", () => {
 		).run();
 	});
 
-	it("reads no setup for a household whose record is all five strokes", async () => {
+	it("reads no setup for a household whose record is all four strokes", async () => {
 		await env.DB.prepare(
 			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
 		)
@@ -732,7 +489,6 @@ describe("readSetup", () => {
 		// Stroke one is drawn today, but the setup is reading, not set up: the connected banks' 90-day history isn't in yet
 		// (the demo seed's banks carry no history mark), so the questions stay shut until it is.
 		expect(setup?.phase).toBe("reading");
-		expect(setup?.steps[0]?.done).toBe(true);
 		const stored = await env.DB.prepare(
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
@@ -899,7 +655,7 @@ describe("takeBackBankStrokes", () => {
 			).first<{ id: number }>()
 		)?.id;
 
-	it("takes strokes one to four back when the last connected bank goes, and keeps the budget answers", async () => {
+	it("takes the four strokes back when the last connected bank goes before setup is done, and keeps the budget answers", async () => {
 		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
@@ -910,12 +666,12 @@ describe("takeBackBankStrokes", () => {
 					id: number;
 				}>()
 			)?.id ?? 0;
+		// Setup not done: no budgets stroke yet, so the last bank going takes the strokes back.
 		await store({
 			strokes: {
 				bank: "2026-10-13",
 				pay: "2026-10-13",
 				bills: "2026-10-13",
-				budgets: "2026-10-13",
 			},
 			budgets: { "7": { kind: "suggested", cents: 65000 } },
 		});
@@ -942,240 +698,5 @@ describe("takeBackBankStrokes", () => {
 		await store(ALL_DRAWN);
 		await env.DB.batch([takeBackBankStrokes(env.DB, 999)]);
 		expect(await read()).toEqual(ALL_DRAWN);
-	});
-});
-
-// The fifth day, the answered wait and the re-ask (P125 E, #586, #671, #578). Stroke five is drawn by readSetup on the first
-// later household day after the night was kept.
-describe("the fifth day (P125 E, #586)", () => {
-	const night = { brought: 3, needYou: 1 };
-	const budgetsDay = "2026-10-13";
-	const later = "2026-10-14";
-
-	/** One household: one connected bank, and the record as given. The bank's history is in, so the setup can be read. */
-	const seedHousehold = async (record: unknown) => {
-		await env.DB.batch([
-			env.DB.prepare("DELETE FROM transactions"),
-			env.DB.prepare("DELETE FROM accounts"),
-			env.DB.prepare("DELETE FROM plaid_items"),
-			env.DB.prepare(
-				"DELETE FROM household_settings WHERE key = 'first_tally'",
-			),
-		]);
-		await env.DB.prepare(
-			"INSERT INTO plaid_items (access_token_encrypted, institution_name, linked_by, plaid_item_id, last_synced_at, history_complete_at) VALUES (?, 'Chase', 'person@example.com', 'item-chase', '2026-10-12T09:00:00Z', '2026-10-12T09:00:00Z')",
-		)
-			.bind(new Uint8Array([1, 2, 3]))
-			.run();
-		await env.DB.prepare(
-			"INSERT INTO household_settings (key, value) VALUES ('first_tally', ?)",
-		)
-			.bind(JSON.stringify(record))
-			.run();
-	};
-	const fourDrawn: FirstTally = {
-		strokes: {
-			bank: budgetsDay,
-			pay: budgetsDay,
-			bills: budgetsDay,
-			budgets: budgetsDay,
-		},
-		budgets: {},
-	};
-	const countOf = async () => (await readFirstTally(env.DB))?.strokes.count;
-
-	it("is not drawn on the budgets stroke's own day, even with the night kept", async () => {
-		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: budgetsDay, flagged: [] });
-		expect(await countOf()).toBeUndefined();
-	});
-
-	it("is drawn on the first later day, and that day's view carries the night's counts", async () => {
-		await seedHousehold({ ...fourDrawn, night });
-		const view = await readSetup(env.DB, {
-			today: later,
-			flagged: [],
-		});
-		expect(await countOf()).toBe(later);
-		expect(view?.fifth).toEqual(night);
-		expect(view?.steps[4]).toEqual({
-			name: "Tomorrow · Tally keeps count on its own",
-			done: true,
-			note: "Today, Oct 14",
-		});
-	});
-
-	it("keeps the first day it was drawn, so loading Home again the same day changes nothing", async () => {
-		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later, flagged: [] });
-		const again = await readSetup(env.DB, {
-			today: later,
-			flagged: [],
-		});
-		expect(await countOf()).toBe(later);
-		expect(again?.fifth).toEqual(night);
-	});
-
-	it("is Home again from the next household day: no set-up view, and the record stays", async () => {
-		await seedHousehold({ ...fourDrawn, night });
-		await readSetup(env.DB, { today: later, flagged: [] });
-		expect(
-			await readSetup(env.DB, { today: "2026-10-15", flagged: [] }),
-		).toBeNull();
-		expect(await countOf()).toBe(later);
-	});
-
-	it("is not drawn while no night has been kept", async () => {
-		await seedHousehold(fourDrawn);
-		await readSetup(env.DB, { today: later, flagged: [] });
-		expect(await countOf()).toBeUndefined();
-	});
-
-	it("draws nothing on a household set up before the feature shipped (every stroke with no day, no night)", async () => {
-		await seedHousehold({
-			strokes: {
-				bank: null,
-				pay: null,
-				bills: null,
-				budgets: null,
-				count: null,
-			},
-			budgets: {},
-		});
-		expect(await readSetup(env.DB, { today: later, flagged: [] })).toBeNull();
-	});
-
-	it("is shown by setupView only on the day stroke five is drawn", () => {
-		const fifth: FirstTally = {
-			strokes: { ...fourDrawn.strokes, count: TODAY },
-			budgets: {},
-			night,
-		};
-		expect(view({ record: fifth, banks: [BANK] })?.fifth).toEqual(night);
-		const after = {
-			...fifth,
-			strokes: { ...fifth.strokes, count: "2026-10-13" },
-		};
-		expect(view({ record: after, banks: [BANK] })).toBeNull();
-	});
-});
-
-describe("the answered wait (P125 E, #671)", () => {
-	const answered: FirstTally = {
-		strokes: {
-			bank: "2026-10-13",
-			pay: "2026-10-13",
-			bills: "2026-10-13",
-			budgets: "2026-10-13",
-		},
-		budgets: {},
-	};
-	const reading = {
-		id: 2,
-		name: "Chase",
-		linkedAt: "2026-10-13 09:00:00",
-		lastSyncedAt: null,
-		historyCompleteAt: null,
-	};
-	const wells = {
-		id: 3,
-		name: "Wells Fargo",
-		linkedAt: "2026-10-13 09:00:00",
-		lastSyncedAt: "2026-10-13",
-		historyCompleteAt: "2026-10-13",
-	};
-
-	it("says what Tally waits for while one bank reads its history, and promises nothing for tomorrow", () => {
-		const v = view({
-			record: answered,
-			banks: [{ ...BANK, historyCompleteAt: null }],
-		});
-		expect(v?.phase).toBe("answered");
-		expect(v?.answeredWaiting).toBe("once Chase's history is in.");
-	});
-
-	it("names the one bank that needs signing in", () => {
-		const v = view({
-			record: answered,
-			banks: [BANK],
-			flagged: [{ id: 1, name: "Chase", reason: "sign-in" }],
-		});
-		expect(v?.answeredWaiting).toBe("once Chase is signed in again.");
-	});
-
-	it("names no wait for a bank that stopped updating: its Fix line says it (#671)", () => {
-		const v = view({
-			record: answered,
-			banks: [{ ...BANK, lastSyncedAt: "2026-10-10" }],
-		});
-		expect(v?.phase).toBe("answered");
-		expect(v?.answeredWaiting).toBeNull();
-	});
-
-	it("names both banks that need signing in", () => {
-		const v = view({
-			record: answered,
-			banks: [BANK, wells],
-			flagged: [
-				{ id: 1, name: "Chase", reason: "sign-in" },
-				{ id: 3, name: "Wells Fargo", reason: "sign-in" },
-			],
-		});
-		expect(v?.answeredWaiting).toBe(
-			"once Chase and Wells Fargo are signed in again.",
-		);
-	});
-
-	it("says your banks' history with two banks reading", () => {
-		const v = view({
-			record: answered,
-			banks: [{ ...BANK, historyCompleteAt: null }, reading],
-		});
-		expect(v?.answeredWaiting).toBe("once your banks' history is in.");
-	});
-
-	it("waits for nothing once every bank is in and signed in", () => {
-		expect(
-			view({ record: answered, banks: [BANK, wells] })?.answeredWaiting,
-		).toBeNull();
-	});
-
-	it("waits for nothing outside the answered phase", () => {
-		const v = view({
-			record: { ...answered, strokes: { bank: "2026-10-13" }, budgets: {} },
-			banks: [{ ...BANK, historyCompleteAt: null }],
-		});
-		expect(v?.phase).toBe("reading");
-		expect(v?.answeredWaiting).toBeNull();
-	});
-});
-
-describe("the re-ask note (P125 E, #578)", () => {
-	it("says nothing with one bank, even when an answer is kept and a question is undrawn", () => {
-		const record: FirstTally = {
-			strokes: { bank: "2026-10-13" },
-			budgets: { "3": { kind: "suggested", cents: 65000 } },
-		};
-		expect(view({ record, banks: [BANK] })?.steps[0]?.note).toBe(
-			"Chase, linked",
-		);
-	});
-
-	it("says nothing with two banks when no answer is kept", () => {
-		const record: FirstTally = { strokes: { bank: "2026-10-13" }, budgets: {} };
-		const v = view({
-			record,
-			banks: [
-				BANK,
-				{
-					name: "Wells Fargo",
-					linkedAt: "2026-10-13 09:00:00",
-					lastSyncedAt: null,
-					historyCompleteAt: null,
-					id: 2,
-				},
-			],
-		});
-		expect(v?.steps[0]?.note).toBe("2 banks, linked");
 	});
 });

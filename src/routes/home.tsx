@@ -24,7 +24,6 @@ import {
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
-import { suggestionQueue } from "../db/suggestions-queue";
 import { olderNeedsCategoryCount } from "../db/transactions";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
@@ -40,7 +39,6 @@ import { BudgetSheet } from "../views/budget-sheet";
 import { EmptyState } from "../views/empty-state";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeSeenCheckIn, type ShownStep } from "../views/home-seen";
-import { HomeSetup } from "../views/home-setup";
 import { HomeTop } from "../views/home-top";
 import { HowFoot } from "../views/how-link";
 import { Layout } from "../views/layout";
@@ -67,20 +65,6 @@ const bandAmount = (cents: number) =>
 
 const COUNTED_CATEGORY = countedCategorySql();
 const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
-
-/**
- * Where "See what needs you" goes on the fifth day (#586, #714), the list the stored needs-you count is about: a transaction
- * that needs a category goes to Organize; else a suggestion waiting in the suggestions queue goes to Settings' suggestions;
- * else a credit held for review, which the full list shows as Review credit (no link to held credits exists).
- */
-async function fifthNeedsHref(
-	db: D1Database,
-	needsCategory: boolean,
-): Promise<string> {
-	if (needsCategory) return "/transactions/organize";
-	const queue = await suggestionQueue(db);
-	return queue.length > 0 ? "/settings/suggestions" : "/transactions?month=all";
-}
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -144,10 +128,10 @@ type HomeOptions = {
 	/** After a tap reaches a limit, focus goes to the row's other button. */
 	nudgeFocus?: { id: number; direction: "up" | "down" };
 	/**
-	 * The setup read the root route made for its redirect (decision 148), handed on so renderHome doesn't read it twice: the
-	 * flagged banks and the setup, read from the same list.
+	 * The flagged banks the root route read for its setup redirect (decision 148), handed on so renderHome doesn't read them
+	 * twice.
 	 */
-	setupRead?: { flagged: FlaggedBank[]; setup: SetupView | null };
+	setupRead?: { flagged: FlaggedBank[] };
 	status?: 200 | 404 | 422;
 };
 
@@ -231,8 +215,8 @@ async function renderHome(
 	);
 	const demo = c.env.DEMO === "true";
 	// The connected banks Home flags: one that stopped syncing, so Safe to spend may be too high (spec §8.5), or one that
-	// needs signing in. Read once, and that one list is both the bank line and the setup's input (its refresh, its answered
-	// wait and its fifth day), so the two always agree. The demo has no real banks, so it never asks.
+	// needs signing in. Read once, and that one list is both the bank line and the setup's input (readSetupForHome), so the
+	// two always agree. The demo has no real banks, so it never asks.
 	const flagged =
 		setupRead?.flagged ??
 		(demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today));
@@ -288,18 +272,6 @@ async function renderHome(
 			.reduce((sum, t) => sum + t.amountCents, 0);
 	const transactionCount = (id: number) =>
 		data.transactions.filter((t) => t.categoryId === id && !t.income).length;
-	// The setup (P142 A, spec §8.8): the family app only, on the current month, until all five strokes are drawn. Only its answered
-	// phase (and the fifth day) is drawn here; the other phases are setup's own screens (/setup).
-	const setup = setupRead
-		? setupRead.setup
-		: current && !demo
-			? await readSetup(c.env.DB, { today, flagged })
-			: null;
-	// The fifth day's "See what needs you" (#586, #714) is read only when its link renders: a night that left something for a person.
-	const fifthNeeds =
-		setup?.fifth && setup.fifth.needYou > 0
-			? await fifthNeedsHref(c.env.DB, currentNeeds > 0 || olderNeeds > 0)
-			: undefined;
 	const pastNotBudgeted = notBudgeted.map((cat) => ({
 		...cat,
 		spentCents: spent(cat.id),
@@ -316,20 +288,7 @@ async function renderHome(
 				<div id="page">
 					{/* One width for the top and the Budget list on desktop (#92, H6). */}
 					<div class="lg:max-w-2xl">
-						{setup?.phase === "answered" || setup?.fifth ? (
-							<HomeSetup
-								view={setup}
-								bankLine={bankNotice?.words}
-								fifthDay={
-									setup.fifth
-										? {
-												safeToSpendCents: summary.safeToSpendCents,
-												needsHref: fifthNeeds,
-											}
-										: undefined
-								}
-							/>
-						) : current ? (
+						{current ? (
 							<HomeTop
 								month={monthName(month)}
 								monthHeading={
@@ -604,8 +563,9 @@ home.get("/", async (c) => {
 		requested <= currentMonth
 			? requested
 			: currentMonth;
-	// Setup (P142 A, decision 148): until the questions are answered, this month's Home is setup's: before a bank, while the
-	// import is read, and once the questions are open, the family goes to /setup (a htmx request is sent with HX-Redirect).
+	// Setup (P142 A, decision 148): until setup is done (the budgets stroke is drawn), this month's Home is setup's: before a
+	// bank, while the import is read, and once the questions are open, the family goes to /setup (a htmx request is sent with
+	// HX-Redirect). Once it is done, Home is plain Home.
 	// The read is handed to renderHome, so it isn't made twice. An earlier month is not sent.
 	const demo = c.env.DEMO === "true";
 	let setupRead: Awaited<ReturnType<typeof readSetupForHome>> | undefined;
@@ -643,11 +603,10 @@ async function readSetupForHome(db: D1Database, today: string) {
 	return { flagged, setup: await readSetup(db, { today, flagged }) };
 }
 
-/** Setup is due (decision 148): before a bank, while the import is read, or once the questions are open, and not on the fifth day. */
+/** Setup is due (decision 148): before a bank, while the import is read, or once the questions are open; a set-up household (null) is Home. */
 function setupDue(setup: SetupView | null): boolean {
 	return (
 		setup !== null &&
-		!setup.fifth &&
 		(setup.phase === "before" ||
 			setup.phase === "reading" ||
 			setup.phase === "ready")
@@ -655,7 +614,7 @@ function setupDue(setup: SetupView | null): boolean {
 }
 
 /**
- * Decision 148: until the questions are answered, Home's routes are setup's, so they send the family there before doing
+ * Decision 148: until setup is done, Home's routes are setup's, so they send the family there before doing
  * anything, a save included. Null when Home answers; otherwise the redirect to /setup (an htmx request gets HX-Redirect).
  */
 async function setupFirst(c: Context<App>): Promise<Response | null> {

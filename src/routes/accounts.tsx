@@ -760,7 +760,7 @@ accounts.post("/accounts/:itemId{[0-9]+}/disconnect", async (c) => {
 				).bind(item.id, item.id),
 			]
 		: [];
-	// Before setup is done, the last connected bank going takes strokes one to four back (spec §8.8), in this batch.
+	// Before setup is done, the last connected bank going takes the four strokes back (spec §8.8), in this batch.
 	statements.push(takeBackBankStrokes(c.env.DB, item.id));
 	statements.push(
 		c.env.DB.prepare(

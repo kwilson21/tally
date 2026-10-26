@@ -691,7 +691,7 @@ describe("Plaid routes", () => {
 		).toBe("access-private");
 	});
 
-	it("a bank linked during setup takes the questions back and keeps the answers and stroke one (#578)", async () => {
+	it("a bank linked after setup is done asks nothing again: the questions and the answers stay (decision 148, #578)", async () => {
 		const { jwt, jwk } = await accessIdentity();
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		await env.DB.prepare(
@@ -706,7 +706,6 @@ describe("Plaid routes", () => {
 						budgets: "2026-10-11",
 					},
 					budgets: { "3": { kind: "suggested", cents: 65000 } },
-					night: { brought: 1, needYou: 0 },
 				}),
 			)
 			.run();
@@ -733,13 +732,21 @@ describe("Plaid routes", () => {
 			"SELECT value FROM household_settings WHERE key = 'first_tally'",
 		).first<{ value: string }>();
 		expect(JSON.parse(record?.value ?? "null")).toEqual({
-			strokes: { bank: "2026-10-10" },
+			strokes: {
+				bank: "2026-10-10",
+				pay: "2026-10-11",
+				bills: "2026-10-11",
+				budgets: "2026-10-11",
+			},
 			budgets: { "3": { kind: "suggested", cents: 65000 } },
-			reAsk: { bank: "Second Bank" },
 		});
 	});
 
 	it("stores the linked item with a fallback name when Plaid name lookup fails", async () => {
+		// A new household's first link: no record, so setup is not done and the link says it is reading.
+		await env.DB.prepare(
+			"DELETE FROM household_settings WHERE key = 'first_tally'",
+		).run();
 		const { jwt, jwk } = await accessIdentity();
 		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubGlobal(

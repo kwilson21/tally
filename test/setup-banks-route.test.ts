@@ -341,7 +341,7 @@ describe("GET /setup/banks: a step change is announced once (decision 146)", () 
 });
 
 describe("GET /setup/banks: the questions open, or there is no setup", () => {
-	it("answered: moves on to Home, with HX-Redirect and no body (the answered top is Home's)", async () => {
+	it("set up (the budgets stroke drawn): moves on to the finish, with HX-Redirect to /setup and no body (decision 148)", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = NULL, history_complete_at = datetime('now')",
 		).run();
@@ -356,23 +356,7 @@ describe("GET /setup/banks: the questions open, or there is no setup", () => {
 		});
 		const { res } = await refresh(`?in=${(await connectedIds()).join(",")}`);
 		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/");
-	});
-
-	it("the fifth day: moves on to Home, with HX-Redirect", async () => {
-		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-				count: "2026-10-01",
-			},
-			budgets: {},
-		});
-		const { res } = await refresh();
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/");
+		expect(res.headers.get("HX-Redirect")).toBe("/setup");
 	});
 
 	it("before a bank: redraws the welcome into #setup-screen, with its headline announced and taking focus (decision 146)", async () => {

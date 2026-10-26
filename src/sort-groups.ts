@@ -60,7 +60,7 @@ export async function dailyJevCap(
 ): Promise<number> {
 	const usual = jevCallLimit(env);
 	if (env.DEMO !== "false") return usual;
-	// A set-up household has all five strokes drawn, so it has answered the three questions too.
+	// A set-up household has all four strokes drawn, so it has answered the three questions too.
 	if (questionsAnswered(await readFirstTally(db))) return usual;
 	const banks = await db
 		.prepare(

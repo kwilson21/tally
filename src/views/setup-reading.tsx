@@ -1,8 +1,8 @@
 // The reading screen (P142 A, decisions 146, 148 and 150, spec §8.8): from a bank linked until the questions open. It says where
 // Tally is (reading, sorting with its bar, taking longer than usual, or waiting for the daily run when Sort right away is off),
 // what comes next, Notify me on this device, Your banks, the email line until the email has reached someone, and Link another
-// bank at the foot. The words are the picked drawing's (proposals-setup.tsx's ReadingBody); the statuses are today's
-// statusOf words (home-setup.tsx) plus the daily run's. The page checks in and refreshes in the app; a drawing passes polls false.
+// bank at the foot. The words are the picked drawing's (proposals-setup.tsx's ReadingBody); the statuses are readingStatus's,
+// with the daily run's words. The page checks in and refreshes in the app; a drawing passes polls false.
 import type { Child } from "hono/jsx";
 import type { SetupView } from "../first-tally/setup";
 import type { YourBank } from "../first-tally/your-banks";

@@ -301,7 +301,7 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(res.headers.get("HX-Redirect")).toBeNull();
 		expect(announced(res)).toContain("Tally's reading your last 90 days");
 	});
-	it("moves the page on to Home once the questions are answered, with HX-Redirect to /", async () => {
+	it("moves the page on to the setup finish once the budgets stroke is drawn, with HX-Redirect to /setup (decision 148)", async () => {
 		await ready();
 		await writeRecord({
 			strokes: { bank: TODAY, pay: TODAY, bills: TODAY, budgets: TODAY },
@@ -309,40 +309,17 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		});
 		const res = await checkIn(family, ORIGIN, "reading");
 		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/");
+		expect(res.headers.get("HX-Redirect")).toBe("/setup");
 	});
-	it("moves the page on to Home once the setup is done and no longer drawn", async () => {
+	it("moves the page on to the finish once setup is done, when its strokes carry no days (set up before the feature)", async () => {
 		await reading();
 		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-				count: "2026-10-01",
-			},
+			strokes: { bank: null, pay: null, bills: null, budgets: null },
 			budgets: {},
 		});
 		const res = await checkIn(family, ORIGIN, "reading");
 		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/");
-	});
-	it("the fifth day moves the page on to Home, which draws the night's view, with no reload", async () => {
-		await reading();
-		await writeRecord({
-			strokes: {
-				bank: TODAY,
-				pay: TODAY,
-				bills: TODAY,
-				budgets: TODAY,
-				count: TODAY,
-			},
-			budgets: {},
-			night: { brought: 3, needYou: 0 },
-		});
-		const res = await checkIn(family, ORIGIN, "reading");
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/");
+		expect(res.headers.get("HX-Redirect")).toBe("/setup");
 	});
 	it("redraws the welcome into #setup-screen once the last connected bank is disconnected, announcing its headline and taking focus", async () => {
 		await reading();
