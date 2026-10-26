@@ -67,7 +67,9 @@ describe("fingerprintOf", () => {
 	const APP_JS = { path: "/assets/app.js", sha256: "aa" };
 	const HTMX = { path: "/vendor/htmx.min.js", sha256: "bb" };
 	const assets = [APP_JS, HTMX];
-	const css = [".used{color:red}", "@media (min-width:1px){.used{margin:0}}"];
+	const RED = ".used{color:red}";
+	const MEDIA = "@media (min-width:1px){.used{margin:0}}";
+	const css = [RED, MEDIA];
 
 	it("is the same whatever order the assets were loaded in", async () => {
 		expect(await fingerprintOf({ dom, assets, css })).toBe(
@@ -104,7 +106,7 @@ describe("fingerprintOf", () => {
 	});
 
 	it("changes when a css string changes", async () => {
-		const changed = [".used{color:blue}", css[1]];
+		const changed = [".used{color:blue}", MEDIA];
 		expect(await fingerprintOf({ dom, assets, css: changed })).not.toBe(
 			await fingerprintOf({ dom, assets, css }),
 		);
@@ -149,11 +151,12 @@ describe("fingerprintOf", () => {
 
 describe("changedParts", () => {
 	const dom = "<main><h1>Home</h1></main>";
-	const assets = [
-		{ path: "/assets/app.js", sha256: "aa" },
-		{ path: "/vendor/htmx.min.js", sha256: "bb" },
-	];
-	const css = [".used{color:red}", "@media (min-width:1px){.used{margin:0}}"];
+	const APP_JS = { path: "/assets/app.js", sha256: "aa" };
+	const HTMX = { path: "/vendor/htmx.min.js", sha256: "bb" };
+	const assets = [APP_JS, HTMX];
+	const RED = ".used{color:red}";
+	const MEDIA = "@media (min-width:1px){.used{margin:0}}";
+	const css = [RED, MEDIA];
 	const head = { dom, assets, css };
 
 	it("names no part when two loads are the same", () => {
@@ -167,7 +170,7 @@ describe("changedParts", () => {
 	});
 
 	it("names only the assets when an asset's hash differs", () => {
-		const changed = [assets[0], { ...assets[1], sha256: "bc" }];
+		const changed = [APP_JS, { ...HTMX, sha256: "bc" }];
 		expect(changedParts(head, { dom, assets: changed, css })).toEqual([
 			"assets",
 		]);
@@ -175,7 +178,7 @@ describe("changedParts", () => {
 
 	it("names only the css when a css string differs", () => {
 		expect(
-			changedParts(head, { dom, assets, css: [".used{color:blue}", css[1]] }),
+			changedParts(head, { dom, assets, css: [".used{color:blue}", MEDIA] }),
 		).toEqual(["css"]);
 	});
 
@@ -189,7 +192,7 @@ describe("changedParts", () => {
 		expect(
 			changedParts(head, {
 				dom: "<main>Gas</main>",
-				assets: [assets[0]],
+				assets: [APP_JS],
 				css: [],
 			}),
 		).toEqual(["dom", "assets", "css"]);
