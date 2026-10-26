@@ -181,8 +181,8 @@ describe("SetupFinish", () => {
 			},
 		});
 		expect(rowsOf(markup).map((row) => row.label)).toEqual(["Pay", "Budgets"]);
-		expect(markup).not.toContain("<dt>Bills</dt>");
-		expect(markup).not.toContain("<dt>Savings</dt>");
+		expect(markup).not.toContain('<dt class="col-start-1">Bills</dt>');
+		expect(markup).not.toContain('<dt class="col-start-1">Savings</dt>');
 	});
 
 	it("draws a Pay row with one dd per merchant, all in the one row", () => {

@@ -1387,7 +1387,7 @@ const SETUP_FINISH_SPEC: UseSpecText = {
 	feedback:
 		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by setup's last answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
 	input:
-		"Touch: Go to Home is 44px tall and full width, and the sort line is plain text under it. Keyboard: after the masthead's Feedback, Tab reaches Go to Home, the body's one control. Screen reader: the step bar's words are read first, then the heading, You're set up., the screen's one h1, which takes focus when a swap draws the screen, so the screen is read once. Each step's row is a label and its value; the notebook is decoration and hidden.",
+		"Touch: Go to Home is 44px tall and full width, and the sort line is plain text under it. Keyboard: after the masthead's Tally and Feedback links, Tab reaches Go to Home at the screen's foot, its one control below the masthead. Screen reader: the step bar's words are read first, then the heading, You're set up., the screen's one h1, which takes focus when a swap draws the screen, so the screen is read once. Each step's row is a label and its value; the notebook is decoration and hidden.",
 	motion: "Nothing of its own moves. Reduced motion changes nothing.",
 	edges:
 		"A step that set nothing has no row, and with no rows at all What you set up and its list are left out. Two merchants share one Pay row, one line each. Long names wrap at their words, and a word too long for its line breaks inside it. A negative Safe to spend shows its minus sign, as Home does. An amount of nine or more characters is one size smaller on a phone, as Home's is (decision 110).",
