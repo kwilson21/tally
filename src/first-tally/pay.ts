@@ -105,6 +105,53 @@ export function payLedgerLine({
 }
 
 /**
+ * The setup question's lead (P142 A): "Tally found money that comes in regularly from one place." when the deposits have a
+ * cadence (cadenceOf); otherwise, since a single deposit or irregular ones don't come in regularly, "…that comes in from one
+ * place.".
+ */
+export function payLead(dates: string[]): string {
+	return cadenceOf(dates)
+		? "Tally found money that comes in regularly from one place."
+		: "Tally found money that comes in from one place.";
+}
+
+/**
+ * The setup card's line under the merchant's amount: the cadence capitalized with the count and the first day ("Every other
+ * Friday · 7 times since Jul 17"), with no cadence "7 times since Jul 17", and a single deposit "Once, on Jul 17". Unlike
+ * paySentence, it shows the cadence even when the amounts vary, since the card shows their range above it.
+ */
+export function payCadenceLine(deposits: PayDeposit[]): string {
+	const dates = deposits.map((deposit) => deposit.date).sort();
+	const first = dates[0] as string;
+	const latest = dates[dates.length - 1] as string;
+	if (deposits.length === 1) return `Once, on ${shortDay(first, latest)}`;
+	const cadence = cadenceOf(dates);
+	const since = `${deposits.length} times since ${shortDay(first, latest)}`;
+	return cadence
+		? `${cadence.charAt(0).toUpperCase()}${cadence.slice(1)} · ${since}`
+		: since;
+}
+
+/**
+ * The card's deposit rows: the three latest by date, newest first, and how many earlier deposits there are ("And 4 earlier").
+ */
+export function latestDeposits(deposits: PayDeposit[]): {
+	shown: PayDeposit[];
+	earlier: number;
+} {
+	const newest = [...deposits].sort((a, b) => b.date.localeCompare(a.date));
+	return {
+		shown: newest.slice(0, 3),
+		earlier: Math.max(0, newest.length - 3),
+	};
+}
+
+/** One deposit's day on the card: its weekday's first three letters and the day, "Fri, Oct 9" (shortDay names a year when it differs). */
+export function depositDay(date: string, latest: string): string {
+	return `${(weekdayOf(date) ?? "").slice(0, 3)}, ${shortDay(date, latest)}`;
+}
+
+/**
  * The value a pay form's hidden `deposit` field carries for each deposit the question shows: its transaction id, merchant
  * key, day and cents. `ids[i]` goes with `deposits[i]` (payMerchants builds them in step), so a value is what the page showed of it.
  */

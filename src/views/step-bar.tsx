@@ -4,6 +4,12 @@
 
 /** The reading screen's step bar label (step one of four, Reading your bank). */
 export const READING_STEP = "Step 1 of 4 done · Reading your bank";
+/** The pay question's step label (step two of four; one step done before it). */
+export const PAY_STEP = "Step 2 of 4 · Your pay";
+/** The bills question's step label (step three of four; two steps done before it). */
+export const BILLS_STEP = "Step 3 of 4 · Your bills";
+/** The budgets question's step label (step four of four; three steps done before it, the savings question included). */
+export const BUDGETS_STEP = "Step 4 of 4 · Your budgets";
 
 /** Four segments: the steps done in ink, the next one half inked while setup has steps left, the rest in rule. */
 export function StepBar({ done, label }: { done: number; label: string }) {

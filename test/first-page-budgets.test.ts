@@ -15,7 +15,14 @@ import {
 	takeBackQuestionStrokes,
 } from "../src/db/first-tally";
 import { resetDemo } from "../src/demo/reset";
-import { type BudgetAsk, bankLine } from "../src/first-tally/budgets";
+import {
+	type BudgetAsk,
+	bankLine,
+	budgetsTotalLine,
+	keepAllButton,
+	keepAllLead,
+	keepAllQuestion,
+} from "../src/first-tally/budgets";
 import {
 	keepBudgetAnswers,
 	settleAndLoad,
@@ -525,6 +532,22 @@ describe("the budgets question, keep all or one at a time", () => {
 });
 
 describe("categories the step does not ask", () => {
+	it("gives each category the step asks its icon and colour, as the setup screen's rows draw them (#773)", async () => {
+		const row = await db
+			.prepare("SELECT icon, color FROM categories WHERE id = ?1")
+			.bind(A)
+			.first<{ icon: string; color: string }>();
+		const pending = (await settleAndLoad(db, TODAY, { oneAtATime: true }))
+			.budgets;
+		if (!pending || pending.done)
+			throw new Error("the budgets question is open");
+		const ask = pending.asks.find((candidate) => candidate.id === A);
+		expect(row?.icon).toBeTruthy();
+		expect(row?.color).toBeTruthy();
+		expect(ask?.icon).toBe(row?.icon);
+		expect(ask?.color).toBe(row?.color);
+	});
+
 	it("keeps a category's budget set on Home, and does not ask it", async () => {
 		await db
 			.prepare(
@@ -758,6 +781,8 @@ describe("the bank line's months", () => {
 		const ask: BudgetAsk = {
 			id: 1,
 			name: "Groceries",
+			icon: "groceries",
+			color: "cat-blue",
 			months: [
 				{ month: "2026-08", spentCents: 61000 },
 				{ month: "2026-09", spentCents: 67400 },
@@ -768,6 +793,58 @@ describe("the bank line's months", () => {
 		expect(bankLine(ask)).toBe(
 			"Your bank shows Groceries spent $610 in August, $674 in September and $700 in October.",
 		);
+	});
+});
+
+// The setup screen's budgets question (P142 A, #773): the lead, the double-ruled total, and the question and its button in
+// the keep all form and in the one-category form (P142's words, and the new words for a single budget).
+
+describe("the setup budgets question's words", () => {
+	it("says what each suggestion is, from the months it came from, with its rounding", () => {
+		expect(
+			keepAllLead([
+				{ month: "2026-08-01", spentCents: 61000 },
+				{ month: "2026-09-01", spentCents: 67400 },
+			]),
+		).toBe(
+			"Each is what you spent in August and September, on average, rounded up to the next $10.",
+		);
+		expect(
+			keepAllLead([
+				{ month: "2026-07-01", spentCents: 100 },
+				{ month: "2026-08-01", spentCents: 100 },
+				{ month: "2026-09-01", spentCents: 100 },
+			]),
+		).toBe(
+			"Each is what you spent in July, August and September, on average, rounded up to the next $10.",
+		);
+	});
+
+	it("says a single month without the average, and no months as a typical month", () => {
+		expect(keepAllLead([{ month: "2026-09-01", spentCents: 67400 }])).toBe(
+			"Each is what you spent in September, rounded up to the next $10.",
+		);
+		expect(keepAllLead([])).toBe(
+			"Each is a typical month, rounded up to the next $10.",
+		);
+	});
+
+	it("totals the budgets, counted and in whole dollars a month", () => {
+		expect(budgetsTotalLine(12, 405000)).toEqual({
+			label: "12 budgets",
+			amount: "$4,050 a month",
+		});
+		expect(budgetsTotalLine(1, 65000)).toEqual({
+			label: "1 budget",
+			amount: "$650 a month",
+		});
+	});
+
+	it("asks the keep all question and names its button in plural, and in the singular for one", () => {
+		expect(keepAllQuestion(12)).toBe("Keep these budgets?");
+		expect(keepAllButton(12)).toBe("Keep all 12");
+		expect(keepAllQuestion(1)).toBe("Keep this budget?");
+		expect(keepAllButton(1)).toBe("Keep this budget");
 	});
 });
 

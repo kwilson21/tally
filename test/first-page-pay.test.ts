@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	amountWords,
 	cadenceOf,
+	depositDay,
+	latestDeposits,
+	payCadenceLine,
+	payLead,
 	payLedgerLine,
 	paySentence,
 	payShown,
@@ -345,5 +349,109 @@ describe("shownPayValues and payShown", () => {
 
 	it("is false for a garbled value", () => {
 		expect(payShown(merchant, [...shown.slice(0, 2), "not json"])).toBe(false);
+	});
+});
+
+// The setup screen's pay question (P142 A, #773): the lead, the card's cadence line, the last three deposits and the day
+// each is drawn with. Every number comes from the deposits, as paySentence's does.
+
+describe("payLead", () => {
+	it("says money comes in regularly from one place when its deposits have a cadence", () => {
+		expect(payLead(EVERY_OTHER_FRIDAY)).toBe(
+			"Tally found money that comes in regularly from one place.",
+		);
+	});
+
+	it("says money comes in from one place when its deposits are irregular, or there is one", () => {
+		expect(payLead(["2026-07-17", "2026-08-02", "2026-09-30"])).toBe(
+			"Tally found money that comes in from one place.",
+		);
+		expect(payLead(["2026-10-09"])).toBe(
+			"Tally found money that comes in from one place.",
+		);
+	});
+});
+
+describe("payCadenceLine", () => {
+	it("names the cadence and the count since the first deposit, with the cadence capitalized", () => {
+		expect(payCadenceLine(deposits(EVERY_OTHER_FRIDAY, 245000))).toBe(
+			"Every other Friday · 7 times since Jul 17",
+		);
+		expect(
+			payCadenceLine(
+				deposits(
+					["2026-08-01", "2026-09-01", "2026-10-01"],
+					[245000, 245000, 245000],
+				),
+			),
+		).toBe("Every month · 3 times since Aug 1");
+	});
+
+	it("shows the cadence even when the amounts vary, since the card shows the range above it", () => {
+		const cents = [230000, 240000, 250000, 260000, 245000, 235000, 255000];
+		expect(payCadenceLine(deposits(EVERY_OTHER_FRIDAY, cents))).toBe(
+			"Every other Friday · 7 times since Jul 17",
+		);
+	});
+
+	it("gives the count and the first day without a cadence", () => {
+		expect(
+			payCadenceLine(
+				deposits(["2026-07-17", "2026-08-02", "2026-09-30"], 245000),
+			),
+		).toBe("3 times since Jul 17");
+	});
+
+	it("names the year of a first deposit from another year", () => {
+		expect(payCadenceLine(deposits(["2025-12-26", "2026-10-09"], 245000))).toBe(
+			"2 times since Dec 26, 2025",
+		);
+	});
+
+	it("says a single deposit once, with its day", () => {
+		expect(payCadenceLine(deposits(["2026-10-09"], 245000))).toBe(
+			"Once, on Oct 9",
+		);
+	});
+});
+
+describe("latestDeposits", () => {
+	it("shows the three latest by date, newest first, and counts the rest", () => {
+		const shuffled = deposits(
+			["2026-09-11", "2026-10-09", "2026-07-17", "2026-09-25", "2026-08-14"],
+			245000,
+		);
+		const { shown, earlier } = latestDeposits(shuffled);
+		expect(shown.map((deposit) => deposit.date)).toEqual([
+			"2026-10-09",
+			"2026-09-25",
+			"2026-09-11",
+		]);
+		expect(earlier).toBe(2);
+	});
+
+	it("shows every deposit and no earlier count when there are three or fewer", () => {
+		expect(
+			latestDeposits(deposits(["2026-09-25", "2026-10-09"], 245000)),
+		).toEqual({
+			shown: [
+				{ date: "2026-10-09", cents: 245000 },
+				{ date: "2026-09-25", cents: 245000 },
+			],
+			earlier: 0,
+		});
+		expect(latestDeposits(deposits(EVERY_OTHER_FRIDAY, 245000)).earlier).toBe(
+			4,
+		);
+	});
+});
+
+describe("depositDay", () => {
+	it("gives the weekday's first three letters and the day, as shortDay does", () => {
+		expect(depositDay("2026-10-09", "2026-10-09")).toBe("Fri, Oct 9");
+	});
+
+	it("names the year of a deposit from another year than the latest", () => {
+		expect(depositDay("2025-12-26", "2026-10-09")).toBe("Fri, Dec 26, 2025");
 	});
 });

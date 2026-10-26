@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { BillSuggestion } from "../src/bills/find";
 import { BIG_BILL_CENTS } from "../src/bills/guards";
 import {
+	billsLead,
 	billsLedgerLine,
 	billsMutedLine,
+	billsTotalLine,
 	keepHeading,
 	keepReply,
 	keepShown,
@@ -200,5 +202,35 @@ describe("keepReply", () => {
 		expect(keepReply(0, 2)).toBe(
 			"Nothing kept. 2 charges changed since the page drew, so they're asked again below.",
 		);
+	});
+});
+
+// The setup screen's bills question (P142 A, #773): the lead and the card's double-ruled total, which counts the charges the
+// screen keeps, in the same words the ledger line uses.
+
+describe("billsLead", () => {
+	it("says charges come back every month, and a single one says so in the singular", () => {
+		expect(billsLead(8)).toBe(
+			"Tally found charges that come back every month.",
+		);
+		expect(billsLead(1)).toBe(
+			"Tally found a charge that comes back every month.",
+		);
+	});
+});
+
+describe("billsTotalLine", () => {
+	it("counts the bills and gives their whole-dollar monthly total", () => {
+		expect(billsTotalLine(8, 197200)).toEqual({
+			label: "8 bills",
+			amount: "about $1,972 a month",
+		});
+	});
+
+	it("says one bill in the singular", () => {
+		expect(billsTotalLine(1, 1500)).toEqual({
+			label: "1 bill",
+			amount: "about $15 a month",
+		});
 	});
 });

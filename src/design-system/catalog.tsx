@@ -8,14 +8,23 @@ import type { FirstTally } from "../db/first-tally";
 import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
-import type { BudgetAsk } from "../first-tally/budgets";
-import type { BankHead, FirstPageModel } from "../first-tally/first-page";
+import { type BudgetAsk, SAVINGS_BLANK_WORDS } from "../first-tally/budgets";
+import type {
+	BankHead,
+	FirstPageModel,
+	PayMerchant,
+} from "../first-tally/first-page";
 import {
 	type SetupPhase,
 	type SetupView,
 	setupSteps,
 	strokesDrawn,
 } from "../first-tally/setup";
+import {
+	skippedBills,
+	skippedBudgets,
+	skippedPay,
+} from "../first-tally/skipped";
 import type { YourBank } from "../first-tally/your-banks";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
@@ -150,6 +159,13 @@ import {
 	SubpageHead,
 	settingsPlaces,
 } from "../views/settings-pages";
+import {
+	SetupBills,
+	SetupBudgets,
+	SetupOneBudget,
+	SetupPay,
+	SetupSavings,
+} from "../views/setup-questions";
 import { SetupReading } from "../views/setup-reading";
 import { SetupWelcome } from "../views/setup-welcome";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
@@ -1240,6 +1256,104 @@ const SETUP_READING_SPEC: UseSpecText = {
 		"One connected bank is named; more are counted (from 2 banks). No time is promised while the history comes in (decision 146). Waiting for the daily run never says taking longer than usual, and it holds until the questions open, even if Sort right away is turned back on meanwhile. A refresh that changes nothing says nothing. Long bank names wrap within their row.",
 	words:
 		"Step bar: “Step 1 of 4 done · Reading your bank” · Heading: “Reading your bank” · reading: “Tally's reading your last 90 days from Chase.” (or “from 2 banks”) · sorting: “Sorting your last 90 days: 318 of 412 done.” · slow: “Sorting is taking longer than usual: 900 of 1,500.” · the daily run: “Tally sorts your last 90 days in its daily run, at about 5 AM, as set in Settings.” · next, reading: “Next it sorts them, then you answer three quick questions and your budget is ready.” · next, sorting: “Your three questions open the moment it's done, usually in a few minutes.” · while it refreshes: “This page updates as it goes.” · next, slow: “Tally keeps trying on its own. Nothing for you to do.” · next, the daily run: “Your three questions open once they're sorted.” · email: “You can close this page. Tally emails you the moment your questions are ready.” · foot: “Link another bank” · “Link every bank and card you use, so your questions cover them all.”",
+};
+
+// The pay question's use spec (P142 A, decision 148, #773): all eight answers, for sign-off.
+const SETUP_PAY_SPEC: UseSpecText = {
+	purpose:
+		"Ask a new family whether the money that comes in from one place is their pay, with the bank's own deposits in front of them.",
+	affordance:
+		"Yes, that's my pay, the full-width button at the screen's foot (pinned there on a phone), and No, it's something else, the quiet text button under it. The card and its deposits are to read.",
+	states:
+		"Default: the lead, the card (the bank's text, the amount or its range, how often it came and since when), the last three deposits with And N earlier when there are more, and the line that Yes counts it as income. One deposit: once, on its day, with no earlier line. Varying amounts: the range, and no cadence when the dates don't repeat. Focus: the heading takes it when the screen is drawn, and the button's own ring on a key. Busy: none of its own.",
+	feedback:
+		"Yes or No saves that merchant's deposits as the person's choice and redraws the screen in place, on to the next question, with the reply in a toast and the announcer. A deposit that arrived or changed since the screen drew is not saved, and the question is asked again.",
+	input:
+		"Touch: both buttons are 44px tall, and Yes is full width. Keyboard: Tab reaches Yes, then No; Enter or Space answers. Screen reader: the heading is the screen's one h1, the lead and card are read in order, and the deposits are a plain list.",
+	motion:
+		"Nothing of its own moves. The screen swaps in place when it is answered, as the question page's does; reduced motion changes nothing.",
+	edges:
+		"A merchant with one deposit says once, on its day. Varying amounts show their range, and irregular dates show no cadence, only the count and the first day. Long bank text wraps inside the card, and the amount keeps its place at the right.",
+	words:
+		"Step bar: “Step 2 of 4 · Your pay” · Heading: “Is this your pay?” · lead: “Tally found money that comes in regularly from one place.” (or “…that comes in from one place.” when the dates don't repeat, or there is one deposit) · cadence: “Every other Friday · 7 times since Jul 17”, “7 times since Jul 17”, “Once, on Oct 9” · “And 4 earlier” · “Yes counts it as income, never as spending.” · Buttons: “Yes, that's my pay” and “No, it's something else”.",
+};
+
+// The bills question's use spec (P142 A, decision 148, #773): all eight answers, for sign-off.
+const SETUP_BILLS_SPEC: UseSpecText = {
+	purpose:
+		"Ask a new family whether the repeat charges Tally found are their bills, and keep them in one tap, so they're set aside before they spend.",
+	affordance:
+		"Keep these 8, the full-width button at the screen's foot (Keep this one for a single charge), and Choose which, the quiet link to Possible bills under it. The list, the fold and the total are to read.",
+	states:
+		"Default: the first five charges, each with its day and amount, the rest folded under “3 more · $47 a month”, the double-ruled total, and what waits in Possible bills. One charge: Keep this one as a bill?. A pay step with nothing to ask: its skipped note under the step bar. Focus: the heading takes it when the screen is drawn.",
+	feedback:
+		"Keep saves the charges the screen showed and redraws the screen in place, with the reply in a toast and the announcer. A charge that is new or changed since the screen drew is asked again below. Choose which opens Possible bills.",
+	input:
+		"Touch: each button is 44px tall, and Keep is full width. Keyboard: Tab reaches the fold, Keep these 8 and Choose which, in that order. Screen reader: the heading is the screen's one h1, the list is plain, and the total reads as a label and an amount.",
+	motion:
+		"The fold's chevron turns as it opens, and reduced motion holds it still. Nothing else moves.",
+	edges:
+		"A charge with no category, or one over $100,000, is left out of the one-tap keep and waits in Possible bills. Long names wrap, and each amount keeps its place at the right. With no charge to keep the screen isn't drawn, and the next screen says why.",
+	words:
+		"Step bar: “Step 3 of 4 · Your bills” · Heading: “Keep these 8 as bills?” or “Keep this one as a bill?” · lead: “Tally found charges that come back every month.” or “Tally found a charge that comes back every month.” · “around the 5th” · fold: “3 more · $47 a month” · total: “8 bills” and “about $364 a month” · “1 more waits in Possible bills.” · Buttons: “Keep these 8”, “Keep this one” and “Choose which”.",
+};
+
+// The budgets question's use spec, keep all (P142 A, decisions 135 and 148, #773): all eight answers, for sign-off.
+const SETUP_BUDGETS_SPEC: UseSpecText = {
+	purpose:
+		"Ask a new family whether to keep the budgets Tally suggests for their categories, all at once or one at a time, from what they really spent.",
+	affordance:
+		"Keep all 12, the full-width button at the screen's foot, and Go one at a time, the quiet link under it. The suggestions, the fold and the total are to read.",
+	states:
+		"Default: the lead on the months the suggestions came from, the first five suggestions with their icon, months and amount, the rest folded, the double-ruled total, the line that a budget can be changed on Home but not removed, and Needs a category when some transactions have none. One suggestion: Keep this budget? with Keep this budget. Steps before it with nothing to ask: their skipped notes above the question. Focus: the heading takes it when the screen is drawn.",
+	feedback:
+		"Keep all saves each suggestion the screen showed and redraws the screen in place, with the count in a toast and the announcer. A suggestion that changed since the screen drew is asked again below. Go one at a time asks each category in turn.",
+	input:
+		"Touch: each button is 44px tall, and Keep all is full width. Keyboard: Tab reaches the fold, Keep all 12 and Go one at a time, in that order. Screen reader: the heading is the screen's one h1, the list is plain, and the lead says the amounts are suggestions.",
+	motion:
+		"The fold's chevron turns as it opens, and reduced motion holds it still. Nothing else moves.",
+	edges:
+		"A category with no history is not in Keep all; it is asked one at a time with a blank amount. A category a Home budget already sets is never asked. A step with nothing to ask shows its note and no question. Long category names wrap.",
+	words:
+		"Step bar: “Step 4 of 4 · Your budgets” · Heading: “Keep these budgets?” or “Keep this budget?” · lead: “Each is what you spent in August and September, on average, rounded up to the next $10.” (one month: “Each is what you spent in September, rounded up to the next $10.”; none: “Each is a typical month, rounded up to the next $10.”) · “Aug $610 · Sep $674” · fold: “7 more · $2,370 a month” · total: “12 budgets” and “$4,050 a month” · “Once set, a budget can be changed on Home but not removed.” · “Needs a category · 86 transactions · about $320 a month” · Buttons: “Keep all 12”, “Keep this budget” and “Go one at a time”.",
+};
+
+// The one-budget question's use spec (P142 A, decisions 114 and 148, #590, #773): all eight answers, for sign-off.
+const SETUP_ONE_BUDGET_SPEC: UseSpecText = {
+	purpose:
+		"Ask a new family about one category's budget: Tally's suggestion from what the bank shows they spent, their own amount, or no budget for it.",
+	affordance:
+		"Yes, $650, the full-width button at the foot, and Skip this one under it. In the body, Another amount opens the amount field and Save this budget. With no suggestion, the amount field is open and Save this budget is at the foot.",
+	states:
+		"Suggestion: the bank's numbers, the question, the note on the suggestion, Yes, and Another amount closed. Another amount open: the field holds the suggestion, and Save this budget keeps what is in it. Refused amount: the field keeps what was typed, its error is under it, and the field takes focus. No history: a blank amount, Save this budget and Skip this one, with the line that the category has no spending yet. Needs a category when some transactions have none.",
+	feedback:
+		"Yes or Save this budget keeps the budget from this month on and redraws the screen with the next category, the reply in a toast and the announcer. A refused amount keeps the question with its words in role=alert. Skip this one keeps the skip.",
+	input:
+		"Touch: every button is 44px tall, and the amount field's arrows are 48px. Keyboard: Tab reaches Another amount, then the field and Save this budget, or Yes and Skip this one; Enter in the amount field saves it. Screen reader: the heading is the screen's one h1 and takes focus, unless an amount is refused, and then the field does.",
+	motion: "Nothing of its own moves. Reduced motion changes nothing.",
+	edges:
+		"A suggestion that moved since the screen drew is not kept, and the question is asked again. A typed amount that isn't dollars is refused in words. A category a Home budget set since the screen drew is not asked. Long names wrap.",
+	words:
+		"Step bar: “Step 4 of 4 · Your budgets” · Heading: “Make $650 a month your Groceries budget?” or “Do you want a Gas budget?” · bank line: “Your bank shows Groceries spent $610 in August and $674 in September.” or “Gas has no spending yet. Set a monthly budget, or skip it.” · note: “Tally's suggestion: a typical month, rounded up to the next $10. From October on.” · field: “Groceries, a month” · Buttons: “Yes, $650”, “Save this budget” and “Skip this one”; “Another amount” opens the field.",
+};
+
+// The savings question's use spec (decision 135, P142 A, decision 148, #773): all eight answers, for sign-off.
+const SETUP_SAVINGS_SPEC: UseSpecText = {
+	purpose:
+		"Ask a new family whether to set money aside from Safe to spend each month, from the month on, as the last question of setup.",
+	affordance:
+		"Save it, the full-width button at the screen's foot, and Not now, the quiet link under it. The amount field in the body takes the monthly amount.",
+	states:
+		"Blank: the question and an empty field. Refused: the field keeps what was typed, with its words under it. After a budgets step with nothing to ask: its skipped note above the question, saying why.",
+	feedback:
+		"Save it keeps the goal from this month on and redraws the screen with the reply in a toast and the announcer. Not now keeps no goal. A refused amount keeps the question with its words in role=alert, and the field takes focus.",
+	input:
+		"Touch: both buttons are 44px tall, and Save it is full width. Keyboard: Enter in the field presses Save it, since its form is named by the button; Tab reaches Not now. Screen reader: the heading is the screen's one h1 and takes focus unless an amount is refused; the field's label says Save each month, from the month on.",
+	motion: "Nothing of its own moves. Reduced motion changes nothing.",
+	edges:
+		"A blank amount and $0 are refused in the words below. A goal Home set since the screen drew is kept, and the reply says so. Long skipped notes wrap.",
+	words:
+		"Step bar: “Step 4 of 4 · Your budgets” · Heading: “Save some each month?” · lead: “Safe to spend sets it aside from the 1st, before anything else. You can change it on Home any time.” · field: “Save each month, from October on” · Buttons: “Save it” and “Not now” · refused: “Enter an amount greater than $0, or choose Not now.”",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -8220,6 +8334,8 @@ const FIRST_WEEK_MONTHS = [
 const FIRST_WEEK_GROCERIES: BudgetAsk = {
 	id: 1,
 	name: "Groceries",
+	icon: "groceries",
+	color: "cat-blue",
 	months: FIRST_WEEK_MONTHS,
 	suggestion: { amountCents: 65000, months: FIRST_WEEK_MONTHS },
 };
@@ -8230,12 +8346,16 @@ const FIRST_WEEK_EATING_OUT_MONTHS = [
 const FIRST_WEEK_EATING_OUT: BudgetAsk = {
 	id: 2,
 	name: "Eating out",
+	icon: "eating-out",
+	color: "cat-plum",
 	months: FIRST_WEEK_EATING_OUT_MONTHS,
 	suggestion: { amountCents: 10000, months: FIRST_WEEK_EATING_OUT_MONTHS },
 };
 const FIRST_WEEK_GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
+	icon: "gas",
+	color: "cat-slate",
 	months: [
 		{ month: "2026-08", spentCents: 0 },
 		{ month: "2026-09", spentCents: 0 },
@@ -8254,6 +8374,140 @@ const FIRST_WEEK_BUDGETS_LEDGER = {
 const FIRST_WEEK_SAVINGS_ENTRY = {
 	id: "savings",
 	text: "Savings · $300 a month",
+};
+
+/**
+ * The question screens' fixtures (P142 A, #773), in the FIRST_WEEK_* style: Chase, October 2026, ACME CORP PAYROLL. The pay
+ * deposits are FIRST_WEEK_PAY's (every other Friday, $2,450); the others change one thing each.
+ */
+const SETUP_PAY_VARYING: PayMerchant = {
+	key: "ACME CORP PAYROLL",
+	name: "Acme Corp",
+	deposits: [
+		{ date: "2026-07-03", cents: 230000 },
+		{ date: "2026-07-29", cents: 240000 },
+		{ date: "2026-08-21", cents: 260000 },
+		{ date: "2026-09-04", cents: 250000 },
+		{ date: "2026-09-30", cents: 245000 },
+		{ date: "2026-10-02", cents: 255000 },
+		{ date: "2026-10-09", cents: 235000 },
+	],
+	ids: [1, 2, 3, 4, 5, 6, 7],
+};
+const SETUP_PAY_ONCE: PayMerchant = {
+	key: "ACME CORP PAYROLL",
+	name: "Acme Corp",
+	deposits: [{ date: "2026-10-09", cents: 245000 }],
+	ids: [7],
+};
+/** Eight repeat charges Tally keeps in one tap: five shown, three folded (the bills step's sample). */
+const SETUP_CHARGES: BillSuggestion[] = [
+	{
+		rawName: "NETFLIX.COM",
+		bankText: "NETFLIX.COM",
+		displayName: "Netflix",
+		amountCents: 1549,
+		dueDay: 5,
+		categoryId: 1,
+		chargeCount: 2,
+	},
+	{
+		rawName: "SPOTIFY",
+		bankText: "SPOTIFY",
+		displayName: "Spotify",
+		amountCents: 1199,
+		dueDay: 9,
+		categoryId: 1,
+		chargeCount: 2,
+	},
+	{
+		rawName: "T-MOBILE",
+		bankText: "T-MOBILE",
+		displayName: "Phone",
+		amountCents: 8500,
+		dueDay: 12,
+		categoryId: 5,
+		chargeCount: 2,
+	},
+	{
+		rawName: "XFINITY",
+		bankText: "XFINITY",
+		displayName: "Internet",
+		amountCents: 6500,
+		dueDay: 20,
+		categoryId: 6,
+		chargeCount: 2,
+	},
+	{
+		rawName: "GEICO",
+		bankText: "GEICO",
+		displayName: "Car insurance",
+		amountCents: 14000,
+		dueDay: 14,
+		categoryId: 4,
+		chargeCount: 2,
+	},
+	{
+		rawName: "WATER CO",
+		bankText: "WATER CO",
+		displayName: "Water",
+		amountCents: 1500,
+		dueDay: 3,
+		categoryId: 6,
+		chargeCount: 2,
+	},
+	{
+		rawName: "ICLOUD",
+		bankText: "ICLOUD",
+		displayName: "Cloud storage",
+		amountCents: 1600,
+		dueDay: 17,
+		categoryId: 7,
+		chargeCount: 2,
+	},
+	{
+		rawName: "MAGAZINE",
+		bankText: "MAGAZINE",
+		displayName: "Magazine",
+		amountCents: 1600,
+		dueDay: 22,
+		categoryId: 7,
+		chargeCount: 2,
+	},
+];
+/** Twelve suggestions that sum to $4,050 a month (405000 cents), each from August and September (the 12 budgets picture). */
+const SETUP_TWELVE: BudgetAsk[] = [
+	[1, "Groceries", "groceries", "cat-blue", 65000, 61000, 67400],
+	[2, "Eating Out", "eating-out", "cat-plum", 23000, 21800, 23100],
+	[3, "Gas", "gas", "cat-slate", 17000, 16200, 17100],
+	[4, "Kids", "kids", "cat-ochre", 29000, 28000, 29600],
+	[5, "Car & Transport", "car", "cat-ochre", 34000, 33000, 34800],
+	[6, "Utilities", "utilities", "cat-blue", 18000, 17000, 17600],
+	[7, "Subscriptions", "subscriptions", "cat-plum", 6000, 5200, 5800],
+	[8, "Shopping", "shopping", "cat-slate", 22000, 21000, 22600],
+	[9, "Personal Care", "personal-care", "cat-ochre", 9000, 7800, 8400],
+	[10, "Health", "health", "cat-brown", 12000, 10400, 11700],
+	[11, "Entertainment", "entertainment", "cat-blue", 15000, 14000, 15000],
+	[12, "Rent", "rent", "cat-brown", 155000, 154000, 156000],
+].map(([id, name, icon, color, cents, aug, sep]) => {
+	const months = [
+		{ month: "2026-08", spentCents: aug as number },
+		{ month: "2026-09", spentCents: sep as number },
+	];
+	return {
+		id: id as number,
+		name: name as string,
+		icon: icon as string,
+		color: color as string,
+		months,
+		suggestion: { amountCents: cents as number, months },
+	};
+});
+/** The month the setup answers take effect from: the sample's own month (October 2026). */
+const FIRST_WEEK_MONTH = FIRST_WEEK_TODAY.slice(0, 7);
+const SETUP_BLANK_ERROR = {
+	text: "Enter a dollar amount, like 250 or 250.50.",
+	typed: "lots",
 };
 
 function FirstWeekGroup() {
@@ -8535,6 +8789,226 @@ function FirstWeekGroup() {
 					</SetupFrame>
 				</State>
 				<UseSpec spec={SETUP_READING_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-pay"
+				title="SetupPay"
+				tier="visual"
+				components={["SetupPay"]}
+				sentence="Setup's pay question as one screen (P142 A, decision 148): the step bar, “Is this your pay?”, the bank's deposits on a ruled card, and Yes or No at the foot. Three states: every other Friday, varying amounts with no cadence, and a single deposit."
+			>
+				<State label="Every other Friday, seven deposits: the last three shown, And 4 earlier, and Yes or No at the foot">
+					<SetupFrame label="Pay, every other Friday: seven deposits of $2,450, the last three shown and And 4 earlier">
+						<SetupPay
+							merchant={FIRST_WEEK_PAY}
+							focus={false}
+							idSuffix="pay-cadence"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Varying amounts and irregular dates: the range, and no cadence">
+					<SetupFrame label="Pay, varying amounts from $2,300 to $2,600 on irregular dates: the range and the count, no cadence">
+						<SetupPay
+							merchant={SETUP_PAY_VARYING}
+							focus={false}
+							idSuffix="pay-varying"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="A single deposit: once, on its day">
+					<SetupFrame label="Pay, a single deposit: Once, on Oct 9">
+						<SetupPay
+							merchant={SETUP_PAY_ONCE}
+							focus={false}
+							idSuffix="pay-once"
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_PAY_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-bills"
+				title="SetupBills, SkippedSteps"
+				tier="visual"
+				components={["SetupBills", "SkippedSteps"]}
+				sentence="Setup's bills question as one screen (P142 A, decision 148): the found charges on a ruled list with their total, what waits in Possible bills, and Keep these at the foot. When a step before it asked nothing, its note shows above the question."
+			>
+				<State label="Eight charges: five shown, three folded, and one waiting in Possible bills">
+					<SetupFrame label="Bills, eight charges: five shown, three more folded, the total, and one more waiting in Possible bills">
+						<SetupBills
+							keep={SETUP_CHARGES}
+							waiting={[FIRST_WEEK_GYM]}
+							focus={false}
+							idSuffix="bills-eight"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="One charge: Keep this one as a bill?">
+					<SetupFrame label="Bills, one charge: Keep this one as a bill?">
+						<SetupBills
+							keep={[SETUP_CHARGES[0] as BillSuggestion]}
+							waiting={[]}
+							focus={false}
+							idSuffix="bills-one"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Eight charges after a pay step with nothing to ask: its note under the step bar">
+					<SetupFrame label="Bills, eight charges after a pay step with nothing to ask: its skipped note under the step bar">
+						<SetupBills
+							keep={SETUP_CHARGES}
+							waiting={[]}
+							focus={false}
+							skipped={[skippedPay()]}
+							idSuffix="bills-after-pay"
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_BILLS_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-budgets"
+				title="SetupBudgets"
+				tier="visual"
+				components={["SetupBudgets", "SkippedSteps"]}
+				sentence="Setup's budgets question, keep all (P142 A, decision 148): the suggestions with their icons and months, the ruled total and Keep all at the foot, or Go one at a time. Steps before it with nothing to ask show their notes above the question."
+			>
+				<State label="Twelve suggestions: five shown, seven folded, the ruled total of $4,050 a month, and Needs a category">
+					<SetupFrame label="Budgets, twelve suggestions: five shown, seven more folded, the total of $4,050 a month, and Needs a category">
+						<SetupBudgets
+							asks={SETUP_TWELVE}
+							month={FIRST_WEEK_MONTH}
+							needs={FIRST_WEEK_NEEDS}
+							focus={false}
+							idSuffix="budgets-twelve"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="One suggestion: Keep this budget?">
+					<SetupFrame label="Budgets, one suggestion: Keep this budget?">
+						<SetupBudgets
+							asks={[FIRST_WEEK_GROCERIES]}
+							month={FIRST_WEEK_MONTH}
+							needs={null}
+							focus={false}
+							idSuffix="budgets-one"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Twelve after the pay and bills steps had nothing to ask: two notes above the question, the bills one with its Possible bills link">
+					<SetupFrame label="Budgets, twelve after the pay and bills steps had nothing to ask: two notes, and one more waiting in Possible bills">
+						<SetupBudgets
+							asks={SETUP_TWELVE}
+							month={FIRST_WEEK_MONTH}
+							needs={null}
+							focus={false}
+							skipped={[skippedPay(), skippedBills(1)]}
+							idSuffix="budgets-after"
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_BUDGETS_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-one-budget"
+				title="SetupOneBudget"
+				tier="visual"
+				components={["SetupOneBudget"]}
+				sentence="Setup's budgets question one category at a time (P142 A, decision 148): the bank's numbers, Tally's suggestion with Yes, Another amount for the amount field, and Skip this one; a category with no history asks for a blank amount."
+			>
+				<State label="With a suggestion: Yes, $650, Skip this one, and Another amount closed">
+					<SetupFrame label="One budget, with a suggestion: Make $650 a month your Groceries budget?, Yes, $650, and Skip this one">
+						<SetupOneBudget
+							ask={FIRST_WEEK_GROCERIES}
+							month={FIRST_WEEK_MONTH}
+							needs={FIRST_WEEK_NEEDS}
+							focus={false}
+							error={null}
+							amountOpen={false}
+							idSuffix="one-suggested"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="Another amount, open: the field holds Tally's suggestion, and Save this budget keeps it as typed">
+					<SetupFrame label="One budget, Another amount open: the field holds $650.00, and Save this budget">
+						<SetupOneBudget
+							ask={FIRST_WEEK_GROCERIES}
+							month={FIRST_WEEK_MONTH}
+							needs={FIRST_WEEK_NEEDS}
+							focus={false}
+							error={null}
+							amountOpen
+							idSuffix="one-amount"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="A refused amount: the field keeps what was typed, with its error under it">
+					<SetupFrame label="One budget, a refused amount: the field keeps lots, with its words under it">
+						<SetupOneBudget
+							ask={FIRST_WEEK_GROCERIES}
+							month={FIRST_WEEK_MONTH}
+							needs={FIRST_WEEK_NEEDS}
+							focus={false}
+							error={SETUP_BLANK_ERROR}
+							amountOpen={false}
+							idSuffix="one-refused"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="No history: a blank amount, Save this budget and Skip this one">
+					<SetupFrame label="One budget, no history: Do you want a Gas budget?, a blank amount, and Save this budget">
+						<SetupOneBudget
+							ask={FIRST_WEEK_GAS}
+							month={FIRST_WEEK_MONTH}
+							needs={FIRST_WEEK_NEEDS}
+							focus={false}
+							error={null}
+							amountOpen={false}
+							idSuffix="one-history"
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_ONE_BUDGET_SPEC} />
+			</Specimen>
+			<Specimen
+				id="setup-savings"
+				title="SetupSavings"
+				tier="visual"
+				components={["SetupSavings", "SkippedSteps"]}
+				sentence="Setup's savings question, the budgets step's last (P142 A, decision 148): Save some each month? with the money input from this month on, and Save it or Not now at the foot. A budgets step that asked nothing shows its note above it."
+			>
+				<State label="Blank: Save some each month?, the field from October on, Save it and Not now">
+					<SetupFrame label="Savings, blank: Save some each month? with an empty amount from October on, Save it and Not now">
+						<SetupSavings
+							month={FIRST_WEEK_MONTH}
+							focus={false}
+							error={null}
+							idSuffix="savings-blank"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="A refused amount: the field keeps what was typed, with its words under it">
+					<SetupFrame label="Savings, a refused amount: the field keeps 0, with its words under it">
+						<SetupSavings
+							month={FIRST_WEEK_MONTH}
+							focus={false}
+							error={{ text: SAVINGS_BLANK_WORDS, typed: "0" }}
+							idSuffix="savings-refused"
+						/>
+					</SetupFrame>
+				</State>
+				<State label="After a budgets step with nothing to ask: its note above the question">
+					<SetupFrame label="Savings, after a budgets step with nothing to ask: Every category already has a budget.">
+						<SetupSavings
+							month={FIRST_WEEK_MONTH}
+							focus={false}
+							error={null}
+							skipped={[skippedBudgets("every-category-budgeted")]}
+							idSuffix="savings-after"
+						/>
+					</SetupFrame>
+				</State>
+				<UseSpec spec={SETUP_SAVINGS_SPEC} />
 			</Specimen>
 			<Specimen
 				id="first-week-part"

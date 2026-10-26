@@ -812,7 +812,15 @@ describe("GET /design-system in the demo", () => {
 		},
 	);
 
-	it.each(["setup-welcome", "setup-reading"])(
+	it.each([
+		"setup-welcome",
+		"setup-reading",
+		"setup-pay",
+		"setup-bills",
+		"setup-budgets",
+		"setup-one-budget",
+		"setup-savings",
+	])(
 		"gives %s its whole use spec, as a visual component, from its own section (decision 148, DESIGN.md section 3)",
 		async (id) => {
 			const { html } = await get("/design-system");
