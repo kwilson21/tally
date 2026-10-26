@@ -30,7 +30,6 @@ import {
 	startHereRows,
 } from "../db/transactions";
 import { loadTrends } from "../db/trends";
-import { readFirstWeek } from "../first-tally/setup";
 import { FORECAST_START_DAY } from "../home-forecast";
 import {
 	billStatusExamples,
@@ -45,7 +44,6 @@ import {
 import { formatCents } from "../money";
 import { buildTrends, RUN_MONTHS, sameDaysCaption } from "../trends";
 import { TallyMark } from "../views/brand";
-import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import {
 	BillsDiagram,
@@ -286,8 +284,6 @@ howItWorks.get("/how-it-works", async (c) => {
 		startRows && startRows.month !== month
 			? `/transactions?raw=1&month=${startRows.month}`
 			: "/transactions?raw=1";
-	// The family app's "Your first week" part (P125 E, spec §9): the five strokes with their days, from the first_tally record.
-	const firstWeek = demo ? null : await readFirstWeek(c.env.DB);
 
 	return c.html(
 		<Layout
@@ -320,15 +316,6 @@ howItWorks.get("/how-it-works", async (c) => {
 					payment that bounced, is left out on both sides, so it never counts as
 					spending.
 				</p>
-				{firstWeek && (
-					<Section id="first-week" title="Your first week">
-						<FirstWeekPart
-							record={firstWeek.record}
-							names={firstWeek.names}
-							today={today}
-						/>
-					</Section>
-				)}
 				<Section id="budget" title="Budget and safe to spend">
 					<p class="mt-2">
 						Home shows how much of this month's budget is left, for each
@@ -357,6 +344,12 @@ howItWorks.get("/how-it-works", async (c) => {
 							</Example>
 						</>
 					) : null}
+					<p class="mt-3">
+						A first budget is suggested from what your bank shows a category
+						spent in up to its last three full months: their average, rounded up
+						to the next $10, with the months it came from. Nothing is saved
+						until you say yes.
+					</p>
 					<RulesFold count={8}>
 						<ul class="mt-3 list-disc space-y-1 pl-5">
 							<li>

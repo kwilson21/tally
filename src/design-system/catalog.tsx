@@ -88,7 +88,6 @@ import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FileField } from "../views/file-field";
 import { FilterSelect } from "../views/filter-select";
-import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
 import { HomeSetup } from "../views/home-setup";
@@ -9033,64 +9032,6 @@ function FirstWeekGroup() {
 					</SetupFrame>
 				</State>
 				<UseSpec spec={SETUP_FINISH_SPEC} />
-			</Specimen>
-			<Specimen
-				id="first-week-part"
-				title="How Tally works · Your first week"
-				tier="visual"
-				components={["FirstWeekPart"]}
-				sentence="How Tally works' part after its intro, in the family app (P125 E, decision 114, spec §9): the five strokes in words, each with the day it was drawn and one plain line on what it did (Chase, linked; the pay merchant; the bills kept; the budgets set; the night's counts), and how a first budget is suggested (§6). A stroke not drawn keeps its question note. A household set up before the feature shipped has no days and no lines, and says so under the list."
-			>
-				<State label="With days: the five strokes as the week drew them, each with its line">
-					<FirstWeekPart
-						record={{
-							strokes: {
-								bank: "2026-10-13",
-								pay: "2026-10-13",
-								bills: "2026-10-13",
-								budgets: "2026-10-13",
-								count: FIRST_WEEK_TODAY,
-							},
-							pay: {
-								"ACME CORP PAYROLL": {
-									yes: {
-										"1": { date: "2026-10-03", cents: 245000 },
-									},
-									at: 0,
-								},
-							},
-							bills: { kept: 8, cents: 206200 },
-							budgets: Object.fromEntries(
-								Array.from({ length: 12 }, (_, i) => [
-									String(i + 1),
-									{ kind: "suggested" as const, cents: 10000 },
-								]),
-							),
-							night: { brought: 3, needYou: 1 },
-						}}
-						names={{
-							bankName: "Chase",
-							merchants: { "ACME CORP PAYROLL": "Acme Corp" },
-						}}
-						today={FIRST_WEEK_TODAY}
-					/>
-				</State>
-				<State label="Set up before the feature shipped: no days and no lines, with its sentence">
-					<FirstWeekPart
-						record={{
-							strokes: {
-								bank: null,
-								pay: null,
-								bills: null,
-								budgets: null,
-								count: null,
-							},
-							budgets: {},
-						}}
-						names={{ bankName: "Chase", merchants: {} }}
-						today={FIRST_WEEK_TODAY}
-					/>
-				</State>
 			</Specimen>
 		</Group>
 	);

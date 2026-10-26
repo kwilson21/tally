@@ -282,13 +282,12 @@ describe("GET /design-system in the demo", () => {
 		expect(html).not.toContain('id="first-page-budgets"');
 	});
 
-	it("draws setup's finish as four states, after setup's savings and before the first week part (#774)", async () => {
+	it("draws setup's finish as four states, after setup's savings (#774)", async () => {
 		const { html } = await get("/design-system");
 		const savings = html.indexOf('id="setup-savings"');
 		const finish = html.indexOf('id="setup-finish"');
 		expect(savings).toBeGreaterThan(-1);
 		expect(finish).toBeGreaterThan(savings);
-		expect(html.indexOf('id="first-week-part"')).toBeGreaterThan(finish);
 		const tag = specimens(html).find((t) => t.includes('id="setup-finish"'));
 		expect(tag).toContain('data-ds-tier="visual"');
 		expect(tag).toContain('data-ds-components="SetupFinish"');
