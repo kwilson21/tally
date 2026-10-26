@@ -2,11 +2,17 @@
 // finish line: no console errors). Alone, it saves a full-page PNG of every page into OUT. With BEFORE_URL
 // (CI's base branch, served on its own port), it loads every page on both servers, fingerprints each load
 // (scripts/fingerprint.mjs), and saves only the pages whose fingerprints differ: the PR's into OUT, and the
-// base's into BEFORE_OUT (decision 152).
+// base's into BEFORE_OUT (decisions 152 and 153).
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import { captureSlices, pageShooter, sliceBands } from "./capture.mjs";
-import { fingerprintOf, needsCapture, sha256Hex } from "./fingerprint.mjs";
+import {
+	changedParts,
+	cleanSelector,
+	fingerprintOf,
+	needsCapture,
+	sha256Hex,
+} from "./fingerprint.mjs";
 import { PAGES, shotNames, VIEWPORTS } from "./pr-body.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://127.0.0.1:8787";
@@ -30,8 +36,9 @@ let captured = 0;
 let saved = 0;
 let savedBefore = 0;
 
-// The assets a page's look depends on, as Playwright names their request types (decision 152).
-const FINGERPRINTED = new Set(["stylesheet", "script", "font", "image"]);
+// The assets hashed whole, as Playwright names their request types (decisions 152 and 153). Stylesheets
+// are not here: the CSS rules a page uses are read from the page instead (usedCss).
+const FINGERPRINTED = new Set(["script", "font", "image"]);
 
 // A promise of one asset's path and hash. A body that can't be read is hashed as the response's status
 // instead, so the page still gets a fingerprint and a difference still shows.
@@ -43,10 +50,76 @@ function hashAsset(response, url) {
 	);
 }
 
+// The CSS rules a page uses, read in the page (decision 153). It runs as one string expression, with
+// cleanSelector's source passed in as `clean`. Each same-origin sheet is marked by its path, and its
+// rules are kept when their selector matches an element (or can't be tested) and always when they
+// aren't style rules. A rule inside @media, @supports, @layer or @container is kept with its condition.
+// A @layer block always leaves its marker, even when no rule in it matches, since it sets the layer
+// order. An @import's sheet is walked like any other. A rule's whole cssText is kept, so its nested
+// rules come with it.
+function usedCss(clean) {
+	const out = [];
+	const groups = [
+		"CSSMediaRule",
+		"CSSSupportsRule",
+		"CSSLayerBlockRule",
+		"CSSContainerRule",
+	];
+	const isA = (rule, name) =>
+		typeof globalThis[name] !== "undefined" && rule instanceof globalThis[name];
+	const walk = (rules, conditions) => {
+		for (const rule of rules) {
+			if (isA(rule, "CSSStyleRule")) {
+				let used = true;
+				try {
+					used = document.querySelector(clean(rule.selectorText)) !== null;
+				} catch {
+					used = true;
+				}
+				if (used) out.push([...conditions, rule.cssText].join(" "));
+			} else if (groups.some((name) => isA(rule, name))) {
+				const condition = rule.cssText
+					.slice(0, rule.cssText.indexOf("{"))
+					.trim();
+				// The layer's prelude goes in before its rules, whether or not any of them match.
+				if (isA(rule, "CSSLayerBlockRule"))
+					out.push([...conditions, condition].join(" "));
+				walk(rule.cssRules, [...conditions, condition]);
+			} else if (isA(rule, "CSSImportRule")) {
+				out.push([...conditions, rule.cssText].join(" "));
+				if (rule.styleSheet === null) continue;
+				try {
+					walk(rule.styleSheet.cssRules, conditions);
+				} catch {
+					out.push(`sheet-unreadable:${rule.href}`);
+				}
+			} else out.push([...conditions, rule.cssText].join(" "));
+		}
+	};
+	for (const sheet of document.styleSheets) {
+		if (sheet.href !== null && new URL(sheet.href).origin !== location.origin)
+			continue;
+		out.push(
+			sheet.href === null
+				? "sheet:inline"
+				: `sheet:${new URL(sheet.href).pathname}`,
+		);
+		let rules;
+		try {
+			rules = sheet.cssRules;
+		} catch {
+			out.push(`sheet-unreadable:${sheet.href}`);
+			continue;
+		}
+		walk(rules, []);
+	}
+	return out;
+}
+
 // Loads `url` in `tab` until the network is idle. With `fingerprint`, it also returns the page's
-// fingerprint, taken once the fonts are ready: the DOM, and a hash of each same-origin stylesheet,
-// script, font and image the page loaded. A page that isn't ok has no fingerprint. The response
-// listener is set before goto, so it sees every asset.
+// parts (its DOM, the same-origin scripts, fonts and images it loaded, and the CSS rules it uses) and
+// its fingerprint, taken once the fonts are ready. A page that isn't ok has no fingerprint. The
+// response listener is set before goto, so it sees every asset.
 async function load(tab, url, { fingerprint = false } = {}) {
 	const { origin } = new URL(url);
 	const hashes = [];
@@ -66,11 +139,15 @@ async function load(tab, url, { fingerprint = false } = {}) {
 		await document.fonts.ready;
 		return true;
 	});
+	const css = await tab.evaluate(
+		`(${usedCss.toString()})(${cleanSelector.toString()})`,
+	);
 	const assets = (await Promise.allSettled(hashes)).flatMap((result) =>
 		result.status === "fulfilled" ? [result.value] : [],
 	);
 	const dom = await tab.evaluate(() => document.documentElement.outerHTML);
-	return { response, fingerprint: await fingerprintOf({ dom, assets }) };
+	const parts = { dom, assets, css };
+	return { response, parts, fingerprint: await fingerprintOf(parts) };
 }
 
 // The page's size in CSS pixels, measured the way Playwright measures a full-page capture.
@@ -192,7 +269,7 @@ for (const viewport of VIEWPORTS) {
 					base: { ok: baseOk, fingerprint: base.fingerprint },
 				})
 			) {
-				console.log(`${where}: ${baseOk ? "changed" : "new"}`);
+				const captureStart = Date.now();
 				saved += await save(
 					OUT,
 					page,
@@ -207,6 +284,11 @@ for (const viewport of VIEWPORTS) {
 						await captureShots(beforeTab, `${where} on main`),
 					);
 				captured++;
+				const seconds = Math.round((Date.now() - captureStart) / 1000);
+				const why = baseOk
+					? `changed (${changedParts(head.parts, base.parts).join(", ")})`
+					: "new";
+				console.log(`${where}: ${why}, captured in ${seconds}s`);
 			}
 		}
 		await tab.close();
