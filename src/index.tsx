@@ -25,6 +25,7 @@ import { plaid } from "./routes/plaid";
 import { plans } from "./routes/plans";
 import { push } from "./routes/push";
 import { settings } from "./routes/settings";
+import { setupRoute } from "./routes/setup";
 import { suggestions } from "./routes/suggestions";
 import { transactions } from "./routes/transactions";
 import { trends } from "./routes/trends";
@@ -222,6 +223,7 @@ app.use("*", async (c, next) => {
 
 app.route("/", health);
 app.route("/", home);
+app.route("/", setupRoute);
 app.route("/", howItWorks);
 app.route("/", plaid);
 app.route("/", organize);

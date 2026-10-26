@@ -34,7 +34,7 @@ export const WELCOME_STEPS = [
 
 /**
  * The welcome. `linkBank` is the one button at the foot (Plaid's, in the app; a plain button in a drawing). `focusHeading` makes
- * the heading take focus, for a redraw that lands on this screen; a full load never sets it.
+ * the heading take focus, for a redraw that lands on this screen (redrawSetup, src/routes/setup.tsx); a full load never sets it.
  */
 export function SetupWelcome({
 	linkBank,

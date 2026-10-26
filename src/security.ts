@@ -9,9 +9,10 @@ const inCatalog = (path: string) =>
 const onAccounts = (path: string) =>
 	path === "/accounts" || path.startsWith("/accounts/");
 
-// Plaid Link is the one third-party script, and its hosts are allowed on Accounts and its sub-pages, and on Home in the family app, where a new family links its bank (decision 114).
+// Plaid Link is the one third-party script, and its hosts are allowed on Accounts and its sub-pages, and on setup in the family
+// app, where a new family links its bank (decisions 114 and 148). Home has no Link a bank, so it loads no Plaid Link.
 export const loadsPlaid = (c: Context) =>
-	onAccounts(c.req.path) || (c.req.path === "/" && c.env.DEMO !== "true");
+	onAccounts(c.req.path) || (c.req.path === "/setup" && c.env.DEMO !== "true");
 
 export const security = secureHeaders({
 	xFrameOptions: "DENY",

@@ -100,8 +100,9 @@ export function SortBar({ sorted, total }: { sorted: number; total: number }) {
  * The screen. `bankLine` is a connected bank that stopped syncing or needs signing in (src/stale-bank.ts), with its Fix
  * (BankBehind). `yourBanks` are the connected banks' rows (YourBanks). `notify` is Notify me on this device (decision 149),
  * given when the server has Web Push keys; `shown` and `idSuffix` are for drawings. `linkBank` is the foot's Link another
- * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on.
- * `polls` false draws no presence check-in, so a drawing fires nothing by itself (decision 146).
+ * bank (Plaid's button in the app). `focusStatus` makes the status take focus, for a redraw that moved the screen on
+ * (redrawSetup, src/routes/setup.tsx). `polls` false draws no presence check-in, so a drawing fires nothing by itself
+ * (decision 146).
  */
 export function SetupReading({
 	view,
@@ -151,7 +152,7 @@ export function SetupReading({
 			>
 				{readingStatus(view)}
 			</p>
-			{/* Always drawn, empty when there is no bar, so a refresh can swap what is inside it. */}
+			{/* Always drawn, empty when there is no bar, so the poll (/setup/banks) and the check-in swap what is inside it. */}
 			<div id="setup-progress">
 				{(step === "sorting" || step === "slow") && (
 					<SortBar sorted={view.sorted} total={view.total} />
@@ -177,7 +178,7 @@ export function SetupReading({
 					step={step}
 				/>
 			)}
-			{/* Always drawn, empty once the email has reached someone, so a refresh can take the line away. */}
+			{/* Always drawn, empty once the email has reached someone, so a refresh (ReadingSwaps) can take the line away. */}
 			<div id="setup-email">
 				<EmailLine emailed={view.emailed} />
 			</div>

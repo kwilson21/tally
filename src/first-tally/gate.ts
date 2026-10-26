@@ -18,7 +18,7 @@ export type QuestionsFacts = {
 
 /**
  * True when every connected bank's 90-day history is in: each has finished its first sync and Plaid's history mark.
- * Zero banks is never in, since "every bank is done" would be true of none. Home's setup promises no time until this holds.
+ * Zero banks is never in, since "every bank is done" would be true of none. setup promises no time until this holds.
  */
 export function banksHistoryIn(banks: QuestionsFacts["banks"]): boolean {
 	return (
@@ -41,8 +41,8 @@ export function questionsOpen(facts: QuestionsFacts): boolean {
 }
 
 /**
- * A connected bank as the gate and Home's setup read it: its id, its name, and the two sync marks the gate needs. Its
- * flags are not read here: Home's setup takes the flags its caller read (the same list as its bank notice), and matches
+ * A connected bank as the gate and setup read it: its id, its name, and the two sync marks the gate needs. Its
+ * flags are not read here: setup takes the flags its caller read (the same list as its bank notice), and matches
  * each bank to its flag by id, never by name, since two banks can share one.
  */
 export type GateBank = QuestionsFacts["banks"][number] & {
@@ -63,7 +63,7 @@ export const BANK_CONNECTED_SQL =
 
 /**
  * What the gate reads besides the record: each connected bank, and what Jev is still owed, counted with the AI switches
- * that decide it. One place, so Home's setup and the gate count the same things.
+ * that decide it. One place, so setup and the gate count the same things.
  */
 export async function readGateInputs(db: D1Database): Promise<{
 	banks: GateBank[];
@@ -87,7 +87,7 @@ export async function readGateInputs(db: D1Database): Promise<{
 /**
  * The gate read from the household's database, which the question page's routes read. Closed again once the first week is
  * set up (isSetUp: all five strokes drawn), so a set-up household is sent Home and its questions are not asked again (#647).
- * Home's setup doesn't come through here: it checks isSetUp itself and reads questionsOpen and the inputs directly.
+ * Setup doesn't come through here: it checks isSetUp itself and reads questionsOpen and the inputs directly.
  */
 export async function readQuestionsGate(db: D1Database): Promise<boolean> {
 	const record = await readFirstTally(db);

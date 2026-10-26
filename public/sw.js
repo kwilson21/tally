@@ -3,11 +3,11 @@
 // only in a tap (push.js). A push must always show a notification, or the browser can revoke the permission, so the words below
 // are the fallback for a push that can't be read.
 
-// The fallback copies PUSH_PAYLOAD (src/first-tally/ready-push.ts), whose url is QUESTIONS_PATH; test/sw-js.test.ts keeps them equal.
+// The fallback copies PUSH_PAYLOAD (src/first-tally/ready-push.ts), whose url is SETUP_PATH; test/sw-js.test.ts keeps them equal.
 const FALLBACK = {
 	title: "Set up your budget",
 	body: "Your transactions are sorted. Three quick questions, about three minutes.",
-	url: "/first-page",
+	url: "/setup",
 };
 
 /** A path on this site, or the fallback path: never another origin (a `//host` path is another site). */

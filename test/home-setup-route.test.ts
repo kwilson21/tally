@@ -1,13 +1,12 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
-import { encryptToken } from "../src/plaid/token-crypto";
-import { accounts } from "../src/routes/accounts";
 import { home } from "../src/routes/home";
 
-// Home during a new family's first week (P125 E, spec §8.8), through the route: the family app only, Link a bank with
-// Plaid Link on Home, and the reading line once a bank is linked.
+// Home once a new family's questions are answered (spec §8.8, decision 148): Home is Home from then on, with the fifth day's
+// view on the day stroke five is drawn (#586, until #774). Before the questions are answered, a family's setup is on its own
+// pages (/setup, setup-route.test.ts), and Home sends them there. Home loads no Plaid Link: it has no Link a bank any more.
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const plaidFamily = {
 	...family,
@@ -15,7 +14,6 @@ const plaidFamily = {
 	PLAID_SECRET: "secret",
 	TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 } as unknown as Env;
-const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const PLAID_MODULE = 'src="/js/plaid-link.js"';
 
 const page = async (bindings: Env) => {
@@ -29,10 +27,6 @@ const writeRecord = (value: unknown) =>
 		.bind(JSON.stringify(value))
 		.run();
 
-/** The opening tag of the element with this id, as the page draws it. */
-const openingTag = (html: string, id: string) =>
-	html.match(new RegExp(`<[a-z]+ id="${id}"[^>]*>`))?.[0] ?? "";
-
 beforeEach(async () => {
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 	await env.DB.prepare(
@@ -40,39 +34,12 @@ beforeEach(async () => {
 	).run();
 });
 
-describe("Home during setup", () => {
-	it("before a bank, with Plaid on: the headline, Link a bank with its redraw targets, and Plaid Link on Home", async () => {
+describe("Home once the questions are answered, and the demo", () => {
+	it("four strokes drawn: the ruled total, and no three things to check", async () => {
+		// The bank's history is in, so the answered phase promises tomorrow (#671 says otherwise while it is importing).
 		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+			"UPDATE plaid_items SET last_synced_at = datetime('now'), history_complete_at = datetime('now') WHERE disconnected_at IS NULL",
 		).run();
-		const html = await page(plaidFamily);
-		expect(html).toContain("Five strokes, and you're set up.");
-		expect(html).toContain("Link a bank");
-		expect(html).toContain(">About a minute<");
-		expect(html).not.toContain(">Next<");
-		expect(html).toContain('data-link-bank-refresh="/"');
-		expect(html).toContain('data-link-bank-target="#page"');
-		expect(html).toContain(PLAID_MODULE);
-		expect(html).toContain(
-			"https://cdn.plaid.com/link/v2/stable/link-initialize.js",
-		);
-		expect(html).not.toContain("Safe to spend");
-	});
-
-	it("before a bank, with Plaid off: no button and no Plaid Link", async () => {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now')",
-		).run();
-		const html = await page(family);
-		expect(html).toContain("Five strokes, and you're set up.");
-		expect(html).not.toContain("Link a bank");
-		expect(html).not.toContain(PLAID_MODULE);
-	});
-
-	it("loads Plaid Link on Home while the import is read (its Have more accounts? button), and not once the questions are answered", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({ strokes: { bank: "2026-10-13" }, budgets: {} });
-		expect(await page(plaidFamily)).toContain(PLAID_MODULE);
 		await writeRecord({
 			strokes: {
 				bank: "2026-10-13",
@@ -82,76 +49,12 @@ describe("Home during setup", () => {
 			},
 			budgets: {},
 		});
-		expect(await page(plaidFamily)).not.toContain(PLAID_MODULE);
-	});
-
-	it("while the import is read, Home lists Your banks, then Have more accounts? and its button, then the five lines", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const html = await page(plaidFamily);
-		const at = (text: string) => html.indexOf(text);
-		expect(html).toContain("Your banks");
-		expect(html).toContain("Have more accounts?");
-		expect(html).toContain("Link every bank and card you use now");
-		expect(at("Your banks")).toBeLessThan(at("Have more accounts?"));
-		expect(at("Have more accounts?")).toBeLessThan(at("Link a bank"));
-		expect(at("Link a bank")).toBeLessThan(at("Your first tally"));
-		expect(html).toContain(PLAID_MODULE);
-		// A full load never moves focus: only the retarget reply that redraws the top focuses its status.
-		expect(html).not.toContain("autofocus");
-	});
-
-	it("with Plaid off, the reading phase lists Your banks but has no prompt and loads no Plaid", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
 		const html = await page(family);
-		expect(html).toContain("Your banks");
-		expect(html).not.toContain("Have more accounts?");
-		expect(html).not.toContain(PLAID_MODULE);
-	});
-
-	it("marks the Your banks poll and the check-in while the import is read, and the check-in in the ready phase, so a Plaid Link window pauses them (decision 146)", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const reading = await page(plaidFamily);
-		expect(openingTag(reading, "your-banks")).toContain("data-waits-for-link");
-		expect(openingTag(reading, "home-seen")).toContain("data-waits-for-link");
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = datetime('now')",
-		).run();
-		await writeRecord({
-			strokes: { bank: daysBefore(todayIn(DEFAULT_TIME_ZONE), 1) },
-			budgets: {},
-		});
-		const ready = await page(plaidFamily);
-		expect(ready).toContain("Set up your budget");
-		expect(openingTag(ready, "home-seen")).toContain("data-waits-for-link");
-	});
-
-	it("in the ready phase, Home has no Your banks, no Have more accounts? and no Plaid Link", async () => {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = NULL, history_complete_at = datetime('now')",
-		).run();
-		// Stroke one drawn yesterday and every bank's history in: the questions are open, and none is answered.
-		await writeRecord({
-			strokes: { bank: daysBefore(todayIn(DEFAULT_TIME_ZONE), 1) },
-			budgets: {},
-		});
-		const html = await page(plaidFamily);
-		expect(html).toContain("Set up your budget");
-		expect(html).not.toContain("Your banks");
-		expect(html).not.toContain("Have more accounts?");
-		expect(html).not.toContain(PLAID_MODULE);
-		expect(html).not.toContain("autofocus");
+		expect(html).toContain(
+			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
+		);
+		expect(html).not.toContain("Three things to check");
+		expect(html).not.toContain('href="/first-page"');
 	});
 
 	it("in the answered phase, Home has no Your banks and no Have more accounts?", async () => {
@@ -176,19 +79,6 @@ describe("Home during setup", () => {
 		expect(html).not.toContain(PLAID_MODULE);
 	});
 
-	it("polls the Your banks list only while a bank is being read (linked within the hour, history not in)", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		expect(await page(family)).toContain('hx-trigger="every 5s"');
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = datetime('now')",
-		).run();
-		expect(await page(family)).not.toContain("every 5s");
-	});
-
 	it("the demo never shows setup, even with no first_tally record", async () => {
 		const html = await page({ ...env, DEMO: "true" } as unknown as Env);
 		expect(html).not.toContain("Five strokes");
@@ -209,259 +99,6 @@ describe("Home during setup", () => {
 		const html = await page(family);
 		expect(html).toContain("Safe to spend");
 		expect(html).not.toContain("Five strokes");
-	});
-
-	it("once a bank is linked, reads the import while the questions are shut, and names the bank", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
-		).run();
-		const bank = await env.DB.prepare(
-			"SELECT institution_name AS name FROM plaid_items WHERE disconnected_at IS NULL",
-		).first<{ name: string }>();
-		// Stroke one drawn today: the questions open tomorrow at the earliest.
-		const today = todayIn(DEFAULT_TIME_ZONE);
-		await writeRecord({ strokes: { bank: today }, budgets: {} });
-		const html = await page(family);
-		expect(html).toContain("Your first week");
-		expect(html).toContain(
-			`Tally's reading your last 90 days from ${bank?.name}.`,
-		);
-		expect(html).not.toContain("Nothing for you to do until then.");
-		expect(html).not.toContain("Three things to check");
-		expect(html).not.toContain("Link a bank");
-	});
-
-	it("says Tally will email you the moment they're ready while the import is read, until the ready email has reached someone", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		const today = todayIn(DEFAULT_TIME_ZONE);
-		await writeRecord({ strokes: { bank: today }, budgets: {} });
-		expect(await page(family)).toContain(
-			"Tally will email you the moment they're ready.",
-		);
-		await writeRecord({
-			strokes: { bank: today },
-			budgets: {},
-			readyEmailedTo: ["dana@example.com"],
-		});
-		expect(await page(family)).not.toContain(
-			"Tally will email you the moment they're ready.",
-		);
-	});
-
-	it("with two connected banks, reads the import and names neither", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const html = await page(family);
-		expect(html).toContain("Tally's reading your last 90 days from 2 banks.");
-		expect(html).not.toContain("from First Harbor Bank");
-		expect(html).not.toContain("from Northline Card Services");
-	});
-
-	it("with one bank's history in and transactions still waiting, says the sort is under way and counts it", async () => {
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-route', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
-		).run();
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
-		).run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = datetime('now')",
-		).run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const html = await page(family);
-		expect(html).toContain(
-			"Your three questions open the moment it's done, usually in a few minutes.",
-		);
-		expect(html).toContain("Sorting your last 90 days:");
-		expect(html).not.toContain("by the morning");
-		expect(html).not.toContain("When it's done");
-	});
-
-	it("four strokes drawn: the ruled total, and no three things to check", async () => {
-		// The bank's history is in, so the answered phase promises tomorrow (#671 says otherwise while it is importing).
-		await env.DB.prepare(
-			"UPDATE plaid_items SET last_synced_at = datetime('now'), history_complete_at = datetime('now') WHERE disconnected_at IS NULL",
-		).run();
-		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		});
-		const html = await page(family);
-		expect(html).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
-		expect(html).not.toContain("Three things to check");
-		expect(html).not.toContain('href="/first-page"');
-	});
-
-	it("a connected bank with no stroke one gets it today, and Home reads the import", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		const html = await page(family);
-		expect(html).toContain("Your first week");
-		expect(html).not.toContain("Nothing for you to do until then.");
-		const stored = await env.DB.prepare(
-			"SELECT value FROM household_settings WHERE key = 'first_tally'",
-		).first<{ value: string }>();
-		expect(JSON.parse(stored?.value ?? "null")?.strokes.bank).toBe(
-			todayIn(DEFAULT_TIME_ZONE),
-		);
-	});
-
-	it("a bank that stopped updating during setup shows its line under the status", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET last_synced_at = datetime('now', '-10 days')",
-		).run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const html = await page(family);
-		expect(html).toContain("Your first week");
-		expect(html).toContain("stopped updating");
-	});
-
-	/**
-	 * A household in the slow step: every bank's history came in over an hour ago, all banks are synced, and one transaction
-	 * still waits for Jev. With `signIn`, the first bank needs signing in.
-	 */
-	const slowHousehold = async ({ signIn }: { signIn: boolean }) => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET status = 'ok', last_synced_at = datetime('now', '-2 hours'), history_complete_at = datetime('now', '-2 hours')",
-		).run();
-		if (signIn)
-			await env.DB.prepare(
-				"UPDATE plaid_items SET status = 'needs_attention' WHERE id = (SELECT MIN(id) FROM plaid_items)",
-			).run();
-		await env.DB.prepare(
-			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-slow', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
-		).run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-	};
-
-	it("a bank that needs signing in while Tally sorts shows its line and Fix, and the slow line leaves out 'Nothing for you to do'", async () => {
-		await slowHousehold({ signIn: true });
-		const html = await page(family);
-		expect(html).toContain("Sorting is taking longer than usual:");
-		expect(html).toContain(
-			"Tally keeps trying on its own and will email you the moment your questions are ready.",
-		);
-		expect(html).toContain("needs signing in");
-		expect(html).toContain('href="/accounts"');
-		expect(html).not.toContain("Nothing for you to do.");
-	});
-
-	it("the slow line says 'Nothing for you to do.' when no bank needs a fix (the control for the line above)", async () => {
-		await slowHousehold({ signIn: false });
-		const html = await page(family);
-		expect(html).toContain("Sorting is taking longer than usual:");
-		expect(html).toContain(
-			"Tally keeps trying on its own and will email you the moment your questions are ready. Nothing for you to do.",
-		);
-		expect(html).not.toContain("needs signing in");
-	});
-
-	it("a recent bank still loading that needs signing in does not poll the Your banks list, and the page does not say it updates (decision 146)", async () => {
-		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
-		).run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET history_complete_at = NULL, status = 'needs_attention', created_at = datetime('now', '-10 minutes')",
-		).run();
-		await writeRecord({
-			strokes: { bank: todayIn(DEFAULT_TIME_ZONE) },
-			budgets: {},
-		});
-		const flagged = await page(family);
-		expect(flagged).toContain("needs signing in");
-		expect(flagged).toContain("Tally's reading your last 90 days from");
-		expect(flagged).not.toContain('hx-trigger="every 5s"');
-		expect(flagged).not.toContain("This page updates as it goes");
-		// The control: the same bank, healthy, polls and says so.
-		await env.DB.prepare("UPDATE plaid_items SET status = 'ok'").run();
-		const healthy = await page(family);
-		expect(healthy).toContain('hx-trigger="every 5s"');
-		expect(healthy).toContain("This page updates as it goes");
-	});
-
-	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and Home offers Link a bank again", async () => {
-		const bank = await env.DB.prepare(
-			"SELECT MIN(id) AS id FROM plaid_items",
-		).first<{ id: number }>();
-		const id = bank?.id ?? 0;
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = NULL WHERE id = ?",
-		)
-			.bind(id)
-			.run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != ?",
-		)
-			.bind(id)
-			.run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = ?",
-		)
-			.bind(await encryptToken("route-access-token", KEY), id)
-			.run();
-		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		});
-		vi.stubGlobal(
-			"fetch",
-			vi.fn(async () => Response.json({})),
-		);
-
-		const response = await accounts.request(
-			`/accounts/${id}/disconnect`,
-			{
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					"HX-Request": "true",
-				},
-				body: "",
-			},
-			plaidFamily,
-		);
-		vi.unstubAllGlobals();
-		expect(response.status).toBeLessThan(400);
-		const stored = await env.DB.prepare(
-			"SELECT value FROM household_settings WHERE key = 'first_tally'",
-		).first<{ value: string }>();
-		expect(JSON.parse(stored?.value ?? "null")).toEqual({
-			strokes: {},
-			budgets: {},
-		});
-
-		const html = await page(plaidFamily);
-		expect(html).toContain("Five strokes, and you're set up.");
-		expect(html).toContain("Link a bank");
-		expect(html).toContain(PLAID_MODULE);
 	});
 });
 
@@ -512,6 +149,29 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 		expect(html).not.toContain("See what needs you");
 		expect(html).not.toContain("Three things to check");
 		expect((await storedRecord()).strokes.count).toBe(today());
+	});
+
+	it("keeps the fifth day's recap when the last bank is disconnected that day (#772)", async () => {
+		await bankHistoryIn();
+		await env.DB.prepare("DELETE FROM transactions").run();
+		await writeRecord({
+			...answeredOn(yesterday()),
+			night: { brought: 3, needYou: 0 },
+		});
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+		const res = await home.request("/", {}, family);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("Location")).toBeNull();
+		const html = (await res.text()).replaceAll("&#39;", "'");
+		expect(html).toContain(
+			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
+		);
+		expect(html).toContain("Safe to spend");
+		expect(html).toContain(
+			"From tomorrow this list goes, and Home is just Home.",
+		);
 	});
 
 	it("says what needs a person, and links to the full list when nothing else is waiting (#714)", async () => {
@@ -664,64 +324,283 @@ describe("Home on the fifth day, the answered wait and Link a bank on the sheets
 		expect(html).not.toContain("Four. Tally keeps count");
 		expect(html).not.toContain("Tomorrow Tally keeps count");
 	});
+});
 
-	describe("Link a bank before a bank is linked (#678)", () => {
-		const unlinked = () =>
-			env.DB.prepare(
-				"UPDATE plaid_items SET disconnected_at = datetime('now')",
-			).run();
-		const firstCategory = async () =>
+describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () => {
+	const answeredHome = async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
+		).run();
+		await writeRecord({
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		});
+	};
+	const firstCategory = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM categories ORDER BY id LIMIT 1",
+			).first<{
+				id: number;
+			}>()
+		)?.id ?? 1;
+
+	it.each([
+		["/", (_id: number) => "/"],
+		["/savings-goal", (_id: number) => "/savings-goal"],
+		["/budget/:id", (id: number) => `/budget/${id}`],
+	])(
+		"a full load of %s loads no Plaid Link, with Plaid on, and links no bank",
+		async (_, pathFor) => {
+			await answeredHome();
+			const path = pathFor(await firstCategory());
+			const html = await (await home.request(path, {}, plaidFamily)).text();
+			expect(html).not.toContain(PLAID_MODULE);
+			expect(html).not.toContain("data-link-bank");
+			expect(html).not.toContain("Link a bank");
+		},
+	);
+
+	it.each([
+		["/", (_id: number) => "/"],
+		["/savings-goal", (_id: number) => "/savings-goal"],
+		["/budget/:id", (id: number) => `/budget/${id}`],
+	])(
+		"an htmx request for %s draws no Link a bank and no Plaid script",
+		async (_, pathFor) => {
+			await answeredHome();
+			const path = pathFor(await firstCategory());
+			const html = await (
+				await home.request(
+					path,
+					{ headers: { "HX-Request": "true" } },
+					plaidFamily,
+				)
+			).text();
+			expect(html).not.toContain("Link a bank");
+			expect(html).not.toContain(PLAID_MODULE);
+		},
+	);
+});
+
+// Home's own routes are setup's until the questions are answered (decision 148, #772): a stale Home page's save or sheet sends
+// the family to /setup, with no write, toast or 422 of its own. The answered phase, the fifth day and the demo are Home's.
+describe("Home's routes are setup's until the questions are answered (decision 148, #772)", () => {
+	const today = () => todayIn(DEFAULT_TIME_ZONE);
+	const yesterday = () => daysBefore(today(), 1);
+	const ORIGIN = "http://localhost";
+
+	/** One bank connected, its history not in: the reading phase. */
+	const readingOneBank = async () => {
+		await env.DB.prepare("UPDATE plaid_items SET disconnected_at = NULL").run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != (SELECT MIN(id) FROM plaid_items)",
+		).run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET last_synced_at = NULL, history_complete_at = NULL",
+		).run();
+	};
+	/** Every connected bank's history is in and nothing waits for Jev: the questions are open (the ready phase). */
+	const historyInAndSorted = async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET plaid_transaction_id = 'plaid-' || id WHERE plaid_transaction_id IS NULL",
+		).run();
+		await env.DB.prepare(
+			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
+		).run();
+	};
+	/** Every bank disconnected: the before phase. */
+	const noBank = async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now')",
+		).run();
+	};
+	/** The first category's id: the budget routes' :id. */
+	const firstCategory = async () =>
+		(
+			await env.DB.prepare(
+				"SELECT id FROM categories ORDER BY id LIMIT 1",
+			).first<{
+				id: number;
+			}>()
+		)?.id ?? 1;
+	/** The rows a save writes, so a save that goes to setup can be seen to write nothing. */
+	const savedRows = async () =>
+		JSON.stringify([
 			(
 				await env.DB.prepare(
-					"SELECT id FROM categories ORDER BY id LIMIT 1",
-				).first<{ id: number }>()
-			)?.id ?? 1;
+					"SELECT * FROM budget_amounts ORDER BY category_id, effective_month",
+				).all()
+			).results,
+			(
+				await env.DB.prepare(
+					"SELECT * FROM savings_goal_amounts ORDER BY effective_month",
+				).all()
+			).results,
+		]);
+	/** A save as the Home sheets and the nudge send it: htmx, form-encoded, from this origin. */
+	const save = (
+		path: string,
+		fields: Record<string, string>,
+		bindings: Env = family,
+	) =>
+		home.request(
+			path,
+			{
+				method: "POST",
+				headers: {
+					Origin: ORIGIN,
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+				},
+				body: new URLSearchParams(fields).toString(),
+			},
+			bindings,
+		);
+	/** Stroke one and the three questions drawn on `day`: the answered phase, with no budget answers kept. */
+	const answeredOn = (day: string) => ({
+		strokes: { bank: day, pay: day, bills: day, budgets: day },
+		budgets: {},
+	});
+
+	describe("while reading (the bank's history is coming in)", () => {
+		beforeEach(async () => {
+			await readingOneBank();
+			await writeRecord({ strokes: { bank: today() }, budgets: {} });
+		});
+
+		it("GET /budget/:id is 303 to /setup", async () => {
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/setup");
+		});
+
+		it("an htmx GET /budget/:id answers 204 with HX-Redirect to /setup", async () => {
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{ headers: { "HX-Request": "true" } },
+				family,
+			);
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/setup");
+		});
+
+		it("GET /savings-goal is 303 to /setup", async () => {
+			const res = await home.request("/savings-goal", {}, family);
+			expect(res.status).toBe(303);
+			expect(res.headers.get("Location")).toBe("/setup");
+		});
 
 		it.each([
-			["/savings-goal", (_id: number) => "/savings-goal"],
-			["/budget/:id", (id: number) => `/budget/${id}`],
+			["a budget", (id: number) => `/budget/${id}`, { budget: "650" }],
+			["the savings goal", () => "/savings-goal", { goal: "500" }],
+			["a nudge up", (id: number) => `/budget/${id}/nudge/up`, {}],
 		])(
-			"a full load of %s links from Home with a plain link, and loads no Plaid",
-			async (_, pathFor) => {
-				await unlinked();
-				const path = pathFor(await firstCategory());
-				const html = await (await home.request(path, {}, plaidFamily)).text();
-				expect(html).toContain('href="/"');
-				expect(html).toContain(">Link a bank on Home</a>");
-				expect(html).not.toContain(PLAID_MODULE);
-				expect(html).not.toContain("data-link-bank");
+			"a stale page's save of %s writes nothing and answers HX-Redirect to /setup",
+			async (_, pathFor, fields) => {
+				const before = await savedRows();
+				const res = await save(pathFor(await firstCategory()), fields);
+				expect(res.status).toBe(204);
+				expect(res.headers.get("HX-Redirect")).toBe("/setup");
+				expect(await savedRows()).toBe(before);
 			},
 		);
 
-		it.each([
-			["/", (_id: number) => "/"],
-			["/savings-goal", (_id: number) => "/savings-goal"],
-			["/budget/:id", (id: number) => `/budget/${id}`],
-		])(
-			"an htmx request for %s draws the plain link, not Plaid's button: a swap loads no Plaid script",
-			async (_, pathFor) => {
-				await unlinked();
-				const path = pathFor(await firstCategory());
-				const html = await (
-					await home.request(
-						path,
-						{ headers: { "HX-Request": "true" } },
-						plaidFamily,
-					)
-				).text();
-				expect(html).toContain('href="/"');
-				expect(html).toContain(">Link a bank on Home</a>");
-				expect(html).not.toContain("data-link-bank");
-				expect(html).not.toContain(PLAID_MODULE);
-			},
-		);
+		it("a refused amount is never answered 422 while reading", async () => {
+			const res = await save(`/budget/${await firstCategory()}`, {
+				budget: "12.345",
+			});
+			expect(res.status).toBe(204);
+			expect(res.headers.get("HX-Redirect")).toBe("/setup");
+		});
+	});
 
-		it("a full load of Home still draws Plaid's button and loads Plaid", async () => {
-			await unlinked();
-			const html = await page(plaidFamily);
-			expect(html).toContain("data-link-bank");
-			expect(html).toContain(PLAID_MODULE);
-			expect(html).not.toContain(">Link a bank on Home</a>");
+	it("GET /budget/:id before a bank is 303 to /setup", async () => {
+		await noBank();
+		await writeRecord({ strokes: {}, budgets: {} });
+		const res = await home.request(
+			`/budget/${await firstCategory()}`,
+			{},
+			family,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/setup");
+	});
+
+	it("GET /budget/:id once the questions are open is 303 to /setup", async () => {
+		await historyInAndSorted();
+		await writeRecord({ strokes: { bank: today() }, budgets: {} });
+		const res = await home.request(
+			`/budget/${await firstCategory()}`,
+			{},
+			family,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("Location")).toBe("/setup");
+	});
+
+	describe("not redirected: the answered phase, the fifth day and the demo", () => {
+		it("GET /budget/:id in the answered phase draws the sheet as today", async () => {
+			await historyInAndSorted();
+			await writeRecord(answeredOn(today()));
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("GET /budget/:id on the fifth day draws the sheet as today", async () => {
+			await historyInAndSorted();
+			await writeRecord({
+				...answeredOn(yesterday()),
+				night: { brought: 0, needYou: 0 },
+			});
+			const res = await home.request(
+				`/budget/${await firstCategory()}`,
+				{},
+				family,
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("GET /budget/:id in the demo draws the sheet, whatever the record says", async () => {
+			await readingOneBank();
+			await writeRecord({ strokes: { bank: today() }, budgets: {} });
+			const res = await home.request(`/budget/${await firstCategory()}`, {}, {
+				...env,
+				DEMO: "true",
+			} as unknown as Env);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Location")).toBeNull();
+			expect(await res.text()).toContain('role="dialog"');
+		});
+
+		it("a save in the answered phase still saves, and says so", async () => {
+			await historyInAndSorted();
+			await writeRecord(answeredOn(today()));
+			const res = await save(`/budget/${await firstCategory()}`, {
+				budget: "650",
+			});
+			expect(res.status).toBe(200);
+			expect(res.headers.get("HX-Trigger")).toContain("Saved the");
 		});
 	});
 });

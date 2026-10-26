@@ -6,25 +6,33 @@ import { Button } from "./button";
  * say what Plaid Link's success redraws, the page's URL and the element it swaps in (Accounts uses its defaults; Home
  * redraws its own #page, decision 114).
  */
-/** The Link a bank button: it opens Plaid Link (public/js/plaid-link.js). */
+/**
+ * The Link a bank button: it opens Plaid Link (public/js/plaid-link.js). `label` and `kind` say what the button reads and how it
+ * looks (setup's welcome says "Link your bank"; its reading screen's foot says "Link another bank", secondary).
+ */
 export const LinkBankButton = ({
 	class: layout,
 	refresh,
 	target,
+	label = "Link a bank",
+	kind = "primary",
 }: {
 	class?: string;
 	refresh?: string;
 	target?: string;
+	label?: string;
+	kind?: "primary" | "secondary";
 }) => (
 	<Button
 		type="button"
+		kind={kind}
 		class={layout}
 		busyLabel="Linking…"
 		data-link-bank
 		data-link-bank-refresh={refresh}
 		data-link-bank-target={target}
 	>
-		Link a bank
+		{label}
 	</Button>
 );
 
@@ -35,13 +43,23 @@ export const LinkBank = ({
 	class: layout,
 	refresh,
 	target,
+	label,
+	kind,
 }: {
 	class?: string;
 	refresh?: string;
 	target?: string;
+	label?: string;
+	kind?: "primary" | "secondary";
 }) => (
 	<>
-		<LinkBankButton class={layout} refresh={refresh} target={target} />
+		<LinkBankButton
+			class={layout}
+			refresh={refresh}
+			target={target}
+			label={label}
+			kind={kind}
+		/>
 		<LinkBankError />
 	</>
 );

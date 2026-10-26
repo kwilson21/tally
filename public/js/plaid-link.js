@@ -198,7 +198,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	let linking = false;
 	const linkClick = async (button) => {
 		if (linking) return;
-		// What a success redraws: Accounts' list by default; Home sets its own page (LinkBank's data attributes).
+		// What a success redraws: Accounts' list by default; setup's screens set their own (LinkBank's data attributes).
 		const refreshUrl = button.dataset?.linkBankRefresh || "/accounts";
 		const refreshTarget = button.dataset?.linkBankTarget || "#accounts-summary";
 		const busy = (value) => {
@@ -282,6 +282,11 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 						let refreshed = false;
 						try {
 							const refreshResponse = await fetch(refreshUrl);
+							// Setup has moved on (the questions or Home), so show the page the redirect reached, not a swap.
+							if (refreshResponse.ok && refreshResponse.redirected) {
+								document.location.assign(refreshResponse.url);
+								return;
+							}
 							if (refreshResponse.ok) {
 								const parsed = new DOMParser().parseFromString(
 									await refreshResponse.text(),
@@ -315,8 +320,8 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 							);
 							return;
 						}
-						// The refresh drew a new button, or on Home the status line; focus that, not the one clicked. Home's status
-						// wins over its own Link a bank (the reading phase keeps one, for Have more accounts?).
+						// The refresh drew a new button, or setup's status line; focus that, not the one clicked. The status
+						// wins over the screen's own Link another bank (the foot keeps one).
 						(
 							document.querySelector("[data-link-bank-focus]") ??
 							document.querySelector("[data-link-bank]")
@@ -339,7 +344,7 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 		}
 	};
 
-	// Home's first-week refreshes, the Your banks poll and the presence check-in, carry data-waits-for-link. While Plaid Link
+	// Setup's reading-screen refreshes, the Your banks poll and the presence check-in, carry data-waits-for-link. While Plaid Link
 	// is open they are skipped, so a sort that finishes mid-link can't redraw the first-week top and take the bank being linked
 	// away (decision 146). htmx 4.0.0 (node_modules/htmx.org/dist/htmx.js, #issueRequest) dispatches a cancelable
 	// htmx:before:request on a request's source element, and sends nothing when it is prevented. A skipped tick is not queued:

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { SetupView } from "../src/first-tally/setup";
 import type { YourBank } from "../src/first-tally/your-banks";
-import { HomeSetup } from "../src/views/home-setup";
 import { NotifyControl, type NotifyShown } from "../src/views/notify-control";
+import { SetupReading } from "../src/views/setup-reading";
 
 // The notify control (decision 149, N1): "Notify me on this device" under Home's first-week setup while the questions are not
 // yet open. Four states, each hidden until push.js shows one, so with no JavaScript, or in a browser without Web Push, nothing
@@ -158,12 +158,19 @@ describe("the notify control's words and button", () => {
 	});
 });
 
-describe("HomeSetup draws the control", () => {
+describe("the reading screen draws the control (decision 149)", () => {
 	const top = async (
 		view: Partial<SetupView>,
 		notify?: { vapidKey: string; shown?: NotifyShown },
 		yourBanks?: { banks: YourBank[]; today: string },
-	) => html(await HomeSetup({ view: { ...base, ...view }, notify, yourBanks }));
+	) =>
+		html(
+			await SetupReading({
+				view: { ...base, ...view },
+				notify,
+				yourBanks,
+			}),
+		);
 
 	it("draws it while reading, after the status line and before Your banks", async () => {
 		const markup = await top(
@@ -186,14 +193,6 @@ describe("HomeSetup draws the control", () => {
 
 	it("draws nothing without notify", async () => {
 		expect(await top({})).not.toContain("data-notify");
-	});
-
-	it("draws it only in the reading phase", async () => {
-		for (const phase of ["before", "ready"] as const) {
-			expect(await top({ phase }, { vapidKey: VAPID }), phase).not.toContain(
-				"data-notify",
-			);
-		}
 	});
 
 	it("never draws it inside the status, the next line or Your banks", async () => {

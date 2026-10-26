@@ -8,7 +8,6 @@
 // /plans/1 (Lawn service, $90, and its payment candidates). Pictures are drawn at their full height, so none is cut.
 
 import type { Child } from "hono/jsx";
-import { type SetupView, setupSteps } from "../first-tally/setup";
 import type { YourBank } from "../first-tally/your-banks";
 import { FORECAST_START_DAY } from "../home-forecast";
 import { budgetExample } from "../how-it-works/examples";
@@ -19,13 +18,14 @@ import { CategoryIcon } from "../views/category";
 import { CategoryGrid } from "../views/category-grid";
 import { Chip } from "../views/chip";
 import { FoldedRow } from "../views/folded-row";
-import { HomeSetup } from "../views/home-setup";
 import { BudgetDiagram } from "../views/how-diagrams";
 import { Icon } from "../views/icons";
 import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
+import { Notebook } from "../views/notebook";
 import { SplitLine } from "../views/split-form";
 import { type StepLine, TallySteps } from "../views/tally-steps";
+import { YourBanks } from "../views/your-banks";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 
@@ -1059,51 +1059,8 @@ export function SplitCategoryProposal() {
 }
 
 // P140 (#719, decision 133): Home's first week while two banks are read. Today is the reading phase as it was; A, the owner's
-// pick, is the real HomeSetup with Your banks and Have more accounts?; B nests the banks under Link your bank. Drawn at 390 px:
-// a 1280 px picture would draw HomeSetup's fixed ids a second time on this page.
-const BANKS_TODAY = "2026-10-14";
-const BANKS_RECORD = { strokes: { bank: "2026-10-13" }, budgets: {} };
-const BANKS_CHASE: YourBank = {
-	id: 3,
-	name: "Chase",
-	status: "ok",
-	lastSyncedAt: "2026-10-14 08:00:00",
-	historyCompleteAt: "2026-10-13 09:00:00",
-	fresh: false,
-	count: 412,
-};
-const BANKS_AMEX: YourBank = {
-	id: 5,
-	name: "American Express",
-	status: "ok",
-	lastSyncedAt: "2026-10-14 08:00:00",
-	historyCompleteAt: null,
-	fresh: true,
-	count: 86,
-};
-
-/** Two banks, one reading: the status names neither bank's count, and the list and the prompt sit under it (A). */
-function banksView(): SetupView {
-	return {
-		phase: "reading",
-		drawn: 1,
-		steps: setupSteps(BANKS_RECORD, "reading", "Chase", BANKS_TODAY, 2),
-		bankName: "Chase",
-		bankCount: 2,
-		historyIn: false,
-		sorting: false,
-		slow: false,
-		refreshes: false,
-		sorted: 0,
-		total: 498,
-		fifth: null,
-		answeredWaiting: null,
-		emailed: false,
-		waitsForRun: false,
-		runTime: "5 AM",
-	};
-}
-
+// pick, is drawn as JSX with the words it drew, as P142's Today is; B nests the banks under Link your bank. Drawn at 390 px: a 1280 px
+// picture would draw the same fixed ids a second time on this page.
 /**
  * Today's five lines as they were drawn, frozen as literal data: the live setup's words (After sorting) must not reach this
  * picture, which stays as it was (P140's "Today" is a record, and only A draws the live HomeSetup).
@@ -1131,6 +1088,80 @@ function BanksToday() {
 			</p>
 			<p class="mt-2 text-muted">Nothing for you to do until then.</p>
 			<TallySteps steps={BANKS_TODAY_STEPS} />
+		</section>
+	);
+}
+
+/** A's two banks as the picture drew them: Chase in, American Express still being read. */
+const BANKS_TODAY = "2026-10-14";
+const BANKS_CHASE: YourBank = {
+	id: 3,
+	name: "Chase",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: "2026-10-13 09:00:00",
+	fresh: false,
+	count: 412,
+};
+const BANKS_AMEX: YourBank = {
+	id: 5,
+	name: "American Express",
+	status: "ok",
+	lastSyncedAt: "2026-10-14 08:00:00",
+	historyCompleteAt: null,
+	fresh: true,
+	count: 86,
+};
+
+/** A's five lines as the picture drew them: Link your bank done with its two banks, three after sorting, and the last one later. */
+const BANKS_A_STEPS: StepLine[] = [
+	{ name: "Link your bank", done: true, note: "2 banks, linked" },
+	{ name: "Your pay", done: false, note: "After sorting" },
+	{ name: "Your bills", done: false, note: "After sorting" },
+	{ name: "Your budgets", done: false, note: "After sorting" },
+	{
+		name: "Tomorrow · Tally keeps count on its own",
+		done: false,
+		note: "Later",
+	},
+];
+
+/**
+ * A, the owner's pick: the banks under the status, Have more accounts? beneath them, and the five lines. Drawn as JSX with its
+ * own words, so the live setup's words never reach this picture (P140's pattern, as P142's Today does).
+ */
+function BanksA() {
+	return (
+		<section id="setup-top" class="mt-2">
+			<div class="flex items-center justify-end gap-4">
+				<h1 class="sr-only">Your first week</h1>
+				<Notebook strokes={1} ink size="size-24" />
+			</div>
+			<p class="mt-3 font-serif text-lg italic">
+				Tally's reading your last 90 days from 2 banks.
+			</p>
+			<p class="mt-2 text-muted">
+				Next it sorts them, then you answer three quick questions and your
+				budget is ready. Tally will email you the moment they're ready.
+			</p>
+			<YourBanks
+				banks={[BANKS_CHASE, BANKS_AMEX]}
+				today={BANKS_TODAY}
+				polls={false}
+			/>
+			<div class="mt-6">
+				<h2 class="text-lg font-semibold">Have more accounts?</h2>
+				<p class="mt-1 text-muted">
+					Link every bank and card you use now, so your first questions cover
+					them all.
+				</p>
+				<div class="mt-3">
+					<Button type="button" class="w-full">
+						Link a bank
+					</Button>
+				</div>
+			</div>
+			<TallySteps steps={BANKS_A_STEPS} />
 		</section>
 	);
 }
@@ -1209,20 +1240,7 @@ export function BanksProposal() {
 					width="w-[392px]"
 				>
 					<Phone label="A, two banks being read" demo={false} tab="home">
-						<HomeSetup
-							view={banksView()}
-							polls={false}
-							linkBank={
-								<Button type="button" class="w-full">
-									Link a bank
-								</Button>
-							}
-							yourBanks={{
-								banks: [BANKS_CHASE, BANKS_AMEX],
-								today: BANKS_TODAY,
-								polls: false,
-							}}
-						/>
+						<BanksA />
 					</Phone>
 				</Choice>
 				<Choice

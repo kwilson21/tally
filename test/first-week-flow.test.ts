@@ -7,6 +7,7 @@ import { resetDemo } from "../src/demo/reset";
 import { firstPage } from "../src/routes/first-page";
 import { home } from "../src/routes/home";
 import { plaid } from "../src/routes/plaid";
+import { setupRoute } from "../src/routes/setup";
 
 // The first week from the top (P125 E, spec §8.8, decision 114), through the routes the family app mounts together: a
 // new family links a bank on Home, the questions open once the import is in, Home's Band opens the question page, and
@@ -37,6 +38,7 @@ router.use("*", async (c, next) => {
 	await next();
 });
 router.route("/", home);
+router.route("/", setupRoute);
 router.route("/", plaid);
 router.route("/", firstPage);
 
@@ -106,11 +108,11 @@ afterEach(() => {
 });
 
 describe("the first week, from Home to the pay stroke", () => {
-	it("a new household links a bank, the gate opens, Home's Band opens /first-page, and its answer draws the pay stroke", async () => {
-		// A fresh household: Home offers the one button and no strokes are drawn.
-		const fresh = await words(await family.fetch("/"));
-		expect(fresh).toContain("Five strokes, and you're set up.");
-		expect(fresh).toContain("Link a bank");
+	it("a new household links a bank, the gate opens, setup moves on to /first-page, and its answer draws the pay stroke", async () => {
+		// A fresh household: setup's welcome offers the one button and no strokes are drawn (Home sends a family here, decision 148).
+		const fresh = await words(await family.fetch("/setup"));
+		expect(fresh).toContain("Welcome to Tally.");
+		expect(fresh).toContain("Link your bank");
 
 		// Linking draws stroke one on the household's day, in the exchange's own batch. The first sync it starts gets
 		// Plaid's not-ready page, so the gate below is opened by hand.
@@ -182,11 +184,10 @@ describe("the first week, from Home to the pay stroke", () => {
 			.run();
 		await deposit("ACME CORP PAYROLL", 245000);
 
-		// Home's Band now opens the question page, and the setup headline is gone.
-		const band = await words(await family.fetch("/"));
-		expect(band).toContain("Set up your budget");
-		expect(band).toContain('href="/first-page"');
-		expect(band).not.toContain("Five strokes, and you're set up.");
+		// Setup moves on to the question page once the questions are open (until #773 they are /first-page).
+		const moved = await family.fetch("/setup");
+		expect(moved.status).toBe(303);
+		expect(moved.headers.get("location")).toBe("/first-page");
 
 		// The question page asks the pay question.
 		const page = await family.fetch("/first-page");
@@ -215,10 +216,10 @@ describe("the first week, from Home to the pay stroke", () => {
 		).toEqual(["announce", "toast"]);
 		expect((await readFirstTally(db))?.strokes.pay).not.toBeUndefined();
 
-		// Home counts the strokes drawn. The bills step had nothing to ask (no repeat charge), so it counts as done and draws
+		// The questions page counts the strokes drawn. The bills step had nothing to ask (no repeat charge), so it counts as done and draws
 		// with the pay answer, as the spec says one answer can draw two; the budgets step still has categories to ask.
 		expect((await readFirstTally(db))?.strokes.bills).not.toBeUndefined();
-		const counted = await words(await family.fetch("/"));
-		expect(counted).toContain("Your first tally · 3 of 5");
+		const counted = await words(await family.fetch("/first-page"));
+		expect(counted).toContain("3 of 5");
 	});
 });

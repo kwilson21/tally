@@ -4,10 +4,10 @@ import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { runReadyEmail } from "../src/first-tally/ready-email";
-import { home } from "../src/routes/home";
 import { enabled } from "../src/routes/plaid";
+import { setupRoute } from "../src/routes/setup";
 
-// The Your banks list's refresh (P140 A, decision 133): GET /home/banks, polled every 5 seconds while a bank is being read.
+// The Your banks list's refresh (P140 A, decision 133): GET /setup/banks, polled every 5 seconds while a bank is being read.
 // It answers with the list and the status out of band, announces a bank that came in, redraws the whole first-week top once
 // the questions open, and redraws Home in full, without a reload, when there is no setup to draw (decision 146).
 const family = { ...env, DEMO: "false" } as unknown as Env;
@@ -22,7 +22,7 @@ const writeRecord = (value: unknown) =>
 		.run();
 
 const refresh = async (query = "", bindings: Env = family) => {
-	const res = await home.request(`/home/banks${query}`, {}, bindings);
+	const res = await setupRoute.request(`/setup/banks${query}`, {}, bindings);
 	return { res, html: (await res.text()).replaceAll("&#39;", "'") };
 };
 
@@ -58,7 +58,7 @@ beforeEach(async () => {
 	).run();
 });
 
-describe("GET /home/banks: the list while a bank is read", () => {
+describe("GET /setup/banks: the list while a bank is read", () => {
 	it("answers with the list and the status out of band, and no layout", async () => {
 		await readingBanks();
 		const { res, html } = await refresh();
@@ -101,7 +101,9 @@ describe("GET /home/banks: the list while a bank is read", () => {
 			.bind(first)
 			.run();
 		const { html } = await refresh(`?in=${first}`);
-		expect(html).toContain(`hx-get="/home/banks?in=${first}&amp;step=reading"`);
+		expect(html).toContain(
+			`hx-get="/setup/banks?in=${first}&amp;step=reading"`,
+		);
 		expect(html).toContain('hx-trigger="every 5s"');
 		expect(html).toContain('hx-status:4xx="swap:none"');
 		expect(html).toContain('hx-status:5xx="swap:none"');
@@ -124,6 +126,29 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		expect(html).not.toContain("data-quiet");
 		// The page stops refreshing, but its person is still there: the poll never takes the check-in out (decision 146).
 		expect(html).not.toContain('hx-swap-oob="delete"');
+	});
+
+	it("answers the email region out of band, empty, once the ready email has reached someone", async () => {
+		await readingBanks();
+		// readingBanks writes the record whole, so the emailed record is written after it; the phase still follows the strokes.
+		await writeRecord({
+			strokes: { bank: TODAY },
+			budgets: {},
+			readyEmailedTo: ["someone@example.com"],
+		});
+		const { html } = await refresh();
+		expect(html).toContain(
+			'<div id="setup-email" hx-swap-oob="innerHTML"></div>',
+		);
+		expect(html).not.toContain("You can close this page.");
+	});
+
+	it("answers the email line out of band inside the email region while the ready email has reached no one", async () => {
+		await readingBanks();
+		const { html } = await refresh();
+		expect(html).toMatch(
+			/<div id="setup-email" hx-swap-oob="innerHTML"><p class="mt-6 rounded-control bg-band p-4">You can close this page\./,
+		);
 	});
 
 	it("marks the poll so a Plaid Link window pauses it while it is open (decision 146)", async () => {
@@ -179,6 +204,10 @@ describe("GET /home/banks: the list while a bank is read", () => {
 		)
 			.bind(first, second)
 			.run();
+		// Something still waits for Jev, so the page is reading still (once nothing waits, the questions open, and it moves on).
+		await env.DB.prepare(
+			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-two', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
+		).run();
 		const { res } = await refresh("");
 		const names = (
 			await env.DB.prepare(
@@ -256,7 +285,7 @@ describe("GET /home/banks: the list while a bank is read", () => {
 	});
 });
 
-describe("GET /home/banks: a step change is announced once (decision 146)", () => {
+describe("GET /setup/banks: a step change is announced once (decision 146)", () => {
 	it("announces the sorting status once, when the poll that named reading finds the sort begun", async () => {
 		await env.DB.prepare(
 			"INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name) SELECT id, 'waiting-step', '2026-10-02', 1200, 'SHOP' FROM accounts LIMIT 1",
@@ -295,24 +324,22 @@ describe("GET /home/banks: a step change is announced once (decision 146)", () =
 		expect(same.html).not.toContain('id="home-seen"');
 	});
 
-	it("announces the ready status and redraws the top once the questions open from a sort (reading to ready)", async () => {
+	it("moves on to the questions once the sort has finished and they open (reading to ready): HX-Redirect to /first-page", async () => {
 		await readingBanks();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
-		// Nothing left to sort: the questions open, and the top redraws with the ready status.
+		// Nothing left to sort: the questions open, and the page moves on to them (until #773 they are /first-page).
 		await saveAiSwitches(env.DB, { categories: false, income: false });
 		const ids = (await connectedIds()).join(",");
 		const { res } = await refresh(`?in=${ids}&step=sorting`);
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(trigger(res)?.announce).toContain(
-			"Now answer three quick questions to set up your budget.",
-		);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
 	});
 });
 
-describe("GET /home/banks: the questions open, or there is no setup", () => {
-	it("redraws the whole first-week top once the phase is no longer reading, and announces the status", async () => {
+describe("GET /setup/banks: the questions open, or there is no setup", () => {
+	it("answered: moves on to Home, with HX-Redirect and no body (the answered top is Home's)", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = NULL, history_complete_at = datetime('now')",
 		).run();
@@ -325,30 +352,12 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 			},
 			budgets: {},
 		});
-		// The page already shows every bank as in, so only the status is said.
-		const { res, html } = await refresh(
-			`?in=${(await connectedIds()).join(",")}`,
-		);
-		expect(res.headers.get("HX-Retarget")).toBe("#setup-top");
-		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
-		expect(html).toContain('id="setup-top"');
-		// The swap moves focus to the new status: the button that had it (Link a bank, a Fix) is gone with the old top.
-		const status = html.split('id="setup-status"')[1]?.split(">")[0] ?? "";
-		expect(status).toContain(" autofocus");
-		expect(html).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
-		expect(trigger(res)?.announce).toBe(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
-		expect(trigger(res)?.toast).toEqual({
-			message:
-				"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-			type: "info",
-		});
+		const { res } = await refresh(`?in=${(await connectedIds()).join(",")}`);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 	});
 
-	it("redraws Home in full, with no reload, when no setup is drawn: set up, or the fifth day (decision 146)", async () => {
+	it("the fifth day: moves on to Home, with HX-Redirect", async () => {
 		await writeRecord({
 			strokes: {
 				bank: "2026-10-13",
@@ -359,32 +368,24 @@ describe("GET /home/banks: the questions open, or there is no setup", () => {
 			},
 			budgets: {},
 		});
-		const { res, html } = await refresh();
-		expect(res.headers.get("HX-Refresh")).toBeNull();
-		expect(res.headers.get("HX-Retarget")).toBe("#page");
-		expect(res.headers.get("HX-Reselect")).toBe("#page");
-		expect(html).toContain('id="page"');
-		// Set up, Home's status is announced as it is drawn and takes focus (decision 146): the page has no focused button left.
-		const focused = html
-			.replaceAll("&#39;", "'")
-			.match(/<[a-z0-9]+[^<>]*\bautofocus\b[^<>]*>([^<]*)</)?.[1];
-		expect(focused).toBeTruthy();
-		expect(trigger(res)?.announce).toBe(focused);
-		expect(trigger(res)?.toast).toEqual({ message: focused, type: "info" });
-		expect(html.match(/\bautofocus\b/g)?.length).toBe(1);
+		const { res } = await refresh();
+		expect(res.status).toBe(204);
+		expect(res.headers.get("HX-Redirect")).toBe("/");
 	});
 
-	it("redraws Home in full before a bank, announcing its headline and taking focus on it (decision 146)", async () => {
+	it("before a bank: redraws the welcome into #setup-screen, with its headline announced and taking focus (decision 146)", async () => {
 		await readingBanks();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = datetime('now')",
 		).run();
 		const { res, html } = await refresh();
-		expect(res.headers.get("HX-Retarget")).toBe("#page");
-		expect(html).toContain('id="page"');
-		expect(trigger(res)?.announce).toBe("Five strokes, and you're set up.");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
+		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
+		expect(html).toContain('id="setup-screen"');
+		expect(trigger(res)?.announce).toBe("Welcome to Tally.");
 		expect(html.replaceAll("&#39;", "'")).toMatch(
-			/<h1[^<>]*\bautofocus\b[^<>]*>Five strokes, and you're set up\.<\/h1>/,
+			/<h1[^<>]*\bautofocus\b[^<>]*>Welcome to Tally\.<\/h1>/,
 		);
 		expect(html.match(/\bautofocus\b/g)?.length).toBe(1);
 	});

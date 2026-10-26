@@ -1499,13 +1499,13 @@ describe("GET /design-system in the demo", () => {
 
 	it("gives each notify control drawing its own help line, so no button points at another drawing's paragraph (#763)", async () => {
 		const { html } = await get("/design-system");
-		// Each NotifyControl drawing, and HomeSetup's Sorting state, draws a button described by its help line. A shared id would
-		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help. The reading screen's
-		// two drawings (its reading state and its on state, #772) each draw their own.
+		// Each NotifyControl drawing, and the reading screen's drawings, draws a button described by its help line. A shared id would
+		// make aria-describedby point at another drawing's paragraph. The app keeps the one id, notify-help. HomeSetup's sorting
+		// drawing went with Home's setup (#772, part 2), so the reading screen's own drawings are the ones counted here.
 		const described = [
 			...html.matchAll(/aria-describedby="(notify-help[^"]*)"/g),
 		].map((match) => match[1] ?? "");
-		expect(described).toHaveLength(7);
+		expect(described).toHaveLength(6);
 		expect(new Set(described).size).toBe(described.length);
 		for (const id of described)
 			expect(html.match(new RegExp(`\\sid="${id}"`, "g")), id).toHaveLength(1);
@@ -1903,5 +1903,33 @@ describe("GET /design-system: Apple Card's group, file field and sheet (#766)", 
 		}
 		expect(sheet).toContain("then Cancel and Upload. On a phone");
 		expect(design).toContain('then Cancel and "Upload"; the demo');
+	});
+});
+
+describe("GET /design-system/proposals: P140 A, the picked banks picture (decision 133)", () => {
+	it("draws A from JSX with setup-top and the real Your banks list, and none of the frozen string's ids", async () => {
+		const { res, html } = await get("/design-system/proposals");
+		expect(res.status).toBe(200);
+		const start = html.indexOf(">A · Your banks under the status");
+		const end = html.indexOf(">B · The banks under Link your bank</h4>");
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		const picture = html.slice(start, end);
+		expect(picture).toContain('<section id="setup-top" class="mt-2">');
+		expect(picture).toContain(
+			'<div class="flex items-center justify-end gap-4">',
+		);
+		expect(picture).toContain('<section id="your-banks"');
+		expect(picture).toContain(
+			"Link every bank and card you use now, so your first questions cover them all.",
+		);
+		for (const id of [
+			"setup-title",
+			"setup-status",
+			"setup-next",
+			"data-link-bank-focus",
+		]) {
+			expect(picture).not.toContain(id);
+		}
 	});
 });

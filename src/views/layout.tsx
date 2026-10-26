@@ -14,6 +14,11 @@ type LayoutProps = {
 	/** Extra ES module scripts for this page only. */
 	modules?: string[];
 	currentPath?: string;
+	/**
+	 * A setup page (P142 A, decision 148): no sidebar and no tab bar; the top line, the wordmark and Feedback, shows at every
+	 * width, over one centred column.
+	 */
+	setup?: boolean;
 	children?: Child;
 };
 
@@ -42,6 +47,7 @@ export function Layout({
 	scripts = [],
 	modules = [],
 	currentPath = "/",
+	setup = false,
 	children,
 }: LayoutProps) {
 	// The keys sheet is open when the address has keys in it (decision 118); its close is the same address without them.
@@ -110,36 +116,64 @@ export function Layout({
 				</a>
 				{demo && <DemoBanner />}
 				<div class="mx-auto flex max-w-6xl gap-10 px-5 pl-[calc(1.25rem+var(--safe-area-left))] pr-[calc(1.25rem+var(--safe-area-right))] lg:px-8">
-					<aside class="hidden w-56 shrink-0 py-8 lg:block">
-						<div class="mb-8">
-							<Wordmark />
-						</div>
-						<Sidebar active={active} currentPath={currentPath} />
-					</aside>
+					{!setup && (
+						<aside class="hidden w-56 shrink-0 py-8 lg:block">
+							<div class="mb-8">
+								<Wordmark />
+							</div>
+							<Sidebar active={active} currentPath={currentPath} />
+						</aside>
+					)}
+					{/* A setup page's sticky foot carries the safe area, and there is no tab bar to clear (decision 148). */}
 					<main
 						id="main"
-						class="min-w-0 flex-1 pb-[var(--focus-scroll-room)] pt-6 lg:pb-24 lg:pt-8"
+						class={
+							setup
+								? "min-w-0 flex-1 pb-0 pt-6 lg:pb-24 lg:pt-8 max-lg:flex max-lg:flex-col max-lg:min-h-[calc(100dvh-var(--safe-area-top))]"
+								: "min-w-0 flex-1 pb-[var(--focus-scroll-room)] pt-6 lg:pb-24 lg:pt-8"
+						}
 					>
-						<div
-							id="top-line"
-							class="mb-2 flex items-center justify-between gap-3 lg:hidden"
-						>
-							<Wordmark />
-							{!currentPath.startsWith("/feedback") && <FeedbackButton />}
-						</div>
-						{children}
+						{setup ? (
+							<div class="mx-auto w-full max-w-md max-lg:flex max-lg:flex-1 max-lg:flex-col">
+								<div
+									id="top-line"
+									class="mb-2 flex items-center justify-between gap-3"
+								>
+									<Wordmark />
+									{!currentPath.startsWith("/feedback") && <FeedbackButton />}
+								</div>
+								{children}
+							</div>
+						) : (
+							<>
+								<div
+									id="top-line"
+									class="mb-2 flex items-center justify-between gap-3 lg:hidden"
+								>
+									<Wordmark />
+									{!currentPath.startsWith("/feedback") && <FeedbackButton />}
+								</div>
+								{children}
+							</>
+						)}
 					</main>
 				</div>
-				<BottomTabs active={active} />
+				{!setup && <BottomTabs active={active} />}
 				{/* The keys sheet (decision 118) is drawn outside #main, when the address has ?keys. A close or open swaps only
 				    this region, so the page keeps its place and focus. */}
 				<div id="keys">
 					{keysOpen && <KeysSheet closeHref={keysCloseHref} />}
 				</div>
 				{/* z-60: above the BottomSheet (z-50), so a failed save's toast shows over an open sheet. Taps pass through it, so a toast over Save never eats the tap that tries again. Toasts sit in the frame, never over the page (decision 101): on a phone 12 px above the tab bar and its safe area, at the top edge while a sheet is open (a sheet drawn inside an inert frame, as the catalog's are, doesn't count), and 12 px above the Select bar's real height in Select mode; on desktop 24 px from the bottom, beside the sidebar and no wider than it. */}
+				{/* On a setup page the toasts sit at the top edge on a phone, as they do over an open sheet: the pinned foot holds the
+				    screen's button, and a toast must not cover it (decision 151). */}
 				<div
 					id="toasts"
-					class="pointer-events-none fixed inset-x-4 z-60 flex flex-col items-center gap-2 bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+0.75rem)] max-lg:[body:has([role=dialog]:not([inert]_*))_&]:top-[calc(0.75rem+var(--safe-area-top))] max-lg:[body:has([role=dialog]:not([inert]_*))_&]:bottom-auto max-lg:[body:has(#selection-form):not(:has([role=dialog]:not([inert]_*)))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)] lg:bottom-6 lg:left-[max(2rem,calc(50%_-_34rem))] lg:right-auto lg:w-56 lg:items-start"
+					class={
+						setup
+							? "pointer-events-none fixed inset-x-4 z-60 flex flex-col items-center gap-2 bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+0.75rem)] max-lg:top-[calc(0.75rem+var(--safe-area-top))] max-lg:bottom-auto max-lg:[body:has([role=dialog]:not([inert]_*))_&]:top-[calc(0.75rem+var(--safe-area-top))] max-lg:[body:has([role=dialog]:not([inert]_*))_&]:bottom-auto max-lg:[body:has(#selection-form):not(:has([role=dialog]:not([inert]_*)))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)] lg:bottom-6 lg:left-[max(2rem,calc(50%_-_34rem))] lg:right-auto lg:w-56 lg:items-start"
+							: "pointer-events-none fixed inset-x-4 z-60 flex flex-col items-center gap-2 bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+0.75rem)] max-lg:[body:has([role=dialog]:not([inert]_*))_&]:top-[calc(0.75rem+var(--safe-area-top))] max-lg:[body:has([role=dialog]:not([inert]_*))_&]:bottom-auto max-lg:[body:has(#selection-form):not(:has([role=dialog]:not([inert]_*)))_&]:bottom-[calc(var(--tabs-height)+var(--safe-area-bottom)+var(--selection-bar-height)+0.75rem)] lg:bottom-6 lg:left-[max(2rem,calc(50%_-_34rem))] lg:right-auto lg:w-56 lg:items-start"
+					}
 				/>
 				<div
 					id="announcer"

@@ -1,7 +1,7 @@
 // The ready email (P140, decision 134, decision 146, spec §8.8): one email to each person on the household list once a new
 // family's first questions are open, while pay, bills and budgets are all undrawn. The minute run sends it (the 10:00 run
 // checks too, as a backstop). It goes to a person only once their page has not checked in for EMAIL_AWAY_AFTER_MS: someone
-// still on Home's setup (while it refreshes) or the questions page sees the questions there instead. An address is claimed in
+// still on setup's reading screen (while it refreshes) or the questions page sees the questions there instead. An address is claimed in
 // the record's readyEmailedTo before its email goes, and released unless the email is delivered. A try Resend may already
 // have accepted (no answer, or any answer but a success, deliver.ts) is kept: the whole email it tried (subject, HTML and
 // text) and the UTC time of that first try are stored, and every later try sends that same stored email through Resend
@@ -29,9 +29,12 @@ const SUBJECT = "Three questions to finish setting up";
 const NEXT =
 	"Now check three things: your pay, your bills and your budgets. About three minutes.";
 const BUTTON = "Finish setting up";
-/** The first week's questions page: the ready email's button and the ready push's link both open it (decision 149). */
-export const QUESTIONS_PATH = "/first-page";
-const LINK = `https://tally.thesuperhuman.us${QUESTIONS_PATH}`;
+/**
+ * Setup (decision 148): the ready email's button and the ready push's link open it, and it moves on to the questions once
+ * they're open (setup's route, src/routes/setup.tsx).
+ */
+export const SETUP_PATH = "/setup";
+const LINK = `https://tally.thesuperhuman.us${SETUP_PATH}`;
 const FOOT = "Tally sends this once, to everyone in your family who uses it.";
 
 // The same test in SQL. json_type is NULL only when the key is absent (a null value reads 'null'), as the rest of the code tests it.

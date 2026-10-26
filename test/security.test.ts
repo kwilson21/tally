@@ -27,7 +27,7 @@ const cspFor = async (path: string) => {
 };
 
 describe("Plaid Content Security Policy", () => {
-	it("allows Plaid's documented hosts on Accounts, and on Home in the family app; the demo's Home keeps 'self'", async () => {
+	it("allows Plaid's documented hosts on Accounts, and on setup in the family app; Home and the demo keep 'self'", async () => {
 		const accounts = await cspFor("/accounts");
 		expect(accounts).toContain("script-src 'self' https://cdn.plaid.com");
 		expect(accounts).toContain("frame-src 'self' https://cdn.plaid.com");
@@ -45,7 +45,7 @@ describe("Plaid Content Security Policy", () => {
 		}
 	});
 
-	it("allows inline styles on Accounts, and on Home in the family app; the demo's Home keeps 'self'", async () => {
+	it("allows inline styles on Accounts, and on setup in the family app; Home and the demo keep 'self'", async () => {
 		expect(await cspFor("/accounts")).toContain(
 			"style-src 'self' 'unsafe-inline'",
 		);
@@ -58,21 +58,21 @@ describe("Plaid Content Security Policy", () => {
 	});
 });
 
-describe("Home in the family app", () => {
+describe("setup in the family app", () => {
 	beforeEach(() => Object.assign(env, { DEMO: "false" }));
 	afterEach(() => Object.assign(env, { DEMO: "true" }));
 
 	it("allows Plaid Link's hosts and inline styles, as Accounts does", async () => {
 		// No Access JWT, so the page is refused; the headers are still set on that refusal.
-		const csp = await cspFor("/");
+		const csp = await cspFor("/setup");
 		expect(csp).toContain("script-src 'self' https://cdn.plaid.com");
 		expect(csp).toContain("frame-src 'self' https://cdn.plaid.com");
 		expect(csp).toContain("connect-src 'self' https://production.plaid.com");
 		expect(csp).toContain("style-src 'self' 'unsafe-inline'");
 	});
 
-	it("keeps Plaid off the family app's other pages", async () => {
-		for (const path of ["/transactions", "/settings"]) {
+	it("keeps Plaid off Home, which has no Link a bank any more, and off the family app's other pages", async () => {
+		for (const path of ["/", "/transactions", "/settings"]) {
 			const csp = await cspFor(path);
 			expect(csp).not.toContain("plaid.com");
 			expect(csp).not.toContain("unsafe-inline");
