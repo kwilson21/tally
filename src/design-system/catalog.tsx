@@ -9,11 +9,7 @@ import type { LikelyRow } from "../db/likely-transactions";
 import type { NeverSuggestRule } from "../db/never-suggest";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { type BudgetAsk, SAVINGS_BLANK_WORDS } from "../first-tally/budgets";
-import type {
-	BankHead,
-	FirstPageModel,
-	PayMerchant,
-} from "../first-tally/first-page";
+import type { PayMerchant } from "../first-tally/first-page";
 import {
 	type SetupPhase,
 	type SetupView,
@@ -86,12 +82,6 @@ import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FileField } from "../views/file-field";
 import { FilterSelect } from "../views/filter-select";
-import {
-	BillsEmpty,
-	BillsQuestion,
-	FirstPageBody,
-	PayQuestion,
-} from "../views/first-page";
 import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
@@ -160,6 +150,7 @@ import {
 	settingsPlaces,
 } from "../views/settings-pages";
 import {
+	RuledTotal,
 	SetupBills,
 	SetupBudgets,
 	SetupOneBudget,
@@ -167,6 +158,7 @@ import {
 	SetupSavings,
 } from "../views/setup-questions";
 import { SetupReading } from "../views/setup-reading";
+import { SetupScreen } from "../views/setup-screen";
 import { SetupWelcome } from "../views/setup-welcome";
 import { SheetCancel, SheetFooter, SheetPrimary } from "../views/sheet-footer";
 import { SplitForm } from "../views/split-form";
@@ -1271,7 +1263,7 @@ const SETUP_PAY_SPEC: UseSpecText = {
 	input:
 		"Touch: both buttons are 44px tall, and Yes is full width. Keyboard: Tab reaches Yes, then No; Enter or Space answers. Screen reader: the heading is the screen's one h1, the lead and card are read in order, and the deposits are a plain list.",
 	motion:
-		"Nothing of its own moves. The screen swaps in place when it is answered, as the question page's does; reduced motion changes nothing.",
+		"Nothing of its own moves. The screen swaps in place when it is answered, as setup's other questions do; reduced motion changes nothing.",
 	edges:
 		"A merchant with one deposit says once, on its day. Varying amounts show their range, and irregular dates show no cadence, only the count and the first day. Long bank text wraps inside the card, and the amount keeps its place at the right.",
 	words:
@@ -1329,7 +1321,7 @@ const SETUP_ONE_BUDGET_SPEC: UseSpecText = {
 	feedback:
 		"Yes or Save this budget keeps the budget from this month on and redraws the screen with the next category, the reply in a toast and the announcer. A refused amount keeps the question with its words in role=alert. Skip this one keeps the skip.",
 	input:
-		"Touch: every button is 44px tall, and the amount field's arrows are 48px. Keyboard: Tab reaches Another amount, then the field and Save this budget, or Yes and Skip this one; Enter in the amount field saves it. Screen reader: the heading is the screen's one h1 and takes focus, unless an amount is refused, and then the field does.",
+		"Touch: every button is at least 44px tall: the money input's round −$1 and +$1 are 48px and its cent arrows 44px. Keyboard: Tab reaches Another amount, then the field and Save this budget, or Yes and Skip this one; Enter in the amount field saves it. Screen reader: the heading is the screen's one h1 and takes focus, unless an amount is refused, and then the field does.",
 	motion: "Nothing of its own moves. Reduced motion changes nothing.",
 	edges:
 		"A suggestion that moved since the screen drew is not kept, and the question is asked again. A typed amount that isn't dollars is refused in words. A category a Home budget set since the screen drew is not asked. Long names wrap.",
@@ -1354,6 +1346,26 @@ const SETUP_SAVINGS_SPEC: UseSpecText = {
 		"A blank amount and $0 are refused in the words below. A goal Home set since the screen drew is kept, and the reply says so. Long skipped notes wrap.",
 	words:
 		"Step bar: “Step 4 of 4 · Your budgets” · Heading: “Save some each month?” · lead: “Safe to spend sets it aside from the 1st, before anything else. You can change it on Home any time.” · field: “Save each month, from October on” · Buttons: “Save it” and “Not now” · refused: “Enter an amount greater than $0, or choose Not now.”",
+};
+
+// The ruled-off total's use spec (decisions 114 and 148, #590, #773): all eight answers, for sign-off. It is setup's last screen
+// until the finish (#774), so its words are the budgets step's.
+const SETUP_RULED_TOTAL_SPEC: UseSpecText = {
+	purpose:
+		"Show a new family the month's Safe to spend once the budgets step is done, with the Four line and a way to Home. It is setup's last screen until the finish (#774).",
+	affordance:
+		"Go to Home, the full-width button at the screen's foot, and Why?, the link beside Safe to spend, which opens how Safe to spend is worked out. A step with nothing to ask says why in a muted line above the double rule.",
+	states:
+		"Done: the double rule, Safe to spend with the month's number, the Four line and Go to Home, and no line above the rule. Nothing to ask, every category budgeted on Home: the line for that reason above the rule. Nothing to ask, no categories yet: the line for that reason above the rule. Neither line shows once a budget answer is recorded on the step, or for a category added after the budgets stroke that has no budget.",
+	feedback:
+		"Go to Home is a link, so it moves the page and saves nothing. The screen is drawn by the budgets step's last answer, which announces its own reply in a toast and the announcer; this screen adds none of its own.",
+	input:
+		"Touch: Go to Home is 44px tall and full width, and Why? is a 44px target. Keyboard: Tab reaches Why?, then Go to Home. Screen reader: the Safe to spend line takes focus after the last answer, as the screen's focus says; a nothing-asked line is plain text above the rule, read before it.",
+	motion: "Nothing of its own moves. Reduced motion changes nothing.",
+	edges:
+		"A negative Safe to spend shows its minus sign before the number, as Home does. A step that asked something shows no line above the rule.",
+	words:
+		"Heading: none. “Safe to spend · Why?”, the month's number in the serif, “Four. Tomorrow Tally keeps count on its own, and that's the fifth.” and “Go to Home”. Above the rule, when nothing was asked: the one line for its reason, in nothingAskedLine's words (budgets.ts).",
 };
 
 // The Switch's use spec (decision 73, P41 B): every line answered before the owner signs it off.
@@ -8268,7 +8280,7 @@ function LedgerForm() {
 	);
 }
 
-/** A new family's first week's question page (P125 E, decision 114): the states the app draws, with fixed sample data. */
+/** A new family's first week's sample data (P125 E, decision 114, #773): fixed values for the setup questions the app draws. */
 const FIRST_WEEK_PAY_DEPOSITS = [
 	"2026-07-17",
 	"2026-07-31",
@@ -8278,44 +8290,12 @@ const FIRST_WEEK_PAY_DEPOSITS = [
 	"2026-09-25",
 	"2026-10-09",
 ].map((date) => ({ date, cents: 245000 }));
-const FIRST_WEEK_HEAD: BankHead = {
-	banks: "Chase",
-	lines: 412,
-	first: "2026-07-16",
-	last: "2026-10-13",
-	left: 6,
-};
 const FIRST_WEEK_PAY = {
 	key: "ACME CORP PAYROLL",
 	name: "Acme Corp",
 	deposits: FIRST_WEEK_PAY_DEPOSITS,
 	ids: FIRST_WEEK_PAY_DEPOSITS.map((_, i) => i + 1),
 };
-const FIRST_WEEK_PAY_LINE = "Pay · Acme Corp, $2,450 every other Friday";
-const FIRST_WEEK_PAY_ENTRY = {
-	id: "pay:ACME CORP PAYROLL",
-	text: FIRST_WEEK_PAY_LINE,
-};
-const FIRST_WEEK_CHARGES: BillSuggestion[] = [
-	{
-		rawName: "NETFLIX.COM",
-		bankText: "NETFLIX.COM",
-		displayName: "Netflix",
-		amountCents: 1549,
-		dueDay: 5,
-		categoryId: 1,
-		chargeCount: 2,
-	},
-	{
-		rawName: "SPOTIFY",
-		bankText: "SPOTIFY",
-		displayName: "Spotify",
-		amountCents: 1199,
-		dueDay: 9,
-		categoryId: 1,
-		chargeCount: 2,
-	},
-];
 const FIRST_WEEK_GYM: BillSuggestion = {
 	rawName: "GYM",
 	bankText: "GYM",
@@ -8339,18 +8319,6 @@ const FIRST_WEEK_GROCERIES: BudgetAsk = {
 	months: FIRST_WEEK_MONTHS,
 	suggestion: { amountCents: 65000, months: FIRST_WEEK_MONTHS },
 };
-const FIRST_WEEK_EATING_OUT_MONTHS = [
-	{ month: "2026-08", spentCents: 9000 },
-	{ month: "2026-09", spentCents: 11000 },
-];
-const FIRST_WEEK_EATING_OUT: BudgetAsk = {
-	id: 2,
-	name: "Eating out",
-	icon: "eating-out",
-	color: "cat-plum",
-	months: FIRST_WEEK_EATING_OUT_MONTHS,
-	suggestion: { amountCents: 10000, months: FIRST_WEEK_EATING_OUT_MONTHS },
-};
 const FIRST_WEEK_GAS: BudgetAsk = {
 	id: 3,
 	name: "Gas",
@@ -8363,18 +8331,6 @@ const FIRST_WEEK_GAS: BudgetAsk = {
 	suggestion: null,
 };
 const FIRST_WEEK_NEEDS = { count: 86, meanCents: 32000 };
-const FIRST_WEEK_BILLS_ENTRY = {
-	id: "bills",
-	text: "Bills · 2 kept, about $27 a month",
-};
-const FIRST_WEEK_BUDGETS_LEDGER = {
-	id: "budgets",
-	text: "Budgets · 2 kept, $750 a month",
-};
-const FIRST_WEEK_SAVINGS_ENTRY = {
-	id: "savings",
-	text: "Savings · $300 a month",
-};
 
 /**
  * The question screens' fixtures (P142 A, #773), in the FIRST_WEEK_* style: Chase, October 2026, ACME CORP PAYROLL. The pay
@@ -8511,19 +8467,6 @@ const SETUP_BLANK_ERROR = {
 };
 
 function FirstWeekGroup() {
-	const page = (over: Partial<FirstPageModel>): FirstPageModel => ({
-		drawn: 1,
-		head: FIRST_WEEK_HEAD,
-		ledger: [],
-		payAnswered: false,
-		pay: [FIRST_WEEK_PAY],
-		keep: [],
-		waiting: [],
-		budgets: null,
-		budgetsAnswered: false,
-		watching: false,
-		...over,
-	});
 	return (
 		<Group id="first-week" title="A new family's first week">
 			<Specimen
@@ -9070,366 +9013,52 @@ function FirstWeekGroup() {
 				</State>
 			</Specimen>
 			<Specimen
-				id="first-page"
-				title="FirstPage"
+				id="setup-ruled-total"
+				title="RuledTotal"
 				tier="visual"
-				components={[
-					"FirstPage",
-					"SmallNotebook",
-					"FirstPageBody",
-					"PayEmpty",
-					"FirstPageDone",
-				]}
-				sentence="The question page at /first-page: Your first page, the notebook with its count, the ledger of answers in ink (or the bank's head lines in muted words before any answer), and one question at a time. Only the family app has it; the demo has no bank to ask about."
+				components={["RuledTotal"]}
+				sentence="Setup's last screen until the finish (#774): the month's Safe to spend ruled off under a double rule, with the Four line and Go to Home. A budgets step with nothing to ask says why above the rule: every category already budgeted on Home, or no categories to budget yet."
 			>
-				<State label="Before any answer: the bank's head lines and the pay question">
-					<FirstPageBody
-						id="first-page-before"
-						model={page({})}
-						focus={false}
-					/>
+				<State label="Done: Safe to spend ruled off, with no line above the rule">
+					<SetupFrame label="Done: Safe to spend ruled off under a double rule, with the Four line and Go to Home">
+						<div id="setup-ruled-total-done">
+							<SetupScreen>
+								<RuledTotal
+									safeCents={70000}
+									focus={false}
+									nothingAsked={null}
+								/>
+							</SetupScreen>
+						</div>
+					</SetupFrame>
 				</State>
-				<State label="Pay with nothing spotted: the step says so and counts as done, and the bills question follows">
-					<FirstPageBody
-						id="first-page-no-pay"
-						model={page({
-							drawn: 2,
-							pay: [],
-							keep: FIRST_WEEK_CHARGES,
-							waiting: [FIRST_WEEK_GYM],
-						})}
-						focus={false}
-					/>
+				<State label="Nothing to ask, every category budgeted on Home: its line above the rule">
+					<SetupFrame label="Nothing to ask, every category budgeted on Home: its line above the double rule">
+						<div id="setup-ruled-total-nothing-asked">
+							<SetupScreen>
+								<RuledTotal
+									safeCents={70000}
+									focus={false}
+									nothingAsked="every-category-budgeted"
+								/>
+							</SetupScreen>
+						</div>
+					</SetupFrame>
 				</State>
-				<State label="Pay answered: the bills question, with one charge that waits in Possible bills">
-					<FirstPageBody
-						id="first-page-bills"
-						model={page({
-							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_ENTRY],
-							payAnswered: true,
-							pay: [],
-							keep: FIRST_WEEK_CHARGES,
-							waiting: [FIRST_WEEK_GYM],
-						})}
-						focus={false}
-					/>
+				<State label="Nothing to ask, no categories yet: its line above the rule">
+					<SetupFrame label="Nothing to ask, no categories yet: its line above the double rule">
+						<div id="setup-ruled-total-no-categories">
+							<SetupScreen>
+								<RuledTotal
+									safeCents={70000}
+									focus={false}
+									nothingAsked="no-categories"
+								/>
+							</SetupScreen>
+						</div>
+					</SetupFrame>
 				</State>
-				<State label="An answer just landed: its ledger line rises in, and its notebook stroke draws in pencil, then inks">
-					<FirstPageBody
-						id="first-page-answered"
-						model={page({
-							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_ENTRY],
-							payAnswered: true,
-							pay: [],
-							keep: FIRST_WEEK_CHARGES,
-							waiting: [FIRST_WEEK_GYM],
-						})}
-						focus={false}
-						motion={{ line: 0, strokes: [1] }}
-					/>
-				</State>
-				<State label="Nothing to keep in one tap: the step says so and names what waits">
-					<FirstPageBody
-						id="first-page-empty"
-						model={page({
-							drawn: 2,
-							ledger: [FIRST_WEEK_PAY_ENTRY],
-							payAnswered: true,
-							pay: [],
-							waiting: [FIRST_WEEK_GYM],
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Both steps done: the page says so">
-					<FirstPageBody
-						id="first-page-done"
-						model={page({
-							drawn: 3,
-							ledger: [
-								FIRST_WEEK_PAY_ENTRY,
-								{ id: "bills", text: "Bills · 2 kept, about $27 a month" },
-							],
-							payAnswered: true,
-							pay: [],
-						})}
-						focus={false}
-					/>
-				</State>
-			</Specimen>
-			<Specimen
-				id="first-page-questions"
-				title="PayQuestion, BillsQuestion, BillsEmpty"
-				tier="interactive"
-				components={["PayQuestion", "BillsQuestion", "BillsEmpty"]}
-				sentence="The one question a step asks: pay as Yes or No, the bills step as one tap that keeps the found charges, or Choose which for Possible bills. Each answer is a form that swaps the page and announces what it saved; a step with nothing to ask says so and counts as done."
-			>
-				<State label="Pay: is this your pay, with Yes and No">
-					<PayQuestion merchant={FIRST_WEEK_PAY} focus={false} />
-				</State>
-				<State label="Bills: keep the two found charges in one tap; the third waits">
-					<BillsQuestion
-						keep={FIRST_WEEK_CHARGES}
-						waiting={[FIRST_WEEK_GYM]}
-						focus={false}
-					/>
-				</State>
-				<State label="Bills with nothing to keep in one tap">
-					<BillsEmpty waiting={1} focus={false} />
-				</State>
-			</Specimen>
-			<Specimen
-				id="first-page-budgets"
-				title="BudgetsQuestion, SavingsQuestion, RuledTotal"
-				tier="interactive"
-				components={["BudgetsQuestion", "SavingsQuestion", "RuledTotal"]}
-				sentence="The budgets step (P125 E, decision 114, #590): Tally's suggestions kept all at once, or one category at a time with Yes, Another amount (the real MoneyInput, opened in place) or Skip this one. A category with no history is asked with a blank amount. Needs a category sits under the question. Once every category is answered, the step ends with the savings question (decision 135): Save some each month? with a blank money input, Save it or Not now. Then the month's Safe to spend is ruled off under a double rule, with the Four line and a way back to Home. A step with nothing to ask says why above that rule: every category already budgeted on Home, or no categories to budget yet."
-			>
-				<State label="Keep all: the suggestions as a list, the total in the question, and One at a time">
-					<FirstPageBody
-						id="first-page-budgets-keep-all"
-						model={page({
-							drawn: 3,
-							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: false,
-								nothingAsked: null,
-								firstDate: "2026-08-01",
-								month: "2026-10",
-								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_EATING_OUT],
-								keepAllOpen: true,
-								needs: FIRST_WEEK_NEEDS,
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="One at a time: Groceries' suggestion, with Yes, Another amount and Skip this one; the ledger holds the budgets kept so far">
-					<FirstPageBody
-						id="first-page-budgets-one"
-						model={page({
-							drawn: 3,
-							ledger: [
-								FIRST_WEEK_PAY_ENTRY,
-								FIRST_WEEK_BILLS_ENTRY,
-								FIRST_WEEK_BUDGETS_LEDGER,
-							],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: false,
-								nothingAsked: null,
-								firstDate: "2026-08-01",
-								month: "2026-10",
-								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_GAS],
-								keepAllOpen: false,
-								needs: FIRST_WEEK_NEEDS,
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Another amount, opened: the field holds Tally's suggestion, and Save this budget keeps it as typed">
-					<FirstPageBody
-						id="first-page-budgets-amount"
-						model={page({
-							drawn: 3,
-							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: false,
-								nothingAsked: null,
-								firstDate: "2026-08-01",
-								month: "2026-10",
-								asks: [FIRST_WEEK_GROCERIES],
-								keepAllOpen: false,
-								needs: null,
-							},
-						})}
-						focus={false}
-						budgetAmountOpen
-					/>
-				</State>
-				<State label="Another amount, refused: the field keeps what was typed, with its error under it, and takes focus">
-					{/* The field takes focus when it's refused, so the sample is a picture here, inert like Picture's. */}
-					<div inert>
-						<FirstPageBody
-							id="first-page-budgets-error"
-							model={page({
-								drawn: 3,
-								ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-								payAnswered: true,
-								pay: [],
-								budgets: {
-									done: false,
-									nothingAsked: null,
-									firstDate: "2026-08-01",
-									month: "2026-10",
-									asks: [FIRST_WEEK_GROCERIES],
-									keepAllOpen: false,
-									needs: null,
-								},
-							})}
-							focus={false}
-							budgetError={{
-								text: "Enter a dollar amount, like 250 or 250.50.",
-								typed: "lots",
-							}}
-						/>
-					</div>
-				</State>
-				<State label="No history: a category with no spending asks for a blank amount, and says so">
-					<FirstPageBody
-						id="first-page-budgets-no-history"
-						model={page({
-							drawn: 3,
-							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: false,
-								nothingAsked: null,
-								firstDate: "2026-08-01",
-								month: "2026-10",
-								asks: [FIRST_WEEK_GAS],
-								keepAllOpen: false,
-								needs: null,
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Nothing to ask: every category already has a budget, so the step says so above the ruled-off Safe to spend">
-					<FirstPageBody
-						id="first-page-budgets-nothing-asked"
-						model={page({
-							drawn: 4,
-							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: true,
-								safeCents: 70000,
-								nothingAsked: "every-category-budgeted",
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Nothing to ask: no categories to budget, so the step says so above the ruled-off Safe to spend">
-					<FirstPageBody
-						id="first-page-budgets-no-categories"
-						model={page({
-							drawn: 4,
-							ledger: [FIRST_WEEK_PAY_ENTRY, FIRST_WEEK_BILLS_ENTRY],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: true,
-								safeCents: 70000,
-								nothingAsked: "no-categories",
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Every category answered: the month's Safe to spend is ruled off under a double rule, with the Four line">
-					<FirstPageBody
-						id="first-page-budgets-done"
-						model={page({
-							drawn: 4,
-							ledger: [
-								FIRST_WEEK_PAY_ENTRY,
-								FIRST_WEEK_BILLS_ENTRY,
-								FIRST_WEEK_BUDGETS_LEDGER,
-							],
-							payAnswered: true,
-							pay: [],
-							budgets: { done: true, safeCents: 70000, nothingAsked: null },
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="The savings question: Save some each month?, a blank money input from October on, then Save it and Not now">
-					<FirstPageBody
-						id="first-page-budgets-savings"
-						model={page({
-							drawn: 3,
-							ledger: [
-								FIRST_WEEK_PAY_ENTRY,
-								FIRST_WEEK_BILLS_ENTRY,
-								FIRST_WEEK_BUDGETS_LEDGER,
-							],
-							payAnswered: true,
-							pay: [],
-							budgets: {
-								done: false,
-								nothingAsked: null,
-								firstDate: "2026-08-01",
-								month: "2026-10",
-								asks: [],
-								keepAllOpen: false,
-								needs: null,
-							},
-						})}
-						focus={false}
-					/>
-				</State>
-				<State label="Save it refused: the field keeps the $0 typed, with its error under it, and takes focus">
-					{/* The field takes focus when it's refused, so the sample is a picture here, inert like Picture's. */}
-					<div inert>
-						<FirstPageBody
-							id="first-page-budgets-savings-error"
-							model={page({
-								drawn: 3,
-								ledger: [
-									FIRST_WEEK_PAY_ENTRY,
-									FIRST_WEEK_BILLS_ENTRY,
-									FIRST_WEEK_BUDGETS_LEDGER,
-								],
-								payAnswered: true,
-								pay: [],
-								budgets: {
-									done: false,
-									nothingAsked: null,
-									firstDate: "2026-08-01",
-									month: "2026-10",
-									asks: [],
-									keepAllOpen: false,
-									needs: null,
-								},
-							})}
-							focus={false}
-							savingsError={{
-								text: "Enter an amount greater than $0, or choose Not now.",
-								typed: "0",
-							}}
-						/>
-					</div>
-				</State>
-				<State label="Saved: the ruled-off Safe to spend, with the Savings line in the ledger as the goal's amount">
-					<FirstPageBody
-						id="first-page-budgets-saved"
-						model={page({
-							drawn: 4,
-							ledger: [
-								FIRST_WEEK_PAY_ENTRY,
-								FIRST_WEEK_BILLS_ENTRY,
-								FIRST_WEEK_BUDGETS_LEDGER,
-								FIRST_WEEK_SAVINGS_ENTRY,
-							],
-							payAnswered: true,
-							pay: [],
-							budgets: { done: true, safeCents: 70000, nothingAsked: null },
-						})}
-						focus={false}
-					/>
-				</State>
+				<UseSpec spec={SETUP_RULED_TOTAL_SPEC} />
 			</Specimen>
 		</Group>
 	);

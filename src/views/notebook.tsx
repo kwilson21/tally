@@ -1,8 +1,8 @@
 // The first week's notebook (P125 E, decision 114): the ledger notebook with its tally strokes drawn so far, beside a
-// terracotta pencil. It is the one drawing of the notebook: Home's setup (home-setup.tsx), the question page's
-// SmallNotebook (first-page.tsx) and the proposals page draw it from here (the proposals pass their own stroke classes
-// through lineClass), and LedgerIllustration (illustration.tsx) is it with all five strokes in ink, so the drawing
-// can't drift. Decorative: the count or TallySteps beside it says the same in words.
+// terracotta pencil. It is the one drawing of the notebook: Home's setup (home-setup.tsx) and the proposals' SmallNotebook
+// (proposal-parts.tsx) draw it from here (proposals-polish-5.tsx passes its own stroke classes through lineClass; SmallNotebook
+// no longer does), and LedgerIllustration (illustration.tsx) is it with all five strokes in ink, so the drawing can't drift.
+// Decorative: the count or TallySteps beside it says the same in words.
 
 /** The five strokes in order: four short verticals, then the slash. Stroke n is drawn after stroke n - 1. */
 export const NOTEBOOK_STROKES = [

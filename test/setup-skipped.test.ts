@@ -89,7 +89,6 @@ const budgetsNothing = (nothingAsked: NothingAsked | null) =>
 /** A model: the pay, bills and budgets steps as the arguments say, with nothing else on the page. */
 const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 	drawn: 2,
-	head: null,
 	ledger: [],
 	payAnswered: false,
 	pay: [],

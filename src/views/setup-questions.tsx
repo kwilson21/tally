@@ -1,7 +1,8 @@
 // The setup question screens (P142 A, decision 148, spec §8.8, #773): once the questions are open, each question is one screen:
 // the step bar, the question as the serif heading, the bank's own numbers as a ruled card or list, and the answers at the foot.
-// The words are the picked drawing's (proposals-setup.tsx's PayBody, BudgetsBody) and the question page's (first-page.tsx),
-// and each form carries the fields the answer reads (routes/first-page.tsx). A form swaps the whole screen (#setup-screen).
+// The words are the picked drawing's (proposals-setup.tsx's PayBody, BudgetsBody) and the old question page's, which setup
+// replaced (#773), and each form carries the fields the answer reads (routes/first-page.tsx). A form swaps the whole screen
+// (#setup-screen).
 import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { monthName, ordinal, shortMonthName } from "../dates";
@@ -20,6 +21,10 @@ import {
 	keepAllButton,
 	keepAllLead,
 	keepAllQuestion,
+	type NothingAsked,
+	needsTail,
+	nothingAskedLine,
+	RULED_STATUS,
 	shownBudgetValue,
 	suggestionNote,
 	yesLabel,
@@ -38,12 +43,13 @@ import type { SkippedNote } from "../first-tally/skipped";
 import { centsToAmount, formatCents } from "../money";
 import { Button } from "./button";
 import { CategoryIcon } from "./category";
-import { type BudgetError, NeedsCategory, Waiting } from "./first-page";
 import { FoldedRow } from "./folded-row";
 import { HomeSeenCheckIn } from "./home-seen";
+import { safeToSpendText } from "./home-top";
 import { MoneyInput } from "./money-input";
 import { SetupScreen } from "./setup-screen";
 import { BILLS_STEP, BUDGETS_STEP, PAY_STEP, StepBar } from "./step-bar";
+import { WhyLink } from "./why-link";
 
 /** The question's needs-a-category line: the count and the mean, or none. */
 type Needs = { count: number; meanCents: number | null } | null;
@@ -614,5 +620,80 @@ export function SetupSavings({
 			</form>
 			{watching && <HomeSeenCheckIn />}
 		</SetupScreen>
+	);
+}
+
+/** A refused amount in the budgets question: the words under its field, and what was typed (kept in the field). */
+export type BudgetError = { text: string; typed: string };
+
+/** The line that names what waits in Possible bills: the count in words, and the link that ends the sentence. */
+export function Waiting({ count }: { count: number }) {
+	const words = waitingWords(count);
+	if (!words) return null;
+	return (
+		<p class="mt-2 text-sm text-muted">
+			{words}{" "}
+			<a href="/bills/find" class="text-accent">
+				Possible bills
+			</a>
+			.
+		</p>
+	);
+}
+
+/**
+ * The Needs a category line under the budgets question: a link to the Needs category filter across all months (the same
+ * count the line shows, needsCategoryCount "all"), then the count and the mean.
+ */
+export function NeedsCategory({
+	needs,
+}: {
+	needs: { count: number; meanCents: number | null };
+}) {
+	return (
+		<p class="mt-3 text-sm text-muted">
+			<a href="/transactions?uncategorized=1&month=all" class="text-accent">
+				Needs a category
+			</a>
+			{needsTail(needs.count, needs.meanCents)}
+		</p>
+	);
+}
+
+/**
+ * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
+ * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says why above the rule.
+ */
+export function RuledTotal({
+	safeCents,
+	focus,
+	nothingAsked,
+}: {
+	safeCents: number;
+	focus: boolean;
+	/** Why the step asked nothing, which the muted line above the rule says; null when it says nothing. */
+	nothingAsked: NothingAsked | null;
+}) {
+	return (
+		<section>
+			{nothingAsked !== null && (
+				<p class="mt-6 text-base text-muted">
+					{nothingAskedLine(nothingAsked)}
+				</p>
+			)}
+			<div class="mt-6 border-b-[3px] border-double border-ink" />
+			<p tabindex={-1} autofocus={focus} class="mt-4 text-lg text-muted">
+				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
+			</p>
+			<p class="font-serif text-6xl font-semibold tracking-tight">
+				{safeToSpendText(safeCents)}
+			</p>
+			<p class="mt-3 font-serif text-lg italic">{RULED_STATUS}</p>
+			<div class="mt-6">
+				<Button href="/" class="w-full">
+					Go to Home
+				</Button>
+			</div>
+		</section>
 	);
 }

@@ -70,7 +70,6 @@ const GAS: BudgetAsk = {
 /** A model with nothing asked or answered: the pay, bills and budgets steps as the arguments say. */
 const modelOf = (over: Partial<FirstPageModel> = {}): FirstPageModel => ({
 	drawn: 2,
-	head: null,
 	ledger: [],
 	payAnswered: false,
 	pay: [],
