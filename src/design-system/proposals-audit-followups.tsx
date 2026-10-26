@@ -1063,7 +1063,7 @@ export function SplitCategoryProposal() {
 // picture would draw the same fixed ids a second time on this page.
 /**
  * Today's five lines as they were drawn, frozen as literal data: the live setup's words (After sorting) must not reach this
- * picture, which stays as it was (P140's "Today" is a record, and only A draws the live HomeSetup).
+ * picture, which stays as it was (P140's "Today" is a record, and A is drawn with its own words, not the live setup's).
  */
 const BANKS_TODAY_STEPS: StepLine[] = [
 	{ name: "Link your bank", done: true, note: "Chase, linked" },
