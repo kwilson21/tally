@@ -7,11 +7,10 @@ import { Wordmark } from "../views/brand";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
 import { FeedbackButton } from "../views/feedback-button";
-import { FirstPage, SmallNotebook } from "../views/first-page";
 import { Icon } from "../views/icons";
 import { Notebook } from "../views/notebook";
 import { type StepLine, TallySteps } from "../views/tally-steps";
-import { Fixed } from "./proposal-parts";
+import { FirstPage, Fixed, SmallNotebook } from "./proposal-parts";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 

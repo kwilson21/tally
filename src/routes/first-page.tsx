@@ -43,9 +43,10 @@ import { readQuestionsGate } from "../first-tally/gate";
 import { payShown } from "../first-tally/pay";
 import { skippedNotes } from "../first-tally/skipped";
 import { hxTrigger } from "../htmx";
-import { type BudgetError, RuledTotal } from "../views/first-page";
 import { Layout } from "../views/layout";
 import {
+	type BudgetError,
+	RuledTotal,
 	SetupBills,
 	SetupBudgets,
 	SetupOneBudget,
@@ -79,8 +80,8 @@ type ScreenOptions = {
 };
 
 /**
- * The question screen a model draws (P142 A, #773), in FirstPageBody's order: the pay question while a merchant is left, then
- * the bills question while charges are kept, then the budgets step. Once the step is done it is the ruled-off total; with no
+ * The question screen a model draws (P142 A, #773): the pay question while a merchant is left, then the bills question while
+ * charges are kept, then the budgets step. Once the step is done it is the ruled-off total; with no
  * category left to ask it is the savings question; keep all while it is the one asked, else one category. `focus` moves the
  * focus to the screen's heading (a refused amount's field takes it instead), and the check-in follows the model's `watching`.
  */

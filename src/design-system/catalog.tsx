@@ -82,7 +82,6 @@ import { FeedbackButton } from "../views/feedback-button";
 import { FeedbackForm } from "../views/feedback-form";
 import { FileField } from "../views/file-field";
 import { FilterSelect } from "../views/filter-select";
-import { RuledTotal } from "../views/first-page";
 import { FirstWeekPart } from "../views/first-week";
 import { FoldedRow } from "../views/folded-row";
 import { HomeForecast } from "../views/home-forecast";
@@ -151,6 +150,7 @@ import {
 	settingsPlaces,
 } from "../views/settings-pages";
 import {
+	RuledTotal,
 	SetupBills,
 	SetupBudgets,
 	SetupOneBudget,

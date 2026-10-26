@@ -11,7 +11,6 @@ import { Band } from "../views/band";
 import { barGeometry } from "../views/bar";
 import { Button } from "../views/button";
 import { CategoryIcon } from "../views/category";
-import { FirstPage, type LedgerLine, SmallNotebook } from "../views/first-page";
 import { FoldedRow } from "../views/folded-row";
 import { Icon } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
@@ -21,7 +20,13 @@ import { ProgressRow } from "../views/progress-row";
 import { SheetFooter } from "../views/sheet-footer";
 import { type StepLine, stepsOf, TallySteps } from "../views/tally-steps";
 import { WhyLink } from "../views/why-link";
-import { Fixed, Sheet } from "./proposal-parts";
+import {
+	FirstPage,
+	Fixed,
+	type LedgerLine,
+	Sheet,
+	SmallNotebook,
+} from "./proposal-parts";
 import { EATING_OUT, TITLE, tx } from "./proposals-phase5-transactions";
 import {
 	Amount,

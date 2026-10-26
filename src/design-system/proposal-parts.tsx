@@ -3,6 +3,7 @@
 
 import type { Child } from "hono/jsx";
 import { Icon } from "../views/icons";
+import { Notebook } from "../views/notebook";
 import { PhoneFrame } from "./specimen";
 
 export type Option = {
@@ -180,5 +181,59 @@ export function Sheet({
 				{children}
 			</div>
 		</div>
+	);
+}
+
+/** One line of a ledger: an answer (ink) or what the bank says (muted). */
+export type LedgerLine = { text: string; ink?: boolean };
+
+/** The notebook beside a question page's headline, with what it counts in words beside it. */
+export function SmallNotebook({
+	strokes,
+	text,
+	size = "size-12",
+}: {
+	strokes: number;
+	text: string;
+	size?: string;
+}) {
+	return (
+		<div class="flex items-center gap-2">
+			<Notebook strokes={strokes} ink size={size} />
+			<p class="text-sm text-muted">{text}</p>
+		</div>
+	);
+}
+
+/**
+ * A question page's top (P125 E), as the proposals draw it: "Your first page", the count at the right, and the ledger so far.
+ * The ledger is left out while it has no lines. `children` is the question.
+ */
+export function FirstPage({
+	right,
+	lines,
+	children,
+}: {
+	right?: Child;
+	lines: LedgerLine[];
+	children?: Child;
+}) {
+	return (
+		<>
+			<div class="flex items-center justify-between gap-3">
+				<h1 class="text-lg font-semibold">Your first page</h1>
+				{right}
+			</div>
+			{lines.length > 0 ? (
+				<ul class="mt-3 divide-y divide-rule border-y border-rule text-sm">
+					{lines.map((line) => (
+						<li class={`py-2 ${line.ink ? "text-ink" : "text-muted"}`}>
+							{line.text}
+						</li>
+					))}
+				</ul>
+			) : null}
+			{children}
+		</>
 	);
 }
