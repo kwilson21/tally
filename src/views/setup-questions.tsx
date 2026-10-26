@@ -395,6 +395,7 @@ export function SetupOneBudget({
 	needs,
 	focus,
 	watching = false,
+	skipped = [],
 	error,
 	amountOpen,
 	idSuffix = "",
@@ -404,6 +405,7 @@ export function SetupOneBudget({
 	needs: Needs;
 	focus: boolean;
 	watching?: boolean;
+	skipped?: SkippedNote[];
 	error: BudgetError | null;
 	/** Another amount drawn open with no error, for the catalog's picture of it. */
 	amountOpen: boolean;
@@ -481,6 +483,7 @@ export function SetupOneBudget({
 			}
 		>
 			<StepBar done={3} label={BUDGETS_STEP} />
+			<SkippedSteps notes={skipped} />
 			<Heading focus={focus && error === null}>{askHeading(ask)}</Heading>
 			<p class="mt-3 text-lg text-muted">{bankLine(ask)}</p>
 			{suggestion && (

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BillSuggestion } from "../src/bills/find";
 import { shownBillValue } from "../src/first-tally/bills";
 import type { BudgetAsk } from "../src/first-tally/budgets";
-import { shownBudgetValue } from "../src/first-tally/budgets";
+import { askHeading, shownBudgetValue } from "../src/first-tally/budgets";
 import type { PayMerchant } from "../src/first-tally/first-page";
 import { shownPayValues } from "../src/first-tally/pay";
 import {
@@ -631,6 +631,23 @@ describe("SetupOneBudget", () => {
 	it("draws the check-in only when watching is given", () => {
 		expect(one()).not.toContain('id="home-seen"');
 		expect(one({ watching: true })).toContain('id="home-seen"');
+	});
+
+	it("draws no skipped steps by default", () => {
+		expect(one()).not.toContain("Your pay");
+	});
+
+	it("draws the skipped steps right under its step bar, as the keep all screen does (#773)", () => {
+		const markup = one({ skipped: [skippedPay(), skippedBills(2)] });
+		expect(markup).toContain("Your pay");
+		expect(markup).toContain("Your bills");
+		expect(markup).toContain("2 more wait in");
+		const bar = markup.indexOf(BUDGETS_STEP);
+		expect(bar).toBeGreaterThanOrEqual(0);
+		expect(markup.indexOf("Your pay")).toBeGreaterThan(bar);
+		expect(markup.indexOf("Your pay")).toBeLessThan(
+			markup.indexOf(askHeading(GROCERIES)),
+		);
 	});
 });
 
