@@ -26,7 +26,18 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # GitHub's Ubuntu 24.04 image ships Google Chrome, newer than Playwright's own Chromium, so use it when it launches (ubuntu-latest moves to 26.04 in November 2026).
+      # scripts/e2e.mjs and scripts/feedback-preview-test.mjs read CHROMIUM_PATH too, so they use the same browser.
+      - name: Use the runner's Chrome, or install Playwright's
+        run: |
+          chrome=$(command -v google-chrome || true)
+          if [ -n "$chrome" ] && node -e "require('playwright').chromium.launch({ executablePath: process.argv[1] }).then((b) => b.close())" "$chrome"; then
+            echo "CHROMIUM_PATH=$chrome" >> "$GITHUB_ENV"
+            echo "Using the runner's Chrome at $chrome."
+          else
+            echo "No Chrome that launches (${chrome:-none found}), so installing Playwright's."
+            npx playwright install --with-deps chromium
+          fi
       - run: npm run test:feedback-preview
       - run: npm run db:migrate:local
       - name: Start the app and seed the demo
@@ -34,9 +45,8 @@ jobs:
           npx wrangler dev --port 8787 > wrangler.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 2; done
           npm run db:seed:local
-      - run: npm run screenshots
       # The same pages on the base branch, so the PR description can show what changed (#60).
-      - name: Screenshot the base branch for before and after
+      - name: Start the base branch's app and seed the demo
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -51,8 +61,11 @@ jobs:
             for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 2; done
             curl -fsS http://127.0.0.1:8788/cdn-cgi/handler/scheduled
           )
-          # The base's own console errors aren't this PR's; its images are only for comparison.
-          OUT=screenshots-before BASE_URL=http://127.0.0.1:8788 npm run screenshots || true
+      # The base's console errors aren't this PR's, so they don't fail the job; its pages are only for comparison.
+      # A base that isn't running fails the job, as does any console error on the PR.
+      - name: Screenshot the PR and the base branch, and compare them
+        run: |
+          BEFORE_URL=http://127.0.0.1:8788 npm run screenshots
           node scripts/changed-shots.mjs
       # After the screenshots: the E2E changes the demo data.
       - run: npm run e2e
