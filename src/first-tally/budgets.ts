@@ -122,6 +122,39 @@ export function keepAllLine(months: MonthSpent[]): string {
 	return `Your bank shows what each category spent in ${monthList(months)}. Tally rounded each up to the next $10.`;
 }
 
+/**
+ * The setup screen's muted lead above the suggestions (P142 A): what each suggestion is, from the months it came from. Two or
+ * more months average them ("on average"); one month names it alone; none is a typical month. Each is rounded up to $10.
+ */
+export function keepAllLead(months: MonthSpent[]): string {
+	if (months.length === 0)
+		return "Each is a typical month, rounded up to the next $10.";
+	if (months.length === 1)
+		return `Each is what you spent in ${monthList(months)}, rounded up to the next $10.`;
+	return `Each is what you spent in ${monthList(months)}, on average, rounded up to the next $10.`;
+}
+
+/** The setup screen's question for the suggestions it keeps: "Keep these budgets?", or "Keep this budget?" for one. */
+export function keepAllQuestion(count: number): string {
+	return count === 1 ? "Keep this budget?" : "Keep these budgets?";
+}
+
+/** The setup screen's one-tap button: "Keep all 12", or "Keep this budget" for one. */
+export function keepAllButton(count: number): string {
+	return count === 1 ? "Keep this budget" : `Keep all ${count}`;
+}
+
+/** The setup card's double-ruled total: "12 budgets" and "$4,050 a month" (one budget in the singular). */
+export function budgetsTotalLine(
+	count: number,
+	cents: number,
+): { label: string; amount: string } {
+	return {
+		label: count === 1 ? "1 budget" : `${count} budgets`,
+		amount: `${dollarsWords(cents)} a month`,
+	};
+}
+
 /** The muted note under a suggestion: where its amount came from, and from which month it takes effect. */
 export function suggestionNote(currentMonth: string): string {
 	return `Tally's suggestion: a typical month, rounded up to the next $10. From ${monthName(currentMonth)} on.`;

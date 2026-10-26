@@ -119,6 +119,30 @@ export function billsMutedLine(charges: BillSuggestion[]): string {
 	return `Your bank shows ${count} ${noun} every month, about ${wholeDollars(total)} in all: ${list}.`;
 }
 
+/**
+ * The setup question's lead (P142 A): "Tally found charges that come back every month.", or "…a charge…" for one. It replaces
+ * the longer muted line, since the card lists the charges and their total.
+ */
+export function billsLead(count: number): string {
+	return count === 1
+		? "Tally found a charge that comes back every month."
+		: "Tally found charges that come back every month.";
+}
+
+/**
+ * The bills card's double-ruled total (P142 A): the count of the charges the screen keeps, and their monthly total in whole
+ * dollars as billsLedgerLine words it ("8 bills", "about $1,972 a month"; "1 bill" for one).
+ */
+export function billsTotalLine(
+	count: number,
+	cents: number,
+): { label: string; amount: string } {
+	return {
+		label: count === 1 ? "1 bill" : `${count} bills`,
+		amount: `about ${wholeDollars(cents)} a month`,
+	};
+}
+
 /** The ledger line a kept bills step writes: "Bills · 8 kept, about $2,062 a month", in ink. */
 export function billsLedgerLine(count: number, cents: number): string {
 	return `Bills · ${count} kept, about ${wholeDollars(cents)} a month`;
