@@ -178,7 +178,7 @@ describe("GET /setup after a bank: Reading your bank", () => {
 		expect(without.html).not.toContain("/js/push.js");
 	});
 
-	it("draws the questions for a family whose questions are open, and sends one with them answered Home", async () => {
+	it("draws the questions for a family whose questions are open, and draws the finish once they are answered", async () => {
 		await sortingAndHistoryIn();
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
@@ -198,8 +198,8 @@ describe("GET /setup after a bank: Reading your bank", () => {
 			budgets: {},
 		});
 		const answered = await setup(family);
-		expect(answered.res.status).toBe(303);
-		expect(answered.res.headers.get("location")).toBe("/");
+		expect(answered.res.status).toBe(200);
+		expect(answered.html).toContain("You're set up.");
 	});
 });
 
@@ -288,7 +288,7 @@ describe("GET /setup/banks: the Your banks poll", () => {
 		expect(html).toContain('"step":"run"');
 	});
 
-	it("draws the first question in place once they open, and sends Home once they are answered", async () => {
+	it("draws the first question in place once they open, and sends the finish once setup is done", async () => {
 		await sortingAndHistoryIn();
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
@@ -312,7 +312,7 @@ describe("GET /setup/banks: the Your banks poll", () => {
 			budgets: {},
 		});
 		const answered = await setupRoute.request("/setup/banks", {}, family);
-		expect(answered.headers.get("HX-Redirect")).toBe("/");
+		expect(answered.headers.get("HX-Redirect")).toBe("/setup");
 	});
 
 	it("redraws #setup-screen with the welcome once the last bank goes before setup is done", async () => {
@@ -422,13 +422,26 @@ describe("GET / in the family app: setup sends a new family to /setup (decision 
 		expect(res.headers.get("location")).toBeNull();
 	});
 
-	it("draws today's answered top, with the status and no redirect, once the questions are answered", async () => {
+	it("is plain Home, with no redirect and no setup top, once setup is done (the budgets stroke drawn)", async () => {
 		await sortingAndHistoryIn();
 		await writeRecord(ANSWERED);
 		const { res, html } = await homePage(family, "/");
 		expect(res.status).toBe(200);
-		expect(html).toContain('id="setup-top"');
-		expect(html).toContain("Four.");
+		expect(res.headers.get("location")).toBeNull();
+		expect(html).not.toContain('id="setup-top"');
+		expect(html).not.toContain("Four.");
+	});
+
+	it("with the budgets stroke drawn, GET /setup is the finish at 200 and GET / is plain Home (decision 148)", async () => {
+		await sortingAndHistoryIn();
+		await writeRecord(ANSWERED);
+		const finish = await setup(family);
+		expect(finish.res.status).toBe(200);
+		expect(finish.html).toContain("You're set up.");
+		expect(finish.html).toContain("Setup done");
+		const home = await homePage(family, "/");
+		expect(home.res.status).toBe(200);
+		expect(home.html).not.toContain('id="setup-top"');
 	});
 
 	it("is Home in the demo, with no redirect and no setup", async () => {
@@ -602,7 +615,7 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		expect(healthy).toContain("This page updates as it goes");
 	});
 
-	it("disconnecting the last connected bank before setup is done takes strokes one to four back, and /setup shows the welcome again", async () => {
+	it("disconnecting the last connected bank before setup is done takes the four strokes back, and /setup shows the welcome again", async () => {
 		const bank = await env.DB.prepare(
 			"SELECT MIN(id) AS id FROM plaid_items",
 		).first<{ id: number }>();
@@ -622,12 +635,12 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		)
 			.bind(await encryptToken("route-access-token", KEY), id)
 			.run();
+		// Setup not done: the budgets stroke is not drawn yet, so the last bank going takes the strokes back.
 		await writeRecord({
 			strokes: {
 				bank: "2026-10-13",
 				pay: "2026-10-13",
 				bills: "2026-10-13",
-				budgets: "2026-10-13",
 			},
 			budgets: {},
 		});
@@ -660,6 +673,64 @@ describe("the reading screen, moved from Home's setup (#772, decision 148)", () 
 		expect(html).toContain("Welcome to Tally.");
 		expect(html).toContain("Link your bank");
 		expect(html).toContain(PLAID_MODULE);
+	});
+
+	it("disconnecting the last connected bank after setup is done takes nothing back, and /setup keeps the finish", async () => {
+		const bank = await env.DB.prepare(
+			"SELECT MIN(id) AS id FROM plaid_items",
+		).first<{ id: number }>();
+		const id = bank?.id ?? 0;
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL WHERE id = ?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id != ?",
+		)
+			.bind(id)
+			.run();
+		await env.DB.prepare(
+			"UPDATE plaid_items SET access_token_encrypted = ? WHERE id = ?",
+		)
+			.bind(await encryptToken("route-access-token", KEY), id)
+			.run();
+		const set = {
+			strokes: {
+				bank: "2026-10-13",
+				pay: "2026-10-13",
+				bills: "2026-10-13",
+				budgets: "2026-10-13",
+			},
+			budgets: {},
+		};
+		await writeRecord(set);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => Response.json({})),
+		);
+		const response = await accounts.request(
+			`/accounts/${id}/disconnect`,
+			{
+				method: "POST",
+				headers: {
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+				},
+				body: "",
+			},
+			plaidFamily,
+		);
+		vi.unstubAllGlobals();
+		expect(response.status).toBeLessThan(400);
+		const stored = await env.DB.prepare(
+			"SELECT value FROM household_settings WHERE key = 'first_tally'",
+		).first<{ value: string }>();
+		expect(JSON.parse(stored?.value ?? "null")).toEqual(set);
+		const { res, html } = await setup(plaidFamily);
+		expect(res.status).toBe(200);
+		expect(html).toContain("Setup done");
+		expect(html).not.toContain("Welcome to Tally.");
 	});
 });
 

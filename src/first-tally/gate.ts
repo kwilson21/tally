@@ -86,7 +86,7 @@ export async function readGateInputs(db: D1Database): Promise<{
 
 /**
  * The gate read from the household's database, which the question page's routes read. Closed again once the first week is
- * set up (isSetUp: all five strokes drawn), so a set-up household is sent Home and its questions are not asked again (#647).
+ * set up (isSetUp: all four strokes drawn), so a set-up household is sent Home and its questions are not asked again (#647).
  * Setup doesn't come through here: it checks isSetUp itself and reads questionsOpen and the inputs directly.
  */
 export async function readQuestionsGate(db: D1Database): Promise<boolean> {

@@ -28,8 +28,6 @@ const stateTag = (markup: string, state: string) => {
 
 const base: SetupView = {
 	phase: "reading",
-	drawn: 1,
-	steps: [],
 	bankName: "Chase",
 	bankCount: 1,
 	historyIn: false,
@@ -38,8 +36,6 @@ const base: SetupView = {
 	refreshes: true,
 	sorted: 0,
 	total: 0,
-	fifth: null,
-	answeredWaiting: null,
 	emailed: false,
 	waitsForRun: false,
 	runTime: "5 AM",

@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_TIME_ZONE, daysBefore, todayIn } from "../src/dates";
+import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 
-// Home once a new family's questions are answered (spec §8.8, decision 148): Home is Home from then on, with the fifth day's
-// view on the day stroke five is drawn (#586, until #774). Before the questions are answered, a family's setup is on its own
-// pages (/setup, setup-route.test.ts), and Home sends them there. Home loads no Plaid Link: it has no Link a bank any more.
+// Home once a new family's setup is done (spec §8.8, decision 148): setup is done at the budgets stroke, and from then on Home
+// is plain Home. Before that, a family's setup is on its own pages (/setup, setup-route.test.ts), and Home sends them there.
+// Home loads no Plaid Link: it has no Link a bank any more.
 const family = { ...env, DEMO: "false" } as unknown as Env;
 const plaidFamily = {
 	...family,
@@ -34,295 +34,72 @@ beforeEach(async () => {
 	).run();
 });
 
-describe("Home once the questions are answered, and the demo", () => {
-	it("four strokes drawn: the ruled total, and no three things to check", async () => {
-		// The bank's history is in, so the answered phase promises tomorrow (#671 says otherwise while it is importing).
+/** Setup done (decision 148): the budgets stroke is drawn, with each step's day. */
+const SET_UP = {
+	strokes: {
+		bank: "2026-10-13",
+		pay: "2026-10-13",
+		bills: "2026-10-13",
+		budgets: "2026-10-13",
+	},
+	budgets: {},
+};
+
+describe("Home once setup is done, and the demo", () => {
+	it("with the budgets stroke drawn, Home is plain Home: no setup top and no status line", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET last_synced_at = datetime('now'), history_complete_at = datetime('now') WHERE disconnected_at IS NULL",
 		).run();
-		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		});
+		await writeRecord(SET_UP);
 		const html = await page(family);
-		expect(html).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(html).toContain("Safe to spend");
+		expect(html).not.toContain('id="setup-top"');
+		expect(html).not.toContain("Four.");
+		expect(html).not.toContain("Tomorrow Tally keeps count");
 		expect(html).not.toContain("Three things to check");
 		expect(html).not.toContain('href="/first-page"');
 	});
 
-	it("in the answered phase, Home has no Your banks and no Have more accounts?", async () => {
+	it("is Home with no Your banks and no Have more accounts? once setup is done", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = datetime('now'), history_complete_at = datetime('now')",
 		).run();
-		await writeRecord({
-			strokes: {
-				bank: "2026-10-13",
-				pay: "2026-10-13",
-				bills: "2026-10-13",
-				budgets: "2026-10-13",
-			},
-			budgets: {},
-		});
+		await writeRecord(SET_UP);
 		const html = await page(plaidFamily);
-		expect(html).toContain(
-			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
-		);
+		expect(html).toContain("Safe to spend");
 		expect(html).not.toContain("Your banks");
 		expect(html).not.toContain("Have more accounts?");
 		expect(html).not.toContain(PLAID_MODULE);
+	});
+
+	it("a bank linked after setup, its history still coming in, brings no setup back", async () => {
+		await env.DB.prepare(
+			"UPDATE plaid_items SET disconnected_at = NULL, last_synced_at = NULL, history_complete_at = NULL",
+		).run();
+		await writeRecord(SET_UP);
+		const res = await home.request("/", {}, family);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("location")).toBeNull();
+		const html = (await res.text()).replaceAll("&#39;", "'");
+		expect(html).toContain("Safe to spend");
+		expect(html).not.toContain('id="setup-top"');
 	});
 
 	it("the demo never shows setup, even with no first_tally record", async () => {
 		const html = await page({ ...env, DEMO: "true" } as unknown as Env);
 		expect(html).not.toContain("Five strokes");
 		expect(html).not.toContain("Your first week");
+		expect(html).not.toContain('id="setup-top"');
 	});
 
-	it("a household with all five strokes drawn shows Home as it is", async () => {
+	it("a household with all four strokes drawn and no days shows Home as it is", async () => {
 		await writeRecord({
-			strokes: {
-				bank: null,
-				pay: null,
-				bills: null,
-				budgets: null,
-				count: null,
-			},
+			strokes: { bank: null, pay: null, bills: null, budgets: null },
 			budgets: {},
 		});
 		const html = await page(family);
 		expect(html).toContain("Safe to spend");
-		expect(html).not.toContain("Five strokes");
-	});
-});
-
-describe("Home on the fifth day, the answered wait and Link a bank on the sheets (P125 E, #586, #671, #678)", () => {
-	const today = () => todayIn(DEFAULT_TIME_ZONE);
-	const yesterday = () => daysBefore(today(), 1);
-	const decoded = (html: string) => html.replaceAll("&amp;", "&");
-
-	/** The four questions and stroke one drawn on `day`. */
-	const answeredOn = (day: string) => ({
-		strokes: { bank: day, pay: day, bills: day, budgets: day },
-		budgets: {},
-	});
-	/** One bank, Chase, with its history in: the demo's second bank is disconnected, so the wording names one bank. */
-	const bankHistoryIn = async () => {
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now') WHERE id > (SELECT MIN(id) FROM plaid_items)",
-		).run();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET institution_name = 'Chase', last_synced_at = datetime('now'), history_complete_at = datetime('now') WHERE disconnected_at IS NULL",
-		).run();
-	};
-	const storedRecord = async () =>
-		JSON.parse(
-			(
-				await env.DB.prepare(
-					"SELECT value FROM household_settings WHERE key = 'first_tally'",
-				).first<{ value: string }>()
-			)?.value ?? "null",
-		);
-
-	it("draws the fifth stroke on the first later day, with the night's sentence, the steps and Home's day", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare("DELETE FROM transactions").run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 3, needYou: 0 },
-		});
-		const html = await page(family);
-		expect(html).toContain(
-			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
-		);
-		expect(html).toContain("Safe to spend");
-		expect(html).toContain(
-			"From tomorrow this list goes, and Home is just Home.",
-		);
-		expect(html).toContain("Today, ");
-		expect(html).not.toContain("See what needs you");
-		expect(html).not.toContain("Three things to check");
-		expect((await storedRecord()).strokes.count).toBe(today());
-	});
-
-	it("keeps the fifth day's recap when the last bank is disconnected that day (#772)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare("DELETE FROM transactions").run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 3, needYou: 0 },
-		});
-		await env.DB.prepare(
-			"UPDATE plaid_items SET disconnected_at = datetime('now')",
-		).run();
-		const res = await home.request("/", {}, family);
-		expect(res.status).toBe(200);
-		expect(res.headers.get("Location")).toBeNull();
-		const html = (await res.text()).replaceAll("&#39;", "'");
-		expect(html).toContain(
-			"Five. Overnight Tally kept count on its own: 3 new transactions, all sorted. You're set up.",
-		);
-		expect(html).toContain("Safe to spend");
-		expect(html).toContain(
-			"From tomorrow this list goes, and Home is just Home.",
-		);
-	});
-
-	it("says what needs a person, and links to the full list when nothing else is waiting (#714)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare("DELETE FROM transactions").run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 1, needYou: 2 },
-		});
-		const html = decoded(await page(family));
-		expect(html).toContain(
-			"Five. Overnight Tally kept count on its own: 1 new transaction; 2 need you.",
-		);
-		expect(html).toContain(">See what needs you</a>");
-		expect(html).toContain('href="/transactions?month=all"');
-		expect(html).not.toContain("uncategorized=1");
-	});
-
-	it("links to the suggestions when a suggestion waits and nothing needs a category (#714)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare("DELETE FROM transactions").run();
-		// A paycheck guess Tally is unsure of: money in (a credit) with an income guess, no category to set.
-		await env.DB.prepare(
-			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name, income_confidence)
-			 VALUES ((SELECT MIN(id) FROM accounts), 'fifth-suggestion', ?, -250000, 'VENMO PAYMENT', 0.5)`,
-		)
-			.bind(today())
-			.run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 1, needYou: 1 },
-		});
-		const html = decoded(await page(family));
-		expect(html).toContain(">See what needs you</a>");
-		expect(html).toContain('href="/settings/suggestions"');
-		expect(html).not.toContain('href="/transactions/organize"');
-	});
-
-	it("links to the full list, where a held credit shows Review credit, when only a held credit waits (#714)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare("DELETE FROM transactions").run();
-		// A credit with no income guess and no category: held for review, and nothing in the suggestions queue.
-		await env.DB.prepare(
-			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name)
-			 VALUES ((SELECT MIN(id) FROM accounts), 'fifth-held', ?, -5000, 'ZELLE FROM FRIEND')`,
-		)
-			.bind(today())
-			.run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 1, needYou: 1 },
-		});
-		const html = decoded(await page(family));
-		expect(html).toContain(">See what needs you</a>");
-		expect(html).toContain('href="/transactions?month=all"');
-		expect(html).not.toContain('href="/transactions/organize"');
-		expect(html).not.toContain('href="/settings/suggestions"');
-	});
-
-	it("links to the organize list when Home shows its own needs-you count", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare(
-			`INSERT INTO transactions (account_id, plaid_transaction_id, date, amount_cents, raw_name)
-			 VALUES ((SELECT MIN(id) FROM accounts), 'fifth-needs', ?, 1500, 'NEEDS A CATEGORY')`,
-		)
-			.bind(today())
-			.run();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 1, needYou: 1 },
-		});
-		const html = decoded(await page(family));
-		expect(html).toContain('href="/transactions/organize"');
-		expect(html).toContain(">See what needs you</a>");
-	});
-
-	it("is Home again the day after, with no set-up view", async () => {
-		await bankHistoryIn();
-		await writeRecord({
-			...answeredOn(daysBefore(today(), 2)),
-			strokes: {
-				...answeredOn(daysBefore(today(), 2)).strokes,
-				count: yesterday(),
-			},
-			night: { brought: 0, needYou: 0 },
-		});
-		const html = await page(family);
-		expect(html).not.toContain("From tomorrow this list goes");
-		expect(html).not.toContain("Five strokes");
-		expect(html).toContain("Safe to spend");
-	});
-
-	it("draws the fifth stroke once when Home loads twice on the same day", async () => {
-		await bankHistoryIn();
-		await writeRecord({
-			...answeredOn(yesterday()),
-			night: { brought: 0, needYou: 0 },
-		});
-		await page(family);
-		await page(family);
-		expect((await storedRecord()).strokes.count).toBe(today());
-	});
-
-	it("draws no fifth stroke while no night is kept", async () => {
-		await bankHistoryIn();
-		await writeRecord(answeredOn(yesterday()));
-		const html = await page(family);
-		expect((await storedRecord()).strokes.count).toBeUndefined();
-		expect(html).not.toContain("From tomorrow this list goes");
-	});
-
-	it("while a bank reads its history, the answered status says what it waits for, not tomorrow (#671)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET last_synced_at = NULL, history_complete_at = NULL WHERE disconnected_at IS NULL",
-		).run();
-		await writeRecord(answeredOn(today()));
-		const html = await page(family);
-		expect(html).toContain(
-			"Four. Tally keeps count once Chase's history is in.",
-		);
-		expect(html).not.toContain("Tomorrow Tally keeps count");
-	});
-
-	it("never promises tomorrow beside a bank that needs signing in (#671)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET status = 'needs_attention' WHERE disconnected_at IS NULL",
-		).run();
-		await writeRecord(answeredOn(today()));
-		const html = await page(family);
-		expect(html).toContain(
-			"Four. Tally keeps count once Chase is signed in again.",
-		);
-		expect(html).not.toContain("Tomorrow Tally keeps count");
-	});
-
-	it("makes no promise beside a bank that stopped updating, and keeps its Fix line (#671)", async () => {
-		await bankHistoryIn();
-		await env.DB.prepare(
-			"UPDATE plaid_items SET last_synced_at = ? WHERE disconnected_at IS NULL",
-		)
-			.bind(`${daysBefore(today(), 4)} 00:00:00`)
-			.run();
-		await writeRecord(answeredOn(today()));
-		const html = decoded(await page(family));
-		expect(html).toContain(">Four.</p>");
-		expect(html).toContain("Chase stopped updating");
-		expect(html).toContain("the bank in Accounts");
-		expect(html).not.toContain("Four. Tally keeps count");
-		expect(html).not.toContain("Tomorrow Tally keeps count");
+		expect(html).not.toContain('id="setup-top"');
 	});
 });
 
@@ -389,10 +166,9 @@ describe("Home's sheets and Home itself load no Plaid (#678, decision 148)", () 
 });
 
 // Home's own routes are setup's until the questions are answered (decision 148, #772): a stale Home page's save or sheet sends
-// the family to /setup, with no write, toast or 422 of its own. The answered phase, the fifth day and the demo are Home's.
-describe("Home's routes are setup's until the questions are answered (decision 148, #772)", () => {
+// the family to /setup, with no write, toast or 422 of its own. Set-up households and the demo are Home's.
+describe("Home's routes are setup's until setup is done (decision 148, #772)", () => {
 	const today = () => todayIn(DEFAULT_TIME_ZONE);
-	const yesterday = () => daysBefore(today(), 1);
 	const ORIGIN = "http://localhost";
 
 	/** One bank connected, its history not in: the reading phase. */
@@ -465,7 +241,7 @@ describe("Home's routes are setup's until the questions are answered (decision 1
 			},
 			bindings,
 		);
-	/** Stroke one and the three questions drawn on `day`: the answered phase, with no budget answers kept. */
+	/** Setup done on `day`: all four strokes drawn, with no budget answers kept. */
 	const answeredOn = (day: string) => ({
 		strokes: { bank: day, pay: day, bills: day, budgets: day },
 		budgets: {},
@@ -551,26 +327,10 @@ describe("Home's routes are setup's until the questions are answered (decision 1
 		expect(res.headers.get("Location")).toBe("/setup");
 	});
 
-	describe("not redirected: the answered phase, the fifth day and the demo", () => {
-		it("GET /budget/:id in the answered phase draws the sheet as today", async () => {
+	describe("not redirected: set up, and the demo", () => {
+		it("GET /budget/:id once setup is done draws the sheet as today", async () => {
 			await historyInAndSorted();
 			await writeRecord(answeredOn(today()));
-			const res = await home.request(
-				`/budget/${await firstCategory()}`,
-				{},
-				family,
-			);
-			expect(res.status).toBe(200);
-			expect(res.headers.get("Location")).toBeNull();
-			expect(await res.text()).toContain('role="dialog"');
-		});
-
-		it("GET /budget/:id on the fifth day draws the sheet as today", async () => {
-			await historyInAndSorted();
-			await writeRecord({
-				...answeredOn(yesterday()),
-				night: { brought: 0, needYou: 0 },
-			});
 			const res = await home.request(
 				`/budget/${await firstCategory()}`,
 				{},
@@ -593,7 +353,7 @@ describe("Home's routes are setup's until the questions are answered (decision 1
 			expect(await res.text()).toContain('role="dialog"');
 		});
 
-		it("a save in the answered phase still saves, and says so", async () => {
+		it("a save once setup is done still saves, and says so", async () => {
 			await historyInAndSorted();
 			await writeRecord(answeredOn(today()));
 			const res = await save(`/budget/${await firstCategory()}`, {

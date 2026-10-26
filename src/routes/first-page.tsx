@@ -27,10 +27,12 @@ import {
 	shownBudgetIds,
 	skippedBudgetWords,
 } from "../first-tally/budgets";
+import { FINISH_HEADING } from "../first-tally/finish";
 import {
 	answerPay,
 	budgetsStepShown,
 	budgetsStrokeGuard,
+	type FinishRead,
 	type FirstPageModel,
 	keepBills,
 	keepBudgetAnswers,
@@ -44,16 +46,15 @@ import { payShown } from "../first-tally/pay";
 import { skippedNotes } from "../first-tally/skipped";
 import { hxTrigger } from "../htmx";
 import { Layout } from "../views/layout";
+import { SetupFinish } from "../views/setup-finish";
 import {
 	type BudgetError,
-	RuledTotal,
 	SetupBills,
 	SetupBudgets,
 	SetupOneBudget,
 	SetupPay,
 	SetupSavings,
 } from "../views/setup-questions";
-import { SetupScreen } from "../views/setup-screen";
 
 // The setup questions' answers (P142 A, spec §8.8, decision 148, #773): the questions are asked at /setup, one screen at a
 // time, and each answer is a POST here that writes it and swaps the screen (#setup-screen). Without JavaScript the answer
@@ -80,15 +81,17 @@ type ScreenOptions = {
 };
 
 /**
- * The question screen a model draws (P142 A, #773): the pay question while a merchant is left, then the bills question while
- * charges are kept, then the budgets step. Once the step is done it is the ruled-off total; with no
- * category left to ask it is the savings question; keep all while it is the one asked, else one category. `focus` moves the
- * focus to the screen's heading (a refused amount's field takes it instead), and the check-in follows the model's `watching`.
+ * The question screen a model draws (P142 A, #773): the setup finish once the budgets stroke is drawn (model.finish, read from
+ * the record, so it comes before any question, #774), then the pay question while a merchant is left, then the bills question
+ * while charges are kept, then the budgets step: with no category left to ask it is the savings question; keep all while it is
+ * the one asked, else one category. `focus` moves the focus to the screen's heading (a refused amount's field takes it
+ * instead), and the check-in follows the model's `watching`.
  */
 export function questionScreen(
 	model: FirstPageModel,
 	{ focus, budgetError = null, savingsError = null }: ScreenOptions,
 ) {
+	if (model.finish) return <SetupFinish {...model.finish} focus={focus} />;
 	const notes = skippedNotes(model);
 	const merchant = model.pay[0];
 	if (merchant)
@@ -107,18 +110,8 @@ export function questionScreen(
 		);
 	const budgets = model.budgets;
 	// settleAndLoad reads the budgets step whenever pay and bills have nothing left to ask, so no page reaches this with none.
-	// The type allows null, and the page has no screen to draw then.
-	if (!budgets) return null;
-	if (budgets.done)
-		return (
-			<SetupScreen>
-				<RuledTotal
-					safeCents={budgets.safeCents}
-					focus={focus}
-					nothingAsked={budgets.nothingAsked}
-				/>
-			</SetupScreen>
-		);
+	// The type allows null, and the page has no screen to draw then. A drawn step is the finish above, so it draws none here.
+	if (!budgets || budgets.done) return null;
 	if (budgets.asks.length === 0)
 		return (
 			<SetupSavings
@@ -171,10 +164,11 @@ export function drawQuestionScreen(
 }
 
 /**
- * The heading the question screen draws (its h1), or null for the ruled-off total, which asks nothing. The in-place redraw
- * announces it, so the words here are the screen's own.
+ * The heading the question screen draws (its h1), or null for a page with no screen (the finish's heading when the finish is
+ * drawn). The in-place redraw announces it, so the words here are the screen's own.
  */
 export function questionHeading(model: FirstPageModel): string | null {
+	if (model.finish) return FINISH_HEADING;
 	if (model.pay[0]) return "Is this your pay?";
 	if (model.keep.length > 0) return keepHeading(model.keep.length);
 	const budgets = model.budgets;
@@ -201,6 +195,18 @@ export function questionsPage(
 	return (
 		<Layout setup title="Setup · Tally" demo={false} currentPath="/setup">
 			{questionScreen(model, { focus, budgetError, savingsError })}
+		</Layout>
+	);
+}
+
+/**
+ * The setup finish as a whole page (GET /setup once the budgets stroke is drawn, read by readFinish): the setup layout around
+ * the finish, as questionsPage lays out a question screen. `focus` moves the focus to its heading.
+ */
+export function finishPage(finish: FinishRead, focus: boolean) {
+	return (
+		<Layout setup title="Setup · Tally" demo={false} currentPath="/setup">
+			<SetupFinish {...finish} focus={focus} />
 		</Layout>
 	);
 }

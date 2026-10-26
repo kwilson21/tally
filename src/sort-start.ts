@@ -7,7 +7,7 @@ export type SortParams = {
 	ids?: number[];
 	bySync: boolean;
 	rulesApplied: boolean;
-	/** The night's instance only: the 09:00 run's UTC day (YYYY-MM-DD). After sorting, it makes the night's names and new-category suggestions, and in production keeps the first night's counts for this day. */
+	/** The night's instance only: the 09:00 run's UTC day (YYYY-MM-DD). After sorting, it clears the daily run's wait mark (production) and makes the night's names and new-category suggestions. */
 	night?: string;
 };
 

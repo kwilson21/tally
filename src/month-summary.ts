@@ -1,5 +1,5 @@
 // A month's summary as Home draws it (spec §6, §8.4): the month's loaded numbers, the bills still to pay this month and
-// the plans set aside, and what they add up to. Home and the first page's ruled-off total both read it here, so the
+// the plans set aside, and what they add up to. Home and the setup finish both read it here, so the
 // Safe to spend they show is the same number (P125 E, decision 114).
 import { loadBillRows } from "./bills/rows";
 import { billTotalsForRows } from "./bills/totals";

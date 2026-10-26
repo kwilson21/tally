@@ -753,9 +753,11 @@ describe("POST /settings/ai: turning Sort right away back on (decision 150)", ()
 		expect((await readFirstTally(env.DB))?.waitsForRun).toBeUndefined();
 	});
 
-	it("writes no mark once the count stroke is drawn", async () => {
+	it("writes no mark once the budgets stroke is drawn, so a set-up household's switch is not waiting", async () => {
 		await markStroke(env.DB, "bank", "2026-10-12");
-		await markStroke(env.DB, "count", "2026-10-13");
+		await markStroke(env.DB, "pay", "2026-10-12");
+		await markStroke(env.DB, "bills", "2026-10-12");
+		await markStroke(env.DB, "budgets", "2026-10-13");
 		await waitingCharge();
 		await post("/settings/ai", TURN_ON);
 		expect((await readAiSwitches(env.DB)).sortOnArrival).toBe(true);

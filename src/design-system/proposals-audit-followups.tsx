@@ -24,8 +24,8 @@ import { MoneyInput } from "../views/money-input";
 import { type NavKey, SIDEBAR_ITEMS } from "../views/nav";
 import { Notebook } from "../views/notebook";
 import { SplitLine } from "../views/split-form";
-import { type StepLine, TallySteps } from "../views/tally-steps";
 import { YourBanks } from "../views/your-banks";
+import { type StepLine, TallySteps } from "./proposal-parts";
 import { Choice, Choices, Phone, Shot } from "./proposals-polish-4";
 import { Specimen } from "./specimen";
 

@@ -10,8 +10,6 @@ import { YourBanks } from "../src/views/your-banks";
 
 const base: SetupView = {
 	phase: "reading",
-	drawn: 1,
-	steps: [],
 	bankName: "Chase",
 	bankCount: 1,
 	historyIn: true,
@@ -20,8 +18,6 @@ const base: SetupView = {
 	refreshes: false,
 	sorted: 0,
 	total: 0,
-	fifth: null,
-	answeredWaiting: null,
 	emailed: false,
 	waitsForRun: false,
 	runTime: "5 AM",

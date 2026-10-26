@@ -21,10 +21,7 @@ import {
 	keepAllButton,
 	keepAllLead,
 	keepAllQuestion,
-	type NothingAsked,
 	needsTail,
-	nothingAskedLine,
-	RULED_STATUS,
 	shownBudgetValue,
 	suggestionNote,
 	yesLabel,
@@ -45,11 +42,9 @@ import { Button } from "./button";
 import { CategoryIcon } from "./category";
 import { FoldedRow } from "./folded-row";
 import { HomeSeenCheckIn } from "./home-seen";
-import { safeToSpendText } from "./home-top";
 import { MoneyInput } from "./money-input";
 import { SetupScreen } from "./setup-screen";
 import { BILLS_STEP, BUDGETS_STEP, PAY_STEP, StepBar } from "./step-bar";
-import { WhyLink } from "./why-link";
 
 /** The question's needs-a-category line: the count and the mean, or none. */
 type Needs = { count: number; meanCents: number | null } | null;
@@ -660,43 +655,5 @@ export function NeedsCategory({
 			</a>
 			{needsTail(needs.count, needs.meanCents)}
 		</p>
-	);
-}
-
-/**
- * The ruled-off total (spec §8.8, #590): a double rule, the month's Safe to spend (the number Home shows), the Four line,
- * and a way back to Home. It is drawn once the budgets stroke is. A step with nothing to ask says why above the rule.
- */
-export function RuledTotal({
-	safeCents,
-	focus,
-	nothingAsked,
-}: {
-	safeCents: number;
-	focus: boolean;
-	/** Why the step asked nothing, which the muted line above the rule says; null when it says nothing. */
-	nothingAsked: NothingAsked | null;
-}) {
-	return (
-		<section>
-			{nothingAsked !== null && (
-				<p class="mt-6 text-base text-muted">
-					{nothingAskedLine(nothingAsked)}
-				</p>
-			)}
-			<div class="mt-6 border-b-[3px] border-double border-ink" />
-			<p tabindex={-1} autofocus={focus} class="mt-4 text-lg text-muted">
-				Safe to spend · <WhyLink section="budget" topic="safe to spend" />
-			</p>
-			<p class="font-serif text-6xl font-semibold tracking-tight">
-				{safeToSpendText(safeCents)}
-			</p>
-			<p class="mt-3 font-serif text-lg italic">{RULED_STATUS}</p>
-			<div class="mt-6">
-				<Button href="/" class="w-full">
-					Go to Home
-				</Button>
-			</div>
-		</section>
 	);
 }

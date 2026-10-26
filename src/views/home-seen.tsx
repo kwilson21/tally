@@ -1,6 +1,6 @@
 // The presence check-in (decision 146): setup's reading screen and the questions page post to /home/seen every 30 seconds
 // while they are open, so Tally knows who is still there and emails only the people who have left (ready-email.tsx). Home's
-// check-in also sends the step its page shows (`step`), so /home/seen redraws the page's first-week top once that step has
+// check-in also sends the step its page shows (`step`), so /home/seen redraws the reading screen's status once that step has
 // moved on, and someone watching sees the questions appear (it never reloads the page). It is a hidden element that swaps
 // nothing and announces nothing, so it is not a live region. It checks in on load, every 30 seconds, and again at once when
 // the tab comes back to the screen (visibilitychange). A tab that isn't on screen counts as away (decision 149, the owner's

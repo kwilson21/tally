@@ -61,7 +61,7 @@ function runBack(
  * The notes a setup screen draws under its step bar (P142 A, #773). The pay screen draws none. The bills screen draws the pay
  * note when pay asked nothing. A budgets screen (keep all, or one at a time) draws the run ending at bills, but only while no
  * budget is answered, so the notes show on the step's first screen and not on each later category. The savings screen draws
- * the run ending at budgets. The ruled-off total draws none.
+ * the run ending at budgets. The finish draws none.
  */
 export function skippedNotes(model: FirstPageModel): SkippedNote[] {
 	if (model.pay.length > 0) return [];

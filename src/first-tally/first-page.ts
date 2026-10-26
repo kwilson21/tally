@@ -13,6 +13,7 @@ import {
 	type MonthSpent,
 	monthlyMeanCents,
 } from "../budgets/first-suggestion";
+import { readAiSwitches } from "../db/ai-switches";
 import {
 	COUNTED_JOINS,
 	COUNTED_SPENDING,
@@ -31,7 +32,6 @@ import {
 	type PayRecord,
 	payAnswerStatement,
 	readFirstTally,
-	STROKES,
 	strokeStatement,
 } from "../db/first-tally";
 import { PERSON_INCOME_SET_SQL } from "../db/income";
@@ -42,6 +42,7 @@ import { payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
 import { tidyName } from "../transactions/tidy-name";
+import type { FinishRows } from "../views/setup-finish";
 import { billsLedgerLine, splitKeepable } from "./bills";
 import {
 	type BudgetAsk,
@@ -49,6 +50,12 @@ import {
 	type NothingAsked,
 	savingsLedgerLine,
 } from "./budgets";
+import {
+	finishBillsLine,
+	finishBudgetsLine,
+	finishPayLine,
+	finishSavingsLine,
+} from "./finish";
 import { type PayDeposit, payLedgerLine, shownPayValues } from "./pay";
 
 /** A merchant whose money in Tally marked as income, and the deposits behind the question. */
@@ -62,9 +69,20 @@ export type PayMerchant = {
 	ids: number[];
 };
 
+/**
+ * What the setup finish draws once the budgets stroke is drawn (readFinish): the month, the month's Safe to spend, what each
+ * step set up, and whether Sort right away is on (the finish's sort line).
+ */
+export type FinishRead = {
+	/** The household month, "2026-10". */
+	month: string;
+	/** The month's Safe to spend in integer cents, the number Home shows. */
+	safeCents: number;
+	rows: FinishRows;
+	sortsOnArrival: boolean;
+};
+
 export type FirstPageModel = {
-	/** The strokes drawn so far, of five. */
-	drawn: number;
 	/**
 	 * The answers so far, in ledger order. `id` names the line for the reply that wrote it (`pay:` and the merchant key for
 	 * a pay line, `bills` for the bills line), so a reply finds its own line even when two lines read the same.
@@ -77,8 +95,13 @@ export type FirstPageModel = {
 	/** The found charges that can be kept in one tap, and the ones that wait in Possible bills. */
 	keep: BillSuggestion[];
 	waiting: BillSuggestion[];
-	/** The budgets step (spec §8.8): null until pay and bills are done, since the page asks them first. */
+	/** The budgets step (spec §8.8): null until pay and bills are done, since the page asks them first, and once it is drawn. */
 	budgets: BudgetsStep | null;
+	/**
+	 * The setup finish, from the record once the budgets stroke is drawn (readFinish), else null. A page with a finish draws it
+	 * before any question, so a deposit that arrives after the stroke can't bring a question back (#774).
+	 */
+	finish: FinishRead | null;
 	/**
 	 * True once a budgets answer is recorded, a skip included (first_tally's `budgets` has an entry). A budgets screen draws
 	 * the steps that asked nothing only while this is false, so the notes show on the step's first screen (P142 A, #773).
@@ -93,18 +116,14 @@ export type FirstPageModel = {
 };
 
 /**
- * The budgets step as the page reads it (spec §6, §8.8, #590). Once the budgets stroke is drawn the page rules off the
- * month's Safe to spend (`done`, the same number Home shows); until then it asks the categories still to answer.
+ * The budgets step as the page reads it (spec §6, §8.8, #590). Once the budgets stroke is drawn the step has nothing left to
+ * ask (`done`), and the setup finish is drawn from the record instead (readFinish); until then it asks the categories still
+ * to answer.
  */
 export type BudgetsStep =
 	| {
+			/** The budgets stroke is drawn: nothing is asked, and the finish is drawn (FirstPageModel.finish). */
 			done: true;
-			safeCents: number;
-			/**
-			 * Why the step asked nothing, for the line above the ruled-off total (nothingAskedReason), or null when it says
-			 * nothing: a family's answer is recorded, or a category with no budget was added after the stroke.
-			 */
-			nothingAsked: NothingAsked | null;
 	  }
 	| {
 			done: false;
@@ -211,16 +230,16 @@ export async function answerPay(
 }
 
 /**
- * The ledger lines of the pay answers (first_tally's `pay`), in the order each merchant was first answered: the record's
- * `at`, not the object's key order, which puts a numeric key first. A merchant answered again keeps its place.
- * "Pay · {Merchant}, …" for each merchant with a Yes, from every deposit answered Yes, as recorded with the answers, so a
- * deposit marked later in the Transactions panel adds nothing. A No adds no deposit to the line, and a merchant with only
- * No answers writes no line.
+ * The merchants the pay answers marked Yes, in the order each was first answered: the record's `at`, not the object's key
+ * order, which puts a numeric key first. A merchant answered again keeps its place. Each has the name the ledger and the
+ * finish give it (the merchant's own name, or its key tidied) and its Yes deposits, as recorded with the answers, so a
+ * deposit marked later in the Transactions panel adds nothing. A No adds no deposit, and a merchant with only No answers
+ * is left out.
  */
-async function payLedger(
+async function yesMerchants(
 	db: D1Database,
 	pay: Record<string, PayRecord> | undefined,
-): Promise<{ id: string; text: string }[]> {
+): Promise<{ key: string; name: string; deposits: PayDeposit[] }[]> {
 	const yeses = Object.entries(pay ?? {})
 		.filter(([, record]) => Object.keys(record.yes ?? {}).length > 0)
 		.sort(([, a], [, b]) => a.at - b.at);
@@ -230,11 +249,23 @@ async function payLedger(
 		yeses.map(([key]) => key),
 	);
 	return yeses.map(([key, record]) => ({
+		key,
+		name: names.get(key) || tidyName(key),
+		deposits: Object.values(record.yes ?? {}),
+	}));
+}
+
+/**
+ * The ledger lines of the pay answers: "Pay · {Merchant}, …" for each merchant with a Yes (yesMerchants), the lines the
+ * answers' reply and the page's ledger show.
+ */
+async function payLedger(
+	db: D1Database,
+	pay: Record<string, PayRecord> | undefined,
+): Promise<{ id: string; text: string }[]> {
+	return (await yesMerchants(db, pay)).map(({ key, name, deposits }) => ({
 		id: `pay:${key}`,
-		text: payLedgerLine({
-			name: names.get(key) || tidyName(key),
-			deposits: Object.values(record.yes ?? {}),
-		}),
+		text: payLedgerLine({ name, deposits }),
 	}));
 }
 
@@ -248,18 +279,30 @@ function billsLedger(
 }
 
 /**
- * The ledger line of the budgets the step kept, from its record (first_tally's `budgets`): every answer that set an
- * amount, a suggestion or another, counted and totalled. Null when none is set (a skip writes no line).
+ * The budgets the step kept, from its record (first_tally's `budgets`): every answer that set an amount, a suggestion or
+ * another, counted and totalled. Null when none is set (a skip writes no line).
  */
-function budgetsLedger(
+function budgetsKept(
 	budgets: Record<string, BudgetAnswer> | undefined,
-): { id: string; text: string } | null {
+): { count: number; cents: number } | null {
 	const kept = Object.values(budgets ?? {}).filter(
 		(answer) => answer.cents !== null,
 	);
 	if (kept.length === 0) return null;
-	const cents = kept.reduce((sum, answer) => sum + (answer.cents ?? 0), 0);
-	return { id: "budgets", text: budgetsLedgerLine(kept.length, cents) };
+	return {
+		count: kept.length,
+		cents: kept.reduce((sum, answer) => sum + (answer.cents ?? 0), 0),
+	};
+}
+
+/** The ledger line of the budgets the step kept (budgetsKept), or null when it kept none. */
+function budgetsLedger(
+	budgets: Record<string, BudgetAnswer> | undefined,
+): { id: string; text: string } | null {
+	const kept = budgetsKept(budgets);
+	return kept
+		? { id: "budgets", text: budgetsLedgerLine(kept.count, kept.cents) }
+		: null;
 }
 
 /**
@@ -402,7 +445,7 @@ async function monthlySpent(
 }
 
 /**
- * Why a drawn budgets step asked nothing, or null when its line says nothing. A recorded answer means the family set the
+ * Why the budgets step asked nothing, or null when its note says nothing. A recorded answer means the family set the
  * step's budgets itself, so none is "already" there. Otherwise the active categories are counted against the budgets that
  * apply this month: none active is "no-categories", and all of them budgeted is "every-category-budgeted". Any other count
  * (a category added since the stroke) says nothing.
@@ -425,8 +468,9 @@ async function nothingAskedReason(
 }
 
 /**
- * The budgets step, read from the household. The categories it may ask are the active ones with no budget that applies
- * this month and no answer in first_tally, in the household's order. Each is given its full months of Spent (fullMonths
+ * The budgets step, read from the household: `done` once the budgets stroke is drawn (the finish is read by readFinish). The
+ * categories it may ask are the active ones with no budget that applies this month and no answer in first_tally, in the
+ * household's order. Each is given its full months of Spent (fullMonths
  * from the history's first date, a month with no spending is $0) and Tally's suggestion (firstBudgetSuggestion). The
  * keep all question is offered while nothing is answered and some category has a suggestion; otherwise one at a time
  * asks the first category not yet answered. The Needs a category line counts the transactions with no category, and
@@ -439,14 +483,7 @@ async function budgetsStep(
 	oneAtATime: boolean,
 ): Promise<BudgetsStep> {
 	const month = today.slice(0, 7);
-	if (record?.strokes.budgets !== undefined) {
-		const { summary } = await readMonthSummary(db, today, month);
-		return {
-			done: true,
-			safeCents: summary.safeToSpendCents,
-			nothingAsked: await nothingAskedReason(db, month, record),
-		};
-	}
+	if (record?.strokes.budgets !== undefined) return { done: true };
 	const { results: categories } = await db
 		.prepare(
 			`SELECT c.id AS id, c.name AS name, c.icon AS icon, c.color AS color FROM categories c WHERE ${budgetAskedSql("c", month)}
@@ -636,6 +673,45 @@ export async function budgetsStepShown(
 }
 
 /**
+ * The setup finish, read from the record (P142 A, decision 148, spec §8.8, #774): null until the budgets stroke is drawn, else
+ * the month, the month's Safe to spend (read as the budgets step reads it, so it is the number Home shows) and what each
+ * step set up, one row per step that set something: each merchant answered Yes, the bills kept, the budgets set, and the
+ * savings goal. It reads the record and never the questions, so a deposit or charge that arrives after the stroke, unanswered,
+ * leaves the finish as it is: that money belongs to the normal income and bills reviews, not to setup.
+ */
+export async function readFinish(
+	db: D1Database,
+	today: string,
+): Promise<FinishRead | null> {
+	const record = await readFirstTally(db);
+	if (record?.strokes.budgets === undefined) return null;
+	const month = today.slice(0, 7);
+	const { summary } = await readMonthSummary(db, today, month);
+	const bills = record.bills;
+	const budgets = budgetsKept(record.budgets);
+	const savings = record.savings;
+	return {
+		month,
+		safeCents: summary.safeToSpendCents,
+		rows: {
+			pay: (await yesMerchants(db, record.pay)).map((merchant) =>
+				finishPayLine(merchant),
+			),
+			bills:
+				bills && bills.kept > 0
+					? finishBillsLine(bills.kept, bills.cents)
+					: null,
+			budgets: budgets ? finishBudgetsLine(budgets.count, budgets.cents) : null,
+			savings:
+				typeof savings === "number" && savings > 0
+					? finishSavingsLine(savings)
+					: null,
+		},
+		sortsOnArrival: (await readAiSwitches(db)).sortOnArrival,
+	};
+}
+
+/**
  * Draws the strokes whose steps have nothing left to ask (an empty step counts as done, P125 E), then reads the page.
  * The pay stroke waits for the last pay answer; the bills stroke waits for pay, since the page asks pay first. What the
  * bills step kept is recorded by keepBills, as each bill is kept, so this read adds no count.
@@ -670,8 +746,6 @@ export async function settleAndLoad(
 		...(savingsLine ? [savingsLine] : []),
 	];
 	return {
-		drawn: STROKES.filter((stroke) => record?.strokes[stroke] !== undefined)
-			.length,
 		ledger,
 		payAnswered: Object.keys(record?.pay ?? {}).length > 0,
 		pay,
@@ -680,6 +754,7 @@ export async function settleAndLoad(
 		budgets: done ? await budgetsStep(db, today, record, oneAtATime) : null,
 		budgetsAnswered: Object.keys(record?.budgets ?? {}).length > 0,
 		watching: !anyQuestionAnswered(record),
+		finish: await readFinish(db, today),
 	};
 }
 

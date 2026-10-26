@@ -5,7 +5,7 @@ import { noteHouseholdMember } from "./db/reconnect";
 import { canResetDemo, resetDemo } from "./demo/reset";
 import { notFoundPage, serverErrorPage } from "./error-pages";
 import { injectDiagnosticsScript } from "./feedback/diagnostics";
-import { recordNightSync, utcDay } from "./first-tally/night";
+import { utcDay } from "./first-tally/night";
 import { runReadyEmail } from "./first-tally/ready-email";
 import { runReadyPush } from "./first-tally/ready-push";
 import type { PlaidEnv } from "./plaid/client";
@@ -80,10 +80,9 @@ app.onError(serverErrorPage);
 /**
  * Production runs twice each morning, each its own invocation (decision 139):
  *
- * - 09:00 (`runScheduled`): syncs every bank, which applies the merchant rules, keeps the first night's sync result,
- *   starts the night's Workflow and retries feedback. The Workflow (src/sort-instance.ts) sorts everything waiting in
- *   groups of 25, then makes the night's notes and names, then new-category suggestions, then keeps the first night's
- *   counts, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
+ * - 09:00 (`runScheduled`): syncs every bank, which applies the merchant rules, starts the night's Workflow and retries
+ *   feedback. The Workflow (src/sort-instance.ts) sorts everything waiting in groups of 25, then makes the night's notes and
+ *   names, then new-category suggestions, each a step of its own, so none of it shares this invocation's 1,000 D1 queries.
  * - 10:00, reconnect reminders (`runReconnectReminders`), then the first week's ready push and ready email (`runReadyPush`, `runReadyEmail`) as a backstop.
  * - Each minute (`runReadyPush`, then `runReadyEmail`, decisions 146 and 149): a new family's ready push goes out two minutes
  *   after its person leaves the first-week pages, and the ready email ten minutes after, or 8 minutes after that push reached
@@ -118,17 +117,11 @@ export async function runScheduled(
 			categoryExample: true,
 		});
 	}
-	const synced = await syncAllItems(env, fetchImpl);
+	await syncAllItems(env, fetchImpl);
 	const night = utcDay(clockNow(time));
-	// The first night's sync (#586), kept for the night's Workflow to decide. Production only: the demo has no banks.
-	if (env.DEMO === "false") {
-		await runStep("first night: sync step", () =>
-			recordNightSync(env.DB, synced, night),
-		);
-	}
-	// The night's Workflow (decision 139): it sorts everything waiting, then makes the night's names and new-category
-	// suggestions, then (production only) keeps the first night's counts for `night`, the day the sync was kept for.
-	// It applies the merchant rules itself first, which also covers a sync whose own rules step failed.
+	// The night's Workflow (decision 139): it sorts everything waiting, then clears the daily run's wait mark (production),
+	// then makes the night's names and new-category suggestions. It applies the merchant rules itself first, which also
+	// covers a sync whose own rules step failed.
 	await startSorting(env, { bySync: false, rulesApplied: false, night });
 	await retryFeedback(env, fetchImpl);
 }

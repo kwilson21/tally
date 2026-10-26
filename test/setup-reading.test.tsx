@@ -17,8 +17,6 @@ import { READING_STEP } from "../src/views/step-bar";
 // The reading screen (P142 A, decisions 146, 148 and 150): the words for each step, and the screen that draws them.
 const base: SetupView = {
 	phase: "reading",
-	drawn: 1,
-	steps: [],
 	bankName: "Chase",
 	bankCount: 1,
 	historyIn: false,
@@ -27,8 +25,6 @@ const base: SetupView = {
 	refreshes: true,
 	sorted: 0,
 	total: 86,
-	fifth: null,
-	answeredWaiting: null,
 	emailed: false,
 	waitsForRun: false,
 	runTime: "5 AM",
