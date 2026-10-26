@@ -34,6 +34,26 @@ describe("normalizeDom", () => {
 		expect(normalizeDom(bill)).not.toBe(normalizeDom(other));
 	});
 
+	it("makes the attribute order the same on two loads: the transaction sheet's inert and htmx marks (/transactions/110, #785)", () => {
+		// htmx and sheet.js set these in whichever order their scripts run, so two loads can list them differently.
+		const htmxFirst =
+			'<form data-htmx-powered="true" inert="" data-sheet-inert="">Edit</form>';
+		const inertFirst =
+			'<form inert="" data-sheet-inert="" data-htmx-powered="true">Edit</form>';
+		expect(normalizeDom(htmxFirst)).toBe(normalizeDom(inertFirst));
+	});
+
+	it("keeps a changed attribute value different even when the attributes are in another order", () => {
+		const one = '<a href="/x" data-k="1">Edit</a>';
+		const two = '<a data-k="2" href="/x">Edit</a>';
+		expect(normalizeDom(one)).not.toBe(normalizeDom(two));
+	});
+
+	it("leaves a <script>'s raw text alone, so attribute-like text inside it stays as it is", () => {
+		const script = `<script>var t = '<i z="1" a="2">';</script>`;
+		expect(normalizeDom(script)).toBe(script);
+	});
+
 	it("leaves a value that is not a v4 UUID as it is", () => {
 		const v1 = "00000000-0000-1000-8000-000000000000";
 		expect(normalizeDom(`<i data-id="${v1}"></i>`)).toContain(v1);

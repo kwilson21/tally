@@ -10,15 +10,49 @@ const V4_UUID =
 	/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/g;
 const PLACEHOLDER = "<uuid>";
 
+/** Code-unit order, so sorting never depends on the locale. */
+const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+// A start tag as a browser serializes it (every attribute is name="value"), or a whole <script> or
+// <style>, which is matched so that its raw text is left as it is.
+const TAG =
+	/<(script|style)\b[\s\S]*?<\/\1\s*>|<([a-zA-Z][\w:-]*)((?: [^\s"'<>/=]+="[^"]*")*)>/gi;
+const ATTRIBUTE = / ([^\s"'<>/=]+)="([^"]*)"/g;
+
 /**
- * The page's HTML with each per-request value replaced, so two loads of the same page on the same
- * data give the same string. Known sources: the Add cash entry key (src/routes/transactions.tsx:1772)
- * and the split sheet's sheet id and refund ids (src/views/split-form.tsx:267).
+ * A start tag with its attributes sorted by name. htmx and sheet.js set a page's attributes in
+ * whichever order their scripts run (the transaction sheet's inert and htmx's powered mark, found
+ * on /transactions/110 in #785), so two loads of one page can list them differently.
+ * @param {string} tag
+ * @param {string | undefined} raw The element name when the match is a <script> or <style>.
+ * @param {string | undefined} name
+ * @param {string | undefined} attributes
+ * @returns {string}
+ */
+function sortTag(tag, raw, name, attributes) {
+	if (raw !== undefined) return tag;
+	const pairs = [...(attributes ?? "").matchAll(ATTRIBUTE)].map((m) => [
+		m[1],
+		m[2],
+	]);
+	pairs.sort(([a], [b]) => compare(a, b));
+	return `<${name}${pairs.map(([key, value]) => ` ${key}="${value}"`).join("")}>`;
+}
+
+/**
+ * The page's HTML with each per-request value replaced and each tag's attributes in one order, so
+ * two loads of the same page on the same data give the same string. Per-request values: the Add
+ * cash entry key (src/routes/transactions.tsx:1772) and the split sheet's sheet id and refund ids
+ * (src/views/split-form.tsx:267), all random v4 UUIDs.
  * @param {string} html
  * @returns {string}
  */
 export function normalizeDom(html) {
-	return html.replace(V4_UUID, PLACEHOLDER);
+	return html
+		.replace(TAG, (tag, raw, name, attributes) =>
+			sortTag(tag, raw, name, attributes),
+		)
+		.replace(V4_UUID, PLACEHOLDER);
 }
 
 /**
@@ -35,9 +69,6 @@ export async function sha256Hex(data) {
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
 }
-
-/** Code-unit order, so sorting never depends on the locale. */
-const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * A page's fingerprint: the SHA-256 of its normalized DOM and its same-origin assets (each one's
