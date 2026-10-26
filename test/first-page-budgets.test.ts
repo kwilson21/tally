@@ -1673,6 +1673,30 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await savingsOf()).toBe(30000);
 	});
 
+	it("answers the load at 200 with the ruled-off total and no question, when that settle completes the budgets step", async () => {
+		// Home budgeted every category and set a goal above $0, so the load's settle draws stroke four and no question is left.
+		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
+		await db
+			.prepare(
+				"INSERT INTO savings_goal_amounts (effective_month, amount_cents) VALUES (?, 30000)",
+			)
+			.bind(CUR)
+			.run();
+		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
+		const { res, html } = await get("/setup");
+		expect(res.status).toBe(200);
+		expect(html).toContain('id="setup-screen"');
+		const text = textOf(html);
+		const { summary } = await readMonthSummary(db, TODAY, CUR);
+		expect(text).toContain("Safe to spend");
+		expect(text).toContain(safeToSpendText(summary.safeToSpendCents));
+		expect(text).toContain(FOUR);
+		expect(text).not.toContain(QUESTION);
+		expect(savingsFormsOf(html)).toHaveLength(0);
+		expect(budgetFormsOf(html)).toHaveLength(0);
+		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
+	});
+
 	it("Save it with $300 sets this month's goal, writes its line, draws stroke four, and rules off Safe to spend less the goal", async () => {
 		await skipAll();
 		const before = (await readMonthSummary(db, TODAY, CUR)).summary
