@@ -1,7 +1,7 @@
 // One rule for every headline amount (decision 110): Home's Safe to spend, a finished month's result,
-// Accounts' Net worth and Trends' Spent so far. An amount 9 or more characters long ("−$999,999",
-// "$1,000,000") is one size smaller on a phone under 640px; shorter ones and every desktop size keep
-// the view's own classes.
+// Accounts' Net worth, Trends' Spent so far and Setup's finish Safe to spend. An amount 9 or more
+// characters long ("−$999,999", "$1,000,000") is one size smaller on a phone under 640px; shorter ones
+// and every desktop size keep the view's own classes.
 //
 // A second rule is Home's notebook drawing only (P127 A, decision 116). The drawing sits beside the
 // amount, so it follows the amount's length rather than the size rule above: up to 7 characters it

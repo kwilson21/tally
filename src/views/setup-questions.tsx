@@ -56,24 +56,27 @@ type Needs = { count: number; meanCents: number | null } | null;
 
 /**
  * A question's serif heading. It takes focus when `focus` is given, as setup-welcome's does, so the screen is read once when it
- * is drawn by a form's swap.
+ * is drawn by a form's swap. Its top margin is mt-6 under a question's step bar; the finish's top row takes mt-4 (setup-finish.tsx).
  */
-function Heading({
+export function Heading({
 	focus,
 	wrap = false,
+	top = "mt-6",
 	children,
 }: {
 	focus: boolean;
 	/** The words hold a long name (a category, a bank): they wrap rather than run past the screen. */
 	wrap?: boolean;
+	/** The heading's top margin class. */
+	top?: string;
 	children?: Child;
 }) {
 	return (
 		<h1
 			class={
 				wrap
-					? "mt-6 font-serif text-4xl font-semibold tracking-tight wrap-anywhere"
-					: "mt-6 font-serif text-4xl font-semibold tracking-tight"
+					? `${top} font-serif text-4xl font-semibold tracking-tight wrap-anywhere`
+					: `${top} font-serif text-4xl font-semibold tracking-tight`
 			}
 			{...(focus ? { tabindex: -1, autofocus: true } : {})}
 		>
