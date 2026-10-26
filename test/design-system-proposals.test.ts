@@ -5346,7 +5346,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
 			'<section id="p139-split-category"',
 			'<section id="p140-banks"',
-			// P140's A is the real HomeSetup, whose own section and Your banks section sit inside its picture.
+			// P140's A (BanksA) is drawn with its own words, and its setup-top and your-banks sections sit inside its picture.
 			'<section id="setup-top"',
 			'<section id="your-banks"',
 			'<section id="p142-setup"',

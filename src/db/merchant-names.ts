@@ -29,8 +29,7 @@ export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
  * The bank texts Workers AI is asked about (spec §7), as one predicate over `t` with `merchants m` joined: a text Plaid
  * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash
  * entry a person typed (on the Cash account) is never asked about, nor a split part, nor an Apple Card row (§8.10: its
- * Merchant is its name, or none is sent). Shared by merchantsToAsk and the night's count of names still waiting
- * (namesStillAsked), so the two can't disagree.
+ * Merchant is its name, or none is sent). merchantsToAsk is the one that reads it.
  */
 export const NAME_ASKED_SQL = `t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
 	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
@@ -72,23 +71,6 @@ export async function merchantsToAsk(
 		.bind(limit)
 		.all<{ rawName: string }>();
 	return results.map((row) => row.rawName);
-}
-
-/**
- * How many bank texts are still waiting for a name (the night's count, #586): the texts NAME_ASKED_SQL asks about, except
- * one whose call failed (`merchant_name_failures`) counts as done, as the gate counts a failed sort (`jev_failed_at`), so
- * a name that keeps failing never holds the night.
- */
-export async function namesStillAsked(db: D1Database): Promise<number> {
-	const row = await db
-		.prepare(
-			`SELECT COUNT(DISTINCT t.raw_name) AS n FROM transactions t
-			 LEFT JOIN merchants m ON m.raw_name = t.raw_name
-			 LEFT JOIN merchant_name_failures f ON f.raw_name = t.raw_name
-			 WHERE ${NAME_ASKED_SQL} AND f.raw_name IS NULL`,
-		)
-		.first<{ n: number }>();
-	return row?.n ?? 0;
 }
 
 /**

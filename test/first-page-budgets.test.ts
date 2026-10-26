@@ -135,6 +135,9 @@ const defaultButtonOf = (form: string) =>
 const focusedHeading = (html: string) =>
 	/<h1[^>]*autofocus[^>]*>([^<]*)<\/h1>/.exec(html)?.[1] ?? null;
 
+/** The page's first h1 as its markup, so a test can read its attributes (the focus) and its words. */
+const h1Of = (html: string) => /<h1\b[^>]*>[^<]*<\/h1>/.exec(html)?.[0] ?? "";
+
 /** The budgets forms on a page, as their markup. */
 const budgetFormsOf = (html: string) =>
 	formsOf(html).filter((form) => form.includes('action="/setup/budgets"'));
@@ -722,6 +725,10 @@ describe("the step's end", () => {
 		expect(reload.html).toContain('href="/"');
 		expect(focusedHeading(reload.html)).toBeNull();
 		expect(textOf(html)).toContain(SET_UP);
+		// The finish's heading takes the focus, so the reply puts the person on "You're set up." (#774).
+		expect(textOf(h1Of(html)).trim()).toBe(SET_UP);
+		expect(h1Of(html)).toContain("autofocus");
+		expect(h1Of(html)).toContain('tabindex="-1"');
 		expect(textOf(html)).not.toContain("Keep all");
 		expect(html).not.toContain("budget?");
 		// Every category was answered (skipped), so the line for a step with nothing to ask is not the one said.
@@ -1835,6 +1842,10 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await savingsOf()).toBe("skipped");
 		expect(await goalRows()).toBe(0);
 		expect(textOf(html)).toContain(SET_UP);
+		// The finish's heading takes the focus, as the last answer's reply (#774).
+		expect(textOf(h1Of(html)).trim()).toBe(SET_UP);
+		expect(h1Of(html)).toContain("autofocus");
+		expect(h1Of(html)).toContain('tabindex="-1"');
 		expect(trigger(res).toast).toEqual({
 			message: "No savings goal for now.",
 			type: "success",

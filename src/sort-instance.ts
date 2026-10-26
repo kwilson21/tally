@@ -38,7 +38,7 @@ const NIGHT_STEPS = {
 		timeout: "15 minutes",
 		sensitive: "output",
 	},
-	// D1 only, so a failed save may run again: the night-run-wait step's clear of the daily run's wait mark (decision 150).
+	// Configures only the night-run-wait step, the clear of the daily run's wait mark (decision 150). D1 only, so a failed save may run again.
 	counts: {
 		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
 		timeout: "1 minute",

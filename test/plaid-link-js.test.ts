@@ -217,7 +217,7 @@ function harness({
 			if (selector === "#accounts-summary") return currentSummary;
 			if (selector === "#page") return currentPage;
 			if (selector === "#setup-screen") return currentSetup;
-			// Only Home has the status line (home-setup.tsx), and Home is the refresh that targets #page.
+			// Setup's status line (setup-reading.tsx) is the focus target; this harness returns it only for a #page refresh, so the setup tests have none.
 			if (selector === "[data-link-bank-focus]")
 				return dataset?.linkBankTarget === "#page" ? status : undefined;
 			if (selector === '[data-bank-item-id="42"] [data-fix-error]')

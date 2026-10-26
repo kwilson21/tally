@@ -89,7 +89,7 @@
 			"workers_dev": false,
 			"preview_urls": false,
 			// Two runs a morning (decision 139): 09:00 the daily catch-up sync (spec §4), at the demo's hour, which then starts
-			// the night's Workflow (sort everything waiting, then names and suggestions, then the first night's counts) and
+			// the night's Workflow (sort everything waiting, then clear the daily run's wait mark, then names and suggestions) and
 			// retries feedback; 10:00 the reconnect reminders, in their own invocation, then the ready email as a backstop. Each minute the
 			// ready email alone (decision 146): a new family's email goes out once its person has left the first-week pages.
 			// src/index.tsx routes by these exact strings.

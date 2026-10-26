@@ -1,5 +1,6 @@
-// The first week's notebook (P125 E, decision 114): the ledger notebook with its tally strokes drawn so far, beside a
-// terracotta pencil. It is the one drawing of the notebook: setup's welcome and finish and the proposals' SmallNotebook
+// The first week's notebook (P125 E, decision 114): the ledger notebook with its tally strokes, beside a terracotta
+// pencil. It is decoration: setup's welcome draws none, setup's finish all five, the proposals' drawings what they need.
+// It is the one drawing of the notebook: setup's welcome and finish and the proposals' SmallNotebook
 // (proposal-parts.tsx) draw it from here (proposals-polish-5.tsx passes its own stroke classes through lineClass; SmallNotebook
 // no longer does), and LedgerIllustration (illustration.tsx) is it with all five strokes in ink, so the drawing can't drift.
 // Decorative: the step bar or the setup's words beside it say the same in words.

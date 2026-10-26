@@ -588,7 +588,7 @@ function Brand() {
 				title="NotifyControl"
 				tier="visual"
 				components={["NotifyControl"]}
-				sentence="Notify me on this device (decision 149): under Home's first-week setup while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the Home Screen hint for an iPhone or an iPad, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
+				sentence="Notify me on this device (decision 149): in setup's reading screen (/setup), under its status line, while the first questions are not open, one button that asks the browser to notify this device when the questions are ready, then the words that say it's on, the Home Screen hint for an iPhone or an iPad, or the quiet line that it's blocked. Each state is drawn here. In the app only the one that applies shows, and with no JavaScript none does."
 			>
 				<State label="Off: the button, with its one line under it">
 					<NotifyControl
