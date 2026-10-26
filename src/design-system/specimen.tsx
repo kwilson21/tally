@@ -159,8 +159,9 @@ export function SheetFrame({ children }: { children?: Child }) {
 
 /**
  * A setup page drawn on the catalog page as /setup will draw it (P142 A, decision 148): one labelled, inert picture. Below lg
- * it is a phone's height and clips, and its overflow-hidden makes it the scrollport of the screen's sticky foot, so the foot
- * sits at the picture's foot as on a phone; from lg it is as tall as the screen, its column centred, as on desktop.
+ * it is at least a phone's height (780px), so a short screen's foot sits at the picture's foot as on a phone, and a taller
+ * screen grows the picture to its full height, so its foot shows under the whole body (not pinned over it); from lg it is as
+ * tall as the screen, its column centred, as on desktop.
  */
 export function SetupFrame({
 	label,
@@ -173,11 +174,11 @@ export function SetupFrame({
 		<div
 			role="img"
 			aria-label={label}
-			class="h-[780px] overflow-hidden rounded-control border border-ink bg-paper lg:h-auto"
+			class="flex min-h-[780px] flex-col overflow-hidden rounded-control border border-ink bg-paper lg:block lg:h-auto lg:min-h-0"
 		>
 			<div
 				inert
-				class="flex h-full flex-col px-5 pt-6 lg:block lg:h-auto lg:px-8 lg:pb-8"
+				class="flex flex-1 flex-col px-5 pt-6 lg:block lg:h-auto lg:px-8 lg:pb-8"
 			>
 				<div class="mx-auto max-w-md flex w-full flex-1 flex-col lg:block">
 					<div class="mb-2 flex items-center justify-between gap-3">
