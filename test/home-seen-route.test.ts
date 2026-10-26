@@ -219,7 +219,7 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(res.headers.get("HX-Refresh")).toBeNull();
 	});
 
-	it("moves a slow page on to the questions once they open, with HX-Redirect, and still writes its check-in", async () => {
+	it("draws a slow page's first question in place once they open, and still writes its check-in", async () => {
 		await sorting();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now', '-2 hours')",
@@ -228,19 +228,19 @@ describe("POST /home/seen: a page whose step has moved on redraws itself, never 
 		expect(slow.status).toBe(204);
 		await ready();
 		const res = await checkIn(family, ORIGIN, "slow");
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
 		expect(await seenOf(PERSON)).not.toBeNull();
 	});
-	it("moves the page on to the questions once the sort it shows has finished and they open", async () => {
+	it("draws the first question in place once the sort it shows has finished and they open", async () => {
 		await sorting();
 		await saveAiSwitches(env.DB, { categories: false, income: false });
 		await env.DB.prepare(
 			"DELETE FROM transactions WHERE plaid_transaction_id = 'waiting-seen'",
 		).run();
 		const res = await checkIn(family, ORIGIN, "sorting");
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
 	});
 	it("swaps the status, the next line and the check-in out of band, with no reload, while still reading, and announces the new step once", async () => {
 		await sorting();

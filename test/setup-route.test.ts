@@ -178,15 +178,16 @@ describe("GET /setup after a bank: Reading your bank", () => {
 		expect(without.html).not.toContain("/js/push.js");
 	});
 
-	it("sends a family whose questions are open to the questions, and one with them answered to Home", async () => {
+	it("draws the questions for a family whose questions are open, and sends one with them answered Home", async () => {
 		await sortingAndHistoryIn();
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
 		).run();
 		await writeRecord({ strokes: { bank: TODAY }, budgets: {} });
 		const ready = await setup(family);
-		expect(ready.res.status).toBe(303);
-		expect(ready.res.headers.get("location")).toBe("/first-page");
+		expect(ready.res.status).toBe(200);
+		expect(ready.html).toContain('id="setup-screen"');
+		expect(ready.html).toMatch(/Step \d of 4/);
 		await writeRecord({
 			strokes: {
 				bank: TODAY,
@@ -287,7 +288,7 @@ describe("GET /setup/banks: the Your banks poll", () => {
 		expect(html).toContain('"step":"run"');
 	});
 
-	it("answers with HX-Redirect to the questions once they open, and to Home once they are answered", async () => {
+	it("draws the first question in place once they open, and sends Home once they are answered", async () => {
 		await sortingAndHistoryIn();
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
@@ -297,8 +298,15 @@ describe("GET /setup/banks: the Your banks poll", () => {
 			{},
 			family,
 		);
-		expect(ready.status).toBe(204);
-		expect(ready.headers.get("HX-Redirect")).toBe("/first-page");
+		expect(ready.status).toBe(200);
+		expect(ready.headers.get("HX-Retarget")).toBe("#setup-screen");
+		expect(ready.headers.get("HX-Reswap")).toBe("outerHTML");
+		expect(ready.headers.get("HX-Trigger")).toContain(
+			"Your questions are ready.",
+		);
+		const drawn = await ready.text();
+		expect(drawn).toContain('id="setup-screen"');
+		expect(drawn).toMatch(/<h1\b[^>]*\sautofocus/);
 		await writeRecord({
 			strokes: { bank: TODAY, pay: TODAY, bills: TODAY, budgets: TODAY },
 			budgets: {},
@@ -347,13 +355,14 @@ describe("POST /home/seen with a step (the presence check-in, decisions 146 and 
 		expect(res.status).toBe(204);
 	});
 
-	it("redirects to the questions once the run has sorted them", async () => {
+	it("draws the first question in place once the run has sorted them", async () => {
 		await env.DB.prepare(
 			"UPDATE transactions SET category_confidence = 0.95, category_source = 'jev' WHERE plaid_transaction_id IS NOT NULL",
 		).run();
 		const { res } = await checkIn(family, "run");
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
+		expect(await res.text()).toContain('id="setup-screen"');
 	});
 
 	it("answers 204 for no step at all, whatever the setup", async () => {

@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe("the first week, from Home to the pay stroke", () => {
-	it("a new household links a bank, the gate opens, setup moves on to /first-page, and its answer draws the pay stroke", async () => {
+	it("a new household links a bank, the gate opens, setup moves on to the questions at /setup, and its answer draws the pay stroke", async () => {
 		// A fresh household: setup's welcome offers the one button and no strokes are drawn (Home sends a family here, decision 148).
 		const fresh = await words(await family.fetch("/setup"));
 		expect(fresh).toContain("Welcome to Tally.");
@@ -184,20 +184,20 @@ describe("the first week, from Home to the pay stroke", () => {
 			.run();
 		await deposit("ACME CORP PAYROLL", 245000);
 
-		// Setup moves on to the question page once the questions are open (until #773 they are /first-page).
-		const moved = await family.fetch("/setup");
-		expect(moved.status).toBe(303);
-		expect(moved.headers.get("location")).toBe("/first-page");
-
-		// The question page asks the pay question.
-		const page = await family.fetch("/first-page");
+		// Setup asks the questions once they are open, one screen at a time, at /setup (#773): the pay question first.
+		const page = await family.fetch("/setup");
 		expect(page.status).toBe(200);
 		const pageHtml = await page.text();
-		expect(pageHtml).toContain("Your first page");
+		expect(pageHtml).toContain('id="setup-screen"');
 		expect(pageHtml).toContain("Is this your pay?");
 
-		// Yes, posted as the page's own form posts it (its merchant and deposit fields, then the answer).
-		const answer = await family.fetch("/first-page/pay", {
+		// The old question page's address sends a family to the questions.
+		const old = await family.fetch("/first-page");
+		expect(old.status).toBe(303);
+		expect(old.headers.get("location")).toBe("/setup");
+
+		// Yes, posted as the question's own form posts it (its merchant and deposit fields, then the answer).
+		const answer = await family.fetch("/setup/pay", {
 			method: "POST",
 			redirect: "manual",
 			headers: {
@@ -216,10 +216,13 @@ describe("the first week, from Home to the pay stroke", () => {
 		).toEqual(["announce", "toast"]);
 		expect((await readFirstTally(db))?.strokes.pay).not.toBeUndefined();
 
-		// The questions page counts the strokes drawn. The bills step had nothing to ask (no repeat charge), so it counts as done and draws
-		// with the pay answer, as the spec says one answer can draw two; the budgets step still has categories to ask.
+		// The bills step had nothing to ask (no repeat charge), so it counts as done with the pay answer, and the reply draws the
+		// budgets question, with the bills step named above it as having asked nothing.
 		expect((await readFirstTally(db))?.strokes.bills).not.toBeUndefined();
-		const counted = await words(await family.fetch("/first-page"));
-		expect(counted).toContain("3 of 5");
+		const reply = await words(answer);
+		expect(reply).toContain("Step 4 of 4 · Your budgets");
+		expect(reply).toContain(
+			">Your bills</span> · Nothing here to keep in one tap.",
+		);
 	});
 });

@@ -1,7 +1,7 @@
-// The question page at /first-page (P125 E, spec §8.8, decision 114): "Your first page", the notebook with its count,
-// the ledger of answers so far, and one question at a time. Each answer swaps the whole page (#first-page), so the
-// count, the ledger and the next question all come from the same reading. The proposals page draws these same pieces
-// (FirstPage, SmallNotebook, LedgerLine), so the drawing and the app can't drift.
+// The questions are asked at /setup now (P142 A, spec §8.8, decision 148, #773), one screen each (views/setup-questions.tsx).
+// FirstPageBody is the catalog's and the proposals' drawing of the old question page ("Your first page", the notebook with its
+// count, the ledger of answers so far, and one question at a time); the app no longer draws it. The proposals page draws these
+// same pieces (FirstPage, SmallNotebook, LedgerLine), so the drawing and the catalog can't drift.
 import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { monthName, shortDay, shortMonthName } from "../dates";

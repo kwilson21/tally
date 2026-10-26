@@ -28,7 +28,8 @@ import {
 	settleAndLoad,
 } from "../src/first-tally/first-page";
 import { readMonthSummary } from "../src/month-summary";
-import { firstPage } from "../src/routes/first-page";
+import { firstPage, questionScreen } from "../src/routes/first-page";
+import { setupRoute } from "../src/routes/setup";
 import { safeToSpendText } from "../src/views/home-top";
 
 // The budgets step of the question page (P125 E, spec §6 and §8.8, decision 114, #590): once pay and bills are done,
@@ -55,6 +56,7 @@ function app(DB: D1Database = db) {
 		c.set("actor", "person@example.com");
 		await next();
 	});
+	router.route("/", setupRoute);
 	router.route("/", firstPage);
 	return {
 		fetch(path: string, init?: RequestInit) {
@@ -129,11 +131,11 @@ const defaultButtonOf = (form: string) =>
 
 /** The heading that takes focus (its autofocus), or null when none does. */
 const focusedHeading = (html: string) =>
-	/<h2[^>]*autofocus[^>]*>([^<]*)<\/h2>/.exec(html)?.[1] ?? null;
+	/<h1[^>]*autofocus[^>]*>([^<]*)<\/h1>/.exec(html)?.[1] ?? null;
 
 /** The budgets forms on a page, as their markup. */
 const budgetFormsOf = (html: string) =>
-	formsOf(html).filter((form) => form.includes('action="/first-page/budgets"'));
+	formsOf(html).filter((form) => form.includes('action="/setup/budgets"'));
 
 /** How many times `needle` appears in `text`. */
 const countOf = (text: string, needle: string) => text.split(needle).length - 1;
@@ -300,20 +302,22 @@ async function recordedBudget(categoryId: number) {
 
 describe("the budgets question, keep all or one at a time", () => {
 	it("offers keep all for the suggestions, with their total, and a quiet One at a time", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const text = textOf(html);
-		expect(text).toContain("Keep all 2 budgets, $800 a month?");
+		expect(text).toContain("Keep these budgets?");
+		expect(text).toContain("2 budgets");
+		expect(text).toContain("$800 a month");
 		expect(text).toContain("Keep all 2");
-		expect(text).toContain("One at a time");
-		expect(html).toContain('href="/first-page?budgets=one"');
+		expect(text).toContain("Go one at a time");
+		expect(html).toContain('href="/setup?budgets=one"');
 		expect(text).toContain(
-			`Your bank shows what each category spent in ${monthName(MONTH_2)} and ${monthName(MONTH_1)}.`,
+			`Each is what you spent in ${monthName(MONTH_2)} and ${monthName(MONTH_1)}, on average, rounded up to the next $10.`,
 		);
 	});
 
 	it("keep all writes each suggestion from this month on, keeps each answer, and says how many", async () => {
-		const { html } = await get("/first-page");
-		const res = await post("/first-page/budgets", [
+		const { html } = await get("/setup");
+		const res = await post("/setup/budgets", [
 			...keepFields(html),
 			["answer", "all"],
 		]);
@@ -338,18 +342,14 @@ describe("the budgets question, keep all or one at a time", () => {
 		});
 		expect(trigger(res.res).announce).toBe("Kept 2 budgets.");
 		expect(trigger(res.res).toast?.type).toBe("success");
-		expect(textOf(res.html)).toContain("Budgets · 2 kept, $800 a month");
 	});
 
 	it("keep all keeps only the suggestions the page showed, and asks a changed one again", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const shown = keepFields(html);
 		// B's suggestion moves after the page drew: its shown value no longer matches, so only A is kept.
 		await spend(B, 90000, `${MONTH_1}-02`);
-		const res = await post("/first-page/budgets", [
-			...shown,
-			["answer", "all"],
-		]);
+		const res = await post("/setup/budgets", [...shown, ["answer", "all"]]);
 		const rows = await db
 			.prepare("SELECT category_id AS id FROM budget_amounts")
 			.all<{ id: number }>();
@@ -361,14 +361,14 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("draws no budgets stroke while a category with no history is still to answer", async () => {
-		const { html } = await get("/first-page");
-		await post("/first-page/budgets", [...keepFields(html), ["answer", "all"]]);
+		const { html } = await get("/setup");
+		await post("/setup/budgets", [...keepFields(html), ["answer", "all"]]);
 		const record = await readFirstTally(db);
 		expect(record?.strokes.budgets).toBeUndefined();
 	});
 
 	it("asks each category in turn with its months and its Yes amount, after One at a time", async () => {
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		const text = textOf(html);
 		expect(focusedHeading(html)).toBe(
 			`Make $650 a month your ${nameA} budget?`,
@@ -383,7 +383,7 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("keeps a Yes, announces it, and asks the next category at once", async () => {
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["answer", "yes"],
@@ -396,22 +396,21 @@ describe("the budgets question, keep all or one at a time", () => {
 		expect(focusedHeading(res.html)).toBe(
 			`Make $150 a month your ${nameB} budget?`,
 		);
-		expect(textOf(res.html)).toContain("Budgets · 1 kept, $650 a month");
 	});
 
 	it("resumes at the next unanswered category after a reload, with no keep all", async () => {
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["answer", "yes"],
 		]);
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).not.toContain("Keep all");
 		expect(textOf(html)).toContain(`Make $150 a month your ${nameB} budget?`);
 	});
 
 	it("keeps a skip as given, writes no budget for it, and moves on", async () => {
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["answer", "skip"],
 		]);
@@ -432,7 +431,7 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("saves another amount typed through the MoneyInput, and says what it saved", async () => {
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["budget", "120"],
 			["answer", "another"],
@@ -452,7 +451,7 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("refuses an amount that is not dollars, with its error in the field, and keeps nothing", async () => {
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["budget", "lots"],
 			["answer", "another"],
@@ -472,7 +471,7 @@ describe("the budgets question, keep all or one at a time", () => {
 		expect(res.html).toMatch(new RegExp(`id="budget-${A}"[^>]*value="lots"`));
 		expect(res.html).not.toContain(`name="category" value="${B}"`);
 		// A corrected Save posts the category the form carries.
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["budget", "120"],
 			["answer", "another"],
@@ -482,7 +481,7 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("keeps Enter in the amount field on Another amount: its form's default button is Save, and the Yes form holds no amount", async () => {
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		const forms = formsOf(html);
 		const amountForm = forms.find((form) => form.includes('name="budget"'));
 		expect(amountForm).toBeDefined();
@@ -495,7 +494,7 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("keeps no change when the suggestion moved since the page drew, and asks it again", async () => {
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "60000"],
 			["answer", "yes"],
@@ -512,11 +511,11 @@ describe("the budgets question, keep all or one at a time", () => {
 	});
 
 	it("says a category already answered changes nothing", async () => {
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["answer", "skip"],
 		]);
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["answer", "yes"],
@@ -555,21 +554,23 @@ describe("categories the step does not ask", () => {
 			)
 			.bind(A, MONTH_2, 40000)
 			.run();
-		const { html } = await get("/first-page");
-		expect(textOf(html)).toContain("Keep all 1 budget, $150 a month?");
+		const { html } = await get("/setup");
+		expect(textOf(html)).toContain("Keep this budget?");
+		expect(textOf(html)).toContain("1 budget");
+		expect(textOf(html)).toContain("$150 a month");
 		expect(textOf(html)).not.toContain(nameA);
 	});
 
 	it("asks a category with no history with a blank amount, and says it has no spending yet", async () => {
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["answer", "skip"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(B)],
 			["answer", "skip"],
 		]);
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		expect(focusedHeading(html)).toBe(`Do you want a ${nameC} budget?`);
 		expect(textOf(html)).toContain(
 			`${nameC} has no spending yet. Set a monthly budget, or skip it.`,
@@ -580,37 +581,41 @@ describe("categories the step does not ask", () => {
 		expect(textOf(html)).not.toContain("Yes, $");
 	});
 
-	it("a category with no history: its blank amount's form has Save as its default button, and Skip is a form of its own", async () => {
-		await post("/first-page/budgets", [
+	it("a category with no history: its Save this budget is the amount form's own button, which Enter in the field presses, and Skip is a form of its own", async () => {
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["answer", "skip"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(B)],
 			["answer", "skip"],
 		]);
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		const forms = formsOf(html);
 		const amountForm = forms.find((form) => form.includes('name="budget"'));
-		expect(defaultButtonOf(amountForm ?? "")).toContain('value="another"');
+		expect(amountForm).toContain('id="one-budget"');
+		// The Save button is drawn in the screen's foot with form="one-budget", so it belongs to the amount form.
+		expect(html).toMatch(
+			/<button\b(?=[^>]*\bform="one-budget")(?=[^>]*value="another")/,
+		);
 		expect(amountForm).not.toContain('value="skip"');
 		expect(forms.find((form) => form.includes('value="skip"'))).toBeDefined();
 	});
 
 	it("asks, with a blank amount and no suggestion, a category whose rounded average is over the largest budget", async () => {
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["answer", "skip"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(B)],
 			["answer", "skip"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(C)],
 			["answer", "skip"],
 		]);
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		expect(focusedHeading(html)).toBe(`Do you want a ${nameD} budget?`);
 		expect(textOf(html)).toContain(
 			`Your bank shows ${nameD} spent $1,000,001 in ${monthName(MONTH_2)} and $1,000,001 in ${monthName(MONTH_1)}.`,
@@ -621,7 +626,7 @@ describe("categories the step does not ask", () => {
 
 describe("the step's end", () => {
 	it("two answers at once both keep, and the budgets stroke waits for the last category", async () => {
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["answer", "yes"],
@@ -655,7 +660,7 @@ describe("the step's end", () => {
 		});
 		// D is still to answer, so the stroke waits for it.
 		expect(record?.strokes.budgets).toBeUndefined();
-		const last = await post("/first-page/budgets", [
+		const last = await post("/setup/budgets", [
 			["category", String(D)],
 			["answer", "skip"],
 		]);
@@ -663,33 +668,33 @@ describe("the step's end", () => {
 		record = await readFirstTally(db);
 		// The savings question is the step's last, so its stroke waits for that answer too (#721).
 		expect(record?.strokes.budgets).toBeUndefined();
-		await post("/first-page/savings", [["answer", "skip"]]);
+		await post("/setup/savings", [["answer", "skip"]]);
 		record = await readFirstTally(db);
 		expect(record?.strokes.budgets).toBe(TODAY);
 	});
 
 	it("rules off the month's Safe to spend, the number Home shows, under the Four line", async () => {
 		await spend(A, 10000, TODAY);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["answer", "yes"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(B)],
 			["shown", "15000"],
 			["answer", "yes"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(C)],
 			["answer", "skip"],
 		]);
-		await post("/first-page/budgets", [
+		await post("/setup/budgets", [
 			["category", String(D)],
 			["answer", "skip"],
 		]);
 		// The savings question is the step's last; Not now leaves the month's Safe to spend as it is.
-		const last = await post("/first-page/savings", [["answer", "skip"]]);
+		const last = await post("/setup/savings", [["answer", "skip"]]);
 		const { summary } = await readMonthSummary(db, TODAY, CUR);
 		// The month's budgets ($650 and $150) less this month's $100 of spending.
 		expect(summary.safeToSpendCents).toBe(70000);
@@ -703,15 +708,17 @@ describe("the step's end", () => {
 		expect(text).toContain("Go to Home");
 	});
 
-	it("shows the total with no question left on a reload", async () => {
+	it("draws the total as the reply to the last answer, and a reload opens Home", async () => {
 		for (const id of [A, B, C, D]) {
-			await post("/first-page/budgets", [
+			await post("/setup/budgets", [
 				["category", String(id)],
 				["answer", "skip"],
 			]);
 		}
-		await post("/first-page/savings", [["answer", "skip"]]);
-		const { html } = await get("/first-page");
+		const { html } = await post("/setup/savings", [["answer", "skip"]]);
+		const reload = await get("/setup");
+		expect(reload.res.status).toBe(303);
+		expect(reload.res.headers.get("Location")).toBe("/");
 		expect(textOf(html)).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
@@ -724,14 +731,15 @@ describe("the step's end", () => {
 
 	it("says neither line once every category is answered with an amount, since those budgets are the family's own (#692 review)", async () => {
 		for (const id of [A, B, C, D]) {
-			await post("/first-page/budgets", [
+			await post("/setup/budgets", [
 				["category", String(id)],
 				["budget", "100"],
 				["answer", "another"],
 			]);
 		}
-		await post("/first-page/savings", [["answer", "skip"]]);
-		const text = textOf((await get("/first-page")).html);
+		const text = textOf(
+			(await post("/setup/savings", [["answer", "skip"]])).html,
+		);
 		expect(text).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
@@ -748,10 +756,10 @@ describe("the step's end", () => {
 				.bind(id, MONTH_2, 5000)
 				.run();
 		}
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain("Save some each month?");
 		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
-		await post("/first-page/savings", [["answer", "skip"]]);
+		await post("/setup/savings", [["answer", "skip"]]);
 		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
 	});
 });
@@ -760,7 +768,7 @@ describe("the needs-a-category line", () => {
 	it("shows the uncategorized count and about its monthly mean, linked to the filter", async () => {
 		// $60 of uncategorized spending in the first full month: a mean of $30 over the two.
 		await spend(null, 6000, `${MONTH_2}-03`);
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		expect(textOf(html)).toContain(
 			"Needs a category · 1 transaction · about $30 a month",
 		);
@@ -771,7 +779,7 @@ describe("the needs-a-category line", () => {
 	});
 
 	it("draws no line when nothing needs a category", async () => {
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		expect(textOf(html)).not.toContain("Needs a category ·");
 	});
 });
@@ -848,21 +856,10 @@ describe("the setup budgets question's words", () => {
 	});
 });
 
-describe("the budgets step's motion", () => {
-	it("marks the budgets ledger line for its one-shot rise when a Yes writes it", async () => {
-		const res = await post("/first-page/budgets", [
-			["category", String(A)],
-			["shown", "65000"],
-			["answer", "yes"],
-		]);
-		expect(res.html).toContain("first-line-new");
-	});
-});
-
 describe("an answer's write checks what is still asked, in its own batch (#590 review)", () => {
 	it("a Yes does not overwrite a Home budget set after the page drew, and says it is already answered", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -877,12 +874,11 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 			message: "That one is already answered.",
 			type: "info",
 		});
-		expect(textOf(res.html)).not.toContain("Budgets ·");
 	});
 
 	it("a Yes whose suggestion moved after the page drew saves nothing, and asks the new suggestion again", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -907,7 +903,7 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 	it("a Yes still lands when a race leaves the suggestion at the same amount, the total at the top of its step", async () => {
 		// A's total goes from $1,284 to $1,300 over the two months: still $650 a month, the largest total that rounds to it.
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -928,7 +924,7 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 	it("Another amount keeps the Home budget set after the page drew, not the typed amount", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["budget", "120"],
@@ -947,14 +943,14 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 	it("a Skip raced by a Yes for the same category keeps that Yes and its budget, and says it is already answered", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["answer", "skip"],
 			],
 			true,
 			raceBeforeBatch(async () => {
-				await post("/first-page/budgets", [
+				await post("/setup/budgets", [
 					["category", String(A)],
 					["shown", "65000"],
 					["answer", "yes"],
@@ -974,7 +970,7 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 	it("a category archived after the page drew is not written", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -996,9 +992,9 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 	});
 
 	it("keep all keeps a Home budget set after the page drew, and keeps the other suggestion", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[...keepFields(html), ["answer", "all"]],
 			true,
 			raceBeforeBatch(homeBudget(A, 40000)),
@@ -1014,9 +1010,9 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 	});
 
 	it("keep all does not write a suggestion whose amount moved after the page drew, and asks it again", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[...keepFields(html), ["answer", "all"]],
 			true,
 			raceBeforeBatch(async () => {
@@ -1035,7 +1031,7 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 	it("a Yes saves nothing when older history moves the window's first month, and asks the new suggestion (#692)", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -1060,7 +1056,7 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 	it("a Yes saves nothing when the first charge moves so a month drops out of the window (#692)", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["shown", "65000"],
@@ -1088,9 +1084,9 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 	});
 
 	it("keep all saves nothing when older history moves the window, and says both suggestions changed (#692)", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[...keepFields(html), ["answer", "all"]],
 			true,
 			raceBeforeBatch(async () => {
@@ -1107,12 +1103,12 @@ describe("an answer's write checks what is still asked, in its own batch (#590 r
 
 describe("keep all's count of what changed (#590 review)", () => {
 	it("counts a shown suggestion that is still asked, but has no suggestion now, as changed", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		await db
 			.prepare("DELETE FROM transactions WHERE category_id = ?")
 			.bind(B)
 			.run();
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			...keepFields(html),
 			["answer", "all"],
 		]);
@@ -1125,9 +1121,9 @@ describe("keep all's count of what changed (#590 review)", () => {
 	});
 
 	it("does not count a shown suggestion that a Home budget has since set", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		await homeBudget(B, 40000)(db);
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			...keepFields(html),
 			["answer", "all"],
 		]);
@@ -1137,9 +1133,9 @@ describe("keep all's count of what changed (#590 review)", () => {
 	});
 
 	it("keeps each shown id once, and neither keeps nor counts a value the page never asked", async () => {
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		const shown = keepFields(html);
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			...shown,
 			...shown,
 			["keep", "not json"],
@@ -1158,7 +1154,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 		// Nothing is drawn but the bank before this request. The refused page is the same page as a redraw with JavaScript, which
 		// reads the check-in after the settle, so it draws none: the settle drew the pay step, and an answered question ends it.
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["budget", "lots"],
@@ -1172,7 +1168,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 
 	it("draws the page at 422 with its error, the typed amount, and Another amount open", async () => {
 		const res = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["budget", "lots"],
@@ -1181,7 +1177,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 			false,
 		);
 		expect(res.res.status).toBe(422);
-		expect(res.html).toContain("<title>Your first page · Tally</title>");
+		expect(res.html).toContain("<title>Setup · Tally</title>");
 		expect(res.html).toContain('role="alert"');
 		expect(res.html).toContain("Enter a dollar amount, like 250 or 250.50.");
 		expect(res.html).toContain('value="lots"');
@@ -1198,7 +1194,7 @@ describe("a refused amount without JavaScript (#590 review)", () => {
 		expect(res.html).toMatch(new RegExp(`id="budget-${A}"[^>]*value="lots"`));
 		expect(res.html).not.toContain(`name="category" value="${B}"`);
 		const saved = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(A)],
 				["budget", "120"],
@@ -1219,7 +1215,7 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 			.prepare("UPDATE categories SET sort_order = 9 WHERE id = ?")
 			.bind(A)
 			.run();
-		const { html } = await get("/first-page?budgets=one");
+		const { html } = await get("/setup?budgets=one");
 		expect(focusedHeading(html)).toBe(
 			`Make $150 a month your ${nameB} budget?`,
 		);
@@ -1249,7 +1245,7 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 			],
 		];
 		for (const fields of stale) {
-			const res = await post("/first-page/budgets", fields);
+			const res = await post("/setup/budgets", fields);
 			expect(trigger(res.res).toast).toEqual(movedOn);
 			expect(focusedHeading(res.html)).toBe(
 				`Make $650 a month your ${nameA} budget?`,
@@ -1260,7 +1256,7 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 			expect(await recordedBudget(B)).toBeUndefined();
 		}
 		// A refused amount for B is not drawn in B's place: the reply is A's question, with no error and nothing typed.
-		const lots = await post("/first-page/budgets", [
+		const lots = await post("/setup/budgets", [
 			["category", String(B)],
 			["budget", "lots"],
 			["answer", "another"],
@@ -1277,7 +1273,7 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 		);
 		// Without JavaScript the same reply is the page again, as a redirect.
 		const plain = await post(
-			"/first-page/budgets",
+			"/setup/budgets",
 			[
 				["category", String(B)],
 				["budget", "lots"],
@@ -1286,7 +1282,7 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 			false,
 		);
 		expect(plain.res.status).toBe(303);
-		expect(plain.res.headers.get("location")).toBe("/first-page");
+		expect(plain.res.headers.get("location")).toBe("/setup");
 		expect(await budgetRows(A)).toEqual([]);
 		expect(await budgetRows(B)).toEqual([]);
 	});
@@ -1295,9 +1291,8 @@ describe("an answer for a category that isn't asked first (#697)", () => {
 describe("the budgets step with nothing to ask (#590 review)", () => {
 	it("says every category already has a budget, above the ruled-off Safe to spend, when Home budgeted them all", async () => {
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
-		await get("/first-page");
-		await post("/first-page/savings", [["answer", "skip"]]);
-		const { html } = await get("/first-page");
+		await get("/setup");
+		const { html } = await post("/setup/savings", [["answer", "skip"]]);
 		const text = textOf(html);
 		expect(text).toContain("Every category already has a budget.");
 		expect(text.indexOf("Every category already has a budget.")).toBeLessThan(
@@ -1311,9 +1306,10 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 
 	it("says there are no categories to budget, not that they are budgeted, when every category is archived (#692 review)", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
-		await get("/first-page");
-		await post("/first-page/savings", [["answer", "skip"]]);
-		const text = textOf((await get("/first-page")).html);
+		await get("/setup");
+		const text = textOf(
+			(await post("/setup/savings", [["answer", "skip"]])).html,
+		);
 		expect(text).toContain("No categories to budget yet.");
 		expect(text.indexOf("No categories to budget yet.")).toBeLessThan(
 			text.indexOf("Safe to spend"),
@@ -1323,8 +1319,8 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 
 	it("says neither line once the stroke is drawn and a category with no budget is added after it (#692 review)", async () => {
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000, MONTH_2)(db);
-		await get("/first-page");
-		await post("/first-page/savings", [["answer", "skip"]]);
+		await get("/setup");
+		await post("/setup/savings", [["answer", "skip"]]);
 		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
 		const added = await db
 			.prepare(
@@ -1335,7 +1331,9 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 			.prepare("UPDATE categories SET archived = 0 WHERE id = ?")
 			.bind(added?.id ?? 0)
 			.run();
-		const text = textOf((await get("/first-page")).html);
+		const text = textOf(
+			String(questionScreen(await settleAndLoad(db, TODAY), { focus: false })),
+		);
 		expect(text).toContain(
 			"Four. Tomorrow Tally keeps count on its own, and that's the fifth.",
 		);
@@ -1346,16 +1344,16 @@ describe("the budgets step with nothing to ask (#590 review)", () => {
 
 describe("the budgets forms carry the month they showed (#692 review)", () => {
 	it("every budgets form on keep all, on one at a time, and on a category with no suggestion carries the month once", async () => {
-		const keepAll = await get("/first-page");
-		const oneAtATime = await get("/first-page?budgets=one");
+		const keepAll = await get("/setup");
+		const oneAtATime = await get("/setup?budgets=one");
 		// Skip A and B, so C, the category with no suggestion, is the one asked: its blank Another amount and Skip.
 		for (const id of [A, B]) {
-			await post("/first-page/budgets", [
+			await post("/setup/budgets", [
 				["category", String(id)],
 				["answer", "skip"],
 			]);
 		}
-		const noSuggestion = await get("/first-page?budgets=one");
+		const noSuggestion = await get("/setup?budgets=one");
 		expect(focusedHeading(noSuggestion.html)).toBe(
 			`Do you want a ${nameC} budget?`,
 		);
@@ -1414,22 +1412,22 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 	}
 
 	it.each([
-		{ label: "keep all", path: "/first-page", answer: "all", extra: [] },
+		{ label: "keep all", path: "/setup", answer: "all", extra: [] },
 		{
 			label: "Yes",
-			path: "/first-page?budgets=one",
+			path: "/setup?budgets=one",
 			answer: "yes",
 			extra: [],
 		},
 		{
 			label: "Another amount",
-			path: "/first-page?budgets=one",
+			path: "/setup?budgets=one",
 			answer: "another",
 			extra: [["budget", "100"]] as [string, string][],
 		},
 		{
 			label: "Skip",
-			path: "/first-page?budgets=one",
+			path: "/setup?budgets=one",
 			answer: "skip",
 			extra: [],
 		},
@@ -1440,7 +1438,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			const drawn = await get(path);
 			vi.setSystemTime(new Date(POSTED));
 			const fields = [...postedBy(drawn.html, answer), ...extra];
-			const res = await post("/first-page/budgets", fields);
+			const res = await post("/setup/budgets", fields);
 			expect(res.res.status).toBe(200);
 			expect(trigger(res.res).toast).toEqual(MONTH_CHANGED);
 			expect(trigger(res.res).announce).toBe(MONTH_CHANGED.message);
@@ -1448,9 +1446,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 			for (const form of budgetFormsOf(res.html))
 				expect(countOf(form, `name="month" value="${NEXT}"`)).toBe(1);
 			if (answer === "all") {
-				expect(focusedHeading(res.html)).toBe(
-					"Keep all 2 budgets, $800 a month?",
-				);
+				expect(focusedHeading(res.html)).toBe("Keep these budgets?");
 			} else {
 				expect(focusedHeading(res.html)).toBe(
 					`Make $650 a month your ${nameA} budget?`,
@@ -1458,18 +1454,18 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 				expect(textOf(res.html)).toContain(`From ${monthName(NEXT)} on.`);
 			}
 			// Without JavaScript the same answer is a redirect back to the page, and it writes nothing.
-			const plain = await post("/first-page/budgets", fields, false);
+			const plain = await post("/setup/budgets", fields, false);
 			expect(plain.res.status).toBe(303);
-			expect(plain.res.headers.get("location")).toBe("/first-page");
+			expect(plain.res.headers.get("location")).toBe("/setup");
 			await nothingWritten();
 		},
 	);
 
 	it("a last-month Another amount with a refused amount gets the month-changed reply at 200, with no error and nothing typed", async () => {
 		vi.setSystemTime(new Date(DRAWN));
-		const drawn = await get("/first-page?budgets=one");
+		const drawn = await get("/setup?budgets=one");
 		vi.setSystemTime(new Date(POSTED));
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			...postedBy(drawn.html, "another"),
 			["budget", "lots"],
 		]);
@@ -1482,7 +1478,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 
 	it("a post with an empty month, from a tab drawn before the month was on its forms, writes nothing and gets the month-changed reply", async () => {
 		vi.setSystemTime(new Date(POSTED));
-		const res = await post("/first-page/budgets", [
+		const res = await post("/setup/budgets", [
 			["category", String(A)],
 			["shown", "65000"],
 			["month", ""],
@@ -1494,7 +1490,7 @@ describe("a form drawn in one month and posted in the next (#692 review)", () =>
 
 	it("a post with no month at all, from a tab drawn before the month was on its forms, writes nothing and gets the month-changed reply", async () => {
 		vi.setSystemTime(new Date(POSTED));
-		const res = await app(db).fetch("/first-page/budgets", {
+		const res = await app(db).fetch("/setup/budgets", {
 			method: "POST",
 			redirect: "manual",
 			headers: {
@@ -1548,7 +1544,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 	async function skipAll() {
 		let last: { res: Response; html: string } | undefined;
 		for (const id of [A, B, C, D]) {
-			last = await post("/first-page/budgets", [
+			last = await post("/setup/budgets", [
 				["category", String(id)],
 				["answer", "skip"],
 			]);
@@ -1559,9 +1555,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	/** The savings forms on a page: the Save it form, then Not now. */
 	const savingsFormsOf = (html: string) =>
-		formsOf(html).filter((form) =>
-			form.includes('action="/first-page/savings"'),
-		);
+		formsOf(html).filter((form) => form.includes('action="/setup/savings"'));
 
 	/**
 	 * The database with a take-back landing right after the savings check (savingsOpen) reads the record, before the refusal
@@ -1612,9 +1606,11 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(forms).toHaveLength(2);
 		const [save, skip] = forms as [string, string];
 		expect(save).toContain('name="goal"');
-		expect(save).toContain('name="answer" value="save"');
-		expect(save).toContain("Save it");
-		expect(defaultButtonOf(save)).toContain('value="save"');
+		// Save it is drawn in the foot with form="savings", so it belongs to the savings form; Enter in its field presses it.
+		expect(html).toMatch(
+			/<button\b(?=[^>]*\bform="savings")(?=[^>]*value="save")/,
+		);
+		expect(textOf(html)).toContain("Save it");
 		expect(skip).toContain('name="answer" value="skip"');
 		expect(skip).toContain("Not now");
 		expect(skip).not.toContain('name="goal"');
@@ -1624,14 +1620,14 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("asks it at load when no category is left, not the Four line", async () => {
 		await db.prepare("UPDATE categories SET archived = 1").run();
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(QUESTION);
 		expect(textOf(html)).not.toContain(FOUR);
 	});
 
 	it("asks it at load when every category already has a budget", async () => {
 		for (const id of [A, B, C, D]) await homeBudget(id, 5000)(db);
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(QUESTION);
 		expect(textOf(html)).not.toContain(FOUR);
 	});
@@ -1644,7 +1640,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(QUESTION);
 		expect(await savingsOf()).toBeUndefined();
 		expect((await readFirstTally(db))?.strokes.budgets).toBeUndefined();
@@ -1661,7 +1657,6 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(textOf(html)).toContain(FOUR);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
-		expect(textOf(html)).toContain("Savings · $300 a month");
 	});
 
 	it("draws stroke four at load, with the goal's cents, when no category is left and a goal above $0 exists", async () => {
@@ -1672,18 +1667,17 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(FOUR);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
-		expect(textOf(html)).toContain("Savings · $300 a month");
 	});
 
 	it("Save it with $300 sets this month's goal, writes its line, draws stroke four, and rules off Safe to spend less the goal", async () => {
 		await skipAll();
 		const before = (await readMonthSummary(db, TODAY, CUR)).summary
 			.safeToSpendCents;
-		const res = await post("/first-page/savings", [
+		const res = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
@@ -1691,7 +1685,6 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(30000);
 		expect(await savingsOf()).toBe(30000);
 		expect((await readFirstTally(db))?.strokes.budgets).toBe(TODAY);
-		expect(textOf(res.html)).toContain("Savings · $300 a month");
 		expect(textOf(res.html)).toContain(FOUR);
 		expect(trigger(res.res).toast).toEqual({
 			message: "Saved the savings goal: $300 a month.",
@@ -1707,13 +1700,12 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("keeps cents: $300.50 is 30050 cents and its line says $300.50", async () => {
 		await skipAll();
-		const res = await post("/first-page/savings", [
+		await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300.50"],
 		]);
 		expect(await goalFor()).toBe(30050);
 		expect(await savingsOf()).toBe(30050);
-		expect(textOf(res.html)).toContain("Savings · $300.50 a month");
 	});
 
 	it("replaces a $0 row for this month rather than failing on its unique key", async () => {
@@ -1724,7 +1716,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const res = await post("/first-page/savings", [
+		const res = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
@@ -1735,7 +1727,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("refuses a blank amount with the words under the field, and writes nothing", async () => {
 		await skipAll();
-		const { res, html } = await post("/first-page/savings", [
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", ""],
 		]);
@@ -1753,7 +1745,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("refuses $0 with the same words, and writes nothing", async () => {
 		await skipAll();
-		const { res, html } = await post("/first-page/savings", [
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "0"],
 		]);
@@ -1765,7 +1757,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("gives bad text and an amount over the largest budget the amount's own words", async () => {
 		await skipAll();
-		const bad = await post("/first-page/savings", [
+		const bad = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "lots"],
 		]);
@@ -1773,7 +1765,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(textOf(bad.html)).toContain(
 			"Enter a dollar amount, like 250 or 250.50.",
 		);
-		const huge = await post("/first-page/savings", [
+		const huge = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "2000000"],
 		]);
@@ -1787,7 +1779,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 	it("without JavaScript a refused Save it returns the whole page at 422, with its error", async () => {
 		await skipAll();
 		const { res, html } = await post(
-			"/first-page/savings",
+			"/setup/savings",
 			[
 				["answer", "save"],
 				["goal", ""],
@@ -1808,7 +1800,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(drawn?.strokes.pay).toBeDefined();
 		expect(drawn?.strokes.bills).toBeDefined();
 		const { res, html } = await post(
-			"/first-page/savings",
+			"/setup/savings",
 			[
 				["answer", "save"],
 				["goal", ""],
@@ -1826,13 +1818,10 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("Not now keeps 'skipped', writes no goal or ledger line, and draws stroke four", async () => {
 		await skipAll();
-		const { res, html } = await post("/first-page/savings", [
-			["answer", "skip"],
-		]);
+		const { res, html } = await post("/setup/savings", [["answer", "skip"]]);
 		expect(res.status).toBe(200);
 		expect(await savingsOf()).toBe("skipped");
 		expect(await goalRows()).toBe(0);
-		expect(textOf(html)).not.toContain("Savings ·");
 		expect(textOf(html)).toContain(FOUR);
 		expect(trigger(res).toast).toEqual({
 			message: "No savings goal for now.",
@@ -1849,14 +1838,13 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const res = await post("/first-page/savings", [
+		const res = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
 		expect(await goalFor()).toBe(20000);
 		expect(await goalRows()).toBe(1);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain("Savings · $200 a month");
 		expect(textOf(res.html)).toContain(FOUR);
 		expect(trigger(res.res).toast).toEqual({
 			message: "Home already has a savings goal: $200 a month.",
@@ -1875,10 +1863,9 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const res = await post("/first-page/savings", [["answer", "skip"]]);
+		const res = await post("/setup/savings", [["answer", "skip"]]);
 		expect(await goalFor()).toBe(20000);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain("Savings · $200 a month");
 		expect(textOf(res.html)).toContain(FOUR);
 		expect(trigger(res.res).toast?.message).toBe(
 			"Home already has a savings goal: $200 a month.",
@@ -1897,7 +1884,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			)
 			.bind(CUR)
 			.run();
-		const res = await post("/first-page/savings", [
+		const res = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", goal],
 		]);
@@ -1905,7 +1892,6 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		expect(await goalFor()).toBe(20000);
 		expect(await goalRows()).toBe(1);
 		expect(await savingsOf()).toBe(20000);
-		expect(textOf(res.html)).toContain("Savings · $200 a month");
 		expect(textOf(res.html)).toContain(FOUR);
 		expect(res.html).not.toContain(QUESTION);
 		expect(textOf(res.html)).not.toContain(BLANK);
@@ -1929,7 +1915,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("gets the month-changed reply for a form drawn in another month, and writes nothing", async () => {
 		await skipAll();
-		const { res, html } = await post("/first-page/savings", [
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 			["month", MONTH_1],
@@ -1947,7 +1933,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("answers a bad answer with 400", async () => {
 		await skipAll();
-		const { res } = await post("/first-page/savings", [
+		const { res } = await post("/setup/savings", [
 			["answer", "yes"],
 			["goal", "300"],
 		]);
@@ -1958,11 +1944,11 @@ describe("the savings question, the budgets step's last question (decision 135, 
 	it("writes one goal and one record when two Save its race", async () => {
 		await skipAll();
 		const [first, second] = await Promise.all([
-			post("/first-page/savings", [
+			post("/setup/savings", [
 				["answer", "save"],
 				["goal", "300"],
 			]),
-			post("/first-page/savings", [
+			post("/setup/savings", [
 				["answer", "save"],
 				["goal", "400"],
 			]),
@@ -1978,8 +1964,8 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("writes nothing for an answer after stroke four, and gets the stale reply", async () => {
 		await skipAll();
-		await post("/first-page/savings", [["answer", "skip"]]);
-		const { res } = await post("/first-page/savings", [
+		await post("/setup/savings", [["answer", "skip"]]);
+		const { res } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "500"],
 		]);
@@ -2003,7 +1989,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			.prepare("UPDATE categories SET archived = 0 WHERE id = ?")
 			.bind(archived.id)
 			.run();
-		const { res, html } = await post("/first-page/savings", [
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
@@ -2018,7 +2004,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		// A blank or $0 Save it is caught by the same reply: the budget is still asked, so the answer is refused with the moved-on
 		// words, not the amount's error.
 		for (const goal of ["", "0"]) {
-			const refused = await post("/first-page/savings", [
+			const refused = await post("/setup/savings", [
 				["answer", "save"],
 				["goal", goal],
 			]);
@@ -2047,8 +2033,8 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			flag_income: 1,
 			raw_name: "NEW PAYER",
 		});
-		expect((await get("/first-page")).html).toContain("Is this your pay?");
-		const { res, html } = await post("/first-page/savings", [
+		expect((await get("/setup")).html).toContain("Is this your pay?");
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
@@ -2068,10 +2054,8 @@ describe("the savings question, the budgets step's last question (decision 135, 
 		// Two charges a month apart with the same amount: Possible bills asks to keep the repeat as a bill.
 		await spend(A, 1549, daysBefore(TODAY, 30), { raw_name: "NETFLIX" });
 		await spend(A, 1549, TODAY, { raw_name: "NETFLIX" });
-		expect((await get("/first-page")).html).toContain(
-			"Keep this one as a bill?",
-		);
-		const { res, html } = await post("/first-page/savings", [
+		expect((await get("/setup")).html).toContain("Keep this one as a bill?");
+		const { res, html } = await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
@@ -2088,17 +2072,16 @@ describe("the savings question, the budgets step's last question (decision 135, 
 
 	it("keeps the answer through a take-back, and the re-ask draws stroke four with no second question", async () => {
 		await skipAll();
-		await post("/first-page/savings", [
+		await post("/setup/savings", [
 			["answer", "save"],
 			["goal", "300"],
 		]);
 		await takeBackQuestionStrokes(db, "Wells Fargo").run();
-		const { html } = await get("/first-page");
+		const { html } = await get("/setup");
 		expect(textOf(html)).toContain(FOUR);
 		expect(textOf(html)).not.toContain(QUESTION);
 		expect(await savingsOf()).toBe(30000);
 		expect(await goalFor()).toBe(30000);
-		expect(textOf(html)).toContain("Savings · $300 a month");
 	});
 
 	it("writes nothing when a pay deposit arrives after the page read and before the Save it batch (#721 review)", async () => {
@@ -2108,7 +2091,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			spend(null, -245000, TODAY, { flag_income: 1, raw_name: "NEW PAYER" }),
 		);
 		const { res, html } = await post(
-			"/first-page/savings",
+			"/setup/savings",
 			[
 				["answer", "save"],
 				["goal", "300"],
@@ -2139,7 +2122,7 @@ describe("the savings question, the budgets step's last question (decision 135, 
 			spend(null, -245000, TODAY, { flag_income: 1, raw_name: "NEW PAYER" }),
 		);
 		const { html } = await post(
-			"/first-page/savings",
+			"/setup/savings",
 			[["answer", "skip"]],
 			true,
 			racing,
