@@ -8,7 +8,7 @@ import {
 } from "../src/apple-card/import";
 import { importWords, rowKey } from "../src/apple-card/plan";
 import { daysBefore } from "../src/dates";
-import { merchantsToAsk, namesStillAsked } from "../src/db/merchant-names";
+import { merchantsToAsk } from "../src/db/merchant-names";
 import { pendingForJev, saveSplit } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 
@@ -593,8 +593,8 @@ describe("importAppleCard: names", () => {
 		expect(asked).not.toContain("BLANK MERCHANT SHOP");
 	});
 
-	it("keeps Apple rows out of the night's count of names still waiting", async () => {
-		const before = await namesStillAsked(db);
+	it("keeps Apple rows out of the bank texts still asked about", async () => {
+		const before = (await merchantsToAsk(db, 1000)).length;
 		await uploadOk(
 			csvOf(
 				row({
@@ -604,7 +604,7 @@ describe("importAppleCard: names", () => {
 				}),
 			),
 		);
-		expect(await namesStillAsked(db)).toBe(before);
+		expect((await merchantsToAsk(db, 1000)).length).toBe(before);
 	});
 });
 

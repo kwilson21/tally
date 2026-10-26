@@ -19,8 +19,6 @@ export type SyncAllResult = {
 	failedBanks: string[];
 	/** Set when the household-wide step after the banks (rules, then bill matching) failed. */
 	afterSyncFailed?: true;
-	/** Set when Plaid isn't enabled here (the demo, or missing secrets): no bank was synced, so the night isn't clean (#714). */
-	disabled?: true;
 };
 
 /** Syncs each healthy Plaid Item in turn so one failure cannot stop the daily catch-up. */
@@ -42,7 +40,6 @@ export async function syncAllItems(
 		failedBanks: [],
 	};
 	if (!enabled(env)) {
-		result.disabled = true;
 		logResult(result);
 		return result;
 	}
