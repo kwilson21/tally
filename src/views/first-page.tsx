@@ -119,7 +119,7 @@ export function FirstPage({
 }
 
 /** The line that names what waits in Possible bills: the count in words, and the link that ends the sentence. */
-function Waiting({ count }: { count: number }) {
+export function Waiting({ count }: { count: number }) {
 	const words = waitingWords(count);
 	if (!words) return null;
 	return (
@@ -336,7 +336,7 @@ function SuggestionRow({ ask }: { ask: BudgetAsk }) {
  * The Needs a category line under the budgets question: a link to the Needs category filter across all months (the same
  * count the line shows, needsCategoryCount "all"), then the count and the mean.
  */
-function NeedsCategory({
+export function NeedsCategory({
 	needs,
 }: {
 	needs: { count: number; meanCents: number | null };
