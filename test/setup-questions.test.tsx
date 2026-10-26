@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BillSuggestion } from "../src/bills/find";
 import { shownBillValue } from "../src/first-tally/bills";
 import type { BudgetAsk } from "../src/first-tally/budgets";
-import { shownBudgetValue } from "../src/first-tally/budgets";
+import { askHeading, shownBudgetValue } from "../src/first-tally/budgets";
 import type { PayMerchant } from "../src/first-tally/first-page";
 import { shownPayValues } from "../src/first-tally/pay";
 import {
@@ -183,7 +183,12 @@ describe("SetupPay", () => {
 
 	it("draws the card: the bank's text, the amount, the cadence, the last three deposits and the earlier count", () => {
 		const markup = pay();
-		expect(markup).toContain('<p class="font-medium">ACME CORP PAYROLL</p>');
+		expect(markup).toContain(
+			'<p class="min-w-0 wrap-break-word font-medium">ACME CORP PAYROLL</p>',
+		);
+		expect(markup).not.toMatch(
+			/<p class="[^"]*\b(flex-1|wrap-anywhere)\b[^"]*">ACME CORP PAYROLL<\/p>/,
+		);
 		expect(markup).toContain("$2,450");
 		expect(markup).toContain("Every other Friday · 7 times since Jul 17");
 		expect(markup).toContain("Fri, Oct 9");
@@ -632,6 +637,23 @@ describe("SetupOneBudget", () => {
 		expect(one()).not.toContain('id="home-seen"');
 		expect(one({ watching: true })).toContain('id="home-seen"');
 	});
+
+	it("draws no skipped steps by default", () => {
+		expect(one()).not.toContain("Your pay");
+	});
+
+	it("draws the skipped steps right under its step bar, as the keep all screen does (#773)", () => {
+		const markup = one({ skipped: [skippedPay(), skippedBills(2)] });
+		expect(markup).toContain("Your pay");
+		expect(markup).toContain("Your bills");
+		expect(markup).toContain("2 more wait in");
+		const bar = markup.indexOf(BUDGETS_STEP);
+		expect(bar).toBeGreaterThanOrEqual(0);
+		expect(markup.indexOf("Your pay")).toBeGreaterThan(bar);
+		expect(markup.indexOf("Your pay")).toBeLessThan(
+			markup.indexOf(askHeading(GROCERIES)),
+		);
+	});
 });
 
 describe("SetupSavings", () => {
@@ -849,5 +871,74 @@ describe("ids and form references across the screens", () => {
 			}),
 		);
 		expect(one.slice(one.indexOf('id="setup-foot"'))).toContain("Yes, $650");
+	});
+});
+
+// A long name with no spaces must wrap inside the screen, not run past its edge (Codex's review of #773's part 1, PR 787). The
+// bills and budgets rows use wrap-anywhere on the name and shrink-0 on the amount. SetupPay's card is the exception: its name
+// is wrap-break-word and its amount may wrap, so a range wraps beside a long name at a phone's width and the name keeps whole words.
+describe("long names wrap inside the setup screens", () => {
+	const LONG = "Unbrokenbankname".repeat(5);
+
+	it("wraps the bank's text in SetupPay's card, and lets the amount wrap beside it", () => {
+		const markup = html(
+			SetupPay({ merchant: { ...PAY, key: LONG, name: LONG }, focus: false }),
+		);
+		expect(markup).toContain(
+			`<p class="min-w-0 wrap-break-word font-medium">${LONG}</p>`,
+		);
+		expect(markup).toMatch(
+			/<p class="font-serif text-2xl font-semibold tabular-nums">\$2,450</,
+		);
+		expect(markup).not.toMatch(/<p class="[^"]*\bshrink-0\b[^"]*">\$2,450</);
+	});
+
+	it("wraps a bill's name in the bills list, and keeps its amount's width", () => {
+		const markup = html(
+			SetupBills({
+				keep: [charge({ displayName: LONG, amountCents: 1549, dueDay: 5 })],
+				waiting: [],
+				focus: false,
+			}),
+		);
+		expect(markup).toMatch(
+			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
+		);
+		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$15\.49</);
+	});
+
+	it("wraps a category's name in the budgets list, and keeps its amount's width", () => {
+		const markup = html(
+			SetupBudgets({
+				asks: [{ ...GROCERIES, name: LONG }],
+				month: "2026-10",
+				needs: null,
+				focus: false,
+			}),
+		);
+		expect(markup).toMatch(
+			new RegExp(`class="[^"]*\\bwrap-anywhere\\b[^"]*"><p>${LONG}</p>`),
+		);
+		expect(markup).toMatch(/class="[^"]*\bshrink-0\b[^"]*">\$650</);
+	});
+
+	it("wraps the category's name in the one-category question's heading", () => {
+		const markup = html(
+			SetupOneBudget({
+				ask: { ...GROCERIES, name: LONG },
+				month: "2026-10",
+				needs: null,
+				focus: false,
+				error: null,
+				amountOpen: false,
+			}),
+		);
+		expect(markup).toContain(LONG);
+		expect(markup).toMatch(/<h1 class="[^"]*\bwrap-anywhere\b[^"]*"/);
+	});
+
+	it("leaves the other headings unwrapped", () => {
+		const markup = html(SetupPay({ merchant: PAY, focus: false }));
+		expect(markup).not.toMatch(/<h1 class="[^"]*\bwrap-anywhere\b/);
 	});
 });

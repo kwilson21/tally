@@ -52,10 +52,23 @@ type Needs = { count: number; meanCents: number | null } | null;
  * A question's serif heading. It takes focus when `focus` is given, as setup-welcome's does, so the screen is read once when it
  * is drawn by a form's swap.
  */
-function Heading({ focus, children }: { focus: boolean; children?: Child }) {
+function Heading({
+	focus,
+	wrap = false,
+	children,
+}: {
+	focus: boolean;
+	/** The words hold a long name (a category, a bank): they wrap rather than run past the screen. */
+	wrap?: boolean;
+	children?: Child;
+}) {
 	return (
 		<h1
-			class="mt-6 font-serif text-4xl font-semibold tracking-tight"
+			class={
+				wrap
+					? "mt-6 font-serif text-4xl font-semibold tracking-tight wrap-anywhere"
+					: "mt-6 font-serif text-4xl font-semibold tracking-tight"
+			}
 			{...(focus ? { tabindex: -1, autofocus: true } : {})}
 		>
 			{children}
@@ -144,8 +157,9 @@ export function SetupPay({
 			</p>
 			<div class="mt-6 rounded-control border border-rule">
 				<div class="px-4 py-3">
+					{/* The amount may wrap: a range wraps at "to", so the name keeps room for whole words beside it. */}
 					<div class="flex items-baseline justify-between gap-3">
-						<p class="font-medium">{merchant.key}</p>
+						<p class="min-w-0 wrap-break-word font-medium">{merchant.key}</p>
 						<p class="font-serif text-2xl font-semibold tabular-nums">
 							{amountWords(merchant.deposits)}
 						</p>
@@ -176,11 +190,11 @@ export function SetupPay({
 function BillRow({ charge }: { charge: BillSuggestion }) {
 	return (
 		<li class="flex items-center gap-3 border-b border-rule py-2">
-			<div class="min-w-0 flex-1">
+			<div class="min-w-0 flex-1 wrap-anywhere">
 				<p>{charge.displayName}</p>
 				<p class="text-sm text-muted">around the {ordinal(charge.dueDay)}</p>
 			</div>
-			<p class="tabular-nums">{dollarsWords(charge.amountCents)}</p>
+			<p class="shrink-0 tabular-nums">{dollarsWords(charge.amountCents)}</p>
 		</li>
 	);
 }
@@ -282,11 +296,11 @@ function BudgetRow({ ask }: { ask: BudgetAsk }) {
 	return (
 		<li class="flex items-center gap-3 border-b border-rule py-2">
 			<CategoryIcon icon={ask.icon} color={ask.color} />
-			<div class="min-w-0 flex-1">
+			<div class="min-w-0 flex-1 wrap-anywhere">
 				<p>{ask.name}</p>
 				<p class="text-sm text-muted tabular-nums">{months}</p>
 			</div>
-			<p class="tabular-nums">
+			<p class="shrink-0 tabular-nums">
 				{dollarsWords(ask.suggestion?.amountCents ?? 0)}
 			</p>
 		</li>
@@ -395,6 +409,7 @@ export function SetupOneBudget({
 	needs,
 	focus,
 	watching = false,
+	skipped = [],
 	error,
 	amountOpen,
 	idSuffix = "",
@@ -404,6 +419,7 @@ export function SetupOneBudget({
 	needs: Needs;
 	focus: boolean;
 	watching?: boolean;
+	skipped?: SkippedNote[];
 	error: BudgetError | null;
 	/** Another amount drawn open with no error, for the catalog's picture of it. */
 	amountOpen: boolean;
@@ -481,7 +497,10 @@ export function SetupOneBudget({
 			}
 		>
 			<StepBar done={3} label={BUDGETS_STEP} />
-			<Heading focus={focus && error === null}>{askHeading(ask)}</Heading>
+			<SkippedSteps notes={skipped} />
+			<Heading focus={focus && error === null} wrap>
+				{askHeading(ask)}
+			</Heading>
 			<p class="mt-3 text-lg text-muted">{bankLine(ask)}</p>
 			{suggestion && (
 				<p class="mt-2 text-sm text-muted">{suggestionNote(month)}</p>

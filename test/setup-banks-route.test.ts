@@ -324,17 +324,19 @@ describe("GET /setup/banks: a step change is announced once (decision 146)", () 
 		expect(same.html).not.toContain('id="home-seen"');
 	});
 
-	it("moves on to the questions once the sort has finished and they open (reading to ready): HX-Redirect to /first-page", async () => {
+	it("draws the first question in place once the sort has finished and they open (reading to ready)", async () => {
 		await readingBanks();
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
-		// Nothing left to sort: the questions open, and the page moves on to them (until #773 they are /first-page).
+		// Nothing left to sort: the questions open, and the first question is drawn into the screen in place.
 		await saveAiSwitches(env.DB, { categories: false, income: false });
 		const ids = (await connectedIds()).join(",");
-		const { res } = await refresh(`?in=${ids}&step=sorting`);
-		expect(res.status).toBe(204);
-		expect(res.headers.get("HX-Redirect")).toBe("/first-page");
+		const { res, html } = await refresh(`?in=${ids}&step=sorting`);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("HX-Retarget")).toBe("#setup-screen");
+		expect(res.headers.get("HX-Reswap")).toBe("outerHTML");
+		expect(html).toContain('id="setup-screen"');
 	});
 });
 

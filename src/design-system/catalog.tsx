@@ -8520,6 +8520,7 @@ function FirstWeekGroup() {
 		keep: [],
 		waiting: [],
 		budgets: null,
+		budgetsAnswered: false,
 		watching: false,
 		...over,
 	});
@@ -9196,6 +9197,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								nothingAsked: null,
 								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_EATING_OUT],
@@ -9220,6 +9222,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								nothingAsked: null,
 								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES, FIRST_WEEK_GAS],
@@ -9240,6 +9243,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								nothingAsked: null,
 								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GROCERIES],
@@ -9263,6 +9267,7 @@ function FirstWeekGroup() {
 								pay: [],
 								budgets: {
 									done: false,
+									nothingAsked: null,
 									firstDate: "2026-08-01",
 									month: "2026-10",
 									asks: [FIRST_WEEK_GROCERIES],
@@ -9288,6 +9293,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								nothingAsked: null,
 								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [FIRST_WEEK_GAS],
@@ -9363,6 +9369,7 @@ function FirstWeekGroup() {
 							pay: [],
 							budgets: {
 								done: false,
+								nothingAsked: null,
 								firstDate: "2026-08-01",
 								month: "2026-10",
 								asks: [],
@@ -9389,6 +9396,7 @@ function FirstWeekGroup() {
 								pay: [],
 								budgets: {
 									done: false,
+									nothingAsked: null,
 									firstDate: "2026-08-01",
 									month: "2026-10",
 									asks: [],

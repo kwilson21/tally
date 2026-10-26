@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { addressOf } from "../address";
 import { householdToday } from "../dates";
 import { bankSyncs } from "../db/accounts";
+import { settleAndLoad } from "../first-tally/first-page";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import {
 	bankState,
@@ -25,12 +26,17 @@ import {
 } from "../views/setup-reading";
 import { SetupWelcome, WELCOME_HEADING } from "../views/setup-welcome";
 import { YourBanks } from "../views/your-banks";
+import {
+	drawQuestionScreen,
+	questionHeading,
+	questionsPage,
+} from "./first-page";
 import { enabled } from "./plaid";
 
-// Setup (P142 A, decision 148, spec §8.8): a new family's first screens, the welcome before a bank and Reading your bank
-// after one. Home sends a new family here until the questions open; once they do, /setup sends the family to the questions
-// (/first-page, until #773), and once the three questions are answered, to Home. The setup screen's refresh and check-in
-// draw and move it in place (redrawSetup), so nothing reloads the page.
+// Setup (P142 A, decision 148, spec §8.8): a new family's first screens: the welcome before a bank, Reading your bank after
+// one, and the questions once they open (one screen each, routes/first-page.tsx). Home sends a new family here until the
+// questions are answered, and then to Home. The setup screen's refresh and check-in draw and move it in place (redrawSetup),
+// so nothing reloads the page.
 
 type App = { Bindings: Env };
 export const setupRoute = new Hono<App>();
@@ -100,9 +106,10 @@ function anotherBankLink(env: Env) {
 
 /**
  * The setup screen moved on in place (decision 146): a phase that left the reading screen is answered here, with no reload.
- * The questions open: the questions page (/first-page) is the next screen. Set up, answered or the fifth day: Home is.
- * Otherwise the screen is redrawn into #setup-screen, with the words it draws announced (`said` first) and its heading or
- * status taking focus, since the control that had it has gone.
+ * The questions open: the first question is drawn into #setup-screen in place, announced with the words of the question
+ * (`said` first, then "Your questions are ready." and the question's heading), and its heading takes the focus. Set up,
+ * answered or the fifth day: Home is. Otherwise the screen is redrawn into #setup-screen, with the words it draws announced
+ * (`said` first) and its heading or status taking focus, since the control that had it has gone.
  */
 export async function redrawSetup(
 	c: Context<App>,
@@ -111,8 +118,18 @@ export async function redrawSetup(
 ) {
 	const { today, banks, flagged, setup } = read;
 	if (setup?.phase === "ready") {
-		c.header("HX-Redirect", "/first-page");
-		return c.body(null, 204);
+		const model = await settleAndLoad(c.env.DB, today);
+		const heading = questionHeading(model);
+		const message = [said, "Your questions are ready.", heading ?? ""]
+			.filter(Boolean)
+			.join(" ");
+		c.header("HX-Retarget", "#setup-screen");
+		c.header("HX-Reswap", "outerHTML");
+		c.header(
+			"HX-Trigger",
+			hxTrigger({ toast: { message, type: "info" }, announce: message }),
+		);
+		return c.html(drawQuestionScreen(model, { focus: true }));
 	}
 	if (!setup || setup.fifth || setup.phase === "answered") {
 		c.header("HX-Redirect", "/");
@@ -147,9 +164,11 @@ export async function redrawSetup(
 }
 
 /**
- * The setup's full page: the welcome before a bank, Reading your bank after one. The family app only. The demo has no setup and
- * answers 404. Once the questions are open it sends the family to them (/first-page), and once they are answered, or the fifth
- * day is drawn, Home.
+ * The setup's full page: the welcome before a bank, Reading your bank after one, and the questions once they are open (one
+ * screen each; `?budgets=one` asks the budgets one category at a time, with its question focused). The family app only. The
+ * demo has no setup and answers 404. Once the questions are answered, or the fifth day is drawn, Home. So, unlike the old
+ * question page, a reload after the last answer opens Home rather than drawing the ruled-off total. A settle on this load that
+ * completes the budgets step draws the ruled-off total, at 200.
  */
 setupRoute.get("/setup", async (c) => {
 	if (c.env.DEMO === "true") return c.notFound();
@@ -158,7 +177,11 @@ setupRoute.get("/setup", async (c) => {
 	const view = await readSetup(c.env.DB, { today, flagged });
 	if (!view || view.fifth || view.phase === "answered")
 		return c.redirect("/", 303);
-	if (view.phase === "ready") return c.redirect("/first-page", 303);
+	if (view.phase === "ready") {
+		const oneAtATime = c.req.query("budgets") === "one";
+		const model = await settleAndLoad(c.env.DB, today, { oneAtATime });
+		return c.html(questionsPage(model, oneAtATime));
+	}
 	const pushKeys = await vapidKeys(c.env);
 	const plaidButton = enabled(c.env) && loadsPlaid(c);
 	const plaid = plaidScripts(plaidButton);

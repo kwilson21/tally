@@ -92,6 +92,11 @@ export type FirstPageModel = {
 	/** The budgets step (spec §8.8): null until pay and bills are done, since the page asks them first. */
 	budgets: BudgetsStep | null;
 	/**
+	 * True once a budgets answer is recorded, a skip included (first_tally's `budgets` has an entry). A budgets screen draws
+	 * the steps that asked nothing only while this is false, so the notes show on the step's first screen (P142 A, #773).
+	 */
+	budgetsAnswered: boolean;
+	/**
 	 * True while no question is answered in the record once the page has settled its own draws (anyQuestionAnswered): the
 	 * check-in a page or an answer's reply keeps (decision 146). Settling draws the pay step when there is no paycheck to
 	 * ask about, so that page draws no check-in.
@@ -131,6 +136,11 @@ export type BudgetsStep =
 			 * months were read. A suggested answer's write checks it is unchanged, so the window it was read from still holds.
 			 */
 			firstDate: string | null;
+			/**
+			 * Why the step asked nothing, when no category is asked and none is answered (nothingAskedReason), or null otherwise:
+			 * the reason the setup screen's note under the step bar says (P142 A, #773).
+			 */
+			nothingAsked: NothingAsked | null;
 	  };
 
 /**
@@ -494,6 +504,7 @@ async function budgetsStep(
 			keepAllOpen: false,
 			needs: null,
 			firstDate: null,
+			nothingAsked: await nothingAskedReason(db, month, record),
 		};
 	const first = await db
 		.prepare(HISTORY_FIRST_SQL)
@@ -526,7 +537,16 @@ async function budgetsStep(
 	const count = await needsCategoryCount(db, "all");
 	const needs =
 		count > 0 ? { count, meanCents: monthlyMeanCents(monthsOf(null)) } : null;
-	return { done: false, month, asks, keepAllOpen, needs, firstDate };
+	// asks is never empty here (an empty step returned above), so the step asked something and has no reason to give.
+	return {
+		done: false,
+		month,
+		asks,
+		keepAllOpen,
+		needs,
+		firstDate,
+		nothingAsked: null,
+	};
 }
 
 /**
@@ -703,6 +723,7 @@ export async function settleAndLoad(
 		keep: split.keep,
 		waiting: split.waiting,
 		budgets: done ? await budgetsStep(db, today, record, oneAtATime) : null,
+		budgetsAnswered: Object.keys(record?.budgets ?? {}).length > 0,
 		watching: !anyQuestionAnswered(record),
 	};
 }

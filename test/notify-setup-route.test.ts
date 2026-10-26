@@ -104,7 +104,7 @@ describe("setup's reading screen: the control and its script", () => {
 		expect(html).not.toContain(CONTROL);
 	});
 
-	it("once the questions are open, with the keys: the page moves on to the questions, with no control to draw", async () => {
+	it("once the questions are open, with the keys: the questions are drawn, with no control and no push.js", async () => {
 		await env.DB.prepare(
 			"UPDATE plaid_items SET history_complete_at = datetime('now')",
 		).run();
@@ -113,8 +113,11 @@ describe("setup's reading screen: the control and its script", () => {
 			budgets: {},
 		});
 		const response = await setupRoute.request("/setup", {}, pushing);
-		expect(response.status).toBe(303);
-		expect(response.headers.get("location")).toBe("/first-page");
+		expect(response.status).toBe(200);
+		const questions = await response.text();
+		expect(questions).toContain('id="setup-screen"');
+		expect(questions).not.toContain(CONTROL);
+		expect(questions).not.toContain(PUSH_MODULE);
 	});
 
 	it("on a past month, and once the questions are answered, Home draws no control and loads no push.js", async () => {
