@@ -1,7 +1,8 @@
 // The setup question screens (P142 A, decision 148, spec §8.8, #773): once the questions are open, each question is one screen:
 // the step bar, the question as the serif heading, the bank's own numbers as a ruled card or list, and the answers at the foot.
-// The words are the picked drawing's (proposals-setup.tsx's PayBody, BudgetsBody) and the old question page's, which setup replaced (#773),
-// and each form carries the fields the answer reads (routes/first-page.tsx). A form swaps the whole screen (#setup-screen).
+// The words are the picked drawing's (proposals-setup.tsx's PayBody, BudgetsBody) and the old question page's, which setup
+// replaced (#773), and each form carries the fields the answer reads (routes/first-page.tsx). A form swaps the whole screen
+// (#setup-screen).
 import type { Child } from "hono/jsx";
 import type { BillSuggestion } from "../bills/find";
 import { monthName, ordinal, shortMonthName } from "../dates";
