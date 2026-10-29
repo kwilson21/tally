@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, todayIn } from "../src/dates";
+import { appleCardUpload } from "../src/db/accounts";
 import { resetDemo } from "../src/demo/reset";
 import { home } from "../src/routes/home";
 
@@ -140,5 +141,20 @@ describe("Home's Apple Card line", () => {
 		expect(textOf(html)).toContain(`${FIRST} stopped updating Oct 3`);
 		expect(textOf(html)).toContain(`${LINE} Sep 30`);
 		expect(html).toContain("as of Sep 30");
+	});
+});
+
+// Home reads the card's upload day and removal alone, so a Home load doesn't scan the card's transactions for `through`.
+describe("appleCardUpload", () => {
+	it("returns the card's upload day and removal, and no other column", async () => {
+		await addCard("2026-09-30", "2026-10-02 09:00:00");
+		expect(await appleCardUpload(env.DB)).toEqual({
+			uploadedOn: "2026-09-30",
+			removedAt: "2026-10-02 09:00:00",
+		});
+	});
+
+	it("is null before the household has an Apple Card", async () => {
+		expect(await appleCardUpload(env.DB)).toBeNull();
 	});
 });

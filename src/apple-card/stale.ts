@@ -12,7 +12,7 @@ export const APPLE_STALE_AFTER_DAYS = 7;
  * no upload yet. The line says what the bank line says, and Home's as-of tag can take this day too (asOfDate).
  */
 export function appleCardNotice(
-	card: AppleCardAccount | null,
+	card: Pick<AppleCardAccount, "uploadedOn" | "removedAt"> | null,
 	today: string,
 ): { words: string; since: string } | null {
 	if (!card || card.removedAt !== null || card.uploadedOn === null) return null;

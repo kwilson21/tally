@@ -451,18 +451,8 @@ export const BANK_LINES = {
  * 138). Kept out of BANK_LINES, which lists the banks' wordings only.
  */
 export const APPLE_LINE =
-	appleCardNotice(
-		{
-			id: 1,
-			balanceCents: 124000,
-			balanceOn: "2026-09-28",
-			uploadedOn: "2026-09-28",
-			removedAt: null,
-			countedFrom: "2026-09-28",
-			through: "2026-09-27",
-		},
-		BANK_TODAY,
-	)?.words ?? "";
+	appleCardNotice({ uploadedOn: "2026-09-28", removedAt: null }, BANK_TODAY)
+		?.words ?? "";
 
 /** The money input in each state it can show. */
 export const MONEY_STATES = [

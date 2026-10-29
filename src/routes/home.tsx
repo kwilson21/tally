@@ -7,7 +7,7 @@ import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
-import { appleCardAccount, bankSyncs } from "../db/accounts";
+import { appleCardUpload, bankSyncs } from "../db/accounts";
 import {
 	budgetCategory,
 	lastMonthSpentCents,
@@ -231,7 +231,7 @@ async function renderHome(
 	// feeds `flagged` or setup, and its day joins the as-of tag below.
 	const appleNotice =
 		current && !demo
-			? appleCardNotice(await appleCardAccount(c.env.DB), today)
+			? appleCardNotice(await appleCardUpload(c.env.DB), today)
 			: null;
 	const day = Number(today.slice(8, 10));
 	const forecastDays = current
