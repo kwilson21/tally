@@ -25,6 +25,8 @@ type Props = {
 	status: string;
 	/** Each connected bank that needs attention, in words (src/stale-bank.ts). */
 	bankLine?: string[];
+	/** Apple Card's reminder, in words, once it hasn't been updated for a week (src/apple-card/stale.ts). */
+	appleLine?: string;
 	/** The short date printed in the as-of tag. */
 	bankDate?: string;
 	dailyAmount?: string;
@@ -60,6 +62,7 @@ export function HomeTop({
 	safeToSpendCents,
 	status,
 	bankLine,
+	appleLine,
 	band,
 	bankDate,
 	dailyAmount,
@@ -108,12 +111,21 @@ export function HomeTop({
 				{homeStatusWords(status, safeToSpendCents, hasBudgets)}
 			</p>
 			{currentMonth && bankLine && <BankBehind words={bankLine} />}
+			{currentMonth && appleLine && (
+				<BankBehind
+					words={[appleLine]}
+					icon="card"
+					label="Upload"
+					srLabel=" an Apple Card file in Accounts"
+					href="/accounts/apple-card"
+				/>
+			)}
 			{currentMonth && dailyAmount && (
 				<p class="mt-1 text-muted">{dailyAmount}</p>
 			)}
 			{currentMonth && forecast}
 			{band && (
-				<div class={bankLine ? "mt-2" : "mt-4"}>
+				<div class={bankLine || appleLine ? "mt-2" : "mt-4"}>
 					<Band href={band.href} detail={band.detail} older={band.older}>
 						{band.text}
 					</Band>

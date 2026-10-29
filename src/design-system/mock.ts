@@ -1,5 +1,6 @@
 // Typed fake data for the catalog. It never touches the database; TypeScript checks each value
 // against the component's props, so a changed component fails `npm run typecheck` here first.
+import { appleCardNotice } from "../apple-card/stale";
 import { MAX_BUDGET_CENTS } from "../budgets/amount";
 import { daysBefore } from "../dates";
 import type { ListRow, StartHereLines } from "../db/transactions";
@@ -444,6 +445,24 @@ export const BANK_LINES = {
 			BANK_TODAY,
 		)?.words ?? [],
 };
+
+/**
+ * Apple Card's line, from Home's own rule: a card uploaded a week before BANK_TODAY, so it reads "since Sep 28" (decision
+ * 138). Kept out of BANK_LINES, which lists the banks' wordings only.
+ */
+export const APPLE_LINE =
+	appleCardNotice(
+		{
+			id: 1,
+			balanceCents: 124000,
+			balanceOn: "2026-09-28",
+			uploadedOn: "2026-09-28",
+			removedAt: null,
+			countedFrom: "2026-09-28",
+			through: "2026-09-27",
+		},
+		BANK_TODAY,
+	)?.words ?? "";
 
 /** The money input in each state it can show. */
 export const MONEY_STATES = [

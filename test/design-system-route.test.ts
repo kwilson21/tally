@@ -5,6 +5,7 @@ import dsScript from "../public/js/ds.js?raw";
 import { parseBudgetAmount } from "../src/budgets/amount";
 import {
 	ADJUST_ROWS,
+	APPLE_LINE,
 	BAND,
 	BANK_LINES,
 	BUDGET_EXAMPLE,
@@ -558,15 +559,21 @@ describe("GET /design-system in the demo", () => {
 		expect(BANK_LINES.signIn[0]).toContain("needs signing in");
 		expect(BANK_LINES.several[0]).toContain("Citi stopped updating Sep 20");
 		expect(BANK_LINES.several[1]).toContain("Chase needs signing in");
+		// Apple Card's line is Home's rule too, and is kept out of BANK_LINES (decision 138).
+		expect(APPLE_LINE).toBe("Apple Card hasn't been updated since Sep 28");
+		expect(section).toContain(APPLE_LINE.replaceAll("'", "&#39;"));
 		// Each picture is described in words, the bank's words and its link included.
 		const labels = [...section.matchAll(/role="img" aria-label="([^"]*)"/g)]
 			.map((m) => m[1] ?? "")
 			.filter((l) => l.includes("Home"));
-		expect(labels).toHaveLength(3);
-		for (const label of labels.slice(-3)) {
-			expect(label).toContain("Safe to spend $283");
-			expect(label).toContain("Fix");
-		}
+		expect(labels).toHaveLength(5);
+		for (const label of labels) expect(label).toContain("Safe to spend $283");
+		for (const label of labels.slice(0, 3)) expect(label).toContain("Fix");
+		// Apple Card's line alone, then with a bank's line: Upload, and Fix beside it.
+		expect(labels[3]).toContain(APPLE_LINE.replaceAll("'", "&#39;"));
+		expect(labels[3]).toContain("Upload");
+		expect(labels[4]).toContain("Fix");
+		expect(labels[4]).toContain("Upload");
 		// The 44px link, drawn in a family app's phone (no demo banner) beside Home's real top.
 		expect(section).toContain("Fix");
 		expect(section).toContain("min-h-11");

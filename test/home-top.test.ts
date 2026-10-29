@@ -131,3 +131,52 @@ describe("HomeTop", () => {
 		expect(html).not.toContain("How this works");
 	});
 });
+
+// Apple Card's line comes after a bank's line, in its own box, and Home's Band sits under either (decision 138).
+describe("HomeTop with Apple Card's line", () => {
+	const APPLE = "Apple Card hasn't been updated since Oct 12";
+
+	it("puts a bank's line before Apple Card's, and both before the forecast", async () => {
+		const html = await top({
+			bankLine: ["Chase stopped updating Oct 2"],
+			appleLine: APPLE,
+		});
+		expect(html.indexOf("Chase stopped updating Oct 2")).toBeLessThan(
+			html.indexOf("Apple Card hasn&#39;t been updated since Oct 12"),
+		);
+		expect(html.indexOf("Apple Card hasn&#39;t")).toBeLessThan(
+			html.indexOf("forecast"),
+		);
+		expect(html).toContain('href="/accounts/apple-card"');
+		expect(html).toContain('data-icon="card"');
+		expect(html.match(/data-icon="bank"/g) ?? []).toHaveLength(1);
+	});
+
+	it("draws Apple Card's line alone, with its Upload link", async () => {
+		const html = await top({ appleLine: APPLE });
+		expect(html).toContain("Apple Card hasn&#39;t been updated since Oct 12");
+		expect(html).toContain(">Upload<");
+		expect(html).not.toContain("Fix");
+	});
+
+	it("draws neither line for a finished month", async () => {
+		const html = await top({
+			currentMonth: false,
+			bankLine: ["Chase stopped updating Oct 2"],
+			appleLine: APPLE,
+		});
+		expect(html).not.toContain("Apple Card");
+		expect(html).not.toContain("Chase stopped updating");
+		expect(html).not.toContain('href="/accounts/apple-card"');
+	});
+
+	it("sits the Band at mt-2 under Apple Card's line, as under a bank's", async () => {
+		const html = await top({ bankLine: undefined, appleLine: APPLE });
+		expect(html).toContain(
+			'<div class="mt-2"><a href="/transactions?uncategorized=1"',
+		);
+		expect(html).not.toContain(
+			'<div class="mt-4"><a href="/transactions?uncategorized=1"',
+		);
+	});
+});
