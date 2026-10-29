@@ -26,11 +26,11 @@ export type FlagWords =
 /** A flagged bank: the id of its row, then its name, reason and date (bankFlag). */
 export type FlaggedBank = { id: number } & FlagWords;
 
-/** Home's selected wording and the date attached to the Safe to spend amount. */
+/** Home's selected wording, and the as-of tag on the Safe to spend amount with the date it was formatted from. */
 export function homeBankNotice(
 	flagged: FlagWords[],
 	today: string,
-): { words: string[]; asOf?: string } | null {
+): { words: string[]; asOf?: string; since?: string } | null {
 	if (flagged.length === 0) return null;
 	const sorted = [...flagged].sort((a, b) => {
 		if (a.since && b.since)
@@ -59,8 +59,26 @@ export function homeBankNotice(
 		words: visible,
 		...(dated && {
 			asOf: shortDay(dated.since, today),
+			since: dated.since,
 		}),
 	};
+}
+
+/**
+ * The as-of tag's date for Home's Safe to spend amount: the earliest of the YYYY-MM-DD dates given, as `shortDay` formats
+ * it, or undefined when none is given. A bank's sync date and Apple Card's upload day both feed it (decision 138).
+ */
+export function asOfDate(
+	dates: (string | undefined)[],
+	today: string,
+): string | undefined {
+	const given = dates.filter((date): date is string => date !== undefined);
+	if (given.length === 0) return undefined;
+	// Both are YYYY-MM-DD, so comparing them as strings compares the dates.
+	return shortDay(
+		given.reduce((earliest, date) => (date < earliest ? date : earliest)),
+		today,
+	);
 }
 
 /**
