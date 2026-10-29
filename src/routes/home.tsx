@@ -2,11 +2,12 @@ import { type Context, Hono } from "hono";
 import type { Child } from "hono/jsx";
 import { actor } from "../actor";
 import { addressOf } from "../address";
+import { appleCardNotice } from "../apple-card/stale";
 import { billTotalsForRows } from "../bills/totals";
 import { statusSentence } from "../budget";
 import { MAX_BUDGET_CENTS, parseBudgetAmount } from "../budgets/amount";
 import { daysInMonth, householdToday, monthLabel, monthName } from "../dates";
-import { bankSyncs } from "../db/accounts";
+import { appleCardUpload, bankSyncs } from "../db/accounts";
 import {
 	budgetCategory,
 	lastMonthSpentCents,
@@ -31,7 +32,12 @@ import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
 import { hxTrigger } from "../htmx";
 import { centsToAmount, formatCents } from "../money";
 import { readMonthSummary } from "../month-summary";
-import { type FlaggedBank, flaggedBanks, homeBankNotice } from "../stale-bank";
+import {
+	asOfDate,
+	type FlaggedBank,
+	flaggedBanks,
+	homeBankNotice,
+} from "../stale-bank";
 import { AdjustLink } from "../views/adjust-link";
 import { BillRow } from "../views/bill-row";
 import { BottomSheet } from "../views/bottom-sheet";
@@ -221,6 +227,12 @@ async function renderHome(
 		setupRead?.flagged ??
 		(demo || !current ? [] : flaggedBanks(await bankSyncs(c.env.DB), today));
 	const bankNotice = homeBankNotice(flagged, today);
+	// Apple Card's line (decision 138): the current month only, never in the demo. It is not a flagged bank, so it never
+	// feeds `flagged` or setup, and its day joins the as-of tag below.
+	const appleNotice =
+		current && !demo
+			? appleCardNotice(await appleCardUpload(c.env.DB), today)
+			: null;
 	const day = Number(today.slice(8, 10));
 	const forecastDays = current
 		? await homeForecastDays(c.env.DB, month, today)
@@ -303,7 +315,11 @@ async function renderHome(
 								hasBudgets={hasBudgets}
 								status={statusSentence(summary.categories)}
 								bankLine={bankNotice?.words}
-								bankDate={bankNotice?.asOf}
+								appleLine={appleNotice?.words}
+								bankDate={asOfDate(
+									[bankNotice?.since, appleNotice?.since],
+									today,
+								)}
 								dailyAmount={dailyAmount}
 								forecast={
 									showForecast && (

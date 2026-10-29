@@ -187,6 +187,7 @@ import { YourBanks } from "../views/your-banks";
 import { DEMO_MONTH_RESULTS } from "./demo-month-results";
 import {
 	ADJUST_ROWS,
+	APPLE_LINE,
 	BAND,
 	BANK_LINES,
 	BANKS,
@@ -922,20 +923,20 @@ const ADJUST_SPEC: UseSpecText = {
 // The stale-bank line's use spec (decision 72, P37 A): every line answered before the owner signs it off.
 const BANK_LINE_SPEC: UseSpecText = {
 	purpose:
-		"Show when Safe to spend was last current and take a person to Accounts when a bank needs attention.",
+		"Show when Safe to spend was last current, take a person to Accounts when a bank needs attention, and offer Apple Card's upload once its file is a week old.",
 	affordance:
-		"A dashed “as of” tag sits on the amount; one soft brick-tinted line has a bank icon, each bank's words on its own line, and one 44px Fix button.",
+		"A dashed “as of” tag sits on the amount; one soft brick-tinted line has a bank icon, each bank's words on its own line, and one 44px Fix button. Apple Card's line is its own soft brick-tinted box under the banks' line, with the card icon, its words and one 44px Upload button.",
 	states:
-		"Shown: a connected bank needs signing in, or hasn't synced for 3 days from the household's today. Not shown: a healthy bank, a disconnected bank, a bank with no recorded sync that doesn't need attention, and the demo.",
+		"Shown: a connected bank needs signing in, or hasn't synced for 3 days from the household's today. Apple Card's line is shown 7 household days after its last upload, counted from the upload and never from its last charge. Not shown: a healthy bank, a disconnected bank, a bank with no recorded sync that doesn't need attention, Apple Card before then or once removed, a past month, and the demo.",
 	feedback:
-		"Fix opens Accounts. Once the bank is fixed or syncs again, the line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
+		"Fix opens Accounts; Upload opens Accounts with the upload sheet open. Once the bank is fixed or syncs again, the line is gone the next time Home loads; after an upload, Apple Card's line is gone the next time Home loads. Nothing is announced: it is part of the page, not an answer to something a person did.",
 	input:
-		"Touch: Fix is 44px tall. Keyboard: Tab reaches Fix after the bank lines; Enter opens Accounts. Screen reader: each bank is a list item, then “Fix the bank in Accounts”; the icon is hidden because the words carry the meaning.",
+		"Touch: Fix and Upload are 44px tall. Keyboard: Tab reaches Fix after the bank lines, then Upload after Fix when both show; Enter opens Accounts, or the upload sheet for Upload. Screen reader: each bank is a list item, then “Fix the bank in Accounts”; Apple Card's words, then “Upload an Apple Card file in Accounts”; the icons are hidden because the words carry the meaning.",
 	motion: "None.",
 	edges:
-		"A bank that needs signing in says so without a sync date. Dated banks come first, oldest first; equal dates and banks without dates sort by name. Up to three banks have their own line, followed by a count when more remain. The as-of tag uses the oldest available date. A long bank name wraps. No JavaScript: Fix is a plain link to Accounts.",
+		"A bank that needs signing in says so without a sync date. Dated banks come first, oldest first; equal dates and banks without dates sort by name. Up to three banks have their own line, followed by a count when more remain. The as-of tag uses the oldest available date, and Apple Card's upload day counts as one of those dates, so the earlier one shows. A long bank name wraps. Apple Card's line comes after the banks' line, in its own tinted box. No JavaScript: Fix and Upload are plain links.",
 	words:
-		"Tag: “as of Sep 20” · “Chase stopped updating Sep 20” · “Capital One needs signing in” · Fix.",
+		"Tag: “as of Sep 20” · “Chase stopped updating Sep 20” · “Capital One needs signing in” · Fix. Apple Card: “Apple Card hasn't been updated since Oct 12” · Upload.",
 };
 
 // The notify control's fake key: the catalog never subscribes, so the key only has to be a value the attribute can hold.
@@ -1418,6 +1419,7 @@ function describeHome({
 	band = true,
 	rows = true,
 	bankLine,
+	appleLine,
 	bankDate,
 	dailyAmount,
 	forecast = true,
@@ -1425,6 +1427,7 @@ function describeHome({
 	band?: boolean;
 	rows?: boolean;
 	bankLine?: string[];
+	appleLine?: string;
 	bankDate?: string;
 	dailyAmount?: string;
 	forecast?: boolean;
@@ -1435,6 +1438,7 @@ function describeHome({
 		HOME_TOP.status,
 		...(bankDate ? [`as of ${bankDate}`] : []),
 		...(bankLine ? [...bankLine, "Fix"] : []),
+		...(appleLine ? [appleLine, "Upload"] : []),
 		...(forecast ? ["Forecast"] : dailyAmount ? [dailyAmount] : []),
 		...(band ? [HOME_TOP.band.text, HOME_TOP.band.detail] : []),
 	];
@@ -1451,12 +1455,14 @@ function describeHome({
 function HomeSketch({
 	band = true,
 	bankLine,
+	appleLine,
 	bankDate,
 	dailyAmount,
 	forecast,
 }: {
 	band?: boolean;
 	bankLine?: string[];
+	appleLine?: string;
 	bankDate?: string;
 	dailyAmount?: string;
 	forecast?: Child;
@@ -1467,6 +1473,7 @@ function HomeSketch({
 				{...HOME_TOP}
 				monthHeading={HOME_MONTH_HEADING}
 				bankLine={bankLine}
+				appleLine={appleLine}
 				bankDate={bankDate}
 				dailyAmount={dailyAmount}
 				forecast={forecast}
@@ -2113,7 +2120,7 @@ function HomeTopGroup() {
 				title="BankBehind"
 				tier="visual"
 				components={["BankBehind"]}
-				sentence="Each bank that needs attention gets its own line under one bank icon and one Fix button; the as-of date is the oldest bank date (decision 95, Q82 C)."
+				sentence="Each bank that needs attention gets its own line under one bank icon and one Fix button; the as-of date is the oldest bank date (decision 95, Q82 C). Apple Card's line comes a week after its last upload: the same soft line with the card icon and an Upload button, after the banks' line (decision 138); the as-of date then takes the earlier of the oldest bank date and the upload day."
 			>
 				<State label="The amount's as-of date and stale bank alert on a phone">
 					<PhoneFrame
@@ -2147,6 +2154,32 @@ function HomeTopGroup() {
 							{...HOME_TOP}
 							monthHeading={HOME_MONTH_HEADING}
 							bankLine={BANK_LINES.several}
+							forecast={forecast}
+						/>
+					</Picture>
+				</State>
+				<State label="Apple Card not updated for a week, on a phone">
+					<PhoneFrame
+						demo={false}
+						label={`Home on a phone in the family app: ${describeHome({ appleLine: APPLE_LINE, bankDate: "Sep 28" })}`}
+					>
+						<HomeSketch
+							appleLine={APPLE_LINE}
+							bankDate="Sep 28"
+							forecast={forecast}
+						/>
+					</PhoneFrame>
+				</State>
+				<State label="A bank and Apple Card, with one as-of date">
+					<Picture
+						label={`Home's top with a bank and Apple Card: ${describeHome({ bankLine: BANK_LINES.stale, appleLine: APPLE_LINE, bankDate: "Sep 28", rows: false })}`}
+					>
+						<HomeTop
+							{...HOME_TOP}
+							monthHeading={HOME_MONTH_HEADING}
+							bankLine={BANK_LINES.stale}
+							appleLine={APPLE_LINE}
+							bankDate="Sep 28"
 							forecast={forecast}
 						/>
 					</Picture>

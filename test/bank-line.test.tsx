@@ -80,3 +80,35 @@ describe("HomeTop with a bank behind", () => {
 		expect(html).not.toContain("bg-band");
 	});
 });
+
+describe("BankBehind for Apple Card", () => {
+	const apple = String(
+		BankBehind({
+			words: ["Apple Card hasn't been updated since Oct 12"],
+			icon: "card",
+			label: "Upload",
+			srLabel: " an Apple Card file in Accounts",
+			href: "/accounts/apple-card",
+		}),
+	);
+
+	it("draws the card icon, the words, and an Upload link to the upload sheet's page", () => {
+		expect(apple).toContain("Apple Card hasn&#39;t been updated since Oct 12");
+		expect(apple).toContain('data-icon="card"');
+		expect(apple).not.toContain('data-icon="bank"');
+		expect(apple).toMatch(
+			/<a href="\/accounts\/apple-card" class="[^"]*min-h-11[^"]*">Upload<span class="sr-only"> an Apple Card file in Accounts<\/span><\/a>/,
+		);
+		expect(apple).not.toContain("Fix");
+		expect(apple).not.toContain('href="/accounts"');
+	});
+
+	it("keeps the bank icon, Fix and the Accounts link when no new props are given", () => {
+		const bank = String(BankBehind({ words: ["Chase needs signing in"] }));
+		expect(bank).toContain('data-icon="bank"');
+		expect(bank).not.toContain('data-icon="card"');
+		expect(bank).toMatch(
+			/<a href="\/accounts" class="[^"]*min-h-11[^"]*">Fix<span class="sr-only"> the bank in Accounts<\/span><\/a>/,
+		);
+	});
+});

@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BIG_BILL_CENTS } from "../src/bills/guards";
 import { matchBillPayments } from "../src/bills/match";
 import {
@@ -12,18 +12,20 @@ import { loadBillRows } from "../src/bills/rows";
 import { WEEKLY_BILL_DATE_WINDOW_DAYS } from "../src/bills/status";
 import { summarizeMonth } from "../src/budget";
 import {
-	DEFAULT_TIME_ZONE,
 	daysBefore,
 	householdToday,
 	monthsBefore,
 	shortDay,
-	todayIn,
 } from "../src/dates";
 import { loadMonth } from "../src/db/month";
 
 // Spec §6.1 rule 4 and §8.5 "Bill matching" (decision 67; P36 B, decision 72): an excluded payment can
 // pay a bill, and a payment from the same merchant outside ±10% is offered as "Price changed?" rather
 // than matched or ignored. Nothing changes until a person accepts.
+
+// Pinned: these tests used to take today from the real clock, so on some days of the month the earlier charge fell
+// inside the ±5-day window and was matched, and the file failed.
+const TODAY = "2026-10-15";
 
 const BASE = "http://tally.test";
 const post = (path: string, body: Record<string, string> = {}, htmx = true) =>
@@ -115,7 +117,7 @@ describe("pickPriceOffer", () => {
 });
 
 describe("bill matching and price changes", () => {
-	const today = todayIn(DEFAULT_TIME_ZONE);
+	const today = TODAY;
 	// A monthly bill due in three days, paid yesterday: its occurrence is the one Bills shows (Due in the
 	// next 7 days), and the payment is inside the ±5-day window. Three days ahead, not behind, so the
 	// bill never slips to the next month's occurrence early in a month.
@@ -206,7 +208,16 @@ describe("bill matching and price changes", () => {
 			htmx,
 		);
 
-	beforeEach(() => seed());
+	// The clock is pinned to TODAY for every test here, before the seed: the routes these call read it (as the bill-part-paid
+	// tests do). One hook, since biome rejects a second beforeEach in the same describe.
+	beforeEach(async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
+		await seed();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
 
 	describe("an excluded payment pays a bill", () => {
 		beforeEach(() =>

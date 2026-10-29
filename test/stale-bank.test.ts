@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	asOfDate,
 	type BankSync,
 	bankFlag,
 	flaggedBanks,
@@ -185,6 +186,7 @@ describe("homeBankNotice", () => {
 				"Login Bank needs signing in",
 			],
 			asOf: "Sep 20",
+			since: "2026-09-20",
 		});
 	});
 
@@ -206,6 +208,7 @@ describe("homeBankNotice", () => {
 					"Recent Bank stopped updating Oct 2",
 				],
 				asOf: "Sep 20",
+				since: "2026-09-20",
 			});
 		}
 	});
@@ -225,6 +228,7 @@ describe("homeBankNotice", () => {
 				"Login Bank needs signing in",
 			],
 			asOf: "Sep 20",
+			since: "2026-09-20",
 		});
 	});
 
@@ -243,6 +247,7 @@ describe("homeBankNotice", () => {
 				"Stale Bank stopped updating Sep 20",
 			],
 			asOf: "Sep 15",
+			since: "2026-09-15",
 		});
 	});
 
@@ -255,6 +260,7 @@ describe("homeBankNotice", () => {
 		).toEqual({
 			words: ["One Bank stopped updating Oct 2"],
 			asOf: "Oct 2",
+			since: "2026-10-02",
 		});
 	});
 
@@ -273,5 +279,43 @@ describe("homeBankNotice", () => {
 				"and 1 more bank needs a fix",
 			]);
 		}
+	});
+});
+
+describe("homeBankNotice's since", () => {
+	it("is the raw date its asOf was formatted from, and is left out with no asOf", () => {
+		expect(
+			homeBankNotice(
+				[{ name: "Old Bank", reason: "stale", since: "2025-12-30" }],
+				"2026-01-08",
+			),
+		).toEqual({
+			words: ["Old Bank stopped updating Dec 30, 2025"],
+			asOf: "Dec 30, 2025",
+			since: "2025-12-30",
+		});
+		expect(
+			homeBankNotice([{ name: "Login Bank", reason: "sign-in" }], TODAY),
+		).not.toHaveProperty("since");
+	});
+});
+
+describe("asOfDate", () => {
+	it("formats the earlier of two dates, in either order", () => {
+		expect(asOfDate(["2026-10-02", "2026-09-28"], "2026-10-05")).toBe("Sep 28");
+		expect(asOfDate(["2026-09-28", "2026-10-02"], "2026-10-05")).toBe("Sep 28");
+	});
+
+	it("ignores undefined, and is undefined when none is given", () => {
+		expect(asOfDate([undefined, "2026-09-28"], "2026-10-05")).toBe("Sep 28");
+		expect(asOfDate(["2026-09-28", undefined], "2026-10-05")).toBe("Sep 28");
+		expect(asOfDate([undefined, undefined], "2026-10-05")).toBeUndefined();
+		expect(asOfDate([], "2026-10-05")).toBeUndefined();
+	});
+
+	it("names the year when the date is from another year", () => {
+		expect(asOfDate(["2025-12-30", "2026-01-02"], "2026-01-08")).toBe(
+			"Dec 30, 2025",
+		);
 	});
 });

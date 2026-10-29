@@ -290,6 +290,24 @@ export async function appleCardAccount(
 }
 
 /**
+ * What Home's Apple Card reminder reads (apple-card/stale.ts): the card's last upload day and removal, the two columns
+ * only. `appleCardAccount` also counts the card's transactions for `through`, which a Home load doesn't need. Null before
+ * the household has an Apple Card.
+ */
+export async function appleCardUpload(
+	db: D1Database,
+): Promise<Pick<AppleCardAccount, "uploadedOn" | "removedAt"> | null> {
+	const row = await db
+		.prepare(
+			"SELECT uploaded_on, removed_at FROM accounts WHERE subtype = 'apple_card'",
+		)
+		.first<{ uploaded_on: string | null; removed_at: string | null }>();
+	return row
+		? { uploadedOn: row.uploaded_on, removedAt: row.removed_at }
+		: null;
+}
+
+/**
  * The accounts net worth adds up: every bank's accounts, and the Apple Card once a balance counts for it and it isn't
  * removed (spec §8.10). Its balance is owed, so it counts as debt, as any card's does.
  */
