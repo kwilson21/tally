@@ -92,16 +92,20 @@ describe("SelectField", () => {
 		expect(html).toContain("right-4");
 	});
 
-	it("keeps its own width in a column, so the chevron stays at the select's edge", () => {
-		// In a flex column the wrapper would stretch to the column while the select keeps its width, parking the chevron
-		// far from the select. self-start keeps the wrapper the select's width.
+	it("fills its wrapper, and the wrapper takes its parent's width, so the chevron stays at the select's edge", () => {
+		// The wrapper is never self-start: in a stretched flex column it takes the column's width, and the select (w-full)
+		// fills the wrapper, so the chevron sits at the select's right edge. In a content-sized row both shrink to fit.
 		const html = renderToString(
 			<div class="flex flex-col gap-1">
 				<SelectField name="month" id="month" options={OPTIONS} variant="pill" />
 			</div>,
 		);
-		expect(html).toMatch(
+		expect(html).toMatch(/<select [^>]*class="(?:[^"]* )?w-full(?: [^"]*)?"/);
+		expect(html).not.toMatch(
 			/<span data-select-field="" class="[^"]*\bself-start\b/,
+		);
+		expect(html).toMatch(
+			/<span data-select-field="" class="[^"]*\bmax-w-full\b/,
 		);
 	});
 

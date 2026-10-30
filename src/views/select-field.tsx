@@ -48,12 +48,12 @@ export function SelectField({
 	return (
 		<span
 			data-select-field=""
-			class={`relative inline-flex max-w-full min-w-0 self-start ${wrapClass ?? ""}`}
+			class={`relative inline-flex max-w-full min-w-0 ${wrapClass ?? ""}`}
 		>
 			<select
 				{...attrs}
 				class={[
-					"min-h-11 max-w-full appearance-none truncate",
+					"min-h-11 w-full max-w-full appearance-none truncate",
 					shape.box,
 					border,
 					extra,
