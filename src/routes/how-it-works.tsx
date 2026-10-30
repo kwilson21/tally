@@ -851,14 +851,17 @@ howItWorks.get("/how-it-works", async (c) => {
 							</li>
 							<li>
 								The line has a point for each day with a balance, this month
-								included. It starts on the first day every account has a
-								balance, so linking another bank doesn't look like your net
-								worth jumped. Until every account has a balance there is no
-								line, only a note saying it is waiting.
+								included, and keeps its past months. An account you add, like
+								another bank or Apple Card, counts from its first balance, so on
+								that day the line steps down by what a card owes or up by a
+								bank's cash, and the sentence under the number names the account
+								and the day.
 							</li>
 							<li>
 								Code writes the sentence under the number, like "Up $3,600 since
-								May.", from the line's first and last day. It isn't AI.
+								May.", from the line's first and last day, and names an account
+								you added since then, like "You added Apple Card on Oct 18." It
+								isn't AI.
 							</li>
 						</ul>
 					</RulesFold>

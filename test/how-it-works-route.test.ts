@@ -642,14 +642,14 @@ describe("the Net worth section (spec §9, feature 7; decision 65)", () => {
 			// One balance a day, in the household's day.
 			expect(text).toContain("one balance per account for that day");
 			expect(text).toContain("time zone");
-			// Why the line starts when every account has a balance.
-			expect(text).toContain("first day every account has a balance");
-			expect(text).toContain(
-				"Until every account has a balance there is no line, only a note saying it is waiting.",
-			);
+			// Why the line keeps its past months, and steps when an account is added.
+			expect(text).toContain("keeps its past months");
+			expect(text).toContain("counts from its first balance");
 			expect(text).toContain("another bank");
-			// The sentence under the number is written by code.
+			expect(text).toContain("names the account and the day");
+			// The sentence under the number is written by code, and names an account added since then.
 			expect(text).toContain("Up $3,600 since May.");
+			expect(text).toContain("You added Apple Card on Oct 18.");
 		}
 	});
 
