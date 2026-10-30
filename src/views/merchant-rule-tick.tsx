@@ -43,6 +43,7 @@ export function MerchantRuleTick({
 					<Icon name="check" class="size-4" />
 				</span>
 			</span>
+			{/* Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			<span class="flex min-w-0 flex-col wrap-anywhere">
 				<span id={`${id}-title`}>
 					Use this category for {merchant} from now on

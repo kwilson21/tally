@@ -146,6 +146,7 @@ export function FeedbackForm({
 						</p>
 						<div
 							id="feedback-redaction-review"
+							// Kept: feedback diagnostics are one long unbroken text (a pre block), so they may break inside a word (E, decision 61).
 							class="mt-3 rounded-control border border-rule bg-band p-3 [&_pre]:mt-1 [&_pre]:font-sans [&_pre]:whitespace-pre-wrap [&_pre]:wrap-anywhere"
 							role="status"
 							hidden

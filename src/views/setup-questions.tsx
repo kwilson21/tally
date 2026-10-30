@@ -70,7 +70,8 @@ export function Heading({
 		<h1
 			class={
 				wrap
-					? `${top} font-serif text-4xl font-semibold tracking-tight wrap-anywhere`
+					? // Kept: a long category or bank name wraps here (E, DESIGN.md); no other heading breaks inside a word.
+						`${top} font-serif text-4xl font-semibold tracking-tight wrap-anywhere`
 					: `${top} font-serif text-4xl font-semibold tracking-tight`
 			}
 			{...(focus ? { tabindex: -1, autofocus: true } : {})}
@@ -194,6 +195,7 @@ export function SetupPay({
 function BillRow({ charge }: { charge: BillSuggestion }) {
 	return (
 		<li class="flex items-center gap-3 border-b border-rule py-2">
+			{/* Kept: bank text can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			<div class="min-w-0 flex-1 wrap-anywhere">
 				<p>{charge.displayName}</p>
 				<p class="text-sm text-muted">around the {ordinal(charge.dueDay)}</p>
@@ -300,6 +302,7 @@ function BudgetRow({ ask }: { ask: BudgetAsk }) {
 	return (
 		<li class="flex items-center gap-3 border-b border-rule py-2">
 			<CategoryIcon icon={ask.icon} color={ask.color} />
+			{/* Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			<div class="min-w-0 flex-1 wrap-anywhere">
 				<p>{ask.name}</p>
 				<p class="text-sm text-muted tabular-nums">{months}</p>

@@ -929,7 +929,7 @@ describe("GET /transactions: Account and Show", () => {
 			);
 			expect(html).toMatch(
 				new RegExp(
-					`<select id="${id}" name="${id}" class="min-h-11 max-w-full rounded-full border border-rule bg-paper px-4 text-base text-ink">`,
+					`<select id="${id}" name="${id}" class="min-h-11 max-w-full appearance-none truncate rounded-full border border-rule bg-paper pl-4 pr-10 text-base text-ink">`,
 				),
 			);
 		}

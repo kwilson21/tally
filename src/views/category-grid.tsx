@@ -34,7 +34,8 @@ export function CategoryGrid({
 }) {
 	return (
 		<div class="grid grid-cols-2 gap-2">
-			{leading}
+			{/* The leading cell (the guess) takes both columns, so its words never wrap in a narrow half. */}
+			{leading && <div class="col-span-2 min-w-0">{leading}</div>}
 			{categories.map((cat, index) => (
 				<Chip
 					type="radio"

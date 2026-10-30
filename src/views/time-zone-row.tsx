@@ -3,6 +3,7 @@ import { Button } from "./button";
 import { chevron } from "./category-row";
 import { FormField } from "./form-field";
 import { type SavedMark, SavedSlot, savedRowClass } from "./saved-tick";
+import { SelectField } from "./select-field";
 
 /** What the zone decides, and what it never touches (decision 67). */
 export const TIME_ZONE_HINT =
@@ -85,10 +86,11 @@ export function TimeZoneRow({
 					error={error}
 				>
 					{({ class: errorClass, ...a11y }) => (
-						<select
+						<SelectField
 							id={id}
 							name="time_zone"
-							class={`min-h-11 rounded-control border border-rule bg-paper px-3 text-lg ${errorClass ?? ""}`}
+							variant="control"
+							class={errorClass}
 							autofocus={Boolean(error)}
 							{...a11y}
 						>
@@ -96,7 +98,7 @@ export function TimeZoneRow({
 							<optgroup label="Other time zones">
 								{OTHER_ZONES.map(option)}
 							</optgroup>
-						</select>
+						</SelectField>
 					)}
 				</FormField>
 				<div class="flex flex-wrap items-center gap-3">

@@ -1,4 +1,5 @@
 import { ordinal } from "../dates";
+import { SelectField } from "./select-field";
 
 export type DueFrequency =
 	| "weekly"
@@ -39,7 +40,7 @@ const FREQUENCIES: [DueFrequency, string][] = [
 	["yearly", "every year"],
 ];
 
-// A picker is a native control on a ledger line: at least 44px, text-lg (the sentence's size).
+// The date input is a native control on a ledger line: at least 44px, text-lg (the sentence's size).
 const PICKER = "min-h-11 border-b border-muted bg-transparent px-1 text-lg";
 
 type Props = {
@@ -74,17 +75,18 @@ export function DueRow({
 			<div class="flex flex-wrap items-center gap-x-2 text-lg">
 				<span class="due-lead-on">Due on</span>
 				<span class="due-lead-the">Due on the</span>
-				<select
+				<SelectField
 					name="weekly_day"
 					aria-label="Day of the week"
-					class={`due-weekly ${PICKER}`}
+					variant="ledger"
+					wrapClass="due-weekly"
 				>
 					{WEEKDAYS.map((day, i) => (
 						<option value={i + 1} selected={i + 1 === dueDay}>
 							{day}s
 						</option>
 					))}
-				</select>
+				</SelectField>
 				<input
 					type="date"
 					name="anchor_date"
@@ -92,35 +94,36 @@ export function DueRow({
 					aria-label="One date it's due"
 					class={`due-biweekly ${PICKER}`}
 				/>
-				<select
+				<SelectField
 					name="due_day"
 					aria-label="Day of the month"
-					class={`due-day ${PICKER}`}
+					variant="ledger"
+					wrapClass="due-day"
 				>
 					{DAYS.map((day) => (
 						<option value={day} selected={day === dueDay}>
 							{ordinal(day)}
 						</option>
 					))}
-				</select>
-				<select name="frequency" aria-label="How often" class={PICKER}>
+				</SelectField>
+				<SelectField name="frequency" aria-label="How often" variant="ledger">
 					{FREQUENCIES.map(([value, label]) => (
 						<option value={value} selected={value === frequency}>
 							{label}
 						</option>
 					))}
-				</select>
+				</SelectField>
 			</div>
 			<div class="due-month flex flex-wrap items-center gap-x-2 text-lg">
 				<span class="due-quarter-word">starting in</span>
 				<span class="due-year-word">in</span>
-				<select name="anchor_month" aria-label="Month" class={PICKER}>
+				<SelectField name="anchor_month" aria-label="Month" variant="ledger">
 					{MONTHS.map((month, i) => (
 						<option value={i + 1} selected={i + 1 === anchorMonth}>
 							{month}
 						</option>
 					))}
-				</select>
+				</SelectField>
 			</div>
 			{error && (
 				<p role="alert" class="text-sm text-over">

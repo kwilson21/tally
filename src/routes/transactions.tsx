@@ -611,6 +611,7 @@ async function renderList(
 					id="transactions-title"
 					tabindex={focusHeading ? -1 : undefined}
 					autofocus={focusHeading}
+					// Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md).
 					class="min-w-0 max-w-full wrap-anywhere font-serif text-5xl font-semibold tracking-tight outline-none"
 				>
 					Transactions

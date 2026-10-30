@@ -14,7 +14,7 @@ export function MaybeQuestion({ children }: { children: Child }) {
 	return (
 		<p class="inline-flex min-h-11 max-w-full items-center gap-2 self-start rounded-control border border-dashed border-ink px-3 font-serif text-3xl font-semibold text-ink">
 			<Icon name="circle-dashed" class="size-6 shrink-0" />
-			<span class="min-w-0 wrap-anywhere">{children}</span>
+			<span class="min-w-0 whitespace-normal break-normal">{children}</span>
 		</p>
 	);
 }
@@ -310,6 +310,7 @@ function TransactionHeading({
 			>
 				{item.label}
 			</h2>
+			{/* Kept: bank text can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			<p class="mt-1 text-sm text-muted wrap-anywhere">{item.bankText}</p>
 			<p class="text-muted">
 				{formatCents(Math.abs(item.amountCents))} · {shortDay(item.date, today)}
@@ -333,6 +334,7 @@ function NameHeading({
 				id="suggestion-title"
 				tabindex={focus ? -1 : undefined}
 				autofocus={focus || undefined}
+				// Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md).
 				class="font-serif text-3xl font-semibold tracking-tight wrap-anywhere outline-none"
 			>
 				{bankText}

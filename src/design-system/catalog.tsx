@@ -140,6 +140,7 @@ import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
 import { SavedTick } from "../views/saved-tick";
 import { SavingsGoalRow } from "../views/savings-goal-row";
 import { SavingsGoalSheet } from "../views/savings-goal-sheet";
+import { SelectField } from "../views/select-field";
 import { SelectableTransactionRow } from "../views/selectable-transaction-row";
 import { SelectionActionBar } from "../views/selection-action-bar";
 import {
@@ -1275,12 +1276,31 @@ const TOAST_SPEC: UseSpecText = {
 		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, a Not this one says “Payment unlinked” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
 
+// SelectField's use spec: the one select look every select on the app shares (DESIGN.md: no native select arrows).
+const SELECT_FIELD_SPEC: UseSpecText = {
+	purpose:
+		"Let a person choose one thing from a short list in a form or a filter bar, with a real select that opens the way their device opens one.",
+	affordance:
+		"A pill, a bordered field or a ledger line, with a chevron at its end that points down. The chevron is Tally's own, centred at the text's inset, so it lines up with the text's edge.",
+	states:
+		"Rest: the chosen option, or the first when none is chosen. Focus: the focus-visible ring on the select. Dashed: a choice Tally guessed, until a person picks. Disabled, loading and error: not applicable here; a form's error is drawn by its field.",
+	feedback:
+		"The choice applies as the form or list says it does. The chevron takes no clicks, so a tap on it opens the select.",
+	input:
+		"Touch: the whole 44px field opens the picker. Keyboard: Tab to it; arrow keys or typing change it. Screen reader: the label's words, then the chosen option, as a combo box.",
+	motion: "None. The browser draws its own list.",
+	edges:
+		"A long option shortens inside its field (truncate, max-w-full) and never pushes the page sideways. Without JavaScript it works the same, since it is a real select.",
+	words:
+		"The labels come from the field they belong to (Month, Time zone, How often); the options are the words the rest of the app uses.",
+};
+
 // The FilterSelect's use spec (P63 A, P64 B): every line answered before the owner signs it off.
 const FILTER_SELECT_SPEC: UseSpecText = {
 	purpose:
 		"Let a person narrow a list by one thing: Transactions' Month, Category, Account and Show. Several sit side by side, and the list and its count follow each choice.",
 	affordance:
-		"A pill with a thin rule, the chosen option in ink and the browser's own arrow at its end, 44px tall. It is a real select, so a phone opens its own picker. It reads as a pill like a Chip, because it narrows the list the way a Chip does.",
+		"A pill with a thin rule, the chosen option in ink and our own chevron at its end (SelectField, centred at the text's inset), 44px tall. It is a real select, so a phone opens its own picker. It reads as a pill like a Chip, because it narrows the list the way a Chip does.",
 	states:
 		"Rest: the chosen option, or the first (“All categories”, “All accounts”, “All”) when none is chosen. Open: the browser's own list. Focus: the focus-visible ring, for the keyboard. Hover, pressed, disabled, loading and error: not applicable. The list swaps as the choice changes, and a choice that can't be made isn't offered.",
 	feedback:
@@ -2297,7 +2317,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses can shrink and truncate. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses wrap between their words and never truncate; a Maybe tag keeps its own line, clear of a dashed name's underline. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
 			>
 				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />
@@ -5152,6 +5172,68 @@ function Controls() {
 					</div>
 				</State>
 				<UseSpec spec={FILTER_SELECT_SPEC} />
+			</Specimen>
+			<Specimen
+				id="select-field"
+				title="SelectField"
+				tier="interactive"
+				components={["SelectField"]}
+				sentence="The one native select look: a real select with our own centred chevron at the text's inset, in a pill, a control or a ledger line, so no browser arrow shows."
+			>
+				<State label="Three looks and a guess: a pill (FilterSelect), a bordered control (a form's Month or time zone), a ledger line (DueRow's pickers) and a dashed guess (split's category)">
+					<div class="flex flex-wrap items-center gap-3">
+						<label for="ds-select-pill" class="sr-only">
+							Month
+						</label>
+						<SelectField
+							variant="pill"
+							id="ds-select-pill"
+							name="ds-select-pill"
+						>
+							<option value="1" selected>
+								October
+							</option>
+						</SelectField>
+						<label for="ds-select-control" class="sr-only">
+							Time zone
+						</label>
+						<SelectField
+							variant="control"
+							id="ds-select-control"
+							name="ds-select-control"
+						>
+							<option value="1" selected>
+								Eastern
+							</option>
+						</SelectField>
+						<label for="ds-select-ledger" class="sr-only">
+							How often
+						</label>
+						<SelectField
+							variant="ledger"
+							id="ds-select-ledger"
+							name="ds-select-ledger"
+						>
+							<option value="monthly" selected>
+								every month
+							</option>
+						</SelectField>
+						<label for="ds-select-guess" class="sr-only">
+							Part 1 category, Tally's guess
+						</label>
+						<SelectField
+							variant="pill"
+							id="ds-select-guess"
+							name="ds-select-guess"
+							dashed
+						>
+							<option value="1" selected>
+								Groceries · Suggested
+							</option>
+						</SelectField>
+					</div>
+				</State>
+				<UseSpec spec={SELECT_FIELD_SPEC} />
 			</Specimen>
 			<Specimen
 				id="search-every-month"

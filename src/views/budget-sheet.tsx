@@ -52,6 +52,7 @@ export function BudgetSheet({
 				<CategoryIcon icon={category.icon} color={category.color} />
 				<h2
 					id={`${id}-sheet-title`}
+					// Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md).
 					class="min-w-0 wrap-anywhere font-serif text-4xl font-semibold tracking-tight"
 					tabindex={-1}
 				>

@@ -78,6 +78,23 @@
 }
 
 @layer base {
+	/* Native date inputs (DESIGN.md: no native select arrows or date icons). The calendar icon is centred vertically at
+	 * the field's right edge, at the same inset as SelectField's chevron (the control's text padding, 0.75rem), so it
+	 * lines up with the pickers beside it. The input stays native: the browser still opens its picker. */
+	input[type="date"] {
+		position: relative;
+	}
+	input[type="date"]::-webkit-calendar-picker-indicator {
+		position: absolute;
+		top: 50%;
+		right: 0.75rem;
+		width: 1rem;
+		height: 1rem;
+		margin: 0;
+		transform: translateY(-50%);
+		cursor: pointer;
+	}
+
 	:root {
 		--safe-area-top: env(safe-area-inset-top, 0px);
 		--safe-area-right: env(safe-area-inset-right, 0px);
