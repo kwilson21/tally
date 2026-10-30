@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { csrf } from "hono/csrf";
 import { secureHeaders } from "hono/secure-headers";
+import { isValidKey } from "./plaid/token-crypto";
 
 /** True for the design system catalog's pages (decision 42). */
 const inCatalog = (path: string) =>
@@ -9,10 +10,15 @@ const inCatalog = (path: string) =>
 const onAccounts = (path: string) =>
 	path === "/accounts" || path.startsWith("/accounts/");
 
-// Plaid Link is the one third-party script, and its hosts are allowed on Accounts and its sub-pages, and on setup in the family
-// app, where a new family links its bank (decisions 114 and 148). Home has no Link a bank, so it loads no Plaid Link.
-export const loadsPlaid = (c: Context) =>
-	onAccounts(c.req.path) || (c.req.path === "/setup" && c.env.DEMO !== "true");
+// Plaid's SDK is injected after a Link/repair click. Its CSP hosts are allowed only on configured, non-demo pages
+// that expose those actions (including pages that can swap Accounts back in).
+export const loadsPlaid = (c: Context) => {
+	const enabled =
+		c.env.DEMO !== "true" &&
+		Boolean(c.env.PLAID_CLIENT_ID && c.env.PLAID_SECRET) &&
+		isValidKey(c.env.TOKEN_ENCRYPTION_KEY);
+	return enabled && (onAccounts(c.req.path) || c.req.path === "/setup");
+};
 
 export const security = secureHeaders({
 	xFrameOptions: "DENY",
@@ -21,7 +27,10 @@ export const security = secureHeaders({
 	contentSecurityPolicy: {
 		defaultSrc: ["'self'"],
 		scriptSrc: [
-			(c) => (loadsPlaid(c) ? "'self' https://cdn.plaid.com" : "'self'"),
+			(c) =>
+				loadsPlaid(c)
+					? "'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js"
+					: "'self'",
 		],
 		// Plaid Link styles its full-screen overlay inline; without this it renders in the page flow.
 		styleSrc: [(c) => (loadsPlaid(c) ? "'self' 'unsafe-inline'" : "'self'")],

@@ -2,6 +2,26 @@
 // Tokens stay only in memory and are never logged or stored by this script.
 export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 	const repairFailure = "Couldn't fix the connection. Try again.";
+	let plaidSdkLoad;
+	const loadPlaidSdk = () => {
+		if (globalThis.Plaid) return Promise.resolve(globalThis.Plaid);
+		if (plaidSdkLoad) return plaidSdkLoad;
+		plaidSdkLoad = new Promise((resolve, reject) => {
+			const script = document.createElement("script");
+			script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+			script.async = true;
+			script.onload = () =>
+				globalThis.Plaid
+					? resolve(globalThis.Plaid)
+					: reject(new Error("Plaid Link did not initialize"));
+			script.onerror = () => reject(new Error("Plaid Link failed to load"));
+			document.head.appendChild(script);
+		}).catch((error) => {
+			plaidSdkLoad = undefined;
+			throw error;
+		});
+		return plaidSdkLoad;
+	};
 	const repairAlert = (region, responseBody, itemId) => {
 		const liveRegion = itemId
 			? document.querySelector(
@@ -43,15 +63,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 				if (button) setRepairBusy(button, value);
 			}
 		};
-		const Plaid = globalThis.Plaid;
-		if (!Plaid) {
-			repairAlert(repairError, undefined, itemId);
-			setBusy(false);
-			return;
-		}
 		setBusy(true);
 		repairError.replaceChildren();
 		try {
+			const Plaid = await loadPlaidSdk();
 			const response = await fetch(`/plaid/items/${itemId}/link-token`, {
 				method: "POST",
 			});
@@ -211,15 +226,10 @@ export function setupPlaidLink({ document, fetch, htmx, DOMParser }) {
 				target.classList.toggle("htmx-request", value);
 			}
 		};
-		const Plaid = globalThis.Plaid;
-		if (!Plaid) {
-			showFailure();
-			busy(false);
-			return;
-		}
 		busy(true);
 		linkErrorRegion()?.replaceChildren();
 		try {
+			const Plaid = await loadPlaidSdk();
 			const response = await fetch("/plaid/link-token", { method: "POST" });
 			if (!response.ok) {
 				showFailure(await response.text());

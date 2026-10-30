@@ -141,7 +141,7 @@ describe("GET /setup before a bank: the welcome", () => {
 		await noBank();
 		const on = await setup(plaidFamily);
 		expect(on.html).toContain(PLAID_MODULE);
-		expect(on.html).toContain(PLAID_SCRIPT);
+		expect(on.html).not.toContain(PLAID_SCRIPT);
 		const off = await setup(family);
 		expect(off.html).not.toContain(PLAID_MODULE);
 		expect(off.html).not.toContain(PLAID_SCRIPT);

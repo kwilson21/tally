@@ -45,6 +45,7 @@ function elementListeners() {
 }
 
 function harness({
+	sdkLoaded = true,
 	linkBank = true,
 	errorRegionOnScreen = true,
 	redrawKeepsLinkButton = false,
@@ -71,6 +72,7 @@ function harness({
 			'<main id="setup-screen" data-version="new"><p id="setup-status" data-link-bank-focus></p></main>',
 	},
 }: {
+	sdkLoaded?: boolean;
 	linkBank?: boolean;
 	/** False when no [data-link-bank-error] is on screen (a first-week redraw can take it away). */
 	errorRegionOnScreen?: boolean;
@@ -199,6 +201,22 @@ function harness({
 	const documentEvents = elementListeners();
 	const document = {
 		body,
+		injectedScripts: [] as Array<{
+			src: string;
+			async?: boolean;
+			onload?: () => void;
+			onerror?: () => void;
+		}>,
+		head: {
+			appendChild(script: {
+				src: string;
+				async?: boolean;
+				onload?: () => void;
+				onerror?: () => void;
+			}) {
+				document.injectedScripts.push(script);
+			},
+		},
 		// Where a setup refresh that redirected sends the person (plaid-link.js uses document.location, not window.location).
 		location: { assign: vi.fn() },
 		// A tab on screen, unless the test says otherwise. The presence ping ignores it while a link is open (decision 149).
@@ -224,6 +242,10 @@ function harness({
 				return liveRepairError;
 		},
 		createElement: () => ({
+			src: "",
+			async: false,
+			onload: undefined as (() => void) | undefined,
+			onerror: undefined as (() => void) | undefined,
 			role: undefined as string | undefined,
 			setAttribute(name: string, value: string) {
 				if (name === "role") this.role = value;
@@ -284,7 +306,8 @@ function harness({
 			};
 		}
 	}
-	(globalThis as { Plaid?: unknown }).Plaid = { create };
+	if (sdkLoaded) (globalThis as { Plaid?: unknown }).Plaid = { create };
+	else delete (globalThis as { Plaid?: unknown }).Plaid;
 	const process = vi.fn();
 	// htmx 4 sends no request for a source that is no longer in the document: its #handleTriggerEvent returns when
 	// !elt.isConnected (node_modules/htmx.org/dist/htmx.js). The fake refuses one the same way, so an exchange that
@@ -372,6 +395,41 @@ afterEach(() => {
 });
 
 describe("plaid-link.js", () => {
+	it("loads Plaid's stable SDK only after a Link action is selected", async () => {
+		const h = harness({ sdkLoaded: false });
+		const pending = h.click();
+
+		expect(h.document.injectedScripts).toHaveLength(1);
+		expect(h.document.injectedScripts[0]?.src).toBe(
+			"https://cdn.plaid.com/link/v2/stable/link-initialize.js",
+		);
+		expect(h.fetch).not.toHaveBeenCalled();
+
+		(globalThis as { Plaid?: unknown }).Plaid = { create: h.create };
+		h.document.injectedScripts[0]?.onload?.();
+		await pending;
+		expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
+			method: "POST",
+		});
+	});
+
+	it("retries loading Plaid after an interrupted SDK request", async () => {
+		const h = harness({ sdkLoaded: false });
+		const interrupted = h.click();
+		h.document.injectedScripts[0]?.onerror?.();
+		await interrupted;
+		expect(h.button.disabled).toBe(false);
+
+		const retry = h.click();
+		expect(h.document.injectedScripts).toHaveLength(2);
+		(globalThis as { Plaid?: unknown }).Plaid = { create: h.create };
+		h.document.injectedScripts[1]?.onload?.();
+		await retry;
+		expect(h.fetch).toHaveBeenCalledWith("/plaid/link-token", {
+			method: "POST",
+		});
+	});
+
 	describe("Fix connection", () => {
 		it("handles Fix connection when Link a bank is absent", async () => {
 			const h = harness({ linkBank: false });
@@ -520,7 +578,9 @@ describe("plaid-link.js", () => {
 		it("shows an alert and leaves the repair button enabled when Plaid is missing", async () => {
 			const h = harness();
 			delete (globalThis as { Plaid?: unknown }).Plaid;
-			await h.repairClick();
+			const pending = h.repairClick();
+			h.document.injectedScripts[0]?.onerror?.();
+			await pending;
 			expect(h.repairChildren).toHaveLength(1);
 			expect(h.repairButton.disabled).toBe(false);
 		});
@@ -768,7 +828,9 @@ describe("plaid-link.js", () => {
 	it("shows a generic alert and keeps the button enabled when Plaid did not load", async () => {
 		const h = harness();
 		delete (globalThis as { Plaid?: unknown }).Plaid;
-		await h.click();
+		const pending = h.click();
+		h.document.injectedScripts[0]?.onerror?.();
+		await pending;
 		expect(h.children).toEqual([
 			expect.objectContaining({ role: "alert", textContent: genericFailure }),
 		]);
