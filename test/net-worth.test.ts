@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-	accountsWaiting,
+	type AccountAdded,
+	type AccountSource,
+	accountsAdded,
 	type BalanceRow,
 	chartStart,
 	type NetWorthPoint,
@@ -26,7 +28,7 @@ describe("chartStart", () => {
 	});
 });
 
-// netWorthSeries and accountsWaiting take the ids of every account the headline counts (connected
+// netWorthSeries and accountsAdded take the ids of every account the headline counts (connected
 // bank accounts, never Cash), so the line can never be a net worth that leaves one out.
 describe("netWorthSeries", () => {
 	it("is empty with no balances", () => {
@@ -48,22 +50,30 @@ describe("netWorthSeries", () => {
 		).toEqual([point("2026-10-01", 125000)]);
 	});
 
-	it("draws nothing while a counted account has no balance at all, however many days the others have", () => {
+	it("leaves out a counted account with no balance yet, and still draws the line from the others", () => {
 		const others = [
 			row(1, "2026-10-01", 1000),
 			row(1, "2026-10-02", 1010),
 			row(2, "2026-10-01", 500),
 			row(2, "2026-10-02", 505),
 		];
-		expect(netWorthSeries(others, "2026-05-01", [1, 2, 3])).toEqual([]);
-		// The day it first has one, the line begins, and not before.
+		expect(netWorthSeries(others, "2026-05-01", [1, 2, 3])).toEqual([
+			point("2026-10-01", 1500),
+			point("2026-10-02", 1515),
+		]);
+		// Its first balance joins the line on that day, a card's as debt.
 		expect(
 			netWorthSeries(
 				[...others, row(3, "2026-10-03", 70, true), row(1, "2026-10-04", 1030)],
 				"2026-05-01",
 				[1, 2, 3],
 			),
-		).toEqual([point("2026-10-03", 1445), point("2026-10-04", 1465)]);
+		).toEqual([
+			point("2026-10-01", 1500),
+			point("2026-10-02", 1515),
+			point("2026-10-03", 1445),
+			point("2026-10-04", 1465),
+		]);
 	});
 
 	it("ignores balances of accounts the headline doesn't count, like Cash or a disconnected bank", () => {
@@ -119,7 +129,7 @@ describe("netWorthSeries", () => {
 		]);
 	});
 
-	it("starts on the first day every account has a balance, so adding an account doesn't look like growth", () => {
+	it("keeps the past months when an account gets its first balance: the line steps on that day by the new balance", () => {
 		expect(
 			netWorthSeries(
 				[
@@ -133,7 +143,38 @@ describe("netWorthSeries", () => {
 				"2026-05-01",
 				[1, 2],
 			),
-		).toEqual([point("2026-09-03", 6020), point("2026-09-04", 6040)]);
+		).toEqual([
+			point("2026-09-01", 1000),
+			point("2026-09-02", 1010),
+			point("2026-09-03", 6020),
+			point("2026-09-04", 6040),
+		]);
+	});
+
+	it("starts the line on the window's first day when a bank's first balance comes later, and a card's debt steps it down", () => {
+		const before = [row(1, "2026-05-01", 1000), row(1, "2026-05-02", 1010)];
+		expect(
+			netWorthSeries(
+				[...before, row(2, "2026-06-10", 5000)],
+				"2026-05-01",
+				[1, 2],
+			),
+		).toEqual([
+			point("2026-05-01", 1000),
+			point("2026-05-02", 1010),
+			point("2026-06-10", 6010),
+		]);
+		expect(
+			netWorthSeries(
+				[...before, row(2, "2026-06-10", 3000, true)],
+				"2026-05-01",
+				[1, 2],
+			),
+		).toEqual([
+			point("2026-05-01", 1000),
+			point("2026-05-02", 1010),
+			point("2026-06-10", -1990),
+		]);
 	});
 
 	it("leaves out days before `from`, but still counts the balances they gave", () => {
@@ -162,17 +203,71 @@ describe("netWorthSeries", () => {
 	});
 });
 
-describe("accountsWaiting", () => {
-	it("counts the counted accounts with no balance, while another has one", () => {
-		const rows = [row(1, "2026-10-01", 100), row(2, "2026-10-01", 200)];
-		expect(accountsWaiting(rows, [1, 2, 3, 4])).toBe(2);
-		expect(accountsWaiting(rows, [1, 2])).toBe(0);
+describe("accountsAdded", () => {
+	const bank = (name: string, accountIds: number[]): AccountSource => ({
+		name,
+		verb: "linked",
+		accountIds,
 	});
 
-	it("is zero before any balance is recorded, since then nothing waits on a particular account", () => {
-		expect(accountsWaiting([], [1, 2, 3])).toBe(0);
-		// A balance of an account the headline doesn't count doesn't make the rest wait.
-		expect(accountsWaiting([row(9, "2026-10-01", 5)], [1, 2])).toBe(0);
+	it("names a source whose first balance is after the line's first day, and not one already there", () => {
+		const rows = [
+			row(1, "2026-04-30", 100),
+			row(1, "2026-10-01", 120),
+			row(2, "2026-06-10", 200),
+		];
+		expect(
+			accountsAdded(
+				rows,
+				[bank("Chase", [1]), bank("Wells Fargo", [2])],
+				"2026-05-01",
+			),
+		).toEqual([{ name: "Wells Fargo", verb: "linked", date: "2026-06-10" }]);
+	});
+
+	it("names a bank once, by the earliest first balance among its accounts", () => {
+		const rows = [
+			row(2, "2026-06-12", 200),
+			row(1, "2026-06-10", 100),
+			row(1, "2026-07-01", 110),
+		];
+		expect(accountsAdded(rows, [bank("Chase", [1, 2])], "2026-05-01")).toEqual([
+			{ name: "Chase", verb: "linked", date: "2026-06-10" },
+		]);
+	});
+
+	it("puts two sources oldest first, then by name on one day, and gives Apple Card the verb added", () => {
+		const rows = [
+			row(2, "2026-09-03", 200),
+			row(3, "2026-10-18", 124000, true),
+			row(4, "2026-09-03", 50),
+		];
+		expect(
+			accountsAdded(
+				rows,
+				[
+					{ name: "Apple Card", verb: "added", accountIds: [3] },
+					bank("Wells Fargo", [2]),
+					bank("Ally", [4]),
+				],
+				"2026-05-01",
+			),
+		).toEqual([
+			{ name: "Ally", verb: "linked", date: "2026-09-03" },
+			{ name: "Wells Fargo", verb: "linked", date: "2026-09-03" },
+			{ name: "Apple Card", verb: "added", date: "2026-10-18" },
+		]);
+	});
+
+	it("leaves out a source with no rows, and one whose first balance is on the line's first day", () => {
+		const rows = [row(1, "2026-05-01", 100)];
+		expect(
+			accountsAdded(
+				rows,
+				[bank("Chase", [1]), bank("Empty", [9])],
+				"2026-05-01",
+			),
+		).toEqual([]);
 	});
 });
 
@@ -185,21 +280,13 @@ describe("netWorthView, with fewer than two days of balances", () => {
 		});
 	});
 
-	it("while a counted account has no balance yet, says the chart waits for every account, and draws no line", () => {
-		const waiting = {
-			kind: "early",
-			sentence: null,
-			note: "The chart starts once every account has a balance.",
-		};
-		expect(netWorthView([], "2026-10-05", 1)).toEqual(waiting);
-		// Even handed a line, it isn't drawn: it would add up fewer accounts than the headline does.
+	it("never waits for every account: with two days of points it draws the line, and no note says it waits", () => {
 		expect(
 			netWorthView(
 				[point("2026-10-01", 100), point("2026-10-05", 200)],
 				"2026-10-05",
-				2,
 			),
-		).toEqual(waiting);
+		).toMatchObject({ kind: "line", sentence: "Up $1 since Oct 1." });
 	});
 
 	it("on the first day, says when it started and that tomorrow brings the chart (P31)", () => {
@@ -345,5 +432,86 @@ describe("netWorthView, with a line to draw", () => {
 		expect(view.description).toContain(
 			"It was -$5,000 on May 1 and is -$3,000 today.",
 		);
+	});
+});
+
+describe("netWorthView, names an account added since the line's start", () => {
+	const today = "2026-10-05";
+	const rising = [
+		point("2026-05-01", 1200000),
+		point("2026-07-15", 1400000),
+		point("2026-10-05", 1560000),
+	];
+	const added = (
+		name: string,
+		verb: AccountAdded["verb"],
+		date: string,
+	): AccountAdded => ({ name, verb, date });
+
+	it("adds the account and its day after the change: 'You added Apple Card on Oct 4.'", () => {
+		expect(
+			netWorthView(rising, today, [added("Apple Card", "added", "2026-10-04")]),
+		).toMatchObject({
+			kind: "line",
+			sentence: "Up $3,600 since May. You added Apple Card on Oct 4.",
+		});
+	});
+
+	it("says 'today' for an account added on its first day", () => {
+		expect(
+			netWorthView(rising, today, [added("Apple Card", "added", today)]),
+		).toMatchObject({
+			sentence: "Up $3,600 since May. You added Apple Card today.",
+		});
+	});
+
+	it("names two accounts in one sentence, oldest first", () => {
+		expect(
+			netWorthView(rising, today, [
+				added("Wells Fargo", "linked", "2026-09-03"),
+				added("Apple Card", "added", "2026-10-04"),
+			]),
+		).toMatchObject({
+			sentence:
+				"Up $3,600 since May. You linked Wells Fargo on Sep 3 and added Apple Card on Oct 4.",
+		});
+	});
+
+	it("counts three or more as 'You added 3 accounts since May.', with the change's own label", () => {
+		expect(
+			netWorthView(rising, today, [
+				added("Wells Fargo", "linked", "2026-07-20"),
+				added("Apple Card", "added", "2026-08-01"),
+				added("Ally", "linked", "2026-09-03"),
+			]),
+		).toMatchObject({
+			sentence: "Up $3,600 since May. You added 3 accounts since May.",
+		});
+	});
+
+	it("says the change alone when no account was added, as before", () => {
+		expect(netWorthView(rising, today, [])).toMatchObject({
+			sentence: "Up $3,600 since May.",
+		});
+	});
+
+	it("carries the clause in the words a screen reader hears", () => {
+		const view = netWorthView(rising, today, [
+			added("Apple Card", "added", "2026-10-04"),
+		]);
+		if (view.kind !== "line") throw new Error("expected a line");
+		expect(view.description).toBe(
+			"Net worth over time. Up $3,600 since May. You added Apple Card on Oct 4. It was $12,000 on May 1 and is $15,600 today.",
+		);
+	});
+
+	it("adds nothing to the early words, which have no change to add to", () => {
+		expect(
+			netWorthView([], today, [added("Apple Card", "added", today)]),
+		).toEqual({
+			kind: "early",
+			sentence: null,
+			note: "The chart starts with the next sync.",
+		});
 	});
 });

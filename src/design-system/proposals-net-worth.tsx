@@ -5,6 +5,7 @@
 
 import { formatCents } from "../money";
 import {
+	type AccountAdded,
 	type NetWorthPoint,
 	type NetWorthView,
 	netWorthView,
@@ -53,11 +54,26 @@ const BANK = series(634_000);
 
 const last = (points: NetWorthPoint[]) => points.at(-1)?.cents ?? 0;
 
-/** The view the chart draws now, with the sentence an option writes in place of the change alone. */
-function view(points: NetWorthPoint[], sentence?: string): NetWorthView {
-	const drawn = netWorthView(points, TODAY);
-	return sentence && drawn.kind === "line" ? { ...drawn, sentence } : drawn;
+/** The view the chart draws: with `added`, its sentence names the accounts added since the line's start (decision 154). */
+function view(
+	points: NetWorthPoint[],
+	added: AccountAdded[] = [],
+): NetWorthView {
+	return netWorthView(points, TODAY, added);
 }
+
+/** B's view: the same line, with the sentence B writes in place of the change alone. */
+function withSentence(points: NetWorthPoint[], sentence: string): NetWorthView {
+	const drawn = view(points);
+	return drawn.kind === "line" ? { ...drawn, sentence } : drawn;
+}
+
+const CARD_ADDED: AccountAdded[] = [
+	{ name: "Apple Card", verb: "added", date: ADDED },
+];
+const BANK_LINKED: AccountAdded[] = [
+	{ name: "Wells Fargo", verb: "linked", date: ADDED },
+];
 
 const whole = (cents: number) => formatCents(cents, { wholeDollars: true });
 
@@ -226,20 +242,14 @@ export function NetWorthProposal() {
 						<Accounts
 							label={`Option A, Apple Card: ${whole(cardChange)} up since May, and the clause`}
 							points={CARD}
-							history={view(
-								CARD,
-								`Up ${whole(cardChange)} since May. You added Apple Card on Oct 18.`,
-							)}
+							history={view(CARD, CARD_ADDED)}
 						/>
 					</Shot>
 					<Shot caption="A new bank with $6,340">
 						<Accounts
 							label={`Option A, a new bank: ${whole(bankChange)} up since May, and the clause`}
 							points={BANK}
-							history={view(
-								BANK,
-								`Up ${whole(bankChange)} since May. You linked Wells Fargo on Oct 18.`,
-							)}
+							history={view(BANK, BANK_LINKED)}
 						/>
 					</Shot>
 					<Rule>
@@ -259,7 +269,7 @@ export function NetWorthProposal() {
 						<Accounts
 							label={`Option B: ${whole(withoutCard)} up since May, not counting Apple Card`}
 							points={CARD}
-							history={view(
+							history={withSentence(
 								CARD,
 								`Up ${whole(withoutCard)} since May, not counting Apple Card's $1,240 from Oct 18.`,
 							)}

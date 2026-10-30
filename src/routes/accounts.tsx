@@ -159,11 +159,11 @@ async function AccountsSummary({
 }) {
 	const today = await householdToday(env.DB);
 	// One read for the headline's accounts, the line's balances and the Apple Card, so they agree.
-	const { banks, points, waiting, appleCard } = await accountsWithHistory(
+	const { banks, points, added, appleCard } = await accountsWithHistory(
 		env.DB,
 		today,
 	);
-	const history = netWorthView(points, today, waiting);
+	const history = netWorthView(points, today, added);
 	const plaidEnabled = enabled(env);
 	const demo = env.DEMO === "true";
 	const cardKept = appleCard !== null && appleCard.removedAt === null;

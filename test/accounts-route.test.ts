@@ -1,7 +1,13 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JEV_URL } from "../src/ai/categorize";
-import { DEFAULT_TIME_ZONE, monthName, todayIn } from "../src/dates";
+import {
+	DEFAULT_TIME_ZONE,
+	daysBefore,
+	monthName,
+	shortDay,
+	todayIn,
+} from "../src/dates";
 import { accountsByBank, netWorthCents } from "../src/db/accounts";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
@@ -150,21 +156,51 @@ describe("GET /accounts", () => {
 		expect(text).toContain("$15,768");
 	});
 
-	it("withholds the line while a connected account has no balance recorded, and says what it waits for", async () => {
-		// The headline counts this account's balance already; a line without it would disagree.
+	it("draws the line from the window's first day and leaves a connected account with no balance yet out of it, though the headline counts it", async () => {
+		// The headline counts this account's balance already; the line draws the others until it has one.
 		await env.DB.prepare(
 			"INSERT INTO accounts (plaid_item_id, name, mask, type, subtype, is_liability, balance_cents) VALUES (2, 'Store card', '3333', 'credit', 'credit card', 1, 25000)",
 		).run();
 		const { html } = await get("/accounts");
 		const text = textOf(html);
-		expect(html).not.toContain("<polyline");
-		expect(html).not.toContain('data-chart="line"');
-		expect(text).toContain(
-			"The chart starts once every account has a balance.",
-		);
+		const since = monthName(chartStart(todayIn(DEFAULT_TIME_ZONE)).slice(0, 7));
+		expect(html).toContain("<polyline");
+		expect(html).toContain('data-chart="line"');
+		expect(text).not.toContain("once every account has a balance");
+		expect(text).toContain(`${since}Today`);
+		// The line ends on the net worth without the card: $15,768.
+		expect(html).toContain("is $15,768 today.");
 		// $4,210.55 + $12,400.00 − $842.17 − $250.00
 		expect(text).toContain("$15,518");
 		expect(text).toContain("Store card");
+	});
+
+	it("names Apple Card with the day its balance was first typed, and the line runs from the window's first day", async () => {
+		const today = todayIn(DEFAULT_TIME_ZONE);
+		const typed = daysBefore(today, 20);
+		await env.DB.prepare(
+			`INSERT INTO accounts (name, type, subtype, is_liability, balance_cents, balance_on, counted_from, uploaded_on)
+			VALUES ('Apple Card', 'credit', 'apple_card', 1, 124018, ?, ?, ?)`,
+		)
+			.bind(today, typed, today)
+			.run();
+		const card = await env.DB.prepare(
+			"SELECT id FROM accounts WHERE subtype = 'apple_card'",
+		).first<{ id: number }>();
+		for (const date of [typed, today])
+			await env.DB.prepare(
+				"INSERT INTO balance_history (account_id, date, balance_cents) VALUES (?, ?, ?)",
+			)
+				.bind(card?.id ?? 0, date, 124018)
+				.run();
+		const { html } = await get("/accounts");
+		const text = textOf(html);
+		const since = monthName(chartStart(today).slice(0, 7));
+		expect(html).toContain("<polyline");
+		expect(text).toContain(`${since}Today`);
+		expect(text).toContain(
+			`since ${since}. You added Apple Card on ${shortDay(typed, today)}.`,
+		);
 	});
 
 	it("with no balance recorded yet, says the chart starts with the next sync", async () => {

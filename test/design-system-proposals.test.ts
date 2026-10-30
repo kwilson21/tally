@@ -7168,6 +7168,13 @@ describe("GET /design-system/proposals, P143 (net worth on the day a new account
 		const a = options(chunk)[1] ?? "";
 		expect(a).toContain("Up $2,370 since May. You added Apple Card on Oct 18.");
 		expect(a).toContain("You linked Wells Fargo on Oct 18.");
+		// The sentence comes from netWorthView itself, so the words a screen reader hears carry the clause too.
+		expect(a).toContain(
+			'aria-label="Net worth over time. Up $2,370 since May. You added Apple Card on Oct 18. It was $38,510 on May 1 and is $40,880 today."',
+		);
+		expect(a).toContain(
+			'aria-label="Net worth over time. Up $9,950 since May. You linked Wells Fargo on Oct 18. It was $38,510 on May 1 and is $48,460 today."',
+		);
 	});
 
 	it("writes each How Tally works rule in plain words, with no link in it", async () => {
