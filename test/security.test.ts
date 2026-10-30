@@ -27,9 +27,28 @@ const cspFor = async (path: string) => {
 };
 
 describe("Plaid Content Security Policy", () => {
+	beforeEach(() =>
+		Object.assign(env, {
+			DEMO: "false",
+			PLAID_CLIENT_ID: "client",
+			PLAID_SECRET: "secret",
+			TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		}),
+	);
+	afterEach(() =>
+		Object.assign(env, {
+			DEMO: "true",
+			PLAID_CLIENT_ID: undefined,
+			PLAID_SECRET: undefined,
+			TOKEN_ENCRYPTION_KEY: undefined,
+		}),
+	);
+
 	it("allows Plaid's documented hosts on Accounts, and on setup in the family app; Home and the demo keep 'self'", async () => {
 		const accounts = await cspFor("/accounts");
-		expect(accounts).toContain("script-src 'self' https://cdn.plaid.com");
+		expect(accounts).toContain(
+			"script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js",
+		);
 		expect(accounts).toContain("frame-src 'self' https://cdn.plaid.com");
 		expect(accounts).toContain(
 			"connect-src 'self' https://production.plaid.com",
@@ -37,12 +56,14 @@ describe("Plaid Content Security Policy", () => {
 
 		// The disconnect page swaps Accounts in, so Link a bank must still load there.
 		expect(await cspFor("/accounts/1/disconnect")).toContain(
-			"script-src 'self' https://cdn.plaid.com",
+			"script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js",
 		);
 
 		for (const path of ["/", "/transactions", "/settings", "/accountsx"]) {
 			expect(await cspFor(path)).not.toContain("plaid.com");
 		}
+		Object.assign(env, { DEMO: "true" });
+		expect(await cspFor("/accounts")).not.toContain("plaid.com");
 	});
 
 	it("allows inline styles on Accounts, and on setup in the family app; Home and the demo keep 'self'", async () => {
@@ -59,13 +80,29 @@ describe("Plaid Content Security Policy", () => {
 });
 
 describe("setup in the family app", () => {
-	beforeEach(() => Object.assign(env, { DEMO: "false" }));
-	afterEach(() => Object.assign(env, { DEMO: "true" }));
+	beforeEach(() =>
+		Object.assign(env, {
+			DEMO: "false",
+			PLAID_CLIENT_ID: "client",
+			PLAID_SECRET: "secret",
+			TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		}),
+	);
+	afterEach(() =>
+		Object.assign(env, {
+			DEMO: "true",
+			PLAID_CLIENT_ID: undefined,
+			PLAID_SECRET: undefined,
+			TOKEN_ENCRYPTION_KEY: undefined,
+		}),
+	);
 
 	it("allows Plaid Link's hosts and inline styles, as Accounts does", async () => {
 		// No Access JWT, so the page is refused; the headers are still set on that refusal.
 		const csp = await cspFor("/setup");
-		expect(csp).toContain("script-src 'self' https://cdn.plaid.com");
+		expect(csp).toContain(
+			"script-src 'self' https://cdn.plaid.com/link/v2/stable/link-initialize.js",
+		);
 		expect(csp).toContain("frame-src 'self' https://cdn.plaid.com");
 		expect(csp).toContain("connect-src 'self' https://production.plaid.com");
 		expect(csp).toContain("style-src 'self' 'unsafe-inline'");

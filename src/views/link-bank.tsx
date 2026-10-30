@@ -64,10 +64,9 @@ export const LinkBank = ({
 	</>
 );
 
-/** Plaid Link's scripts, on every page that can show Link a bank (the disconnect page swaps Accounts in). */
+/** The local handler runs where Plaid actions can appear; it loads Plaid's required CDN SDK only after a Link or repair click. */
 export const plaidScripts = (on: boolean) => ({
-	scripts: on
-		? ["https://cdn.plaid.com/link/v2/stable/link-initialize.js"]
-		: [],
+	// The local handler loads Plaid's required CDN SDK only after Link or repair is requested.
+	scripts: [],
 	modules: on ? ["/js/plaid-link.js"] : [],
 });

@@ -365,7 +365,7 @@ describe("Remove Apple Card (#766)", () => {
 		);
 		expect(withPlaid.status).toBe(200);
 		const html = await withPlaid.text();
-		expect(html).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(html).not.toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(html).toContain('src="/js/plaid-link.js"');
 
 		const withoutPlaid = await app.request(
@@ -394,7 +394,7 @@ describe("Remove Apple Card (#766)", () => {
 		} as unknown as Env);
 		expect(res.status).toBe(502);
 		expect(html).toContain("Couldn't remove Apple Card. Try again.");
-		expect(html).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(html).not.toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(html).toContain('src="/js/plaid-link.js"');
 	});
 

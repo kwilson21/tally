@@ -760,7 +760,7 @@ describe("Link a bank", () => {
 		expect(enabledHtml).toContain("Sync now");
 		expect(enabledHtml).toContain("Syncing…");
 		expect(enabledHtml).toContain("Link a bank");
-		expect(enabledHtml).toContain(`src="${PLAID_LINK_SCRIPT}"`);
+		expect(enabledHtml).not.toContain(`src="${PLAID_LINK_SCRIPT}"`);
 		expect(enabledHtml).toContain('src="/js/plaid-link.js"');
 
 		for (const bindings of [
