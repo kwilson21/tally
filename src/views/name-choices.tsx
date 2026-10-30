@@ -142,6 +142,7 @@ function Choice({
 				aria-describedby={describedBy}
 				class={`mt-1 size-5 shrink-0 accent-ink ${pick ? NAME_PICK_CLASS : ""} ${radioClass}`}
 			/>
+			{/* Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			<span class="flex min-w-0 flex-col wrap-anywhere">
 				<span>{children}</span>
 				{notes.map((note) => {

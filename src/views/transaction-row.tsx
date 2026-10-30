@@ -203,6 +203,9 @@ export function TransactionRow({
 		(kind === "income" ||
 			(kind === "category" && caption === row.categoryName));
 	const pendingFirst = pending && !pendingLast;
+	// A Maybe tag is 44px tall, taller than a 24px caption line, so its line makes room for it and sits a
+	// gap below the name's dashed underline (DESIGN.md: a gap under a dashed underline).
+	const maybeTagShown = maybeIncomeVisible(row) || Boolean(maybeCategory);
 	const Row = href ? "a" : "div";
 	// Only a row with a link has an arrow for the tick to take (P119 A, #71).
 	const mark = href ? saved : undefined;
@@ -212,7 +215,7 @@ export function TransactionRow({
 			<Row
 				href={href}
 				autofocus={autofocus}
-				class={`flex h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
+				class={`flex min-h-16 items-center gap-4 text-ink no-underline${href ? ` ${ROW_OPENS}` : ""}${mark ? ` ${savedRowClass(mark)}` : ""}`}
 				// The rows keyboard.js moves between (j and k) and opens (e): the ones a person opens.
 				data-row={href ? "" : undefined}
 				{...attrs}
@@ -223,7 +226,7 @@ export function TransactionRow({
 						// A name Tally guessed has the sparkles icon before it; a name the bank sent has none. Both have the dashed
 						// underline that says "not decided yet" (P29 A, P87 B, decisions 64 and 80). The marks are for the eye; the words are for a screen reader.
 						<span
-							class={`flex min-w-0 items-center gap-2 text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
+							class={`flex min-w-0 items-center gap-2 pb-0.5 text-lg leading-6 ${kind === "excluded" ? "text-muted" : ""}`}
 						>
 							{row.nameFromBank ? <BankMark /> : <GuessMark />}
 							<span class={`truncate ${SUGGESTED_NAME_CLASS}`}>
@@ -237,7 +240,13 @@ export function TransactionRow({
 							{row.displayName}
 						</span>
 					)}
-					<span class="flex min-w-0 items-center gap-2 leading-6">
+					<span
+						class={
+							maybeTagShown
+								? "flex min-w-0 items-center gap-2 leading-6 mt-1 min-h-11"
+								: "flex min-w-0 items-center gap-2 leading-6"
+						}
+					>
 						{pendingFirst && !needsWords && (
 							<span class="shrink-0 text-muted">
 								Pending{(caption || countsIn) && " ·"}

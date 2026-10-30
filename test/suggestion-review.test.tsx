@@ -1,9 +1,14 @@
 /** @jsxImportSource hono/jsx */
+import { renderToString } from "hono/jsx/dom/server";
 import { describe, expect, it } from "vitest";
 import type { NeverSuggestRule } from "../src/db/never-suggest";
 import type { SuggestionItem } from "../src/db/suggestions-queue";
 import { NeverSuggestList } from "../src/views/merchant-rules";
-import { AskFirst, SuggestionCard } from "../src/views/suggestion-review";
+import {
+	AskFirst,
+	MaybeQuestion,
+	SuggestionCard,
+} from "../src/views/suggestion-review";
 
 // #460: while an answer on the review screen runs, every answer button on the screen is disabled, and a
 // second answer sent meanwhile is dropped by the screen's one request queue, so a double click or a
@@ -175,5 +180,45 @@ describe("the answer forms disable their submit buttons while a request runs (#4
 		expect(skip).toBeDefined();
 		expect(skip).not.toContain("hx-disable");
 		expect(skip).not.toContain("hx-post");
+	});
+});
+
+// Direction A (owner's pick): the Maybe question is a quiet dashed tag in the body face, and the serif h3 under it is
+// the one headline. The tag is a label, not a control, so it is 36px (min-h-9), not the 44px touch target.
+describe("MaybeQuestion is a quiet tag under one serif headline", () => {
+	const tag = (html: string) => html.match(/<p class="[^"]*"/)?.[0] ?? "";
+
+	it("draws a dashed pill in the body face, at body size, not a serif headline", () => {
+		const html = renderToString(
+			<MaybeQuestion>Maybe a transfer</MaybeQuestion>,
+		);
+		const open = tag(html);
+		for (const cls of [
+			"rounded-full",
+			"border-dashed",
+			"border-ink",
+			"font-medium",
+			"text-base",
+			"min-h-9",
+			"self-start",
+			"mt-1",
+			"mb-1",
+		]) {
+			expect(open).toMatch(new RegExp(`\\b${cls}\\b`));
+		}
+		expect(open).not.toContain("font-serif");
+		expect(open).not.toContain("text-3xl");
+		expect(open).not.toContain("min-h-11");
+		expect(html).toMatch(/<svg [^>]*\bsize-5\b/);
+	});
+
+	it("wraps only between words and ends a single too-long word in an ellipsis", () => {
+		const html = renderToString(
+			<MaybeQuestion>Maybe Householdandgardensuppliesandmore</MaybeQuestion>,
+		);
+		expect(html).toContain(
+			'<span class="min-w-0 overflow-hidden text-ellipsis whitespace-normal break-normal leading-none">',
+		);
+		expect(html).not.toContain("wrap-anywhere");
 	});
 });

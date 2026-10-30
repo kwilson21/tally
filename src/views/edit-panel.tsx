@@ -489,6 +489,7 @@ export function EditSheet({
 				// Focused only so screen readers start here; it isn't a control, so no ring. While the sheet
 				// asks about a delete, the question takes the focus instead (one autofocus, or htmx picks the first).
 				autofocus={!deleteConfirm}
+				// Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md).
 				class={`min-w-0 max-w-full wrap-anywhere font-serif text-3xl font-semibold tracking-tight outline-none ${tx.nameSuggested ? SUGGESTED_NAME_CLASS : ""}`}
 			>
 				{tx.displayName}
@@ -504,6 +505,7 @@ export function EditSheet({
 					· {dayLabel(tx.date, today)} · {account}
 				</p>
 			)}
+			{/* Kept: bank text can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 			{tx.rawName !== tx.displayName && (
 				<p class="min-w-0 max-w-full wrap-anywhere text-sm text-muted">
 					{tx.rawName}

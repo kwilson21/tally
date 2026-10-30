@@ -6,6 +6,7 @@ import { Button } from "./button";
 import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { MoneyInput } from "./money-input";
+import { SelectField } from "./select-field";
 import { WhyLink } from "./why-link";
 
 type Category = { id: number; name: string };
@@ -198,10 +199,11 @@ export function PartCategory({
 			>
 				{`Part ${index + 1} category${guessed ? ", Tally's guess" : ""}`}
 			</label>
-			<select
+			<SelectField
 				id={`part-category-${index}`}
 				name="part_category"
-				class={`min-h-11 rounded-full border ${guessed ? "border-dashed border-ink" : "border-rule"} bg-paper px-3`}
+				variant="pill"
+				dashed={guessed}
 				hx-swap-oob={swap}
 				autofocus={autofocus}
 				required
@@ -212,7 +214,7 @@ export function PartCategory({
 						{cat.name}
 					</option>
 				))}
-			</select>
+			</SelectField>
 			<input
 				type="hidden"
 				id={`part-guess-${index}`}

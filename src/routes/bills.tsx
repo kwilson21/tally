@@ -99,6 +99,7 @@ import { Icon } from "../views/icons";
 import { Layout } from "../views/layout";
 import { MoneyInput } from "../views/money-input";
 import { PlanBand, PlannedHeading, PlannedRow } from "../views/planned-expense";
+import { SelectField } from "../views/select-field";
 import { TextInput } from "../views/text-input";
 import { WhyLink } from "../views/why-link";
 
@@ -517,12 +518,9 @@ function BillSheet({
 					</div>
 				)}
 				<div class="flex flex-wrap items-end gap-3">
-					<label class="bill-weekday flex flex-col gap-1">
+					<label for="bill-weekday" class="bill-weekday flex flex-col gap-1">
 						<span>Day of the week</span>
-						<select
-							name="weekly_day"
-							class="min-h-11 rounded-control border border-rule bg-paper px-3"
-						>
+						<SelectField name="weekly_day" id="bill-weekday" variant="control">
 							{[
 								"Monday",
 								"Tuesday",
@@ -539,7 +537,7 @@ function BillSheet({
 									{day}
 								</option>
 							))}
-						</select>
+						</SelectField>
 						{values.frequency === "weekly" && errors.due_day && (
 							<span role="alert" class="text-sm text-over">
 								{errors.due_day}
@@ -601,12 +599,13 @@ function BillSheet({
 						)}
 					</fieldset>
 				</div>
-				<label class="bill-month flex-col gap-1">
+				<label for="bill-anchor-month" class="bill-month flex-col gap-1">
 					<span class="bill-year-label">Month (for yearly bills)</span>
 					<span class="bill-quarter-label">First month</span>
-					<select
+					<SelectField
 						name="anchor_month"
-						class="min-h-11 rounded-control border border-rule bg-paper px-3"
+						id="bill-anchor-month"
+						variant="control"
 					>
 						{Array.from({ length: 12 }, (_, i) => (
 							<option
@@ -619,7 +618,7 @@ function BillSheet({
 								}).format(new Date(Date.UTC(2026, i, 1)))}
 							</option>
 						))}
-					</select>
+					</SelectField>
 					{errors.anchor_month && (
 						<span role="alert" class="text-sm text-over">
 							{errors.anchor_month}

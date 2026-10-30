@@ -6,6 +6,7 @@ import { FoldedRow } from "./folded-row";
 import { Icon, ROW_OPENS, RowArrow } from "./icons";
 import { LedgerField } from "./ledger-field";
 import { CLOSEST_PAYMENTS, PaymentRow } from "./payment-row";
+import { SelectField } from "./select-field";
 import { TextInput } from "./text-input";
 
 /** The longest name a planned expense can have: the sheet's field stops at it, and the save refuses more (plans.tsx). */
@@ -301,13 +302,9 @@ export function PlanSheet({
 						inputmode="decimal"
 						required
 					/>
-					<label class="flex flex-col gap-1">
+					<label for="plan-month" class="flex flex-col gap-1">
 						<span>Month</span>
-						<select
-							id="plan-month"
-							name="month"
-							class="min-h-11 rounded-control border border-rule bg-paper px-3"
-						>
+						<SelectField id="plan-month" name="month" variant="control">
 							{months.map((option) => (
 								<option
 									value={option.value}
@@ -316,7 +313,7 @@ export function PlanSheet({
 									{option.label}
 								</option>
 							))}
-						</select>
+						</SelectField>
 					</label>
 					{errors.month && (
 						<p role="alert" class="text-over">

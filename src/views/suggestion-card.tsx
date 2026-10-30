@@ -107,6 +107,7 @@ export function NewCategoryCard({
 								checked={ticked ? ticked.includes(row.id) : true}
 								class="size-5 accent-ink"
 							/>
+							{/* Kept: a name a person typed can be one long unbroken token, so it alone may break inside a word (E, DESIGN.md). */}
 							<span class="min-w-0 flex-1 wrap-anywhere">{row.name}</span>
 							<span class="tabular-nums">
 								{formatCents(Math.abs(row.amountCents))}

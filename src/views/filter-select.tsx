@@ -1,3 +1,5 @@
+import { SelectField } from "./select-field";
+
 type Props = {
 	/** Ties the select to its label; unique on the page. */
 	id: string;
@@ -14,9 +16,8 @@ type Props = {
 
 /**
  * A pill-shaped choice among a few options, for narrowing a list (Month, Category, Account and Show on
- * Transactions): a real select, named by a label only a screen reader hears, with the chosen option
- * showing in the pill. max-w-full lets a long option shorten inside its pill rather than push the page
- * sideways.
+ * Transactions): a SelectField, named by a label only a screen reader hears, with the chosen option
+ * showing in the pill and our own chevron at its end.
  */
 export function FilterSelect({
 	id,
@@ -31,12 +32,7 @@ export function FilterSelect({
 			<label for={id} class="sr-only">
 				{label}
 			</label>
-			<select
-				id={id}
-				name={name}
-				form={form}
-				class="min-h-11 max-w-full rounded-full border border-rule bg-paper px-4 text-base text-ink"
-			>
+			<SelectField id={id} name={name} form={form} variant="pill">
 				{options.map((o) => (
 					<option
 						value={o.value}
@@ -45,7 +41,7 @@ export function FilterSelect({
 						{o.label}
 					</option>
 				))}
-			</select>
+			</SelectField>
 		</>
 	);
 }

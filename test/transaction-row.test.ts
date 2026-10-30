@@ -762,13 +762,25 @@ describe("TransactionRow", () => {
 		expect(html).toContain("Maybe income");
 		expect(html).not.toContain("Maybe Groceries");
 	});
-	it("lets a long category guess shrink and truncate", async () => {
+	it("wraps a long category guess between its words, never truncating it", async () => {
 		const html = await MaybeCategory({
 			name: "A category name long enough to reach the amount",
 			kind: "category",
 		}).toString();
-		expect(html).toContain("truncate");
-		expect(html).not.toContain("shrink-0");
+		expect(html).not.toContain("truncate");
+		expect(html).toContain("whitespace-normal break-normal");
+		// The tag's icon keeps its width, so the words take the room that is left.
+		expect(html).toContain('class="size-4 shrink-0"');
+	});
+
+	it("gives a row's Maybe tag its own 44px line, clear of the name's underline", async () => {
+		const html = await TransactionRow({
+			row: { ...base, maybeCategoryName: "Groceries" },
+		}).toString();
+		expect(html).toMatch(
+			/<span class="flex min-w-0 items-center gap-2 leading-6 mt-1 min-h-11">/,
+		);
+		expect(html).toContain("min-h-16");
 	});
 
 	it("leaves Counts in off a linked refund, whose caption already explains it", async () => {
@@ -991,7 +1003,7 @@ describe("a TransactionRow that opens", () => {
 			href: "/transactions/7",
 		}).toString();
 		expect(html).toContain(
-			'class="flex h-16 items-center gap-4 text-ink no-underline group/row row-opens"',
+			'class="flex min-h-16 items-center gap-4 text-ink no-underline group/row row-opens"',
 		);
 	});
 
