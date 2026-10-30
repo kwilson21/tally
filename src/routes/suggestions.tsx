@@ -602,11 +602,12 @@ suggestions.post(PATH, async (c) => {
 					db
 						.prepare(
 							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
-							SELECT 'category', transactions.category_confidence, 'something_else', ?
+							SELECT 'category', transactions.category_confidence,
+								CASE WHEN transactions.jev_category_id = ? THEN 'yes' ELSE 'something_else' END, ?
 							FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}
 								AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
 						)
-						.bind(today, item.transactionId, category.id),
+						.bind(category.id, today, item.transactionId, category.id),
 					db
 						.prepare(
 							`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,

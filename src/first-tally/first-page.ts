@@ -13,6 +13,7 @@ import {
 	type MonthSpent,
 	monthlyMeanCents,
 } from "../budgets/first-suggestion";
+import { householdToday } from "../dates";
 import { readAiSwitches } from "../db/ai-switches";
 import {
 	COUNTED_JOINS,
@@ -34,11 +35,11 @@ import {
 	readFirstTally,
 	strokeStatement,
 } from "../db/first-tally";
-import { PERSON_INCOME_SET_SQL } from "../db/income";
+import { PERSON_INCOME_SET_SQL, storedIncomeGuessSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
 import { merchantDisplayNames } from "../db/merchant-names";
 import { currentGoalSql } from "../db/savings-goals";
-import { payAskedSql } from "../db/suggestions-queue";
+import { askedSql, payAskedSql } from "../db/suggestions-queue";
 import { needsCategoryCount } from "../db/transactions";
 import { readMonthSummary } from "../month-summary";
 import { tidyName } from "../transactions/tidy-name";
@@ -213,15 +214,26 @@ export async function answerPay(
 		merchant.ids.map((id, i) => [id, merchant.deposits[i] as PayDeposit]),
 	);
 	const shown = `[${shownPayValues(merchant).join(",")}]`;
-	const [changed] = await db.batch([
-		db
-			.prepare(
-				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${payAskedSql("transactions")}
+	const shownWhere = `${payAskedSql("transactions")}
 				AND transactions.id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
 				AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM transactions s
 					WHERE s.id = json_extract(j.value, '$.id') AND s.date = json_extract(j.value, '$.date')
 					AND -s.amount_cents = json_extract(j.value, '$.cents')
-					AND ${merchantKeySql("s")} = json_extract(j.value, '$.key') AND ${payAskedSql("s")}))`,
+					AND ${merchantKeySql("s")} = json_extract(j.value, '$.key') AND ${payAskedSql("s")}))`;
+	// The answer record goes first, so it reads each deposit's guess before the UPDATE clears it (decision 155). Only a
+	// deposit whose guess is in the income Maybe range is a Maybe, so a sure or too-low guess, or money marked income with
+	// no guess, records nothing. It has the same WHERE as the UPDATE, so a stale answer records nothing either.
+	const [, changed] = await db.batch([
+		db
+			.prepare(
+				`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+				SELECT 'income', ${storedIncomeGuessSql("transactions")}, ?, ?
+				FROM transactions WHERE ${shownWhere} AND ${askedSql("income", storedIncomeGuessSql("transactions"))}`,
+			)
+			.bind(answer, await householdToday(db), shown, shown),
+		db
+			.prepare(
+				`UPDATE transactions SET ${PERSON_INCOME_SET_SQL} WHERE ${shownWhere}`,
 			)
 			.bind(answer === "yes" ? 1 : 0, who, shown, shown),
 		payAnswerStatement(db, merchant.key, { [answer]: deposits }),
