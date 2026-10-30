@@ -40,8 +40,10 @@ const FREQUENCIES: [DueFrequency, string][] = [
 	["yearly", "every year"],
 ];
 
-// The date input is a native control on a ledger line: at least 44px, text-lg (the sentence's size).
-const PICKER = "min-h-11 border-b border-muted bg-transparent px-1 text-lg";
+// The date input is a native control on a ledger line: at least 44px, text-lg (the sentence's size). Its calendar icon
+// sits at the ledger's text inset (px-1), so --field-inset is 0.25rem here (app.css).
+const PICKER =
+	"min-h-11 border-b border-muted bg-transparent px-1 text-lg [--field-inset:0.25rem]";
 
 type Props = {
 	frequency: DueFrequency;

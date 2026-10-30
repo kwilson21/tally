@@ -48,7 +48,7 @@ export function SelectField({
 	return (
 		<span
 			data-select-field=""
-			class={`relative inline-flex max-w-full min-w-0 ${wrapClass ?? ""}`}
+			class={`relative inline-flex max-w-full min-w-0 self-start ${wrapClass ?? ""}`}
 		>
 			<select
 				{...attrs}

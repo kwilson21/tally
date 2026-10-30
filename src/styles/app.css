@@ -78,16 +78,24 @@
 }
 
 @layer base {
+	/* A fieldset's default minimum width is its content's, so one long unbroken word would widen a chip group past its
+	 * column. A group may shrink to its column instead, and a Chip's label ends the word in an ellipsis inside it. */
+	fieldset {
+		min-width: 0;
+	}
+
 	/* Native date inputs (DESIGN.md: no native select arrows or date icons). The calendar icon is centred vertically at
 	 * the field's right edge, at the same inset as SelectField's chevron (the control's text padding, 0.75rem), so it
 	 * lines up with the pickers beside it. The input stays native: the browser still opens its picker. */
 	input[type="date"] {
 		position: relative;
+		/* The calendar icon's inset from the field's right edge, set by the field's variant class: the same as its text's left padding (px-3 by default, px-1 for DueRow's ledger). */
+		--field-inset: 0.75rem;
 	}
 	input[type="date"]::-webkit-calendar-picker-indicator {
 		position: absolute;
 		top: 50%;
-		right: 0.75rem;
+		right: var(--field-inset);
 		width: 1rem;
 		height: 1rem;
 		margin: 0;

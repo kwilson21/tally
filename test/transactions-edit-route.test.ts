@@ -106,7 +106,7 @@ describe("GET /transactions/:id", () => {
 		const { html } = await get(`/transactions/${bakery}`);
 		const sheet = html.slice(html.indexOf('role="dialog"'));
 		expect(sheet).toMatch(
-			/name="category" value="1"[^>]*aria-describedby="category-suggestion-confidence-\d+-1"[^>]*class="sr-only"\/>Groceries <span class="text-muted">· Suggested<\/span>/,
+			/name="category" value="1"[^>]*aria-describedby="category-suggestion-confidence-\d+-1"[^>]*class="sr-only"\/><span class="min-w-0 overflow-hidden text-ellipsis">Groceries <span class="text-muted">· Suggested<\/span><\/span>/,
 		);
 		expect(sheet).toMatch(
 			new RegExp(

@@ -2317,7 +2317,7 @@ function Rows() {
 					"Chip",
 					"WhyLink",
 				]}
-				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses wrap between their words and never truncate; a Maybe tag keeps its own line, clear of a dashed name's underline. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
+				sentence="The row uses a dashed Maybe income tag only for an unsure YES; when income and category are both unsure, the row shows Maybe income and the edit panel shows both guesses. The income confidence line describes its switch (Count as income, P120 B), and long category guesses wrap between their words, with one word too long for the tag ending in an ellipsis; a Maybe tag keeps its own line, clear of a dashed name's underline. A bank-change sentence (an unlinked refund or a removed split) keeps its place on the row over a Maybe category, which the edit panel still shows."
 			>
 				<div class="flex flex-wrap items-start gap-3">
 					<MaybeCategory name="Eating Out" kind="category" />

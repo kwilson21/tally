@@ -9,12 +9,18 @@ import { NameChoices } from "./name-choices";
 import { NewCategoryCard } from "./suggestion-card";
 import { WhyLink } from "./why-link";
 
-/** The dashed "Maybe …" tag at question size: the one question on a screen (spec §8.6, P42 A). */
+/**
+ * The dashed "Maybe …" tag above the one serif headline (spec §8.6, P42 A, direction A: a quiet tag, one headline).
+ * It is a label, not a control, so it is 36px tall (min-h-9) rather than the 44px touch target. Its words wrap between
+ * words, and one word too long for the pill ends in an ellipsis; they never break mid-word.
+ */
 export function MaybeQuestion({ children }: { children: Child }) {
 	return (
-		<p class="inline-flex min-h-11 max-w-full items-center gap-2 self-start rounded-control border border-dashed border-ink px-3 font-serif text-3xl font-semibold text-ink">
-			<Icon name="circle-dashed" class="size-6 shrink-0" />
-			<span class="min-w-0 whitespace-normal break-normal">{children}</span>
+		<p class="mt-1 mb-1 inline-flex min-h-9 max-w-full items-center gap-2 self-start rounded-full border border-dashed border-ink px-4 text-base font-medium text-ink">
+			<Icon name="circle-dashed" class="size-5 shrink-0" />
+			<span class="min-w-0 overflow-hidden text-ellipsis whitespace-normal break-normal leading-none">
+				{children}
+			</span>
 		</p>
 	);
 }

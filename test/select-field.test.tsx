@@ -5,9 +5,11 @@ import designMd from "../DESIGN.md?raw";
 import css from "../src/styles/app.css?raw";
 import { CategoryGrid } from "../src/views/category-grid";
 import { Chip } from "../src/views/chip";
+import { DueRow } from "../src/views/due-row";
 import { FilterSelect } from "../src/views/filter-select";
 import { MaybeCategory, MaybeIncome } from "../src/views/maybe-category";
 import { SelectField } from "../src/views/select-field";
+import { TextInput } from "../src/views/text-input";
 
 // Every source file that draws a native select or a date input, read as text for the guardrail below.
 const SOURCES = import.meta.glob(
@@ -34,7 +36,7 @@ describe("no mid-word wraps", () => {
 		}
 	});
 
-	it("a Maybe tag wraps between words and is never truncated", () => {
+	it("a Maybe tag wraps between words and never breaks mid-word", () => {
 		const html = renderToString(
 			<MaybeCategory name="Household and garden supplies" kind="category" />,
 		);
@@ -42,6 +44,18 @@ describe("no mid-word wraps", () => {
 		expect(html).not.toContain("truncate");
 		expect(html).toContain("whitespace-normal break-normal");
 		expect(renderToString(<MaybeIncome />)).not.toContain("truncate");
+	});
+
+	it("a Maybe tag ends one too-long word in an ellipsis inside the tag", () => {
+		const html = renderToString(
+			<MaybeCategory
+				name="Householdandgardensuppliesandmore"
+				kind="category"
+			/>,
+		);
+		expect(html).toContain(
+			'<span class="min-w-0 overflow-hidden text-ellipsis">Maybe Householdandgardensuppliesandmore</span>',
+		);
 	});
 
 	it("the suggested category cell spans both grid columns", () => {
@@ -78,6 +92,19 @@ describe("SelectField", () => {
 		expect(html).toContain("right-4");
 	});
 
+	it("keeps its own width in a column, so the chevron stays at the select's edge", () => {
+		// In a flex column the wrapper would stretch to the column while the select keeps its width, parking the chevron
+		// far from the select. self-start keeps the wrapper the select's width.
+		const html = renderToString(
+			<div class="flex flex-col gap-1">
+				<SelectField name="month" id="month" options={OPTIONS} variant="pill" />
+			</div>,
+		);
+		expect(html).toMatch(
+			/<span data-select-field="" class="[^"]*\bself-start\b/,
+		);
+	});
+
 	it("keeps the real select with its name first, so the DueRow markup still reads it", () => {
 		const html = renderToString(
 			<SelectField
@@ -108,6 +135,55 @@ describe("SelectField", () => {
 	});
 });
 
+// Tailwind's spacing scale: px-N and pl-N are N x 0.25rem.
+const rem = (n: string) => `${Number(n) * 0.25}rem`;
+// The class list of the date input in a render, whatever order its attributes come in.
+const dateClass = (html: string) =>
+	html
+		.match(/<input\b[^>]*\btype="date"[^>]*>/)?.[0]
+		.match(/class="([^"]*)"/)?.[1];
+
+describe("the arrow and the date icon sit at their variant's text inset", () => {
+	it.each(["pill", "control", "ledger"] as const)(
+		"%s: the arrow's right inset equals the text's left padding",
+		(variant) => {
+			const html = renderToString(
+				<SelectField name="x" id="x" options={OPTIONS} variant={variant} />,
+			);
+			const padding = html.match(/\bpl-(\d+)\b/)?.[1];
+			const inset = html.match(/\bright-(\d+)\b/)?.[1];
+			expect(padding).toBeDefined();
+			expect(inset).toBe(padding);
+		},
+	);
+
+	it("the native date input's calendar icon uses --field-inset, which the base layer defaults to 0.75rem", () => {
+		expect(css).toMatch(
+			/::-webkit-calendar-picker-indicator \{[^}]*right: var\(--field-inset\);/,
+		);
+		expect(css).toMatch(/input\[type="date"\] \{[^}]*--field-inset: 0\.75rem;/);
+	});
+
+	it("a TextInput date (px-3) has the default inset", () => {
+		const html = renderToString(
+			<TextInput id="d" name="date" label="Date" type="date" surface="paper" />,
+		);
+		const input = dateClass(html);
+		const padding = input?.match(/\bpx-(\d+)\b/)?.[1];
+		expect(padding).toBeDefined();
+		expect(rem(padding ?? "")).toBe("0.75rem");
+	});
+
+	it("DueRow's ledger date (px-1) sets its own --field-inset to match", () => {
+		const html = renderToString(<DueRow frequency="monthly" dueDay={1} />);
+		const input = dateClass(html);
+		const padding = input?.match(/\bpx-(\d+)\b/)?.[1];
+		const inset = input?.match(/--field-inset:([\d.]+rem)/)?.[1];
+		expect(padding).toBeDefined();
+		expect(inset).toBe(rem(padding ?? ""));
+	});
+});
+
 describe("guardrails", () => {
 	it("no view or route draws a native select outside SelectField", () => {
 		const offenders = Object.entries(SOURCES)
@@ -135,6 +211,11 @@ describe("guardrails", () => {
 		expect(css).toMatch(
 			/::-webkit-calendar-picker-indicator \{[^}]*position: absolute;[^}]*top: 50%;/,
 		);
+	});
+
+	it("a fieldset may shrink to its column, so one long word in a chip stays inside its group", () => {
+		// A fieldset's default minimum width is its content's; a long unbroken word would widen the group past the sheet.
+		expect(css).toMatch(/\bfieldset \{\s*min-width: 0;/);
 	});
 
 	it("DESIGN.md states the rule", () => {

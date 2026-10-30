@@ -15,7 +15,9 @@ function MaybeTag({
 	return (
 		<span class="inline-flex min-h-11 max-w-full items-center gap-1 whitespace-normal break-normal rounded-control border border-dashed border-ink px-2 text-sm text-ink">
 			{icon && <Icon name="circle-dashed" class="size-4 shrink-0" />}
-			Maybe {word === "income" ? word : details}
+			<span class="min-w-0 overflow-hidden text-ellipsis">
+				Maybe {word === "income" ? word : details}
+			</span>
 		</span>
 	);
 }

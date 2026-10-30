@@ -57,7 +57,10 @@ export function Chip({
 				</span>
 			)}
 			{icon}
-			{children}
+			{/* The label's words wrap between words; one word too long for the pill ends in an ellipsis, never mid-word. */}
+			{children && (
+				<span class="min-w-0 overflow-hidden text-ellipsis">{children}</span>
+			)}
 		</label>
 	);
 }
