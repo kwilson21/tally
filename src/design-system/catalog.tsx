@@ -6836,7 +6836,7 @@ function AccountsGroup() {
 				title="NetWorthChart"
 				tier="visual"
 				components={["NetWorthChart"]}
-				sentence="The line under Accounts' headline (P25 A, P26 A, P31). Code writes the change in a sentence in the status sentence's voice (Up $3,600 since May., Down $1,200 since May., or No change since May.; a history that began this month names the day, Up $120 since Oct 1.) followed by a terracotta Why? that goes to the Net worth section of How Tally works, then one server-drawn line through the last 6 months of net worth on the ledger rules, with its first and last day under it in muted words (May, Today). It has no amounts, axis or hover: the headline and the sentence carry the numbers, and the picture is an SVG with a text alternative that says the same in dollars. Net worth is every account's balance with debt subtracted, leaving out the Cash account and disconnected banks, read from one balance a day recorded when a sync refreshes balances; it starts on the first day every counted account has one, so linking another bank never looks like growth, and while a connected account has none at all there is no line (a line that left it out would disagree with the headline), only a note saying the chart waits for every account. Under two days of balances it is the five empty rules with a sentence and a note on when the chart starts (as P31 drew it). There is nothing to tap: a sync redraws it with the rest of Accounts, and the sync's toast is what is announced. Account rows keep today's balance only."
+				sentence="The line under Accounts' headline (P25 A, P26 A, P31). Code writes the change in a sentence in the status sentence's voice (Up $3,600 since May., Down $1,200 since May., or No change since May.; a history that began this month names the day, Up $120 since Oct 1.) followed by a terracotta Why? that goes to the Net worth section of How Tally works, then one server-drawn line through the last 6 months of net worth on the ledger rules, with its first and last day under it in muted words (May, Today). It has no amounts, axis or hover: the headline and the sentence carry the numbers, and the picture is an SVG with a text alternative that says the same in dollars. Net worth is every account's balance with debt subtracted, leaving out the Cash account and disconnected banks, read from one balance a day recorded when a sync refreshes balances; each counted account counts from its first balance, so the line keeps its past months and steps on the day an account is added, down for a card's balance owed and up for a bank's cash; the sentence names it after the change, as in “Up $2,360 since May. You added Apple Card on Oct 1.” or “You linked Wells Fargo on Oct 1.”; an account with no balance yet is left out of the line until its first one, so until then the line can end apart from the headline, and it meets the headline once every account has one. Under two days of balances it is the five empty rules with a sentence and a note on when the chart starts (as P31 drew it). There is nothing to tap: a sync redraws it with the rest of Accounts, and the sync's toast is what is announced. Account rows keep today's balance only."
 			>
 				<State label="Six months, up (P25 A), at a phone's width">
 					<div class="w-[358px] max-w-full">
@@ -6875,11 +6875,18 @@ function AccountsGroup() {
 						<NetWorthChart view={NET_WORTH_VIEWS.firstDay} />
 					</Picture>
 				</State>
-				<State label="While a connected account has no balance recorded yet: no line, so it never disagrees with the headline">
+				<State label="An account added: Apple Card's balance owed steps the line down on its first day, and the sentence names it">
 					<Picture
-						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.waiting)}`}
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.cardAdded)}`}
 					>
-						<NetWorthChart view={NET_WORTH_VIEWS.waiting} />
+						<NetWorthChart view={NET_WORTH_VIEWS.cardAdded} />
+					</Picture>
+				</State>
+				<State label="A bank linked: its cash steps the line up">
+					<Picture
+						label={`Net worth chart: ${chartWords(NET_WORTH_VIEWS.bankLinked)}`}
+					>
+						<NetWorthChart view={NET_WORTH_VIEWS.bankLinked} />
 					</Picture>
 				</State>
 				<State label="Before any balance is recorded">

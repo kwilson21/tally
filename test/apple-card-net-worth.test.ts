@@ -61,17 +61,22 @@ const DAYS_OCT = [
 	"2026-10-05",
 ];
 
+/** The line's cents on one day, or undefined when it has no point that day. */
+const on = (points: { date: string; cents: number }[], date: string) =>
+	points.find((p) => p.date === date)?.cents;
+
 describe("Apple Card in net worth (spec §8.10)", () => {
 	beforeEach(() => resetDemo(env.DB, TODAY));
 
 	it("counts the card in the headline and the chart from its counted day, and it adds to the banks", async () => {
+		const without = await accountsWithHistory(env.DB, TODAY);
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: TODAY,
 			countedFrom: "2026-10-01",
 		});
 		await addCardBalances(card?.id ?? 0, DAYS_OCT, 124018);
-		const { banks, points, appleCard } = await accountsWithHistory(
+		const { banks, points, appleCard, added } = await accountsWithHistory(
 			env.DB,
 			TODAY,
 		);
@@ -82,16 +87,25 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 		});
 		const counted = countedAccounts(banks, appleCard);
 		expect(netWorthCents(counted)).toBe(BANKS_NET_WORTH_TODAY - 124018);
-		// The line starts on the card's counted day, and ends on the headline.
-		expect(points[0]?.date).toBe("2026-10-01");
-		expect(points).toHaveLength(5);
+		// The line keeps the past months from the window's first day, steps down on the card's counted day by
+		// what it owes, ends on the headline, and names the card for that day.
+		expect(points[0]?.date).toBe("2026-05-01");
+		expect(points).toHaveLength(158);
+		expect(on(points, "2026-09-30")).toBe(on(without.points, "2026-09-30"));
+		expect(on(points, "2026-10-01")).toBe(
+			(on(without.points, "2026-10-01") ?? 0) - 124018,
+		);
 		expect(points.at(-1)).toEqual({
 			date: TODAY,
 			cents: BANKS_NET_WORTH_TODAY - 124018,
 		});
+		expect(added).toEqual([
+			{ name: "Apple Card", verb: "added", date: "2026-10-01" },
+		]);
 	});
 
 	it("reads the card's balances only from its counted day on, so an older balance never carries into the line", async () => {
+		const without = await accountsWithHistory(env.DB, TODAY);
 		const card = await addCard({
 			balanceCents: 124018,
 			balanceOn: TODAY,
@@ -101,7 +115,9 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 		await addCardBalances(card?.id ?? 0, ["2026-09-01"], 999999);
 		await addCardBalances(card?.id ?? 0, DAYS_OCT, 124018);
 		const { points } = await accountsWithHistory(env.DB, TODAY);
-		expect(points[0]?.date).toBe("2026-10-01");
+		expect(points[0]?.date).toBe("2026-05-01");
+		// September's line is the banks' alone: the card's older balance never reached it.
+		expect(on(points, "2026-09-01")).toBe(on(without.points, "2026-09-01"));
 		expect(points.at(-1)?.cents).toBe(BANKS_NET_WORTH_TODAY - 124018);
 	});
 
@@ -131,7 +147,7 @@ describe("Apple Card in net worth (spec §8.10)", () => {
 			netWorthCents(countedAccounts(before.banks, null)),
 		);
 		expect(after.points).toEqual(before.points);
-		expect(after.waiting).toBe(before.waiting);
+		expect(after.added).toEqual(before.added);
 	});
 
 	it("adds a credit balance to net worth, since the card then owes the family", async () => {

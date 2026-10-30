@@ -1,7 +1,9 @@
 // Reads `balance_history` (spec §5) for the net-worth chart on Accounts.
 
 import {
-	accountsWaiting,
+	type AccountAdded,
+	type AccountSource,
+	accountsAdded,
 	type BalanceRow,
 	chartStart,
 	type NetWorthPoint,
@@ -51,12 +53,41 @@ function balanceRowsStatement(db: D1Database, today: string) {
 }
 
 /**
+ * The banks and the Apple Card the line can name when they're added (decision 154): each connected bank as
+ * "linked", and the Apple Card as "added" once its balance counts (the same test countedAccounts applies to it).
+ */
+function accountSources(
+	banks: Bank[],
+	appleCard: AppleCardAccount | null,
+): AccountSource[] {
+	const sources: AccountSource[] = banks
+		.filter((bank) => !bank.disconnected)
+		.map(
+			(bank): AccountSource => ({
+				name: bank.name,
+				verb: "linked",
+				accountIds: bank.accounts
+					.filter((account) => account.connected !== false)
+					.map((account) => account.id),
+			}),
+		);
+	if (appleCard && appleCard.balanceOn !== null && appleCard.removedAt === null)
+		sources.push({
+			name: "Apple Card",
+			verb: "added",
+			accountIds: [appleCard.id],
+		});
+	return sources;
+}
+
+/**
  * Accounts' data in one read: the banks and their accounts (the headline's numbers), the Apple Card, and net worth on
  * each recorded day of the chart's six months. D1 runs a batch as one transaction, so a sync landing
  * during the page can't make the line contradict the headline.
  *
- * The line counts the accounts the headline counts. It has no points until every one of them has a
- * balance, and `waiting` says how many are still without one (spec §8.3).
+ * The line counts the accounts the headline counts, each from its first balance, so it keeps its past months when an
+ * account is added. `added` names the banks and the card whose first balance came after the line's first day, which
+ * the line's sentence names after its change (decision 154, spec §8.3).
  */
 export async function accountsWithHistory(
 	db: D1Database,
@@ -64,7 +95,7 @@ export async function accountsWithHistory(
 ): Promise<{
 	banks: Bank[];
 	points: NetWorthPoint[];
-	waiting: number;
+	added: AccountAdded[];
 	appleCard: AppleCardAccount | null;
 }> {
 	const [bankResult, balanceResult, cardResult] = await db.batch([
@@ -87,10 +118,15 @@ export async function accountsWithHistory(
 		balanceCents: r.balance_cents,
 		isLiability: r.is_liability === 1,
 	}));
+	const points = netWorthSeries(rows, chartStart(today), accountIds);
 	return {
 		banks,
-		points: netWorthSeries(rows, chartStart(today), accountIds),
-		waiting: accountsWaiting(rows, accountIds),
+		points,
+		added: accountsAdded(
+			rows,
+			accountSources(banks, appleCard),
+			points[0]?.date ?? "",
+		),
 		appleCard,
 	};
 }

@@ -706,6 +706,28 @@ const climbing = (endCents: number): NetWorthPoint[] => [
 	{ date: NET_WORTH_TODAY, cents: endCents },
 ];
 const CLIMBING = climbing(NET_WORTH_CENTS);
+// The climb from its last weekly point (Sep 25) to today, a point a day from Sep 28 to Oct 4, so an account's step on
+// Oct 1 draws as a step rather than a slant across a week. The climb is straight from Sep 25 to today.
+const LAST_WEEKLY = CLIMBING[CLIMBING.length - 2]?.cents ?? NET_WORTH_CENTS;
+const DAILY_CLIMB: NetWorthPoint[] = Array.from({ length: 7 }, (_, i) => ({
+	date: daysBefore("2026-09-28", -i),
+	cents: Math.round(
+		LAST_WEEKLY + ((NET_WORTH_CENTS - LAST_WEEKLY) * (3 + i)) / 10,
+	),
+}));
+
+/**
+ * The line when an account is added on Oct 1: the climb, with the account counted only from that day. Before it the line
+ * sits `offset` from the climb (a card's balance owed wasn't counted yet, so +124000; a bank's cash, -634000); from Oct 1
+ * on it is the climb. It ends on the headline like the other examples.
+ */
+const withAccountAdded = (offset: number): NetWorthPoint[] => [
+	...[...CLIMBING.slice(0, -1), ...DAILY_CLIMB].map((p) => ({
+		date: p.date,
+		cents: p.cents + (p.date < "2026-10-01" ? offset : 0),
+	})),
+	{ date: NET_WORTH_TODAY, cents: NET_WORTH_CENTS },
+];
 
 /** The climbing line ending on `endCents`, for a mock whose headline isn't NET_WORTH_CENTS. */
 export const netWorthViewEnding = (endCents: number) =>
@@ -737,6 +759,11 @@ export const NET_WORTH_VIEWS = {
 		NET_WORTH_TODAY,
 	),
 	none: netWorthView([], NET_WORTH_TODAY),
-	// A connected account has no balance recorded yet, so there is no line until it has one.
-	waiting: netWorthView([], NET_WORTH_TODAY, 1),
+	// An account added on Oct 1 (P143 A): the line keeps its past months, steps on that day, and the sentence names it.
+	cardAdded: netWorthView(withAccountAdded(124_000), NET_WORTH_TODAY, [
+		{ name: "Apple Card", verb: "added", date: "2026-10-01" },
+	]),
+	bankLinked: netWorthView(withAccountAdded(-634_000), NET_WORTH_TODAY, [
+		{ name: "Wells Fargo", verb: "linked", date: "2026-10-01" },
+	]),
 };

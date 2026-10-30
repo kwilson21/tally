@@ -20,6 +20,7 @@ import { FormsProposals } from "./proposals-forms";
 import { KeyboardListProposal } from "./proposals-keys";
 import { MixedStoreProposals, SplitThisOneProposal } from "./proposals-mixed";
 import { MoneyInputProposal } from "./proposals-money";
+import { NetWorthProposal } from "./proposals-net-worth";
 import { Phase4Proposals } from "./proposals-phase4";
 import { Phase5BillsProposals } from "./proposals-phase5-bills";
 import { Phase5HomeProposals } from "./proposals-phase5-home";
@@ -582,6 +583,12 @@ export const DECIDED: readonly {
 			"Option A: setup on its own pages: a welcome, then four steps, each a screen with a step bar, one question, the bank's own numbers as a ledger card and the answers at its foot, and a finish that shows Safe to spend and what was set up; no tab bar until setup is done, and the fifth stroke goes (decision 148).",
 		issue: 772,
 	},
+	{
+		title: "P143 · Net worth on the day a new account starts",
+		outcome:
+			"Option A: the net worth line keeps its past months and steps on the day an account gets its first balance, and the sentence names the account and the day, “Up $2,370 since May. You added Apple Card on Oct 18.” (decision 154).",
+		issue: 780,
+	},
 ];
 
 /** The proposals page body. */
@@ -629,6 +636,16 @@ export function Proposals() {
 					Drawn Oct 22. The owner's pick, marked Picked, is decision 148: A.
 				</p>
 				<SetupProposal />
+			</section>
+
+			<section aria-labelledby="p143-title" class="mt-12">
+				<h2 id="p143-title" class="font-serif text-3xl font-semibold">
+					Picked: net worth on the day a new account starts
+				</h2>
+				<p class="mt-2 max-w-prose text-muted">
+					Drawn Oct 30. The owner's pick, marked Picked, is decision 154: A.
+				</p>
+				<NetWorthProposal />
 			</section>
 
 			<section aria-labelledby="followups-picks-title" class="mt-12">

@@ -21,7 +21,7 @@ export type NetWorthView =
 	| { kind: "early"; sentence: string | null; note: string }
 	| {
 			kind: "line";
-			/** "Up $3,600 since May." */
+			/** "Up $3,600 since May.", and after it the accounts added since the line's start: "You added Apple Card on Oct 18." */
 			sentence: string;
 			/** Under the line's left end, like "May"; under its right end, "Today". */
 			startLabel: string;
@@ -47,10 +47,11 @@ export function chartStart(today: string): string {
 /**
  * Net worth on each day that has a balance, oldest first, from `from` on. `accountIds` are every
  * account the headline counts (connected bank accounts, never Cash); balances of any other account
- * are ignored. An account with no row on a day keeps its last balance; debt (`isLiability`)
- * subtracts, as `netWorthCents` does. The series starts on the first day every one of those accounts
- * has a balance, so linking another bank later doesn't look like growth, and while one has none at
- * all there is no series: a line that left it out would disagree with the headline.
+ * are ignored. Each account counts from its first balance: a day's point adds the latest balance of
+ * every counted account that has one by then, so an account with no balance yet is left out, and the
+ * line keeps its past months when an account is added, stepping on the day it gets its first balance.
+ * An account with no row on a day keeps its last balance; debt (`isLiability`) subtracts, as
+ * `netWorthCents` does.
  */
 export function netWorthSeries(
 	rows: BalanceRow[],
@@ -68,7 +69,7 @@ export function netWorthSeries(
 		latest.set(r.accountId, r.isLiability ? -r.balanceCents : r.balanceCents);
 		// A day is finished once the next row is on a later day.
 		if (sorted[i + 1]?.date === r.date) continue;
-		if (latest.size < accounts.size || r.date < from) continue;
+		if (r.date < from) continue;
 		let cents = 0;
 		for (const balance of latest.values()) cents += balance;
 		points.push({ date: r.date, cents });
@@ -76,21 +77,49 @@ export function netWorthSeries(
 	return points;
 }
 
+/** A bank or a card the net worth counts, for `accountsAdded`: its name, the verb its sentence uses, and its account ids. */
+export type AccountSource = {
+	name: string;
+	verb: "linked" | "added";
+	accountIds: number[];
+};
+
+/** An account the line names: its first balance came after the line's first day, on `date`. */
+export type AccountAdded = {
+	name: string;
+	verb: "linked" | "added";
+	date: string;
+};
+
 /**
- * How many of `accountIds` have no balance recorded at all while another does: the chart is waiting
- * for them. Zero before any balance exists, since then nothing waits on one account in particular.
+ * The sources whose first balance is after `firstDate`, the line's first day, oldest first and then by name. A source
+ * is dated by the earliest row of any of its accounts, so a bank with two accounts is named once. One already there
+ * when the line starts is not named, and a source with no rows is left out.
  */
-export function accountsWaiting(
+export function accountsAdded(
 	rows: BalanceRow[],
-	accountIds: number[],
-): number {
-	const recorded = new Set(rows.map((r) => r.accountId));
-	const without = accountIds.filter((id) => !recorded.has(id)).length;
-	return without < accountIds.length ? without : 0;
+	sources: AccountSource[],
+	firstDate: string,
+): AccountAdded[] {
+	const added: AccountAdded[] = [];
+	for (const source of sources) {
+		const ids = new Set(source.accountIds);
+		let first: string | null = null;
+		for (const r of rows) {
+			if (ids.has(r.accountId) && (first === null || r.date < first))
+				first = r.date;
+		}
+		if (first !== null && first > firstDate)
+			added.push({ name: source.name, verb: source.verb, date: first });
+	}
+	return added.sort(
+		(a, b) =>
+			(a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
+			(a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+	);
 }
 
 const NEXT_SYNC = "The chart starts with the next sync.";
-const WAITING = "The chart starts once every account has a balance.";
 
 /** Where the chart's first day is named: its month, or its day when the history began this month. */
 const sinceLabel = (date: string, today: string) =>
@@ -127,17 +156,35 @@ function changeSentence(
 }
 
 /**
+ * The clause after the change that names the accounts added since the line's first day: "You added Apple Card on
+ * Oct 18.", "You linked Wells Fargo on Sep 3 and added Apple Card on Oct 18.", or, for three or more, "You added 3
+ * accounts since May." (the change's own label). "today" names an account added on the day itself.
+ */
+function addedClause(
+	added: AccountAdded[],
+	first: NetWorthPoint,
+	today: string,
+): string {
+	if (added.length > 2)
+		return `You added ${added.length} accounts since ${sinceLabel(first.date, today)}.`;
+	const named = added.map(
+		(a) =>
+			`${a.verb} ${a.name} ${a.date === today ? "today" : `on ${shortDay(a.date, today)}`}`,
+	);
+	return `You ${named.join(" and ")}.`;
+}
+
+/**
  * The chart space from a series: the line, its sentence and its words for screen readers, or, with
  * fewer than two days, a note on when it starts (P31). Points are spaced by their dates, so a gap
- * in syncing is a straight stretch, not a squeeze. `waiting` is `accountsWaiting`: while a counted
- * account has no balance there is no line, whatever else was recorded, and the note says so.
+ * in syncing is a straight stretch, not a squeeze. `added` is `accountsAdded`: the accounts whose
+ * first balance came after the line's first day, named in the sentence after the change (decision 154).
  */
 export function netWorthView(
 	points: NetWorthPoint[],
 	today: string,
-	waiting = 0,
+	added: AccountAdded[] = [],
 ): NetWorthView {
-	if (waiting > 0) return { kind: "early", sentence: null, note: WAITING };
 	const first = points[0];
 	const last = points.at(-1);
 	if (!first || !last)
@@ -170,7 +217,9 @@ export function netWorthView(
 		y: y(p.cents),
 	}));
 
-	const sentence = changeSentence(first, last, today);
+	const change = changeSentence(first, last, today);
+	const sentence =
+		added.length > 0 ? `${change} ${addedClause(added, first, today)}` : change;
 	const isToday = last.date === today;
 	return {
 		kind: "line",

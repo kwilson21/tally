@@ -420,6 +420,7 @@ describe("GET /design-system/proposals", () => {
 			// P137 and P138 (#644, #645) mark their option A, the owner's picks of decision 126, so each has one Picked.
 			// P139 (#660) marks its option A, the owner's pick of decision 131, so it has one Picked.
 			// P142 (#770, decision 148) marks its option A, so it has one Picked.
+			// P143 (#780, decision 154) marks its option A, so it has one Picked.
 			const expected = n < 34 ? 0 : twoPicks.includes(id) ? 2 : 1;
 			expect([id, picked]).toEqual([id, expected]);
 			// Every option is a picture of a screen: labelled, and nothing inside to Tab to. Each option counts its own
@@ -457,7 +458,7 @@ describe("GET /design-system/proposals", () => {
 		// labelled pictures (P119's stills have boxes and no label; P120 and P121 put two or three labelled
 		// screens in one box), so each proposal's own test above counts its pictures.
 		expect(html).not.toMatch(/<div data-screen="picture">\s*<\/div>/);
-		expect(DECIDED.length).toBe(96);
+		expect(DECIDED.length).toBe(97);
 		for (const d of DECIDED) {
 			expect(html).toContain(d.title.replaceAll("'", "&#39;"));
 			expect(html).toContain(d.outcome.replaceAll("'", "&#39;"));
@@ -501,7 +502,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain("rounded up to the next $10");
 		expect(entry?.outcome).toContain("the demo keeps P124 A (decision 114).");
 		// P125 sits after P124 (issue 501) and before P126, so the list stays in proposal order.
-		expect(DECIDED.at(-17)).toBe(entry);
+		expect(DECIDED.at(-18)).toBe(entry);
 	});
 
 	it("lists P126 as decided with issue 202, decisions 115 and 116 and option A, between P125 and P127", () => {
@@ -510,7 +511,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(202);
 		expect(entry?.outcome).toContain("Option A: the boxes keep today's size");
 		expect(entry?.outcome).toContain("decisions 115 and 116");
-		expect(DECIDED.at(-16)).toBe(entry);
+		expect(DECIDED.at(-17)).toBe(entry);
 	});
 
 	it("lists P127 as decided with issue 500, decision 116 and option A, between P126 and P128", () => {
@@ -526,7 +527,7 @@ describe("GET /design-system/proposals", () => {
 		);
 		expect(entry?.outcome).not.toContain("so the minus");
 		expect(entry?.outcome).toContain("(decision 116).");
-		expect(DECIDED.at(-15)).toBe(entry);
+		expect(DECIDED.at(-16)).toBe(entry);
 	});
 
 	it("lists P128 as decided with issue 72, decision 118 and option C, before P129", () => {
@@ -535,7 +536,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.issue).toBe(72);
 		expect(entry?.outcome).toContain("Option C: ? opens the list as a sheet");
 		expect(entry?.outcome).toContain("(decision 118).");
-		expect(DECIDED.at(-14)).toBe(entry);
+		expect(DECIDED.at(-15)).toBe(entry);
 	});
 
 	it("lists P129 as decided with issue 80, decision 117 and option A, after P128 and before P130", () => {
@@ -548,7 +549,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"the centred layout stays (decision 117).",
 		);
-		expect(DECIDED.at(-13)).toBe(entry);
+		expect(DECIDED.at(-14)).toBe(entry);
 	});
 
 	it("keeps P125 to P139 in proposal order, so a later decision can't move them", () => {
@@ -570,6 +571,7 @@ describe("GET /design-system/proposals", () => {
 			"P139 ·",
 			"P140 ·",
 			"P142 ·",
+			"P143 ·",
 		].map((prefix) => DECIDED.findIndex((d) => d.title.startsWith(prefix)));
 		for (const [i, index] of order.entries()) {
 			expect(index, String(i)).toBeGreaterThan(-1);
@@ -606,7 +608,7 @@ describe("GET /design-system/proposals", () => {
 		expect(entry?.outcome).toContain(
 			"up to two bills by name, then “and N more”",
 		);
-		expect(DECIDED.at(-6)).toBe(entry);
+		expect(DECIDED.at(-7)).toBe(entry);
 	});
 
 	it("lists P137 and P138 as decided with issues 644 and 645, option A and decision 126, P138 before P139", () => {
@@ -640,12 +642,14 @@ describe("GET /design-system/proposals", () => {
 			"Option A: Your banks lists each connected bank's state",
 		);
 		expect(banks?.outcome).toContain("(decision 133).");
-		expect(DECIDED.at(-5)).toBe(rules);
-		expect(DECIDED.at(-4)).toBe(payments);
-		expect(DECIDED.at(-3)).toBe(split);
-		expect(DECIDED.at(-2)).toBe(banks);
+		expect(DECIDED.at(-6)).toBe(rules);
+		expect(DECIDED.at(-5)).toBe(payments);
+		expect(DECIDED.at(-4)).toBe(split);
+		expect(DECIDED.at(-3)).toBe(banks);
 		const setup = DECIDED.find((d) => d.title.startsWith("P142 ·"));
-		expect(DECIDED.at(-1)).toBe(setup);
+		expect(DECIDED.at(-2)).toBe(setup);
+		const netWorth = DECIDED.find((d) => d.title.startsWith("P143 ·"));
+		expect(DECIDED.at(-1)).toBe(netWorth);
 	});
 
 	it("draws decision 89 in P117 and links the replaced P90 rule to it", async () => {
@@ -5197,7 +5201,7 @@ describe("GET /design-system/proposals, the second design audit (#603, #604, #60
 	});
 
 	it("lists P130 to P133 as the decided entries before P134, each with its issue and decision 121", () => {
-		const last = DECIDED.slice(-12, -8);
+		const last = DECIDED.slice(-13, -9);
 		expect(last.map((d) => d.title.split(" · ")[0])).toEqual([
 			"P130",
 			"P131",
@@ -5342,6 +5346,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			'<section aria-labelledby="p139-title"',
 			'<section aria-labelledby="p140-title"',
 			'<section aria-labelledby="p142-title"',
+			'<section aria-labelledby="p143-title"',
 		]);
 		expect(html.slice(top, open).match(/<section id="[^"]*"/g)).toEqual([
 			'<section id="p139-split-category"',
@@ -5350,6 +5355,7 @@ describe("GET /design-system/proposals, P134 and P135 (the second audit, #606 an
 			'<section id="setup-top"',
 			'<section id="your-banks"',
 			'<section id="p142-setup"',
+			'<section id="p143-net-worth"',
 		]);
 		expect(html.slice(open + 1, p136)).not.toContain(
 			'<section aria-labelledby="',
@@ -7095,5 +7101,132 @@ describe("GET /design-system/proposals, P142 (a new family's setup, #770)", () =
 			decisions.split("\n").find((line) => line.startsWith("| 147 |")),
 			"decision 147's row is #776's ready email, so it must not name P142",
 		).not.toContain("P142");
+	});
+});
+
+describe("GET /design-system/proposals, P143 (net worth on the day a new account starts, #780)", () => {
+	const drawn = async () => (await get("/design-system/proposals")).html;
+	const count = (text: string, part: string) => text.split(part).length - 1;
+	const P143 = "p143-net-worth";
+	// The specimen alone: block() runs to the next section, which takes the wrapping section's closing tag with it.
+	const specimenOf = (html: string) => {
+		const chunk = block(html, P143);
+		return chunk.slice(0, chunk.lastIndexOf("</section>"));
+	};
+	// Each option's chunk, from its heading to the next (the first chunk is what sits above the first option).
+	const options = (chunk: string) => chunk.split("<h4 ").slice(1);
+
+	it("opens P143's picked section after P142's and before the follow-ups', titled and dated, citing decision 154 (#780)", async () => {
+		const html = await drawn();
+		const open = html.indexOf('<section aria-labelledby="p143-title"');
+		expect(open).toBeGreaterThan(-1);
+		expect(open).toBeGreaterThan(
+			html.indexOf('<section aria-labelledby="p142-title"'),
+		);
+		expect(open).toBeLessThan(
+			html.indexOf('<section aria-labelledby="followups-picks-title"'),
+		);
+		const section = html.slice(open, html.indexOf(`<section id="${P143}"`));
+		expect(section).toContain('<h2 id="p143-title"');
+		expect(section).toContain(
+			"Picked: net worth on the day a new account starts",
+		);
+		expect(section).toContain(
+			"Drawn Oct 30. The owner&#39;s pick, marked Picked, is decision 154: A.",
+		);
+		const decided = DECIDED.find((entry) => entry.title.startsWith("P143 ·"));
+		expect(decided?.title).toBe(
+			"P143 · Net worth on the day a new account starts",
+		);
+		expect(decided?.issue).toBe(780);
+		expect(decided?.outcome).toContain(
+			"Option A: the net worth line keeps its past months",
+		);
+		expect(decided?.outcome).toContain("(decision 154).");
+	});
+
+	it("draws P143 as one visual specimen with Today, A (picked, recommended), B and C, and one Picked on A", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).toContain('data-ds-tier="visual"');
+		expect(chunk).toContain("P143 · Net worth on the day a new account starts");
+		const named = options(chunk);
+		expect(named.length).toBe(4);
+		expect(named[0]).toContain(">Today, as built");
+		expect(named[1]).toContain(">A: name the new account after the change");
+		expect(named[2]).toContain(
+			">B: leave the new account&#39;s first balance out of the change",
+		);
+		expect(named[3]).toContain(">C: mark the day on the line");
+		expect(named[1]).toContain(">Recommended<");
+		expect(named[1]).toContain(">Picked<");
+		expect(count(chunk, ">Picked<")).toBe(1);
+		expect(count(chunk, ">Recommended<")).toBe(1);
+	});
+
+	it("writes A's sentence with the clause, for Apple Card and for a new bank (decision 154)", async () => {
+		const chunk = specimenOf(await drawn());
+		const a = options(chunk)[1] ?? "";
+		expect(a).toContain("Up $2,370 since May. You added Apple Card on Oct 18.");
+		expect(a).toContain("You linked Wells Fargo on Oct 18.");
+		// The sentence comes from netWorthView itself, so the words a screen reader hears carry the clause too.
+		expect(a).toContain(
+			'aria-label="Net worth over time. Up $2,370 since May. You added Apple Card on Oct 18. It was $38,510 on May 1 and is $40,880 today."',
+		);
+		expect(a).toContain(
+			'aria-label="Net worth over time. Up $9,950 since May. You linked Wells Fargo on Oct 18. It was $38,510 on May 1 and is $48,460 today."',
+		);
+	});
+
+	it("gives B's screen-reader description its own sentence, so the words match the picture (#780)", async () => {
+		const chunk = specimenOf(await drawn());
+		const b = options(chunk)[2] ?? "";
+		expect(b).toContain("not counting Apple Card");
+		expect(b).toContain(
+			'aria-label="Net worth over time. Up $3,610 since May, not counting Apple Card&#39;s $1,240 from Oct 18. It was $38,510 on May 1 and is $40,880 today."',
+		);
+		expect(b).not.toContain("Net worth over time. Up $2,370 since May.");
+	});
+
+	it("writes each How Tally works rule in plain words, with no link in it", async () => {
+		const chunk = specimenOf(await drawn());
+		const rules = [...chunk.matchAll(/How Tally works, Net worth/g)];
+		expect(rules.length).toBe(3);
+		for (const rule of rules) {
+			const at = rule.index ?? 0;
+			expect(chunk.slice(at, at + 200)).not.toContain("<a ");
+		}
+	});
+
+	it("draws no client JavaScript, no form and no htmx request, nothing reachable inside a picture, and only its own ids", async () => {
+		const chunk = specimenOf(await drawn());
+		expect(chunk).not.toContain("<script");
+		expect(chunk).not.toContain("<form");
+		expect(actions(chunk)).toEqual([]);
+		expect(firesByItself(chunk)).toEqual([]);
+		expect(reachableInPictures(chunk)).toEqual([]);
+		const ids = [...chunk.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1] ?? "");
+		expect(ids).toEqual([P143, `${P143}-title`]);
+	});
+
+	it("records decision 154 in docs/decisions.md as the owner's picks on #780: the past months kept, and P143 A", () => {
+		const row = decisions
+			.split("\n")
+			.find((line) => line.startsWith("| 154 |"));
+		expect(row, "decision 154's row").toBeDefined();
+		expect(
+			row?.startsWith("| 154 | 2026-10-30 | The owner's picks on #780"),
+		).toBe(true);
+		// Four cells, as the table has: number, date, decision and why.
+		expect((row ?? "").split("|").slice(1, -1)).toHaveLength(4);
+		expect(row).toContain("**the net worth line keeps its past months**");
+		expect(row).toContain("**P143 A**");
+		expect(row).toContain(
+			"Up $2,370 since May. You added Apple Card on Oct 18.",
+		);
+		expect(row).toContain("Not picked: B");
+		expect(row).toContain(
+			"You linked Wells Fargo on Sep 3 and added Apple Card on Oct 18.",
+		);
+		expect(row).toContain("You added 3 accounts since May.");
 	});
 });
