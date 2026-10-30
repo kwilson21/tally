@@ -7,7 +7,7 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 } from "../db/category-suggestions";
-import { PERSON_INCOME_SET_SQL } from "../db/income";
+import { incomeGuessSql, PERSON_INCOME_SET_SQL } from "../db/income";
 import {
 	type NameChoice,
 	type NameReview,
@@ -463,27 +463,44 @@ suggestions.post(PATH, async (c) => {
 	switch (item.kind) {
 		case "income": {
 			if (answer === "yes") {
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
+				// The answer record and the write go in one batch: the record reads the guess before the write (decision 155).
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'income', ${incomeGuessSql("transactions")}, 'yes', ?
+							FROM transactions WHERE id = ? AND ${incomeAskedSql("transactions")}`,
+						)
+						.bind(today, item.transactionId),
+					db
+						.prepare(
+							`UPDATE transactions SET ${PERSON_INCOME_SET_SQL}
 						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-					)
-					.bind(1, who, item.transactionId)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(1, who, item.transactionId),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Counted ${item.label} as income.`, after);
 			}
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET income_maybe_declined = 1
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'income', ${incomeGuessSql("transactions")}, 'no', ?
+							FROM transactions WHERE id = ? AND ${incomeAskedSql("transactions")}`,
+						)
+						.bind(today, item.transactionId),
+					db
+						.prepare(
+							`UPDATE transactions SET income_maybe_declined = 1
 						WHERE id = ? AND ${incomeAskedSql("transactions")}`,
-					)
-					.bind(item.transactionId)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(item.transactionId),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				return askScreen(c, {
 					kind: "income",
 					id: item.id,
@@ -495,28 +512,44 @@ suggestions.post(PATH, async (c) => {
 		}
 		case "transfer": {
 			if (answer === "yes") {
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = NULL,
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'transfer', transactions.transfer_confidence, 'yes', ?
+							FROM transactions WHERE id = ? AND ${transferAskedSql("transactions")}`,
+						)
+						.bind(today, item.transactionId),
+					db
+						.prepare(
+							`UPDATE transactions SET excluded = 1, excluded_source = 'user', transfer_confidence = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND ${transferAskedSql("transactions")}`,
-					)
-					.bind(who, item.transactionId)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(who, item.transactionId),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Left ${item.label} out of the budget.`, after);
 			}
 			// A No changes nothing that counts: it hides this one Maybe (decision 101), and the question asks first.
 			if (answer === "no") {
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET transfer_maybe_declined = 1
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'transfer', transactions.transfer_confidence, 'no', ?
+							FROM transactions WHERE id = ? AND ${transferAskedSql("transactions")}`,
+						)
+						.bind(today, item.transactionId),
+					db
+						.prepare(
+							`UPDATE transactions SET transfer_maybe_declined = 1
 						WHERE id = ? AND ${transferAskedSql("transactions")}`,
-					)
-					.bind(item.transactionId)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(item.transactionId),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				return askScreen(c, {
 					kind: "transfer",
 					id: item.id,
@@ -528,15 +561,23 @@ suggestions.post(PATH, async (c) => {
 		}
 		case "category": {
 			if (answer === "yes") {
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'category', transactions.category_confidence, 'yes', ?
+							FROM transactions WHERE id = ? AND jev_category_id = ? AND ${categoryAskedSql("transactions")}`,
+						)
+						.bind(today, item.transactionId, item.categoryId),
+					db
+						.prepare(
+							`UPDATE transactions SET category_id = jev_category_id, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND jev_category_id = ? AND ${categoryAskedSql("transactions")}`,
-					)
-					.bind(who, item.transactionId, item.categoryId)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(who, item.transactionId, item.categoryId),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Set ${item.label} to ${item.category}.`, after);
 			}
@@ -557,16 +598,25 @@ suggestions.post(PATH, async (c) => {
 						status: 422,
 						focus: true,
 					});
-				const result = await db
-					.prepare(
-						`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
+				const [, result] = await db.batch([
+					db
+						.prepare(
+							`INSERT INTO maybe_answers (kind, confidence, answer, household_day)
+							SELECT 'category', transactions.category_confidence, 'something_else', ?
+							FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}
+								AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
+						)
+						.bind(today, item.transactionId, category.id),
+					db
+						.prepare(
+							`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL, split_removed_from_cents = NULL, split_removed_bills = NULL,
 							updated_by = ?, updated_at = datetime('now')
 						WHERE id = ? AND ${categoryAskedSql("transactions")}
 							AND EXISTS (SELECT 1 FROM categories cc WHERE cc.id = ? AND cc.archived = 0)`,
-					)
-					.bind(category.id, who, item.transactionId, category.id)
-					.run();
-				if (result.meta.changes === 0) return stale();
+						)
+						.bind(category.id, who, item.transactionId, category.id),
+				]);
+				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Set ${item.label} to ${category.name}.`, after);
 			}

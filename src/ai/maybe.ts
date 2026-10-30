@@ -18,13 +18,33 @@ export function unsureBounds(threshold = JEV_THRESHOLD): {
 	return { above: BASIS_POINTS - below, below };
 }
 
-/** Unsure: neither a sure yes nor a sure no, between 1 − threshold and threshold (spec §8.6). */
-export function isUnsure(
-	confidence: number,
-	threshold = JEV_THRESHOLD,
-): boolean {
+/**
+ * The lowest confidence Tally asks a category or a transfer guess about (decision 155, #800). Below it the guess is kept
+ * as stored, but it is neither shown as a Maybe nor asked, so the row reads like one with no guess. Income has no floor
+ * of its own: its range starts at unsureBounds' 20%.
+ */
+export const MAYBE_FLOOR = 0.4;
+
+/** The three kinds of "Maybe …" question that have a range (a new category and a name are asked another way). */
+export type MaybeKind = "category" | "income" | "transfer";
+
+/**
+ * A kind's asked range in whole basis points, both bounds excluded. Income: unsureBounds, from 20% up to the threshold.
+ * Category and transfer: from MAYBE_FLOOR up to the threshold, so the threshold itself is sure. The review queue's SQL
+ * is built from these bounds too (askedSql in src/db/suggestions-queue.ts), so the queue, the rows and the answer writes can't disagree.
+ */
+export function askedBounds(kind: MaybeKind): { above: number; below: number } {
+	if (kind === "income") return unsureBounds();
+	return {
+		above: confidenceBasisPoints(MAYBE_FLOOR) - 1,
+		below: confidenceBasisPoints(JEV_THRESHOLD),
+	};
+}
+
+/** Unsure: the guess is in the kind's asked range (askedBounds), so a sure or a too-low guess is not a Maybe. */
+export function isUnsure(confidence: number, kind: MaybeKind): boolean {
 	const basis = confidenceBasisPoints(confidence);
-	const { above, below } = unsureBounds(threshold);
+	const { above, below } = askedBounds(kind);
 	return basis < below && basis > above;
 }
 
@@ -55,6 +75,6 @@ export function maybeIncomeVisible({
 		!creditReviewed &&
 		!(excluded && !paysBill && !paysPlan) &&
 		incomeConfidence != null &&
-		isUnsure(incomeConfidence)
+		isUnsure(incomeConfidence, "income")
 	);
 }

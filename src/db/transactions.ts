@@ -1,4 +1,4 @@
-import { JEV_THRESHOLD, type JevInput } from "../ai/categorize";
+import type { JevInput } from "../ai/categorize";
 import { confidenceBasisPoints } from "../ai/confidence";
 import type { Decision } from "../ai/decide";
 import { unsureBounds } from "../ai/maybe";
@@ -79,6 +79,7 @@ import {
 	unlinkSplitOverRefundedSql,
 } from "./refunded";
 import { withTurnGuard } from "./sorting-turn";
+import { askedSql } from "./suggestions-queue";
 
 /** A note is empty only when it contains no non-space text; Jev, Workers AI and saves share this rule. */
 const EMPTY_NOTE = "(t.note IS NULL OR trim(t.note) = '')";
@@ -153,7 +154,7 @@ type NameSuggestionColumns = {
 export const MAYBE_CATEGORY_JOINS = `LEFT JOIN categories maybeCat ON maybeCat.id = t.jev_category_id AND maybeCat.archived=0
 	LEFT JOIN category_suggestions cs ON cs.id = t.category_suggestion_id AND cs.status = 'pending' AND NOT ${neverSuggestedSql("t", "new_category")}`;
 /** The Maybe chip's category name (a new one as "new:name"), and whether it is a new one; needs MAYBE_CATEGORY_JOINS. */
-export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND t.category_confidence < ${JEV_THRESHOLD} THEN maybeCat.name END AS maybeCategoryName,
+export const MAYBE_CATEGORY_COLUMNS = `CASE WHEN cs.id IS NOT NULL AND t.category_id IS NULL AND t.category_source IS NULL THEN 'new:' || cs.name WHEN t.category_id IS NULL AND t.category_source IS NULL AND ${askedSql("category", "t.category_confidence")} THEN maybeCat.name END AS maybeCategoryName,
 	CASE WHEN cs.id IS NOT NULL THEN 1 ELSE 0 END AS maybeCategoryNew`;
 /** What the refunds linked to a purchase add up to, for its "$X refunded" caption. */
 export const REFUNDED_COLUMN = `(SELECT COALESCE(-SUM(r.amount_cents),0) FROM transactions r WHERE r.refund_of_id=t.id AND r.is_split=0 AND r.excluded=0 AND r.amount_cents<0 AND r.flag_income=0 AND COALESCE(r.credit_reviewed,0)=1 AND t.excluded=0) AS refundedCents`;

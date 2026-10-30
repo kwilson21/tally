@@ -10,6 +10,7 @@ import {
 	suggestionQueue,
 	transferAskedSql,
 } from "../src/db/suggestions-queue";
+import { getTransaction } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { suggestions } from "../src/routes/suggestions";
 
@@ -844,9 +845,12 @@ describe("incomeAskedSql", () => {
 });
 
 describe("the Maybe range: the queue's SQL and the Yes and No writes agree with isUnsure at every edge", () => {
-	// Each edge with the values either side of it: 0.2 and 0.8 are sure (the basis points floor to 2000 and 8000),
-	// 0.20005 floors to 2000 too, and 0.2001 and 0.7999 are the first unsure values on each side.
-	const EDGES = [0.1, 0.2, 0.20005, 0.2001, 0.5, 0.7999, 0.8, 0.95];
+	// Each edge with the values either side of it: 0.2 and 0.8 are sure for income (the basis points floor to 2000 and
+	// 8000), 0.20005 floors to 2000 too, and 0.2001 and 0.7999 are the first unsure values on each side. A transfer
+	// is asked only from the 40% floor, so 0.3999 is unasked and 0.40 and 0.40005 are the first asked values.
+	const EDGES = [
+		0.1, 0.2, 0.20005, 0.2001, 0.3999, 0.4, 0.40005, 0.5, 0.7999, 0.8, 0.95,
+	];
 
 	it("asks an income or a transfer guess exactly when isUnsure does", async () => {
 		for (const confidence of EDGES) {
@@ -872,11 +876,11 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 			expect(
 				await counted(incomeAskedSql("transactions"), credit),
 				`income at ${confidence}`,
-			).toBe(isUnsure(confidence) ? 1 : 0);
+			).toBe(isUnsure(confidence, "income") ? 1 : 0);
 			expect(
 				await counted(transferAskedSql("transactions"), transfer),
 				`transfer at ${confidence}`,
-			).toBe(isUnsure(confidence) ? 1 : 0);
+			).toBe(isUnsure(confidence, "transfer") ? 1 : 0);
 		}
 	});
 
@@ -946,29 +950,45 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 	/** The DB, with `rival` run just before the write whose SQL starts with `prefix`: the guess moves after the queue read. */
 	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
 		let raced = false;
-		const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
-			new Proxy(statement, {
+		// The statements a batch runs are the real ones, and a batch that holds a racing write fires the rival first.
+		const real = new WeakMap<object, D1PreparedStatement>();
+		const racingWrites = new WeakSet<object>();
+		const fire = async () => {
+			if (!raced) {
+				raced = true;
+				await rival();
+			}
+		};
+		const guard = (
+			statement: D1PreparedStatement,
+			hit: boolean,
+		): D1PreparedStatement => {
+			const proxy = new Proxy(statement, {
 				get(target, prop) {
 					if (prop === "bind")
-						return (...values: unknown[]) => guard(target.bind(...values));
-					if (prop === "run")
+						return (...values: unknown[]) => guard(target.bind(...values), hit);
+					if (prop === "run" || prop === "all")
 						return async () => {
-							if (!raced) {
-								raced = true;
-								await rival();
-							}
-							return target.run();
+							if (hit) await fire();
+							return prop === "run" ? target.run() : target.all();
 						};
 					const value = Reflect.get(target, prop);
 					return typeof value === "function" ? value.bind(target) : value;
 				},
 			});
+			real.set(proxy, statement);
+			if (hit) racingWrites.add(proxy);
+			return proxy;
+		};
 		return new Proxy(db, {
 			get(target, prop) {
 				if (prop === "prepare")
-					return (sql: string) => {
-						const statement = target.prepare(sql);
-						return sql.startsWith(prefix) ? guard(statement) : statement;
+					return (sql: string) =>
+						guard(target.prepare(sql), sql.startsWith(prefix));
+				if (prop === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (statements.some((s) => racingWrites.has(s))) await fire();
+						return target.batch(statements.map((s) => real.get(s) ?? s));
 					};
 				const value = Reflect.get(target, prop);
 				return typeof value === "function" ? value.bind(target) : value;
@@ -1003,15 +1023,79 @@ describe("the Maybe range: the queue's SQL and the Yes and No writes agree with 
 					.bind(id)
 					.first<{ value: number }>();
 				const label = `${kind} ${answer} at ${confidence}`;
-				if (isUnsure(confidence)) {
+				const unsure = isUnsure(confidence, kind);
+				if (unsure) {
 					expect(toastOf(res), label).not.toBe(STALE);
 					expect(saved?.value, label).toBe(1);
 				} else {
 					expect(toastOf(res), label).toBe(STALE);
 					expect(saved?.value, label).toBe(0);
 				}
+				// The answer record (maybe_answers) is written exactly when the answer changed the guess (decision 155).
+				expect(
+					await db
+						.prepare(
+							"SELECT COUNT(*) AS n FROM maybe_answers WHERE kind = ? AND answer = ? AND confidence = ?",
+						)
+						.bind(kind, answer, confidence)
+						.first<{ n: number }>(),
+					`record for ${label}`,
+				).toEqual({ n: unsure ? 1 : 0 });
 			}
 		}
+	});
+
+	it("a row shows its category Maybe at 40% and above, and no Maybe below the floor", async () => {
+		const below = await transaction({
+			amount: 2300,
+			raw: "ROW BELOW FLOOR",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.39,
+		});
+		const atFloor = await transaction({
+			amount: 2300,
+			raw: "ROW AT FLOOR",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.4,
+		});
+		expect((await getTransaction(db, below))?.maybeCategoryName).toBeNull();
+		expect((await getTransaction(db, atFloor))?.maybeCategoryName).toBe(
+			"Eating Out",
+		);
+	});
+
+	it("a category Yes after Tally's guess moved below the 40% floor changes nothing and records nothing", async () => {
+		const id = await transaction({
+			amount: 2300,
+			raw: "FLOOR MOVED",
+			jevCategoryId: eatingOut,
+			categoryConfidence: 0.5,
+		});
+		const res = await answerOn(
+			{ id: `category-${id}`, answer: "yes" },
+			racing("UPDATE transactions SET category_id = jev_category_id", () =>
+				db
+					.prepare(
+						"UPDATE transactions SET category_confidence = ? WHERE id = ?",
+					)
+					.bind(0.39, id)
+					.run(),
+			),
+		);
+		expect(toastOf(res)).toBe(STALE);
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				)
+				.bind(id)
+				.first(),
+		).toEqual({ category_id: null, category_source: null });
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM maybe_answers")
+				.first<{ n: number }>(),
+		).toEqual({ n: 0 });
 	});
 });
 
@@ -1076,5 +1160,34 @@ describe("categoryAskedSql", () => {
 			archived: 0,
 			held: 0,
 		});
+	});
+
+	it("asks a category guess from the 40% floor up to, not including, 80%, the same as isUnsure", async () => {
+		const EXPECTED: [number, number][] = [
+			[0.3999, 0],
+			[0.4, 1],
+			[0.40005, 1],
+			[0.7999, 1],
+			[0.8, 0],
+		];
+		for (const [confidence, asked] of EXPECTED) {
+			const id = await transaction({
+				amount: 2300,
+				raw: `FLOOR CATEGORY ${confidence}`,
+				jevCategoryId: eatingOut,
+				categoryConfidence: confidence,
+			});
+			const counted = await db
+				.prepare(
+					`SELECT COUNT(*) AS n FROM transactions WHERE id = ? AND ${categoryAskedSql("transactions")}`,
+				)
+				.bind(id)
+				.first<{ n: number }>();
+			expect(counted?.n, `category at ${confidence}`).toBe(asked);
+			expect(
+				isUnsure(confidence, "category") ? 1 : 0,
+				`isUnsure at ${confidence}`,
+			).toBe(asked);
+		}
 	});
 });

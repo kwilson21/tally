@@ -27,6 +27,8 @@ const EXPORT_COLUMNS = {
 	// What AI did (spec §8.6): what Tally applied, by kind, transaction or merchant and household day; no amounts.
 	ai_log:
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
+	// What a person answered to a "Maybe …" (decision 155): the kind, the guess's confidence, the answer and the day; no transaction.
+	maybe_answers: "id, kind, confidence, answer, household_day, created_at",
 	// push_subscriptions is not listed on purpose: each device's push endpoint and keys are device tokens, like the access token.
 	household_settings: "key, value",
 	household_members:
