@@ -7177,6 +7177,16 @@ describe("GET /design-system/proposals, P143 (net worth on the day a new account
 		);
 	});
 
+	it("gives B's screen-reader description its own sentence, so the words match the picture (#780)", async () => {
+		const chunk = specimenOf(await drawn());
+		const b = options(chunk)[2] ?? "";
+		expect(b).toContain("not counting Apple Card");
+		expect(b).toContain(
+			'aria-label="Net worth over time. Up $3,610 since May, not counting Apple Card&#39;s $1,240 from Oct 18. It was $38,510 on May 1 and is $40,880 today."',
+		);
+		expect(b).not.toContain("Net worth over time. Up $2,370 since May.");
+	});
+
 	it("writes each How Tally works rule in plain words, with no link in it", async () => {
 		const chunk = specimenOf(await drawn());
 		const rules = [...chunk.matchAll(/How Tally works, Net worth/g)];

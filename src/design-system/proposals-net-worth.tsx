@@ -62,10 +62,21 @@ function view(
 	return netWorthView(points, TODAY, added);
 }
 
-/** B's view: the same line, with the sentence B writes in place of the change alone. */
+/**
+ * B's view: the same line, with the sentence B writes in place of the change alone, in the picture's words for
+ * screen readers too (netWorthView's description starts with its sentence).
+ */
 function withSentence(points: NetWorthPoint[], sentence: string): NetWorthView {
 	const drawn = view(points);
-	return drawn.kind === "line" ? { ...drawn, sentence } : drawn;
+	if (drawn.kind !== "line") return drawn;
+	return {
+		...drawn,
+		sentence,
+		description: drawn.description.replace(
+			`Net worth over time. ${drawn.sentence}`,
+			() => `Net worth over time. ${sentence}`,
+		),
+	};
 }
 
 const CARD_ADDED: AccountAdded[] = [

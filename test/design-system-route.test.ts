@@ -12,6 +12,7 @@ import {
 	CATEGORIES_EXAMPLE,
 	EXCLUSIONS_EXAMPLE,
 	MONEY_STATES,
+	NET_WORTH_VIEWS,
 	PROGRESS_ROWS,
 	TRANSACTION_ROWS,
 	TRANSACTIONS_EXAMPLE,
@@ -86,6 +87,23 @@ describe("GET /design-system in the demo", () => {
 		for (const tier of ["Visual", "Interactive", "Flow"]) {
 			expect(html).toContain(tier);
 		}
+	});
+
+	it("quotes in NetWorthChart's words the examples its states draw: the card and the bank, both on Oct 1 (#780)", async () => {
+		const { html } = await get("/design-system");
+		const start = html.indexOf('<section id="net-worth-chart"');
+		expect(start).toBeGreaterThan(-1);
+		const specimen = html.slice(start, html.indexOf("<section ", start + 1));
+		const card = NET_WORTH_VIEWS.cardAdded;
+		const bank = NET_WORTH_VIEWS.bankLinked;
+		if (card.kind !== "line" || bank.kind !== "line")
+			throw new Error("expected both account states to be lines");
+		expect(specimen).toContain("You added Apple Card on Oct 1.");
+		expect(specimen).toContain("You linked Wells Fargo on Oct 1.");
+		expect(specimen).not.toContain("Oct 18.");
+		// The pictures' own words are the mock's, so the quoted examples and the drawings agree.
+		expect(specimen).toContain(card.description);
+		expect(specimen).toContain(bank.description);
 	});
 
 	it("shows the rows that open with their arrow, a held press, and Needs category in words (P118 A)", async () => {
