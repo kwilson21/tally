@@ -67,6 +67,7 @@ describe("schema", () => {
 			"household_members",
 			"household_people",
 			"household_settings",
+			"maybe_answers",
 			"merchant_name_failures",
 			"merchants",
 			"never_suggest_rules",

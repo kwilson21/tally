@@ -1657,29 +1657,45 @@ describe("a stale answer that lands after the queue was read changes nothing (de
 	 */
 	function racing(prefix: string, rival: () => Promise<unknown>): D1Database {
 		let raced = false;
-		const guard = (statement: D1PreparedStatement): D1PreparedStatement =>
-			new Proxy(statement, {
+		// The statements a batch runs are the real ones, and a batch that holds a racing write fires the rival first.
+		const real = new WeakMap<object, D1PreparedStatement>();
+		const racingWrites = new WeakSet<object>();
+		const fire = async () => {
+			if (!raced) {
+				raced = true;
+				await rival();
+			}
+		};
+		const guard = (
+			statement: D1PreparedStatement,
+			hit: boolean,
+		): D1PreparedStatement => {
+			const proxy = new Proxy(statement, {
 				get(target, prop) {
 					if (prop === "bind")
-						return (...values: unknown[]) => guard(target.bind(...values));
+						return (...values: unknown[]) => guard(target.bind(...values), hit);
 					if (prop === "run" || prop === "all")
 						return async () => {
-							if (!raced) {
-								raced = true;
-								await rival();
-							}
+							if (hit) await fire();
 							return prop === "run" ? target.run() : target.all();
 						};
 					const value = Reflect.get(target, prop);
 					return typeof value === "function" ? value.bind(target) : value;
 				},
 			});
+			real.set(proxy, statement);
+			if (hit) racingWrites.add(proxy);
+			return proxy;
+		};
 		return new Proxy(db, {
 			get(target, prop) {
 				if (prop === "prepare")
-					return (sql: string) => {
-						const statement = target.prepare(sql);
-						return sql.startsWith(prefix) ? guard(statement) : statement;
+					return (sql: string) =>
+						guard(target.prepare(sql), sql.startsWith(prefix));
+				if (prop === "batch")
+					return async (statements: D1PreparedStatement[]) => {
+						if (statements.some((s) => racingWrites.has(s))) await fire();
+						return target.batch(statements.map((s) => real.get(s) ?? s));
 					};
 				const value = Reflect.get(target, prop);
 				return typeof value === "function" ? value.bind(target) : value;

@@ -1,5 +1,5 @@
 import type { Child } from "hono/jsx";
-import { JEV_THRESHOLD } from "../ai/categorize";
+import { isUnsure } from "../ai/maybe";
 import { unpaidBillsNote } from "../bills/unpaid";
 import { dayLabel, shortDay } from "../dates";
 import { isIncluded } from "../db/counted-month";
@@ -214,7 +214,7 @@ export function CategoryChoice({
 		!tx.maybeCategoryNew &&
 		Boolean(tx.suggestedCategoryName) &&
 		tx.categoryConfidence !== null &&
-		tx.categoryConfidence < JEV_THRESHOLD;
+		isUnsure(tx.categoryConfidence, "category");
 	const guessChip = unsureGuess && tx.suggestedCategoryId !== null;
 	// The saved category once it's archived: the active list doesn't hold it, so its row still folds and names it.
 	// Only while the posted choice is that saved category, so a category error's null never folds a row.

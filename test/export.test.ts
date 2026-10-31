@@ -503,6 +503,26 @@ describe("data exports", () => {
 		expect(body).not.toContain("auth-never-export");
 	});
 
+	it("exports each Maybe answer's kind, confidence, answer and day, and no transaction (decision 155)", async () => {
+		await env.DB.prepare(
+			"INSERT INTO maybe_answers (kind, confidence, answer, household_day) VALUES ('transfer', 0.5, 'yes', '2026-10-03')",
+		).run();
+		const body = await (
+			await exports.default.fetch(`${BASE}/settings/export/tally.json`)
+		).text();
+		const data = JSON.parse(body) as Record<string, unknown>;
+		expect(data.maybe_answers).toEqual([
+			{
+				id: 1,
+				kind: "transfer",
+				confidence: 0.5,
+				answer: "yes",
+				household_day: "2026-10-03",
+				created_at: expect.any(String),
+			},
+		]);
+	});
+
 	it("links both downloads from the Your data section", async () => {
 		const html = await (
 			await exports.default.fetch(`${BASE}/settings/data`)

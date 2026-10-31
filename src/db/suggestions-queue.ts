@@ -1,9 +1,8 @@
 // The one review screen's queue (spec §8.6, decisions 79 and 101, issue #195): every "Maybe …" that a
 // person hasn't answered, in the order the screen asks them. The Band on Settings counts this list and
 // the screen shows it one item at a time, so the two can't drift apart.
-import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidencePercent } from "../ai/confidence";
-import { unsureBounds } from "../ai/maybe";
+import { askedBounds, type MaybeKind } from "../ai/maybe";
 import { sameName } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
@@ -127,24 +126,25 @@ const cardLabel = (row: {
 }) => row.ownName ?? merchantLabel(row.displayName, row.merchantKey);
 
 /**
- * The Maybe range as SQL over a confidence expression: `isUnsure`'s bounds (`unsureBounds`) in the same basis points
+ * A kind's asked range (`askedBounds`, `isUnsure`) as SQL over a confidence expression, in the same basis points
  * (`confidenceBasisPoints`). CAST truncates, which is the floor for a confidence of 0 or more, and a NULL guess
  * (no confidence, or one the row hides) is outside the range. `BETWEEN` takes the whole basis points strictly
- * between the bounds. The bounds are code constants, so they are written in, as `categoryAskedSql` does.
+ * between the bounds. The bounds are code constants, so they are written in. Exported so the row's Maybe
+ * (MAYBE_CATEGORY_COLUMNS) reads the same range.
  */
-export const unsureSql = (confidence: string) => {
-	const { above, below } = unsureBounds();
+export const askedSql = (kind: MaybeKind, confidence: string) => {
+	const { above, below } = askedBounds(kind);
 	return `CAST((${confidence}) * ${BASIS_POINTS} AS INTEGER) BETWEEN ${above + 1} AND ${below - 1}`;
 };
 
 /**
- * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against.
+ * True when the review screen can ask whether the credit `alias` names is income: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. The guess is the one the row shows (`maybeIncomeConfidenceSql`), so a settled, declined or Never-suggested credit is never asked, and it must still be in the Maybe range (`askedSql`), so a guess that became sure or dropped below it is never saved against.
  * `afterNo` is the question after a No: the same check, but the No is set (`income_maybe_declined = 1`), so the guess is read without it (`incomeGuessSql`) (#440).
  */
 export const incomeAskedSql = (alias: string, afterNo = false) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.refund_of_id IS NULL AND ${alias}.amount_cents < 0
 		AND ${alias}.flag_income = 0 AND COALESCE(${alias}.credit_reviewed, 0) = 0 AND (${alias}.excluded = 0 OR ${paysBillOrPlanSql(alias)})
-		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${unsureSql(incomeGuessSql(alias))})`;
+		AND ${alias}.income_maybe_declined = ${afterNo ? 1 : 0} AND ${askedSql("income", incomeGuessSql(alias))})`;
 
 /**
  * The first page's pay question (P125 E, spec §8.8, #583): money in that Tally marked as income, Maybe income included,
@@ -159,7 +159,7 @@ export const incomeAskedSql = (alias: string, afterNo = false) =>
 export const payAskedSql = (alias: string) =>
 	`(${alias}.amount_cents < 0 AND ${alias}.excluded = 0 AND ${alias}.parent_id IS NULL AND ${alias}.is_split = 0
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_transfer = 0 AND ${alias}.income_source IS NOT 'user'
-		AND (${alias}.flag_income = 1 OR ${unsureSql(storedIncomeGuessSql(alias))}))`;
+		AND (${alias}.flag_income = 1 OR ${askedSql("income", storedIncomeGuessSql(alias))}))`;
 
 /**
  * Income: a credit Tally is unsure is income and nobody has decided, or said No to (`income_maybe_declined`, decision 101).
@@ -196,11 +196,11 @@ async function incomeSuggestions(
 }
 
 /**
- * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). The guess must still be in the Maybe range (`unsureSql`), so a guess that became sure or dropped below it is never saved against. A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
+ * True when the review screen can ask whether the row `alias` names is a transfer: the queue's own check, repeated by the route's Yes and No writes so a stale answer changes nothing. `alias` is a table alias or `transactions` itself (an UPDATE has no alias). The guess must still be in the Maybe range (`askedSql`), so a guess that became sure or dropped below it is never saved against. A store with a "Never suggest" transfer line is never asked (decision 101). A credit held for review waits until it is reviewed (decision 70).
  * `afterNo` is the question after a No: the same check, with the No set (`transfer_maybe_declined = 1`) (#440).
  */
 export const transferAskedSql = (alias: string, afterNo = false) =>
-	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${unsureSql(`${alias}.transfer_confidence`)}
+	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${askedSql("transfer", `${alias}.transfer_confidence`)}
 		AND ${alias}.excluded = 0 AND ${alias}.flag_transfer = 0 AND COALESCE(${alias}.excluded_source, '') != 'user'
 		AND ${alias}.refund_of_id IS NULL AND ${alias}.flag_income = 0 AND ${alias}.transfer_maybe_declined = ${afterNo ? 1 : 0}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
@@ -258,11 +258,11 @@ async function transferSuggestions(
 }
 
 /**
- * True when the review screen can ask about the category of the row `alias` names: the queue's own check, repeated by the route's Something else and Yes writes so a stale answer changes nothing. `JEV_THRESHOLD` is a code constant, so it is written in.
+ * True when the review screen can ask about the category of the row `alias` names: the queue's own check, repeated by the route's Something else and Yes writes so a stale answer changes nothing. The range (`askedSql`, with the 40% floor) is written in, as code constants.
  */
 export const categoryAskedSql = (alias: string) =>
 	`(${alias}.parent_id IS NULL AND ${alias}.is_split = 0 AND ${alias}.category_id IS NULL AND ${alias}.category_source IS NULL
-		AND ${alias}.category_confidence < ${JEV_THRESHOLD} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
+		AND ${askedSql("category", `${alias}.category_confidence`)} AND ${alias}.flag_income = 0 AND ${jevAsksAboutSql(alias)}
 		AND (${alias}.amount_cents >= 0 OR COALESCE(${alias}.credit_reviewed, 0) = 1)
 		AND EXISTS (SELECT 1 FROM categories ac WHERE ac.id = ${alias}.jev_category_id AND ac.archived = 0))`;
 
