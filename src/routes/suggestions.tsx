@@ -22,6 +22,7 @@ import {
 	FULL_NEW_CATEGORY,
 	fileInNewCategory,
 	newCategoryTarget,
+	pendingCategoryNames,
 	suggestedCategoryName,
 } from "../db/new-category-answer";
 import {
@@ -117,18 +118,16 @@ function requestedReview(
 
 /**
  * The address that answers with a category guess's suggested new category (decision 156), with the skips it was drawn
- * with, so the row's answer posts back to the same screen. It names the store too, so a browser's cached answer is
- * per store, and it answers with the row, or with nothing.
+ * with, so the row's answer posts back to the same screen. It names the item only, never a store's text (a bank's text
+ * can carry a card or account number, and a URL is logged), and it answers with the row, or with nothing.
  */
 function newCategoryAddress(
 	id: string,
-	store: string,
 	skipped: string[],
 	again: string[],
 ): string {
 	const query = new URLSearchParams();
 	query.append("id", id);
-	query.append("store", store);
 	for (const skip of skipped) query.append("skip", skip);
 	for (const set of again) query.append("again", set);
 	return `${PATH}/new-category?${query}`;
@@ -232,6 +231,8 @@ type ScreenInput = {
 	focus?: boolean;
 	today: string;
 	categories: { id: number; name: string }[];
+	/** The pending category suggestion's name for each store, drawn in place with no script (decision 156). */
+	pendingNames: Map<string, string>;
 };
 
 function Screen({
@@ -314,14 +315,17 @@ function Screen({
 								values={values?.id === current.id ? values : undefined}
 								error={error}
 								focus={focus}
+								// Without JavaScript the lazy address never loads, so only a pending name (already
+								// in the database) is drawn here; an AI-only name shows with JavaScript, and Yes and
+								// Something else still answer without it.
+								suggestedName={
+									current.kind === "category"
+										? input.pendingNames.get(current.merchantKey)
+										: undefined
+								}
 								suggestUrl={
 									current.kind === "category"
-										? newCategoryAddress(
-												current.id,
-												current.merchantKey,
-												skipped,
-												again,
-											)
+										? newCategoryAddress(current.id, skipped, again)
 										: undefined
 								}
 							/>
@@ -403,6 +407,12 @@ async function renderScreen(
 				focus: options.focus,
 				today: await householdToday(db),
 				categories: categories.results,
+				pendingNames: await pendingCategoryNames(
+					db,
+					queue.flatMap((item) =>
+						item.kind === "category" ? [item.merchantKey] : [],
+					),
+				),
 			}}
 		/>,
 		options.status ?? 200,
@@ -421,18 +431,16 @@ suggestions.get(PATH, (c) => renderScreen(c));
 // A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
 // row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
 // is announced, and the name is never logged. Each answer, the empty one too, is cached by the browser for a day, so
-// a card drawn again doesn't call Workers AI again (per browser only; the URL names the store, so it is per store).
+// a card drawn again doesn't call Workers AI again (per browser only; the URL names the item, never a store's text).
 suggestions.get(`${PATH}/new-category`, async (c) => {
 	c.header("Cache-Control", "private, max-age=86400");
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
 	const { skipped, again } = requestedReview(c.req.url, queue);
 	const id = c.req.query("id") ?? "";
-	const store = c.req.query("store") ?? "";
 	const item = queue.find((candidate) => candidate.id === id);
-	// The store in the address must be the card's own store, so a stale address names nothing.
-	if (item?.kind !== "category" || item.merchantKey !== store)
-		return c.body(null);
+	// An answered or unknown item gets nothing: the name is read from the item here, never from the address.
+	if (item?.kind !== "category") return c.body(null);
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
 	const ai = (c.env as Env & { AI?: Ai }).AI;
 	const name = await suggestedCategoryName(db, ai, item);
@@ -686,7 +694,7 @@ suggestions.post(PATH, async (c) => {
 				return done(
 					result.created
 						? `Made ${result.name} and set ${item.label} to it.`
-						: `Set ${item.label} to ${result.name}.`,
+						: `Added ${item.label} to ${result.name}.`,
 					after,
 				);
 			}

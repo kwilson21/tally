@@ -3073,7 +3073,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			true,
 		);
 		expect(trigger(res).toast?.message).toBe(
-			"Set Lupita's Taqueria to Groceries.",
+			"Added Lupita's Taqueria to Groceries.",
 		);
 		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(before);
 		expect(
@@ -3153,11 +3153,16 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { html } = await get(address);
 		expect(html).toContain('hx-trigger="load"');
 		expect(html).toContain(`/settings/suggestions/new-category?id=${id}`);
-		expect(html).toContain(new URLSearchParams({ store: LUPITA }).toString());
+		// The URL names the item only, never the store's text (a bank's text can carry a card or account number).
+		const loaderUrl =
+			html.match(/hx-get="([^"]*new-category[^"]*)"/)?.[1] ?? "";
+		expect(loaderUrl).not.toBe("");
+		expect(loaderUrl).not.toContain("store=");
+		expect(decodeURIComponent(loaderUrl)).not.toContain("LUPITA");
 		expect(html).not.toContain("Tally's suggestion");
 		// No AI binding in the tests, so no name is asked for and the row is never drawn.
 		const { res, html: fragment } = await get(
-			`/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`,
+			`/settings/suggestions/new-category?id=${id}`,
 		);
 		expect(res.status).toBe(200);
 		expect(fragment.trim()).toBe("");
@@ -3165,17 +3170,36 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 
 	it("the lazy answer is cached per browser for a day, whether it has a name or not", async () => {
 		const { id } = await categoryCard();
-		const url = `/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`;
-		const { res } = await get(url);
+		const { res } = await get(`/settings/suggestions/new-category?id=${id}`);
 		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
-		// A store that doesn't match the card asks for nothing, and is cached the same way.
-		const other = await get(
-			`/settings/suggestions/new-category?id=${id}&store=SOMEWHERE%20ELSE`,
+	});
+
+	it("an answered or unknown item id gets an empty answer, cached the same way", async () => {
+		const { res, html } = await get(
+			"/settings/suggestions/new-category?id=category-999999",
 		);
-		expect(other.html.trim()).toBe("");
-		expect(other.res.headers.get("Cache-Control")).toBe(
-			"private, max-age=86400",
-		);
+		expect(html.trim()).toBe("");
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+	});
+
+	it("without JavaScript, a pending suggestion's name is drawn in the card, with no lazy request", async () => {
+		const { address } = await categoryCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-pending-page', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		const { html } = await get(address);
+		expect(textOf(html)).toContain("New category: Books & audio");
+		expect(html).toContain('name="new_name"');
+		expect(html).not.toContain('hx-trigger="load"');
 	});
 
 	it("a store with a pending suggestion offers that name, announced, and makes no AI call", async () => {
@@ -3193,7 +3217,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			.bind(LUPITA, suggestion?.id ?? null)
 			.run();
 		const { res, html } = await get(
-			`/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`,
+			`/settings/suggestions/new-category?id=${id}`,
 		);
 		expect(textOf(html)).toContain("Tally's suggestion");
 		expect(textOf(html)).toContain("New category: Books & audio");

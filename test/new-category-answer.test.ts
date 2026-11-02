@@ -369,3 +369,101 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 		expect(run).not.toHaveBeenCalled();
 	});
 });
+
+describe("the filing finds the category the family has, however its key was stored", () => {
+	beforeEach(async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.batch([
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM category_suggestions"),
+		]);
+	});
+
+	async function maybeTx(raw: string) {
+		const eatingOut = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Eating Out'")
+			.first<{ id: number }>();
+		const row = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name,
+					category_confidence, jev_category_id)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 1499, ?, 0.58, ?)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, raw, eatingOut?.id ?? null)
+			.first<{ id: number }>();
+		return row?.id ?? 0;
+	}
+
+	it("files into a category kept by migration 0052 with a legacy key, found by its id", async () => {
+		// Migration 0052 kept this key as SQLite folded it (only ASCII), so the key is not the JS-folded "école".
+		const legacy = await db
+			.prepare(
+				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('École', 'École', 'tag', 'cat-blue', 90) RETURNING id",
+			)
+			.first<{ id: number }>();
+		const tx = await maybeTx("ECOLE PAYMENT");
+		const target = newCategoryTarget("école", [
+			{ id: legacy?.id ?? 0, name: "École", archived: false },
+		]);
+		expect(target).toEqual({
+			ok: true,
+			kind: "existing",
+			id: legacy?.id,
+			name: "École",
+		});
+		const result = await fileInNewCategory(db, {
+			transactionId: tx,
+			target: target as Extract<typeof target, { ok: true }>,
+			today: "2026-10-02",
+			who: "Kazon",
+		});
+		expect(result).toEqual({ ok: true, name: "École", created: false });
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				)
+				.bind(tx)
+				.first(),
+		).toEqual({ category_id: legacy?.id, category_source: "user" });
+	});
+
+	it("a create that lost a race to the same name files into the category that now exists, and reports its stored name", async () => {
+		// The pre-check saw no "Books & audio"; another person made "books & audio" before the batch ran.
+		const tx = await maybeTx("AUDIBLE*TE3E10I7 WA");
+		await db
+			.prepare(
+				"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('books & audio', 'books & audio', 'tag', 'cat-blue', 91)",
+			)
+			.run();
+		const made = await db
+			.prepare("SELECT id FROM categories WHERE name = 'books & audio'")
+			.first<{ id: number }>();
+		const result = await fileInNewCategory(db, {
+			transactionId: tx,
+			target: {
+				ok: true,
+				kind: "create",
+				name: "Books & audio",
+				color: "cat-blue",
+			},
+			today: "2026-10-02",
+			who: "Kazon",
+		});
+		expect(result).toEqual({ ok: true, name: "books & audio", created: false });
+		expect(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM categories WHERE name_key = 'books & audio'",
+				)
+				.first<{ n: number }>(),
+		).toEqual({ n: 1 });
+		expect(
+			await db
+				.prepare("SELECT category_id FROM transactions WHERE id = ?")
+				.bind(tx)
+				.first(),
+		).toEqual({ category_id: made?.id });
+	});
+});
