@@ -5,6 +5,7 @@ import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { FOLLOWS_PURCHASE } from "../src/db/counted-month";
 import { resetDemo } from "../src/demo/reset";
 import { transactions } from "../src/routes/transactions";
+import { pinClock } from "./pinned-clock";
 
 const request = async (path: string, init?: RequestInit) => {
 	const headers = new Headers(init?.headers);
@@ -15,7 +16,15 @@ const request = async (path: string, init?: RequestInit) => {
 	});
 };
 
-beforeEach(async () => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
+// The demo's month and the "Select all N in <month>" link follow the household's today, so the clock is pinned (#808).
+beforeEach(async () => {
+	pinClock();
+	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+});
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 /** The selectable ids on the first page of all months, newest first. The demo seed follows the
  * date, so which ids land on page 1 changes from day to day; tests that need a row on the page

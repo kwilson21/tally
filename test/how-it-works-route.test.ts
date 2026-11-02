@@ -10,6 +10,10 @@ import { destinations } from "../src/routes/destinations";
 import { home } from "../src/routes/home";
 import { howItWorks } from "../src/routes/how-it-works";
 import { transactions } from "../src/routes/transactions";
+import { pinClock } from "./pinned-clock";
+
+// Some describe bodies read "this month" when the file loads, so the clock is pinned now as well as before each test (#808).
+pinClock();
 
 const BASE = "http://tally.test";
 const get = async (path: string) => {
@@ -29,7 +33,13 @@ const monthName = () =>
 	);
 
 beforeEach(async () => {
+	// The demo's months and the Trends example are the household's last months, so the clock is pinned (#808).
+	pinClock();
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("GET /how-it-works in the demo", () => {

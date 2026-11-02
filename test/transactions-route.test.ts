@@ -1,10 +1,14 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TIME_ZONE, monthLabel, todayIn } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { resetDemo } from "../src/demo/reset";
 import { SHOW_LABELS, SHOWS } from "../src/transactions/filters";
 import { FilterSelect } from "../src/views/filter-select";
+import { pinClock } from "./pinned-clock";
+
+// Some describe bodies read "today" when the file loads, so the clock is pinned now as well as before each test (#808).
+pinClock();
 
 async function get(path: string, headers: Record<string, string> = {}) {
 	const res = await exports.default.fetch(`http://tally.test${path}`, {
@@ -197,7 +201,12 @@ function optionsOf(html: string, id: string) {
 }
 
 beforeEach(async () => {
+	pinClock();
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe("GET /transactions", () => {

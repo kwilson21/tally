@@ -31,6 +31,7 @@ import { readMonthSummary } from "../src/month-summary";
 import { firstPage, questionScreen } from "../src/routes/first-page";
 import { setupRoute } from "../src/routes/setup";
 import { safeToSpendText } from "../src/views/home-top";
+import { pinClock } from "./pinned-clock";
 
 // The budgets step of the question page (P125 E, spec §6 and §8.8, decision 114, #590): once pay and bills are done,
 // each category with no budget this month is offered Tally's suggestion, all at once or one at a time, and the step
@@ -39,6 +40,8 @@ import { safeToSpendText } from "../src/views/home-top";
 
 const db = env.DB;
 const BASE = "http://tally.test";
+// These dates are read once, at load, so the clock is pinned before them as well as before each test (#808).
+pinClock();
 const TODAY = todayIn(DEFAULT_TIME_ZONE);
 const CUR = TODAY.slice(0, 7);
 /** The two full months Tally has here: the history starts on the 1st of the earlier one. */
@@ -192,7 +195,12 @@ let nameB = "";
 let nameC = "";
 let nameD = "";
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 beforeEach(async () => {
+	pinClock();
 	await resetDemo(db, TODAY);
 	await db.prepare("DELETE FROM transactions").run();
 	await db.prepare("DELETE FROM bill_payments").run();

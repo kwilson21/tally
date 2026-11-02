@@ -21,6 +21,7 @@ import { resetDemo } from "../src/demo/reset";
 import { forecastMonth } from "../src/home-forecast";
 import { formatCents } from "../src/money";
 import { home as homeRoute } from "../src/routes/home";
+import { pinClock } from "./pinned-clock";
 
 async function home() {
 	const res = await exports.default.fetch("http://tally.test/");
@@ -31,6 +32,11 @@ async function homeAt(month: string) {
 	const res = await exports.default.fetch(`http://tally.test/?month=${month}`);
 	return { res, html: await res.text() };
 }
+
+// The demo's months, "Back to <month>" and the finished-month figures all follow the household's today, so the
+// clock is pinned to October 2026 for the whole file (#808).
+beforeEach(() => pinClock());
+afterEach(() => vi.useRealTimers());
 
 describe("GET / with the demo seed", () => {
 	afterEach(() => vi.useRealTimers());
