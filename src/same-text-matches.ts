@@ -44,6 +44,17 @@ export type SameTextOptions = {
 	vagueTexts?: readonly string[];
 };
 
+/**
+ * True for a vague text, or a cleaned text that is one followed by a space ("apple.com/bill cupertino" is vague,
+ * "apple.com/billing inc" is not: there is no space after the vague text).
+ */
+function isVague(cleanedText: string, vague: ReadonlySet<string>): boolean {
+	for (const v of vague) {
+		if (cleanedText === v || cleanedText.startsWith(`${v} `)) return true;
+	}
+	return false;
+}
+
 /** The note, trimmed, with runs of spaces collapsed and case ignored; "" when there is no note. */
 function normalizedNote(note: string | null): string {
 	return (note ?? "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -67,7 +78,8 @@ export function groupBySameCleanedText(
 
 		let note: string | null = null;
 		let key = cleanedText;
-		if (vague.has(cleanedText)) {
+		const vagueRow = isVague(cleanedText, vague);
+		if (vagueRow) {
 			note = normalizedNote(row.whatItWasNote);
 			if (note === "") continue;
 			key = `${cleanedText}\u0000${note}`;
@@ -79,7 +91,7 @@ export function groupBySameCleanedText(
 		} else {
 			groups.set(key, {
 				cleanedText,
-				note: vague.has(cleanedText) ? (row.whatItWasNote ?? "").trim() : null,
+				note: vagueRow ? (row.whatItWasNote ?? "").trim() : null,
 				rows: [row],
 			});
 		}

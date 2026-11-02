@@ -76,6 +76,12 @@ describe("cleanBankText", () => {
 		expect(cleanBankText("SQ *24HOURFITNESS")).toBe("24hourfitness");
 	});
 
+	it("strips a processor's trailing store code with a # or a hyphen, as well as a bare number", () => {
+		expect(cleanBankText("SQ *CAFE #552")).toBe("cafe");
+		expect(cleanBankText("SQ *CAFE T-1432")).toBe("cafe");
+		expect(cleanBankText("SQ *CAFE 0412")).toBe("cafe");
+	});
+
 	it("leaves a trailing number alone when there is no processor marker (conservative)", () => {
 		expect(cleanBankText("BLUE BOTTLE 0412")).toBe("blue bottle 0412");
 	});

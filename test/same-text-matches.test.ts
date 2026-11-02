@@ -119,6 +119,35 @@ describe("groupBySameCleanedText", () => {
 			expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
 		});
 
+		it("treats a cleaned text that starts with the vague text and a space as vague too", () => {
+			expect(
+				groupBySameCleanedText([
+					row(1, "APPLE.COM/BILL CUPERTINO CA"),
+					row(2, "APPLE.COM/BILL CUPERTINO CA 09/30"),
+				]),
+			).toEqual([]);
+		});
+
+		it("groups Apple rows with a city suffix when they share the note", () => {
+			const groups = groupBySameCleanedText([
+				row(1, "APPLE.COM/BILL CUPERTINO CA", { whatItWasNote: note }),
+				row(2, "APPLE.COM/BILL CUPERTINO CA 09/30", { whatItWasNote: note }),
+			]);
+			expect(groups).toHaveLength(1);
+			expect(groups[0]?.cleanedText).toBe("apple.com/bill cupertino");
+			expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
+		});
+
+		it("does not treat APPLE.COM/BILLING INC as vague, since there is no space after the vague text", () => {
+			const groups = groupBySameCleanedText([
+				row(1, "APPLE.COM/BILLING INC"),
+				row(2, "APPLE.COM/BILLING INC 09/30"),
+			]);
+			expect(groups).toHaveLength(1);
+			expect(groups[0]?.cleanedText).toBe("apple.com/billing inc");
+			expect(groups[0]?.note).toBeNull();
+		});
+
 		it("does not group Apple rows whose notes differ", () => {
 			expect(
 				groupBySameCleanedText([

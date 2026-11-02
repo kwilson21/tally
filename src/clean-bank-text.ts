@@ -101,9 +101,10 @@ export function cleanBankText(raw: string): string {
 	text = text.replace(PROCESSOR, "");
 	text = text.replace(REFERENCE_ID, "");
 	text = stripTrailing(text);
-	// A processor's own reference code at the end ("SQ *BLUE BOTTLE COF 0412") varies per purchase, so it goes.
-	// Only after a processor marker: "BLUE BOTTLE 0412" keeps its number.
-	if (processed) text = text.replace(/(?:^|\s)\d{3,}$/, "");
+	// A processor's own store or reference code at the end ("SQ *BLUE BOTTLE COF 0412", "SQ *CAFE #552", "SQ *CAFE
+	// T-1432") varies per purchase, so it goes. The token is one with a # or three digits in a row, as tidy-name
+	// reads a store code. Only after a processor marker: "BLUE BOTTLE 0412" keeps its number, and "SQ *CAFE 22" keeps 22.
+	if (processed) text = text.replace(/(?:^|\s)\S*(?:#|\d{3})\S*$/, "");
 
 	return text.toLowerCase();
 }
