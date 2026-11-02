@@ -3244,6 +3244,35 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(await res.text()).toContain(`skip=income-${ids.income}`);
 	});
 
+	it("a Never suggest added after the row was drawn stops its create: nothing made or filed, and the answer is the changed-somewhere-else one", async () => {
+		const { ids, id } = await categoryCard();
+		// The row was drawn (and cached) earlier; the store got its Never suggest for a new category since.
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(LUPITA)
+			.run();
+		const categoriesBefore = await countOf(
+			"SELECT COUNT(*) AS n FROM categories",
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "Books & audio" },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(
+			categoriesBefore,
+		);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: null });
+	});
+
 	// A client sends HX-Current-URL, so a bad one must never throw: the refusal is the normal one, with no skips kept.
 	it.each([
 		"not a url",

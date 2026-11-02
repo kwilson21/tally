@@ -505,6 +505,68 @@ describe("the filing finds the category the family has, however its key was stor
 		});
 		expect(result).toEqual({ ok: false, reason: "gone" });
 	});
+
+	it("a Never suggest for a new category added after the name was drawn refuses the create: nothing made or filed", async () => {
+		const tx = await maybeTx("AUDIBLE*TE3E10I7 WA");
+		// The name was drawn and cached, then the store got its Never suggest for a new category.
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('AUDIBLE*TE3E10I7 WA', 'new_category', '2026-10-01')",
+			)
+			.run();
+		const before = await db
+			.prepare("SELECT COUNT(*) AS n FROM categories")
+			.first<{ n: number }>();
+		const answers = await db
+			.prepare("SELECT COUNT(*) AS n FROM maybe_answers")
+			.first<{ n: number }>();
+		const result = await fileInNewCategory(db, {
+			transactionId: tx,
+			target: {
+				ok: true,
+				kind: "create",
+				name: "Books & audio",
+				color: "cat-blue",
+			},
+			today: "2026-10-02",
+			who: "Kazon",
+		});
+		expect(result).toEqual({ ok: false, reason: "gone" });
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM categories")
+				.first<{ n: number }>(),
+		).toEqual(before);
+		expect(
+			await db
+				.prepare(
+					"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				)
+				.bind(tx)
+				.first(),
+		).toEqual({ category_id: null, category_source: null });
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM maybe_answers")
+				.first<{ n: number }>(),
+		).toEqual(answers);
+	});
+
+	it("without a Never suggest the same create still makes and files", async () => {
+		const tx = await maybeTx("AUDIBLE*TE3E10I7 WA");
+		const result = await fileInNewCategory(db, {
+			transactionId: tx,
+			target: {
+				ok: true,
+				kind: "create",
+				name: "Books & audio",
+				color: "cat-blue",
+			},
+			today: "2026-10-02",
+			who: "Kazon",
+		});
+		expect(result).toEqual({ ok: true, name: "Books & audio", created: true });
+	});
 });
 
 describe("a Never suggest for a new category stops the row: no pending name and no AI call", () => {

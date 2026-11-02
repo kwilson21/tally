@@ -144,7 +144,10 @@ export async function fileInNewCategory(
 ): Promise<FileResult> {
 	const { transactionId, target, today, who } = input;
 	const key = nameKey(target.name);
-	const asked = categoryAskedSql("transactions");
+	// The question must still be asked, and no "Never suggest" for a new category may have been added since the name was
+	// drawn (a cached row can outlive the rule). Every guard and the waiting check below use this, so a refused create
+	// files nothing and reads as an answer that changed somewhere else, never as the limit.
+	const asked = `${categoryAskedSql("transactions")} AND NOT ${neverSuggestedSql("transactions", "new_category")}`;
 	// The category this batch files in: by id for an existing one, else by the name the way createFromSuggestion does.
 	const pick =
 		target.kind === "existing"
