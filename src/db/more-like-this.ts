@@ -144,20 +144,26 @@ export async function moreLikeThis(
 
 export type AddResult =
 	| { ok: true; name: string; moved: number; skipped: number }
-	| { ok: false; reason: "gone" };
+	/** The filed purchase, or its category, is gone (not filed, or the category archived). */
+	| { ok: false; reason: "gone" }
+	/** The filed purchase was recategorized after the card was drawn: nothing moved. */
+	| { ok: false; reason: "changed" };
 
 /**
  * Add: files the ticked purchases that are in the filed purchase's group into its category, as one D1 statement. A
  * ticked id that isn't in the group is ignored (the ids are checked against the group, never trusted). The write has
  * the waiting check too, so a purchase someone decided meanwhile is left alone and counted as skipped. The SET list
- * is fileInNewCategory's; no answer record is written.
+ * is fileInNewCategory's; no answer record is written. `category` is the category the card showed: when the filed
+ * purchase is in another one now, the card is stale and nothing moves.
  */
 export async function addMoreLikeThis(
 	db: D1Database,
-	input: { filedId: number; ticked: number[]; who: string },
+	input: { filedId: number; category: number; ticked: number[]; who: string },
 ): Promise<AddResult> {
 	const filed = await filedRow(db, input.filedId);
 	if (!filed) return { ok: false, reason: "gone" };
+	if (filed.categoryId !== input.category)
+		return { ok: false, reason: "changed" };
 	const ticked = [...new Set(input.ticked)];
 	const group = new Set(
 		sameTextPeers(

@@ -115,7 +115,17 @@ export function MoreLikeThisCard({
 			titleId="more-title"
 			focus={focus}
 			form={answerForm(action)}
-			hidden={<input type="hidden" name="more" value={String(card.filedId)} />}
+			hidden={
+				<>
+					<input type="hidden" name="more" value={String(card.filedId)} />
+					{/* The category the card names, by id: Add refuses when the purchase is in another one now. */}
+					<input
+						type="hidden"
+						name="category"
+						value={String(card.categoryId)}
+					/>
+				</>
+			}
 			answers={{
 				create: { type: "submit", name: "answer", value: "more_add" },
 				no: { type: "submit", name: "answer", value: "more_skip" },

@@ -65,6 +65,10 @@ const MAX_STORE_KEY = 500;
 export const CHANGED_SUGGESTION =
 	"That suggestion was changed somewhere else. Here's the current list.";
 
+/** What a stale "Add to …" card says: the purchase moved elsewhere since the card was drawn, so nothing moved. */
+export const MORE_CHANGED =
+	"That purchase was changed somewhere else, so nothing moved.";
+
 /** A question the No just raised: its store(s) and what the check says (decision 101). */
 type Ask = {
 	kind: "income" | "transfer" | "new_category";
@@ -284,12 +288,10 @@ function Screen({
 		ask,
 		values,
 		error,
-		focus: focusWanted = false,
+		focus = false,
 		today,
 		more,
 	} = input;
-	// The focus goes to the card's headline when it is drawn, so the screen's item doesn't take it as well.
-	const focus = focusWanted && !more;
 	const skippedSet = new Set(skipped);
 	const againSet = new Set(again);
 	// The items not set aside come first. Then the skipped ones come back in queue order, and a second Skip
@@ -322,18 +324,19 @@ function Screen({
 				>
 					Settings
 				</a>
-				{more && (
+				{/* While the card shows it is the whole screen: a purchase it offers is never also offered by the queue below. */}
+				{more ? (
 					<div class="mt-6">
 						<MoreLikeThisCard
 							action={action}
 							card={more}
 							today={today}
-							focus={focusWanted}
+							focus={focus}
 						/>
 					</div>
-				)}
+				) : null}
 				{/* The question has no count: the item it asks about has just left the queue, so "0 left" would read wrong. */}
-				{ask ? (
+				{more ? null : ask ? (
 					<div class="mt-6">
 						<AskFirst
 							action={action}
@@ -625,17 +628,33 @@ suggestions.post(PATH, async (c) => {
 	}
 	if (answer === "more_add") {
 		const filedId = moreFrom(form.get("more")?.toString());
+		const category = moreFrom(form.get("category")?.toString());
 		const result =
-			filedId === undefined
+			filedId === undefined || category === undefined
 				? ({ ok: false, reason: "gone" } as const)
 				: await addMoreLikeThis(db, {
 						filedId,
+						category,
 						ticked: form
 							.getAll("ticked")
 							.map((value) => Number(value.toString()))
 							.filter(Number.isSafeInteger),
 						who,
 					});
+		if (!result.ok && result.reason === "changed") {
+			// The card was drawn before the purchase moved to another category: nothing moved, and the next screen shows.
+			const message = MORE_CHANGED;
+			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+			return renderScreen(c, {
+				reviewUrl,
+				focus: true,
+				toast: {
+					message,
+					type: "info",
+					announce: `${message} ${left(queue)}`,
+				},
+			});
+		}
 		if (!result.ok) return stale();
 		const after = await suggestionQueue(db);
 		const { skipped: decided } = result;

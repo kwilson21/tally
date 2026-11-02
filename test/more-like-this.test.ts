@@ -316,6 +316,135 @@ describe("after Create and next", () => {
 	});
 });
 
+describe("a card drawn before the purchase changed moves nothing (Codex P2)", () => {
+	it("the card names its category by id, in a hidden field", async () => {
+		const filed = await maybe(AUDIBLE);
+		await tx({ raw: AUDIBLE, date: "2026-10-05" });
+		const { html } = await createBooks(filed);
+		const books = await categoryId("Books & audio");
+		expect(html).toMatch(new RegExp(`name="category" value="${books}"`));
+	});
+
+	it("refuses Add when the filed purchase was recategorized after the card was drawn, moves nothing, and says so", async () => {
+		const filed = await maybe(AUDIBLE);
+		const peer = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+		await createBooks(filed);
+		// Another tab files the purchase in a different category.
+		await db
+			.prepare("UPDATE transactions SET category_id = ? WHERE id = ?")
+			.bind(await categoryId("Groceries"), filed)
+			.run();
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				answer: "more_add",
+				category: String(await categoryId("Books & audio")),
+				more: String(filed),
+				ticked: String(peer),
+			},
+			true,
+		);
+
+		expect(res.status).toBe(200);
+		expect(await state(peer)).toEqual({ categoryId: null, source: null });
+		expect(trigger(res).toast?.message).toBe(
+			"That purchase was changed somewhere else, so nothing moved.",
+		);
+	});
+
+	it("refuses Add, moving nothing, when the card's category was archived after the card was drawn", async () => {
+		const filed = await maybe(AUDIBLE);
+		const peer = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+		await createBooks(filed);
+		const books = await categoryId("Books & audio");
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(books)
+			.run();
+
+		const { res } = await post(
+			"/settings/suggestions",
+			{
+				answer: "more_add",
+				more: String(filed),
+				category: String(books),
+				ticked: String(peer),
+			},
+			true,
+		);
+
+		expect(res.status).toBe(200);
+		expect(await state(peer)).toEqual({ categoryId: null, source: null });
+	});
+});
+
+describe("the follow-up card is the whole screen (Codex P2)", () => {
+	/** A purchase in the review queue too: a Maybe with its own guess, the same bank text as the filed one. */
+	async function peerMaybe() {
+		return tx({
+			raw: AUDIBLE,
+			date: "2026-10-05",
+			confidence: 0.58,
+			jevCategoryId: await categoryId("Eating Out"),
+		});
+	}
+
+	it("with a peer that also has a Maybe guess, shows the card and no queue card below it", async () => {
+		const filed = await maybe(AUDIBLE);
+		await peerMaybe();
+
+		const { html } = await createBooks(filed);
+
+		expect(html).toContain("1 more looks like this");
+		expect(html).not.toMatch(/Suggestions · \d+ of \d+/);
+		expect(html).not.toMatch(/name="answer" value="yes"/);
+	});
+
+	it("after No, the queue's card shows again, and the peer is offered only there", async () => {
+		const filed = await maybe(AUDIBLE);
+		await peerMaybe();
+		await createBooks(filed);
+
+		const { html } = await post(
+			"/settings/suggestions",
+			{ answer: "more_skip", more: String(filed) },
+			true,
+		);
+
+		expect(html).not.toContain("more-title");
+		expect(html).toMatch(/Suggestions · 1 of 1/);
+		expect(html).toMatch(/name="answer" value="yes"/);
+	});
+
+	it("after Add, the queue's card shows again, without the peer that was added", async () => {
+		const filed = await maybe(AUDIBLE);
+		const peer = await peerMaybe();
+		const other = await maybe("CHEWY.COM 1");
+		await createBooks(filed);
+
+		const { html } = await post(
+			"/settings/suggestions",
+			{
+				answer: "more_add",
+				category: String(await categoryId("Books & audio")),
+				more: String(filed),
+				ticked: String(peer),
+			},
+			true,
+		);
+
+		expect(await state(peer)).toEqual({
+			categoryId: await categoryId("Books & audio"),
+			source: "user",
+		});
+		expect(html).not.toContain("more-title");
+		expect(html).toMatch(/Suggestions · 1 of 1/);
+		expect(html).not.toContain(`value="category-${peer}"`);
+		expect(other).toBeGreaterThan(0);
+	});
+});
+
 describe("Add files only the ticked purchases", () => {
 	it("moves the ticked ones into the category, leaves the unticked one, skips one decided meanwhile, and writes no answer", async () => {
 		const filed = await maybe(AUDIBLE);
@@ -336,6 +465,7 @@ describe("Add files only the ticked purchases", () => {
 			"/settings/suggestions",
 			{
 				answer: "more_add",
+				category: String(await categoryId("Books & audio")),
 				more: String(filed),
 				ticked: [String(ticked), String(decided)],
 			},
@@ -371,7 +501,12 @@ describe("Add files only the ticked purchases", () => {
 
 		const { res } = await post(
 			"/settings/suggestions",
-			{ answer: "more_add", more: String(filed), ticked: String(only) },
+			{
+				answer: "more_add",
+				more: String(filed),
+				category: String(await categoryId("Books & audio")),
+				ticked: String(only),
+			},
 			true,
 		);
 
@@ -387,7 +522,12 @@ describe("Add files only the ticked purchases", () => {
 
 		await post(
 			"/settings/suggestions",
-			{ answer: "more_add", more: String(filed), ticked: String(stranger) },
+			{
+				answer: "more_add",
+				more: String(filed),
+				category: String(await categoryId("Books & audio")),
+				ticked: String(stranger),
+			},
 			true,
 		);
 
