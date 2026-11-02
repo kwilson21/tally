@@ -57,6 +57,7 @@ Progress and feedback (real-time feel, built as polling):
 - Built from the person's confirmed choices only (`user`, `merchant_rule`). Jev's guesses never count as evidence. It starts nearly empty on production and fills as the queue is answered.
 - Jev receives only the lines relevant to the transaction, replacing the five-trip `merchantCategoryHistory` (`src/ai/categorize.ts:26`). Capped list, newest answers weigh more.
 - Approved in chat 2026-11-02: the page is named "What Tally has learned" and sits beside "Tally's rules" in Settings (the builder confirms how Settings is organized). Each row shows "bank text → category" and "From N of your answers", with Change (opens in place with the select, the note "From now on Audible goes here every time.", and Save) and Forget (toast with Undo for 10 seconds). Empty state: "Nothing yet". Jev gets only the line for the transaction's own cleaned bank text. Two data details were not drawn and must be checked first: Forget needs a memory (lines are derived), and a rule cannot be keyed by the merchant (Amazon is not Audible).
+- Owner's pick on Change (2026-11-02): a real rule keyed by cleaned bank text that sorts before Jev, not a hint; no Change button on a known-vague text (only Forget). Own issue, PR and decision entry, after the learned page.
 - Later: show which charges a learned line has affected.
 
 ## Later (add to the spec's Later list, do not build now)
