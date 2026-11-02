@@ -3244,6 +3244,40 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(await res.text()).toContain(`skip=income-${ids.income}`);
 	});
 
+	// A client sends HX-Current-URL, so a bad one must never throw: the refusal is the normal one, with no skips kept.
+	it.each([
+		"not a url",
+		"/settings/suggestions?skip=new-1",
+		"",
+		"http://[::1",
+		"%%%",
+		"http://ex ample/",
+	])(
+		"a create whose HX-Current-URL is %j is refused as usual, with no skips and no throw",
+		async (bad) => {
+			const { id } = await categoryCard();
+			const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					Origin: BASE,
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+					"HX-Current-URL": bad,
+				},
+				body: new URLSearchParams({
+					id,
+					answer: "create",
+					new_name: "",
+				}).toString(),
+			});
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(textOf(html)).toContain("Give the category a name.");
+			expect(html).not.toContain("skip=income-");
+		},
+	);
+
 	it("an answered or unknown item id gets an empty answer, cached the same way", async () => {
 		const { res, html } = await get(
 			"/settings/suggestions/new-category?id=category-999999",

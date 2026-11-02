@@ -100,8 +100,25 @@ function requestedKeys(
 	key: "skip" | "again",
 	ids: Set<string>,
 ): string[] {
-	const requested = new URL(url).searchParams.getAll(key);
-	return [...new Set(requested)].filter((id) => ids.has(id));
+	const requested = queryOf(url).getAll(key);
+	return [...new Set(requested)].filter(
+		(id) => QUEUE_ID.test(id) && ids.has(id),
+	);
+}
+
+/** A queue item's id as the address spells it: "income-1", "category-3", "new-4", "name-8" (never bank text). */
+const QUEUE_ID = /^[a-z]+-\d{1,9}$/;
+
+/**
+ * The query of an address the client sent (the page's own address, from HX-Current-URL, is client data). Only an
+ * absolute URL is read, and only its query; anything that doesn't parse gives no query, so a bad header is never a 500.
+ */
+function queryOf(url: string): URLSearchParams {
+	try {
+		return new URL(url).searchParams;
+	} catch {
+		return new URLSearchParams();
+	}
 }
 
 /** What the address says about the review: the items set aside, and those set aside again. */
