@@ -15,6 +15,7 @@ import { readAiSwitches } from "./ai-switches";
 import { COLORS } from "./categories";
 import { namesToAvoid } from "./category-suggestions";
 import { merchantKeySql } from "./merchant-key";
+import { neverSuggestedSql } from "./never-suggest";
 import { categoryAskedSql } from "./suggestions-queue";
 
 /**
@@ -73,6 +74,7 @@ export async function pendingCategoryNames(
 			`SELECT ${merchantKeySql("t")} AS key, cs.name AS name FROM category_suggestions cs
 			JOIN transactions t ON t.category_suggestion_id = cs.id
 			WHERE cs.status = 'pending' AND ${merchantKeySql("t")} IN (SELECT value FROM json_each(?))
+				AND NOT ${neverSuggestedSql("t", "new_category")}
 			ORDER BY cs.id DESC`,
 		)
 		.bind(JSON.stringify(merchantKeys))
@@ -85,13 +87,21 @@ export async function pendingCategoryNames(
 /**
  * The name Tally suggests for a store's purchase, or null. A pending suggestion for the same store is preferred and
  * makes no call. Otherwise Workers AI names it, from the store's name only, and only while the categories switch is on
- * and there is an AI binding (the demo has one too). Nothing here logs the name.
+ * and there is an AI binding (the demo has one too). A store with a "Never suggest" for a new category gets neither (the
+ * same check the queue's new categories use, decision 101), so no name and no call. Nothing here logs the name.
  */
 export async function suggestedCategoryName(
 	db: D1Database,
 	ai: Ai | undefined,
-	item: { merchantKey: string; merchant: string },
+	item: { transactionId: number; merchantKey: string; merchant: string },
 ): Promise<string | null> {
+	const allowed = await db
+		.prepare(
+			`SELECT 1 AS ok WHERE NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id = ? AND ${neverSuggestedSql("t", "new_category")})`,
+		)
+		.bind(item.transactionId)
+		.first();
+	if (!allowed) return null;
 	const pending = (await pendingCategoryNames(db, [item.merchantKey])).get(
 		item.merchantKey,
 	);
@@ -178,8 +188,13 @@ export async function fileInNewCategory(
 	const results = await db.batch(statements);
 	const filed = results[results.length - 1]?.meta.changes ?? 0;
 	if (filed === 0) {
-		// Only a create can be refused for the limit; any other refusal means the card is out of date.
-		if (target.kind === "create") {
+		// A refusal is "gone" unless the purchase still waits for this answer: a stale answer must never read as the
+		// limit, even when the list is full too. Only a waiting purchase on a create can be refused for the limit.
+		const waiting = await db
+			.prepare(`SELECT 1 AS ok FROM transactions WHERE id = ? AND ${asked}`)
+			.bind(transactionId)
+			.first();
+		if (waiting && target.kind === "create") {
 			const active = await db
 				.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
 				.first<{ n: number }>();

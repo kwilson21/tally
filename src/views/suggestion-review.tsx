@@ -188,6 +188,8 @@ export function SuggestionCard({
 		ticked?: number[];
 		notes?: Record<number, string>;
 		newName?: string;
+		/** Why the typed name was refused, shown on its own field (aria-invalid, described by the message). */
+		newNameError?: string;
 	};
 	error?: string;
 	focus?: boolean;
@@ -249,6 +251,7 @@ export function SuggestionCard({
 							fieldId={fieldId}
 							name={values?.newName ?? suggestedName ?? ""}
 							open={values?.newName !== undefined}
+							error={values?.newNameError}
 						/>
 					) : suggestUrl ? (
 						<NewCategoryLoader url={suggestUrl} fieldId={fieldId} />
@@ -439,6 +442,7 @@ export function NewCategoryRow({
 	fieldId,
 	name,
 	open = false,
+	error,
 }: {
 	/** The screen's address, with its skips: the answer posts there. */
 	action: string;
@@ -450,6 +454,8 @@ export function NewCategoryRow({
 	name: string;
 	/** Open, as a refused answer leaves it, so the typed name is on screen. */
 	open?: boolean;
+	/** Why the typed name was refused: the field is marked invalid and names this message. */
+	error?: string;
 }) {
 	return (
 		<details
@@ -476,6 +482,7 @@ export function NewCategoryRow({
 					name="new_name"
 					label="Category name"
 					value={name}
+					error={error}
 					maxlength={40}
 					autocomplete="off"
 					surface="paper"

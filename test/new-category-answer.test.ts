@@ -294,6 +294,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 	});
 
 	const item = {
+		transactionId: 0,
 		merchantKey: "AUDIBLE*TE3E10I7 WA",
 		merchant: "Audible",
 		label: "Audible",
@@ -318,6 +319,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 	it("names from the store's name, never the transaction's own name or note", async () => {
 		const { ai, run } = fakeAi();
 		const own = {
+			transactionId: 0,
 			merchantKey: "SQ *LUPITAS TAQ 2210",
 			merchant: "Lupita's Taqueria",
 			label: "Team lunch, paid back",
@@ -465,5 +467,84 @@ describe("the filing finds the category the family has, however its key was stor
 				.bind(tx)
 				.first(),
 		).toEqual({ category_id: made?.id });
+	});
+
+	it("an answer that another person made first is stale, even when the list is also full", async () => {
+		const tx = await maybeTx("STALE PURCHASE");
+		const groceries = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Groceries'")
+			.first<{ id: number }>();
+		// Someone else answered this purchase after the queue was read...
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(groceries?.id ?? 0, tx)
+			.run();
+		// ...and the list reached its 50 active categories too.
+		const active = await db
+			.prepare("SELECT COUNT(*) AS n FROM categories WHERE archived = 0")
+			.first<{ n: number }>();
+		for (let i = active?.n ?? 0; i < MAX_ACTIVE; i++)
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?)",
+				)
+				.bind(`Filler ${i}`, `filler ${i}`, 300 + i)
+				.run();
+		const result = await fileInNewCategory(db, {
+			transactionId: tx,
+			target: {
+				ok: true,
+				kind: "create",
+				name: "Books & audio",
+				color: "cat-blue",
+			},
+			today: "2026-10-02",
+			who: "Kazon",
+		});
+		expect(result).toEqual({ ok: false, reason: "gone" });
+	});
+});
+
+describe("a Never suggest for a new category stops the row: no pending name and no AI call", () => {
+	beforeEach(async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.batch([
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM category_suggestions"),
+			db.prepare("DELETE FROM never_suggest_rules"),
+		]);
+		vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	it("gives no pending name and makes no call for a store with that rule", async () => {
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const tx = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-01', 1499, 'AUDIBLE*TE3E10I7 WA', ?)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, suggestion?.id ?? null)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES ('AUDIBLE*TE3E10I7 WA', 'new_category', '2026-10-01')",
+			)
+			.run();
+		const run = vi.fn(async () => "Books & audio");
+		const ai = { run } as unknown as Ai;
+		const item = {
+			transactionId: tx?.id ?? 0,
+			merchantKey: "AUDIBLE*TE3E10I7 WA",
+			merchant: "Audible",
+		};
+		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
+		expect(run).not.toHaveBeenCalled();
 	});
 });

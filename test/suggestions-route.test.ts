@@ -3174,6 +3174,76 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
 	});
 
+	it("a store with a Never suggest for a new category gets no row, pending or named, and no lazy name", async () => {
+		const { id, address } = await categoryCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-never-store', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(LUPITA)
+			.run();
+		const fragment = await get(`/settings/suggestions/new-category?id=${id}`);
+		expect(fragment.html.trim()).toBe("");
+		expect(fragment.res.headers.get("Cache-Control")).toBe(
+			"private, max-age=86400",
+		);
+		const page = await get(address);
+		// The card itself is still asked (only its new category row is withheld), so the test isn't vacuous.
+		expect(page.html).toContain("Maybe Eating Out");
+		expect(page.html).not.toContain("Books &amp; audio");
+		expect(page.html).not.toContain("Tally's suggestion");
+	});
+
+	it("a refused name is named by its own field, with aria-invalid and a message it points at", async () => {
+		const { id } = await categoryCard();
+		const { html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "  " },
+			true,
+		);
+		expect(html).toContain('aria-invalid="true"');
+		expect(html).toContain(`aria-describedby="new-category-name-${id}-error"`);
+		expect(html).toContain(`id="new-category-name-${id}-error"`);
+	});
+
+	it("the name's address is the same per item, and a refused row keeps the skips its page had", async () => {
+		const { ids, address, id } = await categoryCard();
+		const { html: page } = await get(address);
+		expect(page).toContain(
+			`hx-get="/settings/suggestions/new-category?id=${id}"`,
+		);
+		// htmx sends the page's own address as HX-Current-URL, so the row's answer keeps the skips the page had.
+		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+				"HX-Request": "true",
+				"HX-Current-URL": `${BASE}${address}`,
+			},
+			body: new URLSearchParams({
+				id,
+				answer: "create",
+				new_name: "",
+			}).toString(),
+		});
+		expect(res.status).toBe(422);
+		expect(await res.text()).toContain(`skip=income-${ids.income}`);
+	});
+
 	it("an answered or unknown item id gets an empty answer, cached the same way", async () => {
 		const { res, html } = await get(
 			"/settings/suggestions/new-category?id=category-999999",

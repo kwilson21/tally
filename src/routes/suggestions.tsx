@@ -77,6 +77,8 @@ type Values = {
 	notes?: Record<number, string>;
 	/** The new category name a person typed in a category guess's row (decision 156). */
 	newName?: string;
+	/** Why the typed name was refused, shown on its own field (decision 156). */
+	newNameError?: string;
 };
 
 export const suggestions = new Hono<App>();
@@ -117,20 +119,13 @@ function requestedReview(
 }
 
 /**
- * The address that answers with a category guess's suggested new category (decision 156), with the skips it was drawn
- * with, so the row's answer posts back to the same screen. It names the item only, never a store's text (a bank's text
- * can carry a card or account number, and a URL is logged), and it answers with the row, or with nothing.
+ * The address that answers with a category guess's suggested new category (decision 156). It names the item only, never a
+ * store's text (a bank's text can carry a card or account number, and a URL is logged), and never the screen's skips:
+ * the address is the same wherever the card is reached, so the browser's one-day cache holds. The row's answer finds
+ * the skips from the page it was answered on (HX-Current-URL), see the POST below.
  */
-function newCategoryAddress(
-	id: string,
-	skipped: string[],
-	again: string[],
-): string {
-	const query = new URLSearchParams();
-	query.append("id", id);
-	for (const skip of skipped) query.append("skip", skip);
-	for (const set of again) query.append("again", set);
-	return `${PATH}/new-category?${query}`;
+function newCategoryAddress(id: string): string {
+	return `${PATH}/new-category?${new URLSearchParams({ id })}`;
 }
 
 /** Skip: the first one sets the item aside; on an item that came back, it sets it aside for good. */
@@ -325,7 +320,7 @@ function Screen({
 								}
 								suggestUrl={
 									current.kind === "category"
-										? newCategoryAddress(current.id, skipped, again)
+										? newCategoryAddress(current.id)
 										: undefined
 								}
 							/>
@@ -371,11 +366,16 @@ async function renderScreen(
 		status?: 200 | 422;
 		focus?: boolean;
 		toast?: { message: string; type: "success" | "info"; announce: string };
+		/** The address the screen's skips are read from; the page's own address when none is given (a row's answer). */
+		reviewUrl?: string;
 	} = {},
 ) {
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
-	const { skipped, again } = requestedReview(c.req.url, queue);
+	const { skipped, again } = requestedReview(
+		options.reviewUrl ?? c.req.url,
+		queue,
+	);
 	const categories = await db
 		.prepare(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
@@ -472,12 +472,19 @@ suggestions.post(PATH, async (c) => {
 	const who = actor(c as Context<App> & { env: Env & { DEMO: string } });
 	const today = await householdToday(db);
 	const queue = await suggestionQueue(db);
-	const { skipped, again } = requestedReview(c.req.url, queue);
+	// A new category row (decision 156) posts to the screen's bare address, so its skips come from the page it was
+	// answered on (htmx sends that address as HX-Current-URL). Every other answer posts to the page's own address.
+	const reviewUrl =
+		answer === "create"
+			? (c.req.header("HX-Current-URL") ?? c.req.url)
+			: c.req.url;
+	const { skipped, again } = requestedReview(reviewUrl, queue);
 	const next = reviewAddress(skipped, again);
 	// `extra` is one more sentence for the announcer, such as what a create left out; the toast keeps its words.
 	const done = (message: string, queueAfter: SuggestionItem[], extra = "") => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
+			reviewUrl,
 			focus: true,
 			toast: {
 				message,
@@ -490,6 +497,7 @@ suggestions.post(PATH, async (c) => {
 		const message = "That one was already answered.";
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
+			reviewUrl,
 			focus: true,
 			toast: { message, type: "info", announce: message },
 		});
@@ -668,13 +676,21 @@ suggestions.post(PATH, async (c) => {
 			if (answer === "create") {
 				const typed = String(form.get("new_name") ?? "");
 				const target = newCategoryTarget(typed, await categoryNames(db));
-				if (!target.ok)
+				if (!target.ok) {
+					// The limit is the card's message; a refused name is named by its own field (aria-invalid).
+					const limit = target.error === FULL_NEW_CATEGORY;
 					return renderScreen(c, {
-						values: { id, newName: typed },
-						error: target.error,
+						reviewUrl,
+						values: {
+							id,
+							newName: typed,
+							newNameError: limit ? undefined : target.error,
+						},
+						error: limit ? target.error : undefined,
 						status: 422,
 						focus: true,
 					});
+				}
 				const result = await fileInNewCategory(db, {
 					transactionId: item.transactionId,
 					target,
@@ -684,6 +700,7 @@ suggestions.post(PATH, async (c) => {
 				if (!result.ok) {
 					if (result.reason === "gone") return stale();
 					return renderScreen(c, {
+						reviewUrl,
 						values: { id, newName: typed },
 						error: FULL_NEW_CATEGORY,
 						status: 422,
