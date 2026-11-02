@@ -375,6 +375,9 @@ describe("a card drawn before the purchase changed moves nothing (Codex P2)", ()
 		);
 
 		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toBe(
+			"That purchase was changed somewhere else, so nothing moved.",
+		);
 		expect(await state(peer)).toEqual({ categoryId: null, source: null });
 	});
 });

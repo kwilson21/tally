@@ -58,6 +58,8 @@ type FiledRow = {
 	whatItWasNote: string | null;
 	categoryId: number;
 	categoryName: string;
+	/** 1 when the category was archived after the purchase was filed in it. */
+	archived: number;
 };
 
 type CandidateRow = {
@@ -80,8 +82,8 @@ async function filedRow(
 	return db
 		.prepare(
 			`SELECT t.id, t.raw_name AS rawName, ${merchantKeySql("t")} AS merchantKey, (${jevSaysMixedSql("t")}) AS mixed,
-				${visibleNoteSql(false)} AS whatItWasNote, c.id AS categoryId, c.name AS categoryName
-			FROM transactions t JOIN categories c ON c.id = t.category_id AND c.archived = 0
+				${visibleNoteSql(false)} AS whatItWasNote, c.id AS categoryId, c.name AS categoryName, c.archived AS archived
+			FROM transactions t JOIN categories c ON c.id = t.category_id
 			WHERE t.id = ? AND t.category_source = 'user'`,
 		)
 		.bind(filedId)
@@ -128,7 +130,7 @@ export async function moreLikeThis(
 	filedId: number,
 ): Promise<MoreLikeThis | null> {
 	const filed = await filedRow(db, filedId);
-	if (!filed) return null;
+	if (!filed || filed.archived === 1) return null;
 	const rows = sameTextPeers(
 		{ ...filed, mixed: filed.mixed === 1 },
 		await candidates(db, []),
@@ -144,9 +146,9 @@ export async function moreLikeThis(
 
 export type AddResult =
 	| { ok: true; name: string; moved: number; skipped: number }
-	/** The filed purchase, or its category, is gone (not filed, or the category archived). */
+	/** The filed purchase is gone: not filed by a person, or its category is gone. */
 	| { ok: false; reason: "gone" }
-	/** The filed purchase was recategorized after the card was drawn: nothing moved. */
+	/** The card is stale: the purchase moved to another category, or its category was archived. Nothing moved. */
 	| { ok: false; reason: "changed" };
 
 /**
@@ -154,7 +156,7 @@ export type AddResult =
  * ticked id that isn't in the group is ignored (the ids are checked against the group, never trusted). The write has
  * the waiting check too, so a purchase someone decided meanwhile is left alone and counted as skipped. The SET list
  * is fileInNewCategory's; no answer record is written. `category` is the category the card showed: when the filed
- * purchase is in another one now, the card is stale and nothing moves.
+ * purchase is in another one now, or its category is archived, the card is stale and nothing moves.
  */
 export async function addMoreLikeThis(
 	db: D1Database,
@@ -162,7 +164,7 @@ export async function addMoreLikeThis(
 ): Promise<AddResult> {
 	const filed = await filedRow(db, input.filedId);
 	if (!filed) return { ok: false, reason: "gone" };
-	if (filed.categoryId !== input.category)
+	if (filed.archived === 1 || filed.categoryId !== input.category)
 		return { ok: false, reason: "changed" };
 	const ticked = [...new Set(input.ticked)];
 	const group = new Set(
