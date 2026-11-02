@@ -97,9 +97,13 @@ const DATE = /(?<![\w./])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])$/;
 export function cleanBankText(raw: string): string {
 	let text = raw.replace(/\s+/g, " ").trim();
 	text = text.replace(PREFIX, "");
+	const processed = PROCESSOR.test(text);
 	text = text.replace(PROCESSOR, "");
 	text = text.replace(REFERENCE_ID, "");
 	text = stripTrailing(text);
+	// A processor's own reference code at the end ("SQ *BLUE BOTTLE COF 0412") varies per purchase, so it goes.
+	// Only after a processor marker: "BLUE BOTTLE 0412" keeps its number.
+	if (processed) text = text.replace(/(?:^|\s)\d{3,}$/, "");
 
 	return text.toLowerCase();
 }

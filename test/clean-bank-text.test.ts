@@ -65,6 +65,21 @@ describe("cleanBankText", () => {
 		expect(cleanBankText("DEBIT CARD PURCHASE 0921 CVS")).toBe("cvs");
 	});
 
+	it("strips a trailing processor code of three or more digits, so one merchant groups", () => {
+		expect(cleanBankText("SQ *BLUE BOTTLE COF 0412")).toBe("blue bottle cof");
+		expect(cleanBankText("SQ *BLUE BOTTLE COF 0217")).toBe("blue bottle cof");
+	});
+
+	it("keeps a short number that is part of a processor merchant's name", () => {
+		expect(cleanBankText("SQ *CAFE 22")).toBe("cafe 22");
+		expect(cleanBankText("SQ *7ELEVEN")).toBe("7eleven");
+		expect(cleanBankText("SQ *24HOURFITNESS")).toBe("24hourfitness");
+	});
+
+	it("leaves a trailing number alone when there is no processor marker (conservative)", () => {
+		expect(cleanBankText("BLUE BOTTLE 0412")).toBe("blue bottle 0412");
+	});
+
 	it("reads a state code and a trailing date the same in either order", () => {
 		expect(cleanBankText("APPLE.COM/BILL 09/30 CA")).toBe("apple.com/bill");
 		expect(cleanBankText("APPLE.COM/BILL 09/30 CA")).toBe(
