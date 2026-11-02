@@ -22,6 +22,7 @@ import {
 import { AiTally } from "../src/views/ai-tally";
 import { WhyLink } from "../src/views/why-link";
 import { D1_STATEMENT_LIMIT } from "./d1-limits";
+import { pinClock } from "./pinned-clock";
 
 // What AI did this month (spec §8.6, decisions 91 and 101): a small log of what Tally's AI applied,
 // with no amounts, counted from the day it ships. The tally under the AI suggestions switches, its Off
@@ -149,6 +150,8 @@ const linesOf = async (tally: AiTallyCounts, switches = OFF) =>
 	(await AiTally({ tally, switches }).toString()).replace(/<[^>]+>/g, "|");
 
 beforeEach(async () => {
+	// Name logs are dated by the household's today, so the clock matches TODAY (#808).
+	pinClock();
 	await resetDemo(db, TODAY);
 	// The demo's reset records its own example work; each test starts from an empty log.
 	await db.prepare("DELETE FROM ai_log").run();
@@ -161,6 +164,7 @@ beforeEach(async () => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 describe("the migration", () => {

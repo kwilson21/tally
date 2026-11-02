@@ -12,6 +12,7 @@ import { resetDemo } from "../src/demo/reset";
 import { formatCents } from "../src/money";
 import { trends } from "../src/routes/trends";
 import { sameDaysCaption } from "../src/trends";
+import { pinClock } from "./pinned-clock";
 
 const get = async (path: string) => {
 	const res = await exports.default.fetch(`http://tally.test${path}`);
@@ -39,6 +40,8 @@ afterEach(() => {
 });
 
 beforeEach(async () => {
+	// The demo's months and its story follow the household's today, so the clock is pinned (#808).
+	pinClock();
 	await resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE));
 });
 

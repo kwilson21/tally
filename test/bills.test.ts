@@ -9,6 +9,7 @@ import { loadMonth } from "../src/db/month";
 import { resetDemo } from "../src/demo/reset";
 import { app } from "../src/index";
 import appCss from "../src/styles/app.css?raw";
+import { pinClock } from "./pinned-clock";
 
 /** app.css as rules: each selector (commas split, whitespace folded) with its declarations. */
 /** The keys' details under How this works, on desktop (decision 118): the one block that may follow a page's foot. */
@@ -47,6 +48,11 @@ const occurrenceRow = (html: string, label: string) =>
 				(item) => item.includes(`>${label}<`) || item.includes(`>${label} · `),
 			) ?? ""
 	).split("</li>")[0] ?? "";
+
+// The demo, the month names and the "Link a payment" copy all follow the household's today, so the clock is pinned
+// to October 2026 for the whole file (#808).
+beforeEach(() => pinClock());
+afterEach(() => vi.useRealTimers());
 
 describe("Bills", () => {
 	beforeEach(() => resetDemo(env.DB, todayIn(DEFAULT_TIME_ZONE)));
