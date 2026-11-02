@@ -4387,6 +4387,29 @@ const reviewCategories = [
 	{ id: 3, name: "Gas" },
 ];
 
+// The Maybe card's three answers (decision 156), drawn with the Audible example and fake data.
+const audibleItem: SuggestionItem = {
+	kind: "category",
+	id: "category-9",
+	transactionId: 9,
+	date: "2026-10-02",
+	amountCents: 1499,
+	bankText: "AUDIBLE*TE3E10I7 WA",
+	merchantKey: "AUDIBLE*TE3E10I7 WA",
+	merchant: "Audible",
+	label: "Audible",
+	sure: 58,
+	categoryId: 4,
+	category: "Entertainment",
+};
+
+const audibleCategories = [
+	{ id: 2, name: "Eating Out" },
+	{ id: 4, name: "Entertainment" },
+	{ id: 1, name: "Groceries" },
+	{ id: 3, name: "Gas" },
+];
+
 function SuggestionsReview() {
 	return (
 		<Group id="suggestions-review" title="Suggestions review">
@@ -4455,6 +4478,76 @@ function SuggestionsReview() {
 								today={REVIEW_TODAY}
 								skipHref="/settings/suggestions?skip=income-1"
 								categories={reviewCategories}
+							/>
+						</div>
+					</State>
+				</div>
+			</Specimen>
+			<Specimen
+				id="suggestion-maybe-answers"
+				title="A Maybe card's three answers"
+				tier="visual"
+				components={[
+					"SuggestionCard",
+					"NewCategoryRow",
+					"NewCategoryLoader",
+					"SelectField",
+					"TextInput",
+					"Button",
+					"Icon",
+				]}
+				sentence="A category guess with its three answers in order: Yes, the dashed Tally's suggestion row (New category, with the name Tally suggests) and Something else, whose categories are one select with a label. The row opens in place with the name editable and Create and next; nothing is made until then. With no name there is no row. At the 50-category limit the create is refused in words and Something else stays open."
+			>
+				<div hx-ignore class="grid gap-8 md:grid-cols-2">
+					<div class="max-w-md">
+						<SuggestionCard
+							action="/settings/suggestions"
+							item={audibleItem}
+							today={REVIEW_TODAY}
+							skipHref="/settings/suggestions?skip=category-9"
+							categories={audibleCategories}
+							suggestedName="Books & audio"
+							fieldId="maybe-answers-closed"
+						/>
+					</div>
+					<State label="The row open with the name editable: Create and next makes it">
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={audibleItem}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=category-9"
+								categories={audibleCategories}
+								suggestedName="Books & audio"
+								values={{ newName: "Books & audio" }}
+								fieldId="maybe-answers-open"
+							/>
+						</div>
+					</State>
+					<State label="At 50 categories: the create is refused in words, and Something else is open">
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={audibleItem}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=category-9"
+								categories={audibleCategories}
+								suggestedName="Books & audio"
+								values={{ newName: "Books & audio" }}
+								error="Tally has room for 50 categories. Archive one to add another. Add it to an existing category instead."
+								fieldId="maybe-answers-limit"
+							/>
+						</div>
+					</State>
+					<State label="No name for this store: no dashed row">
+						<div class="max-w-md">
+							<SuggestionCard
+								action="/settings/suggestions"
+								item={audibleItem}
+								today={REVIEW_TODAY}
+								skipHref="/settings/suggestions?skip=category-9"
+								categories={audibleCategories}
+								fieldId="maybe-answers-none"
 							/>
 						</div>
 					</State>

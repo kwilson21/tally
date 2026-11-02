@@ -3001,3 +3001,377 @@ describe("a Yes on a Maybe keeps one line under the store it was asked about (de
 		expect(await stored()).toEqual([]);
 	});
 });
+
+// The Maybe card's three answers (decision 156): Yes, a suggested new category opened in place, and Something else's
+// one select. A create makes an active category with no budget and files the purchase in it, in one batch.
+describe("a Maybe card's new category answers (decision 156)", () => {
+	const countOf = async (sql: string) => (await row(sql))?.n as number;
+
+	/** The category card's purchase, with the two cards before it answered past (the first pass of the queue). */
+	async function categoryCard() {
+		const ids = await oneOfEach();
+		const address = `/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`;
+		return { ids, address, id: `category-${ids.category}` };
+	}
+
+	it("creates an active category with no budget and files the purchase in it", async () => {
+		const { ids, id } = await categoryCard();
+		const budgetsBefore = await countOf(
+			"SELECT COUNT(*) AS n FROM budget_amounts",
+		);
+		const amountBefore = await row(
+			"SELECT amount_cents FROM transactions WHERE id = ?",
+			ids.category,
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "Books & audio" },
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toBe(
+			"Made Books & audio and set Lupita's Taqueria to it.",
+		);
+		const made = await row(
+			"SELECT id, archived FROM categories WHERE name = 'Books & audio'",
+		);
+		expect(made).toMatchObject({ archived: 0 });
+		expect(
+			await row(
+				"SELECT category_id, category_source FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: made?.id, category_source: "user" });
+		expect(
+			await countOf(
+				`SELECT COUNT(*) AS n FROM budget_amounts WHERE category_id = ${made?.id ?? 0}`,
+			),
+		).toBe(0);
+		expect(await countOf("SELECT COUNT(*) AS n FROM budget_amounts")).toBe(
+			budgetsBefore,
+		);
+		expect(
+			await row(
+				"SELECT amount_cents FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual(amountBefore);
+		expect(
+			await row(
+				"SELECT kind, answer FROM maybe_answers WHERE kind = 'category' ORDER BY id DESC LIMIT 1",
+			),
+		).toEqual({ kind: "category", answer: "something_else" });
+	});
+
+	it("a name the family already uses files the purchase in that category, with no duplicate", async () => {
+		const { ids, id } = await categoryCard();
+		const groceries = await categoryId("Groceries");
+		const before = await countOf("SELECT COUNT(*) AS n FROM categories");
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "  groceries " },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe(
+			"Added Lupita's Taqueria to Groceries.",
+		);
+		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(before);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: groceries });
+	});
+
+	it("an empty name is refused, and the card stays open with the name box", async () => {
+		const { ids, id } = await categoryCard();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "  " },
+			true,
+		);
+		expect(res.status).toBe(422);
+		expect(textOf(html)).toContain("Give the category a name.");
+		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: null });
+	});
+
+	it("at 50 active categories the create is refused with the full message, and Something else stays open", async () => {
+		const { ids, id } = await categoryCard();
+		const active = await countOf(
+			"SELECT COUNT(*) AS n FROM categories WHERE archived = 0",
+		);
+		for (let i = active; i < 50; i++)
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES (?, ?, 'tag', 'cat-blue', ?)",
+				)
+				.bind(`Extra ${i}`, `extra ${i}`, 100 + i)
+				.run();
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "Books & audio" },
+			true,
+		);
+		expect(res.status).toBe(422);
+		expect(html).toContain('role="alert"');
+		expect(textOf(html)).toContain(
+			"Tally has room for 50 categories. Archive one to add another. Add it to an existing category instead.",
+		);
+		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(
+			await countOf("SELECT COUNT(*) AS n FROM categories WHERE archived = 0"),
+		).toBe(50);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: null });
+	});
+
+	it("Something else shows the categories as one select with a real label, not chips", async () => {
+		const { id } = await categoryCard();
+		const { html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "else" },
+			true,
+		);
+		expect(html).toContain("Choose a category</label>");
+		expect(html).toMatch(/<select[^>]*\bname="category"/);
+		expect(html).not.toContain('type="radio" name="category"');
+	});
+
+	it("the suggested row is a lazy request for the name, and draws nothing until it has one", async () => {
+		const { address, id } = await categoryCard();
+		const { html } = await get(address);
+		expect(html).toContain('hx-trigger="load"');
+		expect(html).toContain(`/settings/suggestions/new-category?id=${id}`);
+		// The URL names the item only, never the store's text (a bank's text can carry a card or account number).
+		const loaderUrl =
+			html.match(/hx-get="([^"]*new-category[^"]*)"/)?.[1] ?? "";
+		expect(loaderUrl).not.toBe("");
+		expect(loaderUrl).not.toContain("store=");
+		expect(decodeURIComponent(loaderUrl)).not.toContain("LUPITA");
+		expect(html).not.toContain("Tally's suggestion");
+		// No AI binding in the tests, so no name is asked for and the row is never drawn.
+		const { res, html: fragment } = await get(
+			`/settings/suggestions/new-category?id=${id}`,
+		);
+		expect(res.status).toBe(200);
+		expect(fragment.trim()).toBe("");
+	});
+
+	it("the lazy answer is cached per browser for a day, whether it has a name or not", async () => {
+		const { id } = await categoryCard();
+		const { res } = await get(`/settings/suggestions/new-category?id=${id}`);
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+	});
+
+	it("a store with a Never suggest for a new category gets no row, pending or named, and no lazy name", async () => {
+		const { id, address } = await categoryCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-never-store', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(LUPITA)
+			.run();
+		const fragment = await get(`/settings/suggestions/new-category?id=${id}`);
+		expect(fragment.html.trim()).toBe("");
+		expect(fragment.res.headers.get("Cache-Control")).toBe(
+			"private, max-age=86400",
+		);
+		const page = await get(address);
+		// The card itself is still asked (only its new category row is withheld), so the test isn't vacuous.
+		expect(page.html).toContain("Maybe Eating Out");
+		expect(page.html).not.toContain("Books &amp; audio");
+		expect(page.html).not.toContain("Tally's suggestion");
+	});
+
+	it("a refused name is named by its own field, with aria-invalid and a message it points at", async () => {
+		const { id } = await categoryCard();
+		const { html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "  " },
+			true,
+		);
+		expect(html).toContain('aria-invalid="true"');
+		expect(html).toContain(`aria-describedby="new-category-name-${id}-error"`);
+		expect(html).toContain(`id="new-category-name-${id}-error"`);
+	});
+
+	it("the name's address is the same per item, and a refused row keeps the skips its page had", async () => {
+		const { ids, address, id } = await categoryCard();
+		const { html: page } = await get(address);
+		expect(page).toContain(
+			`hx-get="/settings/suggestions/new-category?id=${id}"`,
+		);
+		// htmx sends the page's own address as HX-Current-URL, so the row's answer keeps the skips the page had.
+		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+			method: "POST",
+			redirect: "manual",
+			headers: {
+				Origin: BASE,
+				"content-type": "application/x-www-form-urlencoded",
+				"HX-Request": "true",
+				"HX-Current-URL": `${BASE}${address}`,
+			},
+			body: new URLSearchParams({
+				id,
+				answer: "create",
+				new_name: "",
+			}).toString(),
+		});
+		expect(res.status).toBe(422);
+		expect(await res.text()).toContain(`skip=income-${ids.income}`);
+	});
+
+	it("a Never suggest added after the row was drawn stops its create: nothing made or filed, and the answer is the changed-somewhere-else one", async () => {
+		const { ids, id } = await categoryCard();
+		// The row was drawn (and cached) earlier; the store got its Never suggest for a new category since.
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(LUPITA)
+			.run();
+		const categoriesBefore = await countOf(
+			"SELECT COUNT(*) AS n FROM categories",
+		);
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "Books & audio" },
+			true,
+		);
+		expect(trigger(res).toast?.message).toBe("That one was already answered.");
+		expect(await countOf("SELECT COUNT(*) AS n FROM categories")).toBe(
+			categoriesBefore,
+		);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: null });
+	});
+
+	// A client sends HX-Current-URL, so a bad one must never throw: the refusal is the normal one, with no skips kept.
+	it.each([
+		"not a url",
+		"/settings/suggestions?skip=new-1",
+		"",
+		"http://[::1",
+		"%%%",
+		"http://ex ample/",
+	])(
+		"a create whose HX-Current-URL is %j is refused as usual, with no skips and no throw",
+		async (bad) => {
+			const { id } = await categoryCard();
+			const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
+				method: "POST",
+				redirect: "manual",
+				headers: {
+					Origin: BASE,
+					"content-type": "application/x-www-form-urlencoded",
+					"HX-Request": "true",
+					"HX-Current-URL": bad,
+				},
+				body: new URLSearchParams({
+					id,
+					answer: "create",
+					new_name: "",
+				}).toString(),
+			});
+			expect(res.status).toBe(422);
+			const html = await res.text();
+			expect(textOf(html)).toContain("Give the category a name.");
+			expect(html).not.toContain("skip=income-");
+		},
+	);
+
+	it("an answered or unknown item id gets an empty answer, cached the same way", async () => {
+		const { res, html } = await get(
+			"/settings/suggestions/new-category?id=category-999999",
+		);
+		expect(html.trim()).toBe("");
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+	});
+
+	it("without JavaScript, a pending suggestion's name is drawn in the card, with no lazy request", async () => {
+		const { address } = await categoryCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-pending-page', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		const { html } = await get(address);
+		expect(textOf(html)).toContain("New category: Books & audio");
+		expect(html).toContain('name="new_name"');
+		expect(html).not.toContain('hx-trigger="load"');
+	});
+
+	it("a store with a pending suggestion offers that name, announced, and makes no AI call", async () => {
+		const { id } = await categoryCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-pending-store', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		const { res, html } = await get(
+			`/settings/suggestions/new-category?id=${id}`,
+		);
+		expect(textOf(html)).toContain("Tally's suggestion");
+		expect(textOf(html)).toContain("New category: Books & audio");
+		expect(html).toContain('name="new_name"');
+		expect(html).toContain('value="create"');
+		expect(trigger(res).announce).toBe(
+			"Tally suggests a new category: Books & audio",
+		);
+		// Announced only: a passive suggestion appearing does not toast.
+		expect(trigger(res).toast).toBeUndefined();
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+	});
+
+	it("a name typed in the row shows again, open, when the answer is refused", async () => {
+		const { id } = await categoryCard();
+		const { html } = await post(
+			"/settings/suggestions",
+			{ id, answer: "create", new_name: "" },
+			true,
+		);
+		expect(html).toMatch(/<details[^>]*\bopen/);
+		expect(html).toContain('name="new_name"');
+	});
+});

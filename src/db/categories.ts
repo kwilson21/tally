@@ -18,7 +18,13 @@ export type SettingsCategory = {
 };
 
 /** New categories take the next color in turn, so neighbors differ. */
-const COLORS = ["cat-blue", "cat-plum", "cat-slate", "cat-ochre", "cat-brown"];
+export const COLORS = [
+	"cat-blue",
+	"cat-plum",
+	"cat-slate",
+	"cat-ochre",
+	"cat-brown",
+];
 
 type Row = {
 	id: number;

@@ -3,6 +3,7 @@ import { actor } from "../actor";
 import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { categoryNames } from "../db/categories";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -17,6 +18,13 @@ import {
 	NEVER_SUGGEST_KINDS,
 	type NeverSuggestKind,
 } from "../db/never-suggest";
+import {
+	FULL_NEW_CATEGORY,
+	fileInNewCategory,
+	newCategoryTarget,
+	pendingCategoryNames,
+	suggestedCategoryName,
+} from "../db/new-category-answer";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
@@ -38,6 +46,7 @@ import {
 import {
 	AskFirst,
 	joinStores,
+	NewCategoryRow,
 	SuggestionCard,
 } from "../views/suggestion-review";
 
@@ -66,6 +75,10 @@ type Values = {
 	own?: string;
 	ticked?: number[];
 	notes?: Record<number, string>;
+	/** The new category name a person typed in a category guess's row (decision 156). */
+	newName?: string;
+	/** Why the typed name was refused, shown on its own field (decision 156). */
+	newNameError?: string;
 };
 
 export const suggestions = new Hono<App>();
@@ -87,8 +100,25 @@ function requestedKeys(
 	key: "skip" | "again",
 	ids: Set<string>,
 ): string[] {
-	const requested = new URL(url).searchParams.getAll(key);
-	return [...new Set(requested)].filter((id) => ids.has(id));
+	const requested = queryOf(url).getAll(key);
+	return [...new Set(requested)].filter(
+		(id) => QUEUE_ID.test(id) && ids.has(id),
+	);
+}
+
+/** A queue item's id as the address spells it: "income-1", "category-3", "new-4", "name-8" (never bank text). */
+const QUEUE_ID = /^[a-z]+-\d{1,9}$/;
+
+/**
+ * The query of an address the client sent (the page's own address, from HX-Current-URL, is client data). Only an
+ * absolute URL is read, and only its query; anything that doesn't parse gives no query, so a bad header is never a 500.
+ */
+function queryOf(url: string): URLSearchParams {
+	try {
+		return new URL(url).searchParams;
+	} catch {
+		return new URLSearchParams();
+	}
 }
 
 /** What the address says about the review: the items set aside, and those set aside again. */
@@ -103,6 +133,16 @@ function requestedReview(
 		skipped,
 		again: requestedKeys(url, "again", ids).filter((id) => skippedSet.has(id)),
 	};
+}
+
+/**
+ * The address that answers with a category guess's suggested new category (decision 156). It names the item only, never a
+ * store's text (a bank's text can carry a card or account number, and a URL is logged), and never the screen's skips:
+ * the address is the same wherever the card is reached, so the browser's one-day cache holds. The row's answer finds
+ * the skips from the page it was answered on (HX-Current-URL), see the POST below.
+ */
+function newCategoryAddress(id: string): string {
+	return `${PATH}/new-category?${new URLSearchParams({ id })}`;
 }
 
 /** Skip: the first one sets the item aside; on an item that came back, it sets it aside for good. */
@@ -203,6 +243,8 @@ type ScreenInput = {
 	focus?: boolean;
 	today: string;
 	categories: { id: number; name: string }[];
+	/** The pending category suggestion's name for each store, drawn in place with no script (decision 156). */
+	pendingNames: Map<string, string>;
 };
 
 function Screen({
@@ -285,6 +327,19 @@ function Screen({
 								values={values?.id === current.id ? values : undefined}
 								error={error}
 								focus={focus}
+								// Without JavaScript the lazy address never loads, so only a pending name (already
+								// in the database) is drawn here; an AI-only name shows with JavaScript, and Yes and
+								// Something else still answer without it.
+								suggestedName={
+									current.kind === "category"
+										? input.pendingNames.get(current.merchantKey)
+										: undefined
+								}
+								suggestUrl={
+									current.kind === "category"
+										? newCategoryAddress(current.id)
+										: undefined
+								}
 							/>
 						</div>
 					</>
@@ -328,11 +383,16 @@ async function renderScreen(
 		status?: 200 | 422;
 		focus?: boolean;
 		toast?: { message: string; type: "success" | "info"; announce: string };
+		/** The address the screen's skips are read from; the page's own address when none is given (a row's answer). */
+		reviewUrl?: string;
 	} = {},
 ) {
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
-	const { skipped, again } = requestedReview(c.req.url, queue);
+	const { skipped, again } = requestedReview(
+		options.reviewUrl ?? c.req.url,
+		queue,
+	);
 	const categories = await db
 		.prepare(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
@@ -364,6 +424,12 @@ async function renderScreen(
 				focus: options.focus,
 				today: await householdToday(db),
 				categories: categories.results,
+				pendingNames: await pendingCategoryNames(
+					db,
+					queue.flatMap((item) =>
+						item.kind === "category" ? [item.merchantKey] : [],
+					),
+				),
 			}}
 		/>,
 		options.status ?? 200,
@@ -379,6 +445,38 @@ const left = (queue: SuggestionItem[]) =>
 // Settings → Suggestions (issue #195, decision 101): one item at a time, like Organize.
 suggestions.get(PATH, (c) => renderScreen(c));
 
+// A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
+// row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
+// is announced, and the name is never logged. Each answer, the empty one too, is cached by the browser for a day, so
+// a card drawn again doesn't call Workers AI again (per browser only; the URL names the item, never a store's text).
+suggestions.get(`${PATH}/new-category`, async (c) => {
+	c.header("Cache-Control", "private, max-age=86400");
+	const db = c.env.DB;
+	const queue = await suggestionQueue(db);
+	const { skipped, again } = requestedReview(c.req.url, queue);
+	const id = c.req.query("id") ?? "";
+	const item = queue.find((candidate) => candidate.id === id);
+	// An answered or unknown item gets nothing: the name is read from the item here, never from the address.
+	if (item?.kind !== "category") return c.body(null);
+	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
+	const ai = (c.env as Env & { AI?: Ai }).AI;
+	const name = await suggestedCategoryName(db, ai, item);
+	if (!name) return c.body(null);
+	// Announce only, never a toast: a passive suggestion appearing is not an answer or a change (CLAUDE.md names toast + announce for those).
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ announce: `Tally suggests a new category: ${name}` }),
+	);
+	return c.html(
+		<NewCategoryRow
+			action={reviewAddress(skipped, again)}
+			itemId={item.id}
+			fieldId={item.id}
+			name={name}
+		/>,
+	);
+});
+
 // The names review it replaces: its address goes to the screen (the names it held are in the queue now).
 suggestions.get("/settings/names", (c) => c.redirect(PATH, 303));
 suggestions.post("/settings/names", (c) => c.redirect(PATH, 303));
@@ -391,12 +489,19 @@ suggestions.post(PATH, async (c) => {
 	const who = actor(c as Context<App> & { env: Env & { DEMO: string } });
 	const today = await householdToday(db);
 	const queue = await suggestionQueue(db);
-	const { skipped, again } = requestedReview(c.req.url, queue);
+	// A new category row (decision 156) posts to the screen's bare address, so its skips come from the page it was
+	// answered on (htmx sends that address as HX-Current-URL). Every other answer posts to the page's own address.
+	const reviewUrl =
+		answer === "create"
+			? (c.req.header("HX-Current-URL") ?? c.req.url)
+			: c.req.url;
+	const { skipped, again } = requestedReview(reviewUrl, queue);
 	const next = reviewAddress(skipped, again);
 	// `extra` is one more sentence for the announcer, such as what a create left out; the toast keeps its words.
 	const done = (message: string, queueAfter: SuggestionItem[], extra = "") => {
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
+			reviewUrl,
 			focus: true,
 			toast: {
 				message,
@@ -409,6 +514,7 @@ suggestions.post(PATH, async (c) => {
 		const message = "That one was already answered.";
 		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 		return renderScreen(c, {
+			reviewUrl,
 			focus: true,
 			toast: { message, type: "info", announce: message },
 		});
@@ -580,6 +686,51 @@ suggestions.post(PATH, async (c) => {
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Set ${item.label} to ${item.category}.`, after);
+			}
+			// The suggested new category, opened in place (decision 156): the typed name is checked as the category form
+			// checks it, a name the family already has files the purchase in that one, and the create and the filing are
+			// one batch. Nothing is made without this answer.
+			if (answer === "create") {
+				const typed = String(form.get("new_name") ?? "");
+				const target = newCategoryTarget(typed, await categoryNames(db));
+				if (!target.ok) {
+					// The limit is the card's message; a refused name is named by its own field (aria-invalid).
+					const limit = target.error === FULL_NEW_CATEGORY;
+					return renderScreen(c, {
+						reviewUrl,
+						values: {
+							id,
+							newName: typed,
+							newNameError: limit ? undefined : target.error,
+						},
+						error: limit ? target.error : undefined,
+						status: 422,
+						focus: true,
+					});
+				}
+				const result = await fileInNewCategory(db, {
+					transactionId: item.transactionId,
+					target,
+					today,
+					who,
+				});
+				if (!result.ok) {
+					if (result.reason === "gone") return stale();
+					return renderScreen(c, {
+						reviewUrl,
+						values: { id, newName: typed },
+						error: FULL_NEW_CATEGORY,
+						status: 422,
+						focus: true,
+					});
+				}
+				const after = await suggestionQueue(db);
+				return done(
+					result.created
+						? `Made ${result.name} and set ${item.label} to it.`
+						: `Added ${item.label} to ${result.name}.`,
+					after,
+				);
 			}
 			if (answer === "else") {
 				const chosen = Number(form.get("category")?.toString() ?? "");
