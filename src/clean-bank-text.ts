@@ -76,10 +76,12 @@ const US_STATE_CODES = new Set([
 ]);
 
 // A prefix a card terminal adds before the merchant, with its transaction code when it has one ("CHECKCARD 0921",
-// "POS 4417"). The code alternative comes first, so the bare CHECKCARD does not win and leave the code behind.
+// "POS 4417", "DEBIT CARD PURCHASE 0921"). A code is three or more digits; a shorter number after the prefix stays
+// ("CHECKCARD 76 GAS" is "76 gas", "POS 7 ELEVEN" is "7 eleven"), and a POS with a number after it loses only POS.
+// The code alternative comes first, so the bare CHECKCARD does not win and leave the code behind.
 // The lookahead needs a space or the end after it, so "POS DEBITS" or a store called "POS DEBITING" is not cut.
 const PREFIX =
-	/^(?:(?:POS|CHECKCARD)\s+\d+|POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
+	/^(?:(?:POS|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)\s+\d{3,}|POS(?=\s+\d)|POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
 // A payment processor's marker before "*" ("SQ *7ELEVEN"). Only the marker goes; the merchant after it stays.
 const PROCESSOR = /^(?:SQ|TST|DD|SP|PAYPAL)\s?\*\s*/i;
 // "*" then letters and digits, with at least one digit: a reference ID, not a word after a "*".
@@ -97,17 +99,26 @@ export function cleanBankText(raw: string): string {
 	text = text.replace(PREFIX, "");
 	text = text.replace(PROCESSOR, "");
 	text = text.replace(REFERENCE_ID, "");
-	text = text.replace(DATE, "");
-	text = collapse(text);
-
-	const words = text.split(" ");
-	const last = words[words.length - 1];
-	if (words.length > 1 && last !== undefined && US_STATE_CODES.has(last)) {
-		words.pop();
-		text = words.join(" ");
-	}
+	text = stripTrailing(text);
 
 	return text.toLowerCase();
+}
+
+// Removes a trailing bank date and a trailing state code, in a loop, so "APPLE.COM/BILL 09/30 CA" and
+// "APPLE.COM/BILL CA 09/30" clean the same. A state code is only cut when something comes before it.
+function stripTrailing(text: string): string {
+	let previous: string;
+	do {
+		previous = text;
+		text = collapse(text.replace(DATE, ""));
+		const words = text.split(" ");
+		const last = words[words.length - 1];
+		if (words.length > 1 && last !== undefined && US_STATE_CODES.has(last)) {
+			words.pop();
+			text = words.join(" ");
+		}
+	} while (text !== previous);
+	return text;
 }
 
 function collapse(text: string): string {

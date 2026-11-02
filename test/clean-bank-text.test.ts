@@ -55,6 +55,27 @@ describe("cleanBankText", () => {
 		);
 	});
 
+	it("strips a terminal code only when it has three or more digits", () => {
+		expect(cleanBankText("CHECKCARD 76 GAS")).toBe("76 gas");
+		expect(cleanBankText("POS 24 HOUR FITNESS")).toBe("24 hour fitness");
+		expect(cleanBankText("POS 7 ELEVEN")).toBe("7 eleven");
+	});
+
+	it("strips a terminal code after DEBIT CARD PURCHASE too", () => {
+		expect(cleanBankText("DEBIT CARD PURCHASE 0921 CVS")).toBe("cvs");
+	});
+
+	it("reads a state code and a trailing date the same in either order", () => {
+		expect(cleanBankText("APPLE.COM/BILL 09/30 CA")).toBe("apple.com/bill");
+		expect(cleanBankText("APPLE.COM/BILL 09/30 CA")).toBe(
+			cleanBankText("APPLE.COM/BILL CA 09/30"),
+		);
+	});
+
+	it("strips a valid month and day at the end even when it reads as a date (chosen: MEMORIAL 9/11 is memorial)", () => {
+		expect(cleanBankText("MEMORIAL 9/11")).toBe("memorial");
+	});
+
 	it("leaves a number that is not directly after POS or CHECKCARD at the start", () => {
 		expect(cleanBankText("CITY PARKING 4417")).toBe("city parking 4417");
 		expect(cleanBankText("STORE POS 4417")).toBe("store pos 4417");
