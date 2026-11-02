@@ -3,8 +3,9 @@
 // groups by (decision 157). Pure, no I/O.
 //
 // What goes, in this order:
-// - a "POS DEBIT", "POS CREDIT", "POS PURCHASE", "CHECKCARD" or "DEBIT CARD PURCHASE" prefix at the start
-//   (a bare "POS" stays, since it can be part of a store's name);
+// - a "POS DEBIT", "POS CREDIT", "POS PURCHASE", "CHECKCARD" or "DEBIT CARD PURCHASE" prefix at the start, and the
+//   terminal code after "POS" or "CHECKCARD" when there is one ("CHECKCARD 0921 CVS" keeps "cvs"); a bare "POS" stays,
+//   since it can be part of a store's name;
 // - a reference ID after "*" when it contains a digit ("Kindle Unltd*TE3E10I7" keeps "Kindle Unltd"; "GOOGLE *YOUTUBE"
 //   keeps its word, since it has no digit);
 // - a month/day date, "MM/DD" or "M/D", anywhere in the text;
@@ -72,10 +73,11 @@ const US_STATE_CODES = new Set([
 	"DC",
 ]);
 
-// A prefix a card terminal adds before the merchant. The lookahead needs a space or the end after it, so
-// "POS DEBITS" or a store called "POS DEBITING" is not cut.
+// A prefix a card terminal adds before the merchant, with its transaction code when it has one ("CHECKCARD 0921",
+// "POS 4417"). The code alternative comes first, so the bare CHECKCARD does not win and leave the code behind.
+// The lookahead needs a space or the end after it, so "POS DEBITS" or a store called "POS DEBITING" is not cut.
 const PREFIX =
-	/^(?:POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
+	/^(?:(?:POS|CHECKCARD)\s+\d+|POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
 // "*" then letters and digits, with at least one digit: a reference ID, not a word after a processor's "*".
 const REFERENCE_ID = /\*[A-Z0-9]*\d[A-Z0-9]*/gi;
 // A month/day date, "09/30" or "9/3". The lookarounds keep it from cutting inside a URL path or a longer number.

@@ -44,6 +44,22 @@ describe("cleanBankText", () => {
 		expect(cleanBankText("CHECKCARD TARGET")).toBe("target");
 	});
 
+	it("strips a CHECKCARD or POS terminal code, which varies by purchase", () => {
+		expect(cleanBankText("CHECKCARD 0921 CVS")).toBe("cvs");
+		expect(cleanBankText("POS 4417 CITY PARKING")).toBe("city parking");
+	});
+
+	it("reads two purchases at one store the same, whatever their terminal codes", () => {
+		expect(cleanBankText("CHECKCARD 0921 CVS")).toBe(
+			cleanBankText("CHECKCARD 1137 CVS 09/30"),
+		);
+	});
+
+	it("leaves a number that is not directly after POS or CHECKCARD at the start", () => {
+		expect(cleanBankText("CITY PARKING 4417")).toBe("city parking 4417");
+		expect(cleanBankText("STORE POS 4417")).toBe("store pos 4417");
+	});
+
 	it("keeps a bare POS, which may be part of a store's name", () => {
 		expect(cleanBankText("POS SYSTEMS INC")).toBe("pos systems inc");
 	});

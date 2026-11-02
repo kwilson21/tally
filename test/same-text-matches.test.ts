@@ -35,6 +35,16 @@ describe("groupBySameCleanedText", () => {
 		expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
 	});
 
+	it("groups two CHECKCARD rows at one store whose terminal codes differ", () => {
+		const groups = groupBySameCleanedText([
+			row(1, "CHECKCARD 0921 CVS"),
+			row(2, "CHECKCARD 1137 CVS"),
+		]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.cleanedText).toBe("cvs");
+		expect(groups[0]?.rows.map((r) => r.id)).toEqual([1, 2]);
+	});
+
 	it("drops a group of one", () => {
 		expect(groupBySameCleanedText([row(1, "Audible")])).toEqual([]);
 	});
