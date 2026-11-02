@@ -3122,7 +3122,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(res.status).toBe(422);
 		expect(html).toContain('role="alert"');
 		expect(textOf(html)).toContain(
-			"Tally has room for 50 categories. Archive one to add another.",
+			"Tally has room for 50 categories. Archive one to add another. Add it to an existing category instead.",
 		);
 		expect(html).toMatch(/<details[^>]*\bopen/);
 		expect(
@@ -3153,13 +3153,29 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { html } = await get(address);
 		expect(html).toContain('hx-trigger="load"');
 		expect(html).toContain(`/settings/suggestions/new-category?id=${id}`);
+		expect(html).toContain(new URLSearchParams({ store: LUPITA }).toString());
 		expect(html).not.toContain("Tally's suggestion");
 		// No AI binding in the tests, so no name is asked for and the row is never drawn.
 		const { res, html: fragment } = await get(
-			`/settings/suggestions/new-category?id=${id}`,
+			`/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`,
 		);
 		expect(res.status).toBe(200);
 		expect(fragment.trim()).toBe("");
+	});
+
+	it("the lazy answer is cached per browser for a day, whether it has a name or not", async () => {
+		const { id } = await categoryCard();
+		const url = `/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`;
+		const { res } = await get(url);
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+		// A store that doesn't match the card asks for nothing, and is cached the same way.
+		const other = await get(
+			`/settings/suggestions/new-category?id=${id}&store=SOMEWHERE%20ELSE`,
+		);
+		expect(other.html.trim()).toBe("");
+		expect(other.res.headers.get("Cache-Control")).toBe(
+			"private, max-age=86400",
+		);
 	});
 
 	it("a store with a pending suggestion offers that name, announced, and makes no AI call", async () => {
@@ -3177,7 +3193,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			.bind(LUPITA, suggestion?.id ?? null)
 			.run();
 		const { res, html } = await get(
-			`/settings/suggestions/new-category?id=${id}`,
+			`/settings/suggestions/new-category?id=${id}&store=${encodeURIComponent(LUPITA)}`,
 		);
 		expect(textOf(html)).toContain("Tally's suggestion");
 		expect(textOf(html)).toContain("New category: Books & audio");
@@ -3186,6 +3202,9 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(trigger(res).announce).toBe(
 			"Tally suggests a new category: Books & audio",
 		);
+		// Announced only: a passive suggestion appearing does not toast.
+		expect(trigger(res).toast).toBeUndefined();
+		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
 	});
 
 	it("a name typed in the row shows again, open, when the answer is refused", async () => {

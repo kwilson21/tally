@@ -17,6 +17,12 @@ import { namesToAvoid } from "./category-suggestions";
 import { merchantKeySql } from "./merchant-key";
 import { categoryAskedSql } from "./suggestions-queue";
 
+/**
+ * The limit's words on the Maybe card: the category form's full message, and the offer to add to one the family has
+ * instead (the Something else select is open with it).
+ */
+export const FULL_NEW_CATEGORY = `${fullMessage("add")} Add it to an existing category instead.`;
+
 /** Where the purchase goes: an active category the family already has with the name, or a new one. */
 export type NewCategoryTarget =
 	| { ok: true; kind: "existing"; id: number; name: string }
@@ -37,8 +43,13 @@ export function newCategoryTarget(
 	if (active)
 		return { ok: true, kind: "existing", id: active.id, name: active.name };
 	const parsed = parseCategory(nameForm(name), categories, null);
-	if (!parsed.ok)
-		return { ok: false, error: parsed.errors.name ?? fullMessage("add") };
+	if (!parsed.ok) {
+		const error = parsed.errors.name ?? "";
+		return {
+			ok: false,
+			error: error === fullMessage("add") ? FULL_NEW_CATEGORY : error,
+		};
+	}
 	return {
 		ok: true,
 		kind: "create",
@@ -55,7 +66,7 @@ export function newCategoryTarget(
 export async function suggestedCategoryName(
 	db: D1Database,
 	ai: Ai | undefined,
-	item: { merchantKey: string; label: string },
+	item: { merchantKey: string; merchant: string },
 ): Promise<string | null> {
 	const pending = await db
 		.prepare(
@@ -68,9 +79,10 @@ export async function suggestedCategoryName(
 		.first<{ name: string }>();
 	if (pending) return pending.name;
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
+	// The store's name only: a person's own name or note for this purchase is typed text and never leaves the app.
 	const result = await suggestCategoryName(
 		ai,
-		[item.label],
+		[item.merchant],
 		await namesToAvoid(db),
 	);
 	return result.ok ? result.name : null;

@@ -4534,7 +4534,7 @@ function SuggestionsReview() {
 								categories={audibleCategories}
 								suggestedName="Books & audio"
 								values={{ newName: "Books & audio" }}
-								error="Tally has room for 50 categories. Archive one to add another."
+								error="Tally has room for 50 categories. Archive one to add another. Add it to an existing category instead."
 								fieldId="maybe-answers-limit"
 							/>
 						</div>

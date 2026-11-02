@@ -19,6 +19,7 @@ import {
 	type NeverSuggestKind,
 } from "../db/never-suggest";
 import {
+	FULL_NEW_CATEGORY,
 	fileInNewCategory,
 	newCategoryTarget,
 	suggestedCategoryName,
@@ -32,7 +33,6 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
-import { fullMessage } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -117,15 +117,18 @@ function requestedReview(
 
 /**
  * The address that answers with a category guess's suggested new category (decision 156), with the skips it was drawn
- * with, so the row's answer posts back to the same screen. It answers with the row, or with nothing.
+ * with, so the row's answer posts back to the same screen. It names the store too, so a browser's cached answer is
+ * per store, and it answers with the row, or with nothing.
  */
 function newCategoryAddress(
 	id: string,
+	store: string,
 	skipped: string[],
 	again: string[],
 ): string {
 	const query = new URLSearchParams();
 	query.append("id", id);
+	query.append("store", store);
 	for (const skip of skipped) query.append("skip", skip);
 	for (const set of again) query.append("again", set);
 	return `${PATH}/new-category?${query}`;
@@ -313,7 +316,12 @@ function Screen({
 								focus={focus}
 								suggestUrl={
 									current.kind === "category"
-										? newCategoryAddress(current.id, skipped, again)
+										? newCategoryAddress(
+												current.id,
+												current.merchantKey,
+												skipped,
+												again,
+											)
 										: undefined
 								}
 							/>
@@ -412,18 +420,24 @@ suggestions.get(PATH, (c) => renderScreen(c));
 
 // A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
 // row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
-// is announced, and the name is never logged.
+// is announced, and the name is never logged. Each answer, the empty one too, is cached by the browser for a day, so
+// a card drawn again doesn't call Workers AI again (per browser only; the URL names the store, so it is per store).
 suggestions.get(`${PATH}/new-category`, async (c) => {
+	c.header("Cache-Control", "private, max-age=86400");
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
 	const { skipped, again } = requestedReview(c.req.url, queue);
 	const id = c.req.query("id") ?? "";
+	const store = c.req.query("store") ?? "";
 	const item = queue.find((candidate) => candidate.id === id);
-	if (item?.kind !== "category") return c.body(null);
+	// The store in the address must be the card's own store, so a stale address names nothing.
+	if (item?.kind !== "category" || item.merchantKey !== store)
+		return c.body(null);
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
 	const ai = (c.env as Env & { AI?: Ai }).AI;
 	const name = await suggestedCategoryName(db, ai, item);
 	if (!name) return c.body(null);
+	// Announce only, never a toast: a passive suggestion appearing is not an answer or a change (CLAUDE.md names toast + announce for those).
 	c.header(
 		"HX-Trigger",
 		hxTrigger({ announce: `Tally suggests a new category: ${name}` }),
@@ -663,7 +677,7 @@ suggestions.post(PATH, async (c) => {
 					if (result.reason === "gone") return stale();
 					return renderScreen(c, {
 						values: { id, newName: typed },
-						error: fullMessage("add"),
+						error: FULL_NEW_CATEGORY,
 						status: 422,
 						focus: true,
 					});

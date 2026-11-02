@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NONE_FIT } from "../src/ai/decide";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import {
+	FULL_NEW_CATEGORY,
 	fileInNewCategory,
 	newCategoryTarget,
 	suggestedCategoryName,
 } from "../src/db/new-category-answer";
 import { resetDemo } from "../src/demo/reset";
-import { fullMessage, MAX_ACTIVE } from "../src/settings/category-form";
+import { MAX_ACTIVE } from "../src/settings/category-form";
 
 // The Maybe card's "New category" answers (decision 156): the name a person types is checked as the category form
 // checks it, a name that is already a category files the purchase in that one, and the create and the filing are
@@ -80,8 +81,11 @@ describe("newCategoryTarget: the typed name, checked as the category form checks
 	it("at the limit refuses a new name with the category form's full message", () => {
 		expect(newCategoryTarget("Books", activeList(MAX_ACTIVE))).toEqual({
 			ok: false,
-			error: fullMessage("add"),
+			error: FULL_NEW_CATEGORY,
 		});
+		expect(FULL_NEW_CATEGORY).toBe(
+			"Tally has room for 50 categories. Archive one to add another. Add it to an existing category instead.",
+		);
 	});
 
 	it("at the limit still files into a category that already has the name", () => {
@@ -289,7 +293,11 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 		vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
-	const item = { merchantKey: "AUDIBLE*TE3E10I7 WA", label: "Audible" };
+	const item = {
+		merchantKey: "AUDIBLE*TE3E10I7 WA",
+		merchant: "Audible",
+		label: "Audible",
+	};
 	const fakeAi = (answer: unknown = "Books & audio") => {
 		const run = vi.fn(async () => answer);
 		return { ai: { run } as unknown as Ai, run };
@@ -305,6 +313,22 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 		];
 		expect(body.messages[1]?.content).toContain("Places: Audible");
 		expect(body.messages[1]?.content).toContain("Groceries");
+	});
+
+	it("names from the store's name, never the transaction's own name or note", async () => {
+		const { ai, run } = fakeAi();
+		const own = {
+			merchantKey: "SQ *LUPITAS TAQ 2210",
+			merchant: "Lupita's Taqueria",
+			label: "Team lunch, paid back",
+		};
+		await suggestedCategoryName(db, ai, own);
+		const [, body] = run.mock.calls[0] as unknown as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(body.messages[1]?.content).toContain("Places: Lupita's Taqueria");
+		expect(body.messages[1]?.content).not.toContain("Team lunch");
 	});
 
 	it("makes no call when the categories switch is off", async () => {
