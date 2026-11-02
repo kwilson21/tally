@@ -102,8 +102,8 @@ const ORDER: SuggestionKind[] = [
 	"name",
 ];
 
-const LABEL_SQL = `m.display_name AS displayName, ${ownNameSql("t")} AS ownName`;
-const JOIN_MERCHANT = `LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}`;
+export const LABEL_SQL = `m.display_name AS displayName, ${ownNameSql("t")} AS ownName`;
+export const JOIN_MERCHANT = `LEFT JOIN merchants m ON m.raw_name = ${merchantKeySql("t")}`;
 
 type Candidate = {
 	id: number;
@@ -119,7 +119,7 @@ const merchantLabel = (displayName: string | null, key: string) =>
 	displayName || tidyName(key);
 
 /** What a card calls a transaction: its own name (This one only), else its store's. All four kinds share this rule. */
-const cardLabel = (row: {
+export const cardLabel = (row: {
 	ownName: string | null;
 	displayName: string | null;
 	merchantKey: string;

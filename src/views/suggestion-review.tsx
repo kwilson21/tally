@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { shortDay } from "../dates";
+import type { MoreLikeThis } from "../db/more-like-this";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import { Button } from "./button";
@@ -80,6 +81,48 @@ const answerForm = (action: string, scope = "#suggestions-page") => ({
 	"hx-select": scope,
 	"hx-swap": "outerHTML",
 });
+
+/**
+ * The card after "Create and next" (decision 157, step A): the purchases that look like the one just filed, every row
+ * ticked, with Add to its category and a quiet No that only moves on. Its form posts to the screen's address, and
+ * the filed purchase's id travels as a hidden `more` field, never in the address.
+ */
+export function MoreLikeThisCard({
+	action,
+	card,
+	today,
+	focus = false,
+}: {
+	/** The screen's address, with its skips: Add and No post there. */
+	action: string;
+	card: MoreLikeThis;
+	today: string;
+	focus?: boolean;
+}) {
+	return (
+		<NewCategoryCard
+			name={card.categoryName}
+			existing={card.categoryName}
+			more={card.rows.length}
+			rows={card.rows.map((row) => ({
+				id: row.id,
+				name: row.label,
+				amountCents: row.amountCents,
+				date: row.date,
+			}))}
+			today={today}
+			tickName="ticked"
+			titleId="more-title"
+			focus={focus}
+			form={answerForm(action)}
+			hidden={<input type="hidden" name="more" value={String(card.filedId)} />}
+			answers={{
+				create: { type: "submit", name: "answer", value: "more_add" },
+				no: { type: "submit", name: "answer", value: "more_skip" },
+			}}
+		/>
+	);
+}
 
 /**
  * The question after a No on income, a transfer or a new category: one yes-or-no, with Not now and Yes.

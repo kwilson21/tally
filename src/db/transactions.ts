@@ -174,7 +174,7 @@ const suggestedNameMatch = (namesOn: boolean) =>
 	`EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : " AND m.suggested_name = m.raw_name"} AND m.suggested_name LIKE ? ESCAPE '\\')`;
 
 /** The note a row shows; with the details switch off a guessed note is hidden (#314). Needs `t`. */
-const visibleNoteSql = (detailsOn: boolean) =>
+export const visibleNoteSql = (detailsOn: boolean) =>
 	detailsOn
 		? "t.note"
 		: "CASE WHEN t.note_guessed = 1 THEN NULL ELSE t.note END";
