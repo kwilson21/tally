@@ -69,6 +69,20 @@ describe("cleanBankText", () => {
 		expect(cleanBankText("AMZN Mktp US*2K4")).toBe("amzn mktp us");
 	});
 
+	it("strips a bank date only at the end of the text, a valid month and day", () => {
+		expect(cleanBankText("SOME STORE 09/30")).toBe("some store");
+		expect(cleanBankText("24/7 FITNESS")).toBe("24/7 fitness");
+		expect(cleanBankText("9/11 MEMORIAL")).toBe("9/11 memorial");
+	});
+
+	it("keeps the merchant after a processor's * and drops only the processor", () => {
+		expect(cleanBankText("SQ *7ELEVEN")).toBe("7eleven");
+		expect(cleanBankText("SQ *24HOURFITNESS")).toBe("24hourfitness");
+		expect(cleanBankText("SQ *24HOURFITNESS")).not.toBe(
+			cleanBankText("SQ *7ELEVEN"),
+		);
+	});
+
 	it("collapses whitespace and trims", () => {
 		expect(cleanBankText("   Audible    CA   ")).toBe("audible");
 		expect(cleanBankText("APPLE.COM/BILL\tCA  09/30")).toBe("apple.com/bill");

@@ -6,9 +6,11 @@
 // - a "POS DEBIT", "POS CREDIT", "POS PURCHASE", "CHECKCARD" or "DEBIT CARD PURCHASE" prefix at the start, and the
 //   terminal code after "POS" or "CHECKCARD" when there is one ("CHECKCARD 0921 CVS" keeps "cvs"); a bare "POS" stays,
 //   since it can be part of a store's name;
+// - a payment processor's marker before "*" ("SQ *7ELEVEN" keeps "7eleven"), so the merchant after it stays;
 // - a reference ID after "*" when it contains a digit ("Kindle Unltd*TE3E10I7" keeps "Kindle Unltd"; "GOOGLE *YOUTUBE"
 //   keeps its word, since it has no digit);
-// - a month/day date, "MM/DD" or "M/D", anywhere in the text;
+// - a month/day date, "MM/DD" or "M/D" with a real month and day, only as the last token of the text
+//   ("24/7 FITNESS" and "9/11 MEMORIAL" keep their slash tokens);
 // - a US state or DC code as the last word, only when something comes before it and only in capitals
 //   (so "ca" or "Me" inside a name is never cut).
 //
@@ -78,10 +80,13 @@ const US_STATE_CODES = new Set([
 // The lookahead needs a space or the end after it, so "POS DEBITS" or a store called "POS DEBITING" is not cut.
 const PREFIX =
 	/^(?:(?:POS|CHECKCARD)\s+\d+|POS\s+(?:DEBIT|CREDIT|PURCHASE)|CHECKCARD|DEBIT\s+CARD\s+PURCHASE)(?=\s|$)\s*/i;
-// "*" then letters and digits, with at least one digit: a reference ID, not a word after a processor's "*".
+// A payment processor's marker before "*" ("SQ *7ELEVEN"). Only the marker goes; the merchant after it stays.
+const PROCESSOR = /^(?:SQ|TST|DD|SP|PAYPAL)\s?\*\s*/i;
+// "*" then letters and digits, with at least one digit: a reference ID, not a word after a "*".
 const REFERENCE_ID = /\*[A-Z0-9]*\d[A-Z0-9]*/gi;
-// A month/day date, "09/30" or "9/3". The lookarounds keep it from cutting inside a URL path or a longer number.
-const DATE = /(?<![\w./])\d{1,2}\/\d{1,2}(?![\w/])/g;
+// A month/day date, "09/30" or "9/3", with a real month (1-12) and day (1-31), as the last token of the text.
+// The lookbehind keeps it from cutting inside a URL path or a longer token.
+const DATE = /(?<![\w./])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])$/;
 
 /**
  * The cleaned bank text of a raw bank string. Returns "" when nothing is left (for example "POS DEBIT" alone);
@@ -90,6 +95,7 @@ const DATE = /(?<![\w./])\d{1,2}\/\d{1,2}(?![\w/])/g;
 export function cleanBankText(raw: string): string {
 	let text = raw.replace(/\s+/g, " ").trim();
 	text = text.replace(PREFIX, "");
+	text = text.replace(PROCESSOR, "");
 	text = text.replace(REFERENCE_ID, "");
 	text = text.replace(DATE, "");
 	text = collapse(text);
