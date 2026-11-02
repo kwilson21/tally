@@ -16,7 +16,7 @@ export const fullMessage = (action: "add" | "restore") =>
 export type CategoryValue = { name: string };
 export type CategoryErrors = Partial<Record<"name", string>>;
 
-const normalizeName = (name: string) =>
+export const normalizeName = (name: string) =>
 	name.normalize("NFC").trim().replace(/\s+/g, " ");
 /**
  * A category name as the form compares it: ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. It is stored

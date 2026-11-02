@@ -3,10 +3,11 @@ import { shortDay } from "../dates";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
 import { Button } from "./button";
-import { Chip } from "./chip";
 import { Icon } from "./icons";
 import { NameChoices } from "./name-choices";
+import { SelectField } from "./select-field";
 import { NewCategoryCard } from "./suggestion-card";
+import { TextInput } from "./text-input";
 import { WhyLink } from "./why-link";
 
 /**
@@ -168,6 +169,9 @@ export function SuggestionCard({
 	values,
 	error,
 	focus = false,
+	suggestedName,
+	suggestUrl,
+	fieldId = item.id,
 }: {
 	/** The screen's address, with its skips: every answer posts there. */
 	action: string;
@@ -177,15 +181,22 @@ export function SuggestionCard({
 	skipHref: string;
 	/** Active categories, for Something else on a category guess. */
 	categories: { id: number; name: string }[];
-	/** What the form held when it was posted (the Name row, or the ticks), shown again with its error. */
+	/** What the form held when it was posted (the Name row, the ticks, or a typed new category name), shown again with its error. */
 	values?: {
 		picked?: string | null;
 		own?: string;
 		ticked?: number[];
 		notes?: Record<number, string>;
+		newName?: string;
 	};
 	error?: string;
 	focus?: boolean;
+	/** A category guess: the name Tally suggests for a new category, drawn as the dashed row when it is known. */
+	suggestedName?: string;
+	/** A category guess whose name Tally has not asked for yet: the row loads it from this address, in place. */
+	suggestUrl?: string;
+	/** The prefix for this card's field ids, so two cards on one page (the catalog) don't share a label. */
+	fieldId?: string;
 }) {
 	return (
 		<div class="flex flex-col gap-5">
@@ -230,11 +241,24 @@ export function SuggestionCard({
 					<MaybeQuestion>Maybe {item.category}</MaybeQuestion>
 					<Guess sure={item.sure} section="categorization" />
 					<YesForm action={action} item={item} yes={`Yes, ${item.category}`} />
+					{/* A typed name stays on screen, open, when its answer is refused; else Tally's name, once it has one. */}
+					{values?.newName !== undefined || suggestedName !== undefined ? (
+						<NewCategoryRow
+							action={action}
+							itemId={item.id}
+							fieldId={fieldId}
+							name={values?.newName ?? suggestedName ?? ""}
+							open={values?.newName !== undefined}
+						/>
+					) : suggestUrl ? (
+						<NewCategoryLoader url={suggestUrl} fieldId={fieldId} />
+					) : null}
 					<SomethingElse
 						action={action}
 						item={item}
 						categories={categories}
 						error={error}
+						fieldId={fieldId}
 					/>
 				</>
 			)}
@@ -405,8 +429,91 @@ function YesForm({
 }
 
 /**
+ * The dashed row for Tally's suggested new category (decision 156): "New category: {name}", labelled "Tally's
+ * suggestion". It is the second of a category guess's three answers, after Yes and before Something else. It opens
+ * in place with no script, the name pre-filled and editable, and nothing is made until "Create and next".
+ */
+export function NewCategoryRow({
+	action,
+	itemId,
+	fieldId,
+	name,
+	open = false,
+}: {
+	/** The screen's address, with its skips: the answer posts there. */
+	action: string;
+	/** The queue item's id, sent back with the answer. */
+	itemId: string;
+	/** The prefix for this row's field ids, unique on the page. */
+	fieldId: string;
+	/** The name Tally suggested, or the one a person typed when the answer was refused. */
+	name: string;
+	/** Open, as a refused answer leaves it, so the typed name is on screen. */
+	open?: boolean;
+}) {
+	return (
+		<details
+			class="group rounded-control border border-dashed border-ink px-4"
+			open={open}
+		>
+			<summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 py-2">
+				<span class="flex min-w-0 flex-col">
+					<span class="text-sm text-muted">Tally's suggestion</span>
+					<span class="flex min-w-0 items-center gap-1.5 text-lg wrap-anywhere">
+						<Icon name="sparkles" class="size-4 shrink-0" />
+						New category: {name}
+					</span>
+				</span>
+				<Icon
+					name="chevron-right"
+					class="size-5 shrink-0 transition group-open:rotate-90"
+				/>
+			</summary>
+			<form {...answerForm(action)} class="flex flex-col gap-4 pb-4 pt-2">
+				<input type="hidden" name="id" value={itemId} />
+				<TextInput
+					id={`new-category-name-${fieldId}`}
+					name="new_name"
+					label="Category name"
+					value={name}
+					maxlength={40}
+					autocomplete="off"
+					surface="paper"
+				/>
+				<Button type="submit" name="answer" value="create" class="w-full">
+					Create and next
+				</Button>
+			</form>
+		</details>
+	);
+}
+
+/**
+ * Stands in for the dashed row until Tally has asked for its name: it asks once the card is on screen, and the
+ * answer replaces it in place. An answer with no name (no AI, a switch off, or a failed call) replaces it with
+ * nothing, so no row is drawn.
+ */
+export function NewCategoryLoader({
+	url,
+	fieldId,
+}: {
+	/** The address that answers with the row, or with nothing. */
+	url: string;
+	fieldId: string;
+}) {
+	return (
+		<div
+			id={`new-category-loader-${fieldId}`}
+			hx-get={url}
+			hx-trigger="load"
+			hx-swap="outerHTML"
+		/>
+	);
+}
+
+/**
  * Something else: a disclosure that opens in place with no script. It answers this one item only and
- * never makes a rule (decision 101).
+ * never makes a rule (decision 101). A category guess's choice is one select (decision 156).
  */
 function SomethingElse({
 	action,
@@ -414,6 +521,7 @@ function SomethingElse({
 	categories,
 	values,
 	error,
+	fieldId = item.id,
 }: {
 	action: string;
 	item: SuggestionItem;
@@ -422,6 +530,7 @@ function SomethingElse({
 	values?: { picked?: string | null; own?: string };
 	/** The refusal to show: open with it, so its chips or names are on screen. */
 	error?: string;
+	fieldId?: string;
 }) {
 	return (
 		<details
@@ -438,16 +547,25 @@ function SomethingElse({
 			<form {...answerForm(action)} class="flex flex-col gap-4 pb-4 pt-2">
 				<input type="hidden" name="id" value={item.id} />
 				{item.kind === "category" && (
-					<fieldset class="flex flex-col gap-2">
-						<legend class="text-base text-ink">Category</legend>
-						<div class="flex flex-wrap gap-2">
+					<div class="flex flex-col gap-2">
+						<label
+							for={`category-choice-${fieldId}`}
+							class="text-base text-ink"
+						>
+							Choose a category
+						</label>
+						<SelectField
+							id={`category-choice-${fieldId}`}
+							name="category"
+							variant="control"
+							class="w-full"
+						>
+							<option value="" />
 							{categories.map((category) => (
-								<Chip type="radio" name="category" value={String(category.id)}>
-									{category.name}
-								</Chip>
+								<option value={String(category.id)}>{category.name}</option>
 							))}
-						</div>
-					</fieldset>
+						</SelectField>
+					</div>
 				)}
 				{item.kind === "name" && (
 					<NameChoices

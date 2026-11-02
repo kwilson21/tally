@@ -3,6 +3,7 @@ import { actor } from "../actor";
 import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { householdToday } from "../dates";
+import { categoryNames } from "../db/categories";
 import {
 	createFromSuggestion,
 	dismissSuggestion,
@@ -18,6 +19,11 @@ import {
 	type NeverSuggestKind,
 } from "../db/never-suggest";
 import {
+	fileInNewCategory,
+	newCategoryTarget,
+	suggestedCategoryName,
+} from "../db/new-category-answer";
+import {
 	categoryAskedSql,
 	incomeAskedSql,
 	neverSuggestAskedSql,
@@ -26,6 +32,7 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
+import { fullMessage } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -38,6 +45,7 @@ import {
 import {
 	AskFirst,
 	joinStores,
+	NewCategoryRow,
 	SuggestionCard,
 } from "../views/suggestion-review";
 
@@ -66,6 +74,8 @@ type Values = {
 	own?: string;
 	ticked?: number[];
 	notes?: Record<number, string>;
+	/** The new category name a person typed in a category guess's row (decision 156). */
+	newName?: string;
 };
 
 export const suggestions = new Hono<App>();
@@ -103,6 +113,22 @@ function requestedReview(
 		skipped,
 		again: requestedKeys(url, "again", ids).filter((id) => skippedSet.has(id)),
 	};
+}
+
+/**
+ * The address that answers with a category guess's suggested new category (decision 156), with the skips it was drawn
+ * with, so the row's answer posts back to the same screen. It answers with the row, or with nothing.
+ */
+function newCategoryAddress(
+	id: string,
+	skipped: string[],
+	again: string[],
+): string {
+	const query = new URLSearchParams();
+	query.append("id", id);
+	for (const skip of skipped) query.append("skip", skip);
+	for (const set of again) query.append("again", set);
+	return `${PATH}/new-category?${query}`;
 }
 
 /** Skip: the first one sets the item aside; on an item that came back, it sets it aside for good. */
@@ -285,6 +311,11 @@ function Screen({
 								values={values?.id === current.id ? values : undefined}
 								error={error}
 								focus={focus}
+								suggestUrl={
+									current.kind === "category"
+										? newCategoryAddress(current.id, skipped, again)
+										: undefined
+								}
 							/>
 						</div>
 					</>
@@ -378,6 +409,34 @@ const left = (queue: SuggestionItem[]) =>
 
 // Settings → Suggestions (issue #195, decision 101): one item at a time, like Organize.
 suggestions.get(PATH, (c) => renderScreen(c));
+
+// A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
+// row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
+// is announced, and the name is never logged.
+suggestions.get(`${PATH}/new-category`, async (c) => {
+	const db = c.env.DB;
+	const queue = await suggestionQueue(db);
+	const { skipped, again } = requestedReview(c.req.url, queue);
+	const id = c.req.query("id") ?? "";
+	const item = queue.find((candidate) => candidate.id === id);
+	if (item?.kind !== "category") return c.body(null);
+	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
+	const ai = (c.env as Env & { AI?: Ai }).AI;
+	const name = await suggestedCategoryName(db, ai, item);
+	if (!name) return c.body(null);
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ announce: `Tally suggests a new category: ${name}` }),
+	);
+	return c.html(
+		<NewCategoryRow
+			action={reviewAddress(skipped, again)}
+			itemId={item.id}
+			fieldId={item.id}
+			name={name}
+		/>,
+	);
+});
 
 // The names review it replaces: its address goes to the screen (the names it held are in the queue now).
 suggestions.get("/settings/names", (c) => c.redirect(PATH, 303));
@@ -580,6 +639,42 @@ suggestions.post(PATH, async (c) => {
 				if ((result?.meta.changes ?? 0) === 0) return stale();
 				const after = await suggestionQueue(db);
 				return done(`Set ${item.label} to ${item.category}.`, after);
+			}
+			// The suggested new category, opened in place (decision 156): the typed name is checked as the category form
+			// checks it, a name the family already has files the purchase in that one, and the create and the filing are
+			// one batch. Nothing is made without this answer.
+			if (answer === "create") {
+				const typed = String(form.get("new_name") ?? "");
+				const target = newCategoryTarget(typed, await categoryNames(db));
+				if (!target.ok)
+					return renderScreen(c, {
+						values: { id, newName: typed },
+						error: target.error,
+						status: 422,
+						focus: true,
+					});
+				const result = await fileInNewCategory(db, {
+					transactionId: item.transactionId,
+					target,
+					today,
+					who,
+				});
+				if (!result.ok) {
+					if (result.reason === "gone") return stale();
+					return renderScreen(c, {
+						values: { id, newName: typed },
+						error: fullMessage("add"),
+						status: 422,
+						focus: true,
+					});
+				}
+				const after = await suggestionQueue(db);
+				return done(
+					result.created
+						? `Made ${result.name} and set ${item.label} to it.`
+						: `Set ${item.label} to ${result.name}.`,
+					after,
+				);
 			}
 			if (answer === "else") {
 				const chosen = Number(form.get("category")?.toString() ?? "");
