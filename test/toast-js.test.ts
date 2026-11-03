@@ -2542,3 +2542,37 @@ describe("an Undo toast's label and focus (#821)", () => {
 		);
 	});
 });
+
+// #842 round 2 (Codex): an Undo toast swaps the page it was shown on. The default stays #page, so every other Undo toast
+// is unchanged; a toast that names undoTarget swaps that element (the server sends only an allow-listed selector).
+describe("an Undo toast's swap target (#842 round 2)", () => {
+	const undoForm = (toast: FakeNode) =>
+		toast.all().find((node) => node.tag === "form") as FakeNode;
+
+	it("swaps #page for an Undo toast that names no target, as before", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Deleted Coffee, $5.00.",
+			undo: "token",
+			undoExpiresInMs: 10000,
+		});
+		const form = undoForm(toasts.children[0] as FakeNode);
+		expect(form.getAttribute("hx-target")).toBe("#page");
+		expect(form.getAttribute("hx-select")).toBe("#page");
+	});
+
+	it("swaps the element the toast names, for both the target and the selection", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", {
+			message: "Moved 14 rows. 3 need your answer.",
+			undo: "run-token",
+			undoExpiresInMs: 10000,
+			undoAction: "/resort/undo",
+			undoTarget: "#organize-page",
+		});
+		const form = undoForm(toasts.children[0] as FakeNode);
+		expect(form.getAttribute("hx-target")).toBe("#organize-page");
+		expect(form.getAttribute("hx-select")).toBe("#organize-page");
+		expect(form.getAttribute("hx-swap")).toBe("outerHTML");
+	});
+});

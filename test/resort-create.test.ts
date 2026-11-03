@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
+import { moreLikeThis } from "../src/db/more-like-this";
 import { finishRun, readMoved, readRun } from "../src/db/resort-run";
 import { startResortFor } from "../src/db/resort-start";
 import { resetDemo } from "../src/demo/reset";
@@ -871,5 +872,157 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 		expect(create).not.toHaveBeenCalled();
 		vi.restoreAllMocks();
 		expect((await readRun(db))?.status).toBe("done");
+	});
+});
+
+// #842 round 2 (Codex): the finished line leaves the page whole; Create and next keeps its card's rows out of the run;
+// needAnswer counts only the rows the category queue still asks; and the closing toast's Undo redraws its own page.
+describe("the re-check, round 2 of the #842 review", () => {
+	/** The closing toast's poll for a finished run, its page key in the address (or none), and the run's id. */
+	async function closingPoll(key?: string) {
+		const { filed, related } = await maybeFixture();
+		await post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+		const run = await readRun(db);
+		const eating = await categoryId("Eating Out");
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = NULL WHERE id = ?",
+			)
+			.bind(eating, related[0])
+			.run();
+		await finishRun(db, { runId: run?.id ?? "", now: Date.now() });
+		const query = key === undefined ? "" : `&p=${key}`;
+		const res = await get(`/resort/progress?run=${run?.id}${query}`);
+		return { ...res, runId: run?.id ?? "" };
+	}
+
+	it("answers the running poll with the sentence alone, and every finished poll as a delete of the whole line", async () => {
+		const runId = await seedRun(14);
+		const running = await get(`/resort/progress?run=${runId}&m=0`);
+		expect(running.res.headers.get("HX-Retarget")).toBeNull();
+		expect(running.res.headers.get("HX-Reswap")).toBeNull();
+		// The run ends without a closing toast (nothing moved, nothing waiting): the answer still removes the line.
+		await db
+			.prepare(
+				"UPDATE household_settings SET value = json_set(value, '$.status', 'done') WHERE key = 'resort_run'",
+			)
+			.run();
+		const finished = await get(`/resort/progress?run=${runId}&m=0`);
+		expect(finished.html).toBe("");
+		expect(finished.res.headers.get("HX-Retarget")).toBe("#recheck");
+		expect(finished.res.headers.get("HX-Reswap")).toBe("delete");
+		// An unknown run's answer removes the line too, so no stale line stays on a page.
+		const unknown = await get("/resort/progress?run=no-such-run");
+		expect(unknown.res.headers.get("HX-Reswap")).toBe("delete");
+	});
+
+	it("keeps the running line's wrapper, its milestone region and sentence, whole while the run goes", async () => {
+		const { filed } = await maybeFixture();
+		const { html } = await post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+		expect(html).toContain('<div id="recheck" class="mt-4">');
+		expect(html).toContain('<p id="recheck-line"');
+		expect(html).toContain('<span id="recheck-milestone" role="status"');
+	});
+
+	it("a Create and next keeps its card's same-text peers out of the run, so the card still offers them", async () => {
+		const eating = await categoryId("Eating Out");
+		const { filed, related } = await maybeFixture();
+		const peer = await addRow({
+			raw: LUPITA,
+			amount: 2300,
+			jevCategoryId: eating,
+			confidence: 0.5,
+			plaid: null,
+		});
+		await post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+		const ids = [...(reaskOf(0)?.ids ?? [])];
+		expect(ids).not.toContain(peer);
+		expect(ids.sort()).toEqual([...related].sort());
+		const card = await moreLikeThis(db, filed);
+		expect(card?.rows.map((row) => row.id)).toContain(peer);
+	});
+
+	it("counts as waiting only the rows the category queue still asks: a none-fit row and an excluded row are not", async () => {
+		const eating = await categoryId("Eating Out");
+		const { filed, related } = await maybeFixture();
+		await addRow({ raw: "BOOKSHOP 3", amount: 1700, jevCategoryId: eating });
+		await post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+		const run = await readRun(db);
+		// After the run starts: one row loses its guess to none-fit, one is excluded. Only the third row still waits.
+		await db
+			.prepare(
+				"UPDATE transactions SET jev_category_id = NULL, jev_none_fit = 1 WHERE id = ?",
+			)
+			.bind(related[0])
+			.run();
+		await db
+			.prepare(
+				"UPDATE transactions SET excluded = 1, excluded_source = 'user' WHERE id = ?",
+			)
+			.bind(related[1])
+			.run();
+		await finishRun(db, { runId: run?.id ?? "", now: Date.now() });
+		const { res } = await get(`/resort/progress?run=${run?.id}`);
+		expect(trigger(res).toast?.message).toBe(
+			"Nothing moved. 1 needs your answer.",
+		);
+	});
+
+	it("the running line names its page in its address, so the closing toast can redraw that page", async () => {
+		await seedRun(14);
+		const organize = await get("/transactions/organize");
+		expect(organize.html).toContain("&amp;p=organize");
+		const categories = await get("/settings/categories");
+		expect(categories.html).toContain("&amp;p=categories");
+		const suggestions = await get("/settings/suggestions");
+		expect(suggestions.html).toContain("&amp;p=suggestions");
+	});
+
+	it("gives the closing toast its page's own Undo target, and none for no key or a key it does not know", async () => {
+		const pages: [string, string][] = [
+			["suggestions", "#suggestions-page"],
+			["organize", "#organize-page"],
+			["categories", "#categories"],
+		];
+		for (const [key, target] of pages) {
+			const { res } = await closingPoll(key);
+			expect(trigger(res).toast?.undoTarget).toBe(target);
+		}
+		const none = await closingPoll();
+		expect(trigger(none.res).toast?.undoTarget).toBeUndefined();
+		expect(trigger(none.res).toast?.undo).toBeDefined();
+		const unknown = await closingPoll("#page, body");
+		expect(trigger(unknown.res).toast?.undoTarget).toBeUndefined();
+	});
+
+	it("the Undo answer for an Organize or a Settings categories toast draws that page, with its own element", async () => {
+		const organize = await closingPoll("organize");
+		const drawnOrganize = await post("/resort/undo", {
+			token: organize.runId,
+			back: "/transactions/organize",
+		});
+		expect(drawnOrganize.html).toContain('id="organize-page"');
+		const categories = await closingPoll("categories");
+		const drawnCategories = await post("/resort/undo", {
+			token: categories.runId,
+			back: "/settings/categories",
+		});
+		expect(drawnCategories.html).toContain('id="categories"');
 	});
 });
