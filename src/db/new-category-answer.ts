@@ -88,7 +88,9 @@ export async function pendingCategoryNames(
  * The name Tally suggests for a store's purchase, or null. A pending suggestion for the same store is preferred and
  * makes no call. Otherwise Workers AI names it, from the store's name only, and only while the categories switch is on
  * and there is an AI binding (the demo has one too). A store with a "Never suggest" for a new category gets neither (the
- * same check the queue's new categories use, decision 101), so no name and no call. Nothing here logs the name.
+ * same check the queue's new categories use, decision 101), so no name and no call. Each transaction is asked once: the
+ * answer, a name or none, is kept in maybe_names and read back with no call after that (decision 161). Nothing here logs
+ * the name.
  */
 export async function suggestedCategoryName(
 	db: D1Database,
@@ -107,13 +109,52 @@ export async function suggestedCategoryName(
 	);
 	if (pending) return pending;
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
+	// Asked once for each transaction (decision 161): a kept answer, a name or "no name", is read and never asked again.
+	const kept = await keptRow(db, item.transactionId);
+	if (kept) return kept.name;
+	// Claim first: the insert wins the transaction only once, so only the winner asks Workers AI. A request that loses
+	// the claim reads what is stored: no name while the winner is still waiting, its name once it is kept.
+	// The token names this claim: only it can finish the row, so an answer for a purchase that was deleted meanwhile (and
+	// whose id a new purchase reused) is dropped rather than written over that purchase's row.
+	const token = crypto.randomUUID();
+	const claim = await db
+		.prepare(
+			`INSERT INTO maybe_names (transaction_id, name, claim)
+			SELECT id, NULL, ? FROM transactions WHERE id = ?
+			ON CONFLICT(transaction_id) DO NOTHING`,
+		)
+		.bind(token, item.transactionId)
+		.run();
+	if ((claim.meta.changes ?? 0) === 0)
+		return (await keptRow(db, item.transactionId))?.name ?? null;
 	// The store's name only: a person's own name or note for this purchase is typed text and never leaves the app.
 	const result = await suggestCategoryName(
 		ai,
 		[item.merchant],
 		await namesToAvoid(db),
 	);
-	return result.ok ? result.name : null;
+	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
+	const name = result.ok ? result.name : null;
+	const done = await db
+		.prepare(
+			"UPDATE maybe_names SET name = ? WHERE transaction_id = ? AND claim = ?",
+		)
+		.bind(name, item.transactionId, token)
+		.run();
+	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
+	if ((done.meta.changes ?? 0) === 0) return null;
+	return name;
+}
+
+/** The kept row for a transaction, or null when it was never claimed. Its name is null for "no name" or while waiting. */
+async function keptRow(
+	db: D1Database,
+	transactionId: number,
+): Promise<{ name: string | null } | null> {
+	return db
+		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
+		.bind(transactionId)
+		.first<{ name: string | null }>();
 }
 
 export type FileResult =

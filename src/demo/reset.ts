@@ -25,6 +25,7 @@ const TABLES_CHILD_FIRST = [
 	"forgotten_texts",
 	"ai_log",
 	"maybe_answers",
+	"maybe_names",
 	"cash_delete_holds",
 	"planned_delete_holds",
 	"bill_payments",

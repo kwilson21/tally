@@ -283,7 +283,26 @@ describe("database: the create and the filing are one batch", () => {
 	});
 });
 
+// A real transaction for the naming to be kept against (maybe_names references transactions).
+const transactionFor = async (raw: string) =>
+	(
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-01', 1499, ?)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, raw)
+			.first<{ id: number }>()
+	)?.id ?? 0;
+
 describe("suggestedCategoryName: the one naming path, and no call when it need not run", () => {
+	let item: {
+		transactionId: number;
+		merchantKey: string;
+		merchant: string;
+		label: string;
+	};
 	beforeEach(async () => {
 		await resetDemo(db, "2026-09-22");
 		await db.batch([
@@ -291,14 +310,14 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 			db.prepare("DELETE FROM category_suggestions"),
 		]);
 		vi.spyOn(console, "error").mockImplementation(() => {});
+		item = {
+			transactionId: await transactionFor("AUDIBLE*TE3E10I7 WA"),
+			merchantKey: "AUDIBLE*TE3E10I7 WA",
+			merchant: "Audible",
+			label: "Audible",
+		};
 	});
 
-	const item = {
-		transactionId: 0,
-		merchantKey: "AUDIBLE*TE3E10I7 WA",
-		merchant: "Audible",
-		label: "Audible",
-	};
 	const fakeAi = (answer: unknown = "Books & audio") => {
 		const run = vi.fn(async () => answer);
 		return { ai: { run } as unknown as Ai, run };
@@ -319,7 +338,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 	it("names from the store's name, never the transaction's own name or note", async () => {
 		const { ai, run } = fakeAi();
 		const own = {
-			transactionId: 0,
+			transactionId: await transactionFor("SQ *LUPITAS TAQ 2210"),
 			merchantKey: "SQ *LUPITAS TAQ 2210",
 			merchant: "Lupita's Taqueria",
 			label: "Team lunch, paid back",
@@ -369,6 +388,304 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 		const { ai, run } = fakeAi();
 		expect(await suggestedCategoryName(db, ai, item)).toBe("Books & audio");
 		expect(run).not.toHaveBeenCalled();
+	});
+});
+
+describe("suggestedCategoryName keeps one answer per transaction (decision 161)", () => {
+	beforeEach(async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.batch([
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM category_suggestions"),
+			db.prepare("DELETE FROM never_suggest_rules"),
+		]);
+		vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	const merchantKey = "AUDIBLE*TE3E10I7 WA";
+	const itemFor = async (raw = merchantKey) => ({
+		transactionId: await transactionFor(raw),
+		merchantKey,
+		merchant: "Audible",
+	});
+	const aiReturning = (answer: unknown) => {
+		const run = vi.fn(async () => answer);
+		return { ai: { run } as unknown as Ai, run };
+	};
+	const keptRows = async (transactionId: number) =>
+		(
+			await db
+				.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
+				.bind(transactionId)
+				.all<{ name: string | null }>()
+		).results;
+
+	it("a second draw reads the kept name and makes no AI call", async () => {
+		const item = await itemFor();
+		const first = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, first.ai, item)).toBe(
+			"Books & audio",
+		);
+		const second = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, second.ai, item)).toBe(
+			"Books & audio",
+		);
+		expect(first.run).toHaveBeenCalledTimes(1);
+		expect(second.run).not.toHaveBeenCalled();
+		expect(await keptRows(item.transactionId)).toEqual([
+			{ name: "Books & audio" },
+		]);
+	});
+
+	it("a 'no name' answer is kept and never asked again", async () => {
+		const item = await itemFor();
+		const first = aiReturning("Groceries");
+		expect(await suggestedCategoryName(db, first.ai, item)).toBeNull();
+		const second = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, second.ai, item)).toBeNull();
+		expect(second.run).not.toHaveBeenCalled();
+		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
+	});
+
+	it("an AI failure is kept as no name and not re-asked", async () => {
+		const item = await itemFor();
+		const run = vi.fn(async () => {
+			throw new Error("timeout");
+		});
+		const ai = { run } as unknown as Ai;
+		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
+		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
+	});
+
+	it("ten parallel first requests make exactly one AI call and store one row", async () => {
+		const item = await itemFor();
+		// The call takes a moment, so every request is in flight before the first one finishes.
+		const run = vi.fn(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return "Books & audio";
+		});
+		const ai = { run } as unknown as Ai;
+		const answers = await Promise.all(
+			Array.from({ length: 10 }, () => suggestedCategoryName(db, ai, item)),
+		);
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRows(item.transactionId)).toEqual([
+			{ name: "Books & audio" },
+		]);
+		// The winner has the name; a request that lost the claim shows no name on that draw.
+		expect(answers).toContain("Books & audio");
+		expect(answers.every((a) => a === null || a === "Books & audio")).toBe(
+			true,
+		);
+	});
+
+	it("a request that loses the claim returns no name and makes no AI call while the winner waits", async () => {
+		const item = await itemFor();
+		// The winner has claimed the transaction and is still asking Workers AI: its row is there, with no name yet.
+		await db
+			.prepare(
+				"INSERT INTO maybe_names (transaction_id, name, claim) VALUES (?, NULL, 'claim-of-the-winner')",
+			)
+			.bind(item.transactionId)
+			.run();
+		const loser = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, loser.ai, item)).toBeNull();
+		expect(loser.run).not.toHaveBeenCalled();
+	});
+
+	it("after the winner finishes, a later draw returns its name with no call", async () => {
+		const item = await itemFor();
+		const winner = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, winner.ai, item)).toBe(
+			"Books & audio",
+		);
+		const later = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, later.ai, item)).toBe(
+			"Books & audio",
+		);
+		expect(later.run).not.toHaveBeenCalled();
+	});
+
+	it("a failed AI answer stays 'no name' and is never re-asked after the claim", async () => {
+		const item = await itemFor();
+		const run = vi.fn(async () => {
+			throw new Error("timeout");
+		});
+		const ai = { run } as unknown as Ai;
+		const answers = await Promise.all(
+			Array.from({ length: 5 }, () => suggestedCategoryName(db, ai, item)),
+		);
+		expect(answers.every((a) => a === null)).toBe(true);
+		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
+	});
+
+	it("a completion whose claim was replaced changes nothing: a reused row number keeps the new request's name", async () => {
+		const item = await itemFor();
+		const other = {
+			transactionId: item.transactionId,
+			merchantKey: "HARDWARE BARN",
+			merchant: "Hardware Barn",
+		};
+		let bAnswer: string | null | undefined;
+		// Request A claims the transaction, then, while Workers AI is still answering, the purchase is deleted (its row
+		// goes with it) and a new one reuses the id. Request B claims that id and finishes with its own name.
+		const runA = vi.fn(async () => {
+			await db
+				.prepare("DELETE FROM transactions WHERE id = ?")
+				.bind(item.transactionId)
+				.run();
+			await db
+				.prepare(
+					`INSERT INTO transactions (id, plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				VALUES (?, ?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 2300, 'HARDWARE BARN')`,
+				)
+				.bind(item.transactionId, `plaid-${crypto.randomUUID()}`)
+				.run();
+			bAnswer = await suggestedCategoryName(
+				db,
+				aiReturning("Hobby supplies").ai,
+				other,
+			);
+			return "Books & audio";
+		});
+		const answerA = await suggestedCategoryName(
+			db,
+			{ run: runA } as unknown as Ai,
+			item,
+		);
+		// A's answer is for a purchase that is gone: it is dropped, and B's row and name are untouched.
+		expect(answerA).toBeNull();
+		expect(bAnswer).toBe("Hobby supplies");
+		expect(await keptRows(item.transactionId)).toEqual([
+			{ name: "Hobby supplies" },
+		]);
+	});
+
+	it("the stops before the claim make no claim: no row is inserted", async () => {
+		// The switch is off: no claim, no call.
+		const offItem = await itemFor("SWITCH OFF STORE");
+		await saveAiSwitches(db, { categories: false });
+		const off = aiReturning("Books & audio");
+		await suggestedCategoryName(db, off.ai, offItem);
+		expect(off.run).not.toHaveBeenCalled();
+		await saveAiSwitches(db, { categories: true });
+
+		// A pending suggestion for the store answers it: no claim, no call.
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const pendingTx = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-01', 1499, ?, ?)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, merchantKey, suggestion?.id ?? null)
+			.first<{ id: number }>();
+		const pending = aiReturning("Hobby supplies");
+		const pendingItem = {
+			transactionId: pendingTx?.id ?? 0,
+			merchantKey,
+			merchant: "Audible",
+		};
+		expect(await suggestedCategoryName(db, pending.ai, pendingItem)).toBe(
+			"Books & audio",
+		);
+		expect(pending.run).not.toHaveBeenCalled();
+
+		// A Never suggest for a new category stops it: no claim, no call.
+		const neverItem = await itemFor();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(merchantKey)
+			.run();
+		const never = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, never.ai, neverItem)).toBeNull();
+		expect(never.run).not.toHaveBeenCalled();
+
+		expect(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM maybe_names WHERE transaction_id IN (?, ?, ?)",
+				)
+				.bind(
+					offItem.transactionId,
+					pendingItem.transactionId,
+					neverItem.transactionId,
+				)
+				.first<{ n: number }>(),
+		).toMatchObject({ n: 0 });
+	});
+
+	it("deleting the transaction removes its kept name (ON DELETE CASCADE)", async () => {
+		const item = await itemFor();
+		await suggestedCategoryName(db, aiReturning("Books & audio").ai, item);
+		await db
+			.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(item.transactionId)
+			.run();
+		expect(
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM maybe_names")
+				.first<{ n: number }>(),
+		).toMatchObject({ n: 0 });
+	});
+
+	it("a new transaction that reuses the row number gets no old name", async () => {
+		const item = await itemFor();
+		await suggestedCategoryName(db, aiReturning("Books & audio").ai, item);
+		await db
+			.prepare("DELETE FROM transactions WHERE id = ?")
+			.bind(item.transactionId)
+			.run();
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				VALUES (?, ?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 2300, 'HARDWARE BARN')`,
+			)
+			.bind(item.transactionId, `plaid-${crypto.randomUUID()}`)
+			.run();
+		const fresh = aiReturning("Hobby supplies");
+		const reused = {
+			transactionId: item.transactionId,
+			merchantKey: "HARDWARE BARN",
+			merchant: "Hardware Barn",
+		};
+		expect(await suggestedCategoryName(db, fresh.ai, reused)).toBe(
+			"Hobby supplies",
+		);
+		expect(fresh.run).toHaveBeenCalledTimes(1);
+	});
+
+	it("a kept name is not shown, and no call is made, while the categories switch is off", async () => {
+		const item = await itemFor();
+		await suggestedCategoryName(db, aiReturning("Books & audio").ai, item);
+		await saveAiSwitches(db, { categories: false });
+		const later = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, later.ai, item)).toBeNull();
+		expect(later.run).not.toHaveBeenCalled();
+	});
+
+	it("a Never suggest for a new category stops a kept name before any read shows it", async () => {
+		const item = await itemFor();
+		await suggestedCategoryName(db, aiReturning("Books & audio").ai, item);
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(merchantKey)
+			.run();
+		const later = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, later.ai, item)).toBeNull();
+		expect(later.run).not.toHaveBeenCalled();
 	});
 });
 
