@@ -98,6 +98,7 @@ import { ICON_NAMES, Icon, RowArrow } from "../views/icons";
 import { LedgerIllustration } from "../views/illustration";
 import { Key, KeysDetails, KeysSheetBody, Ledger } from "../views/keys";
 import { DemoBanner } from "../views/layout";
+import { LearnedPage } from "../views/learned-page";
 import { LedgerField } from "../views/ledger-field";
 import { LikelyPanel } from "../views/likely-transactions";
 import { LinkBankButton, LinkBankError } from "../views/link-bank";
@@ -7259,6 +7260,7 @@ function SettingsGroup() {
 						places={settingsPlaces({
 							categories: { count: 7, budgetCents: 394000 },
 							merchants: 3,
+							learned: 4,
 							zone: "America/New_York",
 							bankEmailsOn: true,
 							people: 0,
@@ -7274,6 +7276,7 @@ function SettingsGroup() {
 						places={settingsPlaces({
 							categories: { count: 1, budgetCents: null },
 							merchants: 1,
+							learned: 0,
 							zone: "America/Chicago",
 							bankEmailsOn: false,
 							people: 2,
@@ -7377,6 +7380,63 @@ function SettingsGroup() {
 							},
 						]}
 					/>
+				</State>
+			</Specimen>
+			<Specimen
+				id="learned-lines"
+				title="What Tally has learned"
+				tier="visual"
+				components={["LearnedPage", "EmptyState", "Button"]}
+				sentence="Settings' page of what Tally learned from answers (decision 162): an intro, then one bordered line for each text and the category a person chose, with its count and a quiet Forget. Forget undoes within ten seconds. Empty, it says Nothing yet."
+			>
+				<State label="Three lines, one of them a vague text (APPLE.COM/BILL)">
+					<div inert>
+						<LearnedPage
+							id="catalog-learned-lines"
+							titleId="catalog-learned-lines-title"
+							lines={[
+								{
+									cleanedText: "audible",
+									name: "Audible",
+									categoryId: 40,
+									categoryName: "Books & audio",
+									icon: "entertainment",
+									color: "cat-plum",
+									answers: 3,
+									vague: false,
+								},
+								{
+									cleanedText: "apple.com/bill",
+									name: "Apple.com/bill",
+									categoryId: 11,
+									categoryName: "Entertainment",
+									icon: "entertainment",
+									color: "cat-blue",
+									answers: 2,
+									vague: true,
+								},
+								{
+									cleanedText: "netflix.com",
+									name: "Netflix.com",
+									categoryId: 11,
+									categoryName: "Entertainment",
+									icon: "entertainment",
+									color: "cat-blue",
+									answers: 1,
+									vague: false,
+								},
+							]}
+						/>
+					</div>
+				</State>
+				<State label="Nothing yet">
+					<div inert>
+						<LearnedPage
+							id="catalog-learned-empty"
+							titleId="catalog-learned-empty-title"
+							lines={[]}
+						/>
+					</div>
 				</State>
 			</Specimen>
 			<Specimen

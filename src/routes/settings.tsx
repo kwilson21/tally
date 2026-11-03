@@ -25,6 +25,13 @@ import {
 	pendingSuggestions,
 } from "../db/category-suggestions";
 import { waitsForRunStatement } from "../db/first-tally";
+import {
+	displayName,
+	FORGET_UNDO_SECONDS,
+	forgetText,
+	loadLearnedLines,
+	undoForget,
+} from "../db/learned-lines";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
 import {
 	neverSuggestRuleLine,
@@ -65,6 +72,7 @@ import {
 import { EmptyState } from "../views/empty-state";
 import { HouseholdPeople } from "../views/household-people";
 import { Layout } from "../views/layout";
+import { LearnedPage } from "../views/learned-page";
 import {
 	MERCHANT_RULE_SEARCH_THRESHOLD,
 	MerchantRules,
@@ -108,7 +116,14 @@ const ruleFocus = (
 };
 
 /** The Settings pages (decision 120): the contents page, then one page for each of its six sections. */
-type Page = "categories" | "rules" | "household" | "people" | "ai" | "data";
+type Page =
+	| "categories"
+	| "rules"
+	| "learned"
+	| "household"
+	| "people"
+	| "ai"
+	| "data";
 
 type View = {
 	/** The row to show open: a category's id, or "new" for Add category. */
@@ -140,6 +155,8 @@ type View = {
 	/** Focus the "Never suggest" line at this position after a Remove, or the one line that says none. */
 	focusNever?: { index?: number; heading?: boolean };
 	merchantRuleError?: string;
+	/** A What Tally has learned Forget refused (no text chosen). */
+	learnedError?: string;
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
 	errors?: CategoryErrors;
@@ -374,6 +391,7 @@ async function renderContents(c: Context<App>) {
 		.first<{ n: number }>();
 	const waiting = (await suggestionQueue(db, aiSwitches)).length;
 	const rules = await merchantRules(db, aiSwitches.names, "");
+	const learned = await loadLearnedLines(db);
 	const budgeted = active.filter((cat) => cat.budgetCents !== null);
 	const places = settingsPlaces({
 		categories: {
@@ -384,6 +402,7 @@ async function renderContents(c: Context<App>) {
 					: budgeted.reduce((sum, cat) => sum + (cat.budgetCents ?? 0), 0),
 		},
 		merchants: rules.total,
+		learned: learned.length,
 		zone: timeZone,
 		bankEmailsOn,
 		people: people?.n ?? 0,
@@ -662,6 +681,17 @@ async function renderRules(c: Context<App>, view: View = {}) {
 	);
 }
 
+/** What Tally has learned (decisions 156 and 162): one line per text a person's answers taught, each with Forget. */
+async function renderLearned(c: Context<App>, view: View = {}) {
+	const lines = await loadLearnedLines(c.env.DB);
+	return settingsPage(
+		c,
+		"What Tally has learned · Settings",
+		<LearnedPage lines={lines} error={view.learnedError} />,
+		view.status,
+	);
+}
+
 /** Household (decisions 67, 72, 82): the time zone and the bank sign-in emails switch with its recipients. */
 async function renderHousehold(c: Context<App>, view: View = {}) {
 	const db = c.env.DB;
@@ -778,6 +808,8 @@ function renderPage(c: Context<App>, page: Page, view: View = {}) {
 			return renderCategories(c, view);
 		case "rules":
 			return renderRules(c, view);
+		case "learned":
+			return renderLearned(c, view);
 		case "household":
 			return renderHousehold(c, view);
 		case "people":
@@ -888,6 +920,64 @@ settings.post("/settings/never-suggest/remove", async (c) => {
 		});
 	}
 	return c.redirect(rulesAddress(search), 303);
+});
+
+// Forget takes one learned line away and says so, with a ten-second Undo (decision 162). The text is posted in the
+// body, never the address. A text with no line now (a stale form) changes nothing and says the normal thing.
+settings.post("/settings/learned/forget", async (c) => {
+	const form = await c.req.formData();
+	const text = String(form.get("text") ?? "");
+	if (text === "") {
+		const message = "Choose a line to forget.";
+		if (c.req.header("HX-Request"))
+			c.header("HX-Trigger", hxTrigger({ announce: message }));
+		return renderPage(c, "learned", { learnedError: message, status: 400 });
+	}
+	const line = (await loadLearnedLines(c.env.DB)).find(
+		(learned) => learned.cleanedText === text,
+	);
+	const name = line ? `${line.name} → ${line.categoryName}` : displayName(text);
+	const message = `Forgot ${name}. Tally goes back to guessing.`;
+	const id = line ? await forgetText(c.env.DB, text) : 0;
+	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
+	const toast =
+		id > 0
+			? {
+					message,
+					type: "success",
+					undo: String(id),
+					undoExpiresInMs: FORGET_UNDO_SECONDS * 1000,
+					undoAction: "/settings/learned/undo",
+				}
+			: { message, type: "success" };
+	c.header("HX-Trigger", hxTrigger({ toast, announce: message }));
+	return renderPage(c, "learned");
+});
+
+// Undo of a Forget: the line comes back if the Undo is within its ten seconds. Its answer ends the Undo's toast.
+settings.post("/settings/learned/undo", async (c) => {
+	const form = await c.req.formData();
+	const token = String(form.get("token") ?? "");
+	const id = Number(token);
+	const outcome =
+		Number.isInteger(id) && id > 0 ? await undoForget(c.env.DB, id) : "gone";
+	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
+	const toast =
+		outcome === "undone"
+			? {
+					message: "Forget undone. Tally has that line back.",
+					type: "success",
+					undoDone: token,
+				}
+			: outcome === "expired"
+				? {
+						message: "Undo expired. The line stays forgotten.",
+						type: "error",
+						undoDone: token,
+					}
+				: { message: "Nothing to undo.", type: "error", undoDone: token };
+	c.header("HX-Trigger", hxTrigger({ toast, announce: toast.message }));
+	return renderPage(c, "learned");
 });
 
 settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
@@ -1081,6 +1171,7 @@ settings.get("/settings/categories", (c) =>
 	}),
 );
 settings.get("/settings/rules", (c) => renderRules(c));
+settings.get("/settings/learned", (c) => renderLearned(c));
 settings.get("/settings/household", (c) =>
 	renderHousehold(c, {
 		focus: c.req.query("focus") === "zone" ? "zone" : undefined,

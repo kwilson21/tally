@@ -39,6 +39,8 @@ export const PAGES = [
 	{ name: "settings", path: "/settings" },
 	{ name: "settings-categories", path: "/settings/categories" },
 	{ name: "settings-rules", path: "/settings/rules" },
+	// What Tally has learned (decision 162): one line per learned text, with Forget.
+	{ name: "settings-learned", path: "/settings/learned" },
 	{ name: "settings-household", path: "/settings/household" },
 	{ name: "settings-people", path: "/settings/people" },
 	{ name: "settings-ai", path: "/settings/ai" },

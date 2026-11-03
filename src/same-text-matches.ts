@@ -48,7 +48,10 @@ export type SameTextOptions = {
  * True for a vague text, or a cleaned text that is one followed by a space ("apple.com/bill cupertino" is vague,
  * "apple.com/billing inc" is not: there is no space after the vague text).
  */
-function isVague(cleanedText: string, vague: ReadonlySet<string>): boolean {
+export function isVague(
+	cleanedText: string,
+	vague: ReadonlySet<string>,
+): boolean {
 	for (const v of vague) {
 		if (cleanedText === v || cleanedText.startsWith(`${v} `)) return true;
 	}
