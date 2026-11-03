@@ -14,7 +14,7 @@
 
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
-import { askedBounds } from "../ai/maybe";
+
 import { COUNTED_JOINS } from "./counted-month";
 import { WAITING } from "./more-like-this";
 import {
@@ -23,6 +23,7 @@ import {
 	type ResortSnapshot,
 } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
+import { categoryAskedSql } from "./suggestions-queue";
 import { type JevSeen, seenSaveGuard } from "./transactions";
 
 export const RUN_KEY = "resort_run";
@@ -102,6 +103,21 @@ export async function readRun(db: D1Database): Promise<ResortRun | null> {
 		.bind(RUN_KEY)
 		.first<{ value: string }>();
 	return row ? parseRun(row.value) : null;
+}
+
+/**
+ * The moved record of one run (its rows, claim and counts), or null when there is none. It is kept per run, so it is
+ * read by the run's id even after a newer run has replaced `resort_run` (the closing toast, decision 160).
+ */
+export async function readMoved(
+	db: D1Database,
+	runId: string,
+): Promise<MovedRecord | null> {
+	const row = await db
+		.prepare("SELECT value FROM household_settings WHERE key = ?")
+		.bind(movedKey(runId))
+		.first<{ value: string }>();
+	return row ? (JSON.parse(row.value) as MovedRecord) : null;
 }
 
 /** Writes `next` only if the stored text is still `expected` (null: no row yet). True when it wrote. */
@@ -285,12 +301,6 @@ const sameRunRow = (alias: string, list: string) =>
 	`EXISTS (SELECT 1 FROM json_each(${list}) s WHERE json_extract(s.value, '$.id') = ${alias}.id
 		AND ${alias}.plaid_transaction_id IS json_extract(s.value, '$.plaid_transaction_id')
 		AND ${alias}.amount_cents = json_extract(s.value, '$.amount_cents'))`;
-
-/** The Maybe range for a category guess, as basis points on a confidence column (`t`). */
-const maybeRangeSql = () => {
-	const bounds = askedBounds("category");
-	return `CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) > ${bounds.above} AND CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${bounds.below}`;
-};
 
 /** A row's Maybe mark as it stood before a re-ask cleared it, so the mark can be put back exactly. */
 export type ReaskMark = {
@@ -623,7 +633,7 @@ async function finalizeRun(
 				'finalizedAt', ?4,
 				'rows', json(${movedRows}),
 				'needAnswer', (SELECT COUNT(*) FROM transactions t
-					WHERE t.category_id IS NULL AND ${maybeRangeSql()} AND ${sameRunRow("t", SNAPSHOTS)})
+					WHERE ${categoryAskedSql("t")} AND ${sameRunRow("t", SNAPSHOTS)})
 			)
 			FROM household_settings r WHERE r.key = ?1 AND json_extract(r.value, '$.finishToken') = ?2`,
 		)

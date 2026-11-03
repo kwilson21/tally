@@ -46,11 +46,13 @@ import {
 	removeHouseholdMember,
 	saveBankSignInEmails,
 } from "../db/reconnect";
+import { runningRecheck, startResortFor } from "../db/resort-start";
 import { suggestionQueue } from "../db/suggestions-queue";
 import { saveTimeZone } from "../db/time-zone";
 import { waitingForJevSql } from "../db/transactions";
 import { hxTrigger } from "../htmx";
 import { reconnectRecipients } from "../reconnect/reminders";
+import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import {
 	type CategoryErrors,
 	fullMessage,
@@ -80,6 +82,7 @@ import {
 	MERCHANT_RULE_SEARCH_THRESHOLD,
 	MerchantRules,
 } from "../views/merchant-rules";
+import { RecheckLine } from "../views/recheck-line";
 import {
 	SettingsContents,
 	SubpageHead,
@@ -494,6 +497,8 @@ function CategorySuggestion({
 /** Categories (#85, #195): the list with its rows, suggestions waiting, Add category and Archived. */
 async function renderCategories(c: Context<App>, view: View = {}) {
 	const db = c.env.DB;
+	// The re-check's line, while a Create's run goes (decision 159).
+	const recheck = await runningRecheck(db);
 	const timeZone = view.timeZone ?? (await householdTimeZone(db));
 	const today = view.today ?? todayIn(timeZone);
 	const { active, archived } = await settingsCategories(db, today.slice(0, 7));
@@ -557,6 +562,7 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 			class="lg:max-w-3xl"
 		>
 			<SubpageHead title="Categories" titleId="categories-title" />
+			<RecheckLine run={recheck} page="categories" />
 			{view.listError && (
 				<p role="alert" class="mt-3 text-sm text-over">
 					{view.listError}
@@ -832,6 +838,11 @@ function renderPage(c: Context<App>, page: Page, view: View = {}) {
 	}
 }
 
+/** The categories page again, for an Undo answer of the re-check (decision 160): the page the toast was shown on. */
+export function categoriesAgain(c: Context<App>) {
+	return renderPage(c, "categories");
+}
+
 /** Settings' rules, with the Always search kept in the address (a Remove without script returns here). */
 function rulesAddress(search: string): string {
 	return `/settings/rules${search ? `?rules_search=${encodeURIComponent(search)}` : ""}`;
@@ -1100,6 +1111,20 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 		result.leftOut,
 		(work) => c.executionCtx.waitUntil(work),
 	);
+	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
+	const created = !result.attached && !result.restored;
+	const [filedId] = result.filed;
+	const rechecking =
+		created && filedId !== undefined
+			? await startResortFor(
+					c.env as Env & { JEV_API_KEY?: string },
+					c.env.DB,
+					{
+						filedId,
+						excludeIds: [...result.leftOut, ...result.filed],
+					},
+				)
+			: null;
 	const count = result.moved;
 	const transactions = `${count} transaction${count === 1 ? "" : "s"}`;
 	const message = result.restored
@@ -1108,7 +1133,8 @@ settings.post("/settings/suggestions/:id{[0-9]+}/create", async (c) => {
 			? `Added ${transactions} to ${result.name}`
 			: `Created ${result.name} with ${transactions}`;
 	const left = leftOutSentence(result.leftOut.length);
-	return done(c, message, `${message}.${left ? ` ${left}` : ""}`, {
+	const started = rechecking ? ` ${STARTED_ANNOUNCEMENT}` : "";
+	return done(c, message, `${message}.${left ? ` ${left}` : ""}${started}`, {
 		page: "categories",
 	});
 });

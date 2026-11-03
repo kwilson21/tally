@@ -530,6 +530,7 @@ describe("saveSuggestion", () => {
 		}
 		expect(result).toEqual({
 			ok: true,
+			filed: made,
 			name: "école",
 			moved: 4,
 			leftOut: [],
@@ -1384,6 +1385,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1562,6 +1564,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1623,6 +1626,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1665,6 +1669,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "Pet Care",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1757,6 +1762,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "école",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1794,6 +1800,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1836,6 +1843,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1871,6 +1879,7 @@ describe("createFromSuggestion", () => {
 
 			expect(result).toEqual({
 				ok: true,
+				filed: made.slice(0, 2),
 				name: "École",
 				moved: 2,
 				leftOut: [made[2]],
@@ -1889,6 +1898,7 @@ describe("createFromSuggestion", () => {
 			ok: true;
 			name: string;
 			moved: number;
+			filed: number[];
 			leftOut: number[];
 			attached: boolean;
 			restored: boolean;
@@ -1926,6 +1936,7 @@ describe("createFromSuggestion", () => {
 			ok: true,
 			name,
 			moved: 2,
+			filed: s.made.slice(0, 2),
 			leftOut: s.made.slice(2),
 			attached: how.attached ?? false,
 			restored: how.restored ?? false,
@@ -2493,6 +2504,7 @@ describe("createFromSuggestion", () => {
 
 		expect(result).toEqual({
 			ok: true,
+			filed: made,
 			name: "École",
 			moved: 4,
 			leftOut: [],

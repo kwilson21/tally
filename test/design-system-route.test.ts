@@ -1944,3 +1944,19 @@ describe("GET /design-system/proposals: P140 A, the picked banks picture (decisi
 		}
 	});
 });
+
+// #821 owner feedback: the re-check line's specimens never repeat its ids (the section's own id is the only one).
+describe("the re-check line's catalog ids (#821)", () => {
+	it("draws the RecheckLine ids once, on its section alone", async () => {
+		const { html } = await get("/design-system");
+		const section =
+			html
+				.split('<section id="recheck-line"')[1]
+				?.split('<section id="recheck-toast"')[0] ?? "";
+		expect(section).not.toBe("");
+		expect(section).not.toContain(' id="recheck-line"');
+		expect(section).not.toContain(' id="recheck"');
+		expect(section).not.toContain(' id="recheck-milestone"');
+		expect(html.split(' id="recheck-line"').length - 1).toBe(1);
+	});
+});

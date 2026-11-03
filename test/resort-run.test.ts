@@ -481,7 +481,12 @@ describe("bumpDoneStatement", () => {
 describe("finishRun", () => {
 	it("marks the run done, records exactly the rows the sort moved into its category, and counts the Maybe rows left", async () => {
 		const moved = await tx({ plaidCategory: HINT, confidence: 0.58 });
-		const stayed = await tx({ plaidCategory: HINT, confidence: 0.58 });
+		// Jev guessed Groceries for it and is not sure: a Maybe the category queue asks about (decision 27, #842 round 2).
+		const stayed = await tx({
+			plaidCategory: HINT,
+			confidence: 0.58,
+			jevCategoryId: groceries,
+		});
 		const started = await startOrJoinRun(db, {
 			candidates: (await candidatesNow()).filter((c) =>
 				[moved, stayed].includes(c.id),

@@ -14,6 +14,8 @@ document.addEventListener("click", (event) => {
 				undo: button.dataset.dsUndo,
 				undoExpiresInMs: Number(button.dataset.dsUndoExpiresInMs),
 				undoAction: button.dataset.dsUndoAction,
+				// A background poll's toast (the re-check's closing toast) never takes focus (#821 owner feedback).
+				passive: button.dataset.dsPassive === "true",
 			},
 		}),
 	);
