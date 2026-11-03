@@ -24,6 +24,7 @@ import {
 	reservedKeyFor,
 	reserveJevCalls,
 } from "./db/jev-calls";
+import { currentClusterRows } from "./db/resort-candidates";
 import {
 	bumpDoneStatement,
 	type ReaskMark,
@@ -49,6 +50,7 @@ import {
 	saveJevDetailsStatement,
 	saveJevResultStatements,
 } from "./db/transactions";
+import { buildClusters } from "./resort-clusters";
 import { type Deadline, pastDeadline } from "./run-budget";
 import type { ReaskParams } from "./sort-start";
 
@@ -375,6 +377,27 @@ function reaskClusterMembers(
 	return out;
 }
 
+/** A row's grouping inputs as they are now (currentClusterRows). */
+type CurrentRow = Awaited<ReturnType<typeof currentClusterRows>>[number];
+
+/**
+ * The followers still in their leader's cluster by the rows as they are now (decision 158): the leader first, then the
+ * followers, grouped as buildClusters groups them. A follower that no longer groups with the leader (its text, note,
+ * mixed reading or amount changed after the clusters were built) is left out, so its leader's answer is not applied to it.
+ */
+function stillInCluster(
+	leaderId: number,
+	followerIds: readonly number[],
+	current: ReadonlyMap<number, CurrentRow>,
+): number[] {
+	const rows = [leaderId, ...followerIds].flatMap((id) => {
+		const row = current.get(id);
+		return row ? [row] : [];
+	});
+	const cluster = buildClusters(rows).find((c) => c[0] === leaderId) ?? [];
+	return followerIds.filter((id) => cluster.includes(id));
+}
+
 /**
  * Takes the turn and reads what a group needs, with no Jev call and no reservation: the switches once, the categories,
  * the people (when details are on), the time zone, its rows and their merchant histories. Gives the turn back when
@@ -482,6 +505,16 @@ async function readGroup(
 			read.sort(
 				(a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0),
 			);
+			// The clusters are checked against the rows as they are now (decision 158): a follower changed since the clusters
+			// were built may no longer group with its leader. It is not filed; its mark goes back with the rest.
+			const current = new Map(
+				(
+					await currentClusterRows(
+						db,
+						cleared.map((mark) => mark.id),
+					)
+				).map((row) => [row.id, row]),
+			);
 			const leaderIds = new Set(leaderMarks.map((mark) => mark.id));
 			rows = read.filter((row) => leaderIds.has(row.id));
 			const readIds = new Set(read.map((row) => row.id));
@@ -493,7 +526,10 @@ async function readGroup(
 					.filter((id) => !readIds.has(id)),
 				found: rows.length,
 				followers: Object.fromEntries(
-					leaderMarks.map((mark) => [mark.id, followersOf.get(mark.id) ?? []]),
+					leaderMarks.map((mark) => [
+						mark.id,
+						stillInCluster(mark.id, followersOf.get(mark.id) ?? [], current),
+					]),
 				),
 				seen: Object.fromEntries(read.map((row) => [row.id, row.seen])),
 			};

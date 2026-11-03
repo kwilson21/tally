@@ -163,3 +163,39 @@ export async function resortCandidates(
 	}));
 	return orderCandidates(rows, queueIds).slice(0, RESORT_CANDIDATE_MAX);
 }
+
+/**
+ * The grouping inputs of these rows as they are now (decision 158): the text, note, mixed reading and amount that
+ * buildClusters reads. A re-ask checks its clusters against these at read time, since a row may have changed since the
+ * run's clusters were built.
+ */
+export async function currentClusterRows(
+	db: D1Database,
+	ids: readonly number[],
+): Promise<
+	(Pick<
+		ResortCandidate,
+		"id" | "amountCents" | "rawName" | "merchantKey" | "whatItWasNote"
+	> & {
+		mixed: boolean;
+	})[]
+> {
+	if (ids.length === 0) return [];
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, t.amount_cents AS amountCents, t.raw_name AS rawName, ${merchantKeySql("t")} AS merchantKey,
+				(${jevSaysMixedSql("t")}) AS mixed, ${visibleNoteSql(false)} AS whatItWasNote
+			FROM transactions t ${COUNTED_JOINS}
+			WHERE t.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify([...new Set(ids)]))
+		.all<{
+			id: number;
+			amountCents: number;
+			rawName: string;
+			merchantKey: string;
+			mixed: number;
+			whatItWasNote: string | null;
+		}>();
+	return results.map((row) => ({ ...row, mixed: row.mixed === 1 }));
+}

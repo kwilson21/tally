@@ -1483,3 +1483,119 @@ describe("a cluster's followers are logged, and a decided leader hands its clust
 		expect((await readRun(db))?.done).toBe(3);
 	});
 });
+
+describe("a follower that no longer belongs to its leader's cluster at read time is not filed (decision 158)", () => {
+	const cluster = async (
+		count: number,
+		text = "SAME SHOP",
+		note: string | null = null,
+	) => {
+		const ids: number[] = [];
+		for (let i = 0; i < count; i++)
+			ids.push(await addRow({ confidence: 0.55, rawName: text, note }));
+		return ids;
+	};
+
+	/** Starts the run with its clusters as they are now, then changes the rows before the group reads (once). */
+	async function reaskAfterChange(
+		ids: number[],
+		change: (ids: number[]) => Promise<void>,
+		fetchImpl: (url?: string, init?: RequestInit) => Promise<Response>,
+	) {
+		const clusters = await clustersOf(ids);
+		const runId = await startRun(ids);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name !== "group-1-read" || attempt !== 1) return;
+				await change(ids);
+			},
+		});
+		await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: `revalidate-${runId}`,
+			reask: { runId, ids, clusters },
+		});
+		return { fake };
+	}
+
+	it("a follower renamed to other text before the read is not filed; the leader is asked once and the other followers are filed", async () => {
+		const ids = await cluster(4);
+		const jev = fakeJev(
+			() => replyFor("Eating Out", 0.9),
+			() => replyFor("Groceries", 0.6),
+		);
+		const { fake } = await reaskAfterChange(
+			ids,
+			async ([, renamed]) => {
+				await db
+					.prepare(
+						"UPDATE transactions SET raw_name = 'OTHER SHOP' WHERE id = ?",
+					)
+					.bind(renamed)
+					.run();
+			},
+			jev.fetchImpl,
+		);
+		const [leader, renamed, ...others] = ids as [number, number, ...number[]];
+		// The leader is asked once in its group. The renamed row is no longer its follower, so it gets its own ask later.
+		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
+			`group-1-ask-${leader}`,
+			`group-2-ask-${renamed}`,
+		]);
+		// Its own answer (0.6, a Maybe), not the leader's 0.9.
+		expect(await field(renamed, "category_id")).toBeNull();
+		expect(await field(renamed, "category_source")).toBeNull();
+		expect(await confOf(renamed)).toBe(0.6);
+		for (const id of others)
+			expect(await field(id, "category_source")).toBe("jev");
+	});
+
+	it("a follower whose note changed on a vague text before the read is not filed", async () => {
+		const ids = await cluster(4, "apple.com/bill cupertino", "same note");
+		expect((await clustersOf(ids)).map((c) => c.length)).toEqual([4]);
+		const jev = fakeJev(
+			() => replyFor("Eating Out", 0.9),
+			() => replyFor("Groceries", 0.6),
+		);
+		await reaskAfterChange(
+			ids,
+			async ([, , changed]) => {
+				await db
+					.prepare(
+						"UPDATE transactions SET note = 'a different note' WHERE id = ?",
+					)
+					.bind(changed)
+					.run();
+			},
+			jev.fetchImpl,
+		);
+		// Its own answer (0.6), not the leader's: it was asked on its own, after it left the leader's cluster.
+		const changed = ids[2] as number;
+		expect(await field(changed, "category_source")).toBeNull();
+		expect(await confOf(changed)).toBe(0.6);
+		for (const id of [ids[1], ids[3]] as number[]) {
+			expect(await field(id, "category_source")).toBe("jev");
+		}
+	});
+
+	it("a follower whose amount now breaks the amount rule is not filed and stays waiting", async () => {
+		const ids = await cluster(4);
+		await reaskAfterChange(
+			ids,
+			async ([, , , broken]) => {
+				await db
+					.prepare("UPDATE transactions SET amount_cents = 99999 WHERE id = ?")
+					.bind(broken)
+					.run();
+			},
+			vi.fn(async () => replyFor("Eating Out", 0.9)),
+		);
+		const broken = ids[3] as number;
+		expect(await field(broken, "category_source")).toBeNull();
+		// Still waiting: a NULL or a Maybe confidence is asked again later.
+		expect([0.55, null]).toContain(await confOf(broken));
+		for (const id of ids.slice(1, 3) as number[]) {
+			expect(await field(id, "category_source")).toBe("jev");
+		}
+	});
+});
