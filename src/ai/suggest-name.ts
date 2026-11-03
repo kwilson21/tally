@@ -228,11 +228,44 @@ export function cleanCategoryName(
 	return null;
 }
 
+/**
+ * The cleaned bank text to send with one purchase's store, or null when it adds nothing: empty, or the store's own
+ * name in other capitals and spacing ("netflix" for Netflix). Only the bank's text is ever sent (decision 164).
+ */
+export function bankTextToSend(
+	store: string,
+	bankText: string | null,
+): string | null {
+	const words = (text: string) =>
+		text
+			.toLowerCase()
+			.split(/[^\p{L}\p{N}]+/u)
+			.filter(Boolean)
+			.join(" ");
+	const text = (bankText ?? "").trim();
+	if (!text || words(text) === words(store)) return null;
+	return text;
+}
+
+/**
+ * Asks Workers AI for one category name for a group of purchases the categories don't fit. For one purchase, the
+ * purchase's cleaned bank text (`bankText`, decision 164) goes with its store's name, since a store that sells
+ * everything can't say what the purchase was (Amazon, Audible); the nightly naming of several merchants passes null.
+ */
 export async function suggestCategoryName(
 	ai: Ai,
 	merchants: string[],
 	avoid: string[],
+	bankText: string | null = null,
 ): Promise<{ ok: true; name: string | null } | { ok: false }> {
+	const purchaseText =
+		merchants.length === 1 && merchants[0] !== undefined
+			? bankTextToSend(merchants[0], bankText)
+			: null;
+	const places =
+		purchaseText === null
+			? `Places: ${merchants.join("; ")}`
+			: `Place: ${merchants[0]}\nBank text: ${purchaseText}`;
 	try {
 		const answer = await ai.run(
 			NAME_MODEL,
@@ -241,11 +274,13 @@ export async function suggestCategoryName(
 					{
 						role: "system",
 						content:
-							"Suggest one short, plain category name for this group of purchases. Reply with only the name.",
+							purchaseText === null
+								? "Suggest one short, plain category name for this group of purchases. Reply with only the name."
+								: "Suggest one short, plain category name for this kind of purchase. The bank text is what the bank printed for it and says what it was. Reply with only the name.",
 					},
 					{
 						role: "user",
-						content: `Places: ${merchants.join("; ")}\nCategories to avoid: ${avoid.join("; ")}`,
+						content: `${places}\nCategories to avoid: ${avoid.join("; ")}`,
 					},
 				],
 				max_tokens: 40,

@@ -106,6 +106,52 @@ describe("suggestCategoryName", () => {
 		]);
 	});
 
+	it("sends one purchase's cleaned bank text with its store, and the same instruction otherwise", async () => {
+		const ai = fakeAi(async () => ({ response: "Books & audio" }));
+		expect(await suggestCategoryName(ai, ["Amazon"], HAVE, "audible")).toEqual({
+			ok: true,
+			name: "Books & audio",
+		});
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { role: string; content: string }[] },
+		];
+		const user = input.messages[1]?.content ?? "";
+		expect(user).toContain("Place: Amazon");
+		expect(user).toContain("Bank text: audible");
+		expect(user).toContain("Categories to avoid: ");
+		expect(input.messages[0]?.content).toContain("Reply with only the name.");
+		expect(input.messages[0]?.content).toContain("bank text");
+	});
+
+	it("sends the store only, as before, when the bank text is empty or the store's own name", async () => {
+		for (const bankText of [null, "", "amazon"]) {
+			const ai = fakeAi(async () => ({ response: "Books & audio" }));
+			await suggestCategoryName(ai, ["Amazon"], HAVE, bankText);
+			const [, input] = ai.run.mock.calls[0] as [
+				string,
+				{ messages: { content: string }[] },
+			];
+			expect(input.messages[1]?.content).toContain("Places: Amazon");
+			expect(input.messages[1]?.content).not.toContain("Bank text");
+		}
+	});
+
+	it("the nightly naming of several merchants sends no bank text, as before", async () => {
+		const ai = fakeAi(async () => ({ response: "Pet Care" }));
+		await suggestCategoryName(ai, MERCHANTS, HAVE, null);
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(input.messages[1]?.content).toBe(
+			`Places: ${MERCHANTS.join("; ")}\nCategories to avoid: ${HAVE.join("; ")}`,
+		);
+		expect(input.messages[0]?.content).toBe(
+			"Suggest one short, plain category name for this group of purchases. Reply with only the name.",
+		);
+	});
+
 	it("is ok with no name when none was usable, so the group isn't asked about again", async () => {
 		const ai = fakeAi(async () => ({ response: "Groceries" }));
 		expect(await suggestCategoryName(ai, MERCHANTS, HAVE)).toEqual({

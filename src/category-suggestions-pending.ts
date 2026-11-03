@@ -24,7 +24,12 @@ export async function suggestNewCategories(
 	for (const group of groups.slice(0, limit)) {
 		if (now() >= deadline || failures >= 3) break;
 		const avoid = await namesToAvoid(env.DB);
-		const result = await suggestCategoryName(env.AI, group.merchants, avoid);
+		const result = await suggestCategoryName(
+			env.AI,
+			group.merchants,
+			avoid,
+			null,
+		);
 		asked++;
 		if (!result.ok) {
 			failures++;

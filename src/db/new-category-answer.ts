@@ -2,6 +2,7 @@
 // category with no budget amount, and the card's purchase is filed in it. Naming goes through the one AI path
 // (src/ai/suggest-name.ts), and only when the categories switch is on and an AI binding exists.
 import { suggestCategoryName } from "../ai/suggest-name";
+import { cleanBankText } from "../clean-bank-text";
 import {
 	fullMessage,
 	MAX_ACTIVE,
@@ -86,24 +87,28 @@ export async function pendingCategoryNames(
 
 /**
  * The name Tally suggests for a store's purchase, or null. A pending suggestion for the same store is preferred and
- * makes no call. Otherwise Workers AI names it, from the store's name only, and only while the categories switch is on
- * and there is an AI binding (the demo has one too). A store with a "Never suggest" for a new category gets neither (the
- * same check the queue's new categories use, decision 101), so no name and no call. Each transaction is asked once: the
- * answer, a name or none, is kept in maybe_names and read back with no call after that (decision 161). Nothing here logs
- * the name.
+ * makes no call. Otherwise Workers AI names it, from the store's name and the purchase's cleaned bank text (decision
+ * 164), and only while the categories switch is on and there is an AI binding (the demo has one too). The bank text is
+ * read from the transaction here, never from the card's address. A store with a "Never suggest" for a new category gets
+ * neither (the same check the queue's new categories use, decision 101), so no name and no call. Each transaction is
+ * asked once: the answer, a name or none, is kept in maybe_names and read back with no call after that (decision 161).
+ * Nothing here logs the name or the bank text.
  */
 export async function suggestedCategoryName(
 	db: D1Database,
 	ai: Ai | undefined,
 	item: { transactionId: number; merchantKey: string; merchant: string },
 ): Promise<string | null> {
+	// The purchase's raw bank text comes with the same read that checks the Never suggest, so no extra query per card.
 	const allowed = await db
 		.prepare(
-			`SELECT 1 AS ok WHERE NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id = ? AND ${neverSuggestedSql("t", "new_category")})`,
+			`SELECT (SELECT t.raw_name FROM transactions t WHERE t.id = ?) AS raw
+			WHERE NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id = ? AND ${neverSuggestedSql("t", "new_category")})`,
 		)
-		.bind(item.transactionId)
-		.first();
+		.bind(item.transactionId, item.transactionId)
+		.first<{ raw: string | null }>();
 	if (!allowed) return null;
+	const bankText = cleanBankText(allowed.raw ?? "");
 	const pending = (await pendingCategoryNames(db, [item.merchantKey])).get(
 		item.merchantKey,
 	);
@@ -127,11 +132,13 @@ export async function suggestedCategoryName(
 		.run();
 	if ((claim.meta.changes ?? 0) === 0)
 		return (await keptRow(db, item.transactionId))?.name ?? null;
-	// The store's name only: a person's own name or note for this purchase is typed text and never leaves the app.
+	// The store's name and the purchase's cleaned bank text (decision 164). A person's own name, note or kind for this
+	// purchase is typed text and never leaves the app; no amount, date or account either.
 	const result = await suggestCategoryName(
 		ai,
 		[item.merchant],
 		await namesToAvoid(db),
+		bankText,
 	);
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
