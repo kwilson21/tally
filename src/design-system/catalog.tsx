@@ -24,6 +24,7 @@ import {
 import type { YourBank } from "../first-tally/your-banks";
 import { formatCents } from "../money";
 import type { NetWorthView } from "../net-worth";
+import { closingToast, FINISHED_ANNOUNCEMENT } from "../resort-toast";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
 	buildTrends,
@@ -137,6 +138,7 @@ import {
 	PlanSheet,
 } from "../views/planned-expense";
 import { ProgressRow } from "../views/progress-row";
+import { RecheckLine } from "../views/recheck-line";
 import { GroupRuleOffer, RuleOffer } from "../views/rule-offer";
 import { SavedTick } from "../views/saved-tick";
 import { SavingsGoalRow } from "../views/savings-goal-row";
@@ -1280,6 +1282,46 @@ const TOAST_SPEC: UseSpecText = {
 		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
 		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, a Not this one says “Payment unlinked” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
+};
+
+// RecheckLine's use spec (decision 159): the progress sentence the person sees while a re-sort runs.
+const RECHECK_LINE_SPEC: UseSpecText = {
+	purpose:
+		"Show that Tally is still working after a Create, in one sentence, so the person sees it respond without waiting on it.",
+	affordance:
+		"None: it is a sentence, not a control, so nothing about it looks pressable. A ring turns beside it while the run goes.",
+	states:
+		"Running: “Tally is re-checking… N done”, with N from 0 up to the run's total and never past it. Finished: the sentence is gone, and the closing toast says what moved. Nothing is drawn when no run is going.",
+	feedback:
+		"The count changes every 2 seconds while the run goes. The wrapper is the polite live region, so each new count is spoken once, and the Create's own announcement says “Tally is re-checking related rows.” at the start. The end is announced with the closing toast or “Tally finished re-checking.”, never as a list.",
+	input:
+		"Nothing to press. It is not focusable and takes no keys. Screen reader: a polite status with the sentence as its whole text; the ring is hidden from assistive technology.",
+	motion:
+		"The ring turns in --duration-spin (700 ms) and stops under reduced motion, as every busy ring does. The count changes in place with no fade.",
+	edges:
+		"Zero done shows zero; a count past the total is clamped to the total. A failed poll (a dropped connection or a 5xx) says nothing, and the next poll tries again. Without JavaScript the line is drawn once and does not move on.",
+	words:
+		"“Tally is re-checking… 6 done” (the count in its own tabular figures). At the start, the Create's announcement: “Tally is re-checking related rows.” At the end: “Tally finished re-checking.” when nothing moved.",
+};
+
+// The closing toast's use spec (decision 160): the existing Toast with its own Undo.
+const RECHECK_TOAST_SPEC: UseSpecText = {
+	purpose:
+		"Say what the re-check moved and how many rows still need the person's answer, with a way to put the moved rows back.",
+	affordance:
+		"The Toast's own look (see Toast): a paper pill in Tally's frame. Its Undo is a plain underlined 44px button, as the other Undo toasts have.",
+	states:
+		"Moved, one destination: “Moved 14 to Books & audio. 3 need your answer.” Moved, several: “Moved 14 rows. 3 need your answer.” Nothing moved but some waiting: “Nothing moved. 3 need your answer.” Nothing moved and nothing waiting: no toast. Undo shows only when rows moved, for ten seconds.",
+	feedback:
+		"It appears when the poll sees the run finish, the first time only. Its announcer text is the same words. Undo answers with “Put 14 back.”, or “Put 12 back. 2 changed since, so they stayed.” when some rows changed since the run, or “Too late to undo that.” once the ten seconds have passed.",
+	input:
+		"Undo is a labeled form button, usable by touch or keyboard, and it is off while its request is in flight. Screen reader: success is status, an expired Undo is an alert.",
+	motion:
+		"As the Toast: a fade and an 8 px rise in 150 ms, held for the ten seconds Undo is open, then a fade out. Reduced motion shows it at once.",
+	edges:
+		"A category name is shown as the family typed it, wrapped between words. A run that moved nothing has no Undo button. Pluralisation: “1 needs your answer”, “1 row”, “Moved 1 to …”.",
+	words:
+		"“Moved 14 to Books & audio. 3 need your answer.” · “Moved 14 rows. 3 need your answer.” · “Nothing moved. 3 need your answer.” · “Put 14 back.” · “Too late to undo that.”",
 };
 
 // SelectField's use spec: the one select look every select on the app shares (DESIGN.md: no native select arrows).
@@ -6310,6 +6352,91 @@ function Feedback() {
 					</Button>
 				</div>
 				<UseSpec spec={TOAST_SPEC} />
+			</Specimen>
+			<Specimen
+				id="recheck-line"
+				title="RecheckLine"
+				tier="visual"
+				components={["RecheckLine"]}
+				sentence="The re-sort's progress (decision 159): after a Create that makes a category, one quiet sentence on the page the person lands on, while Tally re-checks the related rows it could now belong to. It shows the count, never a list, and it is drawn as a plain sentence beside a ring that stops under reduced motion. It polls every 2 seconds in the app, and this picture does not poll."
+			>
+				<div class="grid gap-6 lg:grid-cols-2">
+					<State label="Starting: nothing done yet">
+						<RecheckLine
+							polls={false}
+							run={{ id: "catalog-run", done: 0, total: 14 }}
+						/>
+					</State>
+					<State label="Mid-run: six of fourteen done">
+						<RecheckLine
+							polls={false}
+							run={{ id: "catalog-run", done: 6, total: 14 }}
+						/>
+					</State>
+				</div>
+				<UseSpec spec={RECHECK_LINE_SPEC} />
+			</Specimen>
+			<Specimen
+				id="recheck-toast"
+				title="Closing toast"
+				tier="interactive"
+				components={["Toast"]}
+				sentence="The re-sort's closing toast (decision 160), the existing Toast with its Undo: one destination, several destinations, a single row, and nothing moved with rows still waiting. Undo appears only when rows moved, and reverses only those rows, for ten seconds. These buttons send the same events the answer sends."
+			>
+				<div class="flex flex-wrap gap-3">
+					{(() => {
+						const single = closingToast({
+							moved: 14,
+							needAnswer: 3,
+							byCategory: [{ name: "Books & audio", count: 14 }],
+						});
+						const several = closingToast({
+							moved: 14,
+							needAnswer: 3,
+							byCategory: [
+								{ name: "Books & audio", count: 9 },
+								{ name: "Gifts", count: 5 },
+							],
+						});
+						const one = closingToast({
+							moved: 1,
+							needAnswer: 1,
+							byCategory: [{ name: "Books & audio", count: 1 }],
+						});
+						const none = closingToast({
+							moved: 0,
+							needAnswer: 3,
+							byCategory: [],
+						});
+						return [single, several, one, none].map((words) =>
+							words ? (
+								<Button
+									type="button"
+									kind="secondary"
+									data-ds-toast={words.type}
+									data-ds-message={words.message}
+									{...(words.undo
+										? {
+												"data-ds-undo": "catalog-demo-token",
+												"data-ds-undo-expires-in-ms": "10000",
+												"data-ds-undo-action": "/resort/undo",
+											}
+										: {})}
+								>
+									{words.undo
+										? "Show a closing toast with Undo"
+										: "Show a closing toast"}
+									: {words.message}
+								</Button>
+							) : null,
+						);
+					})()}
+				</div>
+				<p class="mt-4 text-sm text-muted">
+					Nothing moved and nothing waits ends with no toast: the line just
+					goes, and the announcer says “{FINISHED_ANNOUNCEMENT}”
+				</p>
+				<UseSpec spec={RECHECK_TOAST_SPEC} />
 			</Specimen>
 			<Specimen
 				id="error-pages"
