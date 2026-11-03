@@ -4,12 +4,14 @@ import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { createFromSuggestion } from "../db/category-suggestions";
+import { runningRecheck, startResortFor } from "../db/resort-start";
 import {
 	type NewCategorySuggestion,
 	newCategoryItem,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { formatCents } from "../money";
+import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { nameForm, parseCategory } from "../settings/category-form";
 import {
 	type OrganizeGroup,
@@ -29,6 +31,7 @@ import {
 	NewCategoryChip,
 	NewCategoryName,
 } from "../views/new-category-choice";
+import { RecheckLine } from "../views/recheck-line";
 import { GroupRuleOffer, type GroupRuleOfferValue } from "../views/rule-offer";
 import { OrganizeNewCategoryCard } from "../views/suggestion-card";
 import { TextInput } from "../views/text-input";
@@ -66,6 +69,11 @@ function otherMerchants(
 			.filter((store) => !group.merchantKeys.includes(store.merchantKey))
 			.map((store) => store.merchant),
 	).size;
+}
+
+/** Organize again, for an Undo answer of the re-check (decision 160): the page the toast was shown on. */
+export function organizeAgain(c: Context<App>) {
+	return renderOrganize(c, undefined, 200, false);
 }
 
 async function renderOrganize(
@@ -126,6 +134,8 @@ async function renderOrganize(
 	// The question's answers go to the same skips, and Not now or Yes then moves on from them. Only the skips: the
 	// question's own address also carries its category and store, which an answer must not repeat.
 	const ruleAction = `/transactions/organize/rule${query.size ? `?${query}` : ""}`;
+	// The re-check's line, while a Create's run goes (decision 159).
+	const recheck = await runningRecheck(c.env.DB);
 	if (trigger) {
 		// The list ends on its empty state only when no store is left, so its sentence is announced after the answer's words.
 		const ends = focus && !rule && !group;
@@ -153,6 +163,7 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
+				<RecheckLine run={recheck} />
 				{cardError && !inCard && (
 					<p role="alert" class="mt-3 text-sm text-over">
 						{cardError.message}
@@ -390,6 +401,20 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 		result.leftOut,
 		(work) => c.executionCtx.waitUntil(work),
 	);
+	// Only a new category starts the re-check (decision 157): an Add to or a Restore changes nothing the run would sort.
+	const created = !result.attached && !result.restored;
+	const [filedId] = result.filed;
+	const rechecking =
+		created && filedId !== undefined
+			? await startResortFor(
+					c.env as Env & { JEV_API_KEY?: string },
+					c.env.DB,
+					{
+						filedId,
+						excludeIds: [...result.leftOut, ...result.filed],
+					},
+				)
+			: null;
 	const count = result.moved;
 	const transactions = `${count} ${count === 1 ? "transaction" : "transactions"}`;
 	const message = result.restored
@@ -398,10 +423,11 @@ organize.post("/transactions/organize/suggestion", async (c) => {
 			? `Added ${transactions} to ${result.name}`
 			: `Created ${result.name} with ${transactions}`;
 	const left = leftOutSentence(result.leftOut.length);
+	const started = rechecking ? ` ${STARTED_ANNOUNCEMENT}` : "";
 	if (!c.req.header("HX-Request")) return c.redirect(next, 303);
 	return renderOrganize(c, undefined, 200, true, undefined, {
 		toast: { message, type: "success" },
-		announce: `${message}.${left ? ` ${left}` : ""}`,
+		announce: `${message}.${left ? ` ${left}` : ""}${started}`,
 	});
 });
 

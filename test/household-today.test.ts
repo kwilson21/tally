@@ -211,13 +211,18 @@ describe("one date for the whole request", () => {
 	const LATE_OCTOBER = "2026-11-01T03:30:00Z";
 	const AFTER_MIDNIGHT = "2026-11-01T05:30:00Z";
 
-	// Counts reads of the setting, and moves the clock past Eastern midnight right after the first,
-	// so a request that read it a second time would mix October with November.
+	// Counts reads of the time zone setting, and moves the clock past Eastern midnight right after the first,
+	// so a request that read it a second time would mix October with November. The re-check's run is read from
+	// household_settings too (#821), by its own key, so only the zone's literal key is counted.
 	function watchSetting() {
 		let reads = 0;
 		const prepare = env.DB.prepare.bind(env.DB);
 		vi.spyOn(env.DB, "prepare").mockImplementation((sql: string) => {
-			if (sql.includes("household_settings") && sql.includes("SELECT value")) {
+			if (
+				sql.includes("household_settings") &&
+				sql.includes("SELECT value") &&
+				sql.includes("'time_zone'")
+			) {
 				reads += 1;
 				vi.setSystemTime(new Date(AFTER_MIDNIGHT));
 			}

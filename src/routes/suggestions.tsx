@@ -30,6 +30,7 @@ import {
 	pendingCategoryNames,
 	suggestedCategoryName,
 } from "../db/new-category-answer";
+import { runningRecheck, startResortFor } from "../db/resort-start";
 import {
 	categoryAskedSql,
 	incomeAskedSql,
@@ -39,6 +40,7 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
+import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -48,6 +50,7 @@ import {
 	pickValue,
 	STORE_VALUE,
 } from "../views/name-choices";
+import { RecheckLine, type RecheckRun } from "../views/recheck-line";
 import {
 	AskFirst,
 	joinStores,
@@ -276,6 +279,8 @@ type ScreenInput = {
 	pendingNames: Map<string, string>;
 	/** The "N more look like this" card above the screen, when a purchase was just filed and others look like it. */
 	more: MoreLikeThis | null;
+	/** The re-check's run while it goes, drawn as its progress line (decision 159, #821). */
+	recheck: RecheckRun | null;
 };
 
 function Screen({
@@ -298,6 +303,7 @@ function Screen({
 		focus = false,
 		today,
 		more,
+		recheck,
 	} = input;
 	const skippedSet = new Set(skipped);
 	const againSet = new Set(again);
@@ -331,6 +337,7 @@ function Screen({
 				>
 					Settings
 				</a>
+				<RecheckLine run={recheck} />
 				{/* While the card shows it is the whole screen: a purchase it offers is never also offered by the queue below. */}
 				{more ? (
 					<div class="mt-6">
@@ -478,10 +485,16 @@ async function renderScreen(
 					),
 				),
 				more,
+				recheck: await runningRecheck(db),
 			}}
 		/>,
 		options.status ?? 200,
 	);
+}
+
+/** The suggestions screen again, for an Undo answer of the re-check (decision 160): the page the toast was shown on. */
+export function suggestionsAgain(c: Context<App>) {
+	return renderScreen(c);
 }
 
 /** What the announcer says after an answer: how many are left to check. */
@@ -847,13 +860,19 @@ suggestions.post(PATH, async (c) => {
 						focus: true,
 					});
 				}
+				// Only a new category starts the re-check (decision 157): an Add to changes nothing the run would sort.
+				const rechecking = result.created
+					? await startResortFor(c.env as Env & { JEV_API_KEY?: string }, db, {
+							filedId: item.transactionId,
+						})
+					: null;
 				const after = await suggestionQueue(db);
 				return done(
 					result.created
 						? `Made ${result.name} and set ${item.label} to it.`
 						: `Added ${item.label} to ${result.name}.`,
 					after,
-					"",
+					rechecking ? STARTED_ANNOUNCEMENT : "",
 					item.transactionId,
 				);
 			}
@@ -937,13 +956,36 @@ suggestions.post(PATH, async (c) => {
 					result.leftOut,
 					(work) => c.executionCtx.waitUntil(work),
 				);
+				// Only a new category starts the re-check (decision 157): a restore or an Add to changes nothing it would sort.
+				const created = !result.attached && !result.restored;
+				const [filedId] = result.filed;
+				const rechecking =
+					created && filedId !== undefined
+						? await startResortFor(
+								c.env as Env & { JEV_API_KEY?: string },
+								db,
+								{
+									filedId,
+									excludeIds: [...result.leftOut, ...result.filed],
+								},
+							)
+						: null;
 				const after = await suggestionQueue(db);
 				const message = result.restored
 					? `Restored ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`
 					: result.attached
 						? `Added ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"} to ${result.name}.`
 						: `Made ${result.name} with ${result.moved} ${result.moved === 1 ? "transaction" : "transactions"}.`;
-				return done(message, after, leftOutSentence(result.leftOut.length));
+				return done(
+					message,
+					after,
+					[
+						leftOutSentence(result.leftOut.length),
+						rechecking ? STARTED_ANNOUNCEMENT : "",
+					]
+						.filter(Boolean)
+						.join(" "),
+				);
 			}
 			if (answer === "no") {
 				const dismissed = await dismissSuggestion(db, item.suggestionId);

@@ -104,6 +104,21 @@ export async function readRun(db: D1Database): Promise<ResortRun | null> {
 	return row ? parseRun(row.value) : null;
 }
 
+/**
+ * The moved record of one run (its rows, claim and counts), or null when there is none. It is kept per run, so it is
+ * read by the run's id even after a newer run has replaced `resort_run` (the closing toast, decision 160).
+ */
+export async function readMoved(
+	db: D1Database,
+	runId: string,
+): Promise<MovedRecord | null> {
+	const row = await db
+		.prepare("SELECT value FROM household_settings WHERE key = ?")
+		.bind(movedKey(runId))
+		.first<{ value: string }>();
+	return row ? (JSON.parse(row.value) as MovedRecord) : null;
+}
+
 /** Writes `next` only if the stored text is still `expected` (null: no row yet). True when it wrote. */
 async function writeRunIf(
 	db: D1Database,

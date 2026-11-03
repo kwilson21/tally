@@ -174,7 +174,8 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		const reask = reaskOf(0);
-		expect(reask?.ids).toEqual(related);
+		// The run holds the rows in run order (newest first), so the set is what matters.
+		expect([...(reask?.ids ?? [])].sort()).toEqual([...related].sort());
 		const run = await readRun(db);
 		expect(run?.id).toBe(reask?.runId);
 		expect(run?.status).toBe("running");
@@ -413,6 +414,12 @@ describe("the progress poll (decision 159)", () => {
 			raw: "NEWER ROW",
 			jevCategoryId: await categoryId("Eating Out"),
 		});
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(await categoryId("Groceries"), newer)
+			.run();
 		await startResortFor(mutableEnv as never, db, {
 			filedId: newer,
 			excludeIds: [],
@@ -420,8 +427,12 @@ describe("the progress poll (decision 159)", () => {
 		});
 		expect((await readRun(db))?.id).not.toBe(old?.id);
 		const { res } = await get(`/resort/progress?run=${old?.id}`);
-		expect(trigger(res).toast?.undo).toBe(old?.id);
-		expect(related.length).toBeGreaterThan(0);
+		// The old run moved nothing, and two of its rows still wait: its own words, with no Undo.
+		expect(trigger(res).toast?.message).toBe(
+			"Nothing moved. 2 need your answer.",
+		);
+		expect(trigger(res).toast?.undo).toBeUndefined();
+		expect(related.length).toBe(2);
 	});
 
 	it("an unknown run id returns the empty fragment with no toast", async () => {
@@ -439,6 +450,14 @@ describe("the progress poll (decision 159)", () => {
 			new_name: "Books & audio",
 		});
 		const run = await readRun(db);
+		const eating = await categoryId("Eating Out");
+		// Both related rows are decided by a person, so nothing moves and nothing waits.
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE category_id IS NULL AND category_source IS NULL AND raw_name LIKE 'BOOKSHOP%'",
+			)
+			.bind(eating)
+			.run();
 		await finishRun(db, { runId: run?.id ?? "", now: Date.now() });
 		const { res } = await get(`/resort/progress?run=${run?.id}`);
 		expect(trigger(res).toast).toBeUndefined();
@@ -532,11 +551,19 @@ describe("Undo (decision 160)", () => {
 
 	it("draws the page named by back, and answers a page it does not know with a redirect", async () => {
 		const { runId } = await movedRun();
-		const { res } = await post("/resort/undo", {
+		const plain = await post(
+			"/resort/undo",
+			{ token: runId, back: "/elsewhere" },
+			false,
+		);
+		expect(plain.res.status).toBe(303);
+		expect(plain.res.headers.get("location")).toBe("/settings/suggestions");
+		const drawn = await post("/resort/undo", {
 			token: runId,
 			back: "/elsewhere",
 		});
-		expect(res.status).toBe(303);
+		expect(drawn.res.status).toBe(200);
+		expect(drawn.html).toContain('id="suggestions-page"');
 	});
 });
 
@@ -610,10 +637,11 @@ describe("the four Create paths", () => {
 			amount: 1200,
 			jevCategoryId: eating,
 		});
-		await post("/transactions/organize/suggestion", [
-			["suggestion", String(suggestion)],
-			...pets.map((id): [string, string] => ["shown", String(id)]),
-		]);
+		const filed = await post("/transactions/organize/suggestion", {
+			suggestion: String(suggestion),
+			shown: pets.map(String),
+		});
+		expect(filed.res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect(reaskOf(0)?.ids).toEqual([related]);
 	});

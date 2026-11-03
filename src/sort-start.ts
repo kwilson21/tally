@@ -30,21 +30,24 @@ export type SortParams = {
 /**
  * Starts one sorting instance with these rows, from a sync, Sync now, the webhook, ask again, or the 09:00 run (the
  * night's instance). It returns at once, and never throws: a start that fails is logged by its error name only.
- * Nothing starts with no rows, or with no Jev key unless it is the night's.
+ * Nothing starts with no rows, or with no Jev key unless it is the night's. The result is true only when the instance
+ * was created, so a caller that is waiting on it (a re-sort's run, decision 160) can finish its own instance when not.
  */
 export async function startSorting(
 	env: { JEV_API_KEY?: string; SORT: Env["SORT"] },
 	params: SortParams,
-): Promise<void> {
+): Promise<boolean> {
 	const rows = params.reask ? params.reask.ids.length : params.ids?.length;
-	if (rows === 0) return;
+	if (rows === 0) return false;
 	// The night starts without a Jev key too: its names and suggestions don't need one (sorting then asks nothing).
-	if (!env.JEV_API_KEY && !params.night) return;
+	if (!env.JEV_API_KEY && !params.night) return false;
 	try {
 		await env.SORT.create({ params });
+		return true;
 	} catch (error) {
 		console.error(
 			`sorting: couldn't start ${error instanceof Error ? error.name : "unknown"}`,
 		);
+		return false;
 	}
 }

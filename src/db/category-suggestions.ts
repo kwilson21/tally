@@ -291,6 +291,8 @@ export type CreateResult =
 			ok: true;
 			name: string;
 			moved: number;
+			/** The ids the write filed, in the order the batch returned them (a re-sort starts from the first, #821). */
+			filed: number[];
 			leftOut: number[];
 			attached: boolean;
 			restored: boolean;
@@ -445,7 +447,7 @@ export async function createFromSuggestion(
 				.bind(id, token, ...namedBinds, id, JSON.stringify(ticked)),
 			db
 				.prepare(
-					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE ${named} AND archived = 0 ORDER BY (id = ?) DESC, id LIMIT 1),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,split_removed_from_cents=NULL,split_removed_bills=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate}`,
+					`UPDATE transactions SET category_id=(SELECT id FROM categories WHERE ${named} AND archived = 0 ORDER BY (id = ?) DESC, id LIMIT 1),category_source='user',category_confidence=NULL,jev_none_fit=0,category_suggestion_id=NULL,split_removed_from_cents=NULL,split_removed_bills=NULL,updated_by=?,updated_at=datetime('now') WHERE category_suggestion_id=? AND id IN (${placeholders()}) AND category_id IS NULL AND category_source IS NULL AND is_split=0 AND parent_id IS NULL AND pending=0 AND amount_cents>0 AND excluded=0 AND flag_income=0 AND ${createdGate} RETURNING id`,
 				)
 				.bind(
 					...namedBinds,
@@ -546,6 +548,9 @@ export async function createFromSuggestion(
 		ok: true,
 		name: stored?.name ?? target,
 		moved: filedResult?.meta.changes ?? 0,
+		filed: ((filedResult?.results as { id: number }[] | undefined) ?? []).map(
+			(row) => row.id,
+		),
 		leftOut: leftOut.map((row) => row.id),
 		attached: joined,
 		restored,
