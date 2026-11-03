@@ -48,7 +48,7 @@ export function sameTextPeers<T extends SameTextRow>(
  * A purchase still waiting for a category, as the Needs-category count and Organize read it (NEEDS_CATEGORY), and
  * that no person has decided, is not part of a bill, plan or split, and is not pending. Needs `t` and COUNTED_JOINS.
  */
-const WAITING = `${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.parent_id IS NULL AND t.is_split = 0 AND t.pending = 0`;
+export const WAITING = `${NEEDS_CATEGORY} AND t.category_source IS NULL AND t.parent_id IS NULL AND t.is_split = 0 AND t.pending = 0`;
 
 type FiledRow = {
 	id: number;

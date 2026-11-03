@@ -2610,7 +2610,7 @@ export async function applyMerchantRules(db: D1Database): Promise<void> {
  * uploaded row (spec §8.10). The read and the save guard share it, so a row's save checks the category it was asked
  * with (decision 143). Every other reader keeps `plaid_category` alone. It is NULL for a row with neither, as before.
  */
-const jevCategoryHintSql = (alias: string) =>
+export const jevCategoryHintSql = (alias: string) =>
 	`COALESCE(${alias}.plaid_category, ${alias}.apple_category)`;
 
 // A credit a person already decided about: Jev can only help with its category. The review columns
