@@ -472,6 +472,7 @@ describe("finishRun", () => {
 			moved: 1,
 			needAnswer: 1,
 			categories: ["Groceries"],
+			byCategory: [{ id: groceries, name: "Groceries", count: 1 }],
 			finished: true,
 			pending: 0,
 		});
@@ -603,6 +604,7 @@ describe("finishRun", () => {
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: true,
 			pending: 0,
 		});
@@ -664,6 +666,10 @@ describe("two categories in one run", () => {
 			moved: 2,
 			needAnswer: 0,
 			categories: ["Groceries", other.name],
+			byCategory: expect.arrayContaining([
+				{ id: groceries, name: "Groceries", count: 1 },
+				{ id: other.id, name: other.name, count: 1 },
+			]),
 			finished: true,
 			pending: 0,
 		});
@@ -761,15 +767,16 @@ describe("two categories in one run", () => {
 			moved: 1,
 			needAnswer: 0,
 			categories: ["Groceries"],
+			byCategory: [{ id: groceries, name: "Groceries", count: 1 }],
 			finished: true,
 			pending: 0,
 		});
 	});
 
-	it("does not record a joined row that the run filed into another category", async () => {
-		// b1 was started for the other category; the run files it into Groceries instead. That is not its own
-		// category, so it is not recorded (only g1, which went into its own category, is).
-		const { b1, runId } = await twoCategoryRun();
+	it("records a joined row the run filed into another category, with the category it actually went to", async () => {
+		// b1 was started for the other category; Jev files it into Groceries instead. It is still a row the run
+		// moved, recorded under the category it now holds (g1 and b1 both count).
+		const { g1, b1, runId } = await twoCategoryRun();
 		await db
 			.prepare(
 				"UPDATE transactions SET category_id = ?, category_source = 'jev' WHERE id = ?",
@@ -777,7 +784,130 @@ describe("two categories in one run", () => {
 			.bind(groceries, b1)
 			.run();
 		const result = await finishRun(db, { runId, now: T0 + 5000 });
-		expect(result.moved).toBe(1);
+		expect(result.moved).toBe(2);
+		const record = JSON.parse(
+			(
+				await db
+					.prepare("SELECT value FROM household_settings WHERE key = ?")
+					.bind(`resort_moved_${runId}`)
+					.first<{ value: string }>()
+			)?.value ?? "{}",
+		) as { rows: { id: number; categoryId: number }[] };
+		expect(
+			Object.fromEntries(record.rows.map((r) => [r.id, r.categoryId])),
+		).toEqual({ [g1]: groceries, [b1]: groceries });
+	});
+});
+
+describe("finishRun: the category a moved row actually went to", () => {
+	const recordOf = async (runId: string) =>
+		JSON.parse(
+			(
+				await db
+					.prepare("SELECT value FROM household_settings WHERE key = ?")
+					.bind(`resort_moved_${runId}`)
+					.first<{ value: string }>()
+			)?.value ?? "{}",
+		) as {
+			rows: { id: number; categoryId: number }[];
+			categories: string[];
+			byCategory: { id: number; name: string; count: number }[];
+		};
+
+	it("records a row Jev assigns to a different existing category, and Undo puts it back", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await clear([x]);
+		await answer(x, eatingOut);
+		const result = await finishRun(db, { runId, now: T0 + 5000 });
+		expect(result).toMatchObject({
+			moved: 1,
+			categories: ["Eating Out"],
+			byCategory: [{ id: eatingOut, name: "Eating Out", count: 1 }],
+		});
+		const record = await recordOf(runId);
+		expect(record.rows).toEqual([
+			expect.objectContaining({ id: x, categoryId: eatingOut }),
+		]);
+		await closeToastOnce(db, runId, T0 + 5000);
+		expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
+			restored: 1,
+			changedSince: 0,
+			expired: false,
+		});
+		expect(await state(x)).toMatchObject({ categoryId: null, confidence: 0.3 });
+	});
+
+	it("counts moved rows per destination category", async () => {
+		const other = await otherCategory();
+		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const g2 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) =>
+				[g1, g2].includes(c.id),
+			),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await clear([g1, g2]);
+		await answer(g1, groceries);
+		await answer(g2, other.id);
+		const result = await finishRun(db, { runId, now: T0 + 5000 });
+		expect(result.moved).toBe(2);
+		expect(result.byCategory.sort((a, b) => a.id - b.id)).toEqual(
+			[
+				{ id: groceries, name: "Groceries", count: 1 },
+				{ id: other.id, name: other.name, count: 1 },
+			].sort((a, b) => a.id - b.id),
+		);
+		expect(result.categories.sort()).toEqual(["Groceries", other.name].sort());
+	});
+
+	it("does not move a row left in no category", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([x]);
+		expect(
+			await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 }),
+		).toMatchObject({ moved: 0, byCategory: [], categories: [] });
+		expect(await state(x)).toMatchObject({ categoryId: null, confidence: 0.3 });
+	});
+
+	it("does not move a row a person answered, even into a different category", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([x]);
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+			)
+			.bind(eatingOut, x)
+			.run();
+		expect(
+			await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 }),
+		).toMatchObject({ moved: 0 });
+		expect(await state(x)).toMatchObject({
+			categoryId: eatingOut,
+			categorySource: "user",
+		});
 	});
 });
 
@@ -802,6 +932,7 @@ describe("finishRun: a row a person answered during the run", () => {
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: true,
 			pending: 0,
 		});
@@ -851,6 +982,7 @@ describe("finishRun: one finish per sorting instance", () => {
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: false,
 			pending: 1,
 		});
@@ -870,6 +1002,10 @@ describe("finishRun: one finish per sorting instance", () => {
 			moved: 2,
 			needAnswer: 0,
 			categories: ["Groceries", other.name],
+			byCategory: expect.arrayContaining([
+				{ id: groceries, name: "Groceries", count: 1 },
+				{ id: other.id, name: other.name, count: 1 },
+			]),
 			finished: true,
 			pending: 0,
 		});
@@ -905,6 +1041,7 @@ describe("finishRun: one finish per sorting instance", () => {
 			moved: 1,
 			needAnswer: 0,
 			categories: ["Groceries"],
+			byCategory: [{ id: groceries, name: "Groceries", count: 1 }],
 			finished: true,
 			pending: 0,
 		});
@@ -935,6 +1072,7 @@ describe("finishRun: one finish per sorting instance", () => {
 			moved: 1,
 			needAnswer: 0,
 			categories: ["Groceries"],
+			byCategory: [{ id: groceries, name: "Groceries", count: 1 }],
 			finished: true,
 			pending: 0,
 		});
@@ -1306,6 +1444,7 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: false,
 			pending: 1,
 		});

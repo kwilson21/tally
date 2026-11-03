@@ -65,15 +65,17 @@ export type MovedRecord = {
 	runId: string;
 	categoryId: number;
 	categoryName: string;
-	/** The names of the categories that received a moved row, for the toast. */
+	/** The names of the categories the moved rows went to (the toast), in category id order. */
 	categories: string[];
+	/** The moved rows per category they went to: the toast's counts. */
+	byCategory: { id: number; name: string; count: number }[];
 	/** When the closing toast was claimed; null until it is. */
 	claimedAt: number | null;
 	/** Undo is open until this time (ms): claimedAt + UNDO_MS. Null until the toast is claimed. */
 	until: number | null;
 	/** When the run was finalized: an unclaimed record is removed STALE_MS after this. */
 	finalizedAt: number;
-	/** Each row the run moved: the category its own entry was started for (which it now holds), its identity and its snapshot. */
+	/** Each row the run moved: the category it now holds (Undo puts it back from there), its identity and its snapshot. */
 	rows: {
 		id: number;
 		categoryId: number;
@@ -281,10 +283,14 @@ const maybeRangeSql = () => {
 	return `CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) > ${bounds.above} AND CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${bounds.below}`;
 };
 
-export type FinishResult = {
+type FinishCounts = {
 	moved: number;
 	needAnswer: number;
 	categories: string[];
+	byCategory: { id: number; name: string; count: number }[];
+};
+
+export type FinishResult = FinishCounts & {
 	/** False while some sorting instances have not finished yet (nothing is moved, recorded or restored then). */
 	finished: boolean;
 	/** The instances still to finish. */
@@ -342,6 +348,7 @@ async function recordInstanceFinish(
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: false,
 			pending,
 		};
@@ -350,8 +357,8 @@ async function recordInstanceFinish(
 }
 
 /**
- * Finalizes the run once: marks it done, records the rows the sort moved (each one of the run's own rows, filed into
- * the category its entry was started for, by Jev) with their categories and snapshots, counts how many now need an
+ * Finalizes the run once: marks it done, records the rows the sort moved (each one of the run's own rows that Jev filed
+ * into a category, whichever it is) with the category each holds and its snapshot, counts how many now need an
  * answer, and restores the pre-run mark of each run row the run never reached (still untouched). A keyed finalize
  * flips only while every instance has finished; if the flip does nothing, the run is still open and this returns the
  * waiting result. A second call changes nothing and returns the same counts.
@@ -395,14 +402,19 @@ async function finalizeRun(
 		)
 		.bind(RUN_KEY, token);
 
-	// The moved rows: the run's own rows, now in the category their own entry was started for, filed by Jev.
+	// The moved rows: the run's own rows that were undecided and that Jev has filed into some category (whichever it is),
+	// still the same transaction. Each records the category it now holds, which is where Undo puts it back from.
 	const movedRows = `(SELECT json_group_array(json_object('id', t.id, 'categoryId', t.category_id,
 			'plaid_transaction_id', t.plaid_transaction_id, 'amount_cents', t.amount_cents, 'snapshot', json(s.value)))
 		FROM json_each(json_extract(r.value, '$.snapshots')) s
 		JOIN transactions t ON t.id = json_extract(s.value, '$.id')
 			AND t.plaid_transaction_id IS json_extract(s.value, '$.plaid_transaction_id')
 			AND t.amount_cents = json_extract(s.value, '$.amount_cents')
-		WHERE t.category_id = json_extract(r.value, '$.categoryByRow.' || t.id) AND t.category_source = 'jev')`;
+		WHERE t.category_id IS NOT NULL AND t.category_source = 'jev')`;
+	// The categories the moved rows went to, from their actual destinations (names and counts), in id order.
+	const destinations = `(SELECT c.id AS id, c.name AS name, COUNT(*) AS n
+		FROM json_each(${movedRows}) m JOIN categories c ON c.id = json_extract(m.value, '$.categoryId')
+		GROUP BY c.id ORDER BY c.id)`;
 	const record = db
 		.prepare(
 			`INSERT INTO household_settings (key, value)
@@ -410,9 +422,8 @@ async function finalizeRun(
 				'runId', json_extract(r.value, '$.id'),
 				'categoryId', json_extract(r.value, '$.categoryId'),
 				'categoryName', json_extract(r.value, '$.categoryName'),
-				'categories', json((SELECT json_group_array(json_extract(c.value, '$.name'))
-					FROM json_each(json_extract(r.value, '$.categories')) c
-					WHERE json_extract(c.value, '$.id') IN (SELECT json_extract(m.value, '$.categoryId') FROM json_each(${movedRows}) m))),
+				'categories', json((SELECT json_group_array(d.name) FROM ${destinations} d)),
+				'byCategory', json((SELECT json_group_array(json_object('id', d.id, 'name', d.name, 'count', d.n)) FROM ${destinations} d)),
 				'claimedAt', NULL,
 				'until', NULL,
 				'finalizedAt', ?4,
@@ -435,6 +446,7 @@ async function finalizeRun(
 			moved: 0,
 			needAnswer: 0,
 			categories: [],
+			byCategory: [],
 			finished: false,
 			pending: Math.max(0, run.instances - run.finishedKeys.length),
 		};
@@ -443,6 +455,7 @@ async function finalizeRun(
 		moved: 0,
 		needAnswer: 0,
 		categories: [],
+		byCategory: [],
 	};
 	return { ...counts, finished: true, pending: 0 };
 }
@@ -451,7 +464,7 @@ async function finalizeRun(
 async function readRecord(
 	db: D1Database,
 	runId: string,
-): Promise<{ moved: number; needAnswer: number; categories: string[] } | null> {
+): Promise<FinishCounts | null> {
 	const row = await db
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
@@ -462,6 +475,7 @@ async function readRecord(
 		moved: record.rows.length,
 		needAnswer: record.needAnswer,
 		categories: record.categories,
+		byCategory: record.byCategory,
 	};
 }
 
