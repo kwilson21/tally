@@ -1316,3 +1316,103 @@ describe("a cluster's leader is asked once, and its followers take the answer (d
 		);
 	});
 });
+
+describe("a follower takes its leader's answer only when the leader itself was filed (decision 158)", () => {
+	const cluster = async (count: number, text = "SAME SHOP") => {
+		const ids: number[] = [];
+		for (let i = 0; i < count; i++)
+			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+		return ids;
+	};
+
+	async function reaskClusters(
+		ids: number[],
+		fetchImpl: (url?: string, init?: RequestInit) => Promise<Response>,
+	) {
+		const runId = await startRun(ids);
+		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: `leader-${runId}`,
+			reask: { runId, ids, clusters: await clustersOf(ids) },
+		});
+		return { runId };
+	}
+
+	const expectFollowersRestored = async (ids: number[]) => {
+		for (const id of ids.slice(1)) {
+			expect(await field(id, "category_id")).toBeNull();
+			expect(await field(id, "category_source")).toBeNull();
+			expect(await confOf(id)).toBe(0.55);
+		}
+	};
+
+	it("a leader edited mid-ask is not filed, so its followers are restored and not filed; the leader stays cleared", async () => {
+		const ids = await cluster(4);
+		const fetchImpl = vi.fn(async () => {
+			await db
+				.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?")
+				.bind(ids[0])
+				.run();
+			return replyFor("Eating Out", 0.9);
+		});
+		const { runId } = await reaskClusters(ids, fetchImpl);
+		expect(await field(ids[0] as number, "category_id")).toBeNull();
+		expect(await confOf(ids[0] as number)).toBeNull();
+		await expectFollowersRestored(ids);
+		expect((await readRun(db))?.keptCleared).toContain(ids[0]);
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await confOf(ids[0] as number)).toBeNull();
+		await expectFollowersRestored(ids);
+	});
+
+	it("a leader a person decided mid-ask keeps the person's choice, and its followers are restored", async () => {
+		const ids = await cluster(3);
+		const groceries = await categoryIdByName("Groceries");
+		await reaskClusters(ids, async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+				)
+				.bind(groceries, ids[0])
+				.run();
+			return replyFor("Eating Out", 0.9);
+		});
+		expect(await field(ids[0] as number, "category_source")).toBe("user");
+		await expectFollowersRestored(ids);
+	});
+
+	it("a leader whose id was reused mid-ask is not filed, and its followers are restored", async () => {
+		const ids = await cluster(3);
+		await reaskClusters(ids, async () => {
+			await reuseId(ids[0] as number, { plaid: "other-plaid", amount: 999 });
+			return replyFor("Eating Out", 0.9);
+		});
+		expect(await field(ids[0] as number, "raw_name")).toBe("REPLACEMENT ROW");
+		expect(await field(ids[0] as number, "category_id")).toBeNull();
+		await expectFollowersRestored(ids);
+	});
+
+	it("a mixed reading that names the same category is not a mixed trip, so the followers are applied", async () => {
+		const ids = await cluster(3);
+		await reaskClusters(
+			ids,
+			vi.fn(async () =>
+				replyFor("Eating Out", 0.9, { probability: 0.9, also: "Eating Out" }),
+			),
+		);
+		for (const id of ids)
+			expect(await field(id, "category_source")).toBe("jev");
+	});
+
+	it("a mixed reading below 0.80 is not a mixed trip, so the followers are applied", async () => {
+		const ids = await cluster(3);
+		await reaskClusters(
+			ids,
+			vi.fn(async () =>
+				replyFor("Eating Out", 0.9, { probability: 0.7, also: "Groceries" }),
+			),
+		);
+		for (const id of ids)
+			expect(await field(id, "category_source")).toBe("jev");
+	});
+});

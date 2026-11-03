@@ -723,18 +723,30 @@ export async function writeGroup(
 				// A confident answer for a real category applies to each follower of this leader as a category only (decision
 				// 158), unless Jev reads the trip as mixed: its followers may be other things. Each follower is saved on its own
 				// mark and seen fields, so a row a person has answered or edited is left out (its mark is restored or kept).
+				// The leader's category is filed only when the leader itself was valid (its seen fields are on the plan) and its
+				// save is written (the follower's own save checks it, below). The mixed test is the app's (jevSaysMixedSql,
+				// mixed-trip.ts): Jev's mixed reading at or above the threshold, naming another category.
+				const leaderCategory = decision.categoryId;
 				const mixedTrip =
 					decision.mixedProbability !== null &&
 					decision.mixedProbability !== undefined &&
-					meetsConfidenceThreshold(decision.mixedProbability, JEV_THRESHOLD);
-				if (reask && decision.categoryId !== null && !mixedTrip)
+					meetsConfidenceThreshold(decision.mixedProbability, JEV_THRESHOLD) &&
+					decision.alsoCategoryId !== null &&
+					decision.alsoCategoryId !== undefined &&
+					decision.alsoCategoryId !== leaderCategory;
+				if (
+					reask &&
+					leaderCategory !== null &&
+					reask.seen[row.id] &&
+					!mixedTrip
+				)
 					for (const followerId of reask.followers[row.id] ?? []) {
 						const followerMark = markOf.get(followerId);
 						const followerSeen = reask.seen[followerId];
 						if (!followerMark || !followerSeen) continue;
 						applies.push({
 							index: statements.length,
-							categoryId: decision.categoryId,
+							categoryId: leaderCategory,
 						});
 						statements.push(
 							saveJevResultStatements(
@@ -753,6 +765,7 @@ export async function writeGroup(
 										plaidTransactionId: followerMark.plaid,
 										amountCents: followerMark.amount,
 									},
+									leaderFiled: { id: row.id, categoryId: leaderCategory },
 									categoryAsked: plan.categories.length > 0,
 									switches: {
 										income: sw.income,
