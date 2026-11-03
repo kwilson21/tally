@@ -8,6 +8,7 @@
 // randomness is read outside a step (the Workflow's loop itself reads none).
 
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
+import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
 import { householdTimeZone, todayIn } from "./dates";
 import {
@@ -23,6 +24,7 @@ import {
 	reservedKeyFor,
 	reserveJevCalls,
 } from "./db/jev-calls";
+import { currentClusterRows } from "./db/resort-candidates";
 import {
 	bumpDoneStatement,
 	type ReaskMark,
@@ -48,6 +50,7 @@ import {
 	saveJevDetailsStatement,
 	saveJevResultStatements,
 } from "./db/transactions";
+import { buildClusters } from "./resort-clusters";
 import { type Deadline, pastDeadline } from "./run-budget";
 import type { ReaskParams } from "./sort-start";
 
@@ -157,10 +160,16 @@ type ReaskPlan = {
 	runId: string;
 	cleared: ReaskMark[];
 	dropped: number[];
+	/** How many leaders the read found: the rows the group asks, which its calls are reserved for. */
 	found: number;
 	/**
-	 * Each read row's seen fields, as its question was built: a row whose fields changed before its mark is put back is
-	 * left cleared (#831 round 2). A dropped row has none, so its mark is put back as before.
+	 * Each picked leader's cleared followers (decision 158), by leader id: cleared with the leader, never asked. A
+	 * follower's answer is the leader's, applied only when the leader's answer is confident and not mixed.
+	 */
+	followers: Record<number, number[]>;
+	/**
+	 * Each read row's seen fields, as its question was built (leaders and followers): a row whose fields changed before
+	 * its mark is put back is left cleared (#831 round 2). A dropped row has none, so its mark is put back as before.
 	 */
 	seen: Record<number, JevSeen>;
 };
@@ -344,6 +353,52 @@ function waitAfter(groups: AskResult[][], waitedBefore: number): number | null {
 }
 
 /**
+ * A re-ask's clusters in the run's order (decision 158), each as its member ids (its leader first, then its followers),
+ * restricted to `ids`. A candidate in no cluster is a cluster of its own.
+ */
+function reaskClusterMembers(
+	ids: readonly number[],
+	clusters: readonly number[][] | undefined,
+): number[][] {
+	const clusterOf = new Map<number, number[]>();
+	for (const cluster of clusters ?? [])
+		for (const id of cluster) clusterOf.set(id, cluster);
+	const wanted = new Set(ids);
+	const placed = new Set<number>();
+	const out: number[][] = [];
+	for (const id of ids) {
+		if (placed.has(id)) continue;
+		const members = (clusterOf.get(id) ?? [id]).filter(
+			(member) => wanted.has(member) && !placed.has(member),
+		);
+		for (const member of members) placed.add(member);
+		if (members.length > 0) out.push(members);
+	}
+	return out;
+}
+
+/** A row's grouping inputs as they are now (currentClusterRows). */
+type CurrentRow = Awaited<ReturnType<typeof currentClusterRows>>[number];
+
+/**
+ * The followers still in their leader's cluster by the rows as they are now (decision 158): the leader first, then the
+ * followers, grouped as buildClusters groups them. A follower that no longer groups with the leader (its text, note,
+ * mixed reading or amount changed after the clusters were built) is left out, so its leader's answer is not applied to it.
+ */
+function stillInCluster(
+	leaderId: number,
+	followerIds: readonly number[],
+	current: ReadonlyMap<number, CurrentRow>,
+): number[] {
+	const rows = [leaderId, ...followerIds].flatMap((id) => {
+		const row = current.get(id);
+		return row ? [row] : [];
+	});
+	const cluster = buildClusters(rows).find((c) => c[0] === leaderId) ?? [];
+	return followerIds.filter((id) => cluster.includes(id));
+}
+
+/**
  * Takes the turn and reads what a group needs, with no Jev call and no reservation: the switches once, the categories,
  * the people (when details are on), the time zone, its rows and their merchant histories. Gives the turn back when
  * there is nothing to ask. Any throw after the turn was taken gives it back first. The calls are reserved in their own
@@ -398,15 +453,46 @@ async function readGroup(
 			// The still-waiting rows, in the run's order, under the turn: the clear and the read below both happen under it,
 			// so no other sort sees a cleared mark (decision 160). A retried read clears the same rows again, harmlessly.
 			const runIds = new Set(run.ids);
-			cleared = await reaskPicks(db, {
-				ids: options.reask.ids.filter((id) => runIds.has(id)),
-				except: new Set(options.exceptIds),
-				limit: options.limit,
+			// Only the leaders are asked (decision 158): each cluster is asked through its first row that still waits, so when
+			// a leader was decided or asked before, the next waiting follower leads the rest of its cluster and the cluster is
+			// still asked once. The followers of the picked leaders are cleared with them, under the same turn, never asked.
+			const exceptSet = new Set(options.exceptIds);
+			const members = reaskClusterMembers(
+				options.reask.ids.filter((id) => runIds.has(id)),
+				options.reask.clusters,
+			).map((cluster) => cluster.filter((id) => !exceptSet.has(id)));
+			const allMembers = members.flat();
+			const waiting = await reaskPicks(db, {
+				ids: allMembers,
+				except: new Set(),
+				limit: allMembers.length,
 			});
+			const waitingById = new Map(waiting.map((mark) => [mark.id, mark]));
+			const leaderMarks: ReaskMark[] = [];
+			const followerMarks: ReaskMark[] = [];
+			const followersOf = new Map<number, number[]>();
+			for (const cluster of members) {
+				if (leaderMarks.length >= options.limit) break;
+				const [leaderId, ...rest] = cluster.filter((id) => waitingById.has(id));
+				const leader =
+					leaderId === undefined ? undefined : waitingById.get(leaderId);
+				if (!leader) continue;
+				const followers = rest
+					.map((id) => waitingById.get(id))
+					.filter((mark): mark is ReaskMark => mark !== undefined);
+				leaderMarks.push(leader);
+				followerMarks.push(...followers);
+				followersOf.set(
+					leader.id,
+					followers.map((mark) => mark.id),
+				);
+			}
+			cleared = [...leaderMarks, ...followerMarks];
 			if (cleared.length > 0)
 				await db.batch([reaskClearStatement(db, cleared, options.turnId)]);
-			rows = cleared.length
-				? await pendingForJev(db, options.limit, {
+			// One read for the leaders and their followers. Only the leaders' rows are asked, so only they are in `rows`.
+			const read = cleared.length
+				? await pendingForJev(db, cleared.length, {
 						categories: switches.categories,
 						categoryAsked: categories.length > 0,
 						income: switches.income,
@@ -416,10 +502,22 @@ async function readGroup(
 				: [];
 			// pendingForJev's order is its own (newest first), so the rows are put in the run's order (decision 160).
 			const position = new Map(cleared.map((mark, i) => [mark.id, i]));
-			rows.sort(
+			read.sort(
 				(a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0),
 			);
-			const readIds = new Set(rows.map((row) => row.id));
+			// The clusters are checked against the rows as they are now (decision 158): a follower changed since the clusters
+			// were built may no longer group with its leader. It is not filed; its mark goes back with the rest.
+			const current = new Map(
+				(
+					await currentClusterRows(
+						db,
+						cleared.map((mark) => mark.id),
+					)
+				).map((row) => [row.id, row]),
+			);
+			const leaderIds = new Set(leaderMarks.map((mark) => mark.id));
+			rows = read.filter((row) => leaderIds.has(row.id));
+			const readIds = new Set(read.map((row) => row.id));
 			reask = {
 				runId: options.reask.runId,
 				cleared,
@@ -427,7 +525,13 @@ async function readGroup(
 					.map((mark) => mark.id)
 					.filter((id) => !readIds.has(id)),
 				found: rows.length,
-				seen: Object.fromEntries(rows.map((row) => [row.id, row.seen])),
+				followers: Object.fromEntries(
+					leaderMarks.map((mark) => [
+						mark.id,
+						stillInCluster(mark.id, followersOf.get(mark.id) ?? [], current),
+					]),
+				),
+				seen: Object.fromEntries(read.map((row) => [row.id, row.seen])),
 			};
 		} else {
 			rows = await pendingForJev(db, options.limit, {
@@ -667,6 +771,69 @@ export async function writeGroup(
 				});
 				statements.push(answer.update);
 				if (answer.log) statements.push(answer.log);
+				// A confident answer for a real category applies to each follower of this leader as a category only (decision
+				// 158), unless Jev reads the trip as mixed: its followers may be other things. Each follower is saved on its own
+				// mark and seen fields, so a row a person has answered or edited is left out (its mark is restored or kept).
+				// The leader's category is filed only when the leader itself was valid (its seen fields are on the plan) and its
+				// save is written (the follower's own save checks it, below). The mixed test is the app's (jevSaysMixedSql,
+				// mixed-trip.ts): Jev's mixed reading at or above the threshold, naming another category.
+				const leaderCategory = decision.categoryId;
+				const mixedTrip =
+					decision.mixedProbability !== null &&
+					decision.mixedProbability !== undefined &&
+					meetsConfidenceThreshold(decision.mixedProbability, JEV_THRESHOLD) &&
+					decision.alsoCategoryId !== null &&
+					decision.alsoCategoryId !== undefined &&
+					decision.alsoCategoryId !== leaderCategory;
+				if (
+					reask &&
+					leaderCategory !== null &&
+					reask.seen[row.id] &&
+					!mixedTrip
+				)
+					for (const followerId of reask.followers[row.id] ?? []) {
+						const followerMark = markOf.get(followerId);
+						const followerSeen = reask.seen[followerId];
+						if (!followerMark || !followerSeen) continue;
+						applies.push({
+							index: statements.length,
+							categoryId: leaderCategory,
+						});
+						// A follower's category is logged like the leader's: the What AI did row counts it once, and only when
+						// the save files it (the log statement checks the row's source after the update).
+						const followerSave = saveJevResultStatements(
+							db,
+							followerId,
+							{
+								...decision,
+								noneFit: false,
+								mixedProbability: null,
+								alsoCategoryId: null,
+							},
+							{
+								categoryOnly: true,
+								reask: {
+									runId: reask.runId,
+									plaidTransactionId: followerMark.plaid,
+									amountCents: followerMark.amount,
+								},
+								// The follower's save writes only where its leader's category was filed in this batch
+								// (decision 158). The leader was waiting when the group read, and the batch is turn-guarded.
+								leaderFiled: { id: row.id, categoryId: leaderCategory },
+								categoryAsked: plan.categories.length > 0,
+								switches: {
+									income: sw.income,
+									categories: sw.categories,
+									sortOnArrival: plan.bySync,
+								},
+								log: { day: saveDay, category: true, income: false },
+								turn,
+								seen: followerSeen,
+							},
+						);
+						statements.push(followerSave.update);
+						if (followerSave.log) statements.push(followerSave.log);
+					}
 			}
 			if (sw.details && !row.detailsAsked && !reask) {
 				const kind = result.answer.kind;
@@ -736,13 +903,23 @@ export async function writeGroup(
 	if (reask) {
 		// The rows this group handled, for a re-sort's progress: each asked row once, except a busy one that the next group
 		// asks again (decision 145). Out-of-time and date-changed rows were not handled.
-		const handled = results.filter(
-			(result) =>
-				(result.outcome === "answered" ||
-					result.outcome === "failed" ||
-					result.outcome === "lost") &&
-				!(waitsOnBusy && !stop && retryable(result)),
-		).length;
+		const handledLeaders = results
+			.filter(
+				(result) =>
+					(result.outcome === "answered" ||
+						result.outcome === "failed" ||
+						result.outcome === "lost") &&
+					!(waitsOnBusy && !stop && retryable(result)),
+			)
+			.map((result) => result.id);
+		// Each handled leader counts with its followers (applied or restored, decision 158). A leader the cap or the budget
+		// left unhandled counts none of its followers, which are restored.
+		const handled =
+			handledLeaders.length +
+			handledLeaders.reduce(
+				(sum, id) => sum + (reask.followers[id]?.length ?? 0),
+				0,
+			);
 		// Every row the re-ask cleared gets its mark back unless its answer was saved above: a row not reached, one the
 		// cap or the budget cut, one whose ask failed, and one whose answer no longer applied (decision 160). A row that
 		// was answered has its confidence written, so its restore changes nothing.
@@ -863,6 +1040,9 @@ export async function sortGroups(
 			held = turnId;
 			// A re-ask's picked rows that Jev's question didn't read are not asked again by a later group.
 			for (const id of readPlan.reask?.dropped ?? []) askedIds.add(id);
+			// A re-ask's followers are never asked on their own, so no later group picks one (decision 158).
+			for (const followerIds of Object.values(readPlan.reask?.followers ?? {}))
+				for (const id of followerIds) askedIds.add(id);
 			// The calls are reserved in a step of their own, so a read that runs again never reserves twice. A reserve
 			// that rejects grants nothing here; if its batch had committed, its record gives the calls back at the save.
 			let granted = 0;

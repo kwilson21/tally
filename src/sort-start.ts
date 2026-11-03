@@ -6,7 +6,15 @@
  * A re-ask instance's rows (decision 160): Jev is asked once more about each of these candidate ids, in this order, for
  * the re-sort run `runId`. Only the run's still-waiting rows are asked, and the instance ignores the sync switch.
  */
-export type ReaskParams = { runId: string; ids: number[] };
+export type ReaskParams = {
+	runId: string;
+	ids: number[];
+	/**
+	 * The re-ask's clusters (decision 158), each `[leaderId, ...followerIds]` as buildClusters gives them. Jev is asked
+	 * about each leader only, and a leader's answer applies to its followers. A candidate in no cluster is its own leader.
+	 */
+	clusters?: number[][];
+};
 
 /** What one instance sorts: `ids` (none for all waiting), whether a sync started it, and whether its rules already ran. */
 export type SortParams = {

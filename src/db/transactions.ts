@@ -3208,6 +3208,13 @@ export type JevAnswerSave = {
 		plaidTransactionId: string | null;
 		amountCents: number;
 	};
+	/**
+	 * A re-ask's follower (decision 158): written only when its leader's category was filed by this same batch (the
+	 * leader's own save ran first). A leader that was edited, decided or reused meanwhile is not filed, so nothing here.
+	 * This reads the leader's state in the same batch, which is safe because the leader was waiting when the group read
+	 * and the batch is turn-guarded: no other group can file it in between.
+	 */
+	leaderFiled?: { id: number; categoryId: number };
 	categoryAsked?: boolean;
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
@@ -3285,7 +3292,7 @@ export function saveJevResultStatements(
 					AND ${STILL_ON_SQL}${seenSql}${activeSql}
 					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
 						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')
-					AND plaid_transaction_id IS ? AND amount_cents = ?`,
+					AND plaid_transaction_id IS ? AND amount_cents = ?${options.leaderFiled ? " AND EXISTS (SELECT 1 FROM transactions g WHERE g.id = ? AND g.category_id = ? AND g.category_source = 'jev')" : ""}`,
 			options.turn,
 		);
 		const category = db
@@ -3305,6 +3312,9 @@ export function saveJevResultStatements(
 				options.reask?.runId ?? "",
 				options.reask?.plaidTransactionId ?? null,
 				options.reask?.amountCents ?? 0,
+				...(options.leaderFiled
+					? [options.leaderFiled.id, options.leaderFiled.categoryId]
+					: []),
 				...guarded.binds,
 			);
 		return answerStatements(
