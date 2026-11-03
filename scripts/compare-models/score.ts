@@ -14,7 +14,7 @@ export type Direction = "money out" | "money in";
 export type Case = {
 	rawName: string;
 	direction: Direction;
-	/** Tally's input, from the case's first row. Nothing else is sent: no history, note, kind or person. */
+	/** Tally's input, from the case's first row. Nothing else is sent: no learned line, note, kind or person. */
 	input: JevInput;
 	/** The first category any row of the case has, or null when a person decides. */
 	rightCategory: string | null;

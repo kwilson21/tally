@@ -1001,6 +1001,100 @@ describe("restore of a cleared mark, and updated_at", () => {
 	});
 });
 
+describe("a re-ask sends the learned line that applies (decision 156)", () => {
+	it("sends the line of its cleaned text as category only, and files the answer category-only", async () => {
+		const eatingOut = await categoryIdByName("Eating Out");
+		for (const day of ["01", "02"])
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, updated_at) VALUES (1, ?, 100, 'RESORT LINE SHOP', ?, 'user', '2020-01-01 00:00:00')",
+				)
+				.bind(`2026-08-${day}`, eatingOut)
+				.run();
+		const purchase = await addRow({
+			rawName: "RESORT LINE SHOP",
+			confidence: 0.55,
+		});
+		const runId = await startRun([purchase]);
+		const sent: { state: Record<string, unknown> }[] = [];
+		await sortGroups(
+			withKey,
+			fakeSteps().runStep,
+			vi.fn(async (_url: string, init?: RequestInit) => {
+				sent.push(JSON.parse(String(init?.body)));
+				return reply(0.9);
+			}),
+			{
+				rulesApplied: true,
+				runId: "reask-learned-line",
+				reask: { runId, ids: [purchase] },
+			},
+		);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.state.learned_category).toEqual({
+			category: "Eating Out",
+			from_answers: 2,
+		});
+		expect(sent[0]?.state).not.toHaveProperty("merchant_category_history");
+		expect(await field(purchase, "category_id")).toBe(eatingOut);
+		expect(await field(purchase, "details_asked")).toBe(0);
+	});
+});
+
+describe("a plan a deploy read before learned lines", () => {
+	it("sends no line for its row and does not throw", async () => {
+		const eatingOut = await categoryIdByName("Eating Out");
+		for (const day of ["01", "02"])
+			await db
+				.prepare(
+					"INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_id, category_source, updated_at) VALUES (1, ?, 100, 'OLD PLAN SHOP', ?, 'user', '2020-01-01 00:00:00')",
+				)
+				.bind(`2026-08-${day}`, eatingOut)
+				.run();
+		const purchase = await addRow({
+			rawName: "OLD PLAN SHOP",
+			confidence: 0.55,
+		});
+		const runId = await startRun([purchase]);
+		const fake = fakeSteps();
+		// The read a deploy made before learned lines: histories, no learned.
+		let patched = false;
+		const runStep = (async (
+			name: string,
+			config: unknown,
+			fn: () => Promise<unknown>,
+		) => {
+			const result = await fake.runStep(name, config as never, fn as never);
+			const plan = (result as { plan?: Record<string, unknown> } | undefined)
+				?.plan;
+			if (name === "group-1-read" && plan) {
+				delete plan.learned;
+				plan.histories = {};
+				patched = true;
+			}
+			return result;
+		}) as unknown as typeof fake.runStep;
+		const sent: { state: Record<string, unknown> }[] = [];
+		await sortGroups(
+			withKey,
+			runStep,
+			vi.fn(async (_url: string, init?: RequestInit) => {
+				sent.push(JSON.parse(String(init?.body)));
+				return reply(0.9);
+			}),
+			{
+				rulesApplied: true,
+				runId: "reask-old-plan",
+				reask: { runId, ids: [purchase] },
+			},
+		);
+		expect(patched).toBe(true);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.state).not.toHaveProperty("learned_category");
+		expect(await field(purchase, "category_id")).toBe(eatingOut);
+	});
+});
+
 describe("the daily cap counts a re-ask like any sort", () => {
 	it("reserves and gives back the same calls for the same number of asks", async () => {
 		const normal = [await addRow(), await addRow(), await addRow()];
