@@ -174,25 +174,34 @@ export async function addMoreLikeThis(
 		).map((row) => row.id),
 	);
 	const ids = ticked.filter((id) => group.has(id));
-	if (ids.length === 0)
-		return {
-			ok: true,
-			name: filed.categoryName,
-			moved: 0,
-			skipped: 0,
-		};
-
-	const result = await db
-		.prepare(
-			`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
-				split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now')
-			WHERE id IN (SELECT value FROM json_each(?))
-				AND id IN (SELECT t.id FROM transactions t ${COUNTED_JOINS} WHERE ${WAITING} AND NOT ${jevSaysMixedSql("t")})
-				AND EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0)`,
-		)
-		.bind(filed.categoryId, input.who, JSON.stringify(ids), filed.categoryId)
-		.run();
-	const moved = result.meta.changes ?? 0;
+	// The filed purchase must still be in the category the card showed, and that category active. The check is a
+	// witness read in the same D1 batch as the write, and the write repeats it in its WHERE, so a recategorize or a
+	// delete after the read above moves nothing: the batch runs with no write between them.
+	const filedHolds = `EXISTS (SELECT 1 FROM transactions f JOIN categories fc ON fc.id = f.category_id
+		WHERE f.id = ? AND f.category_source = 'user' AND f.category_id = ? AND fc.archived = 0)`;
+	const [witness, write] = await db.batch([
+		db
+			.prepare(`SELECT ${filedHolds} AS holds`)
+			.bind(input.filedId, filed.categoryId),
+		db
+			.prepare(
+				`UPDATE transactions SET category_id = ?, category_source = 'user', category_confidence = NULL,
+					split_removed_from_cents = NULL, split_removed_bills = NULL, updated_by = ?, updated_at = datetime('now')
+				WHERE ${filedHolds}
+					AND id IN (SELECT value FROM json_each(?))
+					AND id IN (SELECT t.id FROM transactions t ${COUNTED_JOINS} WHERE ${WAITING} AND NOT ${jevSaysMixedSql("t")})`,
+			)
+			.bind(
+				filed.categoryId,
+				input.who,
+				input.filedId,
+				filed.categoryId,
+				JSON.stringify(ids),
+			),
+	]);
+	const holds = (witness?.results[0] as { holds?: number } | undefined)?.holds;
+	if (!holds) return { ok: false, reason: "changed" };
+	const moved = write?.meta.changes ?? 0;
 	return {
 		ok: true,
 		name: filed.categoryName,

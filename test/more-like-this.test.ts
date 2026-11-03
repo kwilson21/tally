@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sameTextPeers } from "../src/db/more-like-this";
+import { addMoreLikeThis, sameTextPeers } from "../src/db/more-like-this";
 import { resetDemo } from "../src/demo/reset";
 import type { SameTextRow } from "../src/same-text-matches";
 
@@ -445,6 +445,129 @@ describe("the follow-up card is the whole screen (Codex P2)", () => {
 		expect(html).toMatch(/Suggestions · 1 of 1/);
 		expect(html).not.toContain(`value="category-${peer}"`);
 		expect(other).toBeGreaterThan(0);
+	});
+});
+
+/**
+ * The database as another tab sees it: `race` runs right after the filed purchase is read, before any write, so the
+ * stale-card check and the write are not one moment. Only that read is intercepted; everything else is the real D1.
+ */
+function raceAfterFiledRead(
+	real: D1Database,
+	race: () => Promise<unknown>,
+): D1Database {
+	const bindOf = (stmt: D1PreparedStatement): D1PreparedStatement =>
+		new Proxy(stmt, {
+			get(target, prop) {
+				if (prop !== "first") {
+					const value = Reflect.get(target, prop, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				}
+				return async () => {
+					const row = await target.first();
+					await race();
+					return row;
+				};
+			},
+		});
+	return new Proxy(real, {
+		get(target, prop) {
+			if (prop === "prepare")
+				return (sql: string) => {
+					const stmt = target.prepare(sql);
+					if (!sql.includes("c.archived AS archived")) return stmt;
+					return new Proxy(stmt, {
+						get(s, p) {
+							if (p !== "bind") {
+								const value = Reflect.get(s, p, s);
+								return typeof value === "function" ? value.bind(s) : value;
+							}
+							return (...args: unknown[]) => bindOf(s.bind(...args));
+						},
+					});
+				};
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
+describe("Add checks the filed purchase in the same write (Codex P2)", () => {
+	/** A filed purchase in Groceries, and one waiting peer with the same bank text. */
+	async function filedAndPeer() {
+		const groceries = await categoryId("Groceries");
+		const filed = await tx({
+			raw: AUDIBLE,
+			categoryId: groceries,
+			categorySource: "user",
+		});
+		const peer = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+		return { groceries, filed, peer };
+	}
+
+	it("moves the ticked still-waiting peer when the filed purchase is unchanged", async () => {
+		const { groceries, filed, peer } = await filedAndPeer();
+
+		const result = await addMoreLikeThis(db, {
+			filedId: filed,
+			category: groceries,
+			ticked: [peer],
+			who: "Kazon",
+		});
+
+		expect(result).toEqual({
+			ok: true,
+			name: "Groceries",
+			moved: 1,
+			skipped: 0,
+		});
+		expect(await state(peer)).toEqual({
+			categoryId: groceries,
+			source: "user",
+		});
+	});
+
+	it("moves nothing, and reports changed, when the filed purchase is recategorized after its read", async () => {
+		const { groceries, filed, peer } = await filedAndPeer();
+		const pets = await tx({ raw: "CHEWY.COM 1", date: "2026-10-05" });
+		const eatingOut = await categoryId("Eating Out");
+		const raced = raceAfterFiledRead(db, () =>
+			db
+				.prepare("UPDATE transactions SET category_id = ? WHERE id = ?")
+				.bind(eatingOut, filed)
+				.run(),
+		);
+
+		const result = await addMoreLikeThis(raced, {
+			filedId: filed,
+			category: groceries,
+			ticked: [peer, pets],
+			who: "Kazon",
+		});
+
+		expect(result).toEqual({ ok: false, reason: "changed" });
+		expect(await state(peer)).toEqual({ categoryId: null, source: null });
+		expect(await state(filed)).toEqual({
+			categoryId: eatingOut,
+			source: "user",
+		});
+	});
+
+	it("moves nothing, and reports changed, when the filed purchase is deleted after its read", async () => {
+		const { groceries, filed, peer } = await filedAndPeer();
+		const raced = raceAfterFiledRead(db, () =>
+			db.prepare("DELETE FROM transactions WHERE id = ?").bind(filed).run(),
+		);
+
+		const result = await addMoreLikeThis(raced, {
+			filedId: filed,
+			category: groceries,
+			ticked: [peer],
+			who: "Kazon",
+		});
+
+		expect(result).toEqual({ ok: false, reason: "changed" });
+		expect(await state(peer)).toEqual({ categoryId: null, source: null });
 	});
 });
 
