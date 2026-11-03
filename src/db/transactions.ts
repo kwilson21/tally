@@ -3211,6 +3211,8 @@ export type JevAnswerSave = {
 	/**
 	 * A re-ask's follower (decision 158): written only when its leader's category was filed by this same batch (the
 	 * leader's own save ran first). A leader that was edited, decided or reused meanwhile is not filed, so nothing here.
+	 * This reads the leader's state in the same batch, which is safe because the leader was waiting when the group read
+	 * and the batch is turn-guarded: no other group can file it in between.
 	 */
 	leaderFiled?: { id: number; categoryId: number };
 	categoryAsked?: boolean;

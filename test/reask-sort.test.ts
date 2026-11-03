@@ -1416,3 +1416,70 @@ describe("a follower takes its leader's answer only when the leader itself was f
 			expect(await field(id, "category_source")).toBe("jev");
 	});
 });
+
+describe("a cluster's followers are logged, and a decided leader hands its cluster to the next waiting row (decision 158)", () => {
+	const cluster = async (count: number, text = "SAME SHOP") => {
+		const ids: number[] = [];
+		for (let i = 0; i < count; i++)
+			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+		return ids;
+	};
+
+	it("the What AI did log counts each follower the leader's answer applied, once each, and the leader once", async () => {
+		const ids = await cluster(4);
+		const runId = await startRun(ids);
+		await sortGroups(
+			withKey,
+			fakeSteps().runStep,
+			vi.fn(async () => replyFor("Eating Out", 0.9)),
+			{
+				rulesApplied: true,
+				runId: `log-${runId}`,
+				reask: { runId, ids, clusters: await clustersOf(ids) },
+			},
+		);
+		const logged = await db
+			.prepare(
+				"SELECT COUNT(*) AS n, COUNT(DISTINCT transaction_id) AS distinct_n FROM ai_log WHERE kind = 'category' AND transaction_id IN (SELECT value FROM json_each(?))",
+			)
+			.bind(JSON.stringify(ids))
+			.first<{ n: number; distinct_n: number }>();
+		expect(logged?.n).toBe(4);
+		expect(logged?.distinct_n).toBe(4);
+	});
+
+	it("a leader a person decided before the group reads hands the cluster to its next waiting row, asked once", async () => {
+		const ids = await cluster(4);
+		const groceries = await categoryIdByName("Groceries");
+		const runId = await startRun(ids);
+		const fake = fakeSteps({
+			beforeAttempt: async (name, attempt) => {
+				if (name !== "group-1-read" || attempt !== 1) return;
+				await db
+					.prepare(
+						"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+					)
+					.bind(groceries, ids[0])
+					.run();
+			},
+		});
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		const done = await sortGroups(withKey, fake.runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: `promote-${runId}`,
+			reask: { runId, ids, clusters: await clustersOf(ids) },
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
+			`group-1-ask-${ids[1]}`,
+		]);
+		expect(done.asked).toBe(1);
+		expect(await field(ids[0] as number, "category_source")).toBe("user");
+		for (const id of ids.slice(1)) {
+			expect(await field(id, "category_source")).toBe("jev");
+			expect(await confOf(id)).toBe(0.9);
+		}
+		// The person-decided row is not counted by the sort, as before (#820): done is the rows the sort handled.
+		expect((await readRun(db))?.done).toBe(3);
+	});
+});
