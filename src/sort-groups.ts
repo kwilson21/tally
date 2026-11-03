@@ -24,6 +24,15 @@ import {
 	reserveJevCalls,
 } from "./db/jev-calls";
 import {
+	bumpDoneStatement,
+	type ReaskMark,
+	readRun,
+	reaskClearStatement,
+	reaskKeepStatement,
+	reaskPicks,
+	reaskRestoreStatement,
+} from "./db/resort-run";
+import {
 	releaseSortingTurn,
 	releaseSortingTurnStatement,
 	takeSortingTurn,
@@ -31,13 +40,16 @@ import {
 } from "./db/sorting-turn";
 import {
 	applyMerchantRules,
+	type JevSeen,
 	markJevFailedStatement,
+	markReaskFailedStatement,
 	merchantCategoryHistoryForJev,
 	pendingForJev,
 	saveJevDetailsStatement,
 	saveJevResultStatements,
 } from "./db/transactions";
 import { type Deadline, pastDeadline } from "./run-budget";
+import type { ReaskParams } from "./sort-start";
 
 /**
  * How many transactions Jev is asked about in a day (decisions 56 and 68). The demo's reset needs few. The count is
@@ -127,9 +139,31 @@ export type SortOptions = {
 	sleep?: (name: string, ms: number) => Promise<void>;
 	/** Names this run's turns, `${runId}:${group}`: the Workflow's instance id, or a random id in-process. */
 	runId: string;
+	/**
+	 * A re-sort's re-ask (decision 160): sorts only these candidate rows, in this order, one Jev ask each, category only.
+	 * It ignores `onlyIds` and `bySync`, and the run is finished by the caller once the groups are done.
+	 */
+	reask?: ReaskParams;
 };
 
 type SortRow = Awaited<ReturnType<typeof pendingForJev>>[number];
+
+/**
+ * What a re-ask group carries (decision 160): the marks it cleared, so each is put back unless it was answered; the
+ * picked rows Jev's question didn't read, which later groups leave out; how many rows the read found, so a group that
+ * the day's cap cut short stops the run; and the run's id.
+ */
+type ReaskPlan = {
+	runId: string;
+	cleared: ReaskMark[];
+	dropped: number[];
+	found: number;
+	/**
+	 * Each read row's seen fields, as its question was built: a row whose fields changed before its mark is put back is
+	 * left cleared (#831 round 2). A dropped row has none, so its mark is put back as before.
+	 */
+	seen: Record<number, JevSeen>;
+};
 
 /** What one group reads once, before its calls are reserved. Plain JSON, for the read step's result. */
 type ReadPlan = {
@@ -146,6 +180,8 @@ type ReadPlan = {
 	rows: SortRow[];
 	/** Each merchant's recent categories, keyed by its merchant key. */
 	histories: Record<string, string[][]>;
+	/** Set for a re-ask group: every row of it is a re-ask row. */
+	reask?: ReaskPlan;
 };
 
 /**
@@ -321,6 +357,7 @@ async function readGroup(
 		bySync: boolean;
 		limit: number;
 		turnId: string;
+		reask?: ReaskParams;
 	},
 ): Promise<
 	{ kind: "busy" } | { kind: "none" } | { kind: "group"; plan: ReadPlan }
@@ -331,6 +368,8 @@ async function readGroup(
 		await releaseSortingTurn(db, options.turnId);
 		return { kind: "none" as const };
 	};
+	// The marks a re-ask cleared in this read, put back by the group's save unless it answered the row (decision 160).
+	let cleared: ReaskMark[] = [];
 	try {
 		const switches = await readAiSwitches(db);
 		if (!asksJev(switches) || (options.bySync && !switches.sortOnArrival))
@@ -349,15 +388,67 @@ async function readGroup(
 			: [];
 		const timeZone = await householdTimeZone(db);
 		const day = todayIn(timeZone);
-		const rows = await pendingForJev(db, options.limit, {
-			categories: switches.categories,
-			categoryAsked: categories.length > 0,
-			income: switches.income,
-			details: switches.details,
-			ids: options.onlyIds,
-			exceptIds: options.exceptIds,
-		});
-		if (rows.length === 0) return await none();
+		let rows: SortRow[];
+		let reask: ReaskPlan | undefined;
+		if (options.reask) {
+			// A re-ask reads its own run only, and only while the run is running (decision 160).
+			const run = await readRun(db);
+			if (!run || run.id !== options.reask.runId || run.status !== "running")
+				return await none();
+			// The still-waiting rows, in the run's order, under the turn: the clear and the read below both happen under it,
+			// so no other sort sees a cleared mark (decision 160). A retried read clears the same rows again, harmlessly.
+			const runIds = new Set(run.ids);
+			cleared = await reaskPicks(db, {
+				ids: options.reask.ids.filter((id) => runIds.has(id)),
+				except: new Set(options.exceptIds),
+				limit: options.limit,
+			});
+			if (cleared.length > 0)
+				await db.batch([reaskClearStatement(db, cleared, options.turnId)]);
+			rows = cleared.length
+				? await pendingForJev(db, options.limit, {
+						categories: switches.categories,
+						categoryAsked: categories.length > 0,
+						income: switches.income,
+						details: false,
+						ids: cleared.map((mark) => mark.id),
+					})
+				: [];
+			// pendingForJev's order is its own (newest first), so the rows are put in the run's order (decision 160).
+			const position = new Map(cleared.map((mark, i) => [mark.id, i]));
+			rows.sort(
+				(a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0),
+			);
+			const readIds = new Set(rows.map((row) => row.id));
+			reask = {
+				runId: options.reask.runId,
+				cleared,
+				dropped: cleared
+					.map((mark) => mark.id)
+					.filter((id) => !readIds.has(id)),
+				found: rows.length,
+				seen: Object.fromEntries(rows.map((row) => [row.id, row.seen])),
+			};
+		} else {
+			rows = await pendingForJev(db, options.limit, {
+				categories: switches.categories,
+				categoryAsked: categories.length > 0,
+				income: switches.income,
+				details: switches.details,
+				ids: options.onlyIds,
+				exceptIds: options.exceptIds,
+			});
+		}
+		if (rows.length === 0) {
+			// Nothing to ask: any mark this read cleared goes back before the turn is given up.
+			if (cleared.length > 0)
+				await db.batch(
+					cleared.map((mark) =>
+						reaskRestoreStatement(db, mark, options.turnId),
+					),
+				);
+			return await none();
+		}
 		const histories = switches.categories
 			? await merchantCategoryHistoryForJev(db, rows)
 			: new Map<string, string[][]>();
@@ -374,9 +465,23 @@ async function readGroup(
 				people,
 				rows,
 				histories: Object.fromEntries(histories),
+				...(reask ? { reask } : {}),
 			},
 		};
 	} catch (error) {
+		// A cleared mark must not outlive the turn: put it back first. If that fails, the turn is kept, so a retried read
+		// takes it back and restores or clears again, and the turn runs out on its own otherwise (decision 160).
+		if (cleared.length > 0) {
+			try {
+				await db.batch(
+					cleared.map((mark) =>
+						reaskRestoreStatement(db, mark, options.turnId),
+					),
+				);
+			} catch {
+				throw error;
+			}
+		}
 		await releaseSortingTurn(db, options.turnId);
 		throw error;
 	}
@@ -426,7 +531,9 @@ async function askOne(
 		if (todayIn(plan.timeZone) !== plan.day)
 			return { id, outcome: "date-changed" };
 		if (Date.now() > plan.askUntil) return { id, outcome: "out-of-time" };
-		const detailRequested = plan.switches.details && !row.detailsAsked;
+		// A re-ask asks for its category only, never details (decision 160).
+		const detailRequested =
+			plan.switches.details && !row.detailsAsked && !plan.reask;
 		const result = await askJev(
 			{
 				...row,
@@ -496,6 +603,9 @@ export async function writeGroup(
 	const now = await readAiSwitches(db);
 	const sw = plan.switches;
 	const turn = plan.turnId;
+	const reask = plan.reask;
+	// Each re-ask row's mark, which carries the identity its save checks (#831).
+	const markOf = new Map((reask?.cleared ?? []).map((mark) => [mark.id, mark]));
 	// The log rows are dated with the household's day as the answers are saved (spec §8.6), in the zone the household has
 	// now: a save retried after the zone changed dates them by it (decision 143). The reservation keeps the read's day.
 	const saveDay = todayIn(await householdTimeZone(db));
@@ -515,9 +625,12 @@ export async function writeGroup(
 		if (!row) continue;
 		if (result.outcome === "answered") {
 			asked += 1;
+			// A re-ask takes its category answer only, and never a flag, exclusion, income or details (decision 160).
+			// A re-ask row with no mark (never read with one) is not written at all (#831).
 			if (
-				(sw.categories || sw.income) &&
-				(!row.categoryOnly || sw.categories)
+				reask
+					? sw.categories && markOf.has(row.id)
+					: (sw.categories || sw.income) && (!row.categoryOnly || sw.categories)
 			) {
 				const decision = decide(result.answer, plan.categories, JEV_THRESHOLD, {
 					categories: sw.categories,
@@ -528,6 +641,14 @@ export async function writeGroup(
 				});
 				const answer = saveJevResultStatements(db, row.id, decision, {
 					categoryOnly: row.categoryOnly,
+					// The save writes only to the row the run holds under this id: the identity its mark carries (#831).
+					reask: reask
+						? {
+								runId: reask.runId,
+								plaidTransactionId: markOf.get(row.id)?.plaid ?? null,
+								amountCents: markOf.get(row.id)?.amount ?? 0,
+							}
+						: undefined,
 					categoryAsked: plan.categories.length > 0,
 					switches: {
 						income: sw.income,
@@ -547,7 +668,7 @@ export async function writeGroup(
 				statements.push(answer.update);
 				if (answer.log) statements.push(answer.log);
 			}
-			if (sw.details && !row.detailsAsked) {
+			if (sw.details && !row.detailsAsked && !reask) {
 				const kind = result.answer.kind;
 				const kindValue =
 					kind &&
@@ -575,13 +696,72 @@ export async function writeGroup(
 			}
 		} else if (result.outcome === "failed") {
 			asked += 1;
-			if (!result.serviceWide)
-				statements.push(markJevFailedStatement(db, row.id, turn));
+			if (!result.serviceWide) {
+				if (reask) {
+					// A re-ask's failure is stamped only on the transaction the run holds under this id (#831 round 2).
+					const mark = markOf.get(row.id);
+					if (mark)
+						statements.push(
+							markReaskFailedStatement(
+								db,
+								{
+									id: row.id,
+									plaidTransactionId: mark.plaid,
+									amountCents: mark.amount,
+								},
+								turn,
+							),
+						);
+				} else statements.push(markJevFailedStatement(db, row.id, turn));
+			}
 		} else if (result.outcome === "lost") {
 			asked += 1;
 		}
 	}
 
+	// Whether the run stops after this group. The stop rules are the same as ever, except a re-ask group: its rows are the
+	// run's own, so it is short only when the day's calls ran out before them (plan.granted under plan.reask.found), and
+	// it stops the run only then.
+	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
+	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
+	const shortGroup = reask
+		? plan.granted < reask.found
+		: plan.rows.length < GROUP_SIZE;
+	const stop =
+		!asksJev(now) ||
+		(plan.bySync && !now.sortOnArrival) ||
+		(!waitsOnBusy && shortGroup && !endedOutOfTime) ||
+		askedNothingOutOfTime ||
+		(!waitsOnBusy && runStops(results, failuresBefore));
+	if (reask) {
+		// The rows this group handled, for a re-sort's progress: each asked row once, except a busy one that the next group
+		// asks again (decision 145). Out-of-time and date-changed rows were not handled.
+		const handled = results.filter(
+			(result) =>
+				(result.outcome === "answered" ||
+					result.outcome === "failed" ||
+					result.outcome === "lost") &&
+				!(waitsOnBusy && !stop && retryable(result)),
+		).length;
+		// Every row the re-ask cleared gets its mark back unless its answer was saved above: a row not reached, one the
+		// cap or the budget cut, one whose ask failed, and one whose answer no longer applied (decision 160). A row that
+		// was answered has its confidence written, so its restore changes nothing.
+		// A row a person edited while it was asked keeps its mark cleared (its seen fields no longer match), so the queued
+		// sort that the edit started can still ask Jev about it, and the finish leaves it alone (#831 round 2).
+		for (const mark of reask.cleared) {
+			const seen = reask.seen[mark.id];
+			statements.push(reaskRestoreStatement(db, mark, turn, seen));
+			if (seen)
+				statements.push(reaskKeepStatement(db, reask.runId, mark, seen, turn));
+		}
+		statements.push(
+			bumpDoneStatement(db, {
+				runId: reask.runId,
+				rows: handled,
+				turnId: turn,
+			}),
+		);
+	}
 	const detailsStatement = saveJevDetailsStatement(db, details, {
 		stillOn: stillOnKeys({ details: true, sortOnArrival: plan.bySync }),
 		turnId: turn,
@@ -619,17 +799,6 @@ export async function writeGroup(
 		)
 			applied += 1;
 
-	// A group whose budget ended its asking hands the rows it didn't reach to the next group, so a short group stops the
-	// run only when the asking wasn't cut short by the budget, nor waits out a busy Jev (decision 145). A group that
-	// asked nothing because its budget was already spent stops the run: its rows would be read again.
-	const endedOutOfTime = results.at(-1)?.outcome === "out-of-time";
-	const askedNothingOutOfTime = asked === 0 && endedOutOfTime;
-	const stop =
-		!asksJev(now) ||
-		(plan.bySync && !now.sortOnArrival) ||
-		(!waitsOnBusy && plan.rows.length < GROUP_SIZE && !endedOutOfTime) ||
-		askedNothingOutOfTime ||
-		(!waitsOnBusy && runStops(results, failuresBefore));
 	return { asked, applied, stop };
 }
 
@@ -650,7 +819,10 @@ export async function sortGroups(
 	options: SortOptions,
 ): Promise<{ asked: number; applied: number }> {
 	const done = { asked: 0, applied: 0 };
-	if (!env.JEV_API_KEY || options.onlyIds?.length === 0) return done;
+	// A re-ask asks only its own rows, and never by the sync switch (decision 160).
+	const onlyIds = options.reask ? options.reask.ids : options.onlyIds;
+	const bySync = options.reask ? false : (options.bySync ?? false);
+	if (!env.JEV_API_KEY || onlyIds?.length === 0) return done;
 	const apiKey = env.JEV_API_KEY;
 	const maxCalls = options.maxCalls ?? Number.POSITIVE_INFINITY;
 	const askedIds = new Set<number>();
@@ -674,11 +846,12 @@ export async function sortGroups(
 				STEP_SETTINGS.read,
 				async () => {
 					const result = await readGroup(env, {
-						onlyIds: options.onlyIds,
+						onlyIds,
 						exceptIds: [...askedIds],
-						bySync: options.bySync ?? false,
+						bySync,
 						limit: Math.min(GROUP_SIZE, maxCalls - done.asked),
 						turnId,
+						reask: options.reask,
 					});
 					if (result.kind === "busy" && options.waitForTurn)
 						throw new Error("sorting turn taken");
@@ -688,6 +861,8 @@ export async function sortGroups(
 			if (read.kind === "busy" || read.kind === "none") break;
 			const { plan: readPlan } = read;
 			held = turnId;
+			// A re-ask's picked rows that Jev's question didn't read are not asked again by a later group.
+			for (const id of readPlan.reask?.dropped ?? []) askedIds.add(id);
 			// The calls are reserved in a step of their own, so a read that runs again never reserves twice. A reserve
 			// that rejects grants nothing here; if its batch had committed, its record gives the calls back at the save.
 			let granted = 0;

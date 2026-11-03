@@ -10,6 +10,7 @@ import {
 } from "./category-suggestions-pending";
 import { readAiSwitches } from "./db/ai-switches";
 import { clearWaitsForRunStatement } from "./db/first-tally";
+import { finishRun } from "./db/resort-run";
 import { waitingForJevSql } from "./db/transactions";
 import { runTimeBudgetMs } from "./run-budget";
 import {
@@ -29,6 +30,15 @@ type InstanceEnv = SortEnv & { AI?: Ai };
  * stays under Workflows' 10,000 steps an instance on Workers Paid. What is left waits for the next sync or the night.
  */
 export const INSTANCE_MAX_CALLS = 5000;
+
+// The re-ask's finish is a D1 write, so a failed one may run again; finishRun is idempotent.
+const REASK_STEPS = {
+	finish: {
+		retries: { limit: 4, delay: "10 seconds", backoff: "constant" },
+		timeout: "1 minute",
+		sensitive: "output",
+	},
+} satisfies Record<string, StepConfig>;
 
 const NIGHT_STEPS = {
 	// Workers AI steps never retry, so no request is made twice. Each starts no request after 13 minutes from its own
@@ -62,6 +72,7 @@ export function instanceSortOptions(
 		rulesApplied: params.rulesApplied,
 		onlyIds: params.ids,
 		bySync: params.bySync,
+		reask: params.reask,
 		runId: options.runId,
 		waitForTurn: true,
 		maxCalls: INSTANCE_MAX_CALLS,
@@ -100,6 +111,24 @@ export async function runSortInstance(
 		console.error(
 			`sorting: stopped ${error instanceof Error ? error.name : "unknown"}`,
 		);
+	}
+	// A re-sort's re-ask finishes its run once its groups are done, even when some rows were never asked (decision 160).
+	const reask = params.reask;
+	if (reask) {
+		try {
+			await runStep("reask-finish", REASK_STEPS.finish, async () => {
+				await finishRun(env.DB, {
+					runId: reask.runId,
+					now: Date.now(),
+					instanceKey: options.runId,
+				});
+				return true;
+			});
+		} catch (error) {
+			console.error(
+				`reask: finish step ${error instanceof Error ? error.name : "unknown"}`,
+			);
+		}
 	}
 	if (!params.night) return;
 

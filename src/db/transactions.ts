@@ -2973,7 +2973,7 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 }
 
 /** A save's guard for `seen`: its values are bound in the order the guard takes them. */
-function seenSaveGuard(seen: JevSeen): {
+export function seenSaveGuard(seen: JevSeen): {
 	sql: string;
 	binds: (string | number | null)[];
 } {
@@ -2999,6 +2999,25 @@ export function markJevFailedStatement(
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
+}
+
+/**
+ * The failure mark of a re-ask's row: as markJevFailedStatement, but only on the transaction the run holds under this id,
+ * by its Plaid id and amount (#831), so a replacement that reused the id is never stamped.
+ */
+export function markReaskFailedStatement(
+	db: D1Database,
+	row: { id: number; plaidTransactionId: string | null; amountCents: number },
+	turnId: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET jev_failed_at = datetime('now')
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ?`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(row.id, row.plaidTransactionId, row.amountCents, ...guarded.binds);
 }
 
 /**
@@ -3179,6 +3198,16 @@ export type JevAnswerStatements = {
 /** How a Jev answer is saved: the switches it was asked under, and the sorting turn that guards the save. */
 export type JevAnswerSave = {
 	categoryOnly?: boolean;
+	/**
+	 * A re-sort's re-ask (decision 160): writes only the category answer, the eight columns Undo keeps (resort-run.ts), for
+	 * a row that the re-ask cleared. Never its flags, exclusion, income or details, whatever the answer said.
+	 */
+	reask?: {
+		runId: string;
+		/** The row's identity as the run holds it: the save writes only to that transaction (#831). */
+		plaidTransactionId: string | null;
+		amountCents: number;
+	};
 	categoryAsked?: boolean;
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
@@ -3243,6 +3272,49 @@ export function saveJevResultStatements(
 				alsoWritten,
 			]
 		: [];
+	if (options.reask) {
+		// The re-ask writes only the category answer. It has no classification check: the row was cleared on purpose, and
+		// its Maybe mark (confidence NULL) is what the guard reads (decision 160). It writes only while its run is still the
+		// household's current run and running (#828): a run closed or finalized meanwhile writes nothing here.
+		const guarded = withTurnGuard(
+			`UPDATE transactions SET
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
+					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+				 WHERE id = ? AND flag_income = 0 AND is_split = 0 AND ${INCLUDED_ROW}
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND ${STILL_ON_SQL}${seenSql}${activeSql}
+					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
+						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')
+					AND plaid_transaction_id IS ? AND amount_cents = ?`,
+			options.turn,
+		);
+		const category = db
+			.prepare(guarded.sql)
+			.bind(
+				categoryWritten,
+				options.categoryAsked === false || d.categoryId === null ? null : "jev",
+				options.categoryAsked === false ? null : d.confidence,
+				suggestionWritten,
+				options.categoryAsked === false || !d.noneFit ? 0 : 1,
+				d.mixedProbability ?? null,
+				alsoWritten,
+				id,
+				stillOn,
+				...(seenGuard?.binds ?? []),
+				...activeBinds,
+				options.reask?.runId ?? "",
+				options.reask?.plaidTransactionId ?? null,
+				options.reask?.amountCents ?? 0,
+				...guarded.binds,
+			);
+		return answerStatements(
+			db,
+			category,
+			id,
+			options.log && { ...options.log, income: false },
+			options.turn,
+		);
+	}
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.

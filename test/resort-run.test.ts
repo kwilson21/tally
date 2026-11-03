@@ -220,6 +220,35 @@ describe("startOrJoinRun", () => {
 		expect(run?.ids.sort()).toEqual([a, b].sort());
 	});
 
+	it("joins a fresh running run with nothing new without writing: no instance is counted", async () => {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const all = await candidatesNow();
+		const first = await startOrJoinRun(db, {
+			candidates: all.filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const stored = () =>
+			db
+				.prepare(
+					"SELECT value FROM household_settings WHERE key = 'resort_run'",
+				)
+				.first<{ value: string }>()
+				.then((row) => row?.value);
+		const before = await stored();
+		const joined = await startOrJoinRun(db, {
+			candidates: all.filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 1000,
+		});
+		expect(joined).toEqual({ runId: first.runId, newIds: [], joined: true });
+		// The stored text is untouched, so instances and every other field stay as they were.
+		expect(await stored()).toBe(before);
+		expect((await readRun(db))?.instances).toBe(1);
+	});
+
 	it("closes a stale run (older than 2 hours) and starts a new one", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();
@@ -1429,10 +1458,13 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 		const runId = runIdOf(started);
 		await clear([g1]);
 		await answer(g1, groceries);
+		// A joiner with a new candidate (a joiner with nothing new writes nothing, so it can't race): a fresh row.
+		const g2 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const joinerCandidates = (await candidatesNow()).filter((c) => c.id === g2);
 		const racing = beforeNextBatch(async () => {
 			// A joiner starts between A's key write and A's flip: instances goes to 2.
 			await startOrJoinRun(db, {
-				candidates: [],
+				candidates: joinerCandidates,
 				categoryId: groceries,
 				categoryName: "Groceries",
 				now: T0 + 3000,

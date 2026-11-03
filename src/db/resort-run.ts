@@ -12,14 +12,18 @@
 // claim is open. A row is the same transaction only while its Plaid id and amount are the ones the run recorded, so a
 // deleted row whose id another purchase reused is never restored or undone.
 
-import { BASIS_POINTS } from "../ai/confidence";
+import { JEV_THRESHOLD } from "../ai/categorize";
+import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
 import { askedBounds } from "../ai/maybe";
+import { COUNTED_JOINS } from "./counted-month";
+import { WAITING } from "./more-like-this";
 import {
 	RESORT_CANDIDATE_MAX,
 	type ResortCandidate,
 	type ResortSnapshot,
 } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
+import { type JevSeen, seenSaveGuard } from "./transactions";
 
 export const RUN_KEY = "resort_run";
 /** A run older than this is closed when the next run starts (decision 160), and an unclaimed record lasts as long. */
@@ -53,6 +57,8 @@ export type ResortRun = {
 	categoryByRow: Record<string, number>;
 	/** The instance keys that have finished (each counted once). The run finalizes when there are `instances` of them. */
 	finishedKeys: string[];
+	/** The ids a re-ask left cleared on purpose (their transaction was edited while asked): the finish leaves them alone. */
+	keptCleared?: number[];
 	startedAt: number;
 	/** True once the run's closing toast was claimed while this run was the current one. */
 	toasted: boolean;
@@ -188,6 +194,9 @@ export async function startOrJoinRun(
 				0,
 				room,
 			);
+			// Nothing new to add: join without writing, so no instance is counted for a call that asks nothing.
+			if (fresh.length === 0)
+				return { runId: current.id, newIds: [], joined: true };
 			const next: ResortRun = {
 				...current,
 				total: current.total + fresh.length,
@@ -282,6 +291,181 @@ const maybeRangeSql = () => {
 	const bounds = askedBounds("category");
 	return `CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) > ${bounds.above} AND CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${bounds.below}`;
 };
+
+/** A row's Maybe mark as it stood before a re-ask cleared it, so the mark can be put back exactly. */
+export type ReaskMark = {
+	id: number;
+	confidence: number | null;
+	mixed: number | null;
+	also: number | null;
+	/** The row's identity as the run holds it (its Plaid id and amount, the same as the run's snapshot): a write to the
+	 * row checks it, so a row whose id was reused by another transaction is never written (#831). */
+	plaid: string | null;
+	amount: number;
+};
+
+/** The identity of each mark, as a JSON array of {id, plaid, amount} for `json_each`. */
+const markIdentities = (marks: readonly ReaskMark[]) =>
+	JSON.stringify(
+		marks.map((m) => ({ id: m.id, plaid: m.plaid, amount: m.amount })),
+	);
+
+/** The row's Plaid id and amount are the ones a mark carries (two binds: the Plaid id, then the amount). */
+const SAME_MARK_ROW = "plaid_transaction_id IS ? AND amount_cents = ?";
+
+/**
+ * The first of `ids` (in that order, skipping `except`, at most `limit`) that still wait for a category: a WAITING row
+ * with no category and a confidence NULL or under the threshold (never one at or above it, never a decided row). Each
+ * comes with its mark as it is now. One read.
+ */
+export async function reaskPicks(
+	db: D1Database,
+	{
+		ids,
+		except,
+		limit,
+	}: { ids: readonly number[]; except: ReadonlySet<number>; limit: number },
+): Promise<ReaskMark[]> {
+	const wanted = [...new Set(ids)].filter((id) => !except.has(id));
+	if (wanted.length === 0 || limit <= 0) return [];
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, t.category_confidence AS confidence, t.jev_mixed AS mixed, t.jev_also_category_id AS also,
+				t.plaid_transaction_id AS plaid, t.amount_cents AS amount
+			FROM transactions t ${COUNTED_JOINS}
+			WHERE (${WAITING}) AND t.category_id IS NULL
+				AND (t.category_confidence IS NULL
+					OR CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})
+				AND t.id IN (SELECT value FROM json_each(?2))
+				AND ${sameRunRow("t", SNAPSHOTS)}`,
+		)
+		.bind(RUN_KEY, JSON.stringify(wanted))
+		.all<{
+			id: number;
+			confidence: number | null;
+			mixed: number | null;
+			also: number | null;
+			plaid: string | null;
+			amount: number;
+		}>();
+	const byId = new Map(results.map((row) => [row.id, row]));
+	const picks: ReaskMark[] = [];
+	for (const id of wanted) {
+		const row = byId.get(id);
+		if (!row) continue;
+		picks.push({
+			id,
+			confidence: row.confidence,
+			mixed: row.mixed,
+			also: row.also,
+			plaid: row.plaid,
+			amount: row.amount,
+		});
+		if (picks.length === limit) break;
+	}
+	return picks;
+}
+
+/**
+ * Clears the Maybe mark (confidence, mixed reading, also-category) of these rows, so Jev is asked about them again. Only
+ * a row still waiting is touched, and only while the sorting turn is held (decision 160).
+ */
+export function reaskClearStatement(
+	db: D1Database,
+	marks: readonly ReaskMark[],
+	turnId: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET category_confidence = NULL, jev_mixed = NULL, jev_also_category_id = NULL
+		WHERE EXISTS (SELECT 1 FROM json_each(?) m WHERE json_extract(m.value, '$.id') = transactions.id
+				AND transactions.plaid_transaction_id IS json_extract(m.value, '$.plaid')
+				AND transactions.amount_cents = json_extract(m.value, '$.amount'))
+			AND category_id IS NULL AND category_source IS NULL
+			AND (category_confidence IS NULL
+				OR CAST(category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})`,
+		turnId,
+	);
+	return db.prepare(guarded.sql).bind(markIdentities(marks), ...guarded.binds);
+}
+
+/**
+ * Puts one cleared row's Maybe mark back, but only while the row is still untouched since the clear: no category, no
+ * source, and the cleared fields still NULL. A row that was answered (its confidence written) or decided is left alone.
+ * Only while the sorting turn is held, so no other sort ever reads a cleared mark (decision 160).
+ */
+export function reaskRestoreStatement(
+	db: D1Database,
+	mark: ReaskMark,
+	turnId: string,
+	/**
+	 * What the row read as when it was asked. Given, the mark comes back only while the row still reads so: a person's
+	 * edit during the ask leaves the mark cleared (see reaskKeepStatement). Not given, it comes back as before.
+	 */
+	seen?: JevSeen,
+): D1PreparedStatement {
+	const guard = seen ? seenSaveGuard(seen) : undefined;
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?,
+			updated_at = CASE WHEN category_confidence IS NOT ? OR jev_mixed IS NOT ? OR jev_also_category_id IS NOT ?
+				THEN datetime('now') ELSE updated_at END
+		WHERE id = ? AND ${SAME_MARK_ROW} AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+			AND jev_mixed IS NULL AND jev_also_category_id IS NULL${guard ? ` AND ${guard.sql}` : ""}`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(
+			mark.confidence,
+			mark.mixed,
+			mark.also,
+			mark.confidence,
+			mark.mixed,
+			mark.also,
+			mark.id,
+			mark.plaid,
+			mark.amount,
+			...(guard?.binds ?? []),
+			...guarded.binds,
+		);
+}
+
+/**
+ * Records that a re-ask row was left cleared on purpose: its transaction was edited while it was asked (its seen fields
+ * no longer match), so its mark is not put back (reaskRestoreStatement). The run keeps the id in `keptCleared`, so the
+ * finish doesn't put the old mark back over the edit either (#831 round 2). Written only while the row is still cleared
+ * and still this transaction, the run is running, and the sorting turn is held.
+ */
+export function reaskKeepStatement(
+	db: D1Database,
+	runId: string,
+	mark: ReaskMark,
+	seen: JevSeen,
+	turnId: string,
+): D1PreparedStatement {
+	const guard = seenSaveGuard(seen);
+	const guarded = withTurnGuard(
+		`UPDATE household_settings SET value = json_set(value, '$.keptCleared',
+				json_insert(COALESCE(json_extract(value, '$.keptCleared'), json('[]')), '$[#]', ?))
+			WHERE key = ? AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running'
+				AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND ${SAME_MARK_ROW}
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND jev_mixed IS NULL AND jev_also_category_id IS NULL
+					AND NOT ${guard.sql})`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(
+			mark.id,
+			RUN_KEY,
+			runId,
+			mark.id,
+			mark.plaid,
+			mark.amount,
+			...guard.binds,
+			...guarded.binds,
+		);
+}
 
 type FinishCounts = {
 	moved: number;
@@ -394,10 +578,20 @@ async function finalizeRun(
 				jev_mixed = ${snap("jev_mixed")},
 				jev_also_category_id = ${snap("jev_also_category_id")},
 				jev_failed_at = ${snap("jev_failed_at")},
-				updated_at = datetime('now')
+				updated_at = CASE WHEN category_id IS NOT ${snap("category_id")}
+					OR category_source IS NOT ${snap("category_source")}
+					OR category_confidence IS NOT ${snap("category_confidence")}
+					OR jev_category_id IS NOT ${snap("jev_category_id")}
+					OR jev_none_fit IS NOT ${snap("jev_none_fit")}
+					OR jev_mixed IS NOT ${snap("jev_mixed")}
+					OR jev_also_category_id IS NOT ${snap("jev_also_category_id")}
+					OR jev_failed_at IS NOT ${snap("jev_failed_at")}
+				THEN datetime('now') ELSE updated_at END
 			WHERE ${sameRunRow("transactions", SNAPSHOTS)}
 				AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 				AND jev_mixed IS NULL AND jev_also_category_id IS NULL AND jev_failed_at IS NULL
+				AND NOT EXISTS (SELECT 1 FROM household_settings k, json_each(COALESCE(json_extract(k.value, '$.keptCleared'), '[]')) x
+					WHERE k.key = ?1 AND x.value = transactions.id)
 				AND ${won}`,
 		)
 		.bind(RUN_KEY, token);
