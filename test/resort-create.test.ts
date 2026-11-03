@@ -1,12 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
-import {
-	finishRun,
-	readMoved,
-	readRun,
-	startOrJoinRun,
-} from "../src/db/resort-run";
+import { finishRun, readMoved, readRun } from "../src/db/resort-run";
 import { startResortFor } from "../src/db/resort-start";
 import { resetDemo } from "../src/demo/reset";
 import { recordSorting } from "./record-sorting";
@@ -61,6 +56,7 @@ const trigger = (res: Response) =>
 			undoExpiresInMs?: number;
 			undoAction?: string;
 			undoDone?: string;
+			passive?: boolean;
 		};
 		announce?: string;
 	};
@@ -182,7 +178,7 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		expect(html).toContain('id="recheck"');
 		expect(html).toContain('role="status"');
 		expect(html).toContain('aria-live="polite"');
-		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}"`);
+		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}&amp;m=0"`);
 		expect(html).toContain('hx-trigger="every 2s"');
 		expect(trigger(res).announce).toContain(
 			"Tally is re-checking related rows.",
@@ -320,7 +316,7 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect((await readRun(db))?.id).toBe(run?.id);
-		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}"`);
+		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}&amp;m=0"`);
 	});
 
 	it("a failed start never leaves the line stuck: the run finishes at once, with its own fresh instance key", async () => {
@@ -391,6 +387,8 @@ describe("the progress poll (decision 159)", () => {
 		expect(toast?.undo).toBe(run?.id);
 		expect(toast?.undoAction).toBe("/resort/undo");
 		expect(toast?.undoExpiresInMs).toBe(10_000);
+		// A background poll never takes focus (#821 owner feedback): the toast is passive.
+		expect(toast?.passive).toBe(true);
 		expect(trigger(first.res).announce).toBe(
 			"Moved 1 to Eating Out. 1 needs your answer.",
 		);
@@ -463,6 +461,96 @@ describe("the progress poll (decision 159)", () => {
 		expect(trigger(res).toast).toBeUndefined();
 		expect(trigger(res).announce).toBe("Tally finished re-checking.");
 		expect(await readMoved(db, run?.id ?? "")).toMatchObject({ rows: [] });
+	});
+});
+
+/** A running run of `total` rows, written as the run record holds it (no instance is started). */
+async function seedRun(total: number): Promise<string> {
+	const id = crypto.randomUUID();
+	const run = {
+		id,
+		total,
+		done: 0,
+		status: "running",
+		instances: 1,
+		ids: [],
+		snapshots: [],
+		categoryId: await categoryId("Eating Out"),
+		categoryName: "Eating Out",
+		categories: [],
+		categoryByRow: {},
+		finishedKeys: [],
+		startedAt: Date.now(),
+		toasted: false,
+	};
+	await db
+		.prepare(
+			"INSERT INTO household_settings (key, value) VALUES ('resort_run', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		)
+		.bind(JSON.stringify(run))
+		.run();
+	return id;
+}
+
+const setDone = (done: number) =>
+	db
+		.prepare(
+			"UPDATE household_settings SET value = json_set(value, '$.done', ?) WHERE key = 'resort_run'",
+		)
+		.bind(done)
+		.run();
+
+// The owner's note on #821 (decision 159): the count is read by a screen reader only at milestones. The visible
+// sentence shows every count (its number is aria-hidden); a hidden polite region carries the milestone text, which
+// changes only when a quarter of the run is crossed. The client holds the milestone it shows in the poll's `m`.
+describe("the progress announcements (#821 owner feedback)", () => {
+	it("speaks the count only at each quarter of the run: three milestone texts for a run of 14, and the sentence shows every count", async () => {
+		const runId = await seedRun(14);
+		let held = 0; // the milestone the page holds (the poll's m)
+		let spoken = ""; // the text the hidden region holds
+		const spokenChanges: string[] = [];
+		for (let done = 0; done <= 14; done++) {
+			await setDone(done);
+			const { html } = await get(`/resort/progress?run=${runId}&m=${held}`);
+			expect(html).toContain(
+				`<span aria-hidden="true" class="tabular-nums">${done}</span>`,
+			);
+			const nextHeld = Number(/[?&](?:amp;)?m=(\d)/.exec(html)?.[1] ?? held);
+			const milestone =
+				/<span id="recheck-milestone" hx-swap-oob="innerHTML">([^<]*)<\/span>/.exec(
+					html,
+				);
+			if (milestone) {
+				spoken = milestone[1] ?? "";
+				spokenChanges.push(spoken);
+			} else {
+				// Nothing crossed: nothing is sent for the hidden region, so nothing is spoken.
+				expect(nextHeld).toBe(held);
+			}
+			held = nextHeld;
+		}
+		expect(spokenChanges).toEqual([
+			"4 of 14 done.",
+			"7 of 14 done.",
+			"11 of 14 done.",
+		]);
+		expect(new Set(spokenChanges).size).toBeLessThanOrEqual(3);
+		expect(spoken).toBe("11 of 14 done.");
+	});
+
+	it("draws the hidden polite region beside the sentence, and the sentence's count is aria-hidden", async () => {
+		const { filed } = await maybeFixture();
+		const { html } = await post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+		expect(html).toContain(
+			'<span id="recheck-milestone" role="status" aria-live="polite" class="sr-only"></span>',
+		);
+		expect(html).toContain(
+			'<span aria-hidden="true" class="tabular-nums">0</span>',
+		);
 	});
 });
 

@@ -217,6 +217,8 @@
 			undoDone,
 			// Where the Undo posts: the cash-delete Undo unless the toast names another (a Not this one's, #340).
 			undoAction = "/transactions/undo-cash-delete",
+			// A passive Undo toast came from a background poll (the re-check's closing toast, #821): it never takes focus.
+			passive = false,
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
@@ -248,6 +250,8 @@
 		} else if (undo) {
 			const words = document.createElement("span");
 			words.textContent = message;
+			// The message gives way and wraps; the Undo button keeps its one line (#821 owner feedback).
+			words.className = "min-w-0";
 			toast.append(words);
 			toast.className +=
 				" pointer-events-auto flex items-center justify-center gap-4";
@@ -270,7 +274,8 @@
 			}
 			const button = document.createElement("button");
 			button.type = "submit";
-			button.className = "min-h-11 px-2 font-medium underline";
+			button.className =
+				"min-h-11 shrink-0 whitespace-nowrap px-2 font-medium underline";
 			button.textContent = "Undo";
 			// keyboard.js presses this with u while the toast shows (decision 118, #516).
 			button.setAttribute("aria-keyshortcuts", "u");
@@ -327,7 +332,7 @@
 			// The swap that removed the delete's sheet left focus nowhere, so focus moves to Undo and a keyboard
 			// user can press it at once. The HX-Trigger runs after the swap (htmx's finally), so this wins over
 			// any autofocus the swap set.
-			undoButton?.focus();
+			if (!passive) undoButton?.focus();
 		}
 		setTimeout(
 			() => takeOffPage(toast),

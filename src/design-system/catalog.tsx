@@ -1279,7 +1279,7 @@ const TOAST_SPEC: UseSpecText = {
 	motion:
 		"It fades in and rises 8 px in 150 ms, ease-out, then fades out in 150 ms. An ordinary toast stays for toast.js's DISPLAY_MS of 4 seconds and is invisible 150 ms before the script takes it out. An Undo toast uses its remaining server token time (up to 10 seconds) and the same 150 ms fade at either end. Reduced motion shows it at once with nothing moving.",
 	edges:
-		"Long words wrap inside the pill. It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
+		"Long words wrap inside the pill. An Undo toast's message wraps, and its Undo label never does: the button is shrink-0 and nowrap, so “Undo” stays on one line on a phone and on desktop (#821). It sits above an open sheet (z-60), at the top edge on a phone while a sheet is open, and that sheet leaves room for every toast on screen, an Undo toast and an error toast together included, with the floor unchanged; Undo posts the token once and refreshes the list. A burst of identical failures shows one. Without JavaScript there is no toast: the page comes back showing the change.",
 	words:
 		"A success says what was saved (“Saved Groceries' budget.”); deletion says “Deleted Farmers market, $20.00.” with Undo, a Not this one says “Payment unlinked” with Undo, and the announcer adds “Undo for 10 seconds.” A failed request says “Couldn't save. Check your connection and try again.” (“Couldn't load…” for a GET). A missing page says “This page isn't here.”",
 };
@@ -1293,9 +1293,9 @@ const RECHECK_LINE_SPEC: UseSpecText = {
 	states:
 		"Running: “Tally is re-checking… N done”, with N from 0 up to the run's total and never past it. Finished: the sentence is gone, and the closing toast says what moved. Nothing is drawn when no run is going.",
 	feedback:
-		"The count changes every 2 seconds while the run goes. The wrapper is the polite live region, so each new count is spoken once, and the Create's own announcement says “Tally is re-checking related rows.” at the start. The end is announced with the closing toast or “Tally finished re-checking.”, never as a list.",
+		"The sentence's count changes every 2 seconds while the run goes, and that count is aria-hidden, so it isn't read each time. A visually hidden polite status beside it holds the count only at each quarter of the run: “4 of 14 done.”, “7 of 14 done.”, “11 of 14 done.”. Between quarters the poll sends nothing to that region, so nothing is spoken. The Create's own announcement says “Tally is re-checking related rows.” at the start, and the end is announced with the closing toast or “Tally finished re-checking.”. Never a list.",
 	input:
-		"Nothing to press. It is not focusable and takes no keys. Screen reader: a polite status with the sentence as its whole text; the ring is hidden from assistive technology.",
+		"Nothing to press. It is not focusable and takes no keys. Screen reader: the hidden status speaks a quarter's words, once; the ring is hidden from assistive technology.",
 	motion:
 		"The ring turns in --duration-spin (700 ms) and stops under reduced motion, as every busy ring does. The count changes in place with no fade.",
 	edges:
@@ -1313,13 +1313,13 @@ const RECHECK_TOAST_SPEC: UseSpecText = {
 	states:
 		"Moved, one destination: “Moved 14 to Books & audio. 3 need your answer.” Moved, several: “Moved 14 rows. 3 need your answer.” Nothing moved but some waiting: “Nothing moved. 3 need your answer.” Nothing moved and nothing waiting: no toast. Undo shows only when rows moved, for ten seconds.",
 	feedback:
-		"It appears when the poll sees the run finish, the first time only. Its announcer text is the same words. Undo answers with “Put 14 back.”, or “Put 12 back. 2 changed since, so they stayed.” when some rows changed since the run, or “Too late to undo that.” once the ten seconds have passed.",
+		"It appears when the poll sees the run finish, the first time only. Its announcer text is the same words. It is passive: a background poll never moves focus onto its Undo, so the person's place on the page stays where it was, and Undo is one Tab away. Undo answers with “Put 14 back.”, or “Put 12 back. 2 changed since, so they stayed.” when some rows changed since the run, or “Too late to undo that.” once the ten seconds have passed.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard, and it is off while its request is in flight. Screen reader: success is status, an expired Undo is an alert.",
 	motion:
 		"As the Toast: a fade and an 8 px rise in 150 ms, held for the ten seconds Undo is open, then a fade out. Reduced motion shows it at once.",
 	edges:
-		"A category name is shown as the family typed it, wrapped between words. A run that moved nothing has no Undo button. Pluralisation: “1 needs your answer”, “1 row”, “Moved 1 to …”.",
+		"A category name is shown as the family typed it, wrapped between words. The message gives way and wraps; the Undo label never breaks, so “Undo” stays on one line at 390 px and at 1280 px (its button is shrink-0 and nowrap). A run that moved nothing has no Undo button. Pluralisation: “1 needs your answer”, “1 row”, “Moved 1 to …”.",
 	words:
 		"“Moved 14 to Books & audio. 3 need your answer.” · “Moved 14 rows. 3 need your answer.” · “Nothing moved. 3 need your answer.” · “Put 14 back.” · “Too late to undo that.”",
 };
@@ -6415,6 +6415,7 @@ function Feedback() {
 									kind="secondary"
 									data-ds-toast={words.type}
 									data-ds-message={words.message}
+									data-ds-passive="true"
 									{...(words.undo
 										? {
 												"data-ds-undo": "catalog-demo-token",

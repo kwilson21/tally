@@ -13,7 +13,12 @@ import {
 	FINISHED_ANNOUNCEMENT,
 	undoWords,
 } from "../resort-toast";
-import { RecheckSentence } from "../views/recheck-line";
+import {
+	RecheckMilestoneSwap,
+	RecheckSentence,
+	recheckDone,
+	recheckMilestone,
+} from "../views/recheck-line";
 import { organizeAgain } from "./organize";
 import { categoriesAgain } from "./settings";
 import { suggestionsAgain } from "./suggestions";
@@ -41,12 +46,18 @@ resort.get("/resort/progress", async (c) => {
 	const runId = c.req.query("run") ?? "";
 	const now = Date.now();
 	const current = await readRun(db);
-	if (current && current.id === runId && isRunning(current, now))
+	if (current && current.id === runId && isRunning(current, now)) {
+		const run = { id: current.id, done: current.done, total: current.total };
+		// The quarter the page holds (`m`): the hidden region is sent again only when a new quarter is crossed (#821).
+		const held = Number(c.req.query("m") ?? "0");
+		const milestone = recheckMilestone(recheckDone(run), run.total);
 		return c.html(
-			<RecheckSentence
-				run={{ id: current.id, done: current.done, total: current.total }}
-			/>,
+			<>
+				<RecheckSentence run={run} />
+				{milestone !== held ? <RecheckMilestoneSwap run={run} /> : null}
+			</>,
 		);
+	}
 	// Finished, unknown or expired: the first answer claims the toast, and every later one, and an unknown id, says nothing.
 	if (runId === "" || !(await closeToastOnce(db, runId, now)))
 		return c.body(null);
@@ -66,6 +77,8 @@ resort.get("/resort/progress", async (c) => {
 						toast: {
 							message: words.message,
 							type: words.type,
+							// A background poll's toast never takes focus (toast.js, #821 owner feedback).
+							passive: true,
 							...(words.undo
 								? {
 										undo: runId,

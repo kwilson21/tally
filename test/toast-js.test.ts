@@ -2482,3 +2482,63 @@ describe("Select all's focus when a count reply swaps it (#475)", () => {
 		expect(document.activeElement).toBe(filter);
 	});
 });
+
+// #821 owner feedback: the closing toast's Undo label must not break letter by letter (the button keeps its one line
+// and the message wraps instead), and a background poll's Undo toast must not take focus (`passive`).
+describe("an Undo toast's label and focus (#821)", () => {
+	const undoDetail = (extra: Record<string, unknown> = {}) => ({
+		message: "Moved 14 to Books & audio. 3 need your answer.",
+		undo: "run-token",
+		undoExpiresInMs: 10000,
+		undoAction: "/resort/undo",
+		...extra,
+	});
+
+	it("keeps the Undo label on one line: the button never shrinks or wraps, and the message wraps instead", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", undoDetail());
+		const toast = toasts.children[0] as FakeNode;
+		const button = toast
+			.all()
+			.find((node) => node.tag === "button") as FakeNode;
+		expect(button.className.split(" ")).toEqual(
+			expect.arrayContaining(["min-h-11", "shrink-0", "whitespace-nowrap"]),
+		);
+		const words = toast.children.find(
+			(node) => node.tag === "span",
+		) as FakeNode;
+		expect(words.textContent).toBe(
+			"Moved 14 to Books & audio. 3 need your answer.",
+		);
+		expect(words.className.split(" ")).toContain("min-w-0");
+	});
+
+	it("moves focus to the Undo button of an ordinary Undo toast (today's behaviour)", async () => {
+		const { body, document, toasts } = await page();
+		fire(body, "toast", undoDetail());
+		const button = (toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "button");
+		expect(document.activeElement).toBe(button);
+	});
+
+	it("does not move focus to the Undo button of a passive Undo toast, so a background poll takes none", async () => {
+		const { body, document, toasts } = await page();
+		fire(body, "toast", undoDetail({ passive: true }));
+		const toast = toasts.children[0] as FakeNode;
+		expect(toast.all().some((node) => node.tag === "button")).toBe(true);
+		expect(document.activeElement).toBe(body);
+	});
+
+	it("still shows a passive Undo toast with its Undo form", async () => {
+		const { body, toasts } = await page();
+		fire(body, "toast", undoDetail({ passive: true }));
+		const form = (toasts.children[0] as FakeNode)
+			.all()
+			.find((node) => node.tag === "form");
+		expect(form?.action).toBe("/resort/undo");
+		expect(form?.children.find((node) => node.name === "token")?.value).toBe(
+			"run-token",
+		);
+	});
+});
