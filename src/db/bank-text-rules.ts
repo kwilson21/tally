@@ -43,13 +43,18 @@ function upsertBankTextRule(
 	cleanedText: string,
 	categoryId: number,
 ): D1PreparedStatement {
+	// Only an active category can take a rule (review of #838, round 2): the insert and the update are both conditional
+	// on the category's state as the batch runs, so a category archived after the route checked it writes nothing. The
+	// WHERE on the SELECT is what lets the upsert follow an INSERT ... SELECT without a parsing ambiguity.
 	return db
 		.prepare(
-			`INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES (?, ?)
+			`INSERT INTO bank_text_rules (cleaned_text, category_id)
+			SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ? AND archived = 0)
 			ON CONFLICT(cleaned_text) DO UPDATE SET
-				category_id = excluded.category_id, updated_at = datetime('now')`,
+				category_id = excluded.category_id, updated_at = datetime('now')
+			WHERE EXISTS (SELECT 1 FROM categories WHERE id = excluded.category_id AND archived = 0)`,
 		)
-		.bind(cleanedText, categoryId);
+		.bind(cleanedText, categoryId, categoryId);
 }
 
 /** Makes the rule for a cleaned text, or moves it to another category, without applying it. */
@@ -144,12 +149,15 @@ export async function applyBankTextRules(db: D1Database): Promise<void> {
  * behind and the person is told nothing changed. The batch runs the merchant rules first, then the bank-text rule, as the
  * sync and the sort step do, so a merchant rule still wins. The statements are read before the batch and reading writes
  * nothing; each bank-text UPDATE is guarded on the rule as it stands when it runs.
+ *
+ * Returns false when no rule was written, because the category was archived after the caller checked it (round 2): the
+ * upsert writes nothing then, the guarded fills match nothing, and any older rule stays as it was.
  */
 export async function changeBankTextRule(
 	db: D1Database,
 	cleanedText: string,
 	categoryId: number,
-): Promise<void> {
+): Promise<boolean> {
 	const others = (await activeBankTextRules(db)).filter(
 		(rule) => rule.cleanedText !== cleanedText,
 	);
@@ -157,9 +165,10 @@ export async function changeBankTextRule(
 		...others,
 		{ cleanedText, categoryId },
 	]);
-	await db.batch([
+	const [upsert] = await db.batch([
 		upsertBankTextRule(db, cleanedText, categoryId),
 		merchantRuleStatement(db),
 		...statements,
 	]);
+	return (upsert?.meta.changes ?? 0) > 0;
 }

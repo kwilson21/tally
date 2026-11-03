@@ -186,7 +186,7 @@ type View = {
 		/** The No's card place in the list; left out, the question comes after every card. */
 		place?: number;
 	};
-	status?: 200 | 400 | 404 | 422 | 503;
+	status?: 200 | 400 | 404 | 409 | 422 | 503;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
@@ -1034,13 +1034,20 @@ settings.post("/settings/learned/change", async (c) => {
 		});
 	}
 	// The rule and its immediate apply are one batch (review of #838): a failure leaves no rule, and says so.
+	let written: boolean;
 	try {
-		await changeBankTextRule(c.env.DB, text, category.id);
+		written = await changeBankTextRule(c.env.DB, text, category.id);
 	} catch {
 		const message =
 			"Tally couldn't save that rule, so nothing changed. Try again.";
 		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
 		return renderPage(c, "learned", { learnedError: message, status: 503 });
+	}
+	// The category was archived after it was checked: no rule was written, so the change is refused (round 2 of #838).
+	if (!written) {
+		const message = "That category was just archived, so nothing changed.";
+		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+		return renderPage(c, "learned", { learnedError: message, status: 409 });
 	}
 	if (!htmx) return c.redirect("/settings/learned", 303);
 	const message = `${line.name} now goes to ${category.name} every time.`;

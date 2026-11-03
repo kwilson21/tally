@@ -563,6 +563,46 @@ describe("a Change is one atomic batch, and its apply is guarded (review of #838
 	});
 });
 
+describe("a Change to a category archived before its batch (review of #838, round 2)", () => {
+	it("writes no rule, fills nothing, and reports that nothing changed", async () => {
+		const books = await categoryId("Books & audio");
+		const a = await txn(RAW_A);
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(books)
+			.run();
+		expect(await changeBankTextRule(db, CLEANED, books)).toBe(false);
+		expect(await ruleCount()).toBe(0);
+		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
+	});
+
+	it("leaves an older rule as it was, and fills nothing with the refused category", async () => {
+		const books = await categoryId("Books & audio");
+		const eating = await categoryId("Eating Out");
+		await addRule(CLEANED, eating);
+		const a = await txn(RAW_A);
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE id = ?")
+			.bind(books)
+			.run();
+		expect(await changeBankTextRule(db, CLEANED, books)).toBe(false);
+		const rule = await db
+			.prepare(
+				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
+			)
+			.bind(CLEANED)
+			.first<{ categoryId: number }>();
+		expect(rule?.categoryId).toBe(eating);
+		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
+	});
+
+	it("a Change to an active category reports that it was written", async () => {
+		const books = await categoryId("Books & audio");
+		expect(await changeBankTextRule(db, CLEANED, books)).toBe(true);
+		expect(await ruleCount()).toBe(1);
+	});
+});
+
 describe("withBankTextRules (pure)", () => {
 	const line = {
 		cleanedText: "netflix.com",
