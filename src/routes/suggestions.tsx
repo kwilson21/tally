@@ -491,10 +491,11 @@ suggestions.get(PATH, (c) =>
 
 // A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
 // row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
-// is announced, and the name is never logged. Each answer, the empty one too, is cached by the browser for a day, so
-// a card drawn again doesn't call Workers AI again (per browser only; the URL names the item, never a store's text).
+// is announced, and the name is never logged. Workers AI is asked once for each transaction and its answer is kept on
+// the server (decision 161), so a card drawn again reads the kept answer; the response is never cached by the browser
+// (no-store), so a stale name isn't served. The URL names the item, never a store's text.
 suggestions.get(`${PATH}/new-category`, async (c) => {
-	c.header("Cache-Control", "private, max-age=86400");
+	c.header("Cache-Control", "no-store");
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
 	const { skipped, again } = requestedReview(c.req.url, queue);

@@ -88,7 +88,9 @@ export async function pendingCategoryNames(
  * The name Tally suggests for a store's purchase, or null. A pending suggestion for the same store is preferred and
  * makes no call. Otherwise Workers AI names it, from the store's name only, and only while the categories switch is on
  * and there is an AI binding (the demo has one too). A store with a "Never suggest" for a new category gets neither (the
- * same check the queue's new categories use, decision 101), so no name and no call. Nothing here logs the name.
+ * same check the queue's new categories use, decision 101), so no name and no call. Each transaction is asked once: the
+ * answer, a name or none, is kept in maybe_names and read back with no call after that (decision 161). Nothing here logs
+ * the name.
  */
 export async function suggestedCategoryName(
 	db: D1Database,
@@ -107,13 +109,34 @@ export async function suggestedCategoryName(
 	);
 	if (pending) return pending;
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
+	// Asked once for each transaction (decision 161): a kept answer, a name or "no name", is read and never asked again.
+	const kept = await db
+		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
+		.bind(item.transactionId)
+		.first<{ name: string | null }>();
+	if (kept) return kept.name;
 	// The store's name only: a person's own name or note for this purchase is typed text and never leaves the app.
 	const result = await suggestCategoryName(
 		ai,
 		[item.merchant],
 		await namesToAvoid(db),
 	);
-	return result.ok ? result.name : null;
+	const name = result.ok ? result.name : null;
+	// Kept whatever came back, so a failed call or an unusable answer is not asked again either. A concurrent first
+	// request that lost the insert keeps the first answer, and both return what is stored now.
+	await db
+		.prepare(
+			`INSERT INTO maybe_names (transaction_id, name)
+			SELECT id, ? FROM transactions WHERE id = ?
+			ON CONFLICT(transaction_id) DO NOTHING`,
+		)
+		.bind(name, item.transactionId)
+		.run();
+	const stored = await db
+		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
+		.bind(item.transactionId)
+		.first<{ name: string | null }>();
+	return stored?.name ?? null;
 }
 
 export type FileResult =
