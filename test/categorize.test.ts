@@ -147,10 +147,10 @@ describe("askJev", () => {
 		expect(second.state.direction).toBe("money in");
 	});
 
-	it("sends merchant history as category names in state, without the earlier transaction details", async () => {
+	it("sends the learned line that applies as its category name and answers count, and no merchant history (decision 156)", async () => {
 		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
 		await askJev(
-			{ ...input, merchantCategoryHistory: [["Groceries"], ["Groceries"]] },
+			{ ...input, learnedCategory: { category: "Groceries", answers: 3 } },
 			categories,
 			"k",
 			fetchImpl,
@@ -162,10 +162,22 @@ describe("askJev", () => {
 			amount_cents: 1200,
 			direction: "money out",
 			account_type: "credit",
-			merchant_category_history: [["Groceries"], ["Groceries"]],
+			learned_category: { category: "Groceries", from_answers: 3 },
 		});
+		expect(body.state).not.toHaveProperty("merchant_category_history");
 		expect(body.questions.category.instructions).toContain(
-			"use them as context for this category guess",
+			"This household has filed this exact bank text under Groceries in 3 of its last 5 answers",
+		);
+	});
+
+	it("sends no learned line and no instruction about one when there is none", async () => {
+		const { calls, fetchImpl } = fakeFetch(() => ok(goodBody));
+		await askJev(input, categories, "k", fetchImpl);
+		const body = JSON.parse(String(calls[0]?.init.body));
+		expect(body.state).not.toHaveProperty("learned_category");
+		expect(body.state).not.toHaveProperty("merchant_category_history");
+		expect(body.questions.category.instructions).not.toContain(
+			"filed this exact bank text",
 		);
 	});
 

@@ -10,6 +10,7 @@
 import { askJev, JEV_THRESHOLD } from "./ai/categorize";
 import { meetsConfidenceThreshold } from "./ai/confidence";
 import { decide, type JevAnswer } from "./ai/decide";
+import { cleanBankText } from "./clean-bank-text";
 import { householdTimeZone, todayIn } from "./dates";
 import {
 	type AiSwitches,
@@ -24,6 +25,7 @@ import {
 	reservedKeyFor,
 	reserveJevCalls,
 } from "./db/jev-calls";
+import { loadLearnedLines } from "./db/learned-lines";
 import { currentClusterRows } from "./db/resort-candidates";
 import {
 	bumpDoneStatement,
@@ -45,7 +47,6 @@ import {
 	type JevSeen,
 	markJevFailedStatement,
 	markReaskFailedStatement,
-	merchantCategoryHistoryForJev,
 	pendingForJev,
 	saveJevDetailsStatement,
 	saveJevResultStatements,
@@ -187,8 +188,11 @@ type ReadPlan = {
 	people: { id: number; name: string }[];
 	/** Every waiting row the read found, at most GROUP_SIZE. */
 	rows: SortRow[];
-	/** Each merchant's recent categories, keyed by its merchant key. */
-	histories: Record<string, string[][]>;
+	/**
+	 * The group's learned lines (decisions 156 and 162), keyed by cleaned bank text: only texts a row of this group has, and
+	 * only lines that are not vague. Absent in a plan a deploy read before learned lines, so no line is sent for it.
+	 */
+	learned?: Record<string, { category: string; answers: number }>;
 	/** Set for a re-ask group: every row of it is a re-ask row. */
 	reask?: ReaskPlan;
 };
@@ -399,8 +403,27 @@ function stillInCluster(
 }
 
 /**
+ * The learned lines Jev may be told for these rows (decisions 156 and 162), by cleaned bank text: one load, then the
+ * lines of the rows' own texts that are not vague (a vague text's line is never sent).
+ */
+async function learnedLinesFor(
+	db: D1Database,
+	rows: SortRow[],
+): Promise<Record<string, { category: string; answers: number }>> {
+	const texts = new Set(rows.map((row) => cleanBankText(row.rawName)));
+	return Object.fromEntries(
+		(await loadLearnedLines(db))
+			.filter((line) => texts.has(line.cleanedText) && !line.vague)
+			.map((line) => [
+				line.cleanedText,
+				{ category: line.categoryName, answers: line.answers },
+			]),
+	);
+}
+
+/**
  * Takes the turn and reads what a group needs, with no Jev call and no reservation: the switches once, the categories,
- * the people (when details are on), the time zone, its rows and their merchant histories. Gives the turn back when
+ * the people (when details are on), the time zone, its rows and their learned lines. Gives the turn back when
  * there is nothing to ask. Any throw after the turn was taken gives it back first. The calls are reserved in their own
  * step (reserveCalls), so a read that runs again never reserves twice.
  */
@@ -553,9 +576,9 @@ async function readGroup(
 				);
 			return await none();
 		}
-		const histories = switches.categories
-			? await merchantCategoryHistoryForJev(db, rows)
-			: new Map<string, string[][]>();
+		// Loaded once for the group, not per row: a line is context for the one text it is about, and a line that
+		// changes before the save still applies its answer (a line is not part of JevSeen).
+		const learned = switches.categories ? await learnedLinesFor(db, rows) : {};
 		return {
 			kind: "group",
 			plan: {
@@ -568,7 +591,7 @@ async function readGroup(
 				categories,
 				people,
 				rows,
-				histories: Object.fromEntries(histories),
+				learned,
 				...(reask ? { reask } : {}),
 			},
 		};
@@ -638,13 +661,11 @@ async function askOne(
 		// A re-ask asks for its category only, never details (decision 160).
 		const detailRequested =
 			plan.switches.details && !row.detailsAsked && !plan.reask;
+		const learned = plan.switches.categories
+			? plan.learned?.[cleanBankText(row.rawName)]
+			: undefined;
 		const result = await askJev(
-			{
-				...row,
-				merchantCategoryHistory: plan.switches.categories
-					? plan.histories[row.merchantKey]
-					: undefined,
-			},
+			{ ...row, learnedCategory: learned },
 			plan.categories.map((c) => c.name),
 			apiKey,
 			fetchImpl,
