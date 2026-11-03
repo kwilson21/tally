@@ -158,13 +158,20 @@ function requestedReview(
 }
 
 /**
- * The address that answers with a category guess's suggested new category (decision 156). It names the item only, never a
- * store's text (a bank's text can carry a card or account number, and a URL is logged), and never the screen's skips:
- * the address is the same wherever the card is reached, so the browser's one-day cache holds. The row's answer finds
- * the skips from the page it was answered on (HX-Current-URL), see the POST below.
+ * The version of the name's loader address. Browsers keep a response from before this rollout for a day (its old
+ * `private, max-age=86400`), so the loader's URL changes with each version and the old cached answer is never reused.
+ * The GET accepts the parameter and ignores it.
+ */
+export const NAME_URL_VERSION = 2;
+
+/**
+ * The address that answers with a category guess's suggested new category (decision 156). It names the item and this
+ * version only, never a store's text (a bank's text can carry a card or account number, and a URL is logged), and never
+ * the screen's skips: the address is the same wherever the card is reached, and the kept answer in maybe_names holds
+ * (decision 161). The row's answer finds the skips from the page it was answered on (HX-Current-URL), see the POST below.
  */
 function newCategoryAddress(id: string): string {
-	return `${PATH}/new-category?${new URLSearchParams({ id })}`;
+	return `${PATH}/new-category?${new URLSearchParams({ id, v: String(NAME_URL_VERSION) })}`;
 }
 
 /** Skip: the first one sets the item aside; on an item that came back, it sets it aside for good. */
@@ -491,10 +498,11 @@ suggestions.get(PATH, (c) =>
 
 // A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
 // row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
-// is announced, and the name is never logged. Each answer, the empty one too, is cached by the browser for a day, so
-// a card drawn again doesn't call Workers AI again (per browser only; the URL names the item, never a store's text).
+// is announced, and the name is never logged. Workers AI is asked once for each transaction and its answer is kept on
+// the server (decision 161), so a card drawn again reads the kept answer; the response is never cached by the browser
+// (no-store), so a stale name isn't served. The URL names the item, never a store's text.
 suggestions.get(`${PATH}/new-category`, async (c) => {
-	c.header("Cache-Control", "private, max-age=86400");
+	c.header("Cache-Control", "no-store");
 	const db = c.env.DB;
 	const queue = await suggestionQueue(db);
 	const { skipped, again } = requestedReview(c.req.url, queue);
