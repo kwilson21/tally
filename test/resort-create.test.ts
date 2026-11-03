@@ -552,6 +552,56 @@ describe("the progress announcements (#821 owner feedback)", () => {
 			'<span aria-hidden="true" class="tabular-nums">0</span>',
 		);
 	});
+
+	/** The hidden region's spoken text in a poll's answer, or null when the answer sends none. */
+	const spokenIn = (html: string) =>
+		/<span id="recheck-milestone" hx-swap-oob="innerHTML">([^<]*)<\/span>/.exec(
+			html,
+		)?.[1] ?? null;
+
+	it("speaks the count it has now when a jump crosses a quarter: 0 to 5 of 14 speaks 5, not the quarter's 4", async () => {
+		const runId = await seedRun(14);
+		const first = await get(`/resort/progress?run=${runId}&m=0`);
+		expect(spokenIn(first.html)).toBeNull();
+		await setDone(5);
+		const jumped = await get(`/resort/progress?run=${runId}&m=0`);
+		expect(jumped.html).toContain(
+			'<span aria-hidden="true" class="tabular-nums">5</span>',
+		);
+		expect(spokenIn(jumped.html)).toBe("5 of 14 done.");
+		// The poll's next quarter is the one the page now holds.
+		expect(jumped.html).toContain("&amp;m=1");
+	});
+
+	it("draws the hidden region at page load with the count it has, and a poll does not repeat the same quarter", async () => {
+		const runId = await seedRun(14);
+		await setDone(5);
+		const { html } = await get("/settings/suggestions");
+		expect(html).toContain(`hx-get="/resort/progress?run=${runId}&amp;m=1"`);
+		expect(html).toContain(
+			'<span id="recheck-milestone" role="status" aria-live="polite" class="sr-only">5 of 14 done.</span>',
+		);
+		// The first poll at the same quarter holds it: nothing is spoken again.
+		const same = await get(`/resort/progress?run=${runId}&m=1`);
+		expect(spokenIn(same.html)).toBeNull();
+		await setDone(6);
+		const next = await get(`/resort/progress?run=${runId}&m=1`);
+		expect(spokenIn(next.html)).toBeNull();
+	});
+
+	it("treats a malformed m as 0: junk answers like m=0 and never resends on every poll", async () => {
+		const runId = await seedRun(14);
+		await setDone(14);
+		const reference = await get(`/resort/progress?run=${runId}&m=0`);
+		expect(spokenIn(reference.html)).toBe("14 of 14 done.");
+		for (const junk of ["abc", "-1", "99999", "1.5", "", "NaN", "4"]) {
+			const { html } = await get(`/resort/progress?run=${runId}&m=${junk}`);
+			expect(html).toBe(reference.html);
+		}
+		// The answer's own m is the quarter it holds, so the next poll sends a valid one and is silent.
+		const held = await get(`/resort/progress?run=${runId}&m=3`);
+		expect(spokenIn(held.html)).toBeNull();
+	});
 });
 
 describe("Undo (decision 160)", () => {
