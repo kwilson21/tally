@@ -7389,7 +7389,7 @@ function SettingsGroup() {
 				components={["LearnedPage", "EmptyState", "Button"]}
 				sentence="Settings' page of what Tally learned from answers (decision 162): an intro, then one bordered line for each text and the category a person chose, with its count and a quiet Forget. Forget undoes within ten seconds. Empty, it says Nothing yet."
 			>
-				<State label="Three lines, one of them a vague text (APPLE.COM/BILL)">
+				<State label="Three lines">
 					<div inert>
 						<LearnedPage
 							id="catalog-learned-lines"

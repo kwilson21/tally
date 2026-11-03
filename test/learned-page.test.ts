@@ -259,6 +259,62 @@ describe("POST /settings/learned/forget", () => {
 		expect(textOf(html)).toContain("Netflix.com → Groceries");
 	});
 
+	it("Undo of a second Forget restores the state before it, and no older answer comes back", async () => {
+		// An old answer, made before the first Forget, that the first Forget hides.
+		await answer("NETFLIX.COM", "Entertainment", "user", "2026-10-02");
+		await db
+			.prepare("UPDATE transactions SET updated_at = '2026-10-02 12:00:00'")
+			.run();
+		const first = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+		expect(textOf((await get("/settings/learned")).html)).toContain(
+			"Nothing yet",
+		);
+		// Pin the first Forget's time so the answers' times are unambiguous.
+		await db
+			.prepare(
+				"UPDATE forgotten_texts SET forgotten_at = '2026-10-10 09:00:00'",
+			)
+			.run();
+		expect(trigger(first.res).toast?.undo).toBeDefined();
+		// A newer answer after the first Forget brings the line back.
+		await answer("NETFLIX.COM", "Groceries", "user", "2026-10-11");
+		await db
+			.prepare(
+				"UPDATE transactions SET updated_at = '2026-10-11 09:00:00' WHERE category_id = ?",
+			)
+			.bind(await categoryId("Groceries"))
+			.run();
+		expect(textOf((await get("/settings/learned")).html)).toContain(
+			"Netflix.com → Groceries",
+		);
+		// The second Forget hides it again; its Undo must put back the state just before it.
+		const second = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+		expect(textOf((await get("/settings/learned")).html)).toContain(
+			"Nothing yet",
+		);
+		const undo = await post("/settings/learned/undo", {
+			token: trigger(second.res).toast?.undo ?? "",
+			back: "/settings/learned",
+		});
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
+		const after = textOf(undo.html);
+		expect(after).toContain("Netflix.com → Groceries");
+		expect(after).toContain("From 1 of your answers");
+		expect(after).not.toContain("Entertainment");
+		const row = await db
+			.prepare(
+				"SELECT forgotten_at AS f, previous_forgotten_at AS p FROM forgotten_texts",
+			)
+			.first<{ f: string; p: string | null }>();
+		expect(row).toEqual({ f: "2026-10-10 09:00:00", p: null });
+	});
+
 	it("is a quiet no-op for a line that is already gone, with no forgotten row written", async () => {
 		const { res } = await post("/settings/learned/forget", {
 			text: "netflix.com",

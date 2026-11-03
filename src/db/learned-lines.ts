@@ -5,7 +5,6 @@
 
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
-import { tidyName } from "../transactions/tidy-name";
 import { INCLUDED } from "./counted-month";
 
 /** How many of a text's latest answers decide its line (decision 162). */
@@ -46,9 +45,33 @@ export type LearnedLine = {
 	vague: boolean;
 };
 
-/** The name a text shows as: tidyName needs capitals to work on, and cleaned text is lowercase. */
+// Small words stay lower case in a name, unless they open it.
+const SMALL_WORDS = new Set([
+	"of",
+	"the",
+	"and",
+	"a",
+	"an",
+	"in",
+	"at",
+	"to",
+	"for",
+	"on",
+]);
+
+/**
+ * A line's name for people: the cleaned text with each word capitalised, except small words (SMALL_WORDS), which stay
+ * lower case unless they are the first word. "museum of the bible" is "Museum of the Bible".
+ */
 export function displayName(cleanedText: string): string {
-	return tidyName(cleanedText.toUpperCase());
+	return cleanedText
+		.split(" ")
+		.map((word, index) => {
+			if (word === "") return word;
+			if (index > 0 && SMALL_WORDS.has(word)) return word;
+			return word.charAt(0).toUpperCase() + word.slice(1);
+		})
+		.join(" ");
 }
 
 /**
@@ -131,8 +154,9 @@ export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 }
 
 /**
- * Forgets a text (its Forget). Its row is written once; a text forgotten before keeps one row, whose time is now.
- * Returns the row's id, which the Undo names.
+ * Forgets a text (its Forget). A text forgotten before keeps its one row: its time moves to now, and the time it had
+ * goes to previous_forgotten_at, so the Undo of this Forget can put the line back as it was. Returns the row's id,
+ * which the Undo names.
  */
 export async function forgetText(
 	db: D1Database,
@@ -141,7 +165,9 @@ export async function forgetText(
 	const row = await db
 		.prepare(
 			`INSERT INTO forgotten_texts (cleaned_text, forgotten_at) VALUES (?, datetime('now'))
-			ON CONFLICT(cleaned_text) DO UPDATE SET forgotten_at = excluded.forgotten_at
+			ON CONFLICT(cleaned_text) DO UPDATE SET
+				previous_forgotten_at = forgotten_texts.forgotten_at,
+				forgotten_at = excluded.forgotten_at
 			RETURNING id`,
 		)
 		.bind(cleanedText)
@@ -150,8 +176,9 @@ export async function forgetText(
 }
 
 /**
- * Undo of a Forget: deletes the row it wrote, only within the ten seconds, by the database's clock. "gone" when the row
- * is not there (already undone, or never written).
+ * Undo of a Forget, only within the ten seconds, by the database's clock. A first Forget's row is deleted; a second
+ * Forget's row gets back the time it replaced, so the line is as it was before that Forget. "gone" when the row is not
+ * there (already undone, or never written).
  */
 export async function undoForget(
 	db: D1Database,
@@ -159,13 +186,23 @@ export async function undoForget(
 ): Promise<"undone" | "expired" | "gone"> {
 	const row = await db
 		.prepare(
-			`SELECT julianday('now') - julianday(forgotten_at) < ? / 86400.0 AS fresh
+			`SELECT julianday('now') - julianday(forgotten_at) < ? / 86400.0 AS fresh,
+				previous_forgotten_at AS previous
 			FROM forgotten_texts WHERE id = ?`,
 		)
 		.bind(FORGET_UNDO_SECONDS, id)
-		.first<{ fresh: number }>();
+		.first<{ fresh: number; previous: string | null }>();
 	if (!row) return "gone";
 	if (!row.fresh) return "expired";
-	await db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id).run();
+	if (row.previous !== null) {
+		await db
+			.prepare(
+				"UPDATE forgotten_texts SET forgotten_at = previous_forgotten_at, previous_forgotten_at = NULL WHERE id = ?",
+			)
+			.bind(id)
+			.run();
+	} else {
+		await db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id).run();
+	}
 	return "undone";
 }
