@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Decision } from "../src/ai/decide";
 import { categorizePending } from "../src/categorize-pending";
 import { householdToday } from "../src/dates";
 import { saveAiSwitches } from "../src/db/ai-switches";
@@ -15,6 +16,7 @@ import {
 	startOrJoinRun,
 } from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
+import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
 import { sortGroups } from "../src/sort-groups";
 import { runSortInstance } from "../src/sort-instance";
@@ -149,10 +151,18 @@ async function categoryIdByName(name: string): Promise<number> {
 async function startRun(ids: number[]): Promise<string> {
 	const candidates: ResortCandidate[] = [];
 	for (const id of ids) {
+		// The identity the run stores is the one the row has now: its Plaid id and amount, read with its snapshot.
+		const row = await db
+			.prepare(
+				"SELECT date, amount_cents AS amount, plaid_transaction_id AS plaid FROM transactions WHERE id = ?",
+			)
+			.bind(id)
+			.first<{ date: string; amount: number; plaid: string | null }>();
 		candidates.push({
 			id,
-			date: TODAY,
-			amountCents: -1234,
+			date: row?.date ?? TODAY,
+			amountCents: row?.amount ?? 0,
+			plaidTransactionId: row?.plaid ?? null,
 			rawName: "",
 			merchantKey: "",
 			mixed: false,
@@ -654,6 +664,64 @@ describe("progress, finish and restore", () => {
 				{ rulesApplied: false, reask: { runId, ids: [a] } },
 			),
 		).rejects.toThrow("rules broke");
+		expect((await readRun(db))?.status).toBe("done");
+	});
+});
+
+describe("a re-ask writes only while its run is still running (#828)", () => {
+	const decision = (categoryId: number): Decision => ({
+		categoryId,
+		suggestedCategoryId: categoryId,
+		confidence: 0.9,
+		flags: { transfer: false, reimbursement: false, income: false },
+		noneFit: false,
+	});
+
+	it("a category answer saved after its run finished writes nothing; while running, it does", async () => {
+		const eatingOut = await categoryIdByName("Eating Out");
+		const running = await addRow();
+		const runIdRunning = await startRun([running]);
+		// The run is still running: the answer applies.
+		expect(
+			await saveJevResult(db, running, decision(eatingOut), {
+				reask: { runId: runIdRunning },
+				categoryAsked: true,
+			}),
+		).toBe(true);
+		await finishRun(db, { runId: runIdRunning, now: Date.now() });
+
+		// A second run, finished before its answer arrives: the same save writes nothing.
+		const closed = await addRow();
+		const runIdClosed = await startRun([closed]);
+		await finishRun(db, { runId: runIdClosed, now: Date.now() });
+		expect((await readRun(db))?.status).toBe("done");
+		expect(
+			await saveJevResult(db, closed, decision(eatingOut), {
+				reask: { runId: runIdClosed },
+				categoryAsked: true,
+			}),
+		).toBe(false);
+		expect(await field(closed, "category_id")).toBeNull();
+		expect(await field(closed, "category_source")).toBeNull();
+	});
+
+	it("a run force-finalized while its group asks: the answer is not written", async () => {
+		const maybe = await addRow({ confidence: 0.55 });
+		const runId = await startRun([maybe]);
+		const fetchImpl = vi.fn(async () => {
+			// Forced finalize (no instance key) while the row's ask is in flight.
+			await finishRun(db, { runId, now: Date.now() });
+			return reply(0.9);
+		});
+		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: "reask-forced",
+			reask: { runId, ids: [maybe] },
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(await field(maybe, "category_id")).toBeNull();
+		// The finalize's restore put the mark back; the late answer did not overwrite it.
+		expect(await confOf(maybe)).toBe(0.55);
 		expect((await readRun(db))?.status).toBe("done");
 	});
 });

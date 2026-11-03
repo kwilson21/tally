@@ -3183,7 +3183,7 @@ export type JevAnswerSave = {
 	 * A re-sort's re-ask (decision 160): writes only the category answer, the eight columns Undo keeps (resort-run.ts), for
 	 * a row that the re-ask cleared. Never its flags, exclusion, income or details, whatever the answer said.
 	 */
-	reask?: boolean;
+	reask?: { runId: string };
 	categoryAsked?: boolean;
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
@@ -3250,14 +3250,17 @@ export function saveJevResultStatements(
 		: [];
 	if (options.reask) {
 		// The re-ask writes only the category answer. It has no classification check: the row was cleared on purpose, and
-		// its Maybe mark (confidence NULL) is what the guard reads (decision 160).
+		// its Maybe mark (confidence NULL) is what the guard reads (decision 160). It writes only while its run is still the
+		// household's current run and running (#828): a run closed or finalized meanwhile writes nothing here.
 		const guarded = withTurnGuard(
 			`UPDATE transactions SET
 					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
 					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
 				 WHERE id = ? AND flag_income = 0 AND is_split = 0 AND ${INCLUDED_ROW}
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-					AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
+					AND ${STILL_ON_SQL}${seenSql}${activeSql}
+					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
+						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')`,
 			options.turn,
 		);
 		const category = db
@@ -3274,6 +3277,7 @@ export function saveJevResultStatements(
 				stillOn,
 				...(seenGuard?.binds ?? []),
 				...activeBinds,
+				options.reask?.runId ?? "",
 				...guarded.binds,
 			);
 		return answerStatements(

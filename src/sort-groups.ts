@@ -635,7 +635,7 @@ export async function writeGroup(
 				});
 				const answer = saveJevResultStatements(db, row.id, decision, {
 					categoryOnly: row.categoryOnly,
-					reask: reask !== undefined,
+					reask: reask ? { runId: reask.runId } : undefined,
 					categoryAsked: plan.categories.length > 0,
 					switches: {
 						income: sw.income,
