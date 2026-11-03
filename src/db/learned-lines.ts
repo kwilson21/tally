@@ -5,7 +5,7 @@
 
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
-import { INCLUDED } from "./counted-month";
+import { jevSaysMixedSql } from "./mixed-trip";
 
 /** How many of a text's latest answers decide its line (decision 162). */
 export const LEARNED_WINDOW = 5;
@@ -135,13 +135,19 @@ export function learnedLines(
 	return lines.sort((a, b) => a.cleanedText.localeCompare(b.cleanedText));
 }
 
-/** The confirmed answers, newest first. Split parents, pending, archived and excluded rows never count. */
+/**
+ * The confirmed answers, newest first. Split parents, pending, archived and excluded rows never count, nor a trip Jev
+ * calls mixed (decision 156), whose parts follow their parent. `excluded = 0` is strict: a bill's link does not make an
+ * excluded row count here, unlike the budget (INCLUDED).
+ */
 const ANSWERS_SQL = `SELECT t.id, t.date, t.raw_name AS rawName, t.updated_at AS updatedAt,
 		t.category_id AS categoryId, c.name AS categoryName, c.icon, c.color
 	FROM transactions t JOIN categories c ON c.id = t.category_id
 	WHERE t.category_source IN ('user', 'merchant_rule')
 		AND t.category_id IS NOT NULL AND c.archived = 0
-		AND t.pending = 0 AND t.is_split = 0 AND ${INCLUDED}
+		AND t.pending = 0 AND t.is_split = 0 AND t.excluded = 0
+		AND NOT ${jevSaysMixedSql("t")}
+		AND NOT EXISTS (SELECT 1 FROM transactions p WHERE p.id = t.parent_id AND ${jevSaysMixedSql("p")})
 	ORDER BY t.date DESC, t.id DESC`;
 
 /** The learned lines as the database has them now. */

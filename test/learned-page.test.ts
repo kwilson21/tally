@@ -110,6 +110,16 @@ describe("GET /settings/learned: the page", () => {
 		expect(html).toContain('action="/settings/learned/forget"');
 	});
 
+	it("names its section by the heading id toast.js hands focus to when an Undo toast ends", async () => {
+		// toast.js's focusHeading falls back to #page-title on a page with no Transactions heading (bills' page is the
+		// same), so keyboard focus lands on this page's heading rather than on the body.
+		const { html } = await get("/settings/learned");
+		expect(html).toMatch(
+			/<h1 id="page-title"[^>]*>What Tally has learned<\/h1>/,
+		);
+		expect(html).toContain('aria-labelledby="page-title"');
+	});
+
 	it("names each Forget button with its line, for a screen reader", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
 		const { html } = await get("/settings/learned");

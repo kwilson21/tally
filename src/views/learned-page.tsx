@@ -13,7 +13,7 @@ export function LearnedPage({
 	lines,
 	error,
 	id = "page",
-	titleId = "learned-title",
+	titleId = "page-title",
 }: {
 	lines: LearnedLine[];
 	error?: string;
