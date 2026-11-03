@@ -6,7 +6,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
-import { suggestions } from "../src/routes/suggestions";
+import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
 import { recordSorting } from "./record-sorting";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
@@ -3234,11 +3234,20 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(html).toContain(`id="new-category-name-${id}-error"`);
 	});
 
+	it("the name's loader carries this rollout's version, which the GET accepts and ignores", async () => {
+		const { id } = await categoryCard();
+		const versioned = await get(
+			`/settings/suggestions/new-category?id=${id}&v=${NAME_URL_VERSION}`,
+		);
+		expect(versioned.res.status).toBe(200);
+		expect(versioned.html.trim()).toBe("");
+	});
+
 	it("the name's address is the same per item, and a refused row keeps the skips its page had", async () => {
 		const { ids, address, id } = await categoryCard();
 		const { html: page } = await get(address);
 		expect(page).toContain(
-			`hx-get="/settings/suggestions/new-category?id=${id}"`,
+			`hx-get="/settings/suggestions/new-category?id=${id}&amp;v=${NAME_URL_VERSION}"`,
 		);
 		// htmx sends the page's own address as HX-Current-URL, so the row's answer keeps the skips the page had.
 		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {

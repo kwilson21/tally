@@ -114,13 +114,16 @@ export async function suggestedCategoryName(
 	if (kept) return kept.name;
 	// Claim first: the insert wins the transaction only once, so only the winner asks Workers AI. A request that loses
 	// the claim reads what is stored: no name while the winner is still waiting, its name once it is kept.
+	// The token names this claim: only it can finish the row, so an answer for a purchase that was deleted meanwhile (and
+	// whose id a new purchase reused) is dropped rather than written over that purchase's row.
+	const token = crypto.randomUUID();
 	const claim = await db
 		.prepare(
-			`INSERT INTO maybe_names (transaction_id, name)
-			SELECT id, NULL FROM transactions WHERE id = ?
+			`INSERT INTO maybe_names (transaction_id, name, claim)
+			SELECT id, NULL, ? FROM transactions WHERE id = ?
 			ON CONFLICT(transaction_id) DO NOTHING`,
 		)
-		.bind(item.transactionId)
+		.bind(token, item.transactionId)
 		.run();
 	if ((claim.meta.changes ?? 0) === 0)
 		return (await keptRow(db, item.transactionId))?.name ?? null;
@@ -132,10 +135,14 @@ export async function suggestedCategoryName(
 	);
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
-	await db
-		.prepare("UPDATE maybe_names SET name = ? WHERE transaction_id = ?")
-		.bind(name, item.transactionId)
+	const done = await db
+		.prepare(
+			"UPDATE maybe_names SET name = ? WHERE transaction_id = ? AND claim = ?",
+		)
+		.bind(name, item.transactionId, token)
 		.run();
+	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
+	if ((done.meta.changes ?? 0) === 0) return null;
 	return name;
 }
 

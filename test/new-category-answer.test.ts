@@ -486,7 +486,7 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 		// The winner has claimed the transaction and is still asking Workers AI: its row is there, with no name yet.
 		await db
 			.prepare(
-				"INSERT INTO maybe_names (transaction_id, name) VALUES (?, NULL)",
+				"INSERT INTO maybe_names (transaction_id, name, claim) VALUES (?, NULL, 'claim-of-the-winner')",
 			)
 			.bind(item.transactionId)
 			.run();
@@ -521,6 +521,48 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
 		expect(run).toHaveBeenCalledTimes(1);
 		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
+	});
+
+	it("a completion whose claim was replaced changes nothing: a reused row number keeps the new request's name", async () => {
+		const item = await itemFor();
+		const other = {
+			transactionId: item.transactionId,
+			merchantKey: "HARDWARE BARN",
+			merchant: "Hardware Barn",
+		};
+		let bAnswer: string | null | undefined;
+		// Request A claims the transaction, then, while Workers AI is still answering, the purchase is deleted (its row
+		// goes with it) and a new one reuses the id. Request B claims that id and finishes with its own name.
+		const runA = vi.fn(async () => {
+			await db
+				.prepare("DELETE FROM transactions WHERE id = ?")
+				.bind(item.transactionId)
+				.run();
+			await db
+				.prepare(
+					`INSERT INTO transactions (id, plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				VALUES (?, ?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-02', 2300, 'HARDWARE BARN')`,
+				)
+				.bind(item.transactionId, `plaid-${crypto.randomUUID()}`)
+				.run();
+			bAnswer = await suggestedCategoryName(
+				db,
+				aiReturning("Hobby supplies").ai,
+				other,
+			);
+			return "Books & audio";
+		});
+		const answerA = await suggestedCategoryName(
+			db,
+			{ run: runA } as unknown as Ai,
+			item,
+		);
+		// A's answer is for a purchase that is gone: it is dropped, and B's row and name are untouched.
+		expect(answerA).toBeNull();
+		expect(bAnswer).toBe("Hobby supplies");
+		expect(await keptRows(item.transactionId)).toEqual([
+			{ name: "Hobby supplies" },
+		]);
 	});
 
 	it("the stops before the claim make no claim: no row is inserted", async () => {
