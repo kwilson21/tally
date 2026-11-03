@@ -32,8 +32,15 @@ export type ResortRun = {
 	instances: number;
 	ids: number[];
 	snapshots: ResortSnapshot[];
+	/** The first category the run started for (callers that want one category read this). */
 	categoryId: number;
 	categoryName: string;
+	/** Every category the run holds, the first one first, each once. A joining call with a new one adds it. */
+	categories: { id: number; name: string }[];
+	/** The category each run row was started for, by row id. A row already in the run keeps its first category. */
+	categoryByRow: Record<string, number>;
+	/** The instance keys that have finished (each counted once). The run finalizes when there are `instances` of them. */
+	finishedKeys: string[];
 	startedAt: number;
 	toasted: boolean;
 	/** Set when the run finishes: the token of the one finish that did it. */
@@ -45,9 +52,12 @@ export type MovedRecord = {
 	runId: string;
 	categoryId: number;
 	categoryName: string;
+	/** The names of the run's categories, for the toast. */
+	categories: string[];
 	/** Undo is open until this time (ms). */
 	until: number;
-	rows: { id: number; snapshot: ResortSnapshot }[];
+	/** Each row the run moved: the category it was started for (which it now holds), and its pre-run snapshot. */
+	rows: { id: number; categoryId: number; snapshot: ResortSnapshot }[];
 	/** The run's rows now in the Maybe range with no category: the ones a person is asked about. */
 	needAnswer: number;
 };
@@ -101,9 +111,21 @@ function freshCandidates(
 	return out;
 }
 
+/** `list` with `category` added, unless its id is already there. */
+const withCategory = (
+	list: readonly { id: number; name: string }[],
+	category: { id: number; name: string },
+) => (list.some((c) => c.id === category.id) ? [...list] : [...list, category]);
+
+/** The category each of `rows` was started for, keyed by row id. */
+const byRow = (rows: readonly ResortCandidate[], categoryId: number) =>
+	Object.fromEntries(rows.map((c) => [String(c.id), categoryId]));
+
 /**
  * Starts a run for `candidates` into `categoryId`, or joins the fresh running one (its new ids only). A running run older
- * than STALE_MS is finished first. `newIds` are the ids this call added to the run.
+ * than STALE_MS is finished first. `newIds` are the ids this call added to the run; a row already in the run keeps the
+ * category it was started for. With no candidates and no fresh running run, nothing is started or written: the result
+ * is `{runId: null, newIds: [], joined: false}`, so an empty re-sort never leaves a run running.
  */
 export async function startOrJoinRun(
 	db: D1Database,
@@ -118,7 +140,7 @@ export async function startOrJoinRun(
 		categoryName: string;
 		now: number;
 	},
-): Promise<{ runId: string; newIds: number[]; joined: boolean }> {
+): Promise<{ runId: string | null; newIds: number[]; joined: boolean }> {
 	for (let attempt = 0; attempt < 5; attempt++) {
 		const row = await db
 			.prepare("SELECT value FROM household_settings WHERE key = ?")
@@ -134,6 +156,14 @@ export async function startOrJoinRun(
 				total: current.total + fresh.length,
 				ids: [...current.ids, ...fresh.map((c) => c.id)],
 				snapshots: [...current.snapshots, ...fresh.map((c) => c.snapshot)],
+				categoryByRow: {
+					...current.categoryByRow,
+					...byRow(fresh, categoryId),
+				},
+				categories: withCategory(current.categories, {
+					id: categoryId,
+					name: categoryName,
+				}),
 				instances: current.instances + 1,
 			};
 			if (await writeRunIf(db, expected, next)) {
@@ -153,6 +183,7 @@ export async function startOrJoinRun(
 		}
 
 		const fresh = freshCandidates(candidates, new Set());
+		if (fresh.length === 0) return { runId: null, newIds: [], joined: false };
 		const run: ResortRun = {
 			id: crypto.randomUUID(),
 			total: fresh.length,
@@ -163,6 +194,9 @@ export async function startOrJoinRun(
 			snapshots: fresh.map((c) => c.snapshot),
 			categoryId,
 			categoryName,
+			categories: [{ id: categoryId, name: categoryName }],
+			categoryByRow: byRow(fresh, categoryId),
+			finishedKeys: [],
 			startedAt: now,
 			toasted: false,
 		};
@@ -294,15 +328,84 @@ const maybeRangeSql = () => {
 	return `CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) > ${bounds.above} AND CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${bounds.below}`;
 };
 
+export type FinishResult = {
+	moved: number;
+	needAnswer: number;
+	categories: string[];
+	/** False while some sorting instances have not finished yet (nothing is moved, recorded or restored then). */
+	finished: boolean;
+	/** The instances still to finish. */
+	pending: number;
+};
+
 /**
- * Finishes the run once: marks it done, records the rows the sort moved into its category (with their pre-run
- * snapshots) and how many now need an answer, and restores the pre-run mark of each run row the run never reached
- * (still untouched). A second call changes nothing and returns the same counts. Undo stays open for UNDO_MS.
+ * Finishes one sorting instance of the run. Without `instanceKey` the run is finalized at once. With it, the key is
+ * recorded once in `finishedKeys`, and the run is finalized only when every instance (the run's `instances`) has
+ * finished; before that this returns `finished: false` with the count still `pending`, and writes nothing else. A run
+ * that is done, or not this one, changes nothing.
  */
 export async function finishRun(
 	db: D1Database,
+	{
+		runId,
+		now,
+		instanceKey,
+	}: { runId: string; now: number; instanceKey?: string },
+): Promise<FinishResult> {
+	if (instanceKey !== undefined) {
+		const waiting = await recordInstanceFinish(db, runId, instanceKey);
+		if (waiting) return waiting;
+	}
+	return finalizeRun(db, { runId, now });
+}
+
+/** Records `key` as finished and returns the waiting result, or null when every instance has finished (or none can). */
+async function recordInstanceFinish(
+	db: D1Database,
+	runId: string,
+	key: string,
+): Promise<FinishResult | null> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		const row = await db
+			.prepare("SELECT value FROM household_settings WHERE key = ?")
+			.bind(RUN_KEY)
+			.first<{ value: string }>();
+		const current = row ? parseRun(row.value) : null;
+		if (
+			!row ||
+			!current ||
+			current.id !== runId ||
+			current.status !== "running"
+		)
+			return null;
+		let next = current;
+		if (!current.finishedKeys.includes(key)) {
+			next = { ...current, finishedKeys: [...current.finishedKeys, key] };
+			if (!(await writeRunIf(db, row.value, next))) continue;
+		}
+		const pending = Math.max(0, next.instances - next.finishedKeys.length);
+		if (pending === 0) return null;
+		return {
+			moved: 0,
+			needAnswer: 0,
+			categories: [],
+			finished: false,
+			pending,
+		};
+	}
+	throw new Error("The re-sort could not record its finish. Try again.");
+}
+
+/**
+ * Finalizes the run once: marks it done, records the rows the sort moved (each one of the run's own rows, filed into
+ * the category its entry was started for, by Jev) with their categories and pre-run snapshots, counts how many now
+ * need an answer, and restores the pre-run mark of each run row the run never reached (still untouched). A second
+ * call changes nothing and returns the same counts. Undo stays open for UNDO_MS.
+ */
+async function finalizeRun(
+	db: D1Database,
 	{ runId, now }: { runId: string; now: number },
-): Promise<{ moved: number; needAnswer: number }> {
+): Promise<FinishResult> {
 	const token = crypto.randomUUID();
 	const key = movedKey(runId);
 	// Parameter ?1 is RUN_KEY, ?2 the finish token: the restore and record only happen for the call that flipped.
@@ -337,6 +440,11 @@ export async function finishRun(
 		.bind(RUN_KEY, token);
 
 	const runRowIds = `SELECT json_extract(s.value, '$.id') FROM json_each(${SNAPSHOTS}) s`;
+	// The moved rows: the run's own rows, now in the category their own entry was started for, filed by Jev.
+	const movedRows = `(SELECT json_group_array(json_object('id', t.id, 'categoryId', t.category_id, 'snapshot', json(s.value)))
+		FROM json_each(json_extract(r.value, '$.snapshots')) s
+		JOIN transactions t ON t.id = json_extract(s.value, '$.id')
+		WHERE t.category_id = json_extract(r.value, '$.categoryByRow.' || t.id) AND t.category_source = 'jev')`;
 	const record = db
 		.prepare(
 			`INSERT INTO household_settings (key, value)
@@ -344,11 +452,11 @@ export async function finishRun(
 				'runId', json_extract(r.value, '$.id'),
 				'categoryId', json_extract(r.value, '$.categoryId'),
 				'categoryName', json_extract(r.value, '$.categoryName'),
+				'categories', json((SELECT json_group_array(json_extract(c.value, '$.name'))
+					FROM json_each(json_extract(r.value, '$.categories')) c
+					WHERE json_extract(c.value, '$.id') IN (SELECT json_extract(m.value, '$.categoryId') FROM json_each(${movedRows}) m))),
 				'until', ?4,
-				'rows', json((SELECT json_group_array(json_object('id', t.id, 'snapshot', json(s.value)))
-					FROM json_each(json_extract(r.value, '$.snapshots')) s
-					JOIN transactions t ON t.id = json_extract(s.value, '$.id')
-					WHERE t.category_id = json_extract(r.value, '$.categoryId') AND t.category_source = 'jev')),
+				'rows', json(${movedRows}),
 				'needAnswer', (SELECT COUNT(*) FROM transactions t
 					WHERE t.id IN (${runRowIds}) AND t.category_id IS NULL AND ${maybeRangeSql()})
 			)
@@ -358,21 +466,30 @@ export async function finishRun(
 
 	// Whether this call flipped the run or not, the record holds the answer: this call's, or the one that finished it.
 	await db.batch([flip, restore, record]);
-	return (await readRecord(db, runId)) ?? { moved: 0, needAnswer: 0 };
+	const counts = (await readRecord(db, runId)) ?? {
+		moved: 0,
+		needAnswer: 0,
+		categories: [],
+	};
+	return { ...counts, finished: true, pending: 0 };
 }
 
-/** The moved record's counts, or null when there is none (never finished, or Undo has removed it). */
+/** The moved record's counts and category names, or null when there is none (never finished, or Undo has removed it). */
 async function readRecord(
 	db: D1Database,
 	runId: string,
-): Promise<{ moved: number; needAnswer: number } | null> {
+): Promise<{ moved: number; needAnswer: number; categories: string[] } | null> {
 	const row = await db
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
 	if (!row) return null;
 	const record = JSON.parse(row.value) as MovedRecord;
-	return { moved: record.rows.length, needAnswer: record.needAnswer };
+	return {
+		moved: record.rows.length,
+		needAnswer: record.needAnswer,
+		categories: record.categories,
+	};
 }
 
 /**
@@ -395,8 +512,8 @@ export async function closeToastOnce(
 }
 
 /**
- * Undo: puts back the snapshot of each moved row that still reads as the run left it (its category is the run's and
- * its source is Jev), and only before the record's `until`. A row that changed since is left alone and counted in
+ * Undo: puts back the snapshot of each moved row that still reads as the run left it (its category is the one it moved
+ * into and its source is Jev), and only before the record's `until`. A row that changed since is left alone and counted in
  * `changedSince`. `expired` is true when there is no open undo for the run (none, or the ten seconds have passed);
  * then nothing is restored, and an expired record is removed. Counts come from the statements' changes.
  */
@@ -431,7 +548,7 @@ export async function undoRun(
 				jev_failed_at = ${undoSnap("jev_failed_at")},
 				updated_at = datetime('now')
 			WHERE id IN (SELECT json_extract(s.value, '$.id') FROM json_each(${rows}) s)
-				AND category_id = (SELECT json_extract(value, '$.categoryId') FROM household_settings WHERE key = ?1)
+				AND category_id = (SELECT json_extract(s.value, '$.categoryId') FROM json_each(${rows}) s WHERE json_extract(s.value, '$.id') = transactions.id)
 				AND category_source = 'jev'
 				AND ${live}`,
 		)

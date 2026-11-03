@@ -129,6 +129,33 @@ describe("buildClusters: the amount rule", () => {
 	});
 });
 
+describe("buildClusters: zero amounts", () => {
+	// The sign rule compares Math.sign, so 0 is its own sign: a zero row joins only another zero row. Written so.
+	it("joins two zero amounts (the same sign, 0, and the same size)", () => {
+		const rows = [
+			row(1, "STORE A", { amountCents: 0 }),
+			row(2, "STORE A", { amountCents: 0 }),
+		];
+		expect(buildClusters(rows)).toEqual([[1, 2]]);
+	});
+
+	it("splits 500 and 0: the signs differ (1 and 0), though $5 apart", () => {
+		const rows = [
+			row(1, "STORE A", { amountCents: 500 }),
+			row(2, "STORE A", { amountCents: 0 }),
+		];
+		expect(buildClusters(rows)).toEqual([[1], [2]]);
+	});
+
+	it("splits 0 and -999: sign(0) differs from sign(-999), though under $10 apart (the rule as written)", () => {
+		const rows = [
+			row(1, "STORE A", { amountCents: 0 }),
+			row(2, "STORE A", { amountCents: -999 }),
+		];
+		expect(buildClusters(rows)).toEqual([[1], [2]]);
+	});
+});
+
 describe("buildClusters: the cap and coverage", () => {
 	it("exports a cap of 25", () => {
 		expect(CLUSTER_MAX).toBe(25);
