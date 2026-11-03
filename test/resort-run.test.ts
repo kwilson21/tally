@@ -1364,12 +1364,93 @@ describe("the closing toast, the Undo deadline, the sweep, identity and the cap"
 	});
 });
 
+describe("round 2: the claim window, the failure marker and the candidate's identity", () => {
+	const claimedText = async (runId: string) =>
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(`resort_moved_${runId}`)
+				.first<{ value: string }>()
+		)?.value ?? null;
+
+	it("a poll after the two hours gets no toast, and removes the unclaimed record", async () => {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([a]);
+		await answer(a, groceries);
+		const runId = runIdOf(started);
+		await finishRun(db, { runId, now: T0 + 5000 });
+		expect(await closeToastOnce(db, runId, T0 + 5000 + STALE_MS + 1)).toBe(
+			false,
+		);
+		expect(await claimedText(runId)).toBeNull();
+	});
+
+	it("a candidate Jev failed on during the run keeps its failure marker", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([x]);
+		await db
+			.prepare(
+				"UPDATE transactions SET jev_failed_at = '2026-10-03 10:00:00' WHERE id = ?",
+			)
+			.bind(x)
+			.run();
+		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		expect(await state(x)).toMatchObject({
+			categoryId: null,
+			confidence: null,
+			jevFailedAt: "2026-10-03 10:00:00",
+		});
+	});
+
+	it("the identity a run stores comes from the candidate row it was given, not a later read", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const original = await db
+			.prepare(
+				"SELECT plaid_transaction_id AS plaid FROM transactions WHERE id = ?",
+			)
+			.bind(x)
+			.first<{ plaid: string }>();
+		const [candidate] = (await candidatesNow()).filter((c) => c.id === x);
+		expect(candidate?.plaidTransactionId).toBe(original?.plaid);
+		// The row's Plaid id changes after the candidate was read: the run keeps the one the candidate carried.
+		await db
+			.prepare(
+				"UPDATE transactions SET plaid_transaction_id = 'plaid-changed-later' WHERE id = ?",
+			)
+			.bind(x)
+			.run();
+		await startOrJoinRun(db, {
+			candidates: candidate ? [candidate] : [],
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		expect((await readRun(db))?.snapshots[0]).toMatchObject({
+			id: x,
+			plaid_transaction_id: original?.plaid,
+		});
+	});
+});
+
 /** A candidate for an id no row has, with the snapshot a real one carries. */
 function synthCandidate(id: number): ResortCandidate {
 	return {
 		id,
 		date: "2026-10-02",
 		amountCents: 1500,
+		plaidTransactionId: null,
 		rawName: `ROW ${id}`,
 		merchantKey: `row${id}`,
 		mixed: false,

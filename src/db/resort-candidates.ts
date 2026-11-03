@@ -37,6 +37,8 @@ export type ResortCandidate = {
 	id: number;
 	date: string;
 	amountCents: number;
+	/** The row's Plaid id as this read saw it: the identity a run stores with the snapshot (resort-run.ts). */
+	plaidTransactionId: string | null;
 	rawName: string;
 	merchantKey: string;
 	mixed: boolean;
@@ -48,6 +50,7 @@ type CandidateRow = {
 	id: number;
 	date: string;
 	amountCents: number;
+	plaidTransactionId: string | null;
 	rawName: string;
 	merchantKey: string;
 	mixed: number;
@@ -116,7 +119,7 @@ export async function resortCandidates(
 
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
+			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.plaid_transaction_id AS plaidTransactionId, t.raw_name AS rawName,
 				${merchantKeySql("t")} AS merchantKey, (${jevSaysMixedSql("t")}) AS mixed,
 				${visibleNoteSql(false)} AS whatItWasNote,
 				t.category_id AS categoryId, t.category_source AS categorySource,
@@ -141,6 +144,7 @@ export async function resortCandidates(
 		id: row.id,
 		date: row.date,
 		amountCents: row.amountCents,
+		plaidTransactionId: row.plaidTransactionId,
 		rawName: row.rawName,
 		merchantKey: row.merchantKey,
 		mixed: row.mixed === 1,

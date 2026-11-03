@@ -144,21 +144,6 @@ const withCategory = (
 const byRow = (rows: readonly ResortCandidate[], categoryId: number) =>
 	Object.fromEntries(rows.map((c) => [String(c.id), categoryId]));
 
-/** The Plaid id of each id in `ids` that is a row now (one read). A missing row has no entry. */
-async function plaidIds(
-	db: D1Database,
-	ids: readonly number[],
-): Promise<Map<number, string | null>> {
-	if (ids.length === 0) return new Map();
-	const { results } = await db
-		.prepare(
-			"SELECT id, plaid_transaction_id AS plaid FROM transactions WHERE id IN (SELECT value FROM json_each(?))",
-		)
-		.bind(JSON.stringify(ids))
-		.all<{ id: number; plaid: string | null }>();
-	return new Map(results.map((row) => [row.id, row.plaid]));
-}
-
 /**
  * Starts a run for `candidates` into `categoryId`, or joins the fresh running one (its new ids only). A running run older
  * than STALE_MS is finished first. `newIds` are the ids this call added to the run; a row already in the run keeps the
@@ -180,13 +165,10 @@ export async function startOrJoinRun(
 		now: number;
 	},
 ): Promise<{ runId: string | null; newIds: number[]; joined: boolean }> {
-	const plaid = await plaidIds(
-		db,
-		candidates.map((c) => c.id),
-	);
+	// The identity comes from the candidate row it was read with, in the same query as its snapshot.
 	const snapshotOf = (c: ResortCandidate): RunSnapshot => ({
 		...c.snapshot,
-		plaid_transaction_id: plaid.get(c.id) ?? null,
+		plaid_transaction_id: c.plaidTransactionId,
 		amount_cents: c.amountCents,
 	});
 
@@ -408,7 +390,7 @@ async function finalizeRun(
 				updated_at = datetime('now')
 			WHERE ${sameRunRow("transactions", SNAPSHOTS)}
 				AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-				AND jev_mixed IS NULL AND jev_also_category_id IS NULL
+				AND jev_mixed IS NULL AND jev_also_category_id IS NULL AND jev_failed_at IS NULL
 				AND ${won}`,
 		)
 		.bind(RUN_KEY, token);
@@ -512,9 +494,10 @@ export async function closeToastOnce(
 		db
 			.prepare(
 				`UPDATE household_settings SET value = json_set(value, '$.claimedAt', ?, '$.until', ? + ?)
-				WHERE key = ? AND json_extract(value, '$.claimedAt') IS NULL`,
+				WHERE key = ? AND json_extract(value, '$.claimedAt') IS NULL
+					AND json_extract(value, '$.finalizedAt') + ? >= ?`,
 			)
-			.bind(now, now, UNDO_MS, movedKey(runId)),
+			.bind(now, now, UNDO_MS, movedKey(runId), STALE_MS, now),
 		db
 			.prepare(
 				`UPDATE household_settings SET value = json_set(value, '$.toasted', json('true'))
