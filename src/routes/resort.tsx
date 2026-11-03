@@ -15,10 +15,12 @@ import {
 } from "../resort-toast";
 import {
 	heldQuarter,
+	RECHECK_PAGES,
 	RecheckMilestoneSwap,
 	RecheckSentence,
 	recheckDone,
 	recheckMilestone,
+	recheckPage,
 } from "../views/recheck-line";
 import { organizeAgain } from "./organize";
 import { categoriesAgain } from "./settings";
@@ -64,14 +66,19 @@ resort.get("/resort/progress", async (c) => {
 		const milestone = recheckMilestone(recheckDone(run), run.total);
 		return c.html(
 			<>
-				<RecheckSentence run={run} />
+				<RecheckSentence run={run} page={recheckPage(c.req.query("p"))} />
 				{milestone !== held ? <RecheckMilestoneSwap run={run} /> : null}
 			</>,
 		);
 	}
-	// Finished, unknown or expired: the first answer claims the toast, and every later one, and an unknown id, says nothing.
+	// Finished, unknown or expired: the whole line leaves the page, on every such answer (#842 round 2). Its wrapper is
+	// the target, so the sentence, the milestone region and the wrapper's spacing all go with it.
+	c.header("HX-Retarget", "#recheck");
+	c.header("HX-Reswap", "delete");
+	// The first answer claims the toast; every later one, and an unknown id, says nothing.
 	if (runId === "" || !(await closeToastOnce(db, runId, now)))
 		return c.body(null);
+	const page = recheckPage(c.req.query("p"));
 	const record = await readMoved(db, runId);
 	const words = record
 		? closingToast({
@@ -95,6 +102,8 @@ resort.get("/resort/progress", async (c) => {
 										undo: runId,
 										undoExpiresInMs: UNDO_MS,
 										undoAction: "/resort/undo",
+										// The page the line sat on is the one Undo redraws (#842 round 2); an unknown key gets the default.
+										...(page ? { undoTarget: RECHECK_PAGES[page] } : {}),
 									}
 								: {}),
 						},

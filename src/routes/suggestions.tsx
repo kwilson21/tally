@@ -337,7 +337,7 @@ function Screen({
 				>
 					Settings
 				</a>
-				<RecheckLine run={recheck} />
+				<RecheckLine run={recheck} page="suggestions" />
 				{/* While the card shows it is the whole screen: a purchase it offers is never also offered by the queue below. */}
 				{more ? (
 					<div class="mt-6">
@@ -866,9 +866,14 @@ suggestions.post(PATH, async (c) => {
 					});
 				}
 				// Only a new category starts the re-check (decision 157): an Add to changes nothing the run would sort.
+				// The card's same-text peers (the "N more look like this" offer) are read before the run starts and kept out of
+				// it, so the card still offers them to the person (#842 round 2).
 				const rechecking = result.created
 					? await startResortFor(c.env as Env & { JEV_API_KEY?: string }, db, {
 							filedId: item.transactionId,
+							excludeIds: (
+								(await moreLikeThis(db, item.transactionId))?.rows ?? []
+							).map((row) => row.id),
 						})
 					: null;
 				const after = await suggestionQueue(db);

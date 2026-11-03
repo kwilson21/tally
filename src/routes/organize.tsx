@@ -174,7 +174,7 @@ async function renderOrganize(
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">
 					Organize
 				</h1>
-				<RecheckLine run={recheck} />
+				<RecheckLine run={recheck} page="organize" />
 				{cardError && !inCard && (
 					<p role="alert" class="mt-3 text-sm text-over">
 						{cardError.message}

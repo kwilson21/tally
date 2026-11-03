@@ -219,6 +219,8 @@
 			undoAction = "/transactions/undo-cash-delete",
 			// A passive Undo toast came from a background poll (the re-check's closing toast, #821): it never takes focus.
 			passive = false,
+			// The element the Undo's answer redraws: #page unless the toast names the page it was shown on (#842 round 2).
+			undoTarget = "#page",
 		} = event.detail ?? {};
 		if (!message) return;
 		if (undo && !(undoExpiresInMs > 0)) return;
@@ -259,8 +261,8 @@
 			form.method = "post";
 			form.action = undoAction;
 			form.setAttribute("hx-post", form.action);
-			form.setAttribute("hx-target", "#page");
-			form.setAttribute("hx-select", "#page");
+			form.setAttribute("hx-target", undoTarget);
+			form.setAttribute("hx-select", undoTarget);
 			form.setAttribute("hx-swap", "outerHTML");
 			for (const [name, value] of Object.entries({
 				token: undo,

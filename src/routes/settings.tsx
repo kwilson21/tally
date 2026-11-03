@@ -562,7 +562,7 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 			class="lg:max-w-3xl"
 		>
 			<SubpageHead title="Categories" titleId="categories-title" />
-			<RecheckLine run={recheck} />
+			<RecheckLine run={recheck} page="categories" />
 			{view.listError && (
 				<p role="alert" class="mt-3 text-sm text-over">
 					{view.listError}

@@ -40,6 +40,25 @@ export const heldQuarter = (raw: string | undefined): number =>
 	raw !== undefined && /^[0-3]$/.test(raw) ? Number(raw) : 0;
 
 /**
+ * The pages a line can sit on, by the key its poll carries (`p`), and the element each one's Undo redraws (#842 round 2).
+ * The server maps the key to the selector; a client never sends a selector.
+ */
+export const RECHECK_PAGES = {
+	suggestions: "#suggestions-page",
+	organize: "#organize-page",
+	categories: "#categories",
+} as const;
+export type RecheckPage = keyof typeof RECHECK_PAGES;
+
+/** The page a poll's `p` names, or undefined for a key that is not on the list (never an element it was not given). */
+export const recheckPage = (
+	raw: string | undefined,
+): RecheckPage | undefined =>
+	raw !== undefined && Object.hasOwn(RECHECK_PAGES, raw)
+		? (raw as RecheckPage)
+		: undefined;
+
+/**
  * The sentence alone, the part that polls. `polls` is false for a picture in the catalog, which fires nothing by itself
  * and draws no ids (so the catalog never repeats the app's). The count is its own tabular span, aria-hidden, since the
  * spoken count is the milestone region's (decision 128 keeps the figures tabular).
@@ -47,9 +66,11 @@ export const heldQuarter = (raw: string | undefined): number =>
 export function RecheckSentence({
 	run,
 	polls = true,
+	page,
 }: {
 	run: RecheckRun;
 	polls?: boolean;
+	page?: RecheckPage;
 }) {
 	const done = recheckDone(run);
 	const milestone = recheckMilestone(done, run.total);
@@ -59,7 +80,7 @@ export function RecheckSentence({
 			class="flex items-center gap-2 text-sm text-muted"
 			{...(polls
 				? {
-						"hx-get": `/resort/progress?run=${run.id}&m=${milestone}`,
+						"hx-get": `/resort/progress?run=${run.id}&m=${milestone}${page ? `&p=${page}` : ""}`,
 						"hx-trigger": "every 2s",
 						"hx-swap": "outerHTML",
 						"hx-status:4xx": "swap:none",
@@ -97,16 +118,18 @@ export function RecheckMilestoneSwap({ run }: { run: RecheckRun }) {
 export function RecheckLine({
 	run,
 	polls = true,
+	page,
 }: {
 	run: RecheckRun | null;
 	polls?: boolean;
+	page?: RecheckPage;
 }) {
 	if (!run) return null;
 	const done = recheckDone(run);
 	const milestone = recheckMilestone(done, run.total);
 	return (
 		<div {...(polls ? { id: "recheck" } : {})} class="mt-4">
-			<RecheckSentence run={run} polls={polls} />
+			<RecheckSentence run={run} polls={polls} page={page} />
 			<span
 				{...(polls ? { id: "recheck-milestone" } : {})}
 				role="status"

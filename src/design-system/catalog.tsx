@@ -1313,7 +1313,7 @@ const RECHECK_TOAST_SPEC: UseSpecText = {
 	states:
 		"Moved, one destination: “Moved 14 to Books & audio. 3 need your answer.” Moved, several: “Moved 14 rows. 3 need your answer.” Nothing moved but some waiting: “Nothing moved. 3 need your answer.” Nothing moved and nothing waiting: no toast. Undo shows only when rows moved, for ten seconds.",
 	feedback:
-		"It appears when the poll sees the run finish, the first time only. Its announcer text is the same words. It is passive: a background poll never moves focus onto its Undo, so the person's place on the page stays where it was, and Undo is one Tab away. Undo answers with “Put 14 back.”, or “Put 12 back. 2 changed since, so they stayed.” when some rows changed since the run, or “Too late to undo that.” once the ten seconds have passed.",
+		"It appears when the poll sees the run finish, the first time only. Its announcer text is the same words. It is passive: a background poll never moves focus onto its Undo, so the person's place on the page stays where it was, and Undo is one Tab away. Its Undo redraws the page the line sat on (`undoTarget`: the suggestions, organize or categories page's own element; `#page` by default for other Undo toasts). Undo answers with “Put 14 back.”, or “Put 12 back. 2 changed since, so they stayed.” when some rows changed since the run, or “Too late to undo that.” once the ten seconds have passed.",
 	input:
 		"Undo is a labeled form button, usable by touch or keyboard, and it is off while its request is in flight. Screen reader: success is status, an expired Undo is an alert.",
 	motion:

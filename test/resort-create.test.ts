@@ -58,6 +58,7 @@ const trigger = (res: Response) =>
 			undoAction?: string;
 			undoDone?: string;
 			passive?: boolean;
+			undoTarget?: string;
 		};
 		announce?: string;
 	};
@@ -136,8 +137,8 @@ async function maybeFixture() {
 		confidence: 0.5,
 	});
 	const related = [
-		await addRow({ raw: "BOOKSHOP 1", amount: 1500 }),
-		await addRow({ raw: "BOOKSHOP 2", amount: 1800 }),
+		await addRow({ raw: "BOOKSHOP 1", amount: 1500, jevCategoryId: eating }),
+		await addRow({ raw: "BOOKSHOP 2", amount: 1800, jevCategoryId: eating }),
 	];
 	return { filed, related, eating };
 }
@@ -179,7 +180,9 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		expect(html).toContain('id="recheck"');
 		expect(html).toContain('role="status"');
 		expect(html).toContain('aria-live="polite"');
-		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}&amp;m=0"`);
+		expect(html).toContain(
+			`hx-get="/resort/progress?run=${run?.id}&amp;m=0&amp;p=suggestions"`,
+		);
 		expect(html).toContain('hx-trigger="every 2s"');
 		expect(trigger(res).announce).toContain(
 			"Tally is re-checking related rows.",
@@ -317,7 +320,9 @@ describe("starting the re-check from a Maybe card's Create (decision 157)", () =
 		expect(res.status).toBe(200);
 		expect(create).toHaveBeenCalledTimes(1);
 		expect((await readRun(db))?.id).toBe(run?.id);
-		expect(html).toContain(`hx-get="/resort/progress?run=${run?.id}&amp;m=0"`);
+		expect(html).toContain(
+			`hx-get="/resort/progress?run=${run?.id}&amp;m=0&amp;p=suggestions"`,
+		);
 	});
 
 	it("a failed start never leaves the line stuck: the run finishes at once, with its own fresh instance key", async () => {
@@ -578,7 +583,9 @@ describe("the progress announcements (#821 owner feedback)", () => {
 		const runId = await seedRun(14);
 		await setDone(5);
 		const { html } = await get("/settings/suggestions");
-		expect(html).toContain(`hx-get="/resort/progress?run=${runId}&amp;m=1"`);
+		expect(html).toContain(
+			`hx-get="/resort/progress?run=${runId}&amp;m=1&amp;p=suggestions"`,
+		);
 		expect(html).toContain(
 			'<span id="recheck-milestone" role="status" aria-live="polite" class="sr-only">5 of 14 done.</span>',
 		);
@@ -879,12 +886,15 @@ describe("a failing re-check never fails the Create (#842 review)", () => {
 // needAnswer counts only the rows the category queue still asks; and the closing toast's Undo redraws its own page.
 describe("the re-check, round 2 of the #842 review", () => {
 	/** The closing toast's poll for a finished run, its page key in the address (or none), and the run's id. */
+	let shelves = 0;
 	async function closingPoll(key?: string) {
 		const { filed, related } = await maybeFixture();
+		// A new category each time, so every call's Create makes a run of its own.
+		shelves += 1;
 		await post("/settings/suggestions", {
 			id: `category-${filed}`,
 			answer: "create",
-			new_name: "Books & audio",
+			new_name: `Shelf ${shelves}`,
 		});
 		const run = await readRun(db);
 		const eating = await categoryId("Eating Out");
