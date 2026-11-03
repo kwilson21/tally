@@ -80,15 +80,16 @@ type Seed = {
 	categoryId?: number | null;
 	categorySource?: string | null;
 	note?: string | null;
+	plaid?: string | null;
 };
 
-/** Inserts one purchase, unique in its name, and returns its id. */
+/** Inserts one purchase, unique in its name and Plaid id, and returns its id. */
 async function addRow(seed: Seed = {}): Promise<number> {
 	seq += 1;
 	const row = await db
 		.prepare(
-			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_confidence, category_id, category_source, note)
-			 VALUES (1, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			`INSERT INTO transactions (account_id, date, amount_cents, raw_name, category_confidence, category_id, category_source, note, plaid_transaction_id)
+			 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 		)
 		.bind(
 			seed.date ?? TODAY,
@@ -98,6 +99,7 @@ async function addRow(seed: Seed = {}): Promise<number> {
 			seed.categoryId ?? null,
 			seed.categorySource ?? null,
 			seed.note ?? null,
+			seed.plaid === undefined ? `plaid-row-${seq}` : seed.plaid,
 		)
 		.first<{ id: number }>();
 	return Number(row?.id);
@@ -122,6 +124,27 @@ const rowState = (id: number) =>
 		)
 		.bind(id)
 		.first<Record<string, unknown>>();
+
+/** A row's identity as the run holds it (its Plaid id and amount), for the helpers that check it. */
+const identityOf = async (id: number) =>
+	(await db
+		.prepare(
+			"SELECT plaid_transaction_id AS plaid, amount_cents AS amount FROM transactions WHERE id = ?",
+		)
+		.bind(id)
+		.first<{ plaid: string | null; amount: number }>()) ?? {
+		plaid: null,
+		amount: 0,
+	};
+
+/** A mark for a row with this confidence, carrying the row's identity (for the clear and restore helpers). */
+const markAt = async (id: number, confidence: number | null) => ({
+	id,
+	confidence,
+	mixed: null,
+	also: null,
+	...(await identityOf(id)),
+});
 
 const confOf = async (id: number) =>
 	(
@@ -684,7 +707,11 @@ describe("a re-ask writes only while its run is still running (#828)", () => {
 		// The run is still running: the answer applies.
 		expect(
 			await saveJevResult(db, running, decision(eatingOut), {
-				reask: { runId: runIdRunning },
+				reask: {
+					runId: runIdRunning,
+					plaidTransactionId: (await identityOf(running)).plaid,
+					amountCents: (await identityOf(running)).amount,
+				},
 				categoryAsked: true,
 			}),
 		).toBe(true);
@@ -697,7 +724,11 @@ describe("a re-ask writes only while its run is still running (#828)", () => {
 		expect((await readRun(db))?.status).toBe("done");
 		expect(
 			await saveJevResult(db, closed, decision(eatingOut), {
-				reask: { runId: runIdClosed },
+				reask: {
+					runId: runIdClosed,
+					plaidTransactionId: (await identityOf(closed)).plaid,
+					amountCents: (await identityOf(closed)).amount,
+				},
 				categoryAsked: true,
 			}),
 		).toBe(false);
@@ -726,6 +757,55 @@ describe("a re-ask writes only while its run is still running (#828)", () => {
 	});
 });
 
+describe("a re-ask writes only to the row it asked about (identity, #831)", () => {
+	/** Deletes the row and inserts a different one under the same id, as an INTEGER PRIMARY KEY reuse does. */
+	async function reuseId(
+		id: number,
+		fields: { plaid: string; amount: number },
+	) {
+		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(id).run();
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_transaction_id)
+				 VALUES (?, 1, ?, ?, 'REPLACEMENT ROW', ?)`,
+			)
+			.bind(id, TODAY, fields.amount, fields.plaid)
+			.run();
+	}
+
+	const cases: [string, number][] = [
+		["a different Plaid id and amount", 999],
+		["the same amount and a different Plaid id", 1234],
+	];
+	for (const [label, amount] of cases) {
+		it(`a stale answer does not reach a replacement row with ${label}; the run's other row is still answered`, async () => {
+			const original = await addRow({ date: TODAY, confidence: 0.55 });
+			const control = await addRow({ date: "2026-09-21", confidence: 0.55 });
+			const runId = await startRun([original, control]);
+			const fetchImpl = vi.fn(async () => {
+				if (fetchImpl.mock.calls.length === 1) {
+					// The original is deleted and its id reused while its ask is in flight.
+					await reuseId(original, { plaid: "other-plaid", amount });
+				}
+				return reply(0.9);
+			});
+			await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+				rulesApplied: true,
+				runId: "reask-reused-id",
+				reask: { runId, ids: [original, control] },
+			});
+			expect(fetchImpl).toHaveBeenCalledTimes(2);
+			// The replacement is not written: no category, no mark, and its own data as it was.
+			expect(await field(original, "raw_name")).toBe("REPLACEMENT ROW");
+			expect(await field(original, "category_id")).toBeNull();
+			expect(await field(original, "category_source")).toBeNull();
+			expect(await field(original, "category_confidence")).toBeNull();
+			// The control row, still the run's own, is answered as usual.
+			expect(await field(control, "category_source")).toBe("jev");
+		});
+	}
+});
+
 describe("restore of a cleared mark, and updated_at", () => {
 	const OLD = "2000-01-01 00:00:00";
 	const stamp = (id: number) => field(id, "updated_at");
@@ -735,7 +815,9 @@ describe("restore of a cleared mark, and updated_at", () => {
 		const runId = await startRun([maybe]);
 		// The instance read and cleared the row, then stopped before its save: the mark is still cleared.
 		expect(await takeSortingTurn(db, "cut-off:1")).toBe(true);
-		await db.batch([reaskClearStatement(db, [maybe], "cut-off:1")]);
+		await db.batch([
+			reaskClearStatement(db, [await markAt(maybe, 0.55)], "cut-off:1"),
+		]);
 		expect(await confOf(maybe)).toBeNull();
 		await releaseSortingTurn(db, "cut-off:1");
 		await finishRun(db, { runId, now: Date.now() });
@@ -757,7 +839,9 @@ describe("restore of a cleared mark, and updated_at", () => {
 		const maybe = await addRow({ confidence: 0.55 });
 		const runId = await startRun([maybe]);
 		expect(await takeSortingTurn(db, "cut-off:2")).toBe(true);
-		await db.batch([reaskClearStatement(db, [maybe], "cut-off:2")]);
+		await db.batch([
+			reaskClearStatement(db, [await markAt(maybe, 0.55)], "cut-off:2"),
+		]);
 		await releaseSortingTurn(db, "cut-off:2");
 		await db
 			.prepare("UPDATE transactions SET updated_at = ? WHERE id = ?")
@@ -776,18 +860,16 @@ describe("restore of a cleared mark, and updated_at", () => {
 			.bind(OLD, withMark, noMark)
 			.run();
 		expect(await takeSortingTurn(db, "stamp:1")).toBe(true);
-		await db.batch([reaskClearStatement(db, [withMark, noMark], "stamp:1")]);
 		await db.batch([
-			reaskRestoreStatement(
+			reaskClearStatement(
 				db,
-				{ id: withMark, confidence: 0.55, mixed: null, also: null },
+				[await markAt(withMark, 0.55), await markAt(noMark, null)],
 				"stamp:1",
 			),
-			reaskRestoreStatement(
-				db,
-				{ id: noMark, confidence: null, mixed: null, also: null },
-				"stamp:1",
-			),
+		]);
+		await db.batch([
+			reaskRestoreStatement(db, await markAt(withMark, 0.55), "stamp:1"),
+			reaskRestoreStatement(db, await markAt(noMark, null), "stamp:1"),
 		]);
 		await releaseSortingTurn(db, "stamp:1");
 		expect(await confOf(withMark)).toBe(0.55);

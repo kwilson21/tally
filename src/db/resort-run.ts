@@ -295,7 +295,20 @@ export type ReaskMark = {
 	confidence: number | null;
 	mixed: number | null;
 	also: number | null;
+	/** The row's identity as the run holds it (its Plaid id and amount, the same as the run's snapshot): a write to the
+	 * row checks it, so a row whose id was reused by another transaction is never written (#831). */
+	plaid: string | null;
+	amount: number;
 };
+
+/** The identity of each mark, as a JSON array of {id, plaid, amount} for `json_each`. */
+const markIdentities = (marks: readonly ReaskMark[]) =>
+	JSON.stringify(
+		marks.map((m) => ({ id: m.id, plaid: m.plaid, amount: m.amount })),
+	);
+
+/** The row's Plaid id and amount are the ones a mark carries (two binds: the Plaid id, then the amount). */
+const SAME_MARK_ROW = "plaid_transaction_id IS ? AND amount_cents = ?";
 
 /**
  * The first of `ids` (in that order, skipping `except`, at most `limit`) that still wait for a category: a WAITING row
@@ -314,7 +327,8 @@ export async function reaskPicks(
 	if (wanted.length === 0 || limit <= 0) return [];
 	const { results } = await db
 		.prepare(
-			`SELECT t.id, t.category_confidence AS confidence, t.jev_mixed AS mixed, t.jev_also_category_id AS also
+			`SELECT t.id, t.category_confidence AS confidence, t.jev_mixed AS mixed, t.jev_also_category_id AS also,
+				t.plaid_transaction_id AS plaid, t.amount_cents AS amount
 			FROM transactions t ${COUNTED_JOINS}
 			WHERE (${WAITING}) AND t.category_id IS NULL
 				AND (t.category_confidence IS NULL
@@ -328,6 +342,8 @@ export async function reaskPicks(
 			confidence: number | null;
 			mixed: number | null;
 			also: number | null;
+			plaid: string | null;
+			amount: number;
 		}>();
 	const byId = new Map(results.map((row) => [row.id, row]));
 	const picks: ReaskMark[] = [];
@@ -339,6 +355,8 @@ export async function reaskPicks(
 			confidence: row.confidence,
 			mixed: row.mixed,
 			also: row.also,
+			plaid: row.plaid,
+			amount: row.amount,
 		});
 		if (picks.length === limit) break;
 	}
@@ -351,17 +369,20 @@ export async function reaskPicks(
  */
 export function reaskClearStatement(
 	db: D1Database,
-	ids: readonly number[],
+	marks: readonly ReaskMark[],
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET category_confidence = NULL, jev_mixed = NULL, jev_also_category_id = NULL
-		WHERE id IN (SELECT value FROM json_each(?)) AND category_id IS NULL AND category_source IS NULL
+		WHERE EXISTS (SELECT 1 FROM json_each(?) m WHERE json_extract(m.value, '$.id') = transactions.id
+				AND transactions.plaid_transaction_id IS json_extract(m.value, '$.plaid')
+				AND transactions.amount_cents = json_extract(m.value, '$.amount'))
+			AND category_id IS NULL AND category_source IS NULL
 			AND (category_confidence IS NULL
 				OR CAST(category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})`,
 		turnId,
 	);
-	return db.prepare(guarded.sql).bind(JSON.stringify(ids), ...guarded.binds);
+	return db.prepare(guarded.sql).bind(markIdentities(marks), ...guarded.binds);
 }
 
 /**
@@ -378,7 +399,7 @@ export function reaskRestoreStatement(
 		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?,
 			updated_at = CASE WHEN category_confidence IS NOT ? OR jev_mixed IS NOT ? OR jev_also_category_id IS NOT ?
 				THEN datetime('now') ELSE updated_at END
-		WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+		WHERE id = ? AND ${SAME_MARK_ROW} AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 			AND jev_mixed IS NULL AND jev_also_category_id IS NULL`,
 		turnId,
 	);
@@ -392,6 +413,8 @@ export function reaskRestoreStatement(
 			mark.mixed,
 			mark.also,
 			mark.id,
+			mark.plaid,
+			mark.amount,
 			...guarded.binds,
 		);
 }

@@ -3183,7 +3183,12 @@ export type JevAnswerSave = {
 	 * A re-sort's re-ask (decision 160): writes only the category answer, the eight columns Undo keeps (resort-run.ts), for
 	 * a row that the re-ask cleared. Never its flags, exclusion, income or details, whatever the answer said.
 	 */
-	reask?: { runId: string };
+	reask?: {
+		runId: string;
+		/** The row's identity as the run holds it: the save writes only to that transaction (#831). */
+		plaidTransactionId: string | null;
+		amountCents: number;
+	};
 	categoryAsked?: boolean;
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
@@ -3260,7 +3265,8 @@ export function saveJevResultStatements(
 					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 					AND ${STILL_ON_SQL}${seenSql}${activeSql}
 					AND EXISTS (SELECT 1 FROM household_settings WHERE key = 'resort_run'
-						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')`,
+						AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running')
+					AND plaid_transaction_id IS ? AND amount_cents = ?`,
 			options.turn,
 		);
 		const category = db
@@ -3278,6 +3284,8 @@ export function saveJevResultStatements(
 				...(seenGuard?.binds ?? []),
 				...activeBinds,
 				options.reask?.runId ?? "",
+				options.reask?.plaidTransactionId ?? null,
+				options.reask?.amountCents ?? 0,
 				...guarded.binds,
 			);
 		return answerStatements(

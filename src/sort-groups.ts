@@ -396,13 +396,7 @@ async function readGroup(
 				limit: options.limit,
 			});
 			if (cleared.length > 0)
-				await db.batch([
-					reaskClearStatement(
-						db,
-						cleared.map((mark) => mark.id),
-						options.turnId,
-					),
-				]);
+				await db.batch([reaskClearStatement(db, cleared, options.turnId)]);
 			rows = cleared.length
 				? await pendingForJev(db, options.limit, {
 						categories: switches.categories,
@@ -601,6 +595,8 @@ export async function writeGroup(
 	const sw = plan.switches;
 	const turn = plan.turnId;
 	const reask = plan.reask;
+	// Each re-ask row's mark, which carries the identity its save checks (#831).
+	const markOf = new Map((reask?.cleared ?? []).map((mark) => [mark.id, mark]));
 	// The log rows are dated with the household's day as the answers are saved (spec §8.6), in the zone the household has
 	// now: a save retried after the zone changed dates them by it (decision 143). The reservation keeps the read's day.
 	const saveDay = todayIn(await householdTimeZone(db));
@@ -621,9 +617,10 @@ export async function writeGroup(
 		if (result.outcome === "answered") {
 			asked += 1;
 			// A re-ask takes its category answer only, and never a flag, exclusion, income or details (decision 160).
+			// A re-ask row with no mark (never read with one) is not written at all (#831).
 			if (
 				reask
-					? sw.categories
+					? sw.categories && markOf.has(row.id)
 					: (sw.categories || sw.income) && (!row.categoryOnly || sw.categories)
 			) {
 				const decision = decide(result.answer, plan.categories, JEV_THRESHOLD, {
@@ -635,7 +632,14 @@ export async function writeGroup(
 				});
 				const answer = saveJevResultStatements(db, row.id, decision, {
 					categoryOnly: row.categoryOnly,
-					reask: reask ? { runId: reask.runId } : undefined,
+					// The save writes only to the row the run holds under this id: the identity its mark carries (#831).
+					reask: reask
+						? {
+								runId: reask.runId,
+								plaidTransactionId: markOf.get(row.id)?.plaid ?? null,
+								amountCents: markOf.get(row.id)?.amount ?? 0,
+							}
+						: undefined,
 					categoryAsked: plan.categories.length > 0,
 					switches: {
 						income: sw.income,
