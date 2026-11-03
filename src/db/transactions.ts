@@ -3179,6 +3179,11 @@ export type JevAnswerStatements = {
 /** How a Jev answer is saved: the switches it was asked under, and the sorting turn that guards the save. */
 export type JevAnswerSave = {
 	categoryOnly?: boolean;
+	/**
+	 * A re-sort's re-ask (decision 160): writes only the category answer, the eight columns Undo keeps (resort-run.ts), for
+	 * a row that the re-ask cleared. Never its flags, exclusion, income or details, whatever the answer said.
+	 */
+	reask?: boolean;
 	categoryAsked?: boolean;
 	switches?: { income: boolean; categories?: boolean; sortOnArrival?: boolean };
 	/** What this answer applies, for its What AI did row (spec §8.6); `day` is the household's day when the answer is saved. */
@@ -3243,6 +3248,42 @@ export function saveJevResultStatements(
 				alsoWritten,
 			]
 		: [];
+	if (options.reask) {
+		// The re-ask writes only the category answer. It has no classification check: the row was cleared on purpose, and
+		// its Maybe mark (confidence NULL) is what the guard reads (decision 160).
+		const guarded = withTurnGuard(
+			`UPDATE transactions SET
+					category_id = ?, category_source = ?, category_confidence = ?, jev_category_id = ?, jev_none_fit = ?,
+					jev_mixed = ?, jev_also_category_id = ?, updated_at = datetime('now')
+				 WHERE id = ? AND flag_income = 0 AND is_split = 0 AND ${INCLUDED_ROW}
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND ${STILL_ON_SQL}${seenSql}${activeSql}`,
+			options.turn,
+		);
+		const category = db
+			.prepare(guarded.sql)
+			.bind(
+				categoryWritten,
+				options.categoryAsked === false || d.categoryId === null ? null : "jev",
+				options.categoryAsked === false ? null : d.confidence,
+				suggestionWritten,
+				options.categoryAsked === false || !d.noneFit ? 0 : 1,
+				d.mixedProbability ?? null,
+				alsoWritten,
+				id,
+				stillOn,
+				...(seenGuard?.binds ?? []),
+				...activeBinds,
+				...guarded.binds,
+			);
+		return answerStatements(
+			db,
+			category,
+			id,
+			options.log && { ...options.log, income: false },
+			options.turn,
+		);
+	}
 	if (options.categoryOnly) {
 		// A person already decided what this credit means. Jev may help with its category only.
 		// It never writes income, so its log row carries no income.

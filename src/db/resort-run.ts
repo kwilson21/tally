@@ -8,8 +8,11 @@
 // that flip happened, so a second finish changes nothing. Undo is one batch that restores only the moved rows still
 // as the run left them, only before the moved record's `until`.
 
-import { BASIS_POINTS } from "../ai/confidence";
+import { JEV_THRESHOLD } from "../ai/categorize";
+import { BASIS_POINTS, confidenceBasisPoints } from "../ai/confidence";
 import { askedBounds } from "../ai/maybe";
+import { COUNTED_JOINS } from "./counted-month";
+import { WAITING } from "./more-like-this";
 import type { ResortCandidate, ResortSnapshot } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
 
@@ -185,6 +188,101 @@ export function bumpDoneStatement(
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(rows, RUN_KEY, runId, ...guarded.binds);
+}
+
+/** A row's Maybe mark as it stood before a re-ask cleared it, so the mark can be put back exactly. */
+export type ReaskMark = {
+	id: number;
+	confidence: number | null;
+	mixed: number | null;
+	also: number | null;
+};
+
+/**
+ * The first of `ids` (in that order, skipping `except`, at most `limit`) that still wait for a category: a WAITING row
+ * with no category and a confidence NULL or under the threshold (never one at or above it, never a decided row). Each
+ * comes with its mark as it is now. One read.
+ */
+export async function reaskPicks(
+	db: D1Database,
+	{
+		ids,
+		except,
+		limit,
+	}: { ids: readonly number[]; except: ReadonlySet<number>; limit: number },
+): Promise<ReaskMark[]> {
+	const wanted = [...new Set(ids)].filter((id) => !except.has(id));
+	if (wanted.length === 0 || limit <= 0) return [];
+	const { results } = await db
+		.prepare(
+			`SELECT t.id, t.category_confidence AS confidence, t.jev_mixed AS mixed, t.jev_also_category_id AS also
+			FROM transactions t ${COUNTED_JOINS}
+			WHERE (${WAITING}) AND t.category_id IS NULL
+				AND (t.category_confidence IS NULL
+					OR CAST(t.category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})
+				AND t.id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(JSON.stringify(wanted))
+		.all<{
+			id: number;
+			confidence: number | null;
+			mixed: number | null;
+			also: number | null;
+		}>();
+	const byId = new Map(results.map((row) => [row.id, row]));
+	const picks: ReaskMark[] = [];
+	for (const id of wanted) {
+		const row = byId.get(id);
+		if (!row) continue;
+		picks.push({
+			id,
+			confidence: row.confidence,
+			mixed: row.mixed,
+			also: row.also,
+		});
+		if (picks.length === limit) break;
+	}
+	return picks;
+}
+
+/**
+ * Clears the Maybe mark (confidence, mixed reading, also-category) of these rows, so Jev is asked about them again. Only
+ * a row still waiting is touched, and only while the sorting turn is held (decision 160).
+ */
+export function reaskClearStatement(
+	db: D1Database,
+	ids: readonly number[],
+	turnId: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET category_confidence = NULL, jev_mixed = NULL, jev_also_category_id = NULL
+		WHERE id IN (SELECT value FROM json_each(?)) AND category_id IS NULL AND category_source IS NULL
+			AND (category_confidence IS NULL
+				OR CAST(category_confidence * ${BASIS_POINTS} AS INTEGER) < ${confidenceBasisPoints(JEV_THRESHOLD)})`,
+		turnId,
+	);
+	return db.prepare(guarded.sql).bind(JSON.stringify(ids), ...guarded.binds);
+}
+
+/**
+ * Puts one cleared row's Maybe mark back, but only while the row is still untouched since the clear: no category, no
+ * source, and the cleared fields still NULL. A row that was answered (its confidence written) or decided is left alone.
+ * Only while the sorting turn is held, so no other sort ever reads a cleared mark (decision 160).
+ */
+export function reaskRestoreStatement(
+	db: D1Database,
+	mark: ReaskMark,
+	turnId: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?
+		WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+			AND jev_mixed IS NULL AND jev_also_category_id IS NULL`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(mark.confidence, mark.mixed, mark.also, mark.id, ...guarded.binds);
 }
 
 /** The run's snapshots, read from the run row (parameter ?1 is RUN_KEY). */

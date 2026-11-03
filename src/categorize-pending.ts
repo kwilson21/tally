@@ -2,9 +2,10 @@
 // 25 as the Workflow (src/sort-groups.ts, decision 139). The tests call it; every trigger, the 09:00 run included,
 // starts a Workflow instance instead (startSorting, src/sort-start.ts).
 import { readAiSwitches } from "./db/ai-switches";
+import { finishRun } from "./db/resort-run";
 import type { Deadline } from "./run-budget";
 import { type SortEnv, type StepRunner, sortGroups } from "./sort-groups";
-import { startSorting } from "./sort-start";
+import { type ReaskParams, startSorting } from "./sort-start";
 
 /** What a run is asked to do, beyond sorting everything waiting. */
 export type PassOptions = {
@@ -26,6 +27,8 @@ export type PassOptions = {
 	 * rest of the run. What it didn't ask is given back to the day, and waits for the next sort.
 	 */
 	time?: Deadline;
+	/** A re-sort's re-ask (decision 160): asks only these candidate rows, and finishes the run after the groups. */
+	reask?: ReaskParams;
 };
 
 /**
@@ -44,16 +47,30 @@ export async function categorizePending(
 		bySync = false,
 		maxCalls,
 		time,
+		reask,
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {
-	const done = await sortGroups(env, inProcess, fetchImpl, {
-		rulesApplied,
-		onlyIds,
-		bySync,
-		maxCalls,
-		time,
-		runId: crypto.randomUUID(),
-	});
+	let done: { asked: number; applied: number };
+	try {
+		done = await sortGroups(env, inProcess, fetchImpl, {
+			rulesApplied,
+			onlyIds,
+			bySync,
+			maxCalls,
+			time,
+			reask,
+			runId: crypto.randomUUID(),
+		});
+	} finally {
+		// A re-sort's run finishes once its groups are done, even when they threw (decision 160). finishRun is idempotent.
+		if (reask)
+			await finishRun(env.DB, { runId: reask.runId, now: Date.now() }).catch(
+				(error: unknown) =>
+					console.error(
+						`reask: finish failed ${error instanceof Error ? error.name : "unknown"}`,
+					),
+			);
+	}
 	if (done.asked > 0)
 		console.log(`jev: asked ${done.asked}, applied ${done.applied}`);
 	return done;
