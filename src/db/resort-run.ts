@@ -151,6 +151,9 @@ export async function startOrJoinRun(
 
 		if (current?.status === "running" && now - current.startedAt <= STALE_MS) {
 			const fresh = freshCandidates(candidates, new Set(current.ids));
+			// Nothing new to add: join without writing, so no instance is counted for a call that asks nothing.
+			if (fresh.length === 0)
+				return { runId: current.id, newIds: [], joined: true };
 			const next: ResortRun = {
 				...current,
 				total: current.total + fresh.length,
@@ -309,14 +312,25 @@ export function reaskRestoreStatement(
 	turnId: string,
 ): D1PreparedStatement {
 	const guarded = withTurnGuard(
-		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?
+		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?,
+			updated_at = CASE WHEN category_confidence IS NOT ? OR jev_mixed IS NOT ? OR jev_also_category_id IS NOT ?
+				THEN datetime('now') ELSE updated_at END
 		WHERE id = ? AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 			AND jev_mixed IS NULL AND jev_also_category_id IS NULL`,
 		turnId,
 	);
 	return db
 		.prepare(guarded.sql)
-		.bind(mark.confidence, mark.mixed, mark.also, mark.id, ...guarded.binds);
+		.bind(
+			mark.confidence,
+			mark.mixed,
+			mark.also,
+			mark.confidence,
+			mark.mixed,
+			mark.also,
+			mark.id,
+			...guarded.binds,
+		);
 }
 
 /** The run's snapshots, read from the run row (parameter ?1 is RUN_KEY). */
@@ -431,7 +445,15 @@ async function finalizeRun(
 				jev_mixed = ${snap("jev_mixed")},
 				jev_also_category_id = ${snap("jev_also_category_id")},
 				jev_failed_at = ${snap("jev_failed_at")},
-				updated_at = datetime('now')
+				updated_at = CASE WHEN category_id IS NOT ${snap("category_id")}
+					OR category_source IS NOT ${snap("category_source")}
+					OR category_confidence IS NOT ${snap("category_confidence")}
+					OR jev_category_id IS NOT ${snap("jev_category_id")}
+					OR jev_none_fit IS NOT ${snap("jev_none_fit")}
+					OR jev_mixed IS NOT ${snap("jev_mixed")}
+					OR jev_also_category_id IS NOT ${snap("jev_also_category_id")}
+					OR jev_failed_at IS NOT ${snap("jev_failed_at")}
+				THEN datetime('now') ELSE updated_at END
 			WHERE id IN (SELECT json_extract(s.value, '$.id') FROM json_each(${SNAPSHOTS}) s)
 				AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 				AND jev_mixed IS NULL AND jev_also_category_id IS NULL

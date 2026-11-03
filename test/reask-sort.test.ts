@@ -7,7 +7,13 @@ import type {
 	ResortCandidate,
 	ResortSnapshot,
 } from "../src/db/resort-candidates";
-import { finishRun, readRun, startOrJoinRun } from "../src/db/resort-run";
+import {
+	finishRun,
+	readRun,
+	reaskClearStatement,
+	reaskRestoreStatement,
+	startOrJoinRun,
+} from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { resetDemo } from "../src/demo/reset";
 import { sortGroups } from "../src/sort-groups";
@@ -160,6 +166,7 @@ async function startRun(ids: number[]): Promise<string> {
 		categoryName: "Eating Out",
 		now: Date.now(),
 	});
+	if (started.runId === null) throw new Error("no run started");
 	return started.runId;
 }
 
@@ -648,6 +655,89 @@ describe("progress, finish and restore", () => {
 			),
 		).rejects.toThrow("rules broke");
 		expect((await readRun(db))?.status).toBe("done");
+	});
+});
+
+describe("restore of a cleared mark, and updated_at", () => {
+	const OLD = "2000-01-01 00:00:00";
+	const stamp = (id: number) => field(id, "updated_at");
+
+	it("finish restores an unreached Maybe candidate whose mark a cut-off instance left cleared", async () => {
+		const maybe = await addRow({ confidence: 0.55 });
+		const runId = await startRun([maybe]);
+		// The instance read and cleared the row, then stopped before its save: the mark is still cleared.
+		expect(await takeSortingTurn(db, "cut-off:1")).toBe(true);
+		await db.batch([reaskClearStatement(db, [maybe], "cut-off:1")]);
+		expect(await confOf(maybe)).toBeNull();
+		await releaseSortingTurn(db, "cut-off:1");
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await confOf(maybe)).toBe(0.55);
+	});
+
+	it("finish leaves updated_at alone on a row whose restore changes nothing", async () => {
+		const untouched = await addRow();
+		const runId = await startRun([untouched]);
+		await db
+			.prepare("UPDATE transactions SET updated_at = ? WHERE id = ?")
+			.bind(OLD, untouched)
+			.run();
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await stamp(untouched)).toBe(OLD);
+	});
+
+	it("finish bumps updated_at on a row whose restore changes a value", async () => {
+		const maybe = await addRow({ confidence: 0.55 });
+		const runId = await startRun([maybe]);
+		expect(await takeSortingTurn(db, "cut-off:2")).toBe(true);
+		await db.batch([reaskClearStatement(db, [maybe], "cut-off:2")]);
+		await releaseSortingTurn(db, "cut-off:2");
+		await db
+			.prepare("UPDATE transactions SET updated_at = ? WHERE id = ?")
+			.bind(OLD, maybe)
+			.run();
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await confOf(maybe)).toBe(0.55);
+		expect(await stamp(maybe)).not.toBe(OLD);
+	});
+
+	it("a re-ask restore bumps updated_at only when the mark it puts back is a value", async () => {
+		const withMark = await addRow({ confidence: 0.55 });
+		const noMark = await addRow();
+		await db
+			.prepare("UPDATE transactions SET updated_at = ? WHERE id IN (?, ?)")
+			.bind(OLD, withMark, noMark)
+			.run();
+		expect(await takeSortingTurn(db, "stamp:1")).toBe(true);
+		await db.batch([reaskClearStatement(db, [withMark, noMark], "stamp:1")]);
+		await db.batch([
+			reaskRestoreStatement(
+				db,
+				{ id: withMark, confidence: 0.55, mixed: null, also: null },
+				"stamp:1",
+			),
+			reaskRestoreStatement(
+				db,
+				{ id: noMark, confidence: null, mixed: null, also: null },
+				"stamp:1",
+			),
+		]);
+		await releaseSortingTurn(db, "stamp:1");
+		expect(await confOf(withMark)).toBe(0.55);
+		expect(await stamp(withMark)).not.toBe(OLD);
+		expect(await stamp(noMark)).toBe(OLD);
+	});
+
+	it("the finish of an in-process sort records its instance key", async () => {
+		const a = await addRow({ confidence: 0.55 });
+		const runId = await startRun([a]);
+		await categorizePending(
+			{ DB: db, JEV_API_KEY: "test-key", DEMO: env.DEMO },
+			fakeJev(() => reply(0.9)).fetchImpl,
+			{ rulesApplied: true, reask: { runId, ids: [a] } },
+		);
+		const run = await readRun(db);
+		expect(run?.status).toBe("done");
+		expect(run?.finishedKeys).toHaveLength(1);
 	});
 });
 

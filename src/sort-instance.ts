@@ -117,7 +117,11 @@ export async function runSortInstance(
 	if (reask) {
 		try {
 			await runStep("reask-finish", REASK_STEPS.finish, async () => {
-				await finishRun(env.DB, { runId: reask.runId, now: Date.now() });
+				await finishRun(env.DB, {
+					runId: reask.runId,
+					now: Date.now(),
+					instanceKey: options.runId,
+				});
 				return true;
 			});
 		} catch (error) {

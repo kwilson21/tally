@@ -217,6 +217,41 @@ describe("startOrJoinRun", () => {
 		expect(run?.ids.sort()).toEqual([a, b].sort());
 	});
 
+	it("joins a fresh running run with nothing new without writing: no instance is counted", async () => {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const all = await candidatesNow();
+		const first = await startOrJoinRun(db, {
+			candidates: all.filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const before = (
+			await db
+				.prepare(
+					"SELECT value FROM household_settings WHERE key = 'resort_run'",
+				)
+				.first<{ value: string }>()
+		)?.value;
+		const joined = await startOrJoinRun(db, {
+			candidates: all.filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 1000,
+		});
+		expect(joined).toEqual({ runId: first.runId, newIds: [], joined: true });
+		const after = (
+			await db
+				.prepare(
+					"SELECT value FROM household_settings WHERE key = 'resort_run'",
+				)
+				.first<{ value: string }>()
+		)?.value;
+		// The stored text is untouched, so instances and every other field stay as they were.
+		expect(after).toBe(before);
+		expect((await readRun(db))?.instances).toBe(1);
+	});
+
 	it("closes a stale run (older than 2 hours) and starts a new one", async () => {
 		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const all = await candidatesNow();

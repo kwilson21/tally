@@ -51,6 +51,7 @@ export async function categorizePending(
 	}: PassOptions = {},
 ): Promise<{ asked: number; applied: number }> {
 	let done: { asked: number; applied: number };
+	const runId = crypto.randomUUID();
 	try {
 		done = await sortGroups(env, inProcess, fetchImpl, {
 			rulesApplied,
@@ -59,16 +60,20 @@ export async function categorizePending(
 			maxCalls,
 			time,
 			reask,
-			runId: crypto.randomUUID(),
+			runId,
 		});
 	} finally {
-		// A re-sort's run finishes once its groups are done, even when they threw (decision 160). finishRun is idempotent.
+		// A re-sort's run finishes once its groups are done, even when they threw (decision 160). This sort's own id is
+		// its instance key, so the run finalizes once every instance it started has finished. finishRun is idempotent.
 		if (reask)
-			await finishRun(env.DB, { runId: reask.runId, now: Date.now() }).catch(
-				(error: unknown) =>
-					console.error(
-						`reask: finish failed ${error instanceof Error ? error.name : "unknown"}`,
-					),
+			await finishRun(env.DB, {
+				runId: reask.runId,
+				now: Date.now(),
+				instanceKey: runId,
+			}).catch((error: unknown) =>
+				console.error(
+					`reask: finish failed ${error instanceof Error ? error.name : "unknown"}`,
+				),
 			);
 	}
 	if (done.asked > 0)
