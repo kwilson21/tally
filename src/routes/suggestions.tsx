@@ -15,6 +15,11 @@ import {
 	settleSuggestion,
 } from "../db/merchant-names";
 import {
+	addMoreLikeThis,
+	type MoreLikeThis,
+	moreLikeThis,
+} from "../db/more-like-this";
+import {
 	NEVER_SUGGEST_KINDS,
 	type NeverSuggestKind,
 } from "../db/never-suggest";
@@ -46,6 +51,7 @@ import {
 import {
 	AskFirst,
 	joinStores,
+	MoreLikeThisCard,
 	NewCategoryRow,
 	SuggestionCard,
 } from "../views/suggestion-review";
@@ -58,6 +64,10 @@ const MAX_STORE_KEY = 500;
 /** The words when a suggestion was answered somewhere else first (decision 120): Settings and Organize say the same. */
 export const CHANGED_SUGGESTION =
 	"That suggestion was changed somewhere else. Here's the current list.";
+
+/** What a stale "Add to …" card says: the purchase moved elsewhere since the card was drawn, so nothing moved. */
+export const MORE_CHANGED =
+	"That purchase was changed somewhere else, so nothing moved.";
 
 /** A question the No just raised: its store(s) and what the check says (decision 101). */
 type Ask = {
@@ -87,11 +97,23 @@ export const suggestions = new Hono<App>();
  * The address of the screen with its skips in it, so every form keeps the skips it was drawn with. `skip`
  * holds the items set aside; `again` holds those set aside a second time, after they came back (decision 79).
  */
-export function reviewAddress(skipped: string[], again: string[] = []): string {
+export function reviewAddress(
+	skipped: string[],
+	again: string[] = [],
+	/** The filed purchase whose "N more look like this" card the screen shows (decision 157): its id only. */
+	more?: number,
+): string {
 	const query = new URLSearchParams();
 	for (const id of skipped) query.append("skip", id);
 	for (const id of again) query.append("again", id);
+	if (more !== undefined) query.set("more", String(more));
 	return query.size ? `${PATH}?${query}` : PATH;
+}
+
+/** The `more` address key as a purchase id, or undefined when it isn't one (an id only, never bank text). */
+function moreFrom(value: string | undefined): number | undefined {
+	if (value === undefined || !/^\d{1,15}$/.test(value)) return undefined;
+	return Number(value);
 }
 
 /** The skip keys of one address key, kept only when the queue still has them (never bank text). */
@@ -245,6 +267,8 @@ type ScreenInput = {
 	categories: { id: number; name: string }[];
 	/** The pending category suggestion's name for each store, drawn in place with no script (decision 156). */
 	pendingNames: Map<string, string>;
+	/** The "N more look like this" card above the screen, when a purchase was just filed and others look like it. */
+	more: MoreLikeThis | null;
 };
 
 function Screen({
@@ -266,6 +290,7 @@ function Screen({
 		error,
 		focus = false,
 		today,
+		more,
 	} = input;
 	const skippedSet = new Set(skipped);
 	const againSet = new Set(again);
@@ -299,8 +324,19 @@ function Screen({
 				>
 					Settings
 				</a>
+				{/* While the card shows it is the whole screen: a purchase it offers is never also offered by the queue below. */}
+				{more ? (
+					<div class="mt-6">
+						<MoreLikeThisCard
+							action={action}
+							card={more}
+							today={today}
+							focus={focus}
+						/>
+					</div>
+				) : null}
 				{/* The question has no count: the item it asks about has just left the queue, so "0 left" would read wrong. */}
-				{ask ? (
+				{more ? null : ask ? (
 					<div class="mt-6">
 						<AskFirst
 							action={action}
@@ -385,6 +421,8 @@ async function renderScreen(
 		toast?: { message: string; type: "success" | "info"; announce: string };
 		/** The address the screen's skips are read from; the page's own address when none is given (a row's answer). */
 		reviewUrl?: string;
+		/** The purchase just filed, whose "N more look like this" card the screen shows (decision 157). */
+		more?: number;
 	} = {},
 ) {
 	const db = c.env.DB;
@@ -393,6 +431,8 @@ async function renderScreen(
 		options.reviewUrl ?? c.req.url,
 		queue,
 	);
+	const more =
+		options.more === undefined ? null : await moreLikeThis(db, options.more);
 	const categories = await db
 		.prepare(
 			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
@@ -430,6 +470,7 @@ async function renderScreen(
 						item.kind === "category" ? [item.merchantKey] : [],
 					),
 				),
+				more,
 			}}
 		/>,
 		options.status ?? 200,
@@ -442,8 +483,11 @@ const left = (queue: SuggestionItem[]) =>
 		? "Nothing left to check."
 		: `${queue.length} left to check.`;
 
-// Settings → Suggestions (issue #195, decision 101): one item at a time, like Organize.
-suggestions.get(PATH, (c) => renderScreen(c));
+// Settings → Suggestions (issue #195, decision 101): one item at a time, like Organize. A `more` address shows the
+// "N more look like this" card after a create, when the purchase it names was just filed (decision 157).
+suggestions.get(PATH, (c) =>
+	renderScreen(c, { more: moreFrom(c.req.query("more")) }),
+);
 
 // A category guess's suggested new category, asked for in place once its card is on screen (decision 156): the dashed
 // row with Tally's name, or nothing when Tally has no name (no AI, the switch off, or a failed call). The row's swap
@@ -498,10 +542,18 @@ suggestions.post(PATH, async (c) => {
 	const { skipped, again } = requestedReview(reviewUrl, queue);
 	const next = reviewAddress(skipped, again);
 	// `extra` is one more sentence for the announcer, such as what a create left out; the toast keeps its words.
-	const done = (message: string, queueAfter: SuggestionItem[], extra = "") => {
-		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+	// `more` is the purchase a create just filed: its "N more look like this" card, when others look like it (decision 157).
+	const done = (
+		message: string,
+		queueAfter: SuggestionItem[],
+		extra = "",
+		more?: number,
+	) => {
+		if (!c.req.header("HX-Request"))
+			return c.redirect(reviewAddress(skipped, again, more), 303);
 		return renderScreen(c, {
 			reviewUrl,
+			more,
 			focus: true,
 			toast: {
 				message,
@@ -561,6 +613,69 @@ suggestions.post(PATH, async (c) => {
 		// The line hides the store's other items, so the count is taken once it is written.
 		const after = await suggestionQueue(db);
 		return done(neverSuggestedMessage(kind as NeverSuggestKind, labels), after);
+	}
+
+	// The "N more look like this" card (decision 157, step A), drawn after a create. "No" moves on and records nothing,
+	// and makes no "Never suggest" line (decision 101). Add files only the ticked purchases still waiting, read from
+	// the group as it is now: the ids posted are checked against it, never trusted.
+	if (answer === "more_skip") {
+		const message = "Left them as they are.";
+		if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+		return renderScreen(c, {
+			focus: true,
+			toast: { message, type: "info", announce: `${message} ${left(queue)}` },
+		});
+	}
+	if (answer === "more_add") {
+		const filedId = moreFrom(form.get("more")?.toString());
+		const category = moreFrom(form.get("category")?.toString());
+		const result =
+			filedId === undefined || category === undefined
+				? ({ ok: false, reason: "gone" } as const)
+				: await addMoreLikeThis(db, {
+						filedId,
+						category,
+						ticked: form
+							.getAll("ticked")
+							.map((value) => Number(value.toString()))
+							.filter(Number.isSafeInteger),
+						who,
+					});
+		if (!result.ok && result.reason === "changed") {
+			// The card was drawn before the purchase moved to another category: nothing moved, and the next screen shows.
+			const message = MORE_CHANGED;
+			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+			return renderScreen(c, {
+				reviewUrl,
+				focus: true,
+				toast: {
+					message,
+					type: "info",
+					announce: `${message} ${left(queue)}`,
+				},
+			});
+		}
+		if (!result.ok) return stale();
+		const after = await suggestionQueue(db);
+		const { skipped: decided } = result;
+		const changed =
+			decided === 0
+				? ""
+				: ` ${decided} ${decided === 1 ? "was" : "were"} changed somewhere else, so ${decided === 1 ? "it was" : "they were"} left alone.`;
+		if (result.moved === 0) {
+			const message = `Nothing moved.${changed}`;
+			if (!c.req.header("HX-Request")) return c.redirect(next, 303);
+			return renderScreen(c, {
+				reviewUrl,
+				focus: true,
+				toast: {
+					message,
+					type: "info",
+					announce: `${message} ${left(after)}`,
+				},
+			});
+		}
+		return done(`Moved ${result.moved} to ${result.name}.${changed}`, after);
 	}
 
 	const item = queue.find((candidate) => candidate.id === id);
@@ -730,6 +845,8 @@ suggestions.post(PATH, async (c) => {
 						? `Made ${result.name} and set ${item.label} to it.`
 						: `Added ${item.label} to ${result.name}.`,
 					after,
+					"",
+					item.transactionId,
 				);
 			}
 			if (answer === "else") {

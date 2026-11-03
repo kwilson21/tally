@@ -241,6 +241,11 @@ const SUGGESTION_CARD_ROWS = CATEGORY_SUGGESTION.rows.map((row) => ({
 	date: row.date,
 }));
 const SUGGESTION_CARD_TODAY = "2026-10-16";
+/** The "N more look like this" card (decision 157): two purchases with one bank text, both ticked. */
+const MORE_LIKE_THIS_ROWS = [
+	{ id: 71, name: "Audible", amountCents: 1499, date: "2026-10-05" },
+	{ id: 72, name: "Audible", amountCents: 1499, date: "2026-10-09" },
+];
 
 const SECTIONS = [
 	["foundation", "Foundation"],
@@ -3895,7 +3900,7 @@ function Rows() {
 					"Button",
 					"WhyLink",
 				]}
-				sentence="One card for a suggested new category, the same in Settings and on the Suggestions page: Tally's guess, one headline, the purchases as ruled rows with one checkbox each, then Create and No, with Why? after No. An unticked row keeps its note. No puts the question in the card's place. Organize shows a short form above its chips."
+				sentence="One card for a suggested new category, the same in Settings and on the Suggestions page: Tally's guess, one headline, the purchases as ruled rows with one checkbox each, then Create and No, with Why? after No. An unticked row keeps its note. No puts the question in the card's place. Organize shows a short form above its chips. With a count of more, after Create and next, the same card lists the purchases that look like the one just filed, all ticked, with no Guess line and no notes."
 			>
 				<State label="All ticked: Create Pet Care, then No, with Why? after it">
 					<div class="max-w-xl" inert>
@@ -3918,6 +3923,20 @@ function Rows() {
 							tickName="ids"
 							ticked={[32, 33]}
 							notes={{ 31: "Birthday present" }}
+							form={{}}
+							answers={{ create: { type: "button" }, no: { type: "button" } }}
+						/>
+					</div>
+				</State>
+				<State label="N more look like this: the purchases with the same bank text, all ticked, Add to Books & audio, then No">
+					<div class="max-w-xl" inert>
+						<NewCategoryCard
+							name="Books & audio"
+							existing="Books & audio"
+							more={MORE_LIKE_THIS_ROWS.length}
+							rows={MORE_LIKE_THIS_ROWS}
+							today={SUGGESTION_CARD_TODAY}
+							tickName="ticked"
 							form={{}}
 							answers={{ create: { type: "button" }, no: { type: "button" } }}
 						/>

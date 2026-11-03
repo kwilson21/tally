@@ -23,6 +23,13 @@ function createWords(name: string, existing?: string, archived?: boolean) {
 	return archived ? `Restore ${existing}` : `Add to ${existing}`;
 }
 
+/** The "N more" headline (decision 157, step A): "1 more looks like this", "2 more look like this". */
+function moreWords(count: number) {
+	return count === 1
+		? "1 more looks like this"
+		: `${count} more look like this`;
+}
+
 /** The muted line that says Tally made the guess (decision 120). */
 function Guess() {
 	return (
@@ -47,6 +54,7 @@ export function NewCategoryCard({
 	notes,
 	existing,
 	archived,
+	more,
 	error,
 	titleId,
 	focus = false,
@@ -66,6 +74,12 @@ export function NewCategoryCard({
 	notes?: Record<number, string>;
 	existing?: string;
 	archived?: boolean;
+	/**
+	 * The "N more look like this" variant (decision 157, step A): the count of purchases that look like the one just
+	 * filed. Its headline replaces "A new category", and the Guess line and the per-row notes are left out; the rows
+	 * and their checkboxes stay.
+	 */
+	more?: number;
 	error?: string;
 	/** The headline's id, where the screen has one card to name (the Suggestions page's "suggestion-title"). */
 	titleId?: string;
@@ -81,14 +95,14 @@ export function NewCategoryCard({
 	return (
 		<form {...form} class={CARD}>
 			{hidden}
-			<Guess />
+			{more === undefined && <Guess />}
 			<h2
 				id={titleId}
 				tabindex={focus ? -1 : undefined}
 				autofocus={focus || undefined}
 				class="font-serif text-xl font-semibold tracking-tight outline-none"
 			>
-				A new category: {name}
+				{more === undefined ? `A new category: ${name}` : moreWords(more)}
 			</h2>
 			{error && (
 				<p role="alert" class="text-sm text-over">
@@ -114,19 +128,21 @@ export function NewCategoryCard({
 							</span>
 							<span class="text-muted">{shortDay(row.date, today)}</span>
 						</label>
-						<div class="hidden pb-2 supports-[selector(:has(*))]:group-has-[input[type=checkbox]:not(:checked)]/tx:block">
-							<TextInput
-								id={`note-${row.id}`}
-								name={`note_${row.id}`}
-								label={`A note for ${row.name} (optional)`}
-								value={notes?.[row.id] ?? ""}
-								maxlength={500}
-								placeholder="Only used if you untick it"
-								hint="Tally sorts it again right away, with your note."
-								surface="paper"
-								class="w-full"
-							/>
-						</div>
+						{more === undefined && (
+							<div class="hidden pb-2 supports-[selector(:has(*))]:group-has-[input[type=checkbox]:not(:checked)]/tx:block">
+								<TextInput
+									id={`note-${row.id}`}
+									name={`note_${row.id}`}
+									label={`A note for ${row.name} (optional)`}
+									value={notes?.[row.id] ?? ""}
+									maxlength={500}
+									placeholder="Only used if you untick it"
+									hint="Tally sorts it again right away, with your note."
+									surface="paper"
+									class="w-full"
+								/>
+							</div>
+						)}
 					</li>
 				))}
 			</ul>
