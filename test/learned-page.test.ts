@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDemo } from "../src/demo/reset";
 
 // Settings' "What Tally has learned" page (decisions 156 and 162): one bordered line per learned text, Forget with
@@ -42,7 +42,10 @@ const trigger = (res: Response) =>
 	};
 
 const textOf = (html: string) =>
-	html.replace(/<[^>]+>/g, "").replaceAll("&#39;", "'");
+	html
+		.replace(/<[^>]+>/g, "")
+		.replaceAll("&#39;", "'")
+		.replaceAll("&amp;", "&");
 
 /** Every URL the page draws in an attribute: links, forms and HTMX targets. */
 const urlsIn = (html: string) =>
@@ -86,8 +89,12 @@ beforeEach(async () => {
 		db.prepare(
 			"INSERT OR IGNORE INTO categories (name, name_key, icon, color, sort_order) VALUES ('Entertainment', 'entertainment', 'entertainment', 'cat-blue', 90)",
 		),
+		db.prepare(
+			"INSERT OR IGNORE INTO categories (name, name_key, icon, color, sort_order) VALUES ('Books & audio', 'books & audio', 'books', 'cat-plum', 95)",
+		),
 		db.prepare("DELETE FROM transactions"),
 		db.prepare("DELETE FROM forgotten_texts"),
+		db.prepare("DELETE FROM bank_text_rules"),
 	]);
 });
 
@@ -128,10 +135,33 @@ describe("GET /settings/learned: the page", () => {
 		);
 	});
 
-	it("has no Change button, since Change is a later PR", async () => {
+	it("offers Change in place on a line: a labelled select, the sentence, and Save with a Cancel link", async () => {
 		await answer("NETFLIX.COM", "Entertainment");
 		const { html } = await get("/settings/learned");
+		expect(html).toContain("<details");
+		expect(html).toContain("Change<span");
+		expect(html).toContain('<label for="page-category-0"');
+		expect(html).toContain('<select id="page-category-0" name="category"');
+		expect(textOf(html)).toContain(
+			"From now on Netflix.com goes here every time.",
+		);
+		expect(html).toContain('action="/settings/learned/change"');
+		expect(html).toContain('hx-post="/settings/learned/change"');
+		expect(textOf(html)).toContain("Save");
+		expect(textOf(html)).toContain("Cancel");
+		// The select starts on the line's category.
+		expect(html).toMatch(/<option[^>]* selected[^>]*>Entertainment<\/option>/);
+		expect(html).not.toMatch(
+			/<option[^>]* selected[^>]*>Books &amp; audio<\/option>/,
+		);
+	});
+
+	it("gives a known-vague text no Change, only Forget", async () => {
+		await answer("APPLE.COM/BILL 09/30", "Entertainment");
+		const { html } = await get("/settings/learned");
+		expect(html).not.toContain("<details");
 		expect(textOf(html)).not.toMatch(/\bChange\b/);
+		expect(html).toContain('action="/settings/learned/forget"');
 	});
 
 	it("shows the empty state when nothing is learned", async () => {
@@ -317,7 +347,8 @@ describe("POST /settings/learned/forget", () => {
 		const after = textOf(undo.html);
 		expect(after).toContain("Netflix.com → Groceries");
 		expect(after).toContain("From 1 of your answers");
-		expect(after).not.toContain("Entertainment");
+		// The Change form lists every category, so only the line itself says what it files under.
+		expect(after).not.toContain("Netflix.com → Entertainment");
 		const row = await db
 			.prepare(
 				"SELECT forgotten_at AS f, previous_forgotten_at AS p FROM forgotten_texts",
@@ -356,5 +387,261 @@ describe("POST /settings/learned/forget", () => {
 		);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/learned");
+	});
+});
+
+const ruleOf = async (text: string) =>
+	(
+		await db
+			.prepare(
+				"SELECT category_id AS categoryId FROM bank_text_rules WHERE cleaned_text = ?",
+			)
+			.bind(text)
+			.first<{ categoryId: number }>()
+	)?.categoryId ?? null;
+
+describe("POST /settings/learned/change", () => {
+	it("makes the rule, applies it at once, and says so in a toast and an announcement", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await answer("NETFLIX.COM", "Entertainment", "user", "2026-10-03");
+		const books = await categoryId("Books & audio");
+		const { res, html } = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(books),
+		});
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast).toMatchObject({
+			message: "Netflix.com now goes to Books & audio every time.",
+			type: "success",
+		});
+		expect(trigger(res).announce).toBe(trigger(res).toast?.message);
+		expect(await ruleOf("netflix.com")).toBe(books);
+		expect(textOf(html)).toContain("Netflix.com → Books & audio");
+		expect(textOf(html)).toContain("Your rule");
+	});
+
+	it("leaves a row the person sorted by hand as it is", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		const row = await db
+			.prepare(
+				"SELECT category_id AS c, category_source AS s FROM transactions",
+			)
+			.first<{ c: number; s: string }>();
+		expect(row).toEqual({ c: await categoryId("Entertainment"), s: "user" });
+	});
+
+	it("saves twice into one row, with the latest category", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Entertainment")),
+		});
+		const n = await db
+			.prepare("SELECT COUNT(*) AS n FROM bank_text_rules")
+			.first<{ n: number }>();
+		expect(n?.n).toBe(1);
+		expect(await ruleOf("netflix.com")).toBe(await categoryId("Entertainment"));
+	});
+
+	it("refuses a known-vague text with an alert, and makes no rule", async () => {
+		await answer("APPLE.COM/BILL 09/30", "Entertainment");
+		const { res, html } = await post("/settings/learned/change", {
+			text: "apple.com/bill",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(400);
+		expect(html).toContain('role="alert"');
+		expect(trigger(res).announce).toBeDefined();
+		expect(await ruleOf("apple.com/bill")).toBeNull();
+	});
+
+	it("refuses an unknown or archived category beside its own line, with an alert", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const unknown = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: "999999",
+		});
+		expect(unknown.res.status).toBe(400);
+		expect(unknown.html).toContain('role="alert"');
+		expect(unknown.html).toContain("Choose a category.");
+		// The disclosure opens with its error, so the error is on screen.
+		expect(unknown.html).toMatch(/<details[^>]* open/);
+		await db
+			.prepare(
+				"UPDATE categories SET archived = 1 WHERE name = 'Books & audio'",
+			)
+			.run();
+		const archived = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(archived.res.status).toBe(400);
+		expect(await ruleOf("netflix.com")).toBeNull();
+	});
+
+	it("refuses a text with no line on the page, with the page's alert", async () => {
+		const { res, html } = await post("/settings/learned/change", {
+			text: "",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(400);
+		expect(html).toContain('role="alert"');
+	});
+
+	it("works without script: a plain form post goes back to the page", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const { res } = await post(
+			"/settings/learned/change",
+			{
+				text: "netflix.com",
+				category: String(await categoryId("Books & audio")),
+			},
+			false,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/settings/learned");
+	});
+});
+
+describe("POST /settings/learned/change: a failed apply saves nothing (review of #838)", () => {
+	afterEach(async () => {
+		await db.prepare("DROP TRIGGER IF EXISTS fail_bank_apply").run();
+	});
+
+	it("answers with an alert and leaves no rule and no filled row", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('unfilled-1', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', 1499, 'NETFLIX.COM*0912')",
+			)
+			.run();
+		await db
+			.prepare(
+				"CREATE TRIGGER fail_bank_apply BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'apply nope'); END",
+			)
+			.run();
+		const { res, html } = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(503);
+		expect(html).toContain('role="alert"');
+		expect(textOf(html)).toContain(
+			"Tally couldn't save that rule, so nothing changed.",
+		);
+		expect(trigger(res).announce).toBe(
+			"Tally couldn't save that rule, so nothing changed. Try again.",
+		);
+		expect(await ruleOf("netflix.com")).toBeNull();
+		const row = await db
+			.prepare(
+				"SELECT category_source AS s FROM transactions WHERE raw_name = 'NETFLIX.COM*0912'",
+			)
+			.first<{ s: string | null }>();
+		expect(row?.s).toBeNull();
+	});
+});
+
+describe("POST /settings/learned/change: merchant rules first (review of #838)", () => {
+	it("fills a row both a merchant rule and the new rule match with the merchant rule's category", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const eating = await categoryId("Eating Out");
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NETFLIX.COM*0912', ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+			)
+			.bind(eating)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('unfilled-2', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', 1499, 'NETFLIX.COM*0912')",
+			)
+			.run();
+		const { res } = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(200);
+		const row = await db
+			.prepare(
+				"SELECT category_id AS c, category_source AS s FROM transactions WHERE plaid_transaction_id = 'unfilled-2'",
+			)
+			.first<{ c: number; s: string }>();
+		expect(row).toEqual({ c: eating, s: "merchant_rule" });
+	});
+});
+
+describe("the learned page with a rule", () => {
+	it("shows the rule's category and 'Your rule' in place of the answers' count", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await db
+			.prepare(
+				"INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES ('netflix.com', ?)",
+			)
+			.bind(await categoryId("Books & audio"))
+			.run();
+		const { html } = await get("/settings/learned");
+		expect(textOf(html)).toContain("Netflix.com → Books & audio");
+		expect(textOf(html)).toContain("Your rule");
+		expect(textOf(html)).not.toContain("From 1 of your answers");
+	});
+
+	it("gives a rule with no answers a line, and Settings' count includes it", async () => {
+		await db
+			.prepare(
+				"INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES ('netflix.com', ?)",
+			)
+			.bind(await categoryId("Books & audio"))
+			.run();
+		const { html } = await get("/settings/learned");
+		expect(textOf(html)).toContain("Netflix.com → Books & audio");
+		expect(textOf(html)).toContain("Your rule");
+		const settings = await get("/settings");
+		expect(textOf(settings.html)).toContain("1 line");
+	});
+
+	it("Forget on a rule's line removes the rule, and its Undo puts the rule and the line back", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const books = await categoryId("Books & audio");
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(books),
+		});
+		const forgot = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+		expect(textOf(forgot.html)).toContain("Nothing yet");
+		expect(await ruleOf("netflix.com")).toBeNull();
+		const undo = await post("/settings/learned/undo", {
+			token: trigger(forgot.res).toast?.undo ?? "",
+			back: "/settings/learned",
+		});
+		expect(trigger(undo.res).toast?.message).toBe(
+			"Forget undone. Tally has that line back.",
+		);
+		expect(textOf(undo.html)).toContain("Netflix.com → Books & audio");
+		expect(await ruleOf("netflix.com")).toBe(books);
+	});
+
+	it("names a rule's line in the Forget toast as the line now reads", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		const { res } = await post("/settings/learned/forget", {
+			text: "netflix.com",
+		});
+		expect(trigger(res).toast?.message).toBe(
+			"Forgot Netflix.com → Books & audio. Tally goes back to guessing.",
+		);
 	});
 });

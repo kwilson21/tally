@@ -1,4 +1,5 @@
 import { matchBillPayments } from "../bills/match";
+import { applyBankTextRules } from "../db/bank-text-rules";
 import { applyMerchantRules } from "../db/transactions";
 
 /**
@@ -29,7 +30,12 @@ export async function afterSyncSteps(db: D1Database): Promise<{
 			return true;
 		}
 	};
-	const rulesFailed = await failed(() => applyMerchantRules(db));
+	// The bank-text rules (decision 163) run after the merchant rules, in the same step, so a merchant rule wins and a
+	// failure here leaves the rules step failed, for the sort to retry.
+	const rulesFailed = await failed(async () => {
+		await applyMerchantRules(db);
+		await applyBankTextRules(db);
+	});
 	const billsFailed = await failed(() => matchBillPayments(db));
 	return failures.length > 0
 		? { rulesFailed, billsFailed, error: failures[0] }

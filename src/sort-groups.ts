@@ -18,6 +18,7 @@ import {
 	readAiSwitches,
 	stillOnKeys,
 } from "./db/ai-switches";
+import { applyBankTextRules } from "./db/bank-text-rules";
 import { questionsAnswered, readFirstTally } from "./db/first-tally";
 import {
 	dropReservedJevCallsStatement,
@@ -403,8 +404,11 @@ function stillInCluster(
 	return followerIds.filter((id) => cluster.includes(id));
 }
 
-/** A learned line as a group's plan keeps it: the cleaned bank text it is for, and its category and count. */
-type LearnedPair = [string, { category: string; answers: number }];
+/**
+ * A learned line as a group's plan keeps it: the cleaned bank text it is for, and its category and count. A line that
+ * is a person's rule (decision 163) says so, and Jev is told it as a rule, with no count.
+ */
+type LearnedPair = [string, { category: string; answers: number; rule?: true }];
 
 /**
  * The learned lines Jev may be told for these rows (decisions 156 and 162), as pairs: one load, then the lines of the
@@ -420,7 +424,9 @@ async function learnedLinesFor(
 		.map(
 			(line): LearnedPair => [
 				line.cleanedText,
-				{ category: line.categoryName, answers: line.answers },
+				line.rule
+					? { category: line.categoryName, answers: line.answers, rule: true }
+					: { category: line.categoryName, answers: line.answers },
 			],
 		);
 }
@@ -429,7 +435,7 @@ async function learnedLinesFor(
 function learnedFor(
 	pairs: LearnedPair[] | undefined,
 	cleanedText: string,
-): { category: string; answers: number } | undefined {
+): { category: string; answers: number; rule?: true } | undefined {
 	return new Map(pairs ?? []).get(cleanedText);
 }
 
@@ -1046,6 +1052,8 @@ export async function sortGroups(
 		if (!options.rulesApplied)
 			await runStep("rules", STEP_SETTINGS.rules, async () => {
 				await applyMerchantRules(env.DB);
+				// After the merchant rules, so a merchant rule wins (decision 163).
+				await applyBankTextRules(env.DB);
 				return true;
 			});
 		for (let n = 1; done.asked < maxCalls; n++) {

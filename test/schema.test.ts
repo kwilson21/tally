@@ -54,6 +54,7 @@ describe("schema", () => {
 			"accounts",
 			"ai_log",
 			"balance_history",
+			"bank_text_rules",
 			"bill_amounts",
 			"bill_payments",
 			"bills",

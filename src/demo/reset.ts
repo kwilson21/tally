@@ -23,6 +23,7 @@ const INTERNET_MERCHANT = "RIVERSIDE FIBER INTERNET";
 // Deletes in child-to-parent order, then inserts the seed, all in one atomic batch.
 const TABLES_CHILD_FIRST = [
 	"forgotten_texts",
+	"bank_text_rules",
 	"ai_log",
 	"maybe_answers",
 	"maybe_names",

@@ -1,10 +1,12 @@
 // "What Tally has learned" (decisions 156 and 162): one line per cleaned bank text, with the category the person chose.
 // A line is derived, never stored, from confirmed answers only: transactions whose category_source is 'user' or
 // 'merchant_rule'. Jev's own guesses never make a line. learnedLines is pure over rows; loadLearnedLines is the thin
-// loader. Part 3b (Jev's use of the lines) reuses learnedLines as it is.
+// loader. A person's Change (decision 163) is a rule on the text: withBankTextRules shows the rule's category on the
+// line, or makes a line from the rule alone, and the loader does that overlay, so Jev is told the same line.
 
 import { cleanBankText } from "../clean-bank-text";
 import { isVague, VAGUE_TEXTS } from "../same-text-matches";
+import { activeBankTextRules, type BankTextRule } from "./bank-text-rules";
 import { jevSaysMixedSql } from "./mixed-trip";
 
 /** How many of a text's latest answers decide its line (decision 162). */
@@ -45,6 +47,11 @@ export type LearnedLine = {
 	answers: number;
 	/** A text that covers more than one kind of purchase (VAGUE_TEXTS, such as APPLE.COM/BILL). */
 	vague: boolean;
+	/**
+	 * The line's category is a rule a person made with Change (decision 163), not only their answers. Absent for an
+	 * answers-only line, so those lines compare as they always did.
+	 */
+	rule?: true;
 };
 
 // Small words stay lower case in a name, unless they open it.
@@ -150,7 +157,50 @@ const ANSWERS_SQL = `SELECT t.id, t.date, t.raw_name AS rawName, t.updated_at AS
 		AND NOT EXISTS (SELECT 1 FROM transactions p WHERE p.id = t.parent_id AND ${jevSaysMixedSql("p")})
 	ORDER BY t.date DESC, t.id DESC`;
 
-/** The learned lines as the database has them now. */
+/**
+ * The lines with the rules a person made (decision 163) on top: a text with a rule shows the rule's category, marked
+ * `rule`, and keeps its answers' count; a rule with no line makes one from the rule alone, with no answers. A vague text
+ * never has a rule, so it never gets one here either. The rules passed in are already the active ones.
+ */
+export function withBankTextRules(
+	lines: readonly LearnedLine[],
+	rules: readonly BankTextRule[],
+): LearnedLine[] {
+	const ruleFor = new Map(rules.map((rule) => [rule.cleanedText, rule]));
+	const shown = new Set<string>();
+	const out: LearnedLine[] = lines.map((line) => {
+		shown.add(line.cleanedText);
+		const rule = line.vague ? undefined : ruleFor.get(line.cleanedText);
+		if (!rule) return line;
+		return {
+			...line,
+			categoryId: rule.categoryId,
+			categoryName: rule.categoryName,
+			icon: rule.icon,
+			color: rule.color,
+			rule: true,
+		};
+	});
+	const vague = new Set(VAGUE_TEXTS);
+	for (const rule of rules) {
+		if (shown.has(rule.cleanedText) || isVague(rule.cleanedText, vague))
+			continue;
+		out.push({
+			cleanedText: rule.cleanedText,
+			name: displayName(rule.cleanedText),
+			categoryId: rule.categoryId,
+			categoryName: rule.categoryName,
+			icon: rule.icon,
+			color: rule.color,
+			answers: 0,
+			vague: false,
+			rule: true,
+		});
+	}
+	return out.sort((a, b) => a.cleanedText.localeCompare(b.cleanedText));
+}
+
+/** The learned lines as the database has them now, with the person's rules on top (decision 163). */
 export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 	const { results: rows } = await db.prepare(ANSWERS_SQL).all<AnswerRow>();
 	const { results: forgotten } = await db
@@ -158,7 +208,22 @@ export async function loadLearnedLines(db: D1Database): Promise<LearnedLine[]> {
 			"SELECT cleaned_text AS cleanedText, forgotten_at AS forgottenAt FROM forgotten_texts",
 		)
 		.all<Forgotten>();
-	return learnedLines(rows, forgotten);
+	return withBankTextRules(
+		learnedLines(rows, forgotten),
+		await activeBankTextRules(db),
+	);
+}
+
+/** The active categories a Change can file a line in, A to Z by the household's own order (as the budget lists them). */
+export async function learnedCategoryChoices(
+	db: D1Database,
+): Promise<{ id: number; name: string }[]> {
+	const { results } = await db
+		.prepare(
+			"SELECT id, name FROM categories WHERE archived = 0 ORDER BY sort_order, name",
+		)
+		.all<{ id: number; name: string }>();
+	return results;
 }
 
 /**
@@ -170,17 +235,25 @@ export async function forgetText(
 	db: D1Database,
 	cleanedText: string,
 ): Promise<number> {
-	const row = await db
-		.prepare(
-			`INSERT INTO forgotten_texts (cleaned_text, forgotten_at) VALUES (?, datetime('now'))
-			ON CONFLICT(cleaned_text) DO UPDATE SET
-				previous_forgotten_at = forgotten_texts.forgotten_at,
-				forgotten_at = excluded.forgotten_at
-			RETURNING id`,
-		)
-		.bind(cleanedText)
-		.first<{ id: number }>();
-	return row?.id ?? 0;
+	// One batch: the Forget remembers the rule it removes (its Undo puts that rule back), then the rule goes. The
+	// insert reads the rule before the delete, in the same batch, in order.
+	const [forgot] = await db.batch<{ id: number }>([
+		db
+			.prepare(
+				`INSERT INTO forgotten_texts (cleaned_text, forgotten_at, rule_category_id)
+				VALUES (?, datetime('now'), (SELECT category_id FROM bank_text_rules WHERE cleaned_text = ?))
+				ON CONFLICT(cleaned_text) DO UPDATE SET
+					previous_forgotten_at = forgotten_texts.forgotten_at,
+					forgotten_at = excluded.forgotten_at,
+					rule_category_id = excluded.rule_category_id
+				RETURNING id`,
+			)
+			.bind(cleanedText, cleanedText),
+		db
+			.prepare("DELETE FROM bank_text_rules WHERE cleaned_text = ?")
+			.bind(cleanedText),
+	]);
+	return forgot?.results[0]?.id ?? 0;
 }
 
 /**
@@ -219,15 +292,26 @@ export async function undoForget(
 		.first<{ fresh: number; previous: string | null }>();
 	if (!row) return "gone";
 	if (!row.fresh) return "expired";
-	if (row.previous !== null) {
-		await db
+	// One batch: the rule the Forget removed comes back, unless the text has a newer rule (ON CONFLICT keeps that one),
+	// and the forgotten row goes back to its earlier state, or goes.
+	const restore =
+		row.previous !== null
+			? db
+					.prepare(
+						"UPDATE forgotten_texts SET forgotten_at = previous_forgotten_at, previous_forgotten_at = NULL, rule_category_id = NULL WHERE id = ?",
+					)
+					.bind(id)
+			: db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id);
+	await db.batch([
+		db
 			.prepare(
-				"UPDATE forgotten_texts SET forgotten_at = previous_forgotten_at, previous_forgotten_at = NULL WHERE id = ?",
+				`INSERT INTO bank_text_rules (cleaned_text, category_id)
+				SELECT cleaned_text, rule_category_id FROM forgotten_texts
+				WHERE id = ? AND rule_category_id IS NOT NULL
+				ON CONFLICT(cleaned_text) DO NOTHING`,
 			)
-			.bind(id)
-			.run();
-	} else {
-		await db.prepare("DELETE FROM forgotten_texts WHERE id = ?").bind(id).run();
-	}
+			.bind(id),
+		restore,
+	]);
 	return "undone";
 }
