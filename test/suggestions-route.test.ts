@@ -6,7 +6,7 @@ import { saveAiSwitches } from "../src/db/ai-switches";
 import { setArchived } from "../src/db/categories";
 import { suggestionQueue } from "../src/db/suggestions-queue";
 import { resetDemo } from "../src/demo/reset";
-import { suggestions } from "../src/routes/suggestions";
+import { NAME_URL_VERSION, suggestions } from "../src/routes/suggestions";
 import { recordSorting } from "./record-sorting";
 
 // The one review screen for every "Maybe …" (issue #195, decisions 79 and 101): Settings' Band leads to
@@ -3168,10 +3168,28 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(fragment.trim()).toBe("");
 	});
 
-	it("the lazy answer is cached per browser for a day, whether it has a name or not", async () => {
+	it("the lazy answer is never cached by the browser, so a stale name isn't served (decision 161)", async () => {
 		const { id } = await categoryCard();
 		const { res } = await get(`/settings/suggestions/new-category?id=${id}`);
-		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+		expect(res.headers.get("Cache-Control")).toBe("no-store");
+	});
+
+	it("the lazy name is asked once for a transaction, however often its row is drawn (decision 161)", async () => {
+		const { id } = await categoryCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder = env as unknown as { AI?: Ai };
+		const before = holder.AI;
+		const run = vi.fn(async () => "Books & audio");
+		holder.AI = { run } as unknown as Ai;
+		try {
+			const first = await get(`/settings/suggestions/new-category?id=${id}`);
+			const second = await get(`/settings/suggestions/new-category?id=${id}`);
+			expect(textOf(first.html)).toContain("New category: Books & audio");
+			expect(textOf(second.html)).toContain("New category: Books & audio");
+			expect(run).toHaveBeenCalledTimes(1);
+		} finally {
+			holder.AI = before;
+		}
 	});
 
 	it("a store with a Never suggest for a new category gets no row, pending or named, and no lazy name", async () => {
@@ -3196,9 +3214,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 			.run();
 		const fragment = await get(`/settings/suggestions/new-category?id=${id}`);
 		expect(fragment.html.trim()).toBe("");
-		expect(fragment.res.headers.get("Cache-Control")).toBe(
-			"private, max-age=86400",
-		);
+		expect(fragment.res.headers.get("Cache-Control")).toBe("no-store");
 		const page = await get(address);
 		// The card itself is still asked (only its new category row is withheld), so the test isn't vacuous.
 		expect(page.html).toContain("Maybe Eating Out");
@@ -3218,11 +3234,20 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(html).toContain(`id="new-category-name-${id}-error"`);
 	});
 
+	it("the name's loader carries this rollout's version, which the GET accepts and ignores", async () => {
+		const { id } = await categoryCard();
+		const versioned = await get(
+			`/settings/suggestions/new-category?id=${id}&v=${NAME_URL_VERSION}`,
+		);
+		expect(versioned.res.status).toBe(200);
+		expect(versioned.html.trim()).toBe("");
+	});
+
 	it("the name's address is the same per item, and a refused row keeps the skips its page had", async () => {
 		const { ids, address, id } = await categoryCard();
 		const { html: page } = await get(address);
 		expect(page).toContain(
-			`hx-get="/settings/suggestions/new-category?id=${id}"`,
+			`hx-get="/settings/suggestions/new-category?id=${id}&amp;v=${NAME_URL_VERSION}"`,
 		);
 		// htmx sends the page's own address as HX-Current-URL, so the row's answer keeps the skips the page had.
 		const res = await exports.default.fetch(`${BASE}/settings/suggestions`, {
@@ -3307,12 +3332,12 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		},
 	);
 
-	it("an answered or unknown item id gets an empty answer, cached the same way", async () => {
+	it("an answered or unknown item id gets an empty answer, sent no-store", async () => {
 		const { res, html } = await get(
 			"/settings/suggestions/new-category?id=category-999999",
 		);
 		expect(html.trim()).toBe("");
-		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+		expect(res.headers.get("Cache-Control")).toBe("no-store");
 	});
 
 	it("without JavaScript, a pending suggestion's name is drawn in the card, with no lazy request", async () => {
@@ -3361,7 +3386,7 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		);
 		// Announced only: a passive suggestion appearing does not toast.
 		expect(trigger(res).toast).toBeUndefined();
-		expect(res.headers.get("Cache-Control")).toBe("private, max-age=86400");
+		expect(res.headers.get("Cache-Control")).toBe("no-store");
 	});
 
 	it("a name typed in the row shows again, open, when the answer is refused", async () => {

@@ -55,6 +55,7 @@ describe("settingsPlaces: the folios are never shortened", () => {
 		const [categories] = settingsPlaces({
 			categories: { count: 50, budgetCents: 5_000_000_000 },
 			merchants: 0,
+			learned: 0,
 			zone: DEFAULT_TIME_ZONE,
 			bankEmailsOn: true,
 			people: 0,
