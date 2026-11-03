@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { finishRun, readMoved, readRun } from "../src/db/resort-run";
 import { startResortFor } from "../src/db/resort-start";
@@ -687,6 +687,36 @@ describe("Undo (decision 160)", () => {
 		expect(trigger(again.res).toast?.message).toBe("Too late to undo that.");
 	});
 
+	it("draws the page with the skip state of its back address, as the browser's address has it (#842 review)", async () => {
+		const { runId } = await movedRun();
+		// A card the person skipped stays set aside after Undo, so its skip link is in the drawn page.
+		const other = await addRow({
+			raw: "OTHER SKIP ROW",
+			jevCategoryId: await categoryId("Eating Out"),
+		});
+		const skipped = await post("/resort/undo", {
+			token: runId,
+			back: `/settings/suggestions?skip=category-${other}`,
+		});
+		expect(skipped.res.status).toBe(200);
+		// The card's form posts to the page with the skip it was drawn with, so the skip carries into the drawn page.
+		expect(skipped.html).toContain(
+			`action="/settings/suggestions?skip=category-${other}"`,
+		);
+		expect(skipped.html).toContain('id="suggestions-page"');
+	});
+
+	it("answers a back address that is not on this site with a redirect, not a page", async () => {
+		const { runId } = await movedRun();
+		const { res } = await post(
+			"/resort/undo",
+			{ token: runId, back: "//evil.example/settings/suggestions" },
+			false,
+		);
+		expect(res.status).toBe(303);
+		expect(res.headers.get("location")).toBe("/settings/suggestions");
+	});
+
 	it("draws the page named by back, and answers a page it does not know with a redirect", async () => {
 		const { runId } = await movedRun();
 		const plain = await post(
@@ -788,5 +818,58 @@ describe("the four Create paths", () => {
 		await post("/settings/categories", { name: "Hobbies" });
 		expect(create).not.toHaveBeenCalled();
 		expect(await readRun(db)).toBeNull();
+	});
+});
+
+// #842 review: the Create already filed the category, so a failure in the re-check must never fail the Create. The
+// failures are forced by making one statement throw, through the database's prepare, as a broken write would.
+describe("a failing re-check never fails the Create (#842 review)", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	/** Makes every statement whose SQL contains `text` throw when it is prepared. */
+	function failStatement(text: string) {
+		const prepare = db.prepare.bind(db);
+		vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+			if (sql.includes(text)) throw new Error("forced failure");
+			return prepare(sql);
+		});
+	}
+
+	const maybeCreate = async () => {
+		const { filed } = await maybeFixture();
+		return post("/settings/suggestions", {
+			id: `category-${filed}`,
+			answer: "create",
+			new_name: "Books & audio",
+		});
+	};
+
+	it("answers the Create as a success, with no line, when the run cannot be written (a failed CAS)", async () => {
+		failStatement(
+			"INSERT INTO household_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
+		);
+		const { res, html } = await maybeCreate();
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("/resort/progress");
+		expect(html).not.toContain('id="recheck"');
+		expect(create).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+		const made = await db
+			.prepare("SELECT id FROM categories WHERE name = 'Books & audio'")
+			.first<{ id: number }>();
+		expect(made?.id).toBeDefined();
+	});
+
+	it("answers the Create as a success, and ends the run it wrote, when a write after the run fails", async () => {
+		// The sweep runs right after the run is written: its failure leaves a running record with no instance.
+		failStatement("substr(key, 1, ?) = ?");
+		const { res, html } = await maybeCreate();
+		expect(res.status).toBe(200);
+		expect(html).not.toContain("/resort/progress");
+		expect(create).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+		expect((await readRun(db))?.status).toBe("done");
 	});
 });
