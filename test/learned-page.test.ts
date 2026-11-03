@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDemo } from "../src/demo/reset";
 
 // Settings' "What Tally has learned" page (decisions 156 and 162): one bordered line per learned text, Forget with
@@ -508,6 +508,74 @@ describe("POST /settings/learned/change", () => {
 		);
 		expect(res.status).toBe(303);
 		expect(res.headers.get("location")).toBe("/settings/learned");
+	});
+});
+
+describe("POST /settings/learned/change: a failed apply saves nothing (review of #838)", () => {
+	afterEach(async () => {
+		await db.prepare("DROP TRIGGER IF EXISTS fail_bank_apply").run();
+	});
+
+	it("answers with an alert and leaves no rule and no filled row", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('unfilled-1', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', 1499, 'NETFLIX.COM*0912')",
+			)
+			.run();
+		await db
+			.prepare(
+				"CREATE TRIGGER fail_bank_apply BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'apply nope'); END",
+			)
+			.run();
+		const { res, html } = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(503);
+		expect(html).toContain('role="alert"');
+		expect(textOf(html)).toContain(
+			"Tally couldn't save that rule, so nothing changed.",
+		);
+		expect(trigger(res).announce).toBe(
+			"Tally couldn't save that rule, so nothing changed. Try again.",
+		);
+		expect(await ruleOf("netflix.com")).toBeNull();
+		const row = await db
+			.prepare(
+				"SELECT category_source AS s FROM transactions WHERE raw_name = 'NETFLIX.COM*0912'",
+			)
+			.first<{ s: string | null }>();
+		expect(row?.s).toBeNull();
+	});
+});
+
+describe("POST /settings/learned/change: merchant rules first (review of #838)", () => {
+	it("fills a row both a merchant rule and the new rule match with the merchant rule's category", async () => {
+		await answer("NETFLIX.COM", "Entertainment");
+		const eating = await categoryId("Eating Out");
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES ('NETFLIX.COM*0912', ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+			)
+			.bind(eating)
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name) VALUES ('unfilled-2', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-04', 1499, 'NETFLIX.COM*0912')",
+			)
+			.run();
+		const { res } = await post("/settings/learned/change", {
+			text: "netflix.com",
+			category: String(await categoryId("Books & audio")),
+		});
+		expect(res.status).toBe(200);
+		const row = await db
+			.prepare(
+				"SELECT category_id AS c, category_source AS s FROM transactions WHERE plaid_transaction_id = 'unfilled-2'",
+			)
+			.first<{ c: number; s: string }>();
+		expect(row).toEqual({ c: eating, s: "merchant_rule" });
 	});
 });
 

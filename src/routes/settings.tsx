@@ -10,7 +10,7 @@ import {
 	readAiSwitches,
 	saveAiSwitches,
 } from "../db/ai-switches";
-import { applyBankTextRules, saveBankTextRule } from "../db/bank-text-rules";
+import { changeBankTextRule } from "../db/bank-text-rules";
 import {
 	addCategory,
 	categoryNames,
@@ -186,7 +186,7 @@ type View = {
 		/** The No's card place in the list; left out, the question comes after every card. */
 		place?: number;
 	};
-	status?: 200 | 400 | 404 | 422;
+	status?: 200 | 400 | 404 | 422 | 503;
 	/** The household's date and time zone, when the handler already read them, so the request reads them once. */
 	today?: string;
 	timeZone?: string;
@@ -1033,8 +1033,15 @@ settings.post("/settings/learned/change", async (c) => {
 			status: 400,
 		});
 	}
-	await saveBankTextRule(c.env.DB, text, category.id);
-	await applyBankTextRules(c.env.DB);
+	// The rule and its immediate apply are one batch (review of #838): a failure leaves no rule, and says so.
+	try {
+		await changeBankTextRule(c.env.DB, text, category.id);
+	} catch {
+		const message =
+			"Tally couldn't save that rule, so nothing changed. Try again.";
+		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+		return renderPage(c, "learned", { learnedError: message, status: 503 });
+	}
 	if (!htmx) return c.redirect("/settings/learned", 303);
 	const message = `${line.name} now goes to ${category.name} every time.`;
 	c.header(

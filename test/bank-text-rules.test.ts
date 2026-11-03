@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanBankText } from "../src/clean-bank-text";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import {
 	applyBankTextRules,
+	bankTextRuleStatements,
+	changeBankTextRule,
 	saveBankTextRule,
 } from "../src/db/bank-text-rules";
 import { unmakeCategory } from "../src/db/categories";
@@ -474,6 +476,90 @@ describe("saving a rule", () => {
 			.bind(CLEANED)
 			.first<{ categoryId: number }>();
 		expect(row?.categoryId).toBe(eating);
+	});
+});
+
+describe("a Change is one atomic batch, and its apply is guarded (review of #838)", () => {
+	// A trigger that makes any update of a row's category fail, standing in for an apply that errors mid-batch.
+	const failApply = () =>
+		db
+			.prepare(
+				"CREATE TRIGGER fail_bank_apply BEFORE UPDATE OF category_id ON transactions BEGIN SELECT RAISE(ABORT, 'apply nope'); END",
+			)
+			.run();
+	afterEach(async () => {
+		await db.prepare("DROP TRIGGER IF EXISTS fail_bank_apply").run();
+	});
+
+	it("a failed apply leaves no rule row: the upsert and the apply are one batch", async () => {
+		const books = await categoryId("Books & audio");
+		await txn(RAW_A);
+		await failApply();
+		await expect(changeBankTextRule(db, CLEANED, books)).rejects.toThrow();
+		expect(await ruleCount()).toBe(0);
+	});
+
+	it("a Change saves the rule and fills what it matches in one go", async () => {
+		const books = await categoryId("Books & audio");
+		const a = await txn(RAW_A);
+		await changeBankTextRule(db, CLEANED, books);
+		expect(await ruleCount()).toBe(1);
+		expect(await stateOf(a)).toMatchObject({
+			categoryId: books,
+			source: "merchant_rule",
+		});
+	});
+
+	it("a Change applies the merchant rules first, so a row both rules match gets the merchant rule's category", async () => {
+		const books = await categoryId("Books & audio");
+		const eating = await categoryId("Eating Out");
+		await db
+			.prepare(
+				"INSERT INTO merchants (raw_name, default_category_id) VALUES (?, ?) ON CONFLICT(raw_name) DO UPDATE SET default_category_id = excluded.default_category_id",
+			)
+			.bind(RAW_A, eating)
+			.run();
+		const both = await txn(RAW_A);
+		const bankOnly = await txn(RAW_B);
+		await changeBankTextRule(db, CLEANED, books);
+		expect(await stateOf(both)).toMatchObject({
+			categoryId: eating,
+			source: "merchant_rule",
+		});
+		expect(await stateOf(bankOnly)).toMatchObject({
+			categoryId: books,
+			source: "merchant_rule",
+		});
+	});
+
+	it("a statement built for a rule fills nothing once that rule is deleted", async () => {
+		const books = await categoryId("Books & audio");
+		await addRule(CLEANED, books);
+		const a = await txn(RAW_A);
+		const statements = await bankTextRuleStatements(db, [
+			{ cleanedText: CLEANED, categoryId: books },
+		]);
+		await db.prepare("DELETE FROM bank_text_rules").run();
+		await db.batch(statements);
+		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
+	});
+
+	it("a statement built for a rule fills nothing once that rule has another category", async () => {
+		const books = await categoryId("Books & audio");
+		const eating = await categoryId("Eating Out");
+		await addRule(CLEANED, books);
+		const a = await txn(RAW_A);
+		const statements = await bankTextRuleStatements(db, [
+			{ cleanedText: CLEANED, categoryId: books },
+		]);
+		await db
+			.prepare(
+				"UPDATE bank_text_rules SET category_id = ? WHERE cleaned_text = ?",
+			)
+			.bind(eating, CLEANED)
+			.run();
+		await db.batch(statements);
+		expect(await stateOf(a)).toMatchObject({ categoryId: null, source: null });
 	});
 });
 

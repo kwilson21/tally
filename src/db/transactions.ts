@@ -2591,17 +2591,20 @@ export async function removeSplit(
  * A rule saved under the merchant key wins over one saved under the raw name (spec §6.1).
  */
 export async function applyMerchantRules(db: D1Database): Promise<void> {
+	await merchantRuleStatement(db).run();
+}
+
+/** The statement applyMerchantRules runs, so a batch can run it with others (a Change, decision 163). */
+export function merchantRuleStatement(db: D1Database): D1PreparedStatement {
 	const rule = `SELECT c.id FROM categories c
 		WHERE c.archived = 0 AND c.id = ${merchantColumnSql("transactions", "default_category_id")}`;
-	await db
-		.prepare(
-			`UPDATE transactions SET
-				category_id = (${rule}),
-				category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
-			WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')
-				AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL) AND EXISTS (${rule})`,
-		)
-		.run();
+	return db.prepare(
+		`UPDATE transactions SET
+			category_id = (${rule}),
+			category_source = 'merchant_rule', category_confidence = NULL, updated_at = datetime('now')
+		WHERE is_split = 0 AND (category_id IS NULL AND category_source IS NULL OR category_source = 'bill')
+			AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL) AND EXISTS (${rule})`,
+	);
 }
 
 /**

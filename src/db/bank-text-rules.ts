@@ -4,6 +4,7 @@
 // person's choice, a Jev guess and a split are never touched.
 
 import { cleanBankText } from "../clean-bank-text";
+import { merchantRuleStatement } from "./transactions";
 
 /** The raw names one UPDATE takes at most: a few hundred ids in all, per the bounded-work rule (decision 163). */
 const RAW_NAMES_PER_UPDATE = 100;
@@ -16,6 +17,9 @@ export type BankTextRule = {
 	icon: string;
 	color: string;
 };
+
+/** The part of a rule the apply needs: which cleaned text, and the category it files in. */
+export type RuleMapping = { cleanedText: string; categoryId: number };
 
 /** The rules whose category is active, for the learned lines and for applying them. */
 export async function activeBankTextRules(
@@ -33,36 +37,43 @@ export async function activeBankTextRules(
 	return results;
 }
 
-/** Makes the rule for a cleaned text, or moves it to another category: one row per text (decision 163). */
-export async function saveBankTextRule(
+/** The upsert that makes the rule for a cleaned text, or moves it to another category: one row per text (decision 163). */
+function upsertBankTextRule(
 	db: D1Database,
 	cleanedText: string,
 	categoryId: number,
-): Promise<void> {
-	await db
+): D1PreparedStatement {
+	return db
 		.prepare(
 			`INSERT INTO bank_text_rules (cleaned_text, category_id) VALUES (?, ?)
 			ON CONFLICT(cleaned_text) DO UPDATE SET
 				category_id = excluded.category_id, updated_at = datetime('now')`,
 		)
-		.bind(cleanedText, categoryId)
-		.run();
+		.bind(cleanedText, categoryId);
+}
+
+/** Makes the rule for a cleaned text, or moves it to another category, without applying it. */
+export async function saveBankTextRule(
+	db: D1Database,
+	cleanedText: string,
+	categoryId: number,
+): Promise<void> {
+	await upsertBankTextRule(db, cleanedText, categoryId).run();
 }
 
 /**
- * Applies the bank-text rules to the rows nothing has filled yet, and to a bill's category, after the merchant rules
- * have run (so a merchant rule wins). A row is matched by cleanBankText of its raw name, which SQL cannot compute, so the
- * raw names still open are read once, grouped in code, and each rule's names are updated in chunks, in one batch. A
- * person's choice, a Jev guess, a split parent and a split's removed part are never a target, and nothing about bank
- * text is logged.
+ * The statements that fill the rows nothing has filled yet, and a bill's category, with the given rules. Each row is
+ * matched by cleanBankText of its raw name, which SQL cannot compute, so the raw names still open are read here, once,
+ * grouped in code, and each rule's names go in chunks. Every UPDATE is guarded on the rule as it is when the statement
+ * runs (`bank_text_rules` still maps its text to that category, and the category is active), so statements built from an
+ * older read fill nothing once the rule was deleted or moved. Reading can throw, and it writes nothing: a caller that
+ * batches these statements decides what else goes in the batch.
  */
-export async function applyBankTextRules(db: D1Database): Promise<void> {
-	const any = await db
-		.prepare("SELECT 1 AS one FROM bank_text_rules LIMIT 1")
-		.first<{ one: number }>();
-	if (!any) return;
-	const rules = await activeBankTextRules(db);
-	if (rules.length === 0) return;
+export async function bankTextRuleStatements(
+	db: D1Database,
+	rules: readonly RuleMapping[],
+): Promise<D1PreparedStatement[]> {
+	if (rules.length === 0) return [];
 	const categoryFor = new Map(rules.map((rule) => [rule.cleanedText, rule]));
 
 	const { results: open } = await db
@@ -73,18 +84,19 @@ export async function applyBankTextRules(db: D1Database): Promise<void> {
 		)
 		.all<{ rawName: string }>();
 
-	const namesByRule = new Map<BankTextRule, string[]>();
+	const namesByText = new Map<string, string[]>();
 	for (const { rawName } of open) {
-		const rule = categoryFor.get(cleanBankText(rawName));
-		if (!rule) continue;
-		const names = namesByRule.get(rule);
+		const cleanedText = cleanBankText(rawName);
+		if (!categoryFor.has(cleanedText)) continue;
+		const names = namesByText.get(cleanedText);
 		if (names) names.push(rawName);
-		else namesByRule.set(rule, [rawName]);
+		else namesByText.set(cleanedText, [rawName]);
 	}
-	if (namesByRule.size === 0) return;
 
-	const statements = [];
-	for (const [rule, names] of namesByRule) {
+	const statements: D1PreparedStatement[] = [];
+	for (const [cleanedText, names] of namesByText) {
+		const rule = categoryFor.get(cleanedText);
+		if (!rule) continue;
 		for (let i = 0; i < names.length; i += RAW_NAMES_PER_UPDATE) {
 			const chunk = names.slice(i, i + RAW_NAMES_PER_UPDATE);
 			statements.push(
@@ -96,11 +108,58 @@ export async function applyBankTextRules(db: D1Database): Promise<void> {
 						WHERE raw_name IN (SELECT value FROM json_each(?))
 							AND is_split = 0 AND ((category_id IS NULL AND category_source IS NULL) OR category_source = 'bill')
 							AND NOT (split_removed_from_cents IS NOT NULL AND category_id IS NOT NULL)
-							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = ? AND c.archived = 0)`,
+							AND EXISTS (SELECT 1 FROM categories c WHERE c.id = ? AND c.archived = 0)
+							AND EXISTS (SELECT 1 FROM bank_text_rules b WHERE b.cleaned_text = ? AND b.category_id = ?)`,
 					)
-					.bind(rule.categoryId, JSON.stringify(chunk), rule.categoryId),
+					.bind(
+						rule.categoryId,
+						JSON.stringify(chunk),
+						rule.categoryId,
+						cleanedText,
+						rule.categoryId,
+					),
 			);
 		}
 	}
-	await db.batch(statements);
+	return statements;
+}
+
+/**
+ * Applies the stored bank-text rules to the rows nothing has filled yet, after the merchant rules have run (so a merchant
+ * rule wins). A person's choice, a Jev guess, a split parent and a split's removed part are never a target, and nothing
+ * about bank text is logged.
+ */
+export async function applyBankTextRules(db: D1Database): Promise<void> {
+	const any = await db
+		.prepare("SELECT 1 AS one FROM bank_text_rules LIMIT 1")
+		.first<{ one: number }>();
+	if (!any) return;
+	const rules = await activeBankTextRules(db);
+	const statements = await bankTextRuleStatements(db, rules);
+	if (statements.length > 0) await db.batch(statements);
+}
+
+/**
+ * A Change (decision 163, review of #838): the rule is saved and applied in ONE batch, so a failed apply leaves no rule
+ * behind and the person is told nothing changed. The batch runs the merchant rules first, then the bank-text rule, as the
+ * sync and the sort step do, so a merchant rule still wins. The statements are read before the batch and reading writes
+ * nothing; each bank-text UPDATE is guarded on the rule as it stands when it runs.
+ */
+export async function changeBankTextRule(
+	db: D1Database,
+	cleanedText: string,
+	categoryId: number,
+): Promise<void> {
+	const others = (await activeBankTextRules(db)).filter(
+		(rule) => rule.cleanedText !== cleanedText,
+	);
+	const statements = await bankTextRuleStatements(db, [
+		...others,
+		{ cleanedText, categoryId },
+	]);
+	await db.batch([
+		upsertBankTextRule(db, cleanedText, categoryId),
+		merchantRuleStatement(db),
+		...statements,
+	]);
 }
