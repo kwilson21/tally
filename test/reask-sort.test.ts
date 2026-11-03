@@ -427,9 +427,10 @@ describe("a person's answer during the run wins", () => {
 		});
 		expect(await field(decided, "category_id")).toBe(groceries);
 		expect(await field(decided, "category_source")).toBe("user");
-		// The edited row's answer doesn't apply (its seen fields changed), so its Maybe mark comes back.
+		// The edited row's answer doesn't apply (its seen fields changed), and its mark stays cleared, so the sort the
+		// edit started can still ask Jev about the clarification (#831 round 2).
 		expect(await field(changed, "category_id")).toBeNull();
-		expect(await confOf(changed)).toBe(0.55);
+		expect(await confOf(changed)).toBeNull();
 	});
 });
 
@@ -757,22 +758,85 @@ describe("a re-ask writes only while its run is still running (#828)", () => {
 	});
 });
 
-describe("a re-ask writes only to the row it asked about (identity, #831)", () => {
-	/** Deletes the row and inserts a different one under the same id, as an INTEGER PRIMARY KEY reuse does. */
-	async function reuseId(
-		id: number,
-		fields: { plaid: string; amount: number },
-	) {
-		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(id).run();
-		await db
-			.prepare(
-				`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_transaction_id)
-				 VALUES (?, 1, ?, ?, 'REPLACEMENT ROW', ?)`,
-			)
-			.bind(id, TODAY, fields.amount, fields.plaid)
-			.run();
-	}
+/** Deletes the row and inserts a different one under the same id, as an INTEGER PRIMARY KEY reuse does. */
+async function reuseId(id: number, fields: { plaid: string; amount: number }) {
+	await db.prepare("DELETE FROM transactions WHERE id = ?").bind(id).run();
+	await db
+		.prepare(
+			`INSERT INTO transactions (id, account_id, date, amount_cents, raw_name, plaid_transaction_id)
+			 VALUES (?, 1, ?, ?, 'REPLACEMENT ROW', ?)`,
+		)
+		.bind(id, TODAY, fields.amount, fields.plaid)
+		.run();
+}
 
+describe("a failed re-ask stamps only the row it asked about (identity, #831 round 2)", () => {
+	it("a non-service-wide failure does not stamp a replacement row that reused the asked id", async () => {
+		const original = await addRow({ date: TODAY, confidence: 0.55 });
+		const control = await addRow({ date: "2026-09-21", confidence: 0.55 });
+		const runId = await startRun([original, control]);
+		const fetchImpl = vi.fn(async () => {
+			if (fetchImpl.mock.calls.length === 1) {
+				await reuseId(original, { plaid: "other-plaid", amount: 999 });
+			}
+			// 400 fails this one ask, not the service: it is marked, and the run goes on.
+			return new Response("{}", { status: 400 });
+		});
+		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: "reask-reused-failure",
+			reask: { runId, ids: [original, control] },
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		// The replacement is not stamped as failed.
+		expect(await field(original, "raw_name")).toBe("REPLACEMENT ROW");
+		expect(await field(original, "jev_failed_at")).toBeNull();
+		// The run's own row, still the same transaction, is stamped as it was asked.
+		expect(await field(control, "jev_failed_at")).not.toBeNull();
+	});
+});
+
+describe("a re-ask that a person edits mid-ask leaves its mark cleared (#831 round 2)", () => {
+	it("an edited candidate keeps its mark cleared, through the group and the finish; an unchanged unreached one is restored", async () => {
+		const edited = await addRow({ date: TODAY, confidence: 0.55 });
+		const unchangedA = await addRow({ date: "2026-09-21", confidence: 0.55 });
+		const unchangedB = await addRow({ date: "2026-09-20", confidence: 0.55 });
+		const runId = await startRun([edited, unchangedA, unchangedB]);
+		// Only the first row is granted today (39 of the demo's 40 calls are used), so the others are unreached.
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '39')")
+			.bind(`jev_calls_${await householdToday(db)}`)
+			.run();
+		const fetchImpl = vi.fn(async () => {
+			// A person edits the candidate's note while its ask is in flight.
+			await db
+				.prepare(
+					"UPDATE transactions SET note = 'edited by a person' WHERE id = ?",
+				)
+				.bind(edited)
+				.run();
+			return reply(0.9);
+		});
+		await sortGroups(withKey, fakeSteps().runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: "reask-edited",
+			reask: { runId, ids: [edited, unchangedA, unchangedB] },
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		// The edit's answer is not written, and its mark stays cleared, so the edit's own sort still asks Jev about it.
+		expect(await confOf(edited)).toBeNull();
+		expect(await field(edited, "category_id")).toBeNull();
+		// The rows nobody edited are unreached: their marks are back.
+		expect(await confOf(unchangedA)).toBe(0.55);
+		expect(await confOf(unchangedB)).toBe(0.55);
+		// The finish does not put the edited row's mark back over the edit.
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await confOf(edited)).toBeNull();
+		expect(await confOf(unchangedA)).toBe(0.55);
+	});
+});
+
+describe("a re-ask writes only to the row it asked about (identity, #831)", () => {
 	const cases: [string, number][] = [
 		["a different Plaid id and amount", 999],
 		["the same amount and a different Plaid id", 1234],

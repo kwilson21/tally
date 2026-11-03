@@ -2973,7 +2973,7 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 }
 
 /** A save's guard for `seen`: its values are bound in the order the guard takes them. */
-function seenSaveGuard(seen: JevSeen): {
+export function seenSaveGuard(seen: JevSeen): {
 	sql: string;
 	binds: (string | number | null)[];
 } {
@@ -2999,6 +2999,25 @@ export function markJevFailedStatement(
 		turnId,
 	);
 	return db.prepare(guarded.sql).bind(id, ...guarded.binds);
+}
+
+/**
+ * The failure mark of a re-ask's row: as markJevFailedStatement, but only on the transaction the run holds under this id,
+ * by its Plaid id and amount (#831), so a replacement that reused the id is never stamped.
+ */
+export function markReaskFailedStatement(
+	db: D1Database,
+	row: { id: number; plaidTransactionId: string | null; amountCents: number },
+	turnId: string,
+): D1PreparedStatement {
+	const guarded = withTurnGuard(
+		`UPDATE transactions SET jev_failed_at = datetime('now')
+		WHERE id = ? AND plaid_transaction_id IS ? AND amount_cents = ?`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(row.id, row.plaidTransactionId, row.amountCents, ...guarded.binds);
 }
 
 /**

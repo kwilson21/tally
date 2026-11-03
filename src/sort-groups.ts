@@ -28,6 +28,7 @@ import {
 	type ReaskMark,
 	readRun,
 	reaskClearStatement,
+	reaskKeepStatement,
 	reaskPicks,
 	reaskRestoreStatement,
 } from "./db/resort-run";
@@ -39,7 +40,9 @@ import {
 } from "./db/sorting-turn";
 import {
 	applyMerchantRules,
+	type JevSeen,
 	markJevFailedStatement,
+	markReaskFailedStatement,
 	merchantCategoryHistoryForJev,
 	pendingForJev,
 	saveJevDetailsStatement,
@@ -155,6 +158,11 @@ type ReaskPlan = {
 	cleared: ReaskMark[];
 	dropped: number[];
 	found: number;
+	/**
+	 * Each read row's seen fields, as its question was built: a row whose fields changed before its mark is put back is
+	 * left cleared (#831 round 2). A dropped row has none, so its mark is put back as before.
+	 */
+	seen: Record<number, JevSeen>;
 };
 
 /** What one group reads once, before its calls are reserved. Plain JSON, for the read step's result. */
@@ -419,6 +427,7 @@ async function readGroup(
 					.map((mark) => mark.id)
 					.filter((id) => !readIds.has(id)),
 				found: rows.length,
+				seen: Object.fromEntries(rows.map((row) => [row.id, row.seen])),
 			};
 		} else {
 			rows = await pendingForJev(db, options.limit, {
@@ -687,8 +696,24 @@ export async function writeGroup(
 			}
 		} else if (result.outcome === "failed") {
 			asked += 1;
-			if (!result.serviceWide)
-				statements.push(markJevFailedStatement(db, row.id, turn));
+			if (!result.serviceWide) {
+				if (reask) {
+					// A re-ask's failure is stamped only on the transaction the run holds under this id (#831 round 2).
+					const mark = markOf.get(row.id);
+					if (mark)
+						statements.push(
+							markReaskFailedStatement(
+								db,
+								{
+									id: row.id,
+									plaidTransactionId: mark.plaid,
+									amountCents: mark.amount,
+								},
+								turn,
+							),
+						);
+				} else statements.push(markJevFailedStatement(db, row.id, turn));
+			}
 		} else if (result.outcome === "lost") {
 			asked += 1;
 		}
@@ -721,8 +746,14 @@ export async function writeGroup(
 		// Every row the re-ask cleared gets its mark back unless its answer was saved above: a row not reached, one the
 		// cap or the budget cut, one whose ask failed, and one whose answer no longer applied (decision 160). A row that
 		// was answered has its confidence written, so its restore changes nothing.
-		for (const mark of reask.cleared)
-			statements.push(reaskRestoreStatement(db, mark, turn));
+		// A row a person edited while it was asked keeps its mark cleared (its seen fields no longer match), so the queued
+		// sort that the edit started can still ask Jev about it, and the finish leaves it alone (#831 round 2).
+		for (const mark of reask.cleared) {
+			const seen = reask.seen[mark.id];
+			statements.push(reaskRestoreStatement(db, mark, turn, seen));
+			if (seen)
+				statements.push(reaskKeepStatement(db, reask.runId, mark, seen, turn));
+		}
 		statements.push(
 			bumpDoneStatement(db, {
 				runId: reask.runId,

@@ -23,6 +23,7 @@ import {
 	type ResortSnapshot,
 } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
+import { type JevSeen, seenSaveGuard } from "./transactions";
 
 export const RUN_KEY = "resort_run";
 /** A run older than this is closed when the next run starts (decision 160), and an unclaimed record lasts as long. */
@@ -56,6 +57,8 @@ export type ResortRun = {
 	categoryByRow: Record<string, number>;
 	/** The instance keys that have finished (each counted once). The run finalizes when there are `instances` of them. */
 	finishedKeys: string[];
+	/** The ids a re-ask left cleared on purpose (their transaction was edited while asked): the finish leaves them alone. */
+	keptCleared?: number[];
 	startedAt: number;
 	/** True once the run's closing toast was claimed while this run was the current one. */
 	toasted: boolean;
@@ -394,13 +397,19 @@ export function reaskRestoreStatement(
 	db: D1Database,
 	mark: ReaskMark,
 	turnId: string,
+	/**
+	 * What the row read as when it was asked. Given, the mark comes back only while the row still reads so: a person's
+	 * edit during the ask leaves the mark cleared (see reaskKeepStatement). Not given, it comes back as before.
+	 */
+	seen?: JevSeen,
 ): D1PreparedStatement {
+	const guard = seen ? seenSaveGuard(seen) : undefined;
 	const guarded = withTurnGuard(
 		`UPDATE transactions SET category_confidence = ?, jev_mixed = ?, jev_also_category_id = ?,
 			updated_at = CASE WHEN category_confidence IS NOT ? OR jev_mixed IS NOT ? OR jev_also_category_id IS NOT ?
 				THEN datetime('now') ELSE updated_at END
 		WHERE id = ? AND ${SAME_MARK_ROW} AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
-			AND jev_mixed IS NULL AND jev_also_category_id IS NULL`,
+			AND jev_mixed IS NULL AND jev_also_category_id IS NULL${guard ? ` AND ${guard.sql}` : ""}`,
 		turnId,
 	);
 	return db
@@ -415,6 +424,45 @@ export function reaskRestoreStatement(
 			mark.id,
 			mark.plaid,
 			mark.amount,
+			...(guard?.binds ?? []),
+			...guarded.binds,
+		);
+}
+
+/**
+ * Records that a re-ask row was left cleared on purpose: its transaction was edited while it was asked (its seen fields
+ * no longer match), so its mark is not put back (reaskRestoreStatement). The run keeps the id in `keptCleared`, so the
+ * finish doesn't put the old mark back over the edit either (#831 round 2). Written only while the row is still cleared
+ * and still this transaction, the run is running, and the sorting turn is held.
+ */
+export function reaskKeepStatement(
+	db: D1Database,
+	runId: string,
+	mark: ReaskMark,
+	seen: JevSeen,
+	turnId: string,
+): D1PreparedStatement {
+	const guard = seenSaveGuard(seen);
+	const guarded = withTurnGuard(
+		`UPDATE household_settings SET value = json_set(value, '$.keptCleared',
+				json_insert(COALESCE(json_extract(value, '$.keptCleared'), json('[]')), '$[#]', ?))
+			WHERE key = ? AND json_extract(value, '$.id') = ? AND json_extract(value, '$.status') = 'running'
+				AND EXISTS (SELECT 1 FROM transactions WHERE id = ? AND ${SAME_MARK_ROW}
+					AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
+					AND jev_mixed IS NULL AND jev_also_category_id IS NULL
+					AND NOT ${guard.sql})`,
+		turnId,
+	);
+	return db
+		.prepare(guarded.sql)
+		.bind(
+			mark.id,
+			RUN_KEY,
+			runId,
+			mark.id,
+			mark.plaid,
+			mark.amount,
+			...guard.binds,
 			...guarded.binds,
 		);
 }
@@ -542,6 +590,8 @@ async function finalizeRun(
 			WHERE ${sameRunRow("transactions", SNAPSHOTS)}
 				AND category_id IS NULL AND category_source IS NULL AND category_confidence IS NULL
 				AND jev_mixed IS NULL AND jev_also_category_id IS NULL AND jev_failed_at IS NULL
+				AND NOT EXISTS (SELECT 1 FROM household_settings k, json_each(COALESCE(json_extract(k.value, '$.keptCleared'), '[]')) x
+					WHERE k.key = ?1 AND x.value = transactions.id)
 				AND ${won}`,
 		)
 		.bind(RUN_KEY, token);
