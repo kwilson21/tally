@@ -18,6 +18,7 @@ import {
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
 import { saveJevResult } from "../src/db/transactions";
 import { resetDemo } from "../src/demo/reset";
+import { buildClusters } from "../src/resort-clusters";
 import { sortGroups } from "../src/sort-groups";
 import { runSortInstance } from "../src/sort-instance";
 import type { SortParams } from "../src/sort-start";
@@ -37,6 +38,34 @@ const reply = (confidence: number, flags: { transfer?: number } = {}) =>
 			answers: {
 				category: { type: "choice", choice: "Eating Out", confidence },
 				transfer: { type: "noul", noul: flags.transfer ?? 0.01 },
+				reimbursement: { type: "noul", noul: 0.01 },
+				income: { type: "noul", noul: 0.01 },
+			},
+		}),
+		{ status: 200 },
+	);
+
+/** A Jev reply for a chosen category, with its confidence and an optional mixed reading (decision 90, #233). */
+const replyFor = (
+	choice: string,
+	confidence: number,
+	mixed?: { probability: number; also: string },
+) =>
+	new Response(
+		JSON.stringify({
+			answers: {
+				category: { type: "choice", choice, confidence },
+				...(mixed
+					? {
+							mixed: { type: "noul", noul: mixed.probability },
+							also_category: {
+								type: "choice",
+								choice: mixed.also,
+								confidence: 0.5,
+							},
+						}
+					: {}),
+				transfer: { type: "noul", noul: 0.01 },
 				reimbursement: { type: "noul", noul: 0.01 },
 				income: { type: "noul", noul: 0.01 },
 			},
@@ -75,6 +104,8 @@ function fakeJev(...responses: (() => Response | Promise<Response>)[]) {
 let seq = 0;
 type Seed = {
 	date?: string;
+	/** The bank's raw text; a row's default is unique, so it never groups with another. */
+	rawName?: string;
 	amount?: number;
 	confidence?: number | null;
 	categoryId?: number | null;
@@ -94,7 +125,7 @@ async function addRow(seed: Seed = {}): Promise<number> {
 		.bind(
 			seed.date ?? TODAY,
 			seed.amount ?? 1234,
-			`REASK ROW ${seq}`,
+			seed.rawName ?? `REASK ROW ${seq}`,
 			seed.confidence ?? null,
 			seed.categoryId ?? null,
 			seed.categorySource ?? null,
@@ -170,31 +201,46 @@ async function categoryIdByName(name: string): Promise<number> {
 	return Number(row?.id);
 }
 
-/** Starts the re-sort run over these rows (in this order) and returns its id. */
-async function startRun(ids: number[]): Promise<string> {
+/** The candidates the run holds for these rows, in this order: the identity and text each row has now. */
+async function candidatesOf(ids: number[]): Promise<ResortCandidate[]> {
 	const candidates: ResortCandidate[] = [];
 	for (const id of ids) {
 		// The identity the run stores is the one the row has now: its Plaid id and amount, read with its snapshot.
 		const row = await db
 			.prepare(
-				"SELECT date, amount_cents AS amount, plaid_transaction_id AS plaid FROM transactions WHERE id = ?",
+				"SELECT date, amount_cents AS amount, plaid_transaction_id AS plaid, raw_name AS rawName, note FROM transactions WHERE id = ?",
 			)
 			.bind(id)
-			.first<{ date: string; amount: number; plaid: string | null }>();
+			.first<{
+				date: string;
+				amount: number;
+				plaid: string | null;
+				rawName: string;
+				note: string | null;
+			}>();
 		candidates.push({
 			id,
 			date: row?.date ?? TODAY,
 			amountCents: row?.amount ?? 0,
 			plaidTransactionId: row?.plaid ?? null,
-			rawName: "",
+			rawName: row?.rawName ?? "",
 			merchantKey: "",
 			mixed: false,
-			whatItWasNote: null,
+			whatItWasNote: row?.note ?? null,
 			snapshot: await snapshotOf(id),
 		});
 	}
+	return candidates;
+}
+
+/** The clusters the start path would hand the re-ask for these rows (decision 158): each `[leader, ...followers]`. */
+const clustersOf = async (ids: number[]) =>
+	buildClusters(await candidatesOf(ids));
+
+/** Starts the re-sort run over these rows (in this order) and returns its id. */
+async function startRun(ids: number[]): Promise<string> {
 	const started = await startOrJoinRun(db, {
-		candidates,
+		candidates: await candidatesOf(ids),
 		categoryId: await categoryIdByName("Eating Out"),
 		categoryName: "Eating Out",
 		now: Date.now(),
@@ -987,5 +1033,286 @@ describe("the daily cap counts a re-ask like any sort", () => {
 		);
 		expect(afterNormal).toBe(3);
 		expect(await callsUsed()).toBe(6);
+	});
+});
+
+describe("a cluster's leader is asked once, and its followers take the answer (decision 158)", () => {
+	/** `count` waiting rows with the same bank text and amount: one cluster, in this order. */
+	const cluster = async (count: number, text = "SAME SHOP") => {
+		const ids: number[] = [];
+		for (let i = 0; i < count; i++)
+			ids.push(await addRow({ confidence: 0.55, rawName: text }));
+		return ids;
+	};
+
+	/** Starts the re-sort run over these rows and runs its groups with their clusters. */
+	async function reaskClusters(
+		ids: number[],
+		fetchImpl: (url?: string, init?: RequestInit) => Promise<Response>,
+		steps = fakeSteps(),
+	) {
+		const runId = await startRun(ids);
+		const done = await sortGroups(withKey, steps.runStep, fetchImpl, {
+			rulesApplied: true,
+			runId: `cluster-${runId}`,
+			reask: { runId, ids, clusters: await clustersOf(ids) },
+		});
+		return { runId, steps, done };
+	}
+
+	it("a cluster of 4 asks Jev once, for its leader, and each row takes the leader's category", async () => {
+		const ids = await cluster(4);
+		const eatingOut = await categoryIdByName("Eating Out");
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		const { steps, done } = await reaskClusters(ids, fetchImpl);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(steps.names().filter((name) => name.includes("-ask-"))).toEqual([
+			`group-1-ask-${ids[0]}`,
+		]);
+		expect(done.asked).toBe(1);
+		expect(await callsUsed()).toBe(1);
+		for (const id of ids) {
+			expect(await field(id, "category_id")).toBe(eatingOut);
+			expect(await field(id, "category_source")).toBe("jev");
+			expect(await confOf(id)).toBe(0.9);
+		}
+	});
+
+	it("the moved record lists every follower the leader's answer filed, so Undo covers them", async () => {
+		const ids = await cluster(4);
+		const { runId } = await reaskClusters(
+			ids,
+			vi.fn(async () => replyFor("Eating Out", 0.9)),
+		);
+		await finishRun(db, { runId, now: Date.now() });
+		const record = JSON.parse((await movedRow(runId))?.value ?? "{}") as {
+			rows: { id: number }[];
+		};
+		expect(record.rows.map((row) => row.id).sort((a, b) => a - b)).toEqual(
+			[...ids].sort((a, b) => a - b),
+		);
+	});
+
+	const unsure: [string, () => Response][] = [
+		["a leader below 0.80", () => replyFor("Eating Out", 0.6)],
+		[
+			"a leader with a mixed trip",
+			() =>
+				replyFor("Eating Out", 0.9, { probability: 0.9, also: "Groceries" }),
+		],
+		["a leader that fits none", () => replyFor("None of these fit", 0.9)],
+	];
+	for (const [label, respond] of unsure) {
+		it(`${label}: no follower is applied or asked, and each gets its mark back`, async () => {
+			const ids = await cluster(4);
+			const fetchImpl = vi.fn(async () => respond());
+			const { steps } = await reaskClusters(ids, fetchImpl);
+			expect(fetchImpl).toHaveBeenCalledTimes(1);
+			expect(steps.names().filter((name) => name.includes("-ask-"))).toEqual([
+				`group-1-ask-${ids[0]}`,
+			]);
+			for (const id of ids.slice(1)) {
+				expect(await field(id, "category_id")).toBeNull();
+				expect(await field(id, "category_source")).toBeNull();
+				expect(await confOf(id)).toBe(0.55);
+			}
+		});
+	}
+
+	it("a leader whose ask fails (400) is marked failed, its followers get their marks back, and none is asked", async () => {
+		const ids = await cluster(3);
+		const jev = fakeJev(() => new Response("{}", { status: 400 }));
+		const { runId } = await reaskClusters(ids, jev.fetchImpl);
+		expect(jev.calls()).toBe(1);
+		expect(await field(ids[0] as number, "jev_failed_at")).not.toBeNull();
+		for (const id of ids) expect(await confOf(id)).toBe(0.55);
+		for (const id of ids.slice(1))
+			expect(await field(id, "jev_failed_at")).toBeNull();
+		await finishRun(db, { runId, now: Date.now() });
+		for (const id of ids) expect(await confOf(id)).toBe(0.55);
+	});
+
+	it("a service-wide failure (503) on the leader restores its followers, and the run finishes", async () => {
+		const ids = await cluster(3);
+		const jev = fakeJev(() => new Response("{}", { status: 503 }));
+		const { runId } = await reaskClusters(ids, jev.fetchImpl);
+		expect(jev.calls()).toBe(1);
+		for (const id of ids) expect(await confOf(id)).toBe(0.55);
+		await finishRun(db, { runId, now: Date.now() });
+		expect((await readRun(db))?.status).toBe("done");
+	});
+
+	it("reserves a call per leader, never per follower: three clusters of 4 use three calls", async () => {
+		const ids = [
+			...(await cluster(4, "SHOP A")),
+			...(await cluster(4, "SHOP B")),
+			...(await cluster(4, "SHOP C")),
+		];
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		await reaskClusters(ids, fetchImpl);
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+		expect(await callsUsed()).toBe(3);
+	});
+
+	it("at the daily cap, three clusters of 4 still get their three leaders asked (followers take no call)", async () => {
+		const ids = [
+			...(await cluster(4, "SHOP A")),
+			...(await cluster(4, "SHOP B")),
+			...(await cluster(4, "SHOP C")),
+		];
+		// 37 of the demo's 40 calls are used, so exactly three leaders fit.
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '37')")
+			.bind(`jev_calls_${await householdToday(db)}`)
+			.run();
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		await reaskClusters(ids, fetchImpl);
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+		expect(await callsUsed()).toBe(40);
+		for (const id of ids) expect(await confOf(id)).toBe(0.9);
+	});
+
+	it("a follower a person categorised meanwhile is not written; the others take the answer", async () => {
+		const ids = await cluster(4);
+		const groceries = await categoryIdByName("Groceries");
+		const fetchImpl = vi.fn(async () => {
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+				)
+				.bind(groceries, ids[1])
+				.run();
+			return replyFor("Eating Out", 0.9);
+		});
+		await reaskClusters(ids, fetchImpl);
+		expect(await field(ids[1] as number, "category_id")).toBe(groceries);
+		expect(await field(ids[1] as number, "category_source")).toBe("user");
+		for (const id of [ids[0], ids[2], ids[3]] as number[]) {
+			expect(await field(id, "category_source")).toBe("jev");
+		}
+	});
+
+	it("a follower whose note changed meanwhile is not written and keeps its cleared mark", async () => {
+		const ids = await cluster(4);
+		const fetchImpl = vi.fn(async () => {
+			await db
+				.prepare("UPDATE transactions SET note = 'edited' WHERE id = ?")
+				.bind(ids[2])
+				.run();
+			return replyFor("Eating Out", 0.9);
+		});
+		const { runId } = await reaskClusters(ids, fetchImpl);
+		expect(await field(ids[2] as number, "category_id")).toBeNull();
+		expect(await confOf(ids[2] as number)).toBeNull();
+		expect((await readRun(db))?.keptCleared).toContain(ids[2]);
+		expect(await field(ids[1] as number, "category_source")).toBe("jev");
+		await finishRun(db, { runId, now: Date.now() });
+		expect(await confOf(ids[2] as number)).toBeNull();
+	});
+
+	it("a follower whose id was reused by another transaction is not written", async () => {
+		const ids = await cluster(4);
+		const fetchImpl = vi.fn(async () => {
+			await reuseId(ids[3] as number, { plaid: "other-plaid", amount: 999 });
+			return replyFor("Eating Out", 0.9);
+		});
+		await reaskClusters(ids, fetchImpl);
+		expect(await field(ids[3] as number, "raw_name")).toBe("REPLACEMENT ROW");
+		expect(await field(ids[3] as number, "category_id")).toBeNull();
+		expect(await field(ids[3] as number, "category_source")).toBeNull();
+		expect(await confOf(ids[3] as number)).toBeNull();
+		expect(await field(ids[1] as number, "category_source")).toBe("jev");
+	});
+
+	it("30 rows with the same text make two clusters (25 and 5), and two leaders are asked", async () => {
+		const ids = await cluster(30);
+		expect((await clustersOf(ids)).map((c) => c.length)).toEqual([25, 5]);
+		const fake = fakeSteps();
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		const { done } = await reaskClusters(ids, fetchImpl, fake);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		expect(fake.names().filter((name) => name.includes("-ask-"))).toEqual([
+			`group-1-ask-${ids[0]}`,
+			`group-1-ask-${ids[25]}`,
+		]);
+		expect(done.asked).toBe(2);
+		expect(await callsUsed()).toBe(2);
+		for (const id of ids) expect(await confOf(id)).toBe(0.9);
+	});
+
+	it("progress counts the leader and its followers once each, never past the total", async () => {
+		const first = await cluster(4, "SHOP A");
+		const second = await cluster(4, "SHOP B");
+		const ids = [...first, ...second];
+		// 39 of 40 calls are used: one leader fits, so the second cluster is not asked.
+		await db
+			.prepare("INSERT INTO household_settings (key, value) VALUES (?, '39')")
+			.bind(`jev_calls_${await householdToday(db)}`)
+			.run();
+		const { runId } = await reaskClusters(
+			ids,
+			vi.fn(async () => replyFor("Eating Out", 0.9)),
+		);
+		const run = await readRun(db);
+		expect(run?.done).toBe(4);
+		expect(run?.done).toBeLessThanOrEqual(run?.total ?? 0);
+		// The second cluster's leader was never asked, so its followers were restored, not counted.
+		for (const id of second) expect(await confOf(id)).toBe(0.55);
+		await finishRun(db, { runId, now: Date.now() });
+		expect((await readRun(db))?.done).toBeLessThanOrEqual(8);
+		for (const id of second) expect(await confOf(id)).toBe(0.55);
+	});
+
+	it("finish restores the followers of a leader a cut-off instance left cleared", async () => {
+		const ids = await cluster(3);
+		const runId = await startRun(ids);
+		expect(await takeSortingTurn(db, "cut-off:cluster")).toBe(true);
+		const marks = [];
+		for (const id of ids) marks.push(await markAt(id, 0.55));
+		await db.batch([reaskClearStatement(db, marks, "cut-off:cluster")]);
+		await releaseSortingTurn(db, "cut-off:cluster");
+		await finishRun(db, { runId, now: Date.now() });
+		for (const id of ids) expect(await confOf(id)).toBe(0.55);
+	});
+
+	it("a candidate with no same-text partner is its own leader and is asked as before (#820)", async () => {
+		const alone = await addRow({ confidence: 0.55, rawName: "ONLY ONCE SHOP" });
+		expect(await clustersOf([alone])).toEqual([[alone]]);
+		const eatingOut = await categoryIdByName("Eating Out");
+		const fetchImpl = vi.fn(async () => replyFor("Eating Out", 0.9));
+		await reaskClusters([alone], fetchImpl);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(await field(alone, "category_id")).toBe(eatingOut);
+		expect(await confOf(alone)).toBe(0.9);
+	});
+
+	it("a follower's save writes only the category columns, never a flag, exclusion, income or details", async () => {
+		const ids = await cluster(2);
+		await saveAiSwitches(db, { details: true });
+		const follower = ids[1] as number;
+		const touched = [
+			"category_id",
+			"category_source",
+			"category_confidence",
+			"jev_category_id",
+			"jev_none_fit",
+			"jev_mixed",
+			"jev_also_category_id",
+			"updated_at",
+		];
+		const before = (await rowState(follower)) ?? {};
+		await reaskClusters(
+			ids,
+			vi.fn(async () => reply(0.9, { transfer: 0.99 })),
+		);
+		const after = (await rowState(follower)) ?? {};
+		for (const key of Object.keys(before)) {
+			if (touched.includes(key) || key === "c") continue;
+			expect(after[key], key).toEqual(before[key]);
+		}
+		expect(await field(follower, "category_source")).toBe("jev");
+		expect(await field(follower, "category_id")).toBe(
+			await categoryIdByName("Eating Out"),
+		);
 	});
 });
