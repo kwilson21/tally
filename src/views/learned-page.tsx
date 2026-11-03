@@ -50,12 +50,15 @@ export function LearnedPage({
 							<li class="flex min-h-16 items-center gap-4 rounded-control border border-rule bg-paper px-4 py-2">
 								<CategoryIcon icon={line.icon} color={line.color} />
 								<span class="min-w-0 flex-1">
-									<span class="block text-lg leading-6">{title}</span>
+									<span class="block text-lg leading-6 wrap-anywhere">
+										{title}
+									</span>
 									<span class="block leading-6 text-muted">
 										{`From ${line.answers} of your answers`}
 									</span>
 								</span>
 								<form
+									class="shrink-0"
 									method="post"
 									action="/settings/learned/forget"
 									hx-post="/settings/learned/forget"

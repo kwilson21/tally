@@ -11,6 +11,8 @@ import { INCLUDED } from "./counted-month";
 export const LEARNED_WINDOW = 5;
 /** How long an Undo of a Forget works, on the server clock as on the toast (decision 162). */
 export const FORGET_UNDO_SECONDS = 10;
+/** Less than this much Undo left is no Undo at all: the toast says the Forget and offers nothing to press. */
+export const FORGET_UNDO_MIN_MS = 1000;
 
 /** One confirmed answer: a transaction a person (or a merchant rule) filed in a category. */
 export type AnswerRow = {
@@ -173,6 +175,23 @@ export async function forgetText(
 		.bind(cleanedText)
 		.first<{ id: number }>();
 	return row?.id ?? 0;
+}
+
+/**
+ * The Undo's time left for a Forget row, in milliseconds, counted by the database's clock from the row's stored time
+ * (the same basis undoForget checks). 0 when it has run out or the row is gone.
+ */
+export async function undoRemainingMs(
+	db: D1Database,
+	id: number,
+): Promise<number> {
+	const row = await db
+		.prepare(
+			"SELECT CAST(MAX(0, MIN(?, (julianday(forgotten_at) + ? / 86400.0 - julianday('now')) * 86400000)) AS INTEGER) AS ms FROM forgotten_texts WHERE id = ?",
+		)
+		.bind(FORGET_UNDO_SECONDS * 1000, FORGET_UNDO_SECONDS, id)
+		.first<{ ms: number }>();
+	return row?.ms ?? 0;
 }
 
 /**

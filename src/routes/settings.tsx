@@ -27,10 +27,11 @@ import {
 import { waitsForRunStatement } from "../db/first-tally";
 import {
 	displayName,
-	FORGET_UNDO_SECONDS,
+	FORGET_UNDO_MIN_MS,
 	forgetText,
 	loadLearnedLines,
 	undoForget,
+	undoRemainingMs,
 } from "../db/learned-lines";
 import { merchantRules, removeMerchantRule } from "../db/merchant-rules";
 import {
@@ -940,13 +941,15 @@ settings.post("/settings/learned/forget", async (c) => {
 	const message = `Forgot ${name}. Tally goes back to guessing.`;
 	const id = line ? await forgetText(c.env.DB, text) : 0;
 	if (!c.req.header("HX-Request")) return c.redirect("/settings/learned", 303);
+	// The Undo's time is what the server has left from the Forget's stored time, so the button never outlives the window.
+	const left = id > 0 ? await undoRemainingMs(c.env.DB, id) : 0;
 	const toast =
-		id > 0
+		left >= FORGET_UNDO_MIN_MS
 			? {
 					message,
 					type: "success",
 					undo: String(id),
-					undoExpiresInMs: FORGET_UNDO_SECONDS * 1000,
+					undoExpiresInMs: left,
 					undoAction: "/settings/learned/undo",
 				}
 			: { message, type: "success" };

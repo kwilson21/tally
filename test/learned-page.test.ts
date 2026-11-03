@@ -181,7 +181,8 @@ describe("POST /settings/learned/forget", () => {
 		expect(t.toast?.message).toBe(
 			"Forgot Netflix.com → Entertainment. Tally goes back to guessing.",
 		);
-		expect(t.toast?.undoExpiresInMs).toBe(10000);
+		expect(t.toast?.undoExpiresInMs).toBeGreaterThanOrEqual(9000);
+		expect(t.toast?.undoExpiresInMs).toBeLessThanOrEqual(10000);
 		expect(t.toast?.undoAction).toBe("/settings/learned/undo");
 		expect(t.toast?.undo).toMatch(/^\d+$/);
 		expect(t.announce).toBe(t.toast?.message);

@@ -7389,7 +7389,7 @@ function SettingsGroup() {
 				components={["LearnedPage", "EmptyState", "Button"]}
 				sentence="Settings' page of what Tally learned from answers (decision 162): an intro, then one bordered line for each text and the category a person chose, with its count and a quiet Forget. Forget undoes within ten seconds. Empty, it says Nothing yet."
 			>
-				<State label="Three lines">
+				<State label="Four lines, one with a long unbroken name">
 					<div inert>
 						<LearnedPage
 							id="catalog-learned-lines"
@@ -7423,6 +7423,16 @@ function SettingsGroup() {
 									icon: "entertainment",
 									color: "cat-blue",
 									answers: 1,
+									vague: false,
+								},
+								{
+									cleanedText: "supercalifragilisticexpialidociousmerchantname",
+									name: "Supercalifragilisticexpialidociousmerchantname",
+									categoryId: 11,
+									categoryName: "Entertainment",
+									icon: "entertainment",
+									color: "cat-blue",
+									answers: 4,
 									vague: false,
 								},
 							]}
