@@ -459,19 +459,128 @@ describe("suggestedCategoryName keeps one answer per transaction (decision 161)"
 		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
 	});
 
-	it("two concurrent first requests store one answer and both return it", async () => {
+	it("ten parallel first requests make exactly one AI call and store one row", async () => {
 		const item = await itemFor();
-		let calls = 0;
-		const run = vi.fn(async () =>
-			calls++ === 0 ? "Books & audio" : "Hobby supplies",
-		);
+		// The call takes a moment, so every request is in flight before the first one finishes.
+		const run = vi.fn(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return "Books & audio";
+		});
 		const ai = { run } as unknown as Ai;
-		const [a, b] = await Promise.all([
-			suggestedCategoryName(db, ai, item),
-			suggestedCategoryName(db, ai, item),
+		const answers = await Promise.all(
+			Array.from({ length: 10 }, () => suggestedCategoryName(db, ai, item)),
+		);
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRows(item.transactionId)).toEqual([
+			{ name: "Books & audio" },
 		]);
-		expect(a).toBe(b);
-		expect(await keptRows(item.transactionId)).toEqual([{ name: a }]);
+		// The winner has the name; a request that lost the claim shows no name on that draw.
+		expect(answers).toContain("Books & audio");
+		expect(answers.every((a) => a === null || a === "Books & audio")).toBe(
+			true,
+		);
+	});
+
+	it("a request that loses the claim returns no name and makes no AI call while the winner waits", async () => {
+		const item = await itemFor();
+		// The winner has claimed the transaction and is still asking Workers AI: its row is there, with no name yet.
+		await db
+			.prepare(
+				"INSERT INTO maybe_names (transaction_id, name) VALUES (?, NULL)",
+			)
+			.bind(item.transactionId)
+			.run();
+		const loser = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, loser.ai, item)).toBeNull();
+		expect(loser.run).not.toHaveBeenCalled();
+	});
+
+	it("after the winner finishes, a later draw returns its name with no call", async () => {
+		const item = await itemFor();
+		const winner = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, winner.ai, item)).toBe(
+			"Books & audio",
+		);
+		const later = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, later.ai, item)).toBe(
+			"Books & audio",
+		);
+		expect(later.run).not.toHaveBeenCalled();
+	});
+
+	it("a failed AI answer stays 'no name' and is never re-asked after the claim", async () => {
+		const item = await itemFor();
+		const run = vi.fn(async () => {
+			throw new Error("timeout");
+		});
+		const ai = { run } as unknown as Ai;
+		const answers = await Promise.all(
+			Array.from({ length: 5 }, () => suggestedCategoryName(db, ai, item)),
+		);
+		expect(answers.every((a) => a === null)).toBe(true);
+		expect(await suggestedCategoryName(db, ai, item)).toBeNull();
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRows(item.transactionId)).toEqual([{ name: null }]);
+	});
+
+	it("the stops before the claim make no claim: no row is inserted", async () => {
+		// The switch is off: no claim, no call.
+		const offItem = await itemFor("SWITCH OFF STORE");
+		await saveAiSwitches(db, { categories: false });
+		const off = aiReturning("Books & audio");
+		await suggestedCategoryName(db, off.ai, offItem);
+		expect(off.run).not.toHaveBeenCalled();
+		await saveAiSwitches(db, { categories: true });
+
+		// A pending suggestion for the store answers it: no claim, no call.
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('Books & audio', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		const pendingTx = await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES (?, (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-01', 1499, ?, ?)
+				RETURNING id`,
+			)
+			.bind(`plaid-${crypto.randomUUID()}`, merchantKey, suggestion?.id ?? null)
+			.first<{ id: number }>();
+		const pending = aiReturning("Hobby supplies");
+		const pendingItem = {
+			transactionId: pendingTx?.id ?? 0,
+			merchantKey,
+			merchant: "Audible",
+		};
+		expect(await suggestedCategoryName(db, pending.ai, pendingItem)).toBe(
+			"Books & audio",
+		);
+		expect(pending.run).not.toHaveBeenCalled();
+
+		// A Never suggest for a new category stops it: no claim, no call.
+		const neverItem = await itemFor();
+		await db
+			.prepare(
+				"INSERT INTO never_suggest_rules (merchant_key, kind, decided_on) VALUES (?, 'new_category', '2026-10-01')",
+			)
+			.bind(merchantKey)
+			.run();
+		const never = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, never.ai, neverItem)).toBeNull();
+		expect(never.run).not.toHaveBeenCalled();
+
+		expect(
+			await db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM maybe_names WHERE transaction_id IN (?, ?, ?)",
+				)
+				.bind(
+					offItem.transactionId,
+					pendingItem.transactionId,
+					neverItem.transactionId,
+				)
+				.first<{ n: number }>(),
+		).toMatchObject({ n: 0 });
 	});
 
 	it("deleting the transaction removes its kept name (ON DELETE CASCADE)", async () => {

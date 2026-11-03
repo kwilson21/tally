@@ -160,7 +160,7 @@ function requestedReview(
 /**
  * The address that answers with a category guess's suggested new category (decision 156). It names the item only, never a
  * store's text (a bank's text can carry a card or account number, and a URL is logged), and never the screen's skips:
- * the address is the same wherever the card is reached, so the browser's one-day cache holds. The row's answer finds
+ * the address is the same wherever the card is reached, and the kept answer in maybe_names holds (decision 161). The row's answer finds
  * the skips from the page it was answered on (HX-Current-URL), see the POST below.
  */
 function newCategoryAddress(id: string): string {

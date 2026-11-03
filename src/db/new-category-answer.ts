@@ -110,33 +110,44 @@ export async function suggestedCategoryName(
 	if (pending) return pending;
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
 	// Asked once for each transaction (decision 161): a kept answer, a name or "no name", is read and never asked again.
-	const kept = await db
-		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
-		.bind(item.transactionId)
-		.first<{ name: string | null }>();
+	const kept = await keptRow(db, item.transactionId);
 	if (kept) return kept.name;
+	// Claim first: the insert wins the transaction only once, so only the winner asks Workers AI. A request that loses
+	// the claim reads what is stored: no name while the winner is still waiting, its name once it is kept.
+	const claim = await db
+		.prepare(
+			`INSERT INTO maybe_names (transaction_id, name)
+			SELECT id, NULL FROM transactions WHERE id = ?
+			ON CONFLICT(transaction_id) DO NOTHING`,
+		)
+		.bind(item.transactionId)
+		.run();
+	if ((claim.meta.changes ?? 0) === 0)
+		return (await keptRow(db, item.transactionId))?.name ?? null;
 	// The store's name only: a person's own name or note for this purchase is typed text and never leaves the app.
 	const result = await suggestCategoryName(
 		ai,
 		[item.merchant],
 		await namesToAvoid(db),
 	);
+	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
-	// Kept whatever came back, so a failed call or an unusable answer is not asked again either. A concurrent first
-	// request that lost the insert keeps the first answer, and both return what is stored now.
 	await db
-		.prepare(
-			`INSERT INTO maybe_names (transaction_id, name)
-			SELECT id, ? FROM transactions WHERE id = ?
-			ON CONFLICT(transaction_id) DO NOTHING`,
-		)
+		.prepare("UPDATE maybe_names SET name = ? WHERE transaction_id = ?")
 		.bind(name, item.transactionId)
 		.run();
-	const stored = await db
+	return name;
+}
+
+/** The kept row for a transaction, or null when it was never claimed. Its name is null for "no name" or while waiting. */
+async function keptRow(
+	db: D1Database,
+	transactionId: number,
+): Promise<{ name: string | null } | null> {
+	return db
 		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
-		.bind(item.transactionId)
+		.bind(transactionId)
 		.first<{ name: string | null }>();
-	return stored?.name ?? null;
 }
 
 export type FileResult =
