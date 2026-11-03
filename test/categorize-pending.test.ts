@@ -794,6 +794,30 @@ describe("categorizePending", () => {
 			).toBe(true);
 		});
 
+		it("sends no line for a text named like an inherited object key, when it has no line", async () => {
+			const { sent, calls } = await askRows([
+				"constructor",
+				"__proto__",
+				"tostring",
+				"hasownproperty",
+			]);
+			expect(calls).toBe(4);
+			for (const request of sent)
+				expect(request.state).not.toHaveProperty("learned_category");
+		});
+
+		it("sends a real line named like an inherited object key, and none for the others", async () => {
+			for (const day of [1, 2]) await answer("constructor", "Eating Out", day);
+			const { sent } = await askRows(["constructor", "tostring"]);
+			expect(sentFor(sent, "constructor")?.state.learned_category).toEqual({
+				category: "Eating Out",
+				from_answers: 2,
+			});
+			expect(sentFor(sent, "tostring")?.state).not.toHaveProperty(
+				"learned_category",
+			);
+		});
+
 		it("gives the line to every raw name that cleans to its text", async () => {
 			for (const day of [1, 2])
 				await answer("AUDIBLE*QQ11W2 WA 05/26", "Eating Out", day);

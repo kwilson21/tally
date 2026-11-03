@@ -189,10 +189,11 @@ type ReadPlan = {
 	/** Every waiting row the read found, at most GROUP_SIZE. */
 	rows: SortRow[];
 	/**
-	 * The group's learned lines (decisions 156 and 162), keyed by cleaned bank text: only texts a row of this group has, and
-	 * only lines that are not vague. Absent in a plan a deploy read before learned lines, so no line is sent for it.
+	 * The group's learned lines (decisions 156 and 162) as [cleaned bank text, line] pairs: only texts a row of this group
+	 * has, and only lines that are not vague. Pairs, not an object, so a text named like an inherited key (`constructor`)
+	 * finds only its own line. Absent in a plan a deploy read before learned lines, so no line is sent for it.
 	 */
-	learned?: Record<string, { category: string; answers: number }>;
+	learned?: LearnedPair[];
 	/** Set for a re-ask group: every row of it is a re-ask row. */
 	reask?: ReaskPlan;
 };
@@ -402,23 +403,34 @@ function stillInCluster(
 	return followerIds.filter((id) => cluster.includes(id));
 }
 
+/** A learned line as a group's plan keeps it: the cleaned bank text it is for, and its category and count. */
+type LearnedPair = [string, { category: string; answers: number }];
+
 /**
- * The learned lines Jev may be told for these rows (decisions 156 and 162), by cleaned bank text: one load, then the
- * lines of the rows' own texts that are not vague (a vague text's line is never sent).
+ * The learned lines Jev may be told for these rows (decisions 156 and 162), as pairs: one load, then the lines of the
+ * rows' own texts that are not vague (a vague text's line is never sent).
  */
 async function learnedLinesFor(
 	db: D1Database,
 	rows: SortRow[],
-): Promise<Record<string, { category: string; answers: number }>> {
+): Promise<LearnedPair[]> {
 	const texts = new Set(rows.map((row) => cleanBankText(row.rawName)));
-	return Object.fromEntries(
-		(await loadLearnedLines(db))
-			.filter((line) => texts.has(line.cleanedText) && !line.vague)
-			.map((line) => [
+	return (await loadLearnedLines(db))
+		.filter((line) => texts.has(line.cleanedText) && !line.vague)
+		.map(
+			(line): LearnedPair => [
 				line.cleanedText,
 				{ category: line.categoryName, answers: line.answers },
-			]),
-	);
+			],
+		);
+}
+
+/** The group's line for a cleaned text. A Map, so only the text's own pair matches, never an inherited key. */
+function learnedFor(
+	pairs: LearnedPair[] | undefined,
+	cleanedText: string,
+): { category: string; answers: number } | undefined {
+	return new Map(pairs ?? []).get(cleanedText);
 }
 
 /**
@@ -578,7 +590,7 @@ async function readGroup(
 		}
 		// Loaded once for the group, not per row: a line is context for the one text it is about, and a line that
 		// changes before the save still applies its answer (a line is not part of JevSeen).
-		const learned = switches.categories ? await learnedLinesFor(db, rows) : {};
+		const learned = switches.categories ? await learnedLinesFor(db, rows) : [];
 		return {
 			kind: "group",
 			plan: {
@@ -662,7 +674,7 @@ async function askOne(
 		const detailRequested =
 			plan.switches.details && !row.detailsAsked && !plan.reask;
 		const learned = plan.switches.categories
-			? plan.learned?.[cleanBankText(row.rawName)]
+			? learnedFor(plan.learned, cleanBankText(row.rawName))
 			: undefined;
 		const result = await askJev(
 			{ ...row, learnedCategory: learned },
