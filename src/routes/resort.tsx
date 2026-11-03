@@ -34,12 +34,22 @@ type App = { Bindings: Env };
 export const resort = new Hono<App>();
 
 /** The pages a Create can land on, by their path: each one draws its own page again for the Undo answer. */
-const AGAIN: Record<string, (c: Context<App>) => Response | Promise<Response>> =
-	{
-		"/settings/suggestions": suggestionsAgain,
-		"/transactions/organize": organizeAgain,
-		"/settings/categories": categoriesAgain,
-	};
+const AGAIN: Record<
+	string,
+	(c: Context<App>, back: URL) => Response | Promise<Response>
+> = {
+	"/settings/suggestions": suggestionsAgain,
+	"/transactions/organize": organizeAgain,
+	"/settings/categories": categoriesAgain,
+};
+
+/** A back address that stays on this site: one path that starts with a single slash, with no backslash (#842 review). */
+const SITE_BASE = "http://tally.invalid";
+function siteBack(back: string): URL | null {
+	if (!back.startsWith("/") || back.startsWith("//") || back.includes("\\"))
+		return null;
+	return new URL(back, SITE_BASE);
+}
 
 resort.get("/resort/progress", async (c) => {
 	c.header("Cache-Control", "no-store");
@@ -102,15 +112,20 @@ resort.get("/resort/progress", async (c) => {
 resort.post("/resort/undo", async (c) => {
 	const form = await c.req.formData();
 	const runId = String(form.get("token") ?? "");
-	const back = String(form.get("back") ?? "");
-	const path = back.split("?")[0] ?? "";
+	// The page to draw, from its own address: only a known page on this site (#842 review), else the Suggestions page.
+	const target = siteBack(String(form.get("back") ?? ""));
+	const known = target !== null && Object.hasOwn(AGAIN, target.pathname);
 	const outcome = runId
 		? await undoRun(c.env.DB, { runId, now: Date.now() })
 		: { expired: true, restored: 0, changedSince: 0 };
 	const { message, type } = undoWords(outcome);
 	if (!c.req.header("HX-Request")) {
-		const known = AGAIN[path] ? back : "/settings/suggestions";
-		return c.redirect(known, 303);
+		return c.redirect(
+			known && target
+				? target.pathname + target.search
+				: "/settings/suggestions",
+			303,
+		);
 	}
 	c.header(
 		"HX-Trigger",
@@ -119,6 +134,7 @@ resort.post("/resort/undo", async (c) => {
 			announce: message,
 		}),
 	);
-	const again = AGAIN[path] ?? suggestionsAgain;
-	return again(c);
+	const page =
+		known && target ? target : new URL("/settings/suggestions", SITE_BASE);
+	return (AGAIN[page.pathname] ?? suggestionsAgain)(c, page);
 });

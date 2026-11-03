@@ -1,6 +1,5 @@
 import { type Context, Hono } from "hono";
 import { actor } from "../actor";
-import { addressOf } from "../address";
 import { askAgainLeftOut, leftOutSentence } from "../categorize-pending";
 import { categoryNames, makeCategory, unmakeCategory } from "../db/categories";
 import { createFromSuggestion } from "../db/category-suggestions";
@@ -72,8 +71,17 @@ function otherMerchants(
 }
 
 /** Organize again, for an Undo answer of the re-check (decision 160): the page the toast was shown on. */
-export function organizeAgain(c: Context<App>) {
-	return renderOrganize(c, undefined, 200, false);
+export function organizeAgain(c: Context<App>, back: URL) {
+	return renderOrganize(
+		c,
+		undefined,
+		200,
+		false,
+		undefined,
+		undefined,
+		undefined,
+		back,
+	);
 }
 
 async function renderOrganize(
@@ -93,8 +101,11 @@ async function renderOrganize(
 	 * sit in its card when that card is drawn, and under Organize's heading when it isn't.
 	 */
 	cardError?: { suggestionId: number; message: string },
+	/** The address the page is drawn for, when it is not this request's (an Undo answer's back address). */
+	at?: URL,
 ) {
-	const params = new URL(c.req.url).searchParams;
+	const address = at ?? new URL(c.req.url);
+	const params = address.searchParams;
 	const requestedSkips = params.getAll("skip");
 	const [allGroups, categories] = await Promise.all([
 		organizeGroups(c.env.DB),
@@ -157,7 +168,7 @@ async function renderOrganize(
 			title="Organize · Tally"
 			active="transactions"
 			demo={c.env.DEMO === "true"}
-			currentPath={addressOf(c)}
+			currentPath={address.pathname + address.search}
 		>
 			<div id="organize-page" class="lg:max-w-3xl">
 				<h1 class="font-serif text-5xl font-semibold tracking-tight">

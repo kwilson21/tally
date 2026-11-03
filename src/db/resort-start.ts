@@ -6,6 +6,9 @@
 //
 // Nothing starts without the Jev key and the categories switch (the demo has neither, so nothing shows there). A
 // "N more look like this" Add is not a trigger: it moves rows the person chose, with no AI.
+//
+// The re-check is an extra: the Create has already filed its category when this runs, so no failure here fails the
+// Create (#842 review). Every error is logged by its name only, and the answer is null, as for "nothing to show".
 
 import { buildClusters } from "../resort-clusters";
 import { startSorting } from "../sort-start";
@@ -49,12 +52,51 @@ export async function runningRecheck(
 	return { id: run.id, done: run.done, total: run.total };
 }
 
+/** A error's name for the log: never its message, which could carry row text. */
+const errorName = (error: unknown): string =>
+	error instanceof Error ? error.name : "unknown";
+
+/**
+ * Ends a run that this call wrote but whose instance never started, so the line never sticks. Best effort: a failure is
+ * logged by its name, and the run is then left to the next run, which closes a stale one (decision 160).
+ */
+async function endUnstarted(db: D1Database, runId: string): Promise<void> {
+	try {
+		await finishRun(db, {
+			runId,
+			now: Date.now(),
+			instanceKey: crypto.randomUUID(),
+		});
+	} catch (error) {
+		console.error(`resort: couldn't end its run ${errorName(error)}`);
+	}
+}
+
+/**
+ * The run this call wrote and whose start is still owed, if the call failed before its instance started. A
+ * startOrJoinRun that throws after writing a new run gives back no id, so the run is found by its start time: the one
+ * this call stamped with `now`, still running.
+ */
+async function orphanRun(
+	db: D1Database,
+	now: number,
+	owed: string | null,
+): Promise<string | null> {
+	if (owed !== null) return owed;
+	try {
+		const run = await readRun(db);
+		return run?.status === "running" && run.startedAt === now ? run.id : null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Starts the re-check for the category the row `filedId` was just filed in. Returns the run's id when there is one to
  * show (a new run, or a join: a join with nothing new shows the line without starting an instance), or null when
  * nothing starts. `excludeIds` are rows another path already asks (the left-out rows of a create) and the filed rows,
  * so Jev is never asked twice for the same row. A run whose instance could not be created is finished at once, with a
- * fresh instance key, so the line never sticks (decision 160).
+ * fresh instance key, so the line never sticks (decision 160). Never throws (#842 review).
  */
 export async function startResortFor(
 	env: { JEV_API_KEY?: string; SORT: Env["SORT"] },
@@ -64,6 +106,29 @@ export async function startResortFor(
 		excludeIds = [],
 		now = Date.now(),
 	}: { filedId: number; excludeIds?: readonly number[]; now?: number },
+): Promise<string | null> {
+	// The run this call added instances to, while its own instance is still owed.
+	const owed: { runId: string | null } = { runId: null };
+	try {
+		return await startFor(env, db, { filedId, excludeIds, now }, owed);
+	} catch (error) {
+		console.error(`resort: couldn't start ${errorName(error)}`);
+		const runId = await orphanRun(db, now, owed.runId);
+		if (runId !== null) await endUnstarted(db, runId);
+		return null;
+	}
+}
+
+/** The work of startResortFor, which reports the run it owes through `owed` until its instance starts. */
+async function startFor(
+	env: { JEV_API_KEY?: string; SORT: Env["SORT"] },
+	db: D1Database,
+	{
+		filedId,
+		excludeIds,
+		now,
+	}: { filedId: number; excludeIds: readonly number[]; now: number },
+	owed: { runId: string | null },
 ): Promise<string | null> {
 	if (!env.JEV_API_KEY) return null;
 	if (!(await readAiSwitches(db)).categories) return null;
@@ -100,6 +165,8 @@ export async function startResortFor(
 	if (started.runId === null) return null;
 	if (started.newIds.length === 0) return started.runId;
 
+	// Owed from here until the instance is created: a failure now, or a refused start, ends the run.
+	owed.runId = started.runId;
 	const fresh = new Set(started.newIds);
 	const ok = await startSorting(env, {
 		bySync: false,
@@ -110,12 +177,9 @@ export async function startResortFor(
 			clusters: buildClusters(candidates.filter((c) => fresh.has(c.id))),
 		},
 	});
+	owed.runId = null;
 	if (ok) return started.runId;
-	// No instance is coming for the rows this call added, so this call's own instance is finished here.
-	await finishRun(db, {
-		runId: started.runId,
-		now: Date.now(),
-		instanceKey: crypto.randomUUID(),
-	});
+	// A refused start: no instance is coming for the rows this call added, so the run is ended here.
+	await endUnstarted(db, started.runId);
 	return null;
 }

@@ -435,6 +435,8 @@ async function renderScreen(
 		toast?: { message: string; type: "success" | "info"; announce: string };
 		/** The address the screen's skips are read from; the page's own address when none is given (a row's answer). */
 		reviewUrl?: string;
+		/** The page's address for its keys sheet, when it is not this request's (an Undo answer's back address). */
+		address?: string;
 		/** The purchase just filed, whose "N more look like this" card the screen shows (decision 157). */
 		more?: number;
 	} = {},
@@ -467,7 +469,7 @@ async function renderScreen(
 	return c.html(
 		<Screen
 			demo={c.env.DEMO === "true"}
-			address={addressOf(c)}
+			address={options.address ?? addressOf(c)}
 			input={{
 				skipped,
 				again,
@@ -493,8 +495,11 @@ async function renderScreen(
 }
 
 /** The suggestions screen again, for an Undo answer of the re-check (decision 160): the page the toast was shown on. */
-export function suggestionsAgain(c: Context<App>) {
-	return renderScreen(c);
+export function suggestionsAgain(c: Context<App>, back: URL) {
+	return renderScreen(c, {
+		reviewUrl: back.href,
+		address: back.pathname + back.search,
+	});
 }
 
 /** What the announcer says after an answer: how many are left to check. */
