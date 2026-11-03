@@ -29,6 +29,8 @@ const EXPORT_COLUMNS = {
 		"id, kind, transaction_id, merchant_raw_name, household_day, created_at",
 	// What a person answered to a "Maybe …" (decision 155): the kind, the guess's confidence, the answer and the day; no transaction.
 	maybe_answers: "id, kind, confidence, answer, household_day, created_at",
+	// What Tally has learned (decision 162): the cleaned bank text a person forgot, and when. Its lines are derived.
+	forgotten_texts: "id, cleaned_text, forgotten_at, previous_forgotten_at",
 	// push_subscriptions is not listed on purpose: each device's push endpoint and keys are device tokens, like the access token.
 	household_settings: "key, value",
 	household_members:

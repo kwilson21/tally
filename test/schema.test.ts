@@ -64,6 +64,7 @@ describe("schema", () => {
 			"category_suggestions",
 			"documents",
 			"feedback",
+			"forgotten_texts",
 			"household_members",
 			"household_people",
 			"household_settings",

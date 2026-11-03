@@ -46,6 +46,8 @@ export type ContentsCounts = {
 	categories: { count: number; budgetCents: number | null };
 	/** Tally's rules: the merchants with an Always rule. */
 	merchants: number;
+	/** What Tally has learned: one line per text a person chose a category for (decision 162). */
+	learned: number;
 	/** The household's time zone, as its IANA name. */
 	zone: string;
 	bankEmailsOn: boolean;
@@ -84,6 +86,19 @@ export function settingsPlaces(counts: ContentsCounts): Place[] {
 			desc: "Always and never, for merchants",
 			folio: {
 				text: `${merchants} ${merchants === 1 ? "merchant" : "merchants"}`,
+				tone: "muted",
+			},
+		},
+		{
+			name: "What Tally has learned",
+			href: "/settings/learned",
+			icon: "message",
+			desc: "What your answers taught Tally",
+			folio: {
+				text:
+					counts.learned === 0
+						? "Nothing yet"
+						: `${counts.learned} ${counts.learned === 1 ? "line" : "lines"}`,
 				tone: "muted",
 			},
 		},
