@@ -7387,13 +7387,18 @@ function SettingsGroup() {
 				title="What Tally has learned"
 				tier="visual"
 				components={["LearnedPage", "EmptyState", "Button"]}
-				sentence="Settings' page of what Tally learned from answers (decision 162): an intro, then one bordered line for each text and the category a person chose, with its count and a quiet Forget. Forget undoes within ten seconds. Empty, it says Nothing yet."
+				sentence="Settings' page of what Tally learned from answers (decisions 162 and 163): an intro, then one bordered line for each text and the category a person chose, with its count and a quiet Forget. A text that isn't vague also has Change, which opens in place into its category select, the sentence “From now on … goes here every time.”, Save and Cancel. A line a rule made says Your rule. Forget undoes within ten seconds. Empty, it says Nothing yet."
 			>
-				<State label="Four lines, one with a long unbroken name">
+				<State label="Four lines, one with a long unbroken name, one a rule">
 					<div inert>
 						<LearnedPage
 							id="catalog-learned-lines"
 							titleId="catalog-learned-lines-title"
+							categories={[
+								{ id: 40, name: "Books & audio" },
+								{ id: 11, name: "Entertainment" },
+								{ id: 1, name: "Groceries" },
+							]}
 							lines={[
 								{
 									cleanedText: "audible",
@@ -7424,6 +7429,7 @@ function SettingsGroup() {
 									color: "cat-blue",
 									answers: 1,
 									vague: false,
+									rule: true,
 								},
 								{
 									cleanedText: "supercalifragilisticexpialidociousmerchantname",
@@ -7433,6 +7439,71 @@ function SettingsGroup() {
 									icon: "entertainment",
 									color: "cat-blue",
 									answers: 4,
+									vague: false,
+								},
+							]}
+						/>
+					</div>
+				</State>
+				<State label="Change open on a line, its select on the line's category">
+					<div inert>
+						<LearnedPage
+							id="catalog-learned-change"
+							titleId="catalog-learned-change-title"
+							change={{ cleanedText: "audible" }}
+							categories={[
+								{ id: 40, name: "Books & audio" },
+								{ id: 11, name: "Entertainment" },
+								{ id: 1, name: "Groceries" },
+							]}
+							lines={[
+								{
+									cleanedText: "audible",
+									name: "Audible",
+									categoryId: 40,
+									categoryName: "Books & audio",
+									icon: "books",
+									color: "cat-plum",
+									answers: 3,
+									vague: false,
+								},
+								{
+									cleanedText: "apple.com/bill",
+									name: "Apple.com/bill",
+									categoryId: 11,
+									categoryName: "Entertainment",
+									icon: "entertainment",
+									color: "cat-blue",
+									answers: 2,
+									vague: true,
+								},
+							]}
+						/>
+					</div>
+				</State>
+				<State label="Change refused: the line stays open with the alert">
+					<div inert>
+						<LearnedPage
+							id="catalog-learned-change-error"
+							titleId="catalog-learned-change-error-title"
+							change={{
+								cleanedText: "audible",
+								error: "Choose a category.",
+							}}
+							categories={[
+								{ id: 40, name: "Books & audio" },
+								{ id: 11, name: "Entertainment" },
+								{ id: 1, name: "Groceries" },
+							]}
+							lines={[
+								{
+									cleanedText: "audible",
+									name: "Audible",
+									categoryId: 40,
+									categoryName: "Books & audio",
+									icon: "books",
+									color: "cat-plum",
+									answers: 3,
 									vague: false,
 								},
 							]}

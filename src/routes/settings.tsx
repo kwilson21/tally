@@ -10,6 +10,7 @@ import {
 	readAiSwitches,
 	saveAiSwitches,
 } from "../db/ai-switches";
+import { applyBankTextRules, saveBankTextRule } from "../db/bank-text-rules";
 import {
 	addCategory,
 	categoryNames,
@@ -29,6 +30,7 @@ import {
 	displayName,
 	FORGET_UNDO_MIN_MS,
 	forgetText,
+	learnedCategoryChoices,
 	loadLearnedLines,
 	undoForget,
 	undoRemainingMs,
@@ -158,6 +160,8 @@ type View = {
 	merchantRuleError?: string;
 	/** A What Tally has learned Forget refused (no text chosen). */
 	learnedError?: string;
+	/** A What Tally has learned Change refused for its own line: that line opens with the refusal in it (decision 163). */
+	learnedChange?: { cleanedText: string; error: string };
 	/** What was typed, shown again with the errors. */
 	values?: { name: string };
 	errors?: CategoryErrors;
@@ -685,10 +689,16 @@ async function renderRules(c: Context<App>, view: View = {}) {
 /** What Tally has learned (decisions 156 and 162): one line per text a person's answers taught, each with Forget. */
 async function renderLearned(c: Context<App>, view: View = {}) {
 	const lines = await loadLearnedLines(c.env.DB);
+	const categories = await learnedCategoryChoices(c.env.DB);
 	return settingsPage(
 		c,
 		"What Tally has learned · Settings",
-		<LearnedPage lines={lines} error={view.learnedError} />,
+		<LearnedPage
+			lines={lines}
+			error={view.learnedError}
+			change={view.learnedChange}
+			categories={categories}
+		/>,
 		view.status,
 	);
 }
@@ -980,6 +990,57 @@ settings.post("/settings/learned/undo", async (c) => {
 					}
 				: { message: "Nothing to undo.", type: "error", undoDone: token };
 	c.header("HX-Trigger", hxTrigger({ toast, announce: toast.message }));
+	return renderPage(c, "learned");
+});
+
+// Change on a learned line (decision 163): a rule on the cleaned bank text, made in place from the line. A text with no
+// line now (a stale form) and a known-vague text, which no rule can cover, are refused for the page. A category that is
+// unknown or archived is refused beside its own line. Otherwise the rule is saved and applied at once to what nothing has
+// filled, and a toast says so. The rule never changes a merchant rule.
+settings.post("/settings/learned/change", async (c) => {
+	const form = await c.req.formData();
+	const text = String(form.get("text") ?? "");
+	const categoryId = Number(form.get("category") ?? "");
+	const htmx = Boolean(c.req.header("HX-Request"));
+	const line =
+		text === ""
+			? undefined
+			: (await loadLearnedLines(c.env.DB)).find(
+					(learned) => learned.cleanedText === text,
+				);
+	const refuse = (message: string) => {
+		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+		return renderPage(c, "learned", { learnedError: message, status: 400 });
+	};
+	if (!line) return refuse("Choose a line to change.");
+	if (line.vague)
+		return refuse(
+			`${line.name} covers more than one kind of purchase, so a rule can't be made for it.`,
+		);
+	const category =
+		Number.isInteger(categoryId) && categoryId > 0
+			? await c.env.DB.prepare(
+					"SELECT id, name FROM categories WHERE id = ? AND archived = 0",
+				)
+					.bind(categoryId)
+					.first<{ id: number; name: string }>()
+			: null;
+	if (!category) {
+		const message = "Choose a category.";
+		if (htmx) c.header("HX-Trigger", hxTrigger({ announce: message }));
+		return renderPage(c, "learned", {
+			learnedChange: { cleanedText: text, error: message },
+			status: 400,
+		});
+	}
+	await saveBankTextRule(c.env.DB, text, category.id);
+	await applyBankTextRules(c.env.DB);
+	if (!htmx) return c.redirect("/settings/learned", 303);
+	const message = `${line.name} now goes to ${category.name} every time.`;
+	c.header(
+		"HX-Trigger",
+		hxTrigger({ toast: { message, type: "success" }, announce: message }),
+	);
 	return renderPage(c, "learned");
 });
 

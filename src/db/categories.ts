@@ -144,6 +144,7 @@ export async function unmakeCategory(
 				AND NOT EXISTS (SELECT 1 FROM merchants WHERE default_category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM bills WHERE category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM budget_amounts WHERE category_id = ?1)
+				AND NOT EXISTS (SELECT 1 FROM bank_text_rules WHERE category_id = ?1)
 				AND NOT EXISTS (SELECT 1 FROM category_archive_periods WHERE category_id = ?1)`,
 		)
 		.bind(id)

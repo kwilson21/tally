@@ -30,7 +30,11 @@ const EXPORT_COLUMNS = {
 	// What a person answered to a "Maybe …" (decision 155): the kind, the guess's confidence, the answer and the day; no transaction.
 	maybe_answers: "id, kind, confidence, answer, household_day, created_at",
 	// What Tally has learned (decision 162): the cleaned bank text a person forgot, and when. Its lines are derived.
-	forgotten_texts: "id, cleaned_text, forgotten_at, previous_forgotten_at",
+	// rule_category_id is the rule a Forget removed, for its Undo (decision 163).
+	forgotten_texts:
+		"id, cleaned_text, forgotten_at, previous_forgotten_at, rule_category_id",
+	// A rule a person made with Change (decision 163): the cleaned bank text and the category; no amounts or transactions.
+	bank_text_rules: "id, cleaned_text, category_id, created_at, updated_at",
 	// push_subscriptions is not listed on purpose: each device's push endpoint and keys are device tokens, like the access token.
 	household_settings: "key, value",
 	household_members:
