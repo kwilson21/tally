@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	RESORT_CANDIDATE_MAX,
 	type ResortCandidate,
 	resortCandidates,
 } from "../src/db/resort-candidates";
@@ -9,7 +10,9 @@ import {
 	closeToastOnce,
 	finishRun,
 	readRun,
+	STALE_MS,
 	startOrJoinRun,
+	UNDO_MS,
 	undoRun,
 } from "../src/db/resort-run";
 import { releaseSortingTurn, takeSortingTurn } from "../src/db/sorting-turn";
@@ -482,7 +485,9 @@ describe("finishRun", () => {
 			runId: runIdOf(started),
 			categoryId: groceries,
 			categoryName: "Groceries",
-			until: T0 + 15000,
+			until: null,
+			claimedAt: null,
+			finalizedAt: T0 + 5000,
 			needAnswer: 1,
 		});
 		expect(parsed.rows.map((r: { id: number }) => r.id)).toEqual([moved]);
@@ -682,6 +687,7 @@ describe("two categories in one run", () => {
 	it("undoes both groups when nothing changed since", async () => {
 		const { g1, b1, g2, runId } = await twoCategoryRun();
 		await finishRun(db, { runId, now: T0 + 5000 });
+		await closeToastOnce(db, runId, T0 + 5000);
 		expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
 			restored: 2,
 			changedSince: 0,
@@ -710,6 +716,7 @@ describe("two categories in one run", () => {
 			)
 			.bind(groceries, b1)
 			.run();
+		await closeToastOnce(db, runId, T0 + 5000);
 		expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
 			restored: 1,
 			changedSince: 1,
@@ -976,10 +983,10 @@ describe("closeToastOnce", () => {
 			categoryName: "Groceries",
 			now: T0,
 		});
-		expect(await closeToastOnce(db, runIdOf(started))).toBe(false);
+		expect(await closeToastOnce(db, runIdOf(started), T0)).toBe(false);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
-		expect(await closeToastOnce(db, runIdOf(started))).toBe(true);
-		expect(await closeToastOnce(db, runIdOf(started))).toBe(false);
+		expect(await closeToastOnce(db, runIdOf(started), T0 + 6000)).toBe(true);
+		expect(await closeToastOnce(db, runIdOf(started), T0 + 6001)).toBe(false);
 		expect((await readRun(db))?.toasted).toBe(true);
 	});
 });
@@ -998,6 +1005,7 @@ describe("undoRun", () => {
 		await answer(a, groceries);
 		await answer(b, groceries);
 		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		await closeToastOnce(db, runIdOf(started), T0 + 5000);
 		return { a, b, runId: runIdOf(started) };
 	}
 
@@ -1090,3 +1098,292 @@ describe("undoRun", () => {
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 });
+
+describe("the closing toast, the Undo deadline, the sweep, identity and the cap", () => {
+	/** A finished run with one row moved into Groceries, not yet claimed. Returns the row and the run id. */
+	async function finishedUnclaimed(finishAt = T0 + 5000) {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === a),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([a]);
+		await answer(a, groceries);
+		await finishRun(db, { runId: runIdOf(started), now: finishAt });
+		return { a, runId: runIdOf(started) };
+	}
+
+	/** A fresh candidate row that starts the next run. */
+	async function nextRunStart(now: number) {
+		const c = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		return startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((x) => x.id === c),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now,
+		});
+	}
+
+	const recordText = async (runId: string) =>
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(`resort_moved_${runId}`)
+				.first<{ value: string }>()
+		)?.value ?? null;
+
+	it("an expired, claimed record is gone after the next start, without Undo", async () => {
+		const { runId } = await finishedUnclaimed();
+		expect(await closeToastOnce(db, runId, T0 + 5000)).toBe(true);
+		// Ten seconds after the claim nobody undid it; the next run's start removes the record.
+		await nextRunStart(T0 + 5000 + UNDO_MS + 1);
+		expect(await settingsKeys()).toEqual(["resort_run"]);
+	});
+
+	it("an unclaimed record is removed by the first start after STALE_MS past its finish", async () => {
+		const { runId } = await finishedUnclaimed();
+		await nextRunStart(T0 + 5000 + STALE_MS + 1);
+		expect(await settingsKeys()).toEqual(["resort_run"]);
+		expect(await recordText(runId)).toBeNull();
+	});
+
+	it("an unclaimed record is still claimable at exactly STALE_MS after it finished", async () => {
+		const { runId } = await finishedUnclaimed();
+		await nextRunStart(T0 + 5000 + STALE_MS);
+		expect(await recordText(runId)).not.toBeNull();
+		expect(await closeToastOnce(db, runId, T0 + 5000 + STALE_MS)).toBe(true);
+	});
+
+	it("a new run does not drop a completed run's unseen toast: its closing still delivers Undo", async () => {
+		const { a, runId } = await finishedUnclaimed();
+		const next = await nextRunStart(T0 + 6000);
+		expect(next.joined).toBe(false);
+		expect(await closeToastOnce(db, runId, T0 + 7000)).toBe(true);
+		expect(await undoRun(db, { runId, now: T0 + 7000 })).toEqual({
+			restored: 1,
+			changedSince: 0,
+			expired: false,
+		});
+		expect(await state(a)).toMatchObject({ categoryId: null, confidence: 0.3 });
+	});
+
+	it("the Undo deadline starts when the toast is claimed, not when the run finishes", async () => {
+		const { a, runId } = await finishedUnclaimed(T0 + 5000);
+		expect(JSON.parse((await recordText(runId)) ?? "{}")).toMatchObject({
+			until: null,
+			claimedAt: null,
+		});
+		// Undo before the claim: nothing is open.
+		expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
+			restored: 0,
+			changedSince: 0,
+			expired: true,
+		});
+		expect(await state(a)).toMatchObject({ categoryId: groceries });
+		// The toast is claimed well after the finish: Undo is open from the claim.
+		expect(await closeToastOnce(db, runId, T0 + 20_000)).toBe(true);
+		expect(JSON.parse((await recordText(runId)) ?? "{}")).toMatchObject({
+			claimedAt: T0 + 20_000,
+			until: T0 + 20_000 + UNDO_MS,
+		});
+		expect(await undoRun(db, { runId, now: T0 + 20_000 + UNDO_MS })).toEqual({
+			restored: 1,
+			changedSince: 0,
+			expired: false,
+		});
+	});
+
+	it("an Undo after the claim's ten seconds restores nothing", async () => {
+		const { a, runId } = await finishedUnclaimed(T0 + 5000);
+		await closeToastOnce(db, runId, T0 + 20_000);
+		expect(
+			await undoRun(db, { runId, now: T0 + 20_000 + UNDO_MS + 1 }),
+		).toEqual({ restored: 0, changedSince: 0, expired: true });
+		expect(await state(a)).toMatchObject({ categoryId: groceries });
+	});
+
+	it("a candidate deleted and its id reused by another row is not restored", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([x]);
+		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(x).run();
+		// Another purchase takes the same id: untouched, but a different transaction.
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, plaid_transaction_id, account_id, date, amount_cents, raw_name)
+				VALUES (?, 'plaid-reused-candidate', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-03', 2500, 'OTHER SHOP')`,
+			)
+			.bind(x)
+			.run();
+		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		expect(await state(x)).toMatchObject({
+			categoryId: null,
+			confidence: null,
+		});
+	});
+
+	it("a moved row deleted and its id reused by another row is not undone", async () => {
+		const m = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === m),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		await clear([m]);
+		await answer(m, groceries);
+		await finishRun(db, { runId: runIdOf(started), now: T0 + 5000 });
+		await closeToastOnce(db, runIdOf(started), T0 + 5000);
+		await db.prepare("DELETE FROM transactions WHERE id = ?").bind(m).run();
+		await db
+			.prepare(
+				`INSERT INTO transactions (id, plaid_transaction_id, account_id, date, amount_cents, raw_name,
+					category_id, category_source, category_confidence)
+				VALUES (?, 'plaid-reused-moved', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-10-03', 900, 'OTHER SHOP', ?, 'jev', 0.9)`,
+			)
+			.bind(m, groceries)
+			.run();
+		expect(
+			await undoRun(db, { runId: runIdOf(started), now: T0 + 6000 }),
+		).toEqual({ restored: 0, changedSince: 1, expired: false });
+		expect(await state(m)).toMatchObject({
+			categoryId: groceries,
+			categorySource: "jev",
+			confidence: 0.9,
+		});
+	});
+
+	/** A db whose next batch is preceded by `before` (the joiner that arrives between the key and the flip). */
+	function beforeNextBatch(before: () => Promise<unknown>): D1Database {
+		let fired = false;
+		return new Proxy(db, {
+			get(target, prop) {
+				if (prop === "batch") {
+					return async (statements: D1PreparedStatement[]) => {
+						if (!fired) {
+							fired = true;
+							await before();
+						}
+						return target.batch(statements);
+					};
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		}) as unknown as D1Database;
+	}
+
+	it("a joiner arriving between the instance's key and the flip keeps the run open", async () => {
+		const g1 = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === g1),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await clear([g1]);
+		await answer(g1, groceries);
+		const racing = beforeNextBatch(async () => {
+			// A joiner starts between A's key write and A's flip: instances goes to 2.
+			await startOrJoinRun(db, {
+				candidates: [],
+				categoryId: groceries,
+				categoryName: "Groceries",
+				now: T0 + 3000,
+			});
+		});
+		expect(
+			await finishRun(racing, { runId, now: T0 + 4000, instanceKey: "A" }),
+		).toEqual({
+			moved: 0,
+			needAnswer: 0,
+			categories: [],
+			finished: false,
+			pending: 1,
+		});
+		expect((await readRun(db))?.status).toBe("running");
+		expect(await recordText(runId)).toBeNull();
+		// Instance B finishes last; the run finalizes with A's row.
+		expect(
+			await finishRun(db, { runId, now: T0 + 5000, instanceKey: "B" }),
+		).toMatchObject({ moved: 1, finished: true, pending: 0 });
+		expect((await readRun(db))?.status).toBe("done");
+	});
+
+	it("a joined run never holds more than RESORT_CANDIDATE_MAX rows", async () => {
+		const range = (from: number, to: number) =>
+			Array.from({ length: to - from + 1 }, (_, i) => synthCandidate(from + i));
+		const first = await startOrJoinRun(db, {
+			candidates: range(900_000, 900_089),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const joined = await startOrJoinRun(db, {
+			candidates: range(900_090, 900_119),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 1000,
+		});
+		expect(joined.joined).toBe(true);
+		expect(joined.newIds).toHaveLength(RESORT_CANDIDATE_MAX - 90);
+		expect((await readRun(db))?.total).toBe(RESORT_CANDIDATE_MAX);
+		const full = await startOrJoinRun(db, {
+			candidates: range(900_120, 900_124),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0 + 2000,
+		});
+		expect(full).toMatchObject({
+			runId: first.runId,
+			newIds: [],
+			joined: true,
+		});
+		expect((await readRun(db))?.total).toBe(RESORT_CANDIDATE_MAX);
+	});
+
+	it("a new run holds at most RESORT_CANDIDATE_MAX rows", async () => {
+		const started = await startOrJoinRun(db, {
+			candidates: Array.from({ length: RESORT_CANDIDATE_MAX + 50 }, (_, i) =>
+				synthCandidate(900_000 + i),
+			),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		expect(started.newIds).toHaveLength(RESORT_CANDIDATE_MAX);
+		expect((await readRun(db))?.total).toBe(RESORT_CANDIDATE_MAX);
+	});
+});
+
+/** A candidate for an id no row has, with the snapshot a real one carries. */
+function synthCandidate(id: number): ResortCandidate {
+	return {
+		id,
+		date: "2026-10-02",
+		amountCents: 1500,
+		rawName: `ROW ${id}`,
+		merchantKey: `row${id}`,
+		mixed: false,
+		whatItWasNote: null,
+		snapshot: {
+			id,
+			category_id: null,
+			category_source: null,
+			category_confidence: null,
+			jev_category_id: null,
+			jev_none_fit: 0,
+			jev_mixed: null,
+			jev_also_category_id: null,
+			jev_failed_at: null,
+		},
+	};
+}
