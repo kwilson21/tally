@@ -14,6 +14,7 @@ import {
 	undoWords,
 } from "../resort-toast";
 import {
+	heldQuarter,
 	RecheckMilestoneSwap,
 	RecheckSentence,
 	recheckDone,
@@ -49,7 +50,7 @@ resort.get("/resort/progress", async (c) => {
 	if (current && current.id === runId && isRunning(current, now)) {
 		const run = { id: current.id, done: current.done, total: current.total };
 		// The quarter the page holds (`m`): the hidden region is sent again only when a new quarter is crossed (#821).
-		const held = Number(c.req.query("m") ?? "0");
+		const held = heldQuarter(c.req.query("m"));
 		const milestone = recheckMilestone(recheckDone(run), run.total);
 		return c.html(
 			<>

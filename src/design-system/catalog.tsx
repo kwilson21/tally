@@ -1293,7 +1293,7 @@ const RECHECK_LINE_SPEC: UseSpecText = {
 	states:
 		"Running: “Tally is re-checking… N done”, with N from 0 up to the run's total and never past it. Finished: the sentence is gone, and the closing toast says what moved. Nothing is drawn when no run is going.",
 	feedback:
-		"The sentence's count changes every 2 seconds while the run goes, and that count is aria-hidden, so it isn't read each time. A visually hidden polite status beside it holds the count only at each quarter of the run: “4 of 14 done.”, “7 of 14 done.”, “11 of 14 done.”. Between quarters the poll sends nothing to that region, so nothing is spoken. The Create's own announcement says “Tally is re-checking related rows.” at the start, and the end is announced with the closing toast or “Tally finished re-checking.”. Never a list.",
+		"The sentence's count changes every 2 seconds while the run goes, and that count is aria-hidden, so it isn't read each time. A visually hidden polite status beside it holds the count only at each quarter of the run: “4 of 14 done.”, “7 of 14 done.”, “11 of 14 done.”. The words are the count it has when the quarter is crossed, so a jump from 0 to 5 speaks “5 of 14 done.”, never a lower number than the one shown. Between quarters the poll sends nothing to that region, so nothing is spoken. The Create's own announcement says “Tally is re-checking related rows.” at the start, and the end is announced with the closing toast or “Tally finished re-checking.”. Never a list.",
 	input:
 		"Nothing to press. It is not focusable and takes no keys. Screen reader: the hidden status speaks a quarter's words, once; the ring is hidden from assistive technology.",
 	motion:

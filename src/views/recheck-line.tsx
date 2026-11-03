@@ -21,14 +21,23 @@ export const recheckDone = (run: RecheckRun): number =>
 export const recheckMilestone = (done: number, total: number): number =>
 	total > 0 ? Math.min(3, Math.floor((done * 4) / total)) : 0;
 
-/** The milestone's words for the hidden region: the row count at that quarter ("4 of 14 done."), or "" before one. */
+/**
+ * The hidden region's words: the count it has now ("5 of 14 done."), or "" before the first quarter. The quarter decides
+ * whether the region speaks at all; the words speak the live count, so a jump past a quarter never says a lower number
+ * than the visible one (#821 owner feedback).
+ */
 export const recheckMilestoneText = (
 	milestone: number,
+	done: number,
 	total: number,
-): string =>
-	milestone === 0
-		? ""
-		: `${Math.ceil((total * milestone) / 4)} of ${total} done.`;
+): string => (milestone === 0 ? "" : `${done} of ${total} done.`);
+
+/**
+ * The quarter index the page holds, from the poll's `m`. Only a whole 0 to 3 counts; anything else (missing, NaN, a
+ * negative, a fraction, a huge number) is treated as 0, so junk never makes the server resend the region every poll.
+ */
+export const heldQuarter = (raw: string | undefined): number =>
+	raw !== undefined && /^[0-3]$/.test(raw) ? Number(raw) : 0;
 
 /**
  * The sentence alone, the part that polls. `polls` is false for a picture in the catalog, which fires nothing by itself
@@ -79,7 +88,7 @@ export function RecheckMilestoneSwap({ run }: { run: RecheckRun }) {
 	const done = recheckDone(run);
 	return (
 		<span id="recheck-milestone" hx-swap-oob="innerHTML">
-			{recheckMilestoneText(recheckMilestone(done, run.total), run.total)}
+			{recheckMilestoneText(recheckMilestone(done, run.total), done, run.total)}
 		</span>
 	);
 }
@@ -104,7 +113,7 @@ export function RecheckLine({
 				aria-live="polite"
 				class="sr-only"
 			>
-				{recheckMilestoneText(milestone, run.total)}
+				{recheckMilestoneText(milestone, done, run.total)}
 			</span>
 		</div>
 	);
