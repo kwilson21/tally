@@ -44,18 +44,22 @@ describe("the Maybe card's three answers, in order (decision 156)", () => {
 	it("draws Yes, then the dashed suggestion row, then Something else", () => {
 		const html = card({ suggestedName: "Books & audio" });
 		const yes = html.indexOf('value="yes"');
-		const row = html.indexOf("Tally&#39;s suggestion");
+		const row = html.indexOf("New category:");
 		const else_ = html.indexOf("Something else");
 		expect(yes).toBeGreaterThan(-1);
 		expect(row).toBeGreaterThan(yes);
 		expect(else_).toBeGreaterThan(row);
 	});
 
-	it("draws the row dashed, labelled Tally's suggestion, with its name", () => {
+	it("draws the row dashed, with its name and no visible label, and Tally's suggestion as its accessible name (decision 166)", () => {
 		const html = card({ suggestedName: "Books & audio" });
 		expect(html).toMatch(/<details[^>]*border-dashed[^>]*>/);
-		expect(html).toContain("Tally&#39;s suggestion");
 		expect(html).toContain("New category: Books &amp; audio");
+		// The visible small label is gone; screen readers still hear whose suggestion it is.
+		expect(html).toContain(
+			'<span class="sr-only">Tally&#39;s suggestion: </span>',
+		);
+		expect(html).not.toMatch(/text-muted">Tally&#39;s suggestion</);
 	});
 
 	it("opens the row in place with the name in a labelled, editable field and Create and next", () => {
@@ -192,7 +196,7 @@ describe("the suggestion row is not shown when it is the guess's own category (d
 			suggestedName: "Books & media",
 			categories: withBooks,
 		});
-		expect(html).toContain("Tally&#39;s suggestion");
+		expect(html).toContain("Tally&#39;s suggestion: ");
 		expect(html).toContain("Existing category: Books &amp; media");
 		expect(html).toContain("Save and next");
 		expect(html).toContain("Yes, Shopping");

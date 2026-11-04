@@ -3428,7 +3428,9 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		const { res, html } = await get(
 			`/settings/suggestions/new-category?id=${id}`,
 		);
-		expect(textOf(html)).toContain("Tally's suggestion");
+		expect(textOf(html)).toContain(
+			"Tally's suggestion: New category: Books & audio",
+		);
 		expect(textOf(html)).toContain("New category: Books & audio");
 		expect(html).toContain('name="new_name"');
 		expect(html).toContain('value="create"');

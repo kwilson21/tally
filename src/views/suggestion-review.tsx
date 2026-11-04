@@ -534,9 +534,10 @@ export function NewCategoryRow({
 		>
 			<summary class="flex min-h-11 cursor-pointer items-center justify-between gap-3 py-2">
 				<span class="flex min-w-0 flex-col">
-					<span class="text-sm text-muted">Tally's suggestion</span>
 					<span class="flex min-w-0 items-center gap-1.5 text-lg wrap-anywhere">
 						<Icon name="sparkles" class="size-4 shrink-0" />
+						{/* The visible label is gone (owner, decision 166): screen readers still hear whose suggestion it is. */}
+						<span class="sr-only">Tally's suggestion: </span>
 						{existing ? "Existing category" : "New category"}:{" "}
 						{existing?.name ?? name}
 					</span>
