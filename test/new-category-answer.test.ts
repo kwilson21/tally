@@ -1357,3 +1357,100 @@ describe("suggestedCategoryName: the choices and a re-ask when the categories ch
 		expect(all).not.toMatch(/1499|14\.99/);
 	});
 });
+
+// Decision 165 (review on PR #850): the categories can change while the Workers AI call is in flight. The answer was
+// asked against the categories before the change, so it gives no name this time; the row keeps the old key, so the
+// next draw asks once more.
+describe("suggestedCategoryName: a change to the categories while the call is in flight (decision 165)", () => {
+	let item: { transactionId: number; merchantKey: string; merchant: string };
+	beforeEach(async () => {
+		await resetDemo(db, "2026-09-22");
+		await db.batch([
+			db.prepare("DELETE FROM transactions"),
+			db.prepare("DELETE FROM category_suggestions"),
+			db.prepare("DELETE FROM never_suggest_rules"),
+		]);
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const merchantKey = "AUDIBLE*TE3E10I7 WA";
+		item = {
+			transactionId: await transactionFor(merchantKey),
+			merchantKey,
+			merchant: "Audible",
+		};
+	});
+
+	const activeRows = async () =>
+		(
+			await db
+				.prepare("SELECT id, name FROM categories WHERE archived = 0")
+				.all<{ id: number; name: string }>()
+		).results;
+	const keptRow = () =>
+		db
+			.prepare(
+				"SELECT name, categories_key FROM maybe_names WHERE transaction_id = ?",
+			)
+			.bind(item.transactionId)
+			.first<{ name: string | null; categories_key: string | null }>();
+	const aiReturning = (answer: unknown) => {
+		const run = vi.fn(async () => answer);
+		return { ai: { run } as unknown as Ai, run };
+	};
+
+	it("a rename made while the call is in flight gives no name, keeps the old key, and is asked once more on the next draw", async () => {
+		const oldKey = await categoriesKey(await activeRows());
+		const run = vi.fn(async () => {
+			await db
+				.prepare(
+					"UPDATE categories SET name = 'Eating Out Fun', name_key = 'eating out fun' WHERE name = 'Eating Out'",
+				)
+				.run();
+			return "Books & audio";
+		});
+		expect(
+			await suggestedCategoryName(db, { run } as unknown as Ai, item),
+		).toBeNull();
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(await keptRow()).toEqual({
+			name: "Books & audio",
+			categories_key: oldKey,
+		});
+		const next = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, next.ai, item)).toBe(
+			"Hobby supplies",
+		);
+		expect(next.run).toHaveBeenCalledTimes(1);
+		const third = aiReturning("Something else");
+		expect(await suggestedCategoryName(db, third.ai, item)).toBe(
+			"Hobby supplies",
+		);
+		expect(third.run).not.toHaveBeenCalled();
+	});
+
+	it("a category made while the call is in flight gives no name this time and is asked once on the next draw", async () => {
+		const run = vi.fn(async () => {
+			await db
+				.prepare(
+					"INSERT INTO categories (name, name_key, icon, color, sort_order) VALUES ('Gear', 'gear', 'tag', 'cat-blue', (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories))",
+				)
+				.run();
+			return "Books & audio";
+		});
+		expect(
+			await suggestedCategoryName(db, { run } as unknown as Ai, item),
+		).toBeNull();
+		const next = aiReturning("Hobby supplies");
+		expect(await suggestedCategoryName(db, next.ai, item)).toBe(
+			"Hobby supplies",
+		);
+		expect(next.run).toHaveBeenCalledTimes(1);
+	});
+
+	it("with no change while the call is in flight, the answer is returned as before", async () => {
+		const { ai } = aiReturning("Books & audio");
+		expect(await suggestedCategoryName(db, ai, item)).toBe("Books & audio");
+		expect((await keptRow())?.categories_key).toBe(
+			await categoriesKey(await activeRows()),
+		);
+	});
+});

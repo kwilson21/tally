@@ -207,7 +207,11 @@ export function cleanCategoryName(
 			.replace(/\s+/g, " ");
 		// Decision 165: a reply that is one of the family's active categories is that category, with its stored spelling.
 		// It is the household's own label, so it is taken before the shape and instruction checks below.
-		const choice = choices.find((c) => sameName(c, name));
+		// The prompt shows each category by its label (choiceLabel), so a reply may name it in that form; the stored name
+		// wins over a label, and the first label in the list wins a tie.
+		const choice =
+			choices.find((c) => sameName(c, name)) ??
+			choices.find((c) => sameName(choiceLabel(c), name));
 		if (choice) return choice;
 		if (
 			name.length < 2 ||
@@ -453,12 +457,10 @@ export async function suggestCategoryName(
  * marker characters taken out and whitespace collapsed, at most the 50 active categories. The names are the household's
  * own labels, so they are not run through the instruction check.
  */
+const choiceLabel = (name: string) => oneLine(boundaryValue(oneLine(name)));
+
 const choiceLine = (choices: string[]) =>
-	choices
-		.slice(0, MAX_ACTIVE)
-		.map((name) => oneLine(boundaryValue(oneLine(name))))
-		.filter(Boolean)
-		.join("; ");
+	choices.slice(0, MAX_ACTIVE).map(choiceLabel).filter(Boolean).join("; ");
 
 /** Marks a model puts before a list item ("1.", "-", "•") and quotes it wraps a name in. */
 const LIST_MARK = /^\s*(?:[-•·]|\*(?=\s)|\d+[.)])\s*/;

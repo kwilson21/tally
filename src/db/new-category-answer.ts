@@ -147,7 +147,8 @@ export async function suggestedCategoryName(
 		[item.merchant],
 		await purchaseNamesToAvoid(db),
 		bankText,
-		active.map((c) => c.name),
+		// Lowest id first: when two labels collide, the first category by id is the one a reply names.
+		[...active].sort((a, b) => a.id - b.id).map((c) => c.name),
 	);
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
@@ -159,6 +160,12 @@ export async function suggestedCategoryName(
 		.run();
 	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
 	if ((done.meta.changes ?? 0) === 0) return null;
+	// The categories may have changed while the call was in flight (decision 165): the answer was asked against `key`, so
+	// it is not offered now. The row keeps `key`, so the next draw sees a stale key and asks once more; no second call here.
+	const current = await categoriesKey(
+		(await categoryNames(db)).filter((c) => !c.archived),
+	);
+	if (current !== key) return null;
 	return name;
 }
 

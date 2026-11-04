@@ -816,3 +816,53 @@ describe("suggestCategoryName: the single purchase lists the family's active cat
 		expect(line).not.toContain("Category 51");
 	});
 });
+
+// Decision 165 (review on PR #850): the prompt shows each active category as its sanitized label, so a reply can name
+// it in that form. The reply is matched to the stored category by its stored name or its label, and returns the
+// stored spelling.
+describe("cleanCategoryName: a reply in the prompt's label of an active category returns the stored category (decision 165)", () => {
+	it("a reply equal to the sanitized label returns the stored name with its apostrophe", () => {
+		expect(cleanCategoryName("Kids activities", [], ["Kids' activities"])).toBe(
+			"Kids' activities",
+		);
+	});
+
+	it("a reply in other capitals, with its apostrophe, returns the stored name too", () => {
+		expect(
+			cleanCategoryName("kids' activities", [], ["Kids' activities"]),
+		).toBe("Kids' activities");
+		expect(cleanCategoryName("KIDS ACTIVITIES", [], ["Kids' activities"])).toBe(
+			"Kids' activities",
+		);
+	});
+
+	it("keeps working when two active labels collide: the first in the list (lowest id) wins, and nothing throws", () => {
+		expect(
+			cleanCategoryName(
+				"Kids activities",
+				[],
+				["Kids' activities", "Kids' Activities"],
+			),
+		).toBe("Kids' activities");
+	});
+});
+
+describe("suggestCategoryName: the prompt's label of a category with a stripped character (decision 165)", () => {
+	it("lists the sanitized label in the prompt and returns the stored name for the label reply", async () => {
+		const run = vi.fn(async () => ({ response: "Kids activities" }));
+		const ai = { run } as unknown as Ai;
+		expect(
+			await suggestCategoryName(ai, ["Kids Club"], [], "kids club", [
+				"Kids' activities",
+			]),
+		).toEqual({ ok: true, name: "Kids' activities" });
+		const [, input] = run.mock.calls[0] as unknown as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(input.messages[1]?.content).toContain(
+			"Family categories: Kids activities",
+		);
+		expect(input.messages[1]?.content).not.toContain("Kids'");
+	});
+});
