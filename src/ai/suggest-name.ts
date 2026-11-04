@@ -214,6 +214,8 @@ export function cleanCategoryName(
 			/\b(?:here is|category|suggest|because|would be)\b/i.test(name)
 		)
 			continue;
+		// Decision 164: a reply that reads as an instruction is never shown, the same phrase list as the bank text.
+		if (readsAsInstruction(foldBankText(name))) continue;
 		if (
 			/^(?:none(?: of these fit)?|nothing|n\/?a)\.?$/i.test(name) ||
 			avoid.some((n) => n.toLowerCase() === name.toLowerCase())
