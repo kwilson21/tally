@@ -361,7 +361,7 @@ const nightlyName = (store: string) =>
 
 /** The first sentence of a single purchase's naming prompt (decision 164): what the name is for. */
 const PURCHASE_NAME_ASK =
-	"Suggest one short, plain category name for this kind of purchase: a household budget category for what the money buys, never a product, device or brand name.";
+	"Suggest one short, plain category name for this kind of purchase: a household budget category for what the money buys, never a product, device or brand name. Examples of the style: Audible -> Books & audio; Petco -> Pet supplies; Planet Fitness -> Gym. These show the style only; name the purchase you are given, and never reuse an example unless it truly fits.";
 
 /**
  * Asks Workers AI for one category name for a group of purchases the categories don't fit. For one purchase, the
