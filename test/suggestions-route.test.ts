@@ -3451,3 +3451,98 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		expect(html).toContain('name="new_name"');
 	});
 });
+
+// Decision 166: a suggested name that is the card's own guess (Maybe Eating Out) is not drawn as the row, on the full page
+// or from the lazy request. Yes still files the purchase there. The stored answer is kept as it was asked.
+describe("a suggested name that is the guess's own category is not drawn (decision 166)", () => {
+	/** The category card's purchase, with the two cards before it answered past (as in the decision 156 tests). */
+	async function eatingOutCard() {
+		const ids = await oneOfEach();
+		const address = `/settings/suggestions?skip=income-${ids.income}&skip=transfer-${ids.transfer}`;
+		return { ids, address, id: `category-${ids.category}` };
+	}
+
+	it("the full page draws no row for a pending name that is the guess, in any case, and still draws Yes", async () => {
+		const { address } = await eatingOutCard();
+		const suggestion = await db
+			.prepare(
+				"INSERT INTO category_suggestions (name, status) VALUES ('eating OUT', 'pending') RETURNING id",
+			)
+			.first<{ id: number }>();
+		await db
+			.prepare(
+				`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount_cents, raw_name, category_suggestion_id)
+				VALUES ('plaid-guess-store', (SELECT id FROM accounts WHERE type != 'cash' ORDER BY id LIMIT 1), '2026-09-30', 2300, ?, ?)`,
+			)
+			.bind(LUPITA, suggestion?.id ?? null)
+			.run();
+		const page = await get(address);
+		expect(page.html).toContain("Maybe Eating Out");
+		expect(page.html).toContain("Yes, Eating Out");
+		expect(textOf(page.html)).not.toContain("Tally's suggestion");
+		expect(page.html).not.toContain('name="new_name"');
+		expect(page.html).not.toContain("Existing category");
+		expect(page.html).not.toContain("New category");
+	});
+
+	it("the lazy request returns the no-name response for a name that is the guess, with no announcement", async () => {
+		const { id } = await eatingOutCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder = env as unknown as { AI?: Ai };
+		const before = holder.AI;
+		const run = vi.fn(async () => "eating out");
+		holder.AI = { run } as unknown as Ai;
+		try {
+			const { res, html } = await get(
+				`/settings/suggestions/new-category?id=${id}`,
+			);
+			expect(res.status).toBe(200);
+			expect(html.trim()).toBe("");
+			expect(res.headers.get("HX-Trigger")).toBeNull();
+			expect(res.headers.get("Cache-Control")).toBe("no-store");
+		} finally {
+			holder.AI = before;
+		}
+	});
+
+	it("the name is still asked once and kept as it was asked, and a later draw reads it with no call", async () => {
+		const { ids, id } = await eatingOutCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder = env as unknown as { AI?: Ai };
+		const before = holder.AI;
+		const run = vi.fn(async () => "Eating Out");
+		holder.AI = { run } as unknown as Ai;
+		try {
+			await get(`/settings/suggestions/new-category?id=${id}`);
+			const again = await get(`/settings/suggestions/new-category?id=${id}`);
+			expect(again.html.trim()).toBe("");
+			expect(run).toHaveBeenCalledTimes(1);
+			const kept = await row(
+				"SELECT name, categories_key FROM maybe_names WHERE transaction_id = ?",
+				ids.category,
+			);
+			expect(kept).toMatchObject({ name: "Eating Out" });
+			expect(kept?.categories_key).toMatch(/^[0-9a-f]{16}$/);
+		} finally {
+			holder.AI = before;
+		}
+	});
+
+	it("the Yes button still files the purchase in the guess, with the row hidden", async () => {
+		const { ids, id, address } = await eatingOutCard();
+		const page = await get(address);
+		expect(page.html).toContain(`value="yes"`);
+		const { res } = await post(
+			"/settings/suggestions",
+			{ id, answer: "yes" },
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(
+			await row(
+				"SELECT category_id FROM transactions WHERE id = ?",
+				ids.category,
+			),
+		).toEqual({ category_id: await categoryId("Eating Out") });
+	});
+});

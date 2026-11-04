@@ -54,6 +54,7 @@ import {
 import { RecheckLine, type RecheckRun } from "../views/recheck-line";
 import {
 	AskFirst,
+	isTheGuess,
 	joinStores,
 	MoreLikeThisCard,
 	NewCategoryRow,
@@ -532,7 +533,9 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	// The AI binding is optional: the tests and a local run have none, and a missing one means no name.
 	const ai = (c.env as Env & { AI?: Ai }).AI;
 	const name = await suggestedCategoryName(db, ai, item);
-	if (!name) return c.body(null);
+	// The name is asked and kept as it was (decision 161); a name that is the guess itself draws nothing (decision 166),
+	// the same empty answer as no name.
+	if (!name || isTheGuess(name, item.category)) return c.body(null);
 	// The row says "Existing category" for one of the family's active categories (decision 165), so it is named so.
 	const categories = (await categoryNames(db)).filter((c) => !c.archived);
 	const existing = activeNamed(name, categories);

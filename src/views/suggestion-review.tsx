@@ -3,7 +3,7 @@ import { shortDay } from "../dates";
 import type { MoreLikeThis } from "../db/more-like-this";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
-import { activeNamed } from "../settings/category-form";
+import { activeNamed, sameName } from "../settings/category-form";
 import { Button } from "./button";
 import { Icon } from "./icons";
 import { NameChoices } from "./name-choices";
@@ -297,8 +297,10 @@ export function SuggestionCard({
 					<MaybeQuestion>Maybe {item.category}</MaybeQuestion>
 					<Guess sure={item.sure} section="categorization" />
 					<YesForm action={action} item={item} yes={`Yes, ${item.category}`} />
-					{/* A typed name stays on screen, open, when its answer is refused; else Tally's name, once it has one. */}
-					{values?.newName !== undefined || suggestedName !== undefined ? (
+					{/* A typed name stays on screen, open, when its answer is refused; else Tally's name, once it has one, unless it is the guess itself (decision 166). */}
+					{values?.newName !== undefined ||
+					(suggestedName !== undefined &&
+						!isTheGuess(suggestedName, item.category)) ? (
 						<NewCategoryRow
 							action={action}
 							itemId={item.id}
@@ -308,7 +310,7 @@ export function SuggestionCard({
 							open={values?.newName !== undefined}
 							error={values?.newNameError}
 						/>
-					) : suggestUrl ? (
+					) : suggestUrl && suggestedName === undefined ? (
 						<NewCategoryLoader url={suggestUrl} fieldId={fieldId} />
 					) : null}
 					<SomethingElse
@@ -485,6 +487,13 @@ function YesForm({
 		</form>
 	);
 }
+
+/**
+ * True when a suggested name is the card's own guess, the Maybe category (decision 166). Such a name gets no row and no
+ * lazy request: Yes already files the purchase in that category. Compared as the form compares names (sameName).
+ */
+export const isTheGuess = (name: string, guess: string | null) =>
+	guess !== null && sameName(name, guess);
 
 /**
  * The dashed row for Tally's suggested new category (decision 156): "New category: {name}", labelled "Tally's

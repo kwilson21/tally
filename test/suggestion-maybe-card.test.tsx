@@ -159,3 +159,58 @@ describe("the dashed row for an existing category (decision 165)", () => {
 		);
 	});
 });
+
+// Decision 166: a suggested name that is the card's own guess (the Maybe category) is not offered as a row, since Yes
+// already files the purchase there. A different category, or a new name, shows its row as before.
+describe("the suggestion row is not shown when it is the guess's own category (decision 166)", () => {
+	const shopping = { ...audible, category: "Shopping", categoryId: 9 };
+	const withBooks = [...categories, { id: 7, name: "Books & media" }];
+
+	it("hides the row when the suggested name is the guess, in any case, and still draws Yes", () => {
+		for (const name of ["Entertainment", "entertainment", "  ENTERTAINMENT "]) {
+			const html = card({ suggestedName: name });
+			expect(html).not.toContain("Tally&#39;s suggestion");
+			expect(html).not.toContain("New category");
+			expect(html).not.toContain("Existing category");
+			expect(html).not.toContain('name="new_name"');
+			expect(html).toContain("Yes, Entertainment");
+		}
+	});
+
+	it("draws no loader either when the pending name is the guess, so nothing asks for it", () => {
+		const html = card({
+			suggestedName: "Entertainment",
+			suggestUrl: `${PATH}/new-category?id=category-9`,
+		});
+		expect(html).not.toContain('hx-trigger="load"');
+		expect(html).toContain("Yes, Entertainment");
+	});
+
+	it("still shows the row, as Existing category, for an active category that is not the guess", () => {
+		const html = card({
+			item: shopping,
+			suggestedName: "Books & media",
+			categories: withBooks,
+		});
+		expect(html).toContain("Tally&#39;s suggestion");
+		expect(html).toContain("Existing category: Books &amp; media");
+		expect(html).toContain("Save and next");
+		expect(html).toContain("Yes, Shopping");
+	});
+
+	it("still shows the row, as New category, for a new name", () => {
+		const html = card({ item: shopping, suggestedName: "Books & audio" });
+		expect(html).toContain("New category: Books &amp; audio");
+		expect(html).toContain("Create and next");
+		expect(html).toContain("Yes, Shopping");
+	});
+
+	it("keeps a typed name on screen even when it is the guess, since the person typed it", () => {
+		const html = card({
+			suggestedName: "Entertainment",
+			values: { id: "category-9", newName: "Entertainment" },
+			error: "Give the category a name.",
+		});
+		expect(html).toContain('name="new_name"');
+	});
+});

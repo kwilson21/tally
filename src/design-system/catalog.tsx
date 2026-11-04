@@ -4558,7 +4558,7 @@ function SuggestionsReview() {
 					"Button",
 					"Icon",
 				]}
-				sentence="A category guess with its three answers in order: Yes, the dashed Tally's suggestion row (New category, with the name Tally suggests) and Something else, whose categories are one select with a label. The row opens in place with the name editable and Create and next; nothing is made until then. When the name is one of the family's categories the row reads Existing category and its button reads Save and next, which files the purchase in it and makes nothing. With no name there is no row. At the 50-category limit the create is refused in words and Something else stays open."
+				sentence="A category guess with its three answers in order: Yes, the dashed Tally's suggestion row (New category, with the name Tally suggests) and Something else, whose categories are one select with a label. The row opens in place with the name editable and Create and next; nothing is made until then. When the name is one of the family's categories the row reads Existing category and its button reads Save and next, which files the purchase in it and makes nothing. With no name there is no row, and a name that is the guess's own category draws no row either, since Yes already files it (decision 166). At the 50-category limit the create is refused in words and Something else stays open."
 			>
 				<div hx-ignore class="grid gap-8 md:grid-cols-2">
 					<div class="max-w-md">
@@ -4594,8 +4594,8 @@ function SuggestionsReview() {
 								today={REVIEW_TODAY}
 								skipHref="/settings/suggestions?skip=category-9"
 								categories={audibleCategories}
-								suggestedName="Entertainment"
-								values={{ newName: "Entertainment" }}
+								suggestedName="Groceries"
+								values={{ newName: "Groceries" }}
 								fieldId="maybe-answers-existing"
 							/>
 						</div>
