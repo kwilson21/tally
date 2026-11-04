@@ -25,6 +25,16 @@ export const normalizeName = (name: string) =>
 export const nameKey = (name: string) => normalizeName(name).toLowerCase();
 /** Whether two category names are the same, ignoring case (Unicode-aware, unlike SQL NOCASE) and spacing. */
 export const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
+/**
+ * The active category with this name (ignoring case and spacing), or undefined. The one check for "is this name an
+ * active category": the form, the Maybe card's "Existing category" row and the naming's choices all use it (decision 165).
+ */
+export function activeNamed<T extends { name: string; archived?: boolean }>(
+	name: string,
+	categories: readonly T[],
+): T | undefined {
+	return categories.find((c) => !c.archived && sameName(c.name, name));
+}
 const activeCount = (existing: Existing) =>
 	existing.filter((c) => !c.archived).length;
 

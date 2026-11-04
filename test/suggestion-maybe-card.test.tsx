@@ -127,3 +127,35 @@ describe("the Maybe card's three answers, in order (decision 156)", () => {
 		expect(html).not.toContain('id="new-category-name-category-9"');
 	});
 });
+
+// Decision 165: a suggested name the family already has as an active category reads "Existing category", and its
+// button reads "Save and next" (nothing is made). A name that is not one of them keeps "New category" and "Create and next".
+describe("the dashed row for an existing category (decision 165)", () => {
+	const withBooks = [...categories, { id: 7, name: "Books & media" }];
+
+	it("reads Existing category, with the family's spelling, for an active category", () => {
+		const html = card({
+			suggestedName: "books & MEDIA",
+			categories: withBooks,
+			values: { id: "category-9", newName: "books & MEDIA" },
+		});
+		expect(html).toContain("Existing category: Books &amp; media");
+		expect(html).not.toContain("New category:");
+		expect(html).toMatch(
+			/<button[^>]*name="answer"[^>]*value="create"[^>]*>\s*Save and next/,
+		);
+		expect(html).not.toContain("Create and next");
+	});
+
+	it("reads New category and Create and next for a name the family does not have", () => {
+		const html = card({
+			suggestedName: "Books & audio",
+			categories: withBooks,
+		});
+		expect(html).toContain("New category: Books &amp; audio");
+		expect(html).not.toContain("Existing category");
+		expect(html).toMatch(
+			/<button[^>]*name="answer"[^>]*value="create"[^>]*>\s*Create and next/,
+		);
+	});
+});

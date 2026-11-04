@@ -683,3 +683,40 @@ describe("Add files only the ticked purchases", () => {
 		).toBe(0);
 	});
 });
+
+// Decision 165: "Save and next" on an existing category files the purchase in it with no new category, and the same
+// "N more look like this" card follows it, keyed by the filed purchase's category.
+describe("after Save and next on an existing category (decision 165)", () => {
+	it("files the purchase in the existing category, makes none, and still offers the look-alikes", async () => {
+		const filed = await maybe(AUDIBLE);
+		const same = await tx({ raw: AUDIBLE, date: "2026-10-05" });
+		const categoriesBefore = (
+			await db
+				.prepare("SELECT COUNT(*) AS n FROM categories")
+				.first<{ n: number }>()
+		)?.n;
+		const { res, html } = await post(
+			"/settings/suggestions",
+			{ id: `category-${filed}`, answer: "create", new_name: "  groceries " },
+			true,
+		);
+		expect(res.status).toBe(200);
+		expect(trigger(res).toast?.message).toMatch(/^Added .+ to Groceries\.$/);
+		expect(
+			(
+				await db
+					.prepare("SELECT COUNT(*) AS n FROM categories")
+					.first<{ n: number }>()
+			)?.n,
+		).toBe(categoriesBefore);
+		expect(await state(filed)).toEqual({
+			categoryId: await categoryId("Groceries"),
+			source: "user",
+		});
+		expect(html).toContain("1 more looks like this");
+		expect(html).toMatch(
+			new RegExp(`name="ticked" value="${same}"[^>]*checked`),
+		);
+		expect(html).toMatch(/Add to Groceries/);
+	});
+});

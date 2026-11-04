@@ -154,6 +154,20 @@ export async function namesToAvoid(db: D1Database): Promise<string[]> {
 	return results.map((row) => row.name);
 }
 
+/**
+ * The names a single purchase's naming call must not offer (decision 165): the archived categories, which are names not
+ * to create, and the dismissed suggestions. The active categories are not here: the call is given them as choices
+ * instead, so it can name one that fits. The nightly naming keeps namesToAvoid.
+ */
+export async function purchaseNamesToAvoid(db: D1Database): Promise<string[]> {
+	const { results } = await db
+		.prepare(
+			"SELECT name FROM categories WHERE archived = 1 UNION SELECT name FROM category_suggestions WHERE status = 'dismissed'",
+		)
+		.all<{ name: string }>();
+	return results.map((row) => row.name);
+}
+
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
 export type PendingSuggestions = PendingSuggestion[] & { more: number };
 /** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */

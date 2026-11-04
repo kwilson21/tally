@@ -3192,6 +3192,57 @@ describe("a Maybe card's new category answers (decision 156)", () => {
 		}
 	});
 
+	it("a lazy name that is an active category reads Existing category, Save and next, and is announced as one (decision 165)", async () => {
+		const { id, ids } = await categoryCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder = env as unknown as { AI?: Ai };
+		const before = holder.AI;
+		// Workers AI answers in another capitalisation: the family's own spelling is what the row shows.
+		const run = vi.fn(async () => "groceries");
+		holder.AI = { run } as unknown as Ai;
+		try {
+			const { res, html } = await get(
+				`/settings/suggestions/new-category?id=${id}`,
+			);
+			expect(textOf(html)).toContain("Existing category: Groceries");
+			expect(textOf(html)).not.toContain("New category");
+			expect(html).toMatch(/>\s*Save and next\s*</);
+			expect(html).not.toContain("Create and next");
+			expect(trigger(res).announce).toBe(
+				"Tally suggests an existing category: Groceries",
+			);
+			// Nothing is made or filed by drawing the row.
+			expect(
+				await row(
+					"SELECT category_id FROM transactions WHERE id = ?",
+					ids.category,
+				),
+			).toEqual({ category_id: null });
+		} finally {
+			holder.AI = before;
+		}
+	});
+
+	it("a lazy name that is new keeps New category, Create and next, and says so in the announcer", async () => {
+		const { id } = await categoryCard();
+		await saveAiSwitches(db, { categories: true });
+		const holder = env as unknown as { AI?: Ai };
+		const before = holder.AI;
+		holder.AI = { run: vi.fn(async () => "Books & audio") } as unknown as Ai;
+		try {
+			const { res, html } = await get(
+				`/settings/suggestions/new-category?id=${id}`,
+			);
+			expect(textOf(html)).toContain("New category: Books & audio");
+			expect(html).toMatch(/>\s*Create and next\s*</);
+			expect(trigger(res).announce).toBe(
+				"Tally suggests a new category: Books & audio",
+			);
+		} finally {
+			holder.AI = before;
+		}
+	});
+
 	it("a store with a Never suggest for a new category gets no row, pending or named, and no lazy name", async () => {
 		const { id, address } = await categoryCard();
 		const suggestion = await db
