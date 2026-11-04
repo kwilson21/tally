@@ -4,17 +4,17 @@
 import { suggestCategoryName } from "../ai/suggest-name";
 import { cleanBankText } from "../clean-bank-text";
 import {
+	activeNamed,
 	fullMessage,
 	MAX_ACTIVE,
 	nameForm,
 	nameKey,
 	normalizeName,
 	parseCategory,
-	sameName,
 } from "../settings/category-form";
 import { readAiSwitches } from "./ai-switches";
-import { COLORS } from "./categories";
-import { namesToAvoid } from "./category-suggestions";
+import { COLORS, categoryNames } from "./categories";
+import { purchaseNamesToAvoid } from "./category-suggestions";
 import { merchantKeySql } from "./merchant-key";
 import { neverSuggestedSql } from "./never-suggest";
 import { categoryAskedSql } from "./suggestions-queue";
@@ -41,7 +41,7 @@ export function newCategoryTarget(
 	categories: { id: number; name: string; archived: boolean }[],
 ): NewCategoryTarget {
 	const name = normalizeName(typed);
-	const active = categories.find((c) => !c.archived && sameName(c.name, name));
+	const active = activeNamed(name, categories);
 	if (active)
 		return { ok: true, kind: "existing", id: active.id, name: active.name };
 	const parsed = parseCategory(nameForm(name), categories, null);
@@ -90,9 +90,10 @@ export async function pendingCategoryNames(
  * makes no call. Otherwise Workers AI names it, from the store's name and the purchase's cleaned bank text (decision
  * 164), and only while the categories switch is on and there is an AI binding (the demo has one too). The bank text is
  * read from the transaction here, never from the card's address. A store with a "Never suggest" for a new category gets
- * neither (the same check the queue's new categories use, decision 101), so no name and no call. Each transaction is
- * asked once: the answer, a name or none, is kept in maybe_names and read back with no call after that (decision 161).
- * Nothing here logs the name or the bank text.
+ * neither (the same check the queue's new categories use, decision 101), so no name and no call. The call is given the
+ * family's active categories to choose from (decision 165). Each transaction is asked once for each set of active
+ * categories: the answer, a name or none, is kept in maybe_names with that set's key and read back with no call while
+ * the set is unchanged (decisions 161 and 165). Nothing here logs the name or the bank text.
  */
 export async function suggestedCategoryName(
 	db: D1Database,
@@ -114,54 +115,95 @@ export async function suggestedCategoryName(
 	);
 	if (pending) return pending;
 	if (!ai || !(await readAiSwitches(db)).categories) return null;
-	// Asked once for each transaction (decision 161): a kept answer, a name or "no name", is read and never asked again.
+	// Asked once for each transaction and set of active categories (decisions 161 and 165): a kept answer is read and
+	// never asked again while the categories are the ones it was asked against. A category made, renamed, archived or
+	// restored changes the key, and the kept answer is then claimed and asked once more, below.
+	const active = (await categoryNames(db)).filter((c) => !c.archived);
+	const key = await categoriesKey(active);
 	const kept = await keptRow(db, item.transactionId);
-	if (kept) return kept.name;
-	// Claim first: the insert wins the transaction only once, so only the winner asks Workers AI. A request that loses
-	// the claim reads what is stored: no name while the winner is still waiting, its name once it is kept.
-	// The token names this claim: only it can finish the row, so an answer for a purchase that was deleted meanwhile (and
-	// whose id a new purchase reused) is dropped rather than written over that purchase's row.
+	if (kept && kept.key === key) return kept.name;
+	// Claim first: one statement inserts the row, or takes over a kept row whose key is no longer the current one, so
+	// only the winner asks Workers AI. A request that loses the claim reads what is stored: no name while the winner is
+	// still waiting, its name once it is kept. The token names this claim: only it can finish the row, so an answer for a
+	// purchase that was deleted meanwhile (and whose id a new purchase reused) is dropped rather than written over that
+	// purchase's row.
 	const token = crypto.randomUUID();
 	const claim = await db
 		.prepare(
-			`INSERT INTO maybe_names (transaction_id, name, claim)
-			SELECT id, NULL, ? FROM transactions WHERE id = ?
-			ON CONFLICT(transaction_id) DO NOTHING`,
+			`INSERT INTO maybe_names (transaction_id, name, claim, categories_key)
+			SELECT id, NULL, ?, ? FROM transactions WHERE id = ?
+			ON CONFLICT(transaction_id) DO UPDATE SET name = NULL, claim = excluded.claim, categories_key = excluded.categories_key
+				WHERE maybe_names.categories_key IS NOT excluded.categories_key`,
 		)
-		.bind(token, item.transactionId)
+		.bind(token, key, item.transactionId)
 		.run();
 	if ((claim.meta.changes ?? 0) === 0)
 		return (await keptRow(db, item.transactionId))?.name ?? null;
-	// The store's name and the purchase's cleaned bank text (decision 164). A person's own name, note or kind for this
-	// purchase is typed text and never leaves the app; no amount, date or account either.
+	// The store's name and the purchase's cleaned bank text (decision 164), and the family's active categories as choices
+	// (decision 165). A person's own name, note or kind for this purchase is typed text and never leaves the app; no
+	// amount, date or account either.
 	const result = await suggestCategoryName(
 		ai,
 		[item.merchant],
-		await namesToAvoid(db),
+		await purchaseNamesToAvoid(db),
 		bankText,
+		// Lowest id first: when two labels collide, the first category by id is the one a reply names.
+		[...active].sort((a, b) => a.id - b.id).map((c) => c.name),
 	);
 	// Kept whatever came back, so a failed call or an unusable answer is "no name" and is not asked again either.
 	const name = result.ok ? result.name : null;
 	const done = await db
 		.prepare(
-			"UPDATE maybe_names SET name = ? WHERE transaction_id = ? AND claim = ?",
+			"UPDATE maybe_names SET name = ?, categories_key = ? WHERE transaction_id = ? AND claim = ?",
 		)
-		.bind(name, item.transactionId, token)
+		.bind(name, key, item.transactionId, token)
 		.run();
 	// Nothing changed when the row was replaced meanwhile: the answer is for a purchase that is gone, so it is dropped.
 	if ((done.meta.changes ?? 0) === 0) return null;
+	// The categories may have changed while the call was in flight (decision 165): the answer was asked against `key`, so
+	// it is not offered now. The row keeps `key`, so the next draw sees a stale key and asks once more; no second call here.
+	const current = await categoriesKey(
+		(await categoryNames(db)).filter((c) => !c.archived),
+	);
+	if (current !== key) return null;
 	return name;
 }
 
-/** The kept row for a transaction, or null when it was never claimed. Its name is null for "no name" or while waiting. */
+/**
+ * The key of a set of active categories (decision 165): a SHA-256 of the sorted "id:name" list, as 16 hex characters.
+ * A kept name is read back only while its key is the current one, so any change to the active categories asks again.
+ */
+export async function categoriesKey(
+	active: { id: number; name: string }[],
+): Promise<string> {
+	const list = active
+		.map((c) => `${c.id}:${c.name}`)
+		.sort()
+		.join("\n");
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(list),
+	);
+	return [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("")
+		.slice(0, 16);
+}
+
+/**
+ * The kept row for a transaction, or null when it was never claimed. Its name is null for "no name" or while waiting,
+ * and its key is the active categories it was asked against (null for a row kept before migration 0066).
+ */
 async function keptRow(
 	db: D1Database,
 	transactionId: number,
-): Promise<{ name: string | null } | null> {
+): Promise<{ name: string | null; key: string | null } | null> {
 	return db
-		.prepare("SELECT name FROM maybe_names WHERE transaction_id = ?")
+		.prepare(
+			"SELECT name, categories_key AS key FROM maybe_names WHERE transaction_id = ?",
+		)
 		.bind(transactionId)
-		.first<{ name: string | null }>();
+		.first<{ name: string | null; key: string | null }>();
 }
 
 export type FileResult =

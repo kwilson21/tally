@@ -41,6 +41,7 @@ import {
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
+import { activeNamed } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
@@ -532,10 +533,17 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 	const ai = (c.env as Env & { AI?: Ai }).AI;
 	const name = await suggestedCategoryName(db, ai, item);
 	if (!name) return c.body(null);
+	// The row says "Existing category" for one of the family's active categories (decision 165), so it is named so.
+	const categories = (await categoryNames(db)).filter((c) => !c.archived);
+	const existing = activeNamed(name, categories);
 	// Announce only, never a toast: a passive suggestion appearing is not an answer or a change (CLAUDE.md names toast + announce for those).
 	c.header(
 		"HX-Trigger",
-		hxTrigger({ announce: `Tally suggests a new category: ${name}` }),
+		hxTrigger({
+			announce: existing
+				? `Tally suggests an existing category: ${existing.name}`
+				: `Tally suggests a new category: ${name}`,
+		}),
 	);
 	return c.html(
 		<NewCategoryRow
@@ -543,6 +551,7 @@ suggestions.get(`${PATH}/new-category`, async (c) => {
 			itemId={item.id}
 			fieldId={item.id}
 			name={name}
+			categories={categories}
 		/>,
 	);
 });

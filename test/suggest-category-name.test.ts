@@ -664,3 +664,205 @@ describe("bankTextToSend: the bank text is folded before it is checked and redac
 			expect(bankTextToSend("Shop", text)).toBeNull();
 	});
 });
+
+// Decision 165: the single purchase's call is given the family's active categories as choices. A reply that is one of
+// them is the household's own label, so it is accepted with its stored spelling, even where the shape rules would
+// reject it. Archived and dismissed names are still never offered.
+describe("cleanCategoryName: a reply that is an active category is that category (decision 165)", () => {
+	it("returns the stored spelling of an active category, whatever the model's capitals", () => {
+		expect(cleanCategoryName("ikea", [], ["IKEA"])).toBe("IKEA");
+		expect(cleanCategoryName("pet care", [], ["Pet care"])).toBe("Pet care");
+		expect(cleanCategoryName("  Books & Media  ", [], ["Books & media"])).toBe(
+			"Books & media",
+		);
+	});
+
+	it("accepts an active category the shape rules would reject: digits, four words, or over 30 characters", () => {
+		expect(cleanCategoryName("Gear 2 Pro", [], ["Gear 2 Pro"])).toBe(
+			"Gear 2 Pro",
+		);
+		expect(
+			cleanCategoryName(
+				"Home And Garden Pet Care",
+				[],
+				["Home And Garden Pet Care"],
+			),
+		).toBe("Home And Garden Pet Care");
+		const long = "Household Cleaning And Laundry Supplies Weekly";
+		expect(cleanCategoryName(long, [], [long])).toBe(long);
+	});
+
+	it("still drops an archived or dismissed name, which is in the avoid list and not a choice", () => {
+		expect(
+			cleanCategoryName("Pet Care", ["Pet Care"], ["Groceries"]),
+		).toBeNull();
+		expect(
+			cleanCategoryName("Hobby Supplies", ["Hobby Supplies"], []),
+		).toBeNull();
+	});
+
+	it("checks the choices line by line: a choice on a later line is taken once the first line is not usable", () => {
+		expect(cleanCategoryName("None\nIKEA", [], ["IKEA"])).toBe("IKEA");
+	});
+
+	it("does not change a reply that is not a choice", () => {
+		expect(cleanCategoryName("Pet Care", [], ["IKEA"])).toBe("Pet Care");
+	});
+});
+
+describe("suggestCategoryName: the single purchase lists the family's active categories as choices (decision 165)", () => {
+	const fakeAi = (run: (...args: unknown[]) => unknown) =>
+		({ run: vi.fn(run) }) as unknown as Ai & { run: ReturnType<typeof vi.fn> };
+	const CHOOSE =
+		"If one of the family's categories listed below truly fits this purchase, reply with exactly that category's name; otherwise name a new category. Reply with only the name.";
+	const ACTIVE = ["Groceries", "Books & media", "IKEA"];
+
+	it("puts the active names in the data part on one line and asks for exactly one of them if it fits", async () => {
+		const ai = fakeAi(async () => ({ response: "Books & media" }));
+		expect(
+			await suggestCategoryName(
+				ai,
+				["Audible"],
+				["Dismissed Name"],
+				"audible",
+				ACTIVE,
+			),
+		).toEqual({ ok: true, name: "Books & media" });
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		const system = input.messages[0]?.content ?? "";
+		const user = input.messages[1]?.content ?? "";
+		expect(system).toContain(CHOOSE);
+		expect(user).toContain(
+			"Family categories: Groceries; Books & media; IKEA\n",
+		);
+		expect(user).toContain("Categories to avoid: Dismissed Name");
+		expect(user).not.toContain(
+			"Categories to avoid: Dismissed Name; Groceries",
+		);
+	});
+
+	it("gives the choice sentence to a single purchase with no usable bank text too", async () => {
+		const ai = fakeAi(async () => ({ response: "Gym" }));
+		await suggestCategoryName(ai, ["Planet Fitness"], [], "", ACTIVE);
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(input.messages[0]?.content).toContain(CHOOSE);
+		expect(input.messages[1]?.content).toContain(
+			"Family categories: Groceries; Books & media; IKEA",
+		);
+	});
+
+	it("a single purchase with no choices gets the prompt as before", async () => {
+		const ai = fakeAi(async () => ({ response: "Books & audio" }));
+		await suggestCategoryName(ai, ["Amazon"], HAVE, "audible");
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(input.messages[0]?.content).not.toContain(
+			"reply with exactly that category",
+		);
+		expect(input.messages[1]?.content).not.toContain("Family categories");
+	});
+
+	it("the nightly prompt never lists the choices, even if they are passed", async () => {
+		const ai = fakeAi(async () => ({ response: "Pet Care" }));
+		await suggestCategoryName(ai, ["Chewy", "Petsmart"], HAVE, null, ACTIVE);
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		const all = `${input.messages[0]?.content}\n${input.messages[1]?.content}`;
+		expect(all).not.toContain("Family categories");
+		expect(all).not.toContain("reply with exactly that category");
+		expect(input.messages[0]?.content).toBe(
+			"Suggest one short, plain category name for this group of purchases. Reply with only the name.",
+		);
+	});
+
+	it("takes the quote and marker characters out of a category name and keeps it on one line", async () => {
+		const ai = fakeAi(async () => ({ response: "Gym" }));
+		await suggestCategoryName(ai, ["Planet Fitness"], [], "", [
+			'Pets "and" <more>\nlines',
+		]);
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		const line = (input.messages[1]?.content ?? "")
+			.split("\n")
+			.find((l) => l.startsWith("Family categories:"));
+		expect(line).toBe("Family categories: Pets and more lines");
+	});
+
+	it("caps the choices at the 50 active categories", async () => {
+		const ai = fakeAi(async () => ({ response: "Gym" }));
+		const many = Array.from({ length: 60 }, (_, i) => `Category ${i + 1}`);
+		await suggestCategoryName(ai, ["Planet Fitness"], [], "", many);
+		const [, input] = ai.run.mock.calls[0] as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		const line =
+			(input.messages[1]?.content ?? "")
+				.split("\n")
+				.find((l) => l.startsWith("Family categories:")) ?? "";
+		expect(line.split("; ")).toHaveLength(50);
+		expect(line).not.toContain("Category 51");
+	});
+});
+
+// Decision 165 (review on PR #850): the prompt shows each active category as its sanitized label, so a reply can name
+// it in that form. The reply is matched to the stored category by its stored name or its label, and returns the
+// stored spelling.
+describe("cleanCategoryName: a reply in the prompt's label of an active category returns the stored category (decision 165)", () => {
+	it("a reply equal to the sanitized label returns the stored name with its apostrophe", () => {
+		expect(cleanCategoryName("Kids activities", [], ["Kids' activities"])).toBe(
+			"Kids' activities",
+		);
+	});
+
+	it("a reply in other capitals, with its apostrophe, returns the stored name too", () => {
+		expect(
+			cleanCategoryName("kids' activities", [], ["Kids' activities"]),
+		).toBe("Kids' activities");
+		expect(cleanCategoryName("KIDS ACTIVITIES", [], ["Kids' activities"])).toBe(
+			"Kids' activities",
+		);
+	});
+
+	it("keeps working when two active labels collide: the first in the list (lowest id) wins, and nothing throws", () => {
+		expect(
+			cleanCategoryName(
+				"Kids activities",
+				[],
+				["Kids' activities", "Kids' Activities"],
+			),
+		).toBe("Kids' activities");
+	});
+});
+
+describe("suggestCategoryName: the prompt's label of a category with a stripped character (decision 165)", () => {
+	it("lists the sanitized label in the prompt and returns the stored name for the label reply", async () => {
+		const run = vi.fn(async () => ({ response: "Kids activities" }));
+		const ai = { run } as unknown as Ai;
+		expect(
+			await suggestCategoryName(ai, ["Kids Club"], [], "kids club", [
+				"Kids' activities",
+			]),
+		).toEqual({ ok: true, name: "Kids' activities" });
+		const [, input] = run.mock.calls[0] as unknown as [
+			string,
+			{ messages: { content: string }[] },
+		];
+		expect(input.messages[1]?.content).toContain(
+			"Family categories: Kids activities",
+		);
+		expect(input.messages[1]?.content).not.toContain("Kids'");
+	});
+});

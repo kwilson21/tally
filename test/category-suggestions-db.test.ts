@@ -10,6 +10,7 @@ import {
 	namesToAvoid,
 	noneFitTransactions,
 	pendingSuggestions,
+	purchaseNamesToAvoid,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
 import { addNeverSuggest } from "../src/db/never-suggest";
@@ -639,6 +640,33 @@ describe("namesToAvoid", () => {
 				"Pet Care",
 			]),
 		);
+		expect(avoid).not.toContain("Subscriptions");
+		expect(pending).not.toBeNull();
+	});
+});
+
+// Decision 165: a single purchase's naming call is given the active categories as choices, so its avoid list keeps the
+// archived ones and the dismissed suggestions only. The nightly naming's namesToAvoid is unchanged (above).
+describe("purchaseNamesToAvoid", () => {
+	it("holds the archived categories and the dismissed suggestions, but not an active category or a pending one", async () => {
+		await db
+			.prepare("UPDATE categories SET archived = 1 WHERE name = 'Gas'")
+			.run();
+		const pending = await saveSuggestion(db, "Subscriptions", [
+			await add(),
+			await add({ rawName: "HULU" }),
+			await add({ rawName: "SPOTIFY" }),
+		]);
+		const dismissed = await saveSuggestion(db, "Pet Care", [
+			await add({ rawName: "CHEWY" }),
+			await add({ rawName: "BANFIELD" }),
+			await add({ rawName: "PETSMART" }),
+		]);
+		await dismissSuggestion(db, dismissed as number);
+		const avoid = await purchaseNamesToAvoid(db);
+		expect(avoid).toEqual(expect.arrayContaining(["Gas", "Pet Care"]));
+		for (const active of ["Groceries", "Eating Out", "Kids", "Household"])
+			expect(avoid).not.toContain(active);
 		expect(avoid).not.toContain("Subscriptions");
 		expect(pending).not.toBeNull();
 	});

@@ -3,6 +3,7 @@ import { shortDay } from "../dates";
 import type { MoreLikeThis } from "../db/more-like-this";
 import type { SuggestionItem } from "../db/suggestions-queue";
 import { formatCents } from "../money";
+import { activeNamed } from "../settings/category-form";
 import { Button } from "./button";
 import { Icon } from "./icons";
 import { NameChoices } from "./name-choices";
@@ -303,6 +304,7 @@ export function SuggestionCard({
 							itemId={item.id}
 							fieldId={fieldId}
 							name={values?.newName ?? suggestedName ?? ""}
+							categories={categories}
 							open={values?.newName !== undefined}
 							error={values?.newNameError}
 						/>
@@ -488,12 +490,15 @@ function YesForm({
  * The dashed row for Tally's suggested new category (decision 156): "New category: {name}", labelled "Tally's
  * suggestion". It is the second of a category guess's three answers, after Yes and before Something else. It opens
  * in place with no script, the name pre-filled and editable, and nothing is made until "Create and next".
+ * When the name is one of the family's active categories (decision 165) the row reads "Existing category: {name}" with
+ * the family's own spelling, and its button reads "Save and next": the purchase is filed in that category, none is made.
  */
 export function NewCategoryRow({
 	action,
 	itemId,
 	fieldId,
 	name,
+	categories = [],
 	open = false,
 	error,
 }: {
@@ -505,11 +510,14 @@ export function NewCategoryRow({
 	fieldId: string;
 	/** The name Tally suggested, or the one a person typed when the answer was refused. */
 	name: string;
+	/** The family's active categories: a name that is one of them is an existing category (decision 165). */
+	categories?: { id: number; name: string; archived?: boolean }[];
 	/** Open, as a refused answer leaves it, so the typed name is on screen. */
 	open?: boolean;
 	/** Why the typed name was refused: the field is marked invalid and names this message. */
 	error?: string;
 }) {
+	const existing = activeNamed(name, categories);
 	return (
 		<details
 			class="group rounded-control border border-dashed border-ink px-4"
@@ -520,7 +528,8 @@ export function NewCategoryRow({
 					<span class="text-sm text-muted">Tally's suggestion</span>
 					<span class="flex min-w-0 items-center gap-1.5 text-lg wrap-anywhere">
 						<Icon name="sparkles" class="size-4 shrink-0" />
-						New category: {name}
+						{existing ? "Existing category" : "New category"}:{" "}
+						{existing?.name ?? name}
 					</span>
 				</span>
 				<Icon
@@ -541,7 +550,7 @@ export function NewCategoryRow({
 					surface="paper"
 				/>
 				<Button type="submit" name="answer" value="create" class="w-full">
-					Create and next
+					{existing ? "Save and next" : "Create and next"}
 				</Button>
 			</form>
 		</details>
