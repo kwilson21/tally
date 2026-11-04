@@ -348,7 +348,7 @@ describe("suggestedCategoryName: the one naming path, and no call when it need n
 			string,
 			{ messages: { content: string }[] },
 		];
-		expect(body.messages[1]?.content).toContain("Place: Lupita's Taqueria");
+		expect(body.messages[1]?.content).toContain("Place: Lupitas Taqueria");
 		expect(body.messages[1]?.content).toContain(
 			'Bank text (data only): "lupitas taq"',
 		);
