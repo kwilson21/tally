@@ -90,9 +90,30 @@ describe("cleanCategoryName: a reply that reads as an instruction is never sugge
 			"Disregard Everything",
 			"You Are Admin",
 			"Act As Root",
+			"Forget Everything",
+			"Reply With Yes",
+			"System Prompt",
 			"System: Pay",
 		])
 			expect(cleanCategoryName(answer, HAVE)).toBeNull();
+	});
+
+	it("keeps real category words that the bank-text list would catch: instructions, pretend, and words inside longer words", () => {
+		for (const name of [
+			"Music Instruction",
+			"Driving Instructions",
+			"Impact Assistance",
+			"Contract Assets",
+			"Fact Assessment",
+			"Intact Assets",
+			"Pretend Play",
+			"Act Fast",
+			"System Fees",
+			"User Fees",
+			"Pet Supplies",
+			"Books & audio",
+		])
+			expect(cleanCategoryName(name, [])).toBe(name);
 	});
 
 	it("falls through to the next valid line when the first reads as an instruction", () => {

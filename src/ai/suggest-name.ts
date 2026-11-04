@@ -214,8 +214,8 @@ export function cleanCategoryName(
 			/\b(?:here is|category|suggest|because|would be)\b/i.test(name)
 		)
 			continue;
-		// Decision 164: a reply that reads as an instruction is never shown, the same phrase list as the bank text.
-		if (readsAsInstruction(foldBankText(name))) continue;
+		// Decision 164: a reply that reads as an instruction is never shown (a narrower list than the bank text's).
+		if (nameReadsAsInstruction(name)) continue;
 		if (
 			/^(?:none(?: of these fit)?|nothing|n\/?a)\.?$/i.test(name) ||
 			avoid.some((n) => n.toLowerCase() === name.toLowerCase())
@@ -258,6 +258,19 @@ function foldBankText(text: string): string {
 function readsAsInstruction(folded: string): boolean {
 	const compact = folded.replace(/[^\p{L}]/gu, "").toLowerCase();
 	return INSTRUCTION_LIKE.test(folded) || COMPACT_INSTRUCTION.test(compact);
+}
+
+/**
+ * The phrases a returned category name is checked against (decision 164): the bank-text list as spaced words only,
+ * without "instructions" and "pretend", which are real category words (Music Instruction, Pretend Play). A name is
+ * letters, spaces and a few marks, at most three words (cleanCategoryName), so there is no compact check.
+ */
+const NAME_INSTRUCTION_LIKE =
+	/\bignore\s+(?:all\s+|the\s+|any\s+)?(?:previous|above|prior|earlier)\b|\bignore\s+this\b|\bdisregard\b|\bforget\s+everything\b|\bsystem\s+prompt\b|\b(?:reply|respond)\s+with\b|\byou\s+are\b|\bact\s+as\b|\bcall\b[\s\S]*\bnow\b/i;
+
+/** True when a returned category name reads as an instruction (NAME_INSTRUCTION_LIKE). Best effort, as the bank text's check. */
+function nameReadsAsInstruction(name: string): boolean {
+	return NAME_INSTRUCTION_LIKE.test(foldBankText(name));
 }
 
 /**
