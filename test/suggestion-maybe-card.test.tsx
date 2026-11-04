@@ -44,18 +44,22 @@ describe("the Maybe card's three answers, in order (decision 156)", () => {
 	it("draws Yes, then the dashed suggestion row, then Something else", () => {
 		const html = card({ suggestedName: "Books & audio" });
 		const yes = html.indexOf('value="yes"');
-		const row = html.indexOf("Tally&#39;s suggestion");
+		const row = html.indexOf("New category:");
 		const else_ = html.indexOf("Something else");
 		expect(yes).toBeGreaterThan(-1);
 		expect(row).toBeGreaterThan(yes);
 		expect(else_).toBeGreaterThan(row);
 	});
 
-	it("draws the row dashed, labelled Tally's suggestion, with its name", () => {
+	it("draws the row dashed, with its name and no visible label, and Tally's suggestion as its accessible name (decision 166)", () => {
 		const html = card({ suggestedName: "Books & audio" });
 		expect(html).toMatch(/<details[^>]*border-dashed[^>]*>/);
-		expect(html).toContain("Tally&#39;s suggestion");
 		expect(html).toContain("New category: Books &amp; audio");
+		// The visible small label is gone; screen readers still hear whose suggestion it is.
+		expect(html).toContain(
+			'<span class="sr-only">Tally&#39;s suggestion: </span>',
+		);
+		expect(html).not.toMatch(/text-muted">Tally&#39;s suggestion</);
 	});
 
 	it("opens the row in place with the name in a labelled, editable field and Create and next", () => {
@@ -157,5 +161,60 @@ describe("the dashed row for an existing category (decision 165)", () => {
 		expect(html).toMatch(
 			/<button[^>]*name="answer"[^>]*value="create"[^>]*>\s*Create and next/,
 		);
+	});
+});
+
+// Decision 166: a suggested name that is the card's own guess (the Maybe category) is not offered as a row, since Yes
+// already files the purchase there. A different category, or a new name, shows its row as before.
+describe("the suggestion row is not shown when it is the guess's own category (decision 166)", () => {
+	const shopping = { ...audible, category: "Shopping", categoryId: 9 };
+	const withBooks = [...categories, { id: 7, name: "Books & media" }];
+
+	it("hides the row when the suggested name is the guess, in any case, and still draws Yes", () => {
+		for (const name of ["Entertainment", "entertainment", "  ENTERTAINMENT "]) {
+			const html = card({ suggestedName: name });
+			expect(html).not.toContain("Tally&#39;s suggestion");
+			expect(html).not.toContain("New category");
+			expect(html).not.toContain("Existing category");
+			expect(html).not.toContain('name="new_name"');
+			expect(html).toContain("Yes, Entertainment");
+		}
+	});
+
+	it("draws no loader either when the pending name is the guess, so nothing asks for it", () => {
+		const html = card({
+			suggestedName: "Entertainment",
+			suggestUrl: `${PATH}/new-category?id=category-9`,
+		});
+		expect(html).not.toContain('hx-trigger="load"');
+		expect(html).toContain("Yes, Entertainment");
+	});
+
+	it("still shows the row, as Existing category, for an active category that is not the guess", () => {
+		const html = card({
+			item: shopping,
+			suggestedName: "Books & media",
+			categories: withBooks,
+		});
+		expect(html).toContain("Tally&#39;s suggestion: ");
+		expect(html).toContain("Existing category: Books &amp; media");
+		expect(html).toContain("Save and next");
+		expect(html).toContain("Yes, Shopping");
+	});
+
+	it("still shows the row, as New category, for a new name", () => {
+		const html = card({ item: shopping, suggestedName: "Books & audio" });
+		expect(html).toContain("New category: Books &amp; audio");
+		expect(html).toContain("Create and next");
+		expect(html).toContain("Yes, Shopping");
+	});
+
+	it("keeps a typed name on screen even when it is the guess, since the person typed it", () => {
+		const html = card({
+			suggestedName: "Entertainment",
+			values: { id: "category-9", newName: "Entertainment" },
+			error: "Give the category a name.",
+		});
+		expect(html).toContain('name="new_name"');
 	});
 });
