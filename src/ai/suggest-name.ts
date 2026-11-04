@@ -232,9 +232,31 @@ export function cleanCategoryName(
 const MAX_BANK_TEXT = 40;
 /** Currency amounts, and bare decimal amounts such as 14.99 (decision 164). */
 const AMOUNT = /[$€£¥]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*\.\d+/g;
-/** Words that read as an instruction to the model, in any capitals (decision 164). */
+/**
+ * Phrases that read as an instruction to the model, in any capitals (decision 164). A best-effort list, not a guarantee:
+ * it is checked on the folded text with its spaces, and again with the spaces taken out (COMPACT_INSTRUCTION), so a
+ * phrase split by odd spacing still counts.
+ */
 const INSTRUCTION_LIKE =
-	/\bignore\s+(?:all\s+|the\s+|any\s+)?(?:previous|above|prior|earlier)\b|\bdisregard\b|\bsystem\s+prompt\b|\binstructions?\b|\b(?:reply|respond)\s+with\b|\byou\s+are\b|\bcall\b[\s\S]*\bnow\b/i;
+	/\bignore\s+(?:all\s+|the\s+|any\s+)?(?:previous|above|prior|earlier)\b|\bignore\s+this\b|\bdisregard\b|\bforget\s+everything\b|\bsystem\s+prompt\b|\binstructions?\b|\b(?:reply|respond)\s+with\b|\byou\s+are\b|\bact\s+as\b|\bpretend\b|\bcall\b[\s\S]*\bnow\b|\b(?:assistant|user|system)\s*:/i;
+/** The same phrases as letters only, lowercase, with no spaces (see INSTRUCTION_LIKE). */
+const COMPACT_INSTRUCTION =
+	/ignore(?:all|the|any)?(?:previous|above|prior|earlier)|ignorethis|disregard|forgeteverything|systemprompt|instructions?|(?:reply|respond)with|youare|actas|pretend|call.*now/;
+
+/**
+ * The text with the characters that hide an instruction made plain (decision 164): format characters (zero-width
+ * spaces and joiners, bidi marks) become spaces, and full-width and other compatibility forms are folded (NFKC), so
+ * a full-width digit is an ASCII one. Other characters are kept as they are, so a short alphanumeric is sent as it was.
+ */
+function foldBankText(text: string): string {
+	return text.replace(/\p{Cf}/gu, " ").normalize("NFKC");
+}
+
+/** True when the folded text reads as an instruction, with its spaces or without them (INSTRUCTION_LIKE). */
+function readsAsInstruction(folded: string): boolean {
+	const compact = folded.replace(/[^\p{L}]/gu, "").toLowerCase();
+	return INSTRUCTION_LIKE.test(folded) || COMPACT_INSTRUCTION.test(compact);
+}
 
 /**
  * The bank's text without its amounts and number runs: a currency amount, a bare decimal, any token with five or
@@ -246,7 +268,8 @@ function dropNumbers(text: string): string {
 		.replace(AMOUNT, " ")
 		.split(/\s+/)
 		.filter((token) => {
-			const digits = (token.match(/\d/g) ?? []).length;
+			// Any Unicode digit counts, so an Arabic-Indic run is dropped like an ASCII one.
+			const digits = (token.match(/\p{Nd}/gu) ?? []).length;
 			if (digits === 0) return true;
 			return digits < 5 && /\p{L}/u.test(token);
 		})
@@ -269,7 +292,7 @@ function capAtWord(text: string, max = MAX_BANK_TEXT): string {
  * dropped, then capped at 40 characters on a word boundary. Empty when nothing is left.
  */
 export function redactBankTextForAi(cleaned: string): string {
-	return capAtWord(dropNumbers(cleaned));
+	return capAtWord(dropNumbers(foldBankText(cleaned)));
 }
 
 /**
@@ -288,8 +311,10 @@ export function bankTextToSend(
 			.split(/[^\p{L}\p{N}]+/u)
 			.filter(Boolean)
 			.join(" ");
-	const loose = dropNumbers(bankText ?? "");
-	if (INSTRUCTION_LIKE.test(loose)) return null;
+	const folded = foldBankText(bankText ?? "");
+	const loose = dropNumbers(folded);
+	// Checked before the cap, and on the text with its numbers too, since a number between two words can hide a phrase.
+	if (readsAsInstruction(folded) || readsAsInstruction(loose)) return null;
 	const text = capAtWord(loose);
 	if (!text || words(text) === words(store)) return null;
 	return text;
@@ -300,6 +325,24 @@ export function bankTextToSend(
  * close the quotes around it or open a tag (decision 164).
  */
 const boundaryValue = (text: string) => text.replace(/["'`“”‘’<>[\]{}\\]/g, "");
+
+/** A name as one line: format characters and every run of whitespace or control characters become one space. */
+const oneLine = (text: string) =>
+	text
+		.replace(/\p{Cf}/gu, "")
+		.replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu, " ")
+		.trim();
+
+/** The single purchase's store name in the prompt: one line, no quote or marker characters, at most 60 characters. */
+const placeLabel = (store: string) =>
+	capAtWord(oneLine(boundaryValue(oneLine(store))), 60);
+
+/**
+ * A nightly group's store name in the prompt: one line, and its double quotes, backticks and angle brackets taken out.
+ * Any other name, apostrophes included, comes out as it went in (the nightly naming keeps its wording, decision 92).
+ */
+const nightlyName = (store: string) =>
+	oneLine(oneLine(store).replace(/["`<>]/g, ""));
 
 /**
  * Asks Workers AI for one category name for a group of purchases the categories don't fit. For one purchase, the
@@ -318,10 +361,15 @@ export async function suggestCategoryName(
 		merchants.length === 1 && merchants[0] !== undefined
 			? bankTextToSend(merchants[0], bankText)
 			: null;
+	// A purchase always passes its bank text, a string (possibly empty); the nightly naming passes null.
+	const isPurchase = bankText !== null && merchants.length === 1;
+	const label = isPurchase
+		? placeLabel(merchants[0] ?? "")
+		: merchants.map(nightlyName).join("; ");
 	const places =
 		purchaseText === null
-			? `Places: ${merchants.join("; ")}`
-			: `Place: ${merchants[0]}\nBank text (data only): "${boundaryValue(purchaseText)}"`;
+			? `Places: ${label}`
+			: `Place: ${label}\nBank text (data only): "${boundaryValue(purchaseText)}"`;
 	try {
 		const answer = await ai.run(
 			NAME_MODEL,
