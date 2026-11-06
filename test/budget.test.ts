@@ -253,7 +253,8 @@ describe("statusSentence", () => {
 			3,
 			"Eating Out and Gas are over. 3 bills are overdue.",
 		],
-		[[], 2, "No budgets set yet."],
+		[[], 2, "No budgets set yet. 2 bills are overdue."],
+		[[], 1, "No budgets set yet. 1 bill is overdue."],
 		[[cat("Groceries", 100)], 0, "Everything is on track."],
 	])("with overdue bills %#", (categories, overdueBills, sentence) => {
 		expect(statusSentence(categories, overdueBills)).toBe(sentence);

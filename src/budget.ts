@@ -172,8 +172,8 @@ export function statusSentence(
 	categories: CategorySummary[],
 	overdueBills = 0,
 ): string {
-	if (categories.length === 0) return "No budgets set yet.";
 	const bills = overdueBillsClause(overdueBills);
+	if (categories.length === 0) return `No budgets set yet.${bills}`;
 	const over = categories.filter((c) => c.over);
 	if (over.length === 0)
 		return overdueBills > 0
