@@ -2,6 +2,7 @@
 // first screen. The month is a small heading above it, Why? explains the amount, the status sentence
 // says what it means, and the Band is the one next action. Things to try and the Budget list follow.
 import type { Child } from "hono/jsx";
+import { overdueBillsClause } from "../budget";
 import { formatCents } from "../money";
 import { Band } from "./band";
 import { BankBehind } from "./bank-line";
@@ -23,6 +24,8 @@ type Props = {
 	safeToSpendCents: number;
 	/** The status sentence: "Eating Out is $36 over. Everything else is on track." */
 	status: string;
+	/** Bills Bills lists as overdue, said once on the status line, the over-budget one too (decision 167). */
+	overdueBills?: number;
 	/** Each connected bank that needs attention, in words (src/stale-bank.ts). */
 	bankLine?: string[];
 	/** Apple Card's reminder, in words, once it hasn't been updated for a week (src/apple-card/stale.ts). */
@@ -49,9 +52,10 @@ export function homeStatusWords(
 	status: string,
 	safeToSpendCents: number,
 	hasBudgets: boolean,
+	overdueBills = 0,
 ): string {
 	return hasBudgets && safeToSpendCents < 0
-		? "Over budget this month. Spending more takes it further over."
+		? `Over budget this month. Spending more takes it further over.${overdueBillsClause(overdueBills)}`
 		: status;
 }
 
@@ -61,6 +65,7 @@ export function HomeTop({
 	monthHeading,
 	safeToSpendCents,
 	status,
+	overdueBills = 0,
 	bankLine,
 	appleLine,
 	band,
@@ -108,7 +113,7 @@ export function HomeTop({
 				tabindex={focusStatus ? -1 : undefined}
 				autofocus={focusStatus}
 			>
-				{homeStatusWords(status, safeToSpendCents, hasBudgets)}
+				{homeStatusWords(status, safeToSpendCents, hasBudgets, overdueBills)}
 			</p>
 			{currentMonth && bankLine && <BankBehind words={bankLine} />}
 			{currentMonth && appleLine && (

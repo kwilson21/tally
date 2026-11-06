@@ -728,7 +728,7 @@ async function renderList(
 									// / moves focus here (keyboard.js, decision 118); from another page it arrives with focus.
 									aria-keyshortcuts="/"
 									autofocus={focusSearch}
-									class="min-h-11 w-full rounded-control border border-rule bg-band py-2 pl-10 pr-3 text-lg"
+									class="min-h-11 w-full rounded-control border border-muted bg-band py-2 pl-10 pr-3 text-lg"
 									{...a11y}
 								/>
 							</div>

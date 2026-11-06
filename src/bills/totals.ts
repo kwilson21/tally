@@ -190,12 +190,14 @@ export function calculateBillTotals({
 	// "To pay soon" counts each due or overdue occurrence once (spec §6).
 	const soon = new Map<string, number>();
 	const soonBillIds = new Set<number>();
+	const overdueBillIds = new Set<number>();
 	for (const [key, occurrence] of judged) {
 		if (!activeIds.has(occurrence.billId)) continue;
 		if (occurrence.status !== "due" && occurrence.status !== "overdue")
 			continue;
 		soon.set(key, Math.max(0, occurrence.amountCents - occurrence.paidCents));
 		soonBillIds.add(occurrence.billId);
+		if (occurrence.status === "overdue") overdueBillIds.add(occurrence.billId);
 	}
 	let stillToPayCents = 0;
 	for (const occurrence of thisMonthOccurrences) {
@@ -226,6 +228,8 @@ export function calculateBillTotals({
 		stillToPayCents,
 		// Bills to pay soon, each bill once; soonCents still sums every occurrence due soon.
 		soonCount: soonBillIds.size,
+		// Bills with an overdue, unpaid occurrence, each once; Home's status sentence says so.
+		overdueCount: overdueBillIds.size,
 		soonCents,
 		setAsideCents,
 		groups,

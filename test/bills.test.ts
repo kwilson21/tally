@@ -990,7 +990,7 @@ describe("Bills", () => {
 				)?.[1] ?? "";
 			expect(headline).toMatch(/^\$\d/);
 			expect(html).toContain(
-				"Eating Out is $86 over. Everything else is on track.",
+				"Eating Out is $86 over. Other budgets are on track.",
 			);
 		} finally {
 			vi.useRealTimers();

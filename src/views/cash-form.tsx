@@ -123,7 +123,7 @@ export function CashForm({
 					<input
 						id={`${idPrefix}-note`}
 						name="note"
-						class={`rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
+						class={`rounded-control border border-muted bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
 						value={values.note}
 						{...a11y}
 					/>

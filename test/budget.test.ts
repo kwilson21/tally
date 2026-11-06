@@ -239,4 +239,24 @@ describe("statusSentence", () => {
 	])("%#", (categories, sentence) => {
 		expect(statusSentence(categories)).toBe(sentence);
 	});
+
+	it.each([
+		[[cat("Groceries", 100)], 1, "Budgets are on track. 1 bill is overdue."],
+		[[cat("Groceries", 100)], 2, "Budgets are on track. 2 bills are overdue."],
+		[
+			[cat("Eating Out", -3600), cat("Gas", 50)],
+			1,
+			"Eating Out is $36 over. Other budgets are on track. 1 bill is overdue.",
+		],
+		[
+			[cat("Eating Out", -100), cat("Gas", -200)],
+			3,
+			"Eating Out and Gas are over. 3 bills are overdue.",
+		],
+		[[], 2, "No budgets set yet. 2 bills are overdue."],
+		[[], 1, "No budgets set yet. 1 bill is overdue."],
+		[[cat("Groceries", 100)], 0, "Everything is on track."],
+	])("with overdue bills %#", (categories, overdueBills, sentence) => {
+		expect(statusSentence(categories, overdueBills)).toBe(sentence);
+	});
 });

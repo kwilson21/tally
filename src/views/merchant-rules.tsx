@@ -102,7 +102,7 @@ export function MerchantRules({
 						</label>
 						<input
 							id={`${id}-search`}
-							class="min-h-11 min-w-0 flex-1 rounded-control border border-rule bg-paper px-3 text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+							class="min-h-11 min-w-0 flex-1 rounded-control border border-muted bg-paper px-3 text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
 							name="rules_search"
 							value={search}
 							placeholder="Search merchants"

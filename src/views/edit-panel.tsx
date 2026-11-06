@@ -839,7 +839,7 @@ export function EditSheet({
 										id="note"
 										name="note"
 										rows={2}
-										class={`w-full rounded-control border border-rule bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
+										class={`w-full rounded-control border border-muted bg-paper px-3 py-2 text-lg ${errorClass ?? ""}`}
 										{...a11y}
 									>
 										{values.note ?? ""}

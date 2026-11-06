@@ -58,6 +58,26 @@ describe("bill totals", () => {
 		},
 	);
 
+	it("counts a bill left overdue from an earlier month in overdueCount, though October sets none of it aside", () => {
+		const totals = calculateBillTotals({
+			month: "2026-10",
+			bills: [bill(7, "monthly")],
+			displayedOccurrences: [
+				{
+					billId: 7,
+					dueDate: "2026-09-28",
+					status: "overdue",
+					amountCents: 9000,
+					paidCents: 0,
+				},
+			],
+			thisMonthOccurrences: [],
+		});
+		// Home lists it as "Was due Sep 28" and Bills puts it in Overdue, so Home's sentence says so too.
+		expect(totals.overdueCount).toBe(1);
+		expect(totals.setAsideCents).toBe(0);
+	});
+
 	it("counts overdue unpaid bills in still to pay and excludes a yearly bill due in March", () => {
 		const totals = calculateBillTotals({
 			month: "2026-10",
@@ -175,6 +195,8 @@ describe("bill totals", () => {
 		});
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
+		// Two of its occurrences are overdue, but it is one bill.
+		expect(totals.overdueCount).toBe(1);
 	});
 
 	it("counts every October occurrence in Upcoming and still to pay, and September's overdue one in Overdue (decision 122)", () => {
