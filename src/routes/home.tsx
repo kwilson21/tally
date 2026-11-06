@@ -263,6 +263,8 @@ async function renderHome(
 		refundsCents,
 		billsStillDueCents: billTotals?.stillToPayCents ?? 0,
 	});
+	// Bills Bills lists as overdue, said on the status line (decision 167); a finished month says nothing of bills.
+	const overdueBills = current ? (billTotals?.overdueCount ?? 0) : 0;
 	// Any budget this month, the same test statusSentence uses. With none, Home is never over budget (#519).
 	const hasBudgets = summary.categories.length > 0;
 	// With no budget the forecast would measure spending against $0 and draw it over budget, so it waits for one.
@@ -313,10 +315,8 @@ async function renderHome(
 								}
 								safeToSpendCents={summary.safeToSpendCents}
 								hasBudgets={hasBudgets}
-								status={statusSentence(
-									summary.categories,
-									current ? (billTotals?.overdueCount ?? 0) : 0,
-								)}
+								status={statusSentence(summary.categories, overdueBills)}
+								overdueBills={overdueBills}
 								bankLine={bankNotice?.words}
 								appleLine={appleNotice?.words}
 								bankDate={asOfDate(

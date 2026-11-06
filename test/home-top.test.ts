@@ -80,6 +80,17 @@ describe("HomeTop", () => {
 		expect(html).not.toContain("Everything is on track");
 	});
 
+	it("keeps the overdue clause on the over-budget line when overdue bills pushed Safe to spend below zero", async () => {
+		const html = await top({ safeToSpendCents: -12000, overdueBills: 2 });
+		expect(html).toContain(
+			"Over budget this month. Spending more takes it further over. 2 bills are overdue.",
+		);
+		const one = await top({ safeToSpendCents: -12000, overdueBills: 1 });
+		expect(one).toContain("further over. 1 bill is overdue.");
+		const none = await top({ safeToSpendCents: -12000, overdueBills: 0 });
+		expect(none).not.toContain("overdue");
+	});
+
 	// Issue #519: with no budgeted category, a negative number is not over budget. It keeps its ink
 	// colour and the status sentence (Home passes "No budgets set yet.") shows instead.
 	it("is never over budget when no category has a budget", async () => {

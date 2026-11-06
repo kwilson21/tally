@@ -161,16 +161,19 @@ const listFormat = new Intl.ListFormat("en-US", {
 	type: "conjunction",
 });
 
+/** " 2 bills are overdue." (with its leading space), or nothing at 0: the clause Home's status line ends with. */
+export function overdueBillsClause(overdueBills: number): string {
+	if (overdueBills <= 0) return "";
+	return ` ${overdueBills} ${overdueBills === 1 ? "bill is" : "bills are"} overdue.`;
+}
+
 /** The one-line status under the headline, written by code from the numbers (never by AI). Overdue bills are said once, plainly, since a sentence about the budgets alone must not read as "all is well" over them. */
 export function statusSentence(
 	categories: CategorySummary[],
 	overdueBills = 0,
 ): string {
 	if (categories.length === 0) return "No budgets set yet.";
-	const bills =
-		overdueBills > 0
-			? ` ${overdueBills} ${overdueBills === 1 ? "bill is" : "bills are"} overdue.`
-			: "";
+	const bills = overdueBillsClause(overdueBills);
 	const over = categories.filter((c) => c.over);
 	if (over.length === 0)
 		return overdueBills > 0
