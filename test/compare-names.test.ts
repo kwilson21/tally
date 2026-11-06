@@ -310,6 +310,9 @@ describe("the Worker's request handling", () => {
 			"?tokens=0",
 			"?models=",
 			"?models=granite,",
+			"?models=toString",
+			"?models=constructor",
+			"?models=__proto__",
 		]) {
 			expect((await worker.fetch(get(`/${query}`), e)).status).toBe(400);
 		}

@@ -231,7 +231,7 @@ export async function runNamesComparison(
 	today: string = todayIn(DEFAULT_TIME_ZONE),
 ): Promise<string> {
 	const keys = slice.models ?? KEYS;
-	const unknown = keys.filter((key) => !(key in CANDIDATES));
+	const unknown = keys.filter((key) => !KEYS.includes(key as CandidateKey));
 	if (unknown.length > 0)
 		throw new Error(
 			`Unknown model ${unknown.join(", ")}. Choose from ${KEYS.join(", ")}.`,
