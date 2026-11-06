@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadBillSuggestions } from "../src/bills/find";
 import { matchBillPayments } from "../src/bills/match";
 import { insertBill, updateBill } from "../src/bills/write";
@@ -651,7 +651,15 @@ describe("finding bills", () => {
 		expect(await found(/target/i)).toEqual([]);
 	});
 
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("remembers Not a bill for the merchant, not for one raw name", async () => {
+		// The route reads the household's "today", and the finder only looks back three months, so the clock is the
+		// fixture's day: on the real one these charges age out and the merchant is no longer a suggestion.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(`${TODAY}T12:00:00Z`));
 		await targetCharges();
 
 		const res = await exports.default.fetch(
