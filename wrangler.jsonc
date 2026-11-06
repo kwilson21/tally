@@ -4,6 +4,8 @@
 	"main": "./src/index.tsx",
 	// Set once at project start; bump deliberately, never automatically.
 	"compatibility_date": "2026-09-22",
+	// Temporal (dates, time zones) is on by default only from 2026-12-01; we turn it on now.
+	"compatibility_flags": ["temporal"],
 	"assets": {
 		"directory": "./public/",
 		"binding": "ASSETS"
