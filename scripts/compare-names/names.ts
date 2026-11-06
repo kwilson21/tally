@@ -20,10 +20,6 @@ export const CANDIDATES = {
 		label: "Llama 3.1 8B fp8 (today's, baseline)",
 		id: "@cf/meta/llama-3.1-8b-instruct-fp8",
 	},
-	"llama-fast": {
-		label: "Llama 3.1 8B fp8-fast",
-		id: "@cf/meta/llama-3.1-8b-instruct-fp8-fast",
-	},
 	"llama-awq": {
 		label: "Llama 3.1 8B awq",
 		id: "@cf/meta/llama-3.1-8b-instruct-awq",
@@ -50,7 +46,8 @@ const KEYS = Object.keys(CANDIDATES) as CandidateKey[];
 
 /** What production allows an answer (suggest-name.ts): the default budget to compare against. */
 const PRODUCTION_TOKENS = 60;
-const TIMEOUT_MS = 30_000;
+/** Production's own limit (suggest-name.ts): a model slower than this is unusable there, so it fails here too. */
+const TIMEOUT_MS = 15_000;
 
 /** Messy bank texts of the kind a real statement prints, to add to the seed's few clean ones. */
 const EXTRA_TEXTS = [
@@ -130,7 +127,9 @@ export function replyOf(answer: unknown): Reply {
 			text,
 			shape: "chat",
 			finish,
-			...(text === null && thought !== null ? { thoughtOnly: true } : {}),
+			...(text === null && thought !== null && finish === "length"
+				? { thoughtOnly: true }
+				: {}),
 		};
 	}
 	if (typeof body.output_text === "string" || Array.isArray(body.output)) {
@@ -144,8 +143,12 @@ export function replyOf(answer: unknown): Reply {
 			.map((part) => nonEmpty((part as { text?: unknown })?.text))
 			.filter((part): part is string => part !== null);
 		const text = nonEmpty(body.output_text) ?? (parts.join("\n") || null);
+		const incomplete = (
+			body.incomplete_details as { reason?: unknown } | null | undefined
+		)?.reason;
 		const thoughtOnly =
 			text === null &&
+			incomplete === "max_output_tokens" &&
 			items.some((item) => (item as { type?: string })?.type === "reasoning");
 		return {
 			text,
@@ -328,20 +331,30 @@ export function formatNamesReport(input: ReportInput): string {
 	return `${lines.join("\n")}\n`;
 }
 
-const numberOf = (value: string | null): number | undefined => {
-	const parsed = value === null ? Number.NaN : Number(value);
-	return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+/** A missing parameter is no limit; a present one must be a whole number above zero, or the request is refused. */
+const numberOf = (name: string, value: string | null): number | undefined => {
+	if (value === null) return undefined;
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed < 1)
+		throw new Error(
+			`${name} must be a whole number above zero, got "${value}".`,
+		);
+	return parsed;
 };
 
 export default {
 	async fetch(request: Request, env: CompareEnv): Promise<Response> {
 		const url = new URL(request.url);
+		// Every run is billed, so only GET / starts one: not a favicon fetch, a health probe or a HEAD.
+		if (url.pathname !== "/") return new Response("Not found", { status: 404 });
+		if (request.method !== "GET")
+			return new Response("GET only", { status: 405 });
 		const models = url.searchParams.get("models");
 		try {
 			const report = await runNamesComparison(env, {
 				models: models ? models.split(",").map((m) => m.trim()) : undefined,
-				limit: numberOf(url.searchParams.get("limit")),
-				tokens: numberOf(url.searchParams.get("tokens")),
+				limit: numberOf("limit", url.searchParams.get("limit")),
+				tokens: numberOf("tokens", url.searchParams.get("tokens")),
 			});
 			return new Response(report, {
 				headers: { "content-type": "text/markdown; charset=utf-8" },

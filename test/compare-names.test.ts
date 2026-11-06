@@ -6,9 +6,11 @@ import {
 	formatNamesReport,
 	replyOf,
 	runNamesComparison,
+	default as worker,
 } from "../scripts/compare-names/names";
 import { INSTRUCTIONS } from "../src/ai/suggest-name";
 import { buildSeed } from "../src/demo/seed";
+import catalog from "../worker-configuration.d.ts?raw";
 
 const TODAY = "2026-11-06";
 
@@ -79,6 +81,36 @@ describe("replyOf", () => {
 			finish: "length",
 			thoughtOnly: true,
 		});
+	});
+
+	it("only says a model ran out of tokens when the API reports truncation", () => {
+		const stopped = {
+			choices: [
+				{
+					message: { content: null, reasoning_content: "thinking" },
+					finish_reason: "stop",
+				},
+			],
+		};
+		expect(replyOf(stopped)).toEqual({
+			text: null,
+			shape: "chat",
+			finish: "stop",
+		});
+		const reasoningItem = {
+			type: "reasoning",
+			content: [{ type: "reasoning_text", text: "hm" }],
+		};
+		expect(replyOf({ output: [reasoningItem] })).toEqual({
+			text: null,
+			shape: "responses",
+		});
+		expect(
+			replyOf({
+				output: [reasoningItem],
+				incomplete_details: { reason: "max_output_tokens" },
+			}),
+		).toEqual({ text: null, shape: "responses", thoughtOnly: true });
 	});
 
 	it("gives no text for anything it doesn't know", () => {
@@ -229,5 +261,56 @@ describe("formatNamesReport", () => {
 		expect(report).toContain("ran out of tokens");
 		// Average of 100 and 300.
 		expect(report).toContain("200");
+	});
+});
+
+describe("CANDIDATES", () => {
+	it("are all in the generated Workers AI catalog, so none can fail as an unknown model", () => {
+		for (const { id } of Object.values(CANDIDATES)) {
+			expect(catalog).toContain(`"${id}":`);
+		}
+	});
+});
+
+describe("the Worker's request handling", () => {
+	const env = () => {
+		const { ai, run } = fakeAi(() => ({ response: "Plain Name" }));
+		return { env: { AI: ai }, run };
+	};
+	const get = (path: string, init?: RequestInit) =>
+		new Request(`http://localhost:8798${path}`, init);
+
+	it("runs a comparison for GET / only", async () => {
+		const { env: e, run } = env();
+		const response = await worker.fetch(get("/?models=granite&limit=2"), e);
+		expect(response.status).toBe(200);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	it("starts no billed call for another path or method", async () => {
+		const { env: e, run } = env();
+		expect((await worker.fetch(get("/favicon.ico"), e)).status).toBe(404);
+		expect((await worker.fetch(get("/", { method: "POST" }), e)).status).toBe(
+			405,
+		);
+		expect((await worker.fetch(get("/", { method: "HEAD" }), e)).status).toBe(
+			405,
+		);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("rejects a malformed limit or tokens instead of running everything", async () => {
+		const { env: e, run } = env();
+		for (const query of [
+			"?limit=abc",
+			"?limit=0",
+			"?limit=-3",
+			"?limit=1.5",
+			"?tokens=abc",
+			"?tokens=0",
+		]) {
+			expect((await worker.fetch(get(`/${query}`), e)).status).toBe(400);
+		}
+		expect(run).not.toHaveBeenCalled();
 	});
 });
