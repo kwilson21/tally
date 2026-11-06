@@ -313,7 +313,10 @@ async function renderHome(
 								}
 								safeToSpendCents={summary.safeToSpendCents}
 								hasBudgets={hasBudgets}
-								status={statusSentence(summary.categories)}
+								status={statusSentence(
+									summary.categories,
+									current ? (billTotals?.overdueCount ?? 0) : 0,
+								)}
 								bankLine={bankNotice?.words}
 								appleLine={appleNotice?.words}
 								bankDate={asOfDate(

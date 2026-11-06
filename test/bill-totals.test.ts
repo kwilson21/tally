@@ -175,6 +175,8 @@ describe("bill totals", () => {
 		});
 		expect(totals.soonCount).toBe(1);
 		expect(totals.soonCents).toBe(48000);
+		// Two of its occurrences are overdue, but it is one bill.
+		expect(totals.overdueCount).toBe(1);
 	});
 
 	it("counts every October occurrence in Upcoming and still to pay, and September's overdue one in Overdue (decision 122)", () => {

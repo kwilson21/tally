@@ -122,7 +122,7 @@ export function MoneyInput({
 					−
 				</button>
 				<div
-					class={`flex min-h-[90px] w-[292px] min-w-0 items-center gap-1 rounded-control border bg-paper py-3 pl-3 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-accent ${error ? "border-over" : "border-rule"}`}
+					class={`flex min-h-[90px] w-[292px] min-w-0 items-center gap-1 rounded-control border bg-paper py-3 pl-3 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-accent ${error ? "border-over" : "border-muted"}`}
 				>
 					<span
 						aria-hidden="true"

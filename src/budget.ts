@@ -161,18 +161,32 @@ const listFormat = new Intl.ListFormat("en-US", {
 	type: "conjunction",
 });
 
-/** The one-line status under the headline, written by code from the numbers (never by AI). */
-export function statusSentence(categories: CategorySummary[]): string {
+/** The one-line status under the headline, written by code from the numbers (never by AI). Overdue bills are said once, plainly, since a sentence about the budgets alone must not read as "all is well" over them. */
+export function statusSentence(
+	categories: CategorySummary[],
+	overdueBills = 0,
+): string {
 	if (categories.length === 0) return "No budgets set yet.";
+	const bills =
+		overdueBills > 0
+			? ` ${overdueBills} ${overdueBills === 1 ? "bill is" : "bills are"} overdue.`
+			: "";
 	const over = categories.filter((c) => c.over);
-	if (over.length === 0) return "Everything is on track.";
+	if (over.length === 0)
+		return overdueBills > 0
+			? `Budgets are on track.${bills}`
+			: "Everything is on track.";
 	const rest =
-		over.length < categories.length ? " Everything else is on track." : "";
+		over.length < categories.length
+			? overdueBills > 0
+				? " Other budgets are on track."
+				: " Everything else is on track."
+			: "";
 	if (over.length === 1) {
 		const [only] = over as [CategorySummary];
 		const amount = -only.leftCents;
 		const text = formatCents(amount, { wholeDollars: amount % 100 === 0 });
-		return `${only.name} is ${text} over.${rest}`;
+		return `${only.name} is ${text} over.${rest}${bills}`;
 	}
-	return `${listFormat.format(over.map((c) => c.name))} are over.${rest}`;
+	return `${listFormat.format(over.map((c) => c.name))} are over.${rest}${bills}`;
 }

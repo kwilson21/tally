@@ -390,7 +390,7 @@ export function MonthEnd({
 				</p>
 				{budgeted && (
 					<span
-						class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 text-xl font-extrabold tracking-widest uppercase ${over ? "border-over text-over" : "border-ok text-ok"}`}
+						class={`inline-block -rotate-3 rounded-control border-2 px-3 py-0.5 font-serif text-2xl font-semibold ${over ? "border-over text-over" : "border-ok text-ok"}`}
 					>
 						{over ? "Over" : "Under"}
 						<span class="sr-only"> budget</span>

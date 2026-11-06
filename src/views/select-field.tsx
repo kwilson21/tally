@@ -17,11 +17,11 @@ type Props = Omit<JSX.IntrinsicElements["select"], "class"> & {
 // The text's left padding is the arrow's right inset, so the arrow sits in line with the text's own edge (DESIGN.md).
 const VARIANT = {
 	pill: {
-		box: "rounded-full border border-rule bg-paper pl-4 pr-10 text-base text-ink",
+		box: "rounded-full border border-muted bg-paper pl-4 pr-10 text-base text-ink",
 		arrow: "right-4",
 	},
 	control: {
-		box: "rounded-control border border-rule bg-paper pl-3 pr-10 text-base text-ink",
+		box: "rounded-control border border-muted bg-paper pl-3 pr-10 text-base text-ink",
 		arrow: "right-3",
 	},
 	ledger: {

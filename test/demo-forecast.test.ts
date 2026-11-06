@@ -139,11 +139,15 @@ describe("Home's forecast agrees with its sentence on the demo (#322)", () => {
 	});
 
 	it("says the story in Home's own words on the 13th and the 20th", async () => {
-		expect(await homeOn("2026-10-13")).toContain(
-			"Eating Out is $14 over. Everything else is on track.",
+		expect(
+			(await homeOn("2026-10-13")).match(/text-lg italic"[^>]*>([^<]*)</)?.[1],
+		).toBe(
+			"Eating Out is $14 over. Other budgets are on track. 3 bills are overdue.",
 		);
-		expect(await homeOn("2026-10-20")).toContain(
-			"Eating Out is $86 over. Everything else is on track.",
+		expect(
+			(await homeOn("2026-10-20")).match(/text-lg italic"[^>]*>([^<]*)</)?.[1],
+		).toBe(
+			"Eating Out is $86 over. Other budgets are on track. 3 bills are overdue.",
 		);
 	});
 });
