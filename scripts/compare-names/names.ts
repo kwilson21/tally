@@ -352,7 +352,9 @@ export default {
 		const models = url.searchParams.get("models");
 		try {
 			const report = await runNamesComparison(env, {
-				models: models ? models.split(",").map((m) => m.trim()) : undefined,
+				// Only a missing parameter means every model; an empty one is refused as an unknown model.
+				models:
+					models === null ? undefined : models.split(",").map((m) => m.trim()),
 				limit: numberOf("limit", url.searchParams.get("limit")),
 				tokens: numberOf("tokens", url.searchParams.get("tokens")),
 			});
