@@ -113,6 +113,41 @@ describe("replyOf", () => {
 		).toEqual({ text: null, shape: "responses", thoughtOnly: true });
 	});
 
+	it("marks an answer that has text but was cut off at the token limit", () => {
+		expect(
+			replyOf({
+				choices: [
+					{
+						message: { content: "Trader Joe's\nTrader" },
+						finish_reason: "length",
+					},
+				],
+			}),
+		).toEqual({
+			text: "Trader Joe's\nTrader",
+			shape: "chat",
+			finish: "length",
+			truncated: true,
+		});
+		expect(
+			replyOf({
+				output_text: "Costco\nCost",
+				incomplete_details: { reason: "max_output_tokens" },
+			}),
+		).toMatchObject({
+			text: "Costco\nCost",
+			shape: "responses",
+			truncated: true,
+		});
+		// A complete answer, and a shape that reports no finish reason, are not marked.
+		expect(
+			replyOf({
+				choices: [{ message: { content: "Costco" }, finish_reason: "stop" }],
+			}),
+		).not.toHaveProperty("truncated");
+		expect(replyOf({ response: "Costco" })).not.toHaveProperty("truncated");
+	});
+
 	it("gives no text for anything it doesn't know", () => {
 		expect(replyOf(null)).toMatchObject({ text: null, shape: "unknown" });
 		expect(replyOf({ nope: 1 })).toMatchObject({
@@ -164,6 +199,19 @@ describe("askNames", () => {
 		}));
 		const result = await askNames(ai, "m", "COSTCO WHSE #0421", 60);
 		expect(result).toMatchObject({ ok: true, names: ["Costco"] });
+	});
+
+	it("keeps whether the answer was cut off at the token limit", async () => {
+		const { ai } = fakeAi(() => ({
+			choices: [
+				{ message: { content: "Costco\nCost" }, finish_reason: "length" },
+			],
+		}));
+		expect(await askNames(ai, "m", "COSTCO WHSE #0421", 60)).toMatchObject({
+			ok: true,
+			names: ["Costco", "Cost"],
+			truncated: true,
+		});
 	});
 
 	it("keeps a thrown error's message and goes on", async () => {
@@ -317,5 +365,48 @@ describe("the Worker's request handling", () => {
 			expect((await worker.fetch(get(`/${query}`), e)).status).toBe(400);
 		}
 		expect(run).not.toHaveBeenCalled();
+	});
+});
+
+describe("formatNamesReport cut-off answers", () => {
+	const report = formatNamesReport({
+		today: TODAY,
+		tokens: 60,
+		models: [
+			{
+				key: "gemma4",
+				results: [
+					{
+						text: "A",
+						ok: true,
+						names: ["Alpha"],
+						ms: 10,
+						shape: "chat",
+						finish: "stop",
+					},
+					{
+						text: "B",
+						ok: true,
+						names: ["Beta", "Be"],
+						ms: 10,
+						shape: "chat",
+						finish: "length",
+						truncated: true,
+					},
+				],
+			},
+		],
+	});
+
+	it("counts them in their own column, apart from the ones that never got to an answer", () => {
+		expect(report).toContain("Cut off mid-answer");
+		expect(report).toMatch(
+			/Gemma 4 26B \|[^\n]*\| 2 \| 2 \| 0 \| 0 \| 0 \| 1 \|/,
+		);
+	});
+
+	it("marks the cut-off answer where its names are shown, so it doesn't look complete", () => {
+		expect(report).toMatch(/\| B \| Beta \/ Be[^|]*cut off/i);
+		expect(report).not.toMatch(/\| A \| Alpha[^|]*cut off/i);
 	});
 });

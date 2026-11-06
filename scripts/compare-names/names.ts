@@ -97,6 +97,8 @@ export type Reply = {
 	finish?: string;
 	/** The model sent thinking but no answer, so it ran out of tokens before replying. */
 	thoughtOnly?: boolean;
+	/** There is text, but the API says the model was stopped at the token limit, so the answer is partial. */
+	truncated?: boolean;
 };
 
 const nonEmpty = (value: unknown): string | null =>
@@ -130,6 +132,7 @@ export function replyOf(answer: unknown): Reply {
 			...(text === null && thought !== null && finish === "length"
 				? { thoughtOnly: true }
 				: {}),
+			...(text !== null && finish === "length" ? { truncated: true } : {}),
 		};
 	}
 	if (typeof body.output_text === "string" || Array.isArray(body.output)) {
@@ -154,6 +157,9 @@ export function replyOf(answer: unknown): Reply {
 			text,
 			shape: "responses",
 			...(thoughtOnly ? { thoughtOnly } : {}),
+			...(text !== null && incomplete === "max_output_tokens"
+				? { truncated: true }
+				: {}),
 		};
 	}
 	return { text: null, shape: "unknown" };
@@ -166,6 +172,8 @@ export type NameResult = {
 	names?: string[];
 	error?: string;
 	thoughtOnly?: boolean;
+	/** Cut off at the token limit with some text, so the names may be partial. */
+	truncated?: boolean;
 	ms: number;
 	shape: Reply["shape"];
 	finish?: string;
@@ -210,6 +218,7 @@ export async function askNames(
 			ms,
 			shape: reply.shape,
 			finish: reply.finish,
+			truncated: reply.truncated,
 		};
 	} catch (error) {
 		return {
@@ -268,7 +277,8 @@ function show(result: NameResult | undefined): string {
 	if (!result.ok) return "⚠ no text in the answer";
 	if (!result.names || result.names.length === 0)
 		return "(nothing passed the name check)";
-	return cell(result.names.join(" / "));
+	const names = cell(result.names.join(" / "));
+	return result.truncated ? `${names} ⚠ cut off at the token limit` : names;
 }
 
 /** The summary table, then every bank text with each model's names beside it. */
@@ -282,8 +292,8 @@ export function formatNamesReport(input: ReportInput): string {
 		"",
 		`Run on ${input.today}. Answer budget: ${input.tokens} tokens (production allows ${PRODUCTION_TOKENS}). Names are what production would offer after its own name check, so "named" counts texts with at least one name that passed.`,
 		"",
-		"| Model | Id | Texts | Named | Empty after check | Failed | Ran out of tokens | Avg ms |",
-		"|---|---|---|---|---|---|---|---|",
+		"| Model | Id | Texts | Named | Empty after check | Failed | Ran out of tokens | Cut off mid-answer | Avg ms |",
+		"|---|---|---|---|---|---|---|---|---|",
 	];
 	for (const { key, results } of input.models) {
 		const named = results.filter(
@@ -294,11 +304,12 @@ export function formatNamesReport(input: ReportInput): string {
 		).length;
 		const failed = results.filter((r) => !r.ok && !r.thoughtOnly).length;
 		const thought = results.filter((r) => r.thoughtOnly).length;
+		const cutOff = results.filter((r) => r.truncated).length;
 		const avg = results.length
 			? Math.round(results.reduce((sum, r) => sum + r.ms, 0) / results.length)
 			: 0;
 		lines.push(
-			`| ${label(key)} | ${idOf(key)} | ${results.length} | ${named} | ${empty} | ${failed} | ${thought} | ${avg} |`,
+			`| ${label(key)} | ${idOf(key)} | ${results.length} | ${named} | ${empty} | ${failed} | ${thought} | ${cutOff} | ${avg} |`,
 		);
 	}
 	const shapes = input.models.map(
@@ -306,6 +317,15 @@ export function formatNamesReport(input: ReportInput): string {
 			`- ${label(key)}: ${[...new Set(results.map((r) => r.shape))].join(", ")}`,
 	);
 	lines.push("", "Answer shapes seen:", ...shapes);
+	if (
+		input.models.some(({ results }) =>
+			results.some((r) => r.shape === "response"),
+		)
+	)
+		lines.push(
+			"",
+			'The `response` shape (Llama, Granite) carries no finish reason, so "Cut off mid-answer" is always 0 for it. Check its names for a last name that stops short.',
+		);
 	const failures = input.models.flatMap(({ key, results }) => {
 		const first = results.find((r) => r.error);
 		return first ? [`- ${label(key)}: ${first.error}`] : [];
