@@ -347,6 +347,35 @@ describe("the Worker's request handling", () => {
 		expect(run).not.toHaveBeenCalled();
 	});
 
+	it("refuses a request a browser sends on behalf of another page, so a web page can't start a billed run", async () => {
+		const { env: e, run } = env();
+		const crossPage: Record<string, string>[] = [
+			{ "sec-fetch-site": "cross-site" },
+			{ "sec-fetch-site": "same-site" },
+			{ "sec-fetch-site": "same-origin" },
+			{ origin: "https://example.com" },
+		];
+		for (const headers of crossPage) {
+			expect((await worker.fetch(get("/", { headers }), e)).status).toBe(403);
+		}
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("still runs for curl and for typing the address into a browser", async () => {
+		const { env: e, run } = env();
+		// Typing the address sends Sec-Fetch-Site: none; curl sends neither header.
+		const typed = await worker.fetch(
+			get("/?models=granite&limit=1", {
+				headers: { "sec-fetch-site": "none" },
+			}),
+			e,
+		);
+		const curled = await worker.fetch(get("/?models=granite&limit=1"), e);
+		expect(typed.status).toBe(200);
+		expect(curled.status).toBe(200);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
 	it("rejects a malformed limit or tokens instead of running everything", async () => {
 		const { env: e, run } = env();
 		for (const query of [

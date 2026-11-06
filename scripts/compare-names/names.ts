@@ -369,6 +369,14 @@ export default {
 		if (url.pathname !== "/") return new Response("Not found", { status: 404 });
 		if (request.method !== "GET")
 			return new Response("GET only", { status: 405 });
+		// A browser marks a request made for another page (an image tag, a link) with Sec-Fetch-Site or Origin.
+		// Refuse those, so a page you visit can't start a billed run. curl, and typing the address, send neither.
+		const site = request.headers.get("sec-fetch-site");
+		if ((site !== null && site !== "none") || request.headers.has("origin"))
+			return new Response(
+				"Run this with curl, or by typing the address, not from another page.",
+				{ status: 403 },
+			);
 		const models = url.searchParams.get("models");
 		try {
 			const report = await runNamesComparison(env, {
