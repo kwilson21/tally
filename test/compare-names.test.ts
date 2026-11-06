@@ -1,0 +1,233 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+	askNames,
+	bankTexts,
+	CANDIDATES,
+	formatNamesReport,
+	replyOf,
+	runNamesComparison,
+} from "../scripts/compare-names/names";
+import { INSTRUCTIONS } from "../src/ai/suggest-name";
+import { buildSeed } from "../src/demo/seed";
+
+const TODAY = "2026-11-06";
+
+type Body = {
+	messages: { role: string; content: string }[];
+	max_tokens: number;
+	temperature: number;
+};
+
+/** A fake Workers AI that answers every call from `answer`, which sees the model id and the body it was sent. */
+const fakeAi = (answer: (model: string, body: Body) => unknown) => {
+	const run = vi.fn(async (model: string, body: Body) => answer(model, body));
+	return { ai: { run } as unknown as Ai, run };
+};
+
+describe("replyOf", () => {
+	it("reads Llama and Granite's `response` string", () => {
+		expect(replyOf({ response: "Trader Joe's" })).toEqual({
+			text: "Trader Joe's",
+			shape: "response",
+		});
+	});
+
+	it("reads an OpenAI-style chat completion (Gemma, GLM)", () => {
+		const answer = {
+			choices: [{ message: { content: "Blue Bottle" }, finish_reason: "stop" }],
+		};
+		expect(replyOf(answer)).toEqual({
+			text: "Blue Bottle",
+			shape: "chat",
+			finish: "stop",
+		});
+	});
+
+	it("reads a Responses-style answer (gpt-oss), by output_text or by its message items", () => {
+		expect(replyOf({ output_text: "Costco" })).toMatchObject({
+			text: "Costco",
+			shape: "responses",
+		});
+		expect(
+			replyOf({
+				output: [
+					{
+						type: "reasoning",
+						content: [{ type: "reasoning_text", text: "hm" }],
+					},
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "Costco" }],
+					},
+				],
+			}),
+		).toMatchObject({ text: "Costco", shape: "responses" });
+	});
+
+	it("reports a model that spent its tokens thinking: no text, finish 'length'", () => {
+		const answer = {
+			choices: [
+				{
+					message: { content: null, reasoning_content: "Let me think..." },
+					finish_reason: "length",
+				},
+			],
+		};
+		expect(replyOf(answer)).toEqual({
+			text: null,
+			shape: "chat",
+			finish: "length",
+			thoughtOnly: true,
+		});
+	});
+
+	it("gives no text for anything it doesn't know", () => {
+		expect(replyOf(null)).toMatchObject({ text: null, shape: "unknown" });
+		expect(replyOf({ nope: 1 })).toMatchObject({
+			text: null,
+			shape: "unknown",
+		});
+	});
+});
+
+describe("bankTexts", () => {
+	it("is the demo seed's bank texts plus the messy extras, each once, never an empty one", () => {
+		const seed = buildSeed(TODAY);
+		const texts = bankTexts(seed);
+		expect(new Set(texts).size).toBe(texts.length);
+		expect(texts).toContain("NETFLIX.COM");
+		expect(texts.some((text) => /AMZN|SQ \*/.test(text))).toBe(true);
+		expect(texts.every((text) => text.trim().length > 0)).toBe(true);
+	});
+
+	it("can be limited", () => {
+		expect(bankTexts(buildSeed(TODAY), 5)).toHaveLength(5);
+	});
+});
+
+describe("askNames", () => {
+	it("sends production's own instructions and message shape, and only the bank text", async () => {
+		const { ai, run } = fakeAi(() => ({
+			response: "Netflix\nNetflix Streaming",
+		}));
+		const result = await askNames(ai, "@cf/test/model", "NETFLIX.COM", 60);
+		expect(run).toHaveBeenCalledTimes(1);
+		const [model, body] = run.mock.calls[0] as [string, Body];
+		expect(model).toBe("@cf/test/model");
+		expect(body.messages).toEqual([
+			{ role: "system", content: INSTRUCTIONS },
+			{ role: "user", content: "Bank text: NETFLIX.COM" },
+		]);
+		expect(body.max_tokens).toBe(60);
+		expect(body.temperature).toBe(0.2);
+		expect(result).toMatchObject({
+			ok: true,
+			names: ["Netflix", "Netflix Streaming"],
+		});
+	});
+
+	it("runs the answer through production's name check", async () => {
+		const { ai } = fakeAi(() => ({
+			response: "1. Costco\n- COSTCO WHSE #0421\nCostco ($42.10)\n",
+		}));
+		const result = await askNames(ai, "m", "COSTCO WHSE #0421", 60);
+		expect(result).toMatchObject({ ok: true, names: ["Costco"] });
+	});
+
+	it("keeps a thrown error's message and goes on", async () => {
+		const { ai } = fakeAi(() => {
+			throw new Error("5007: No such model");
+		});
+		const result = await askNames(ai, "m", "X", 60);
+		expect(result).toMatchObject({ ok: false, error: "5007: No such model" });
+	});
+
+	it("marks an answer with no text as not ok, and says why", async () => {
+		const { ai } = fakeAi(() => ({
+			choices: [
+				{
+					message: { content: null, reasoning_content: "hmm" },
+					finish_reason: "length",
+				},
+			],
+		}));
+		expect(await askNames(ai, "m", "X", 60)).toMatchObject({
+			ok: false,
+			thoughtOnly: true,
+		});
+	});
+});
+
+describe("runNamesComparison", () => {
+	it("asks every chosen model about every text, one call at a time, and tells them apart in the report", async () => {
+		const { ai, run } = fakeAi((model) =>
+			model.includes("gemma")
+				? {
+						choices: [
+							{ message: { content: "Gemma Name" }, finish_reason: "stop" },
+						],
+					}
+				: { response: "Plain Name" },
+		);
+		const report = await runNamesComparison(
+			{ AI: ai },
+			{ models: ["granite", "gemma4"], limit: 3, tokens: 60 },
+			TODAY,
+		);
+		expect(run).toHaveBeenCalledTimes(6);
+		expect(report).toContain("Plain Name");
+		expect(report).toContain("Gemma Name");
+		expect(report).toContain(CANDIDATES.granite.id);
+	});
+
+	it("rejects a model it doesn't know", async () => {
+		const { ai } = fakeAi(() => ({ response: "x" }));
+		await expect(
+			runNamesComparison({ AI: ai }, { models: ["nope"] }, TODAY),
+		).rejects.toThrow(/nope/);
+	});
+});
+
+describe("formatNamesReport", () => {
+	it("summarises each model (answered, empty, failed, speed) and lists every text's names", () => {
+		const report = formatNamesReport({
+			today: TODAY,
+			tokens: 60,
+			models: [
+				{
+					key: "granite",
+					results: [
+						{
+							text: "A",
+							ok: true,
+							names: ["Alpha"],
+							ms: 100,
+							shape: "response",
+						},
+						{ text: "B", ok: true, names: [], ms: 300, shape: "response" },
+					],
+				},
+				{
+					key: "gemma4",
+					results: [
+						{ text: "A", ok: false, error: "boom", ms: 50, shape: "unknown" },
+						{
+							text: "B",
+							ok: false,
+							thoughtOnly: true,
+							ms: 70,
+							shape: "chat",
+							finish: "length",
+						},
+					],
+				},
+			],
+		});
+		expect(report).toMatch(/granite[^\n]*\b2\b[^\n]*\b1\b/);
+		expect(report).toContain("Alpha");
+		expect(report).toContain("boom");
+		expect(report).toContain("ran out of tokens");
+		// Average of 100 and 300.
+		expect(report).toContain("200");
+	});
+});
