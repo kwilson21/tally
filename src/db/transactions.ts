@@ -3301,7 +3301,7 @@ export function saveJevResultStatements(
 				income_source = CASE WHEN credit_reviewed_by = 'user' AND income_source IS NULL THEN 'user' WHEN ${plaidSetIncomeSql("transactions")} THEN NULL WHEN income_source = 'user' OR (income_source IS NULL AND flag_income = 1) THEN COALESCE(income_source, 'user') WHEN ? = 1 AND amount_cents <= 0 THEN 'jev' ELSE NULL END,
 				excluded = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL THEN excluded ELSE MAX(excluded, ?) END,
 				excluded_source = CASE WHEN excluded_source = 'user' OR category_confidence IS NOT NULL OR ? = 0 THEN excluded_source ELSE 'jev' END,
-				jev_attempts = 0,
+				jev_attempts = CASE WHEN category_id IS NULL AND category_source IS NULL THEN 0 ELSE jev_attempts END,
 				updated_at = datetime('now')
 			WHERE id = ? AND NOT ${gaveUpSql("transactions")} AND (category_confidence IS NULL OR (? = 1 AND amount_cents < 0 AND income_confidence IS NULL))
 				AND excluded = 0 AND is_split = 0

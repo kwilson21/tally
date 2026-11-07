@@ -9,6 +9,7 @@ import {
 	bumpDoneStatement,
 	closeToastOnce,
 	finishRun,
+	movedKey,
 	readRun,
 	STALE_MS,
 	startOrJoinRun,
@@ -1590,6 +1591,81 @@ describe("round 2: the claim window, the failure marker and the candidate's iden
 		});
 	});
 
+	// Undo puts back the failure counter the row had before the run (decision 171), as it puts back jev_failed_at.
+	const counter = async (id: number) =>
+		(
+			await db
+				.prepare("SELECT jev_attempts AS n FROM transactions WHERE id = ?")
+				.bind(id)
+				.first<{ n: number }>()
+		)?.n;
+
+	it("undo puts back the failure counter the row had before the run", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		await db
+			.prepare("UPDATE transactions SET jev_attempts = 2 WHERE id = ?")
+			.bind(x)
+			.run();
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await clear([x]);
+		// Jev fails on the row during the run, then the run files it: the counter goes up by that failure.
+		await db
+			.prepare(
+				"UPDATE transactions SET jev_attempts = jev_attempts + 1, jev_failed_at = '2026-10-03 10:00:00' WHERE id = ?",
+			)
+			.bind(x)
+			.run();
+		await answer(x, groceries);
+		await finishRun(db, { runId, now: T0 + 5000 });
+		await closeToastOnce(db, runId, T0 + 5000);
+		expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
+			restored: 1,
+			changedSince: 0,
+			expired: false,
+		});
+		expect(await counter(x)).toBe(2);
+		expect(await state(x)).toMatchObject({
+			categoryId: null,
+			jevFailedAt: null,
+		});
+	});
+
+	it("a moved record from before the counter was kept leaves the counter as it is on undo", async () => {
+		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const started = await startOrJoinRun(db, {
+			candidates: (await candidatesNow()).filter((c) => c.id === x),
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await clear([x]);
+		await answer(x, groceries);
+		await finishRun(db, { runId, now: T0 + 5000 });
+		await closeToastOnce(db, runId, T0 + 5000);
+		// The record as a run finished before this change stored it: no counter in its snapshot.
+		await db
+			.prepare(
+				"UPDATE household_settings SET value = json_remove(value, '$.rows[0].snapshot.jev_attempts') WHERE key = ?",
+			)
+			.bind(movedKey(runId))
+			.run();
+		await db
+			.prepare("UPDATE transactions SET jev_attempts = 4 WHERE id = ?")
+			.bind(x)
+			.run();
+		expect(await undoRun(db, { runId, now: T0 + 6000 })).toMatchObject({
+			restored: 1,
+		});
+		expect(await counter(x)).toBe(4);
+	});
+
 	it("the identity a run stores comes from the candidate row it was given, not a later read", async () => {
 		const x = await tx({ plaidCategory: HINT, confidence: 0.3 });
 		const original = await db
@@ -1641,6 +1717,7 @@ function synthCandidate(id: number): ResortCandidate {
 			jev_mixed: null,
 			jev_also_category_id: null,
 			jev_failed_at: null,
+			jev_attempts: 0,
 		},
 	};
 }

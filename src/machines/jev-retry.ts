@@ -2,7 +2,7 @@ import { setup } from "xstate";
 
 // The retry of one transaction's Jev question (decision 171, #864). A row Jev fails on JEV_ATTEMPT_CAP times in a row
 // gives up: the sorting run leaves it out until a person asks again, or the row's bank text, name, amount or account
-// changes. Jev's answer ends the question: a filed row (Jev set a category) is never reopened, and an unsure row (Jev
+// changes. Jev's answer ends the question: a filed row (a category is set, whoever set it) is never reopened, and an unsure row (Jev
 // stored a confidence but set no category) waits for a person's ask again. This machine is the one place that says so.
 // The SQL writers keep the database's columns in step with it (the SQL forms below are the same rules), and the tests
 // walk every writer from every state against the machine.
@@ -62,8 +62,9 @@ export const jevRetry = setup({}).createMachine({
 });
 
 /**
- * The state a stored row is in, from its retry columns. Filed is a category Jev set. Unsure is a stored confidence with
- * no category. Gave up is the counter at the cap for anything else. Every other row is waiting.
+ * The state a stored row is in, from its retry columns. Filed is any row with a category, whoever set it (Jev's retry
+ * does not apply to a row that has one). Unsure is a stored confidence with no category. Gave up is the counter at the
+ * cap for anything else. Every other row is waiting.
  */
 export function retryStateOf(row: {
 	attempts: number;
@@ -71,7 +72,7 @@ export function retryStateOf(row: {
 	categorySource: string | null;
 	confidence: number | null;
 }): JevRetryState {
-	if (row.categoryId !== null && row.categorySource === "jev") return "filed";
+	if (row.categoryId !== null) return "filed";
 	if (row.confidence !== null && row.categoryId === null) return "unsure";
 	if (row.attempts >= JEV_ATTEMPT_CAP) return "gave_up";
 	return "waiting";
@@ -80,9 +81,9 @@ export function retryStateOf(row: {
 // The SQL forms of the same states, for one table alias. Each is true exactly when retryStateOf names that state.
 // `IS 'jev'` keeps the test free of NULL, so a NULL source is simply not Jev's.
 
-/** True for a filed row. */
+/** True for a filed row: any row with a category. */
 export function filedSql(alias: string): string {
-	return `(${alias}.category_id IS NOT NULL AND ${alias}.category_source IS 'jev')`;
+	return `(${alias}.category_id IS NOT NULL)`;
 }
 
 /** True for an unsure row. */

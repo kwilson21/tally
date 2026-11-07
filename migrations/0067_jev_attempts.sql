@@ -13,5 +13,6 @@ WHEN OLD.jev_attempts > 0 AND (
 	OR OLD.own_name IS NOT NEW.own_name
 )
 BEGIN
-	UPDATE transactions SET jev_attempts = 0 WHERE id = NEW.id;
+	-- A row with a category is filed (decision 171): a change does not reopen it, so its count stays.
+	UPDATE transactions SET jev_attempts = 0 WHERE id = NEW.id AND category_id IS NULL;
 END;

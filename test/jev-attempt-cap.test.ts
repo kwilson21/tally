@@ -33,6 +33,14 @@ const EATING_OUT = 2;
 
 type Fetch = (url?: string, init?: RequestInit) => Promise<Response>;
 
+type RowKind =
+	| "waiting"
+	| "gave_up"
+	| "unsure"
+	| "filed by Jev"
+	| "filed by a person"
+	| "filed by a merchant rule";
+
 /** Jev's reply: Eating Out at the given confidence, no flags. */
 const replyAt = (confidence: number): Fetch =>
 	vi.fn(
@@ -94,12 +102,15 @@ async function snapshot(id: number): Promise<Snapshot> {
 			categorySource: string | null;
 			confidence: number | null;
 		}>();
+	const categoryId = row?.categoryId ?? null;
 	return {
 		attempts: Number(row?.attempts),
 		failed: row?.failedAt != null,
-		categoryId: row?.categoryId ?? null,
+		categoryId,
 		categorySource: row?.categorySource ?? null,
-		confidence: row?.confidence ?? null,
+		// The machine reads a stored confidence only on a row with no category, so only that one is compared. A
+		// filed row's stored confidence is the mark that Jev was asked, which the answer writer keeps (decision 143).
+		confidence: categoryId === null ? (row?.confidence ?? null) : null,
 	};
 }
 
@@ -207,6 +218,54 @@ describe("the Jev retry machine", () => {
 	it("the cap is 5 failures", () => {
 		expect(JEV_ATTEMPT_CAP).toBe(5);
 	});
+
+	// A row with a category, whoever set it, is filed: Jev's retry does not apply to it.
+	it.each([
+		["person", "user"],
+		["merchant rule", "merchant_rule"],
+	])("a row a %s categorized derives as filed", (_who, source) => {
+		expect(
+			retryStateOf({
+				attempts: 0,
+				categoryId: EATING_OUT,
+				categorySource: source,
+				confidence: null,
+			}),
+		).toBe("filed");
+	});
+});
+
+// A failed income question is one of Jev's asks on a row that may already have a category. It counts only while the
+// row is waiting: on an unsure or filed row it leaves the failure stamp alone (decision 171).
+describe("a failed income question stamps only a waiting row", () => {
+	async function stampedAfterFailure(id: number): Promise<boolean> {
+		await markJevFailedStatement(db, id).run();
+		return (await snapshot(id)).failed;
+	}
+
+	it("a waiting row is stamped", async () => {
+		expect(await stampedAfterFailure(await addRow("WAITING ROW"))).toBe(true);
+	});
+
+	it("an unsure row is not stamped", async () => {
+		const id = await addRow("UNSURE ROW");
+		await db
+			.prepare("UPDATE transactions SET category_confidence = 0.5 WHERE id = ?")
+			.bind(id)
+			.run();
+		expect(await stampedAfterFailure(id)).toBe(false);
+	});
+
+	it("a filed row is not stamped", async () => {
+		const id = await addRow("FILED ROW");
+		await db
+			.prepare(
+				"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE id = ?",
+			)
+			.bind(EATING_OUT, id)
+			.run();
+		expect(await stampedAfterFailure(id)).toBe(false);
+	});
 });
 
 // Every writer, from every state, against the machine (decision 171). A row is built in each state, the real writer
@@ -214,7 +273,16 @@ describe("the Jev retry machine", () => {
 // back. Where the machine allows the event, the row must reach the machine's state. Where it refuses, the row's retry
 // columns must be exactly as they were. There are no exceptions to this grid.
 describe("every writer agrees with the machine, state by state", () => {
-	const STATES: JevRetryState[] = ["waiting", "gave_up", "unsure", "filed"];
+	// Each kind of row, with the state the machine says it is in. A row with a category in any way is filed, so the
+	// person's and the merchant rule's categories are grid rows too, not just Jev's.
+	const ROWS: { kind: RowKind; state: JevRetryState }[] = [
+		{ kind: "waiting", state: "waiting" },
+		{ kind: "gave_up", state: "gave_up" },
+		{ kind: "unsure", state: "unsure" },
+		{ kind: "filed by Jev", state: "filed" },
+		{ kind: "filed by a person", state: "filed" },
+		{ kind: "filed by a merchant rule", state: "filed" },
+	];
 	const EVENTS = [
 		{ name: "JEV_FAILED", categorized: false },
 		{ name: "JEV_ANSWERED", categorized: true },
@@ -224,15 +292,15 @@ describe("every writer agrees with the machine, state by state", () => {
 	] as const;
 
 	/** A row built in the state: the columns the writers and the machine both read. */
-	async function rowIn(state: JevRetryState): Promise<number> {
+	async function rowIn(kind: RowKind): Promise<number> {
 		const id = await addRow("GRID BANK TEXT");
-		if (state === "gave_up") {
+		if (kind === "gave_up") {
 			await db
 				.prepare("UPDATE transactions SET jev_attempts = ? WHERE id = ?")
 				.bind(CAP, id)
 				.run();
 		}
-		if (state === "unsure") {
+		if (kind === "unsure") {
 			// Jev's answer was unsure: its confidence is stored, and no category is filed.
 			await db
 				.prepare(
@@ -241,11 +309,28 @@ describe("every writer agrees with the machine, state by state", () => {
 				.bind(id)
 				.run();
 		}
-		if (state === "filed") {
+		if (kind === "filed by Jev") {
 			// Jev's answer filed the row in a category.
 			await db
 				.prepare(
 					"UPDATE transactions SET category_id = ?, category_source = 'jev', category_confidence = 0.9 WHERE id = ?",
+				)
+				.bind(EATING_OUT, id)
+				.run();
+		}
+		if (kind === "filed by a person") {
+			// A person chose the category; Jev has not answered this row.
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'user' WHERE id = ?",
+				)
+				.bind(EATING_OUT, id)
+				.run();
+		}
+		if (kind === "filed by a merchant rule") {
+			await db
+				.prepare(
+					"UPDATE transactions SET category_id = ?, category_source = 'merchant_rule' WHERE id = ?",
 				)
 				.bind(EATING_OUT, id)
 				.run();
@@ -274,11 +359,11 @@ describe("every writer agrees with the machine, state by state", () => {
 		}
 	}
 
-	for (const state of STATES) {
+	for (const { kind, state } of ROWS) {
 		for (const event of EVENTS) {
-			const label = `${state} + ${event.name}${event.name === "JEV_ANSWERED" ? (event.categorized ? " (categorized)" : " (unsure)") : ""}`;
+			const label = `${kind} + ${event.name}${event.name === "JEV_ANSWERED" ? (event.categorized ? " (categorized)" : " (unsure)") : ""}`;
 			it(label, async () => {
-				const id = await rowIn(state);
+				const id = await rowIn(kind);
 				const before = await snapshot(id);
 				expect(stateOf(before)).toBe(state);
 				const expected = next(jevRetry, state, event.name, {
