@@ -10,6 +10,7 @@ import {
 	closeToastOnce,
 	finishRun,
 	movedKey,
+	readMoved,
 	readRun,
 	STALE_MS,
 	startOrJoinRun,
@@ -1762,3 +1763,70 @@ function synthCandidate(id: number): ResortCandidate {
 		},
 	};
 }
+
+describe("reading the stored run and moved record", () => {
+	const stored = async (key: string) =>
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(key)
+				.first<{ value: string }>()
+		)?.value ?? "";
+	const put = (key: string, value: string) =>
+		db
+			.prepare("UPDATE household_settings SET value = ? WHERE key = ?")
+			.bind(value, key)
+			.run();
+
+	/** A finished run with one moved row, so both records exist. */
+	async function finishedRun() {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const candidates = (await candidatesNow()).filter((c) => c.id === a);
+		const started = await startOrJoinRun(db, {
+			candidates,
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await answer(a, groceries);
+		await finishRun(db, { runId, now: T0 + 5000 });
+		return runId;
+	}
+
+	it("reads back exactly what the writers stored, a run and its moved record", async () => {
+		const runId = await finishedRun();
+		expect(await readRun(db)).toEqual(JSON.parse(await stored("resort_run")));
+		expect(await readMoved(db, runId)).toEqual(
+			JSON.parse(await stored(movedKey(runId))),
+		);
+	});
+
+	it("refuses a stored run that is not JSON or has a field of the wrong type", async () => {
+		await finishedRun();
+		const run = JSON.parse(await stored("resort_run"));
+		await put("resort_run", "not json");
+		await expect(readRun(db)).rejects.toThrow("resort_run is not JSON");
+		await put("resort_run", JSON.stringify({ ...run, total: "2" }));
+		await expect(readRun(db)).rejects.toThrow(
+			"resort_run does not have the shape it is read as",
+		);
+		await put("resort_run", JSON.stringify({ ...run, snapshots: [{ id: 1 }] }));
+		await expect(readRun(db)).rejects.toThrow("resort_run does not have");
+	});
+
+	it("refuses a moved record whose rows are not rows, in the read, the counts and Undo alike", async () => {
+		const runId = await finishedRun();
+		const record = JSON.parse(await stored(movedKey(runId)));
+		await put(movedKey(runId), JSON.stringify({ ...record, rows: "x" }));
+		await expect(readMoved(db, runId)).rejects.toThrow(
+			"does not have the shape",
+		);
+		await expect(undoRun(db, { runId, now: T0 + 6000 })).rejects.toThrow(
+			"does not have the shape",
+		);
+		await expect(finishRun(db, { runId, now: T0 + 7000 })).rejects.toThrow(
+			"does not have the shape",
+		);
+	});
+});

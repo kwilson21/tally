@@ -23,6 +23,17 @@ import {
 	type ResortSnapshot,
 } from "./resort-candidates";
 import { withTurnGuard } from "./sorting-turn";
+import {
+	isArrayOf,
+	isBoolean,
+	isNullable,
+	isNumber,
+	isOptional,
+	isRecordOf,
+	isShape,
+	isString,
+	parseStored,
+} from "./stored-shape";
 import { categoryAskedSql } from "./suggestions-queue";
 import { type JevSeen, seenSaveGuard } from "./transactions";
 
@@ -36,7 +47,9 @@ const MOVED_PREFIX = "resort_moved_";
 export const movedKey = (runId: string) => `${MOVED_PREFIX}${runId}`;
 
 /** A candidate's pre-run snapshot, with the identity Finish and Undo check: its Plaid id and its amount in cents. */
-export type RunSnapshot = ResortSnapshot & {
+export type RunSnapshot = Omit<ResortSnapshot, "jev_attempts"> & {
+	/** The row's failure counter when the run began. Missing in a record stored before decision 182: Undo then leaves the counter as it is. */
+	jev_attempts?: number;
 	plaid_transaction_id: string | null;
 	amount_cents: number;
 };
@@ -94,7 +107,76 @@ export type MovedRecord = {
 	needAnswer: number;
 };
 
-const parseRun = (value: string): ResortRun => JSON.parse(value) as ResortRun;
+// What the stored text is checked against when it is read. Each guard names every key of its type (isShape), so a key
+// added to a type above and not here is a compile error.
+const isRunSnapshot = isShape<RunSnapshot>({
+	id: isNumber,
+	category_id: isNullable(isNumber),
+	category_source: isNullable(isString),
+	category_confidence: isNullable(isNumber),
+	jev_category_id: isNullable(isNumber),
+	jev_none_fit: isNumber,
+	jev_mixed: isNullable(isNumber),
+	jev_also_category_id: isNullable(isNumber),
+	jev_failed_at: isNullable(isString),
+	jev_attempts: isOptional(isNumber),
+	plaid_transaction_id: isNullable(isString),
+	amount_cents: isNumber,
+});
+const isNamedCategory = isShape<{ id: number; name: string }>({
+	id: isNumber,
+	name: isString,
+});
+const isResortRun = isShape<ResortRun>({
+	id: isString,
+	total: isNumber,
+	done: isNumber,
+	status: (value): value is ResortRun["status"] =>
+		value === "running" || value === "done",
+	instances: isNumber,
+	ids: isArrayOf(isNumber),
+	snapshots: isArrayOf(isRunSnapshot),
+	categoryId: isNumber,
+	categoryName: isString,
+	categories: isArrayOf(isNamedCategory),
+	categoryByRow: isRecordOf(isNumber),
+	finishedKeys: isArrayOf(isString),
+	keptCleared: isOptional(isArrayOf(isNumber)),
+	startedAt: isNumber,
+	toasted: isBoolean,
+	finishToken: isOptional(isString),
+});
+const isMovedRecord = isShape<MovedRecord>({
+	runId: isString,
+	categoryId: isNumber,
+	categoryName: isString,
+	categories: isArrayOf(isString),
+	byCategory: isArrayOf(
+		isShape<{ id: number; name: string; count: number }>({
+			id: isNumber,
+			name: isString,
+			count: isNumber,
+		}),
+	),
+	claimedAt: isNullable(isNumber),
+	until: isNullable(isNumber),
+	finalizedAt: isNumber,
+	rows: isArrayOf(
+		isShape<MovedRecord["rows"][number]>({
+			id: isNumber,
+			categoryId: isNumber,
+			plaid_transaction_id: isNullable(isString),
+			amount_cents: isNumber,
+			snapshot: isRunSnapshot,
+		}),
+	),
+	needAnswer: isNumber,
+});
+
+const parseRun = (value: string): ResortRun =>
+	parseStored(RUN_KEY, value, isResortRun);
+const parseMoved = (key: string, value: string): MovedRecord =>
+	parseStored(key, value, isMovedRecord);
 
 /** The run, or null when none has ever been started. */
 export async function readRun(db: D1Database): Promise<ResortRun | null> {
@@ -117,7 +199,7 @@ export async function readMoved(
 		.prepare("SELECT value FROM household_settings WHERE key = ?")
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
-	return row ? (JSON.parse(row.value) as MovedRecord) : null;
+	return row ? parseMoved(movedKey(runId), row.value) : null;
 }
 
 /** Writes `next` only if the stored text is still `expected` (null: no row yet). True when it wrote. */
@@ -675,7 +757,7 @@ async function readRecord(
 		.bind(movedKey(runId))
 		.first<{ value: string }>();
 	if (!row) return null;
-	const record = JSON.parse(row.value) as MovedRecord;
+	const record = parseMoved(movedKey(runId), row.value);
 	return {
 		moved: record.rows.length,
 		needAnswer: record.needAnswer,
@@ -744,7 +826,7 @@ export async function undoRun(
 		.bind(key)
 		.first<{ value: string }>();
 	if (!existing) return { restored: 0, changedSince: 0, expired: true };
-	const moved = (JSON.parse(existing.value) as MovedRecord).rows.length;
+	const moved = parseMoved(key, existing.value).rows.length;
 
 	// Parameter ?1 is the record's key, ?2 the time. The record's own `until` (null until claimed) is checked in every write.
 	const live = `EXISTS (SELECT 1 FROM household_settings WHERE key = ?1 AND json_extract(value, '$.until') >= ?2)`;
