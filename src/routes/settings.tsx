@@ -23,7 +23,7 @@ import {
 	createFromSuggestion,
 	dismissSuggestion,
 	type PendingSuggestion,
-	pendingSuggestions,
+	pendingSuggestionPage,
 } from "../db/category-suggestions";
 import { waitsForRunStatement } from "../db/first-tally";
 import {
@@ -502,7 +502,8 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 	const timeZone = view.timeZone ?? (await householdTimeZone(db));
 	const today = view.today ?? todayIn(timeZone);
 	const { active, archived } = await settingsCategories(db, today.slice(0, 7));
-	const categorySuggestions = await pendingSuggestions(db);
+	const { suggestions: categorySuggestions, more: moreSuggestions } =
+		await pendingSuggestionPage(db);
 	const adding = view.open === "new";
 	const cards = categorySuggestions.map((suggestion, place) => {
 		// A suggestion whose name a category already has is added to it, or restores it when archived, not made again
@@ -597,10 +598,9 @@ async function renderCategories(c: Context<App>, view: View = {}) {
 					/>
 				))}
 				{cards}
-				{categorySuggestions.more > 0 && (
+				{moreSuggestions > 0 && (
 					<p class="py-2 text-sm text-muted">
-						{categorySuggestions.more} more suggestions will show once you
-						decide these.
+						{moreSuggestions} more suggestions will show once you decide these.
 					</p>
 				)}
 				<AddCategoryRow

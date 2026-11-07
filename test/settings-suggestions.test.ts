@@ -5,6 +5,7 @@ import { JEV_URL } from "../src/ai/categorize";
 import { saveAiSwitches } from "../src/db/ai-switches";
 import { saveCategory, setArchived } from "../src/db/categories";
 import {
+	pendingSuggestionPage,
 	pendingSuggestions,
 	saveSuggestion,
 } from "../src/db/category-suggestions";
@@ -792,9 +793,8 @@ describe("Never suggest lines in the card (decision 101)", () => {
 		const { id } = await twoStores();
 		await neverLine("CHEWY.COM");
 		await neverLine("PETSMART 0412");
-		const pending = await pendingSuggestions(db);
-		expect(pending).toEqual([]);
-		expect(pending.more).toBe(0);
+		const pending = await pendingSuggestionPage(db);
+		expect(pending).toEqual({ suggestions: [], more: 0 });
 		const { html } = await get();
 		expect(html).not.toContain("data-suggestion=");
 		expect(await status(id)).toBe("pending");

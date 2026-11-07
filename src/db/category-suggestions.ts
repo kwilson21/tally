@@ -169,7 +169,11 @@ export async function purchaseNamesToAvoid(db: D1Database): Promise<string[]> {
 }
 
 export type PendingSuggestion = { id: number; name: string; rows: ListRow[] };
-export type PendingSuggestions = PendingSuggestion[] & { more: number };
+/** The pending suggestions to show, and how many more wait beyond the limit. */
+export type PendingSuggestionPage = {
+	suggestions: PendingSuggestion[];
+	more: number;
+};
 /** How many suggestions Settings lists; the review screen asks every one, so it passes no limit. */
 export const SETTINGS_SUGGESTION_LIMIT = 10;
 
@@ -202,11 +206,20 @@ function filterClause(only?: SuggestionFilter): [string, unknown[]] {
 	];
 }
 
+/** The busiest pending suggestions (up to `limit`), for a caller that has no use for the count of those left out. */
 export async function pendingSuggestions(
 	db: D1Database,
 	limit = SETTINGS_SUGGESTION_LIMIT,
 	only?: SuggestionFilter,
-): Promise<PendingSuggestions> {
+): Promise<PendingSuggestion[]> {
+	return (await pendingSuggestionPage(db, limit, only)).suggestions;
+}
+
+export async function pendingSuggestionPage(
+	db: D1Database,
+	limit = SETTINGS_SUGGESTION_LIMIT,
+	only?: SuggestionFilter,
+): Promise<PendingSuggestionPage> {
 	await db.batch([
 		db.prepare(
 			`UPDATE transactions SET category_suggestion_id=NULL WHERE category_suggestion_id IN (SELECT cs.id FROM category_suggestions cs WHERE cs.status='pending' AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.category_suggestion_id=cs.id AND ${suggestedRowSql("t")}))`,
@@ -230,10 +243,7 @@ export async function pendingSuggestions(
 		)
 		.bind(...onlyBinds, limit)
 		.all<{ id: number; name: string; n: number; total: number }>();
-	if (!suggestions.length)
-		return Object.defineProperty([], "more", {
-			value: 0,
-		}) as unknown as PendingSuggestions;
+	if (!suggestions.length) return { suggestions: [], more: 0 };
 	const { results } = await db
 		.prepare(`WITH pending AS (
 			SELECT value AS id FROM json_each(?)
@@ -288,9 +298,10 @@ export async function pendingSuggestions(
 			pending: !!tx.pending,
 		});
 	}
-	return Object.defineProperty([...byId.values()], "more", {
-		value: Math.max(0, (suggestions[0]?.total ?? 0) - byId.size),
-	}) as PendingSuggestions;
+	return {
+		suggestions: [...byId.values()],
+		more: Math.max(0, (suggestions[0]?.total ?? 0) - byId.size),
+	};
 }
 
 const NOTHING_TICKED =

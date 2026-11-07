@@ -53,7 +53,7 @@ describe("MonthEnd budget bars", () => {
 				rows={rows(5)}
 			/>,
 		);
-		expect(html).not.toContain('role="region"');
+		expect(html).not.toContain('<section tabindex="0"');
 		expect(html).not.toContain("swipe sideways for the rest");
 		expect(html).not.toContain("Show the rest of the categories");
 		const chart = html.match(
@@ -120,7 +120,7 @@ describe("MonthEnd budget bars", () => {
 			if ([7, 12].includes(count)) expect(chart).toContain(">budget</text>");
 			expect(html).toMatch(
 				new RegExp(
-					`role="region" tabindex="0" aria-label="${count} categories; scroll sideways to see them all" class="[^"]*overflow-x-auto[^"]*${wideCueHidden ? "lg:hidden" : ""}"`,
+					`<section tabindex="0" aria-label="${count} categories; scroll sideways to see them all" class="[^"]*overflow-x-auto[^"]*${wideCueHidden ? "lg:hidden" : ""}"`,
 				),
 			);
 			expect(html).toContain(
@@ -146,7 +146,7 @@ describe("MonthEnd budget bars", () => {
 			);
 			if (wideCueHidden) {
 				expect(html).toContain('class="mt-4 hidden lg:block"');
-				expect(html.match(/role="region"/g)).toHaveLength(1);
+				expect(html.match(/<section tabindex="0"/g)).toHaveLength(1);
 				expect(html).toContain(
 					`class="month-end-swipe-arrow text-accent lg:hidden"`,
 				);

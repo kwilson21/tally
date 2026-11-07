@@ -242,9 +242,8 @@ function EndBars({
 		);
 	return (
 		<div id={`${chartId}-bars`} class="relative mt-4">
-			{/* biome-ignore lint/a11y/useSemanticElements: this scroll container must expose role=region explicitly */}
-			<div
-				role="region"
+			{/* A section with a name is a region landmark, and the arrow keys scroll it, so it takes focus. */}
+			<section
 				tabindex={0}
 				aria-label={`${rows.length} categories; scroll sideways to see them all`}
 				class={
@@ -264,7 +263,7 @@ function EndBars({
 						aria-hidden="true"
 					/>
 				</div>
-			</div>
+			</section>
 			<span
 				class={
 					phoneOnlyCue

@@ -72,7 +72,7 @@ export function Switch({
 				type="checkbox"
 				// A native checkbox with role="switch" reads its on/off state from `checked`; an
 				// aria-checked would only go stale as the box is toggled without a script.
-				// biome-ignore lint/a11y/useAriaPropsForRole: see above
+				// biome-ignore lint/a11y/useAriaPropsForRole: a native checkbox exposes its on/off state through `checked`, so an aria-checked would only go stale
 				role="switch"
 				id={id}
 				name={name}
