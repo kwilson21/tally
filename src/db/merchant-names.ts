@@ -6,13 +6,19 @@ import { householdToday } from "../dates";
 import {
 	type NameSource,
 	nameSource,
+	normaliseNames,
 	offeredNames,
-	storeSuggestedNames,
 } from "../transactions/name-suggestions";
 import { tidyName } from "../transactions/tidy-name";
 import { KEPT_NAME_LOG_SQL } from "./ai-log";
 import { type AiSwitches, readAiSwitches } from "./ai-switches";
-import { merchantKeySql } from "./merchant-key";
+import { merchantKeySql, merchantNamesJsonSql } from "./merchant-key";
+
+/**
+ * What a name's text is trimmed of in SQL: spaces, tab and CR, the set the table's CHECK and the backfill use
+ * (migrations/0071_merchant_suggested_names.sql). Other Unicode spaces are kept here, though the JS side trims them.
+ */
+export const NAME_TRIM_SQL = "' ' || char(9) || char(13)";
 
 /**
  * The part of an upsert into `merchants` that settles a pending suggestion when a person names the
@@ -22,31 +28,62 @@ import { merchantKeySql } from "./merchant-key";
  */
 export const SETTLE_SUGGESTION_SQL = `suggestion_status = CASE
 	WHEN merchants.suggestion_status != 'pending' OR excluded.display_name IS NULL THEN merchants.suggestion_status
-	WHEN instr(char(10) || COALESCE(merchants.suggested_name, '') || char(10), char(10) || excluded.display_name || char(10)) > 0 THEN 'accepted'
+	WHEN EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = merchants.raw_name AND n.name = excluded.display_name) THEN 'accepted'
 	ELSE 'rejected' END`;
 
 /**
  * The bank texts Workers AI is asked about (spec §7), as one predicate over `t` with `merchants m` joined: a text Plaid
- * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier answer. A cash
- * entry a person typed (on the Cash account) is never asked about, nor a split part, nor an Apple Card row (§8.10: its
- * Merchant is its name, or none is sent). merchantsToAsk is the one that reads it.
+ * sent no `merchant_name` for, whose merchant has no name a person chose, no suggestion, and no earlier answer
+ * (`names_asked`). A cash entry a person typed (on the Cash account) is never asked about, nor a split part, nor an
+ * Apple Card row (§8.10: its Merchant is its name, or none is sent). merchantsToAsk is the one that reads it.
  */
 export const NAME_ASKED_SQL = `t.parent_id IS NULL AND NULLIF(t.merchant_name, '') IS NULL
 	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.type = 'cash')
 	AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.id = t.account_id AND a.subtype = 'apple_card')
-	AND m.display_name IS NULL AND m.suggested_name IS NULL AND COALESCE(m.suggestion_status, 'none') = 'none'`;
+	AND m.display_name IS NULL AND COALESCE(m.names_asked, 0) = 0 AND COALESCE(m.suggestion_status, 'none') = 'none'`;
 
 /**
- * Suggests each bank name for its merchant, `pending` (spec §8.6, decision 68). One `?`: the names, a JSON array. A
- * merchant a person named, or whose suggestion they decided, is never touched; a guess still waiting gives way. `guard`
- * is the SQL that must hold for the rows to be written: a sync's lock (OWNS_LOCK), or `1` for an upload, which runs
- * in one batch with nothing to lock.
+ * Suggests bank-sent names for their merchants, `pending` (spec §8.6, decision 68): the merchant rows first, then their
+ * names, as the statements of one batch, in this order. A merchant a person named, or whose suggestion they decided, is
+ * never touched; a guess still waiting gives way (its names are replaced). `names` are the bank's texts (a blank one is
+ * skipped). `guard` is the SQL that must hold for any of the rows to be written: a sync's lock (OWNS_LOCK, bound with
+ * `guardBinds`), or `1` for an upload, which runs in one batch with nothing to lock. Callers must run all of them.
  */
-export const suggestBankNamesSql = (guard: string) =>
-	`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-	 SELECT value, value, 'pending' FROM json_each(?) WHERE ${guard}
-	 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
-	 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`;
+export function suggestBankNames(
+	db: D1Database,
+	names: readonly string[],
+	guard: string,
+	guardBinds: readonly (string | number)[],
+): D1PreparedStatement[] {
+	// Every statement reads the same non-blank names, `?` first, then the guard's binds.
+	const binds = [JSON.stringify(names), ...guardBinds];
+	const nonBlank = `(SELECT value FROM json_each(?) WHERE trim(value, ${NAME_TRIM_SQL}) <> '')`;
+	return [
+		db
+			.prepare(
+				`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
+				 SELECT value, 'pending', 0 FROM ${nonBlank} AS j WHERE ${guard}
+				 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = 'pending', names_asked = 0
+				 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
+			)
+			.bind(...binds),
+		db
+			.prepare(
+				`DELETE FROM merchant_suggested_names WHERE merchant_key IN (
+					SELECT m.raw_name FROM merchants m JOIN ${nonBlank} AS j ON m.raw_name = j.value
+					WHERE m.display_name IS NULL AND m.suggestion_status = 'pending')
+				 AND ${guard}`,
+			)
+			.bind(...binds),
+		db
+			.prepare(
+				`INSERT INTO merchant_suggested_names (merchant_key, position, name)
+				 SELECT m.raw_name, 0, trim(j.value, ${NAME_TRIM_SQL}) FROM merchants m JOIN ${nonBlank} AS j ON m.raw_name = j.value
+				 WHERE m.display_name IS NULL AND m.suggestion_status = 'pending' AND ${guard}`,
+			)
+			.bind(...binds),
+	];
+}
 
 /**
  * The bank texts to ask Workers AI about, at most `limit` (NAME_ASKED_SQL). A merchant is asked about once, so an answer
@@ -74,11 +111,13 @@ export async function merchantsToAsk(
 }
 
 /**
- * Keeps one batch of Workers AI answers and failed calls, as one D1 batch. An answer is pending when there are
- * names, an empty suggestion when there are none (so it isn't asked again), and it lands only on a merchant nobody
- * has named, suggested for or decided about, so late answers are dropped; it also clears its text's failure. A
- * failed call is kept in `merchant_name_failures`, not `merchants`, so a failure never makes a merchant row that
- * sync could copy; the text is asked again on a later night (#468). Returns how many answers came with a name.
+ * Keeps one batch of Workers AI answers and failed calls, as one D1 batch. An answer is pending when it has usable names
+ * (normaliseNames), and an empty answer otherwise (`names_asked`, so it isn't asked again). The first answer for a text
+ * is the one kept, and it lands only on a merchant nobody has named, suggested for or decided about (`names_asked = 0`
+ * and no other status), so late answers are dropped; it also clears its text's failure. The merchant row is written
+ * first and its names after, in the same batch: the names only for a merchant that this batch left pending with no
+ * names yet. A failed call is kept in `merchant_name_failures`, not `merchants`, so a failure never makes a merchant
+ * row that sync could copy; the text is asked again on a later night (#468). Returns how many answers came with a name.
  */
 export async function saveAskedNames(
 	db: D1Database,
@@ -86,31 +125,46 @@ export async function saveAskedNames(
 	failed: string[],
 ): Promise<number> {
 	const statements: D1PreparedStatement[] = [];
-	if (answers.length > 0) {
+	const firstByText = new Map<string, { rawName: string; names: string[] }>();
+	for (const answer of answers)
+		if (!firstByText.has(answer.rawName))
+			firstByText.set(answer.rawName, answer);
+	const kept = [...firstByText.values()].map(({ rawName, names }) => {
+		const usable = normaliseNames(names);
+		return {
+			rawName,
+			names: usable,
+			status: usable.length > 0 ? "pending" : "none",
+		};
+	});
+	if (kept.length > 0) {
+		const json = JSON.stringify(kept);
 		statements.push(
 			db
 				.prepare(
-					`WITH answers AS (
-						SELECT json_extract(value, '$.rawName') AS rawName,
-							json_extract(value, '$.suggestedName') AS suggestedName,
-							json_extract(value, '$.status') AS status
-						FROM json_each(?)
-					)
-					INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-					SELECT rawName, suggestedName, status FROM answers WHERE 1
-					 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = excluded.suggestion_status
-					 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.suggested_name IS NULL
-					 RETURNING suggested_name`,
+					`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
+					 SELECT json_extract(value, '$.rawName'), json_extract(value, '$.status'),
+						CASE WHEN json_extract(value, '$.status') = 'pending' THEN 0 ELSE 1 END
+					 FROM json_each(?) WHERE 1
+					 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = excluded.suggestion_status, names_asked = excluded.names_asked
+					 WHERE merchants.display_name IS NULL AND merchants.suggestion_status = 'none' AND merchants.names_asked = 0
+					 RETURNING raw_name, suggestion_status`,
 				)
-				.bind(
-					JSON.stringify(
-						answers.map(({ rawName, names }) => ({
-							rawName,
-							suggestedName: storeSuggestedNames(names),
-							status: names.length > 0 ? "pending" : "none",
-						})),
-					),
-				),
+				.bind(json),
+		);
+		statements.push(
+			db
+				.prepare(
+					`INSERT INTO merchant_suggested_names (merchant_key, position, name)
+					 SELECT m.raw_name, n.key, trim(n.value, ${NAME_TRIM_SQL})
+					 FROM json_each(?) AS a
+					 JOIN merchants m ON m.raw_name = json_extract(a.value, '$.rawName')
+					 JOIN json_each(a.value, '$.names') AS n
+					 WHERE m.display_name IS NULL AND m.suggestion_status = 'pending'
+					   AND NOT EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name)
+					   AND trim(n.value, ${NAME_TRIM_SQL}) <> ''`,
+				)
+				.bind(json),
 		);
 	}
 	if (failed.length > 0) {
@@ -134,10 +188,14 @@ export async function saveAskedNames(
 		);
 	}
 	if (statements.length === 0) return 0;
-	const [saved] = await db.batch<{ suggested_name: string | null }>(statements);
-	// The answers' upsert is the batch's first statement, so it is the one with rows to count.
-	if (answers.length === 0 || !saved) return 0;
-	return saved.results.filter((row) => Boolean(row.suggested_name)).length;
+	const [saved] = await db.batch<{
+		raw_name: string;
+		suggestion_status: string;
+	}>(statements);
+	// The answers' upsert is the batch's first statement: its RETURNING rows are the merchants it left pending.
+	if (kept.length === 0 || !saved) return 0;
+	return saved.results.filter((row) => row.suggestion_status === "pending")
+		.length;
 }
 
 export type NameReview = {
@@ -185,10 +243,11 @@ export async function namesToReview(
 	const namesOn = (switches ?? (await readAiSwitches(db))).names;
 	const { results } = await db
 		.prepare(
-			`SELECT m.raw_name AS key, m.rowid AS id, m.suggested_name AS stored, t.raw_name AS bankText, COUNT(*) AS count,
+			`SELECT m.raw_name AS key, m.rowid AS id, ${merchantNamesJsonSql("m.raw_name")} AS stored, t.raw_name AS bankText, COUNT(*) AS count,
 				SUM(t.own_name IS NOT NULL) AS owned
 			 FROM merchants m JOIN transactions t ON ${merchantKeySql("t")} = m.raw_name AND t.parent_id IS NULL
-			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL AND COALESCE(m.suggested_name, '') != ''
+			 WHERE m.suggestion_status = 'pending' AND m.display_name IS NULL
+			   AND EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = m.raw_name)
 			 GROUP BY m.raw_name, t.raw_name`,
 		)
 		.all<{
@@ -263,7 +322,7 @@ export async function settleSuggestion(
 			: db
 					.prepare(
 						`UPDATE merchants SET display_name = ?1,
-							suggestion_status = CASE WHEN instr(char(10) || COALESCE(suggested_name, '') || char(10), char(10) || ?1 || char(10)) > 0 THEN 'accepted' ELSE 'rejected' END
+							suggestion_status = CASE WHEN EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = merchants.raw_name AND n.name = ?1) THEN 'accepted' ELSE 'rejected' END
 						 WHERE raw_name = ?2 AND suggestion_status = 'pending' AND display_name IS NULL`,
 					)
 					.bind(choice.name, key);

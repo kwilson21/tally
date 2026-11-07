@@ -63,6 +63,7 @@ import { maybeIncomeConfidenceSql, plaidSetIncomeSql } from "./income";
 import {
 	merchantColumnSql,
 	merchantKeySql,
+	merchantNamesJsonSql,
 	sameMerchantSql,
 } from "./merchant-key";
 import { SETTLE_SUGGESTION_SQL } from "./merchant-names";
@@ -143,7 +144,7 @@ export type ListRow = {
 };
 
 /** What a row needs from its merchant to decide the name it shows (src/transactions/name-suggestions.ts). */
-export const NAME_SUGGESTION_COLUMNS = `${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
+export const NAME_SUGGESTION_COLUMNS = `${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus, ${merchantKeySql("t")} AS merchantKey`;
 type NameSuggestionColumns = {
 	suggestedNames: string | null;
 	suggestionStatus: string | null;
@@ -172,8 +173,11 @@ export const COUNTS_IN_MONTH_COLUMN = `CASE WHEN ${COUNTED_MONTH} != substr(t.da
  * With the names switch off only the bank's own name is offered (a suggestion equal to the merchant's
  * key, src/transactions/name-suggestions.ts), so only that one can match.
  */
-const suggestedNameMatch = (namesOn: boolean) =>
-	`EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : " AND m.suggested_name = m.raw_name"} AND m.suggested_name LIKE ? ESCAPE '\\')`;
+const suggestedNameMatch = (namesOn: boolean) => {
+	// With the names switch off only the bank's own name counts: the one name, and it is the merchant's key.
+	const bankOnly = `(SELECT COUNT(*) FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name) = 1 AND EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = m.raw_name AND x.name = m.raw_name)`;
+	return `EXISTS (SELECT 1 FROM merchants m WHERE m.raw_name = ${merchantKeySql("t")} AND m.suggestion_status = 'pending' AND m.display_name IS NULL${namesOn ? "" : ` AND ${bankOnly}`} AND EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = m.raw_name AND n.name LIKE ? ESCAPE '\\'))`;
+};
 
 /** The note a row shows; with the details switch off a guessed note is hidden (#314). Needs `t`. */
 export const visibleNoteSql = (detailsOn: boolean) =>
@@ -394,7 +398,7 @@ export async function listTransactions(
 		.prepare(
 			`SELECT t.id, t.date, t.amount_cents AS amountCents, t.raw_name AS rawName,
 				${merchantColumnSql("t", "display_name")} AS merchantName, ${ownNameSql("t")} AS ownName, ${NAME_SUGGESTION_COLUMNS}, ${f.raw ? "NULL" : visibleNoteSql(detailsOn)} AS note, ${f.raw ? "0" : `CASE WHEN t.note_state = 'guessed' AND ${detailsOn ? "1" : "0"} = 1 THEN 1 ELSE 0 END`} AS noteGuessed, t.parent_id AS parentId,
-				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${ownNameSql("p")} AS parentOwnName, ${merchantColumnSql("p", "suggested_name")} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
+				t.is_split AS isSplit, ${merchantColumnSql("p", "display_name")} AS parentMerchantName, ${ownNameSql("p")} AS parentOwnName, ${merchantNamesJsonSql(merchantKeySql("p"))} AS parentSuggestedNames, ${merchantColumnSql("p", "suggestion_status")} AS parentSuggestionStatus, ${merchantKeySql("p")} AS parentMerchantKey, p.raw_name AS parentRawName,
 				t.split_removed_from_cents AS splitRemovedFromCents, ${STILL_UNPAID_BILLS_SQL("t.split_removed_bills")} AS splitRemovedBills,
 				t.refund_of_id AS refundOfId, rp.date AS refundPurchaseDate, t.refund_unlinked_purchase_date AS refundUnlinkedPurchaseDate, ${FOLLOWS_PURCHASE} AS followsPurchase,
 				${REFUNDED_COLUMN},
@@ -2718,7 +2722,7 @@ export async function pendingForJev(
 	const { results } = await db
 		.prepare(
 			`SELECT t.id, ${merchantKeySql("t")} AS merchantKey, t.raw_name AS rawName, COALESCE(${ownNameSql("t")}, ${merchantColumnSql("t", "display_name")}) AS displayName,
-				${merchantColumnSql("t", "suggested_name")} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
+				${merchantNamesJsonSql(merchantKeySql("t"))} AS suggestedNames, ${merchantColumnSql("t", "suggestion_status")} AS suggestionStatus,
 				t.amount_cents AS amountCents, a.type AS accountType,
 				${jevCategoryHintSql("t")} AS plaidCategory, t.note, t.kind, hp.name AS forPerson,
 				${ownNameSql("t")} AS ownName, ${merchantColumnSql("t", "display_name")} AS merchantName,
@@ -2900,7 +2904,7 @@ function seenMatchSql(value: (field: keyof JevSeen) => string): string {
 		AND ${ownNameSql("transactions")} IS ${value("ownName")}
 		AND ${merchantKeySql("transactions")} = ${value("merchantKey")}
 		AND ${merchantColumnSql("transactions", "display_name")} IS ${value("merchantName")}
-		AND ${merchantColumnSql("transactions", "suggested_name")} IS ${value("suggestedNames")}
+		AND ${merchantNamesJsonSql(merchantKeySql("transactions"))} IS ${value("suggestedNames")}
 		AND ${merchantColumnSql("transactions", "suggestion_status")} IS ${value("suggestionStatus")}
 		AND transactions.amount_cents = ${value("amountCents")}
 		AND transactions.account_id = ${value("accountId")}

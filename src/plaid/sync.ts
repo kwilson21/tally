@@ -3,7 +3,7 @@ import { UNPAID_BILLS_SQL } from "../bills/unpaid";
 import { householdToday } from "../dates";
 import { PLAID_INCOME_CATEGORY, syncedIncomeFlagSql } from "../db/income";
 import { merchantKeySql } from "../db/merchant-key";
-import { suggestBankNamesSql } from "../db/merchant-names";
+import { NAME_TRIM_SQL, suggestBankNames } from "../db/merchant-names";
 import {
 	isPlaidTransferSql,
 	plaidTransferRuleSql,
@@ -130,65 +130,109 @@ function plaidNameToSuggest(transaction: PlaidTransaction): string | null {
 // bound values in a statement, and ends with the Item's lock (`OWNS_LOCK`, which brings two `?`s of its own).
 
 /**
- * The CASE that ranks a merchant's suggestion columns, lowest first: 0 a decided suggestion (accepted or rejected);
- * 1 a waiting guess when nobody named the merchant, 4 when somebody did; 2 a suggested name that isn't waiting; 3
- * nothing at all. `named` is the SQL that says a person named the merchant. The copy ranks with it on both sides of
- * its upsert, so the two can't drift apart.
+ * The rank of a merchant's suggestion, lowest first: 0 a decided suggestion (accepted or rejected); 1 a waiting guess when
+ * nobody named the merchant, 4 when somebody did; 2 an empty answer (`names_asked`); 3 nothing at all. `named` is the SQL
+ * that says a person named the merchant. The copy ranks with it on both sides of its upsert, so the two can't drift apart.
  */
-const suggestionPickSql = (
-	status: string,
-	suggestedName: string,
-	named: string,
-) =>
+const suggestionPickSql = (status: string, asked: string, named: string) =>
 	`CASE WHEN ${status} IN ('accepted', 'rejected') THEN 0
 	   WHEN ${status} = 'pending' AND NOT (${named}) THEN 1
 	   WHEN ${status} = 'pending' THEN 4
-	   WHEN ${suggestedName} IS NOT NULL THEN 2
+	   WHEN ${asked} = 1 THEN 2
 	   ELSE 3 END`;
 
 /**
- * Starts the merchant row of each Plaid name from the rows saved under the bank texts it came with, unless the name
- * has a row an earlier sync made. Two `?`s: the pairs, a JSON array of `[Plaid name, bank text]` in the order the
- * charges arrived, and this page's names that are open (see `syncItem`), a JSON array that is `[]` when none. When
- * several texts share one name, no person's choice is dropped: `display_name`, `default_category_id` and `not_a_bill`
- * each come from the first text whose row holds one. The suggestion columns come from one row, the first of: a decided
- * suggestion (accepted or rejected); a waiting guess; the empty answer; nothing at all. A waiting guess goes last of all
- * when a person named the merchant, in one of the texts or on its own row, so it gives way to the named merchant.
- * Ties fall to the page's first text.
- *
- * On an open key, which only this run made, a later page fills in just the choices the row doesn't have yet and a
- * better-ranked suggestion. The upsert needs no WHERE of its own: a conflict can only be on an open key, since the
- * filter admits no other existing key.
+ * True when a merchant's suggested names are exactly its key, the bank's own name (name-suggestions.ts isBankName): one
+ * row, and it is the key. `key` is SQL for the merchant's key.
+ */
+const bankOnlySql = (key: string) =>
+	`((SELECT COUNT(*) FROM merchant_suggested_names x WHERE x.merchant_key = ${key}) = 1
+	   AND EXISTS (SELECT 1 FROM merchant_suggested_names x WHERE x.merchant_key = ${key} AND x.name = ${key}))`;
+
+/**
+ * True when a person named the merchant `key` (SQL), within this page: one of the page's texts for it, or its own row,
+ * holds a chosen name. Needs the `pair` CTE of COPY_WINNERS in scope.
+ */
+const namedKeySql = (key: string) =>
+	`(EXISTS (SELECT 1 FROM pair q JOIN merchants d ON d.raw_name = q.t WHERE q.k = ${key} AND d.display_name IS NOT NULL)
+	   OR EXISTS (SELECT 1 FROM merchants ow WHERE ow.raw_name = ${key} AND ow.display_name IS NOT NULL))`;
+
+/**
+ * The winner of each Plaid name the page starts a row for (copyPlaidNamesSql). One `?` for the pairs, a JSON array of
+ * `[Plaid name, bank text]` in the order the charges arrived, and one for the names opened in this run, a JSON array
+ * (`[]` when none). The candidates for a name are the rows of its page's bank texts, and its own row when it has one as
+ * candidate `n = -1` so it wins a tie. A candidate's rank is pickSql's, with the same `named` for every candidate of the
+ * name. `winner.t` is the bank text whose row the name takes, or NULL when its own row wins. The three statements of
+ * copyPlaidNamesSql all read this CTE, and it is read before any of them writes, so they agree with each other.
+ */
+const COPY_WINNERS = `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
+	 opened(k) AS (SELECT value FROM json_each(?)),
+	 src(k, n, t, pick, status, asked, display_name, default_category_id, not_a_bill) AS (
+	   SELECT p.k, p.n, p.t, ${suggestionPickSql("m.suggestion_status", "m.names_asked", namedKeySql("p.k"))}, m.suggestion_status, m.names_asked,
+	     m.display_name, m.default_category_id, m.not_a_bill
+	   FROM pair p JOIN merchants m ON m.raw_name = p.t
+	   WHERE NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k) OR p.k IN (SELECT k FROM opened)),
+	 cand(k, n, t, pick, status, asked) AS (
+	   SELECT k, n, t, pick, status, asked FROM src
+	   UNION ALL
+	   SELECT m.raw_name, -1, NULL, ${suggestionPickSql("m.suggestion_status", "m.names_asked", namedKeySql("m.raw_name"))}, m.suggestion_status, m.names_asked
+	   FROM merchants m WHERE m.raw_name IN (SELECT k FROM src)),
+	 winner(k, t, status, asked) AS (
+	   SELECT g.k,
+	     (SELECT c.t FROM cand c WHERE c.k = g.k ORDER BY c.pick, c.n LIMIT 1),
+	     (SELECT c.status FROM cand c WHERE c.k = g.k ORDER BY c.pick, c.n LIMIT 1),
+	     (SELECT c.asked FROM cand c WHERE c.k = g.k ORDER BY c.pick, c.n LIMIT 1)
+	   FROM (SELECT DISTINCT k FROM src) g)`;
+
+/**
+ * Starts the merchant row of each Plaid name from the rows saved under the bank texts it came with, unless the name has a
+ * row an earlier sync made (see COPY_WINNERS for the winner). The merchant takes its status and names_asked from the
+ * winner, and a name's display name, default category and Not a bill come from the first text that has each. An
+ * existing row keeps its own status unless the winner ranks strictly better, the same comparison COPY_WINNERS makes
+ * (`takeNew`), so the two statements can't disagree. The names are copied by copyPlaidNamesSql, which runs first.
+ * Two `?`s, then the lock's: the pairs and the opened names, as copyNeverSuggestSql takes them.
  */
 const copyMerchantRowSql = (ownsLock: string) => {
-	// A person named the merchant when one of this page's texts for it, or the merchant's own row, holds a name.
-	const namedInPage = `EXISTS (SELECT 1 FROM pair q JOIN merchants d ON d.raw_name = q.t WHERE q.k = p.k AND d.display_name IS NOT NULL)
-	   OR EXISTS (SELECT 1 FROM merchants own WHERE own.raw_name = p.k AND own.display_name IS NOT NULL)`;
 	const namedNow =
 		"merchants.display_name IS NOT NULL OR excluded.display_name IS NOT NULL";
-	const takeNew = `${suggestionPickSql("excluded.suggestion_status", "excluded.suggested_name", namedNow)} < ${suggestionPickSql("merchants.suggestion_status", "merchants.suggested_name", namedNow)}`;
-	return `WITH pair(k, t, n) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), key FROM json_each(?)),
-	 src(k, n, pick, suggested_name, suggestion_status, display_name, default_category_id, not_a_bill) AS (
-	   SELECT p.k, p.n, ${suggestionPickSql("m.suggestion_status", "m.suggested_name", namedInPage)},
-	     m.suggested_name, m.suggestion_status, m.display_name, m.default_category_id, m.not_a_bill
-	   FROM pair p JOIN merchants m ON m.raw_name = p.t
-	   WHERE (NOT EXISTS (SELECT 1 FROM merchants x WHERE x.raw_name = p.k) OR p.k IN (SELECT value FROM json_each(?))))
-	 INSERT INTO merchants (raw_name, suggested_name, display_name, default_category_id, suggestion_status, not_a_bill)
-	 SELECT g.k,
-	   (SELECT s.suggested_name FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
-	   (SELECT s.display_name FROM src s WHERE s.k = g.k AND s.display_name IS NOT NULL ORDER BY s.n LIMIT 1),
-	   (SELECT s.default_category_id FROM src s WHERE s.k = g.k AND s.default_category_id IS NOT NULL ORDER BY s.n LIMIT 1),
-	   (SELECT s.suggestion_status FROM src s WHERE s.k = g.k ORDER BY s.pick, s.n LIMIT 1),
-	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = g.k)
-	 FROM (SELECT DISTINCT k FROM src) g
+	const takeNew = `${suggestionPickSql("excluded.suggestion_status", "excluded.names_asked", namedNow)} < ${suggestionPickSql("merchants.suggestion_status", "merchants.names_asked", namedNow)}`;
+	return `${COPY_WINNERS}
+	 INSERT INTO merchants (raw_name, display_name, default_category_id, suggestion_status, names_asked, not_a_bill)
+	 SELECT w.k,
+	   (SELECT s.display_name FROM src s WHERE s.k = w.k AND s.display_name IS NOT NULL ORDER BY s.n LIMIT 1),
+	   (SELECT s.default_category_id FROM src s WHERE s.k = w.k AND s.default_category_id IS NOT NULL ORDER BY s.n LIMIT 1),
+	   w.status, w.asked,
+	   (SELECT MAX(s.not_a_bill) FROM src s WHERE s.k = w.k)
+	 FROM winner w
 	 WHERE ${ownsLock}
 	 ON CONFLICT(raw_name) DO UPDATE SET
-	   suggested_name = CASE WHEN ${takeNew} THEN excluded.suggested_name ELSE merchants.suggested_name END,
 	   suggestion_status = CASE WHEN ${takeNew} THEN excluded.suggestion_status ELSE merchants.suggestion_status END,
+	   names_asked = CASE WHEN ${takeNew} THEN excluded.names_asked ELSE merchants.names_asked END,
 	   display_name = COALESCE(merchants.display_name, excluded.display_name),
 	   default_category_id = COALESCE(merchants.default_category_id, excluded.default_category_id),
 	   not_a_bill = MAX(merchants.not_a_bill, excluded.not_a_bill)`;
 };
+
+/**
+ * The names of each Plaid name's winner (COPY_WINNERS), written before copyMerchantRowSql so both read the state from before
+ * this page: first one INSERT OR REPLACE of the winner's rows under the Plaid name (SQLite reads the names it copies from
+ * before it writes them, so a bank text that is also another name on the page is copied as it was), then one DELETE of
+ * the name's positions past the winner's count, which removes the names it had before. Winners with no rows of their own
+ * (an empty answer, or none at all) leave the name with none. A winner that is the name's own row changes nothing.
+ * Both carry the lock, so a lost lock writes neither.
+ */
+const copyPlaidNamesSql = (ownsLock: string): [string, string] => [
+	`${COPY_WINNERS}
+	 INSERT OR REPLACE INTO merchant_suggested_names (merchant_key, position, name)
+	 SELECT w.k, s.position, s.name FROM winner w JOIN merchant_suggested_names s ON s.merchant_key = w.t
+	 WHERE w.t IS NOT NULL AND ${ownsLock}`,
+	`${COPY_WINNERS}
+	 DELETE FROM merchant_suggested_names
+	 WHERE merchant_key IN (SELECT w.k FROM winner w WHERE w.t IS NOT NULL)
+	   AND position >= (SELECT COUNT(*) FROM merchant_suggested_names s
+	     WHERE s.merchant_key = (SELECT w2.t FROM winner w2 WHERE w2.k = merchant_suggested_names.merchant_key))
+	   AND ${ownsLock}`,
+];
 
 /**
  * Gives each Plaid name the "Never suggest" lines of the bank text it came with (decision 101), with each line's
@@ -207,14 +251,14 @@ const copyNeverSuggestSql = (ownsLock: string) =>
  * Withdraws the waiting suggestion of a Plaid name that is no longer the newest for a bank text (spec §8.6,
  * decision 79). One `?`: the bank texts to look at, a JSON array of `[text, text tidied]` pairs. It
  * includes every text using a Plaid name changed on this page, so a shared name stays while newest for any text. A row is
- * the bank's own suggestion when its suggested name is its key (src/transactions/name-suggestions.ts), and
- * it is withdrawn only when nobody has named it, it has a charge with one of these bank texts, and it is
- * the newest Plaid name (latest date, then latest id) for none of its charges' bank texts.
+ * the bank's own suggestion when its names are exactly its key (bankOnlySql), and it is withdrawn only when nobody has
+ * named it, it has a charge with one of these bank texts, and it is the newest Plaid name (latest date, then latest id)
+ * for none of its charges' bank texts. Its names go with it in the page's last name statement (sweepStaleNamesSql).
  */
 const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	`WITH pair(text, tidied) AS (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))
-	 UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
-	 WHERE suggestion_status = 'pending' AND display_name IS NULL AND suggested_name = raw_name
+	 UPDATE merchants SET suggestion_status = 'none', names_asked = 0
+	 WHERE suggestion_status = 'pending' AND display_name IS NULL AND ${bankOnlySql("merchants.raw_name")}
 	   AND EXISTS (SELECT 1 FROM transactions t WHERE t.raw_name IN (SELECT text FROM pair)
 	     AND t.parent_id IS NULL AND t.merchant_name = merchants.raw_name)
 	   AND NOT EXISTS (
@@ -227,35 +271,65 @@ const withdrawOlderPlaidNamesSql = (ownsLock: string) =>
 	   AND ${ownsLock}`;
 
 /**
- * Suggests the Plaid name of each bank text's newest remaining charge (latest date, then latest id), as
- * `suggestBankNamesSql` does, unless that name is only the text or the text tidied. One `?`: the same
- * `[text, text tidied]` pairs. It runs once the page's writes are all in, so a text a charge has left
- * offers the name of the charge that is newest now, even one withdrawn earlier.
+ * The charges' Plaid names this page suggests, as the rows of `json_each` for `[text, text tidied]` pairs, joined to each
+ * text's newest remaining charge (latest date, then latest id) that has a Plaid name, unless that name is only the text or
+ * the text tidied. The three statements of suggestNewestPlaidNamesSql all read these same candidates, so they agree.
+ * `?`: the same pairs as withdrawOlderPlaidNamesSql; then the lock's binds.
  */
-const suggestNewestPlaidNamesSql = (ownsLock: string) =>
-	`INSERT INTO merchants (raw_name, suggested_name, suggestion_status)
-	 SELECT DISTINCT n.merchant_name, n.merchant_name, 'pending'
-	 FROM json_each(?) AS a
+const newestPlaidNameCandidatesSql = (ownsLock: string) =>
+	`FROM json_each(?) AS a
 	 JOIN transactions n ON n.id = (SELECT x.id FROM transactions x
 	   WHERE x.raw_name = json_extract(a.value, '$[0]') AND x.parent_id IS NULL AND NULLIF(x.merchant_name, '') IS NOT NULL
 	   ORDER BY x.date DESC, x.id DESC LIMIT 1)
-	 WHERE n.merchant_name != json_extract(a.value, '$[0]') AND n.merchant_name != json_extract(a.value, '$[1]') AND ${ownsLock}
-	 ON CONFLICT(raw_name) DO UPDATE SET suggested_name = excluded.suggested_name, suggestion_status = 'pending'
-	 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`;
+	 WHERE n.merchant_name != json_extract(a.value, '$[0]') AND n.merchant_name != json_extract(a.value, '$[1]')
+	   AND trim(n.merchant_name, ${NAME_TRIM_SQL}) <> '' AND ${ownsLock}`;
+
+/**
+ * Suggests the Plaid name of each bank text's newest remaining charge, as suggestBankNames does, unless that name is only
+ * the text or the text tidied. It runs once the page's writes are all in, so a text a charge has left offers the name of
+ * the charge that is newest now, even one withdrawn earlier. Three statements, as suggestBankNames: the merchant rows,
+ * then the names of the merchants that are pending and unnamed, replaced, read from the same candidates.
+ */
+const suggestNewestPlaidNamesSql = (
+	ownsLock: string,
+): [string, string, string] => {
+	const from = newestPlaidNameCandidatesSql(ownsLock);
+	const waiting = `(SELECT raw_name FROM merchants WHERE display_name IS NULL AND suggestion_status = 'pending')`;
+	return [
+		`INSERT INTO merchants (raw_name, suggestion_status, names_asked)
+		 SELECT DISTINCT n.merchant_name, 'pending', 0 ${from}
+		 ON CONFLICT(raw_name) DO UPDATE SET suggestion_status = 'pending', names_asked = 0
+		 WHERE merchants.display_name IS NULL AND merchants.suggestion_status IN ('none', 'pending')`,
+		`DELETE FROM merchant_suggested_names WHERE merchant_key IN (SELECT n.merchant_name ${from})
+		 AND merchant_key IN ${waiting}`,
+		`INSERT INTO merchant_suggested_names (merchant_key, position, name)
+		 SELECT DISTINCT n.merchant_name, 0, trim(n.merchant_name, ${NAME_TRIM_SQL}) ${from}
+		 AND n.merchant_name IN ${waiting}`,
+	];
+};
 
 /**
  * Clears a guess still waiting on the merchant of a Plaid name that needs no suggestion (the text, or the
- * text tidied; decision 79). Workers AI is asked only about texts Plaid doesn't name (decision 68), so a guess
- * made before Plaid named the text, and copied to the merchant with the rest of the row, is stale. A guess is
- * a suggested name that isn't the key. A name a person chose, a suggestion they decided, the bank's own
- * name, and a guess that charges with no Plaid name still read from this row are left alone. One `?`: the
- * names, a JSON array.
+ * text tidied; decision 79). Workers AI is asked only about texts Plaid doesn't name (decision 68), so a guess made before
+ * Plaid named the text, and copied to the merchant with the rest of the row, is stale. A guess is a waiting suggestion
+ * whose names aren't exactly its key. A name a person chose, a suggestion they decided, the bank's own name, and a guess
+ * that charges with no Plaid name still read from this row are left alone. One `?`: the names, a JSON array.
  */
 const clearStaleGuessesSql = (ownsLock: string) =>
-	`UPDATE merchants SET suggested_name = NULL, suggestion_status = 'none'
+	`UPDATE merchants SET suggestion_status = 'none', names_asked = 0
 	 WHERE raw_name IN (SELECT value FROM json_each(?))
-	   AND suggestion_status = 'pending' AND display_name IS NULL AND suggested_name IS NOT raw_name
+	   AND suggestion_status = 'pending' AND display_name IS NULL AND NOT ${bankOnlySql("merchants.raw_name")}
 	   AND NOT EXISTS (SELECT 1 FROM transactions u WHERE u.raw_name = merchants.raw_name AND u.parent_id IS NULL AND NULLIF(u.merchant_name, '') IS NULL)
+	   AND ${ownsLock}`;
+
+/**
+ * Removes the names of every merchant that is now `none` (invariant I1). The statements that withdraw a suggestion set its
+ * status to none and leave its rows, so the page's last name statement sweeps them. It is unscoped, since the keys a
+ * withdrawal changed can't be found again. Carries the lock.
+ */
+const sweepStaleNamesSql = (ownsLock: string) =>
+	`DELETE FROM merchant_suggested_names
+	 WHERE merchant_key IN (SELECT raw_name FROM merchants WHERE suggestion_status = 'none')
 	   AND ${ownsLock}`;
 
 /** True only while this run still holds the Item's lock; every page write carries it. */
@@ -934,7 +1008,7 @@ export async function syncItem(
 			}
 			if (pairs.size > 0) {
 				// Read before the batch, so it sees only the rows of earlier pages and syncs: the names with no row yet.
-				// This run's copy and suggestBankNamesSql make rows for this page's names, and suggestNewestPlaidNamesSql
+				// This run's copy and suggestBankNames make rows for this page's names, and suggestNewestPlaidNamesSql
 				// for names a stored charge already carries, whose row the page that stored the charge made. So a row this
 				// run makes is for a name read here or on an earlier page. A sync that resumes from a saved cursor is a
 				// separate run: it opens no names, and the rows an earlier run made are never filled.
@@ -946,10 +1020,22 @@ export async function syncItem(
 					.all<{ value: string }>();
 				for (const { value } of fresh.results) openMerchantKeys.add(value);
 				const open = pairKeys.filter((key) => openMerchantKeys.has(key));
+				// The names are copied first, from the state before this page (copyPlaidNamesSql); then the merchant rows, which
+				// take the same winner's status; then the never-suggest lines.
+				const [copyNames, dropOtherNames] = copyPlaidNamesSql(OWNS_LOCK);
+				const pairJson = JSON.stringify([...pairs.values()]);
+				const openJson = JSON.stringify(open);
 				statements.push(
+					env.DB.prepare(copyNames).bind(pairJson, openJson, itemRowId, lockId),
+					env.DB.prepare(dropOtherNames).bind(
+						pairJson,
+						openJson,
+						itemRowId,
+						lockId,
+					),
 					env.DB.prepare(copyMerchantRowSql(OWNS_LOCK)).bind(
-						JSON.stringify([...pairs.values()]),
-						JSON.stringify(open),
+						pairJson,
+						openJson,
 						itemRowId,
 						lockId,
 					),
@@ -972,11 +1058,10 @@ export async function syncItem(
 			}
 			if (suggested.size > 0) {
 				statements.push(
-					env.DB.prepare(suggestBankNamesSql(OWNS_LOCK)).bind(
-						JSON.stringify([...suggested]),
+					...suggestBankNames(env.DB, [...suggested], OWNS_LOCK, [
 						itemRowId,
 						lockId,
-					),
+					]),
 				);
 			}
 			// A pending transaction the bank drops waits for the update's last page before it is deleted, because
@@ -1070,17 +1155,17 @@ export async function syncItem(
 				const texts = JSON.stringify(
 					[...textsOfCharges].map((text) => [text, tidyName(text)]),
 				);
+				const [newestRows, newestDrop, newestNames] =
+					suggestNewestPlaidNamesSql(OWNS_LOCK);
 				statements.push(
 					env.DB.prepare(withdrawOlderPlaidNamesSql(OWNS_LOCK)).bind(
 						texts,
 						itemRowId,
 						lockId,
 					),
-					env.DB.prepare(suggestNewestPlaidNamesSql(OWNS_LOCK)).bind(
-						texts,
-						itemRowId,
-						lockId,
-					),
+					env.DB.prepare(newestRows).bind(texts, itemRowId, lockId),
+					env.DB.prepare(newestDrop).bind(texts, itemRowId, lockId),
+					env.DB.prepare(newestNames).bind(texts, itemRowId, lockId),
 				);
 			}
 			// A Plaid name that needs no suggestion (it is the bank's text, or that text tidied) leaves no guess
@@ -1099,6 +1184,11 @@ export async function syncItem(
 					),
 				);
 			}
+			// The withdrawals above left their rows behind; the last name statement of the page removes them (sweepStaleNamesSql).
+			if (textsOfCharges.size > 0 || plain.size > 0)
+				statements.push(
+					env.DB.prepare(sweepStaleNamesSql(OWNS_LOCK)).bind(itemRowId, lockId),
+				);
 			// The last page's write also stamps the first sync that ran after Plaid said the history was in (#581): the same
 			// batch, so the stamp means the history's pages are in. COALESCE keeps the first stamp of all.
 			const lastPageStamp = historyReported

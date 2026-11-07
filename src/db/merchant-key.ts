@@ -27,10 +27,20 @@ export function merchantKeySql(alias: string): string {
 
 type MerchantColumn =
 	| "display_name"
-	| "suggested_name"
 	| "suggestion_status"
+	| "names_asked"
 	| "default_category_id"
 	| "not_a_bill";
+
+/**
+ * A merchant's suggested names as JSON text, given SQL for the key: `[[position, name], …]` in position order, or `[]`
+ * for none (merchant_suggested_names). parseSuggestedNames reads it and sorts by position again, so neither the order
+ * of the rows nor of the aggregate is relied on. The stale-form check compares it as text, so both sides use this SQL.
+ */
+export function merchantNamesJsonSql(keySql: string): string {
+	return `(SELECT COALESCE(json_group_array(json_array(p.position, p.name)), '[]')
+		FROM (SELECT n.position, n.name FROM merchant_suggested_names n WHERE n.merchant_key = ${keySql} ORDER BY n.position) p)`;
+}
 
 /** A `merchants` column on the row saved under a merchant key, given SQL for the key. */
 export function merchantColumnOfSql(

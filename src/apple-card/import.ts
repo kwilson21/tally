@@ -3,7 +3,7 @@
 // planned first (plan.ts), from the day Tally's history starts (historyStart).
 
 import { daysBefore } from "../dates";
-import { suggestBankNamesSql } from "../db/merchant-names";
+import { suggestBankNames } from "../db/merchant-names";
 import { tidyName } from "../transactions/tidy-name";
 import type { AppleRow } from "./csv";
 import { type HeldTwins, type ImportPlan, planImport, rowKey } from "./plan";
@@ -247,9 +247,7 @@ export async function importAppleCard(
 		),
 	];
 	if (names.length > 0)
-		statements.push(
-			db.prepare(suggestBankNamesSql("1")).bind(JSON.stringify(names)),
-		);
+		statements.push(...suggestBankNames(db, names, "1", []));
 
 	const results = await db.batch<{ id: number }>(statements);
 	const accountId = results[1]?.results[0]?.id;

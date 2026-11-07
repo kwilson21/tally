@@ -103,7 +103,7 @@ export function jevAnswerLogStatement(
  * name (`?`) is one of its suggestions.
  */
 const KEPT_NAME_CONDITIONS = `m.suggestion_status = 'pending' AND m.display_name IS NULL
-		AND instr(char(10) || COALESCE(m.suggested_name, '') || char(10), char(10) || ? || char(10)) > 0`;
+		AND EXISTS (SELECT 1 FROM merchant_suggested_names n WHERE n.merchant_key = m.raw_name AND n.name = ?)`;
 
 /**
  * The log row for a name Tally guessed that a person is keeping (spec §8.6): parameters are the day, the
