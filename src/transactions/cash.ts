@@ -1,3 +1,4 @@
+import { CASH_MERCHANT_MAX, NOTE_MAX } from "../limits";
 import { toCents } from "../money";
 
 export type CashValues = {
@@ -55,12 +56,13 @@ export function parseCash(
 	Object.assign(errors, parsedAmount.errors);
 	const merchant = values.merchant.trim();
 	if (!merchant) errors.merchant = "Enter where you spent it.";
-	else if (merchant.length > 120)
-		errors.merchant = "Use 120 characters or fewer.";
+	else if (merchant.length > CASH_MERCHANT_MAX)
+		errors.merchant = `Use ${CASH_MERCHANT_MAX} characters or fewer.`;
 	const categoryId = Number(values.category);
 	if (!categoryIds.includes(categoryId))
 		errors.category = "Pick a category from the list.";
-	if (values.note.length > 500) errors.note = "Use 500 characters or fewer.";
+	if (values.note.length > NOTE_MAX)
+		errors.note = `Use ${NOTE_MAX} characters or fewer.`;
 	return Object.keys(errors).length
 		? { ok: false as const, errors }
 		: {

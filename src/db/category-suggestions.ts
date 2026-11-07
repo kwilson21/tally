@@ -1,5 +1,6 @@
 import { JEV_THRESHOLD } from "../ai/categorize";
 import { householdToday } from "../dates";
+import { NOTE_MAX } from "../limits";
 import {
 	fullMessage,
 	MAX_ACTIVE,
@@ -358,11 +359,11 @@ export async function createFromSuggestion(
 	const ticked = input.ticked.filter((tx) => attached.includes(tx));
 	if (!ticked.length)
 		return { ok: false, reason: "empty", error: NOTHING_TICKED };
-	if (Object.values(input.notes).some((note) => note.length > 500))
+	if (Object.values(input.notes).some((note) => note.length > NOTE_MAX))
 		return {
 			ok: false,
 			reason: "invalid",
-			error: "Keep each note under 500 characters.",
+			error: `Keep each note under ${NOTE_MAX} characters.`,
 		};
 	// A category the family already has with this name takes the ticked transactions ("Add to", decision
 	// 101), instead of a new one, in any capitals or accents the form would also match (sameName, since SQL

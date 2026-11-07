@@ -9,6 +9,7 @@ import {
 	newCategoryItem,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
+import { DISPLAY_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { nameForm, parseCategory } from "../settings/category-form";
@@ -279,7 +280,7 @@ async function renderOrganize(
 								label="Name (optional)"
 								hint="Change it to rename every transaction from this merchant."
 								value={values ? values.name : group.name}
-								maxlength={80}
+								maxlength={DISPLAY_NAME_MAX}
 								error={values?.nameError}
 								autocomplete="off"
 							/>
@@ -491,8 +492,8 @@ organize.post("/transactions/organize", async (c) => {
 	if (named && !named.ok) values.newCategoryError = named.errors.name;
 	else if (!choseNew && !category)
 		values.categoryError = "Pick a category from the list.";
-	if (name.length > 80)
-		values.nameError = "Name must be 80 characters or fewer.";
+	if (name.length > DISPLAY_NAME_MAX)
+		values.nameError = `Name must be ${DISPLAY_NAME_MAX} characters or fewer.`;
 	if (values.categoryError || values.newCategoryError || values.nameError)
 		return renderOrganize(c, values, 422);
 

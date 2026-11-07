@@ -1,7 +1,7 @@
 // What the Settings form may save for a category, checked before anything is written (spec §7).
 import { NONE_FIT } from "../ai/decide";
+import { CATEGORY_NAME_MAX } from "../limits";
 
-const MAX_NAME = 40;
 /**
  * Few enough that Settings, Home and the edit panel always show every category at once, with no
  * pagination (decision 37). Well under Jev's limit of 255 options, one being "None of these fit".
@@ -56,8 +56,8 @@ export function parseCategory(
 
 	const clash = existing.find((c) => c.id !== id && sameName(c.name, name));
 	if (name === "") errors.name = "Give the category a name.";
-	else if (name.length > MAX_NAME)
-		errors.name = `Keep the name to ${MAX_NAME} characters.`;
+	else if (name.length > CATEGORY_NAME_MAX)
+		errors.name = `Keep the name to ${CATEGORY_NAME_MAX} characters.`;
 	else if (sameName(name, NONE_FIT))
 		errors.name = "That name is reserved for Tally. Pick another.";
 	else if (clash)

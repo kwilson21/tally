@@ -40,17 +40,13 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
+import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { activeNamed } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
 import { EmptyState } from "../views/empty-state";
 import { Layout } from "../views/layout";
-import {
-	MAX_OWN_NAME,
-	OWN_VALUE,
-	pickValue,
-	STORE_VALUE,
-} from "../views/name-choices";
+import { OWN_VALUE, pickValue, STORE_VALUE } from "../views/name-choices";
 import { RecheckLine, type RecheckRun } from "../views/recheck-line";
 import {
 	AskFirst,
@@ -64,7 +60,6 @@ import {
 type App = { Bindings: Env };
 
 const PATH = "/settings/suggestions";
-const MAX_STORE_KEY = 500;
 
 /** The words when a suggestion was answered somewhere else first (decision 120): Settings and Organize say the same. */
 export const CHANGED_SUGGESTION =
@@ -619,7 +614,9 @@ suggestions.post(PATH, async (c) => {
 				form
 					.getAll("store")
 					.map((store) => store.toString())
-					.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY),
+					.filter(
+						(store) => store.length > 0 && store.length <= MERCHANT_KEY_MAX,
+					),
 			),
 		];
 		if (
@@ -1083,10 +1080,10 @@ function readChoice(
 	if (picked === OWN_VALUE) {
 		if (own === "")
 			return { ok: false, error: "Type a name here, or pick one above." };
-		if (own.length > MAX_OWN_NAME)
+		if (own.length > DISPLAY_NAME_MAX)
 			return {
 				ok: false,
-				error: `Keep the name under ${MAX_OWN_NAME} characters.`,
+				error: `Keep the name under ${DISPLAY_NAME_MAX} characters.`,
 			};
 		return { ok: true, value: { kind: "name", name: own } };
 	}

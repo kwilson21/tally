@@ -2,6 +2,7 @@ import type { Child } from "hono/jsx";
 import { shortDay } from "../dates";
 import type { MoreLikeThis } from "../db/more-like-this";
 import type { SuggestionItem } from "../db/suggestions-queue";
+import { CATEGORY_NAME_MAX } from "../limits";
 import { formatCents } from "../money";
 import { activeNamed, sameName } from "../settings/category-form";
 import { Button } from "./button";
@@ -555,7 +556,7 @@ export function NewCategoryRow({
 					label="Category name"
 					value={name}
 					error={error}
-					maxlength={40}
+					maxlength={CATEGORY_NAME_MAX}
 					autocomplete="off"
 					surface="paper"
 				/>

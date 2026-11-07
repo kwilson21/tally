@@ -1,5 +1,6 @@
 import type { Child } from "hono/jsx";
 import { shortDay } from "../dates";
+import { NOTE_MAX } from "../limits";
 import { formatCents } from "../money";
 import { Button } from "./button";
 import { Icon } from "./icons";
@@ -135,7 +136,7 @@ export function NewCategoryCard({
 									name={`note_${row.id}`}
 									label={`A note for ${row.name} (optional)`}
 									value={notes?.[row.id] ?? ""}
-									maxlength={500}
+									maxlength={NOTE_MAX}
 									placeholder="Only used if you untick it"
 									hint="Tally sorts it again right away, with your note."
 									surface="paper"

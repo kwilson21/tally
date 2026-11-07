@@ -7,6 +7,7 @@ import {
 	sanitizeFeedbackMessage,
 	sanitizeFeedbackRoute,
 } from "../feedback/privacy";
+import { FEEDBACK_MESSAGE_MAX } from "../limits";
 import { FeedbackForm, type FeedbackValues } from "../views/feedback-form";
 import { Layout } from "../views/layout";
 
@@ -168,12 +169,16 @@ feedback.post("/feedback", async (c) => {
 		);
 		return setFeedbackLimitCookie(response, crypto.randomUUID());
 	}
-	if (!rawMessage.trim() || rawMessage.length > 2000 || !values.message) {
+	if (
+		!rawMessage.trim() ||
+		rawMessage.length > FEEDBACK_MESSAGE_MAX ||
+		!values.message
+	) {
 		return c.html(
 			view(values, false, {
 				error:
-					rawMessage.length > 2000
-						? "Keep the message to 2,000 characters."
+					rawMessage.length > FEEDBACK_MESSAGE_MAX
+						? `Keep the message to ${FEEDBACK_MESSAGE_MAX.toLocaleString("en-US")} characters.`
 						: "Write a message before sending.",
 				diagnosticsEnabled: diagnosticsEnabled(c.env),
 			}),

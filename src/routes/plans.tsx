@@ -19,12 +19,12 @@ import {
 	updatePlan,
 } from "../db/planned-expenses";
 import { hxTrigger } from "../htmx";
+import { PLAN_NAME_MAX } from "../limits";
 import { centsToAmount, formatCents, toCents } from "../money";
 import { sheetAttrs } from "../views/bottom-sheet";
 import { Button } from "../views/button";
 import { Layout } from "../views/layout";
 import {
-	PLAN_NAME_MAX,
 	type PlanMonthOption,
 	PlanPaymentPicker,
 	PlanSheet,
