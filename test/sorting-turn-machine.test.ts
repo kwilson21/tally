@@ -199,7 +199,8 @@ describe("the sorting turn statements follow the machine", () => {
 				["RETAKE", ME],
 			] as const) {
 				for (const state of STATES) {
-					await seed(rowFor(state, holder));
+					const before = rowFor(state, holder);
+					await seed(before);
 					await db
 						.prepare("DELETE FROM household_settings WHERE key = ?")
 						.bind(RESERVED)
@@ -211,7 +212,25 @@ describe("the sorting turn statements follow the machine", () => {
 							)
 							.bind(RESERVED)
 							.run();
+					const started = Date.now();
 					await takeSortingTurnStatement(db, ME, RESERVED).run();
+					const after = await readSortingTurn(db);
+					const allowed =
+						withRecord && next(sortingTurnMachine, state, event) !== null;
+					if (allowed) {
+						// Taken: the turn is ours, with a fresh full turn, whoever had it before.
+						expect(after?.id, `${state}, ${event}: holder`).toBe(ME);
+						expect(
+							after?.until,
+							`${state}, ${event}: until`,
+						).toBeGreaterThanOrEqual(started + SORTING_TURN_MS);
+					} else {
+						// Refused, or no reservation record: the whole row is exactly as it was.
+						expect(
+							after,
+							`${state}, ${event}, record ${withRecord}: row`,
+						).toEqual(before);
+					}
 					expect(
 						await stateNow(),
 						`${state}, ${event}, record ${withRecord}`,
