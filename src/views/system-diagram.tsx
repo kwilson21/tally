@@ -1,4 +1,4 @@
-// The parts of Tally on How Tally works, drawn by Pele (decision 176): the bank feeds the server, which reads and
+// The parts of Tally on How Tally works, drawn by Pele (decision 181): the bank feeds the server, which reads and
 // writes the database and asks the two AI helpers. Top to bottom so the text stays legible on a 390px phone.
 import { PeleDiagram } from "./pele-diagram";
 

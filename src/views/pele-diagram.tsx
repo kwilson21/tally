@@ -1,4 +1,4 @@
-// The one place Tally draws a diagram with Pele (decision 176): Mermaid text in, SVG out, on the server. Pele
+// The one place Tally draws a diagram with Pele (decision 181): Mermaid text in, SVG out, on the server. Pele
 // writes its colours and fonts as an inline `style` attribute, which the page's CSP (style-src 'self') refuses, so
 // the attribute is dropped here and app.css's `.pele` rules supply the same variables from Tally's tokens.
 import { raw } from "hono/html";

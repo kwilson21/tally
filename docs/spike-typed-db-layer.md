@@ -1,0 +1,58 @@
+# Spike: a typed database layer for Tally
+
+Status: the spike is finished and the decision is accepted. Nothing under `src/` was changed and `package.json` is untouched (the candidates were installed with `--no-save` in a throwaway worktree). The evidence is in `test/spike/*.test.ts` and `spike/` on the branch `spike/typed-db-layer` (pushed for reference, no PR, not for merge). Versions tested: drizzle-orm 0.45.4 (drizzle-kit 0.31.11), kysely 0.29.8, workers-qb 1.16.0, kysely-d1 0.4.0 (source read only). Run on `main` at b26f7be.
+
+## Results
+
+Pass = the test passes against the real schema in the Workers runtime. Partial = works with part of the query kept as raw SQL.
+
+| # | Test | 1. No library (generator + `q`) | 2. Drizzle | 3. Kysely (compile + `db.batch`) | 4. workers-qb | 5. Prisma |
+|---|---|---|---|---|---|---|
+| 1 | Describe a real table (CHECK, partial unique index), fail on drift | **Pass**, every table: columns, CHECK lists, indexes (partial or not), FKs, read from SQLite. Drift test fails on a stale copy and on a real `ALTER TABLE`. | **Partial.** `category_suggestions`, `merchants`, `transactions` (58 columns) written by hand and checked by a drift test I wrote; the drift test fails on a wrong schema. The schema file does not drive the database (CHECKs are documentation only). `drizzle-kit pull` on our 68 migrations was **unusable**: it attached all 1,188 CHECKs of the whole database to every table, cut the closing `)` off them, dropped the columns and WHERE of the partial index (`uniqueIndex(...).on()`), and mis-quoted defaults. Partial index on `lower(name)` is expressible by hand. | **Fail.** Types only; erased at build time. No runtime object to compare. | **Fail.** Same, a type only. | Not tested. Docs: no CHECK syntax; partial indexes only behind a Preview flag; expression indexes (`lower(name)`) not supported. |
+| 2 | Compare-and-set `UPDATE … WHERE status='pending' RETURNING name` | Pass (unchanged SQL, table name checked, id bound) | Pass (`.get()` gives `undefined` on no match) | Pass (`null` on no match) | Pass | Not tested |
+| 3 | `db.batch`, one statement forced to fail | Pass (D1's own batch) | Pass: per-statement results, RETURNING works, a failing statement rolled back the whole batch. `orm.transaction()` rejects on D1 (BEGIN refused) and kept nothing. | Pass by compiling each query and calling `env.DB.batch` ourselves. kysely-d1 0.4.0 `db.transaction()` throws "Transactions are not supported yet." (read from its source). | Pass (`batchExecute`; rollback verified) | Docs: D1 transactions unsupported, array `$transaction` not stated to be atomic. Not tested. |
+| 4a | `ON CONFLICT … DO UPDATE` with the settle `CASE` | Pass (unchanged) | Pass, same rows as `SETTLE_SUGGESTION_SQL` on 3 cases; **the CASE stays hand-written SQL** inside `sql\`\`` | Pass, same rows; CASE is raw `sql\`\`` | Pass, same rows; CASE is a `Raw` string | Not tested |
+| 4b | `INSERT … SELECT … FROM json_each(?) … ON CONFLICT … WHERE` | Pass; a guard fragment brings its own parameters and the numbering follows, replacing `gate.sql(args.length + 1)` | **Pass, after a retry.** My first try failed: `.insert().select()` always names every column, so a 3-value SELECT gave "3 values for 6 columns". It works when the SELECT gives a value for every column (`test/spike/drizzle-hard.test.ts`, case A; only the SELECT is raw), and also with `json_each` declared as a pseudo-table (case B; needed an `as never` cast). | **Pass in the builder** (`selectFrom(sql\`json_each(…)\`.as('j'))`, `onConflict … .where`). Needs `WHERE 1` or SQLite reads `ON` as a join, as our original does. | Fail in the builder; works via `qb.raw({query, args})` only | Not tested |
+| 5 | Derive a hand-kept list from the schema; fail when a migration adds a column | **Pass.** `SCHEMA.transactions.columns` (58); a test fails after a real `ALTER TABLE … ADD COLUMN`. Also derives the child-first delete order from the foreign keys and ran it on D1. | Pass for `transactions` (`getTableColumns`; drift test fails when the migration and the schema file disagree), but only for tables we describe; each needs hand-writing | **Fail** (no runtime columns) | **Fail** | Not tested |
+| 6 | Worker bundle, `wrangler deploy --dry-run --env demo`, a minimal real use | **+3.4 KiB gzip** (772.01 vs 768.51). Mostly the generated schema pulled in by `q.ts`; a real design would export just a table-name list. | **+34.6 KiB gzip** (803.08) | **+67.6 KiB gzip** (836.12) | **+14.5 KiB gzip** (782.96) | Not measured. Docs only say Workers has a 3 MB limit. |
+
+Baseline for the bundle: 3627.14 KiB raw / 768.51 KiB gzip. For comparison decision 170 measured XState at about 79 KiB gzip. Each figure is one measured run with a minimal use of the library; a bigger use may shrink or grow it.
+
+## What the spike found in today's code
+
+- The hand-kept `transactions` export list (`src/settings/export.ts`) has 57 of 58 columns. The one left out is `entry_key`. Nothing records whether that is on purpose, which is the problem.
+- `TABLES_CHILD_FIRST` (`src/demo/reset.ts`) does not list `feedback`, `household_settings` or `push_subscriptions`. Nothing in the code says whether that is deliberate. Its order is valid against the foreign keys today.
+- Four places match `/UNIQUE/` against `error.message` (`category-suggestions.ts` lines 130 and 502, `categories.ts` 121, `routes/settings.tsx` 1243). Drizzle wraps every driver error as `Failed query: …` and puts the UNIQUE text in `error.cause`, so those four checks would silently stop matching after a conversion.
+
+## Maintenance (from the npm registry; GitHub issues were not read)
+
+- drizzle-orm: stable releases 0.45.0 (2025-12-04), .1, .2 (2026-03-27), .3 (2026-09-21), .4 (2026-10-08); 5 stable in the last 12 months, with a six-month gap. A `1.0.0-beta` line is the active one (beta.22 at the time). Same team ships drizzle-kit and the D1 driver in-package.
+- kysely: 20 stable releases in 12 months, last 0.29.8 on 2026-11-01. **Has no D1 dialect of its own.** kysely-d1 (third party, one maintainer): last release 2025-04-19, no transactions. Other D1 dialects exist on npm (for example `@notsplol/kysely-d1`, `@cibule/db-d1`); I did not evaluate them, because compile-and-`db.batch` needs none.
+- workers-qb: 1.16.0 on 2026-10-22, 5 stable in 12 months, one main author, zero dependencies, 444 KB installed.
+- Prisma: very active (7.10.1, 2026-10-15; 8.0.0-rc in progress). Docs state D1 has no transaction support; not tested here.
+
+## What I did not verify
+
+- Prisma was not run at all; its row is documentation only, from a subagent's fetch of prisma.io (not independently re-read).
+- Type safety (compile-time errors for a wrong column) was not tested for any candidate; the tests are runtime. I did not run `tsc` on the spike files.
+- Drizzle's 1.0 beta line, `drizzle-kit generate`/`migrate`, and Drizzle relational queries were not tried. `drizzle-kit pull` was run on a local SQLite file built from our migrations, not against D1 over HTTP; the introspection code is shared.
+- Full suite, feedback integration, typecheck, lint and the production dry-run were not run, because nothing here changes `src/`. Only the four spike test files were run.
+- The spike branch `spike/typed-db-layer` was pushed for reference only (no PR, not for merge); its drift test checks columns, not-null, enum CHECK lists and indexes, but **not column types, defaults or primary keys**. The test the conversion writes must (decision 179).
+
+## Recommendation (updated after the owner's answer)
+
+**Drizzle**, as the owner prefers, used for the simple queries; the hard queries stay `sql` fragments inside it. Reasons: the settle `CASE` is raw SQL either way, and the `INSERT … SELECT … FROM json_each(?)` needs either a raw SELECT that gives all six columns or a pseudo-table with a type cast, so keeping it as today's tested SQL is the safer choice; it is a choice, not a limit of Drizzle. The Drizzle schema is written by hand, one table at a time, as each part is converted, and a drift test in CI fails when it stops matching `migrations/*.sql`. The generator and the `q` template from candidate 1 are dropped from the proposal.
+
+## Decision 179
+
+The decision is recorded once, in `docs/decisions.md` (entry 179). It is not copied here, so the two cannot drift apart. In short: simple queries use Drizzle, hard queries stay SQL inside it, migrations stay the source of truth, and a CI drift test keeps the hand-written schema honest.
+
+## Follow-on: stop packing suggested names into one text
+
+`merchants.suggested_name` holds up to three names joined by newlines. Every "is this one of the suggested names" check searches that text with `instr(char(10) || … || char(10), char(10) || name || char(10))`, and the stale-form check compares the whole packed string. Counted with `git grep -l`: 10 source files name the column, 17 mention it in any spelling, and 26 test files name it (an earlier count of ten was cut short by `head`). Main places: `src/db/merchant-names.ts` (settle rule, `namesToReview`), `src/plaid/sync.ts` (the merge), `src/db/ai-log.ts`, `src/db/transactions.ts` (about five places), `src/db/merchant-rules.ts`, `src/settings/export.ts`, `src/demo/reset.ts`. One more requirement: today an "asked, Workers AI gave no usable name" merchant is stored as `suggested_name = ''` (decision 175), which is what stops it being asked again. With one row per name, zero rows would look like "never asked", so the new design needs an explicit asked marker (a column or status) before `suggested_name` is dropped. The owner chose a table with one row per name (`merchant_suggested_names`: merchant, position, name), where "is this a suggested name" is a plain lookup. This changes the data and the spec, so it needs its own decision, issue and migration. It lands before the conversion of `merchant-names.ts`, so that file is converted once.
+
+## Answered by the owner, and what is still open
+
+- Drizzle: accepted. Suggested names: a table, landing before the `merchant-names.ts` conversion.
+- `entry_key` is the hidden double-submit token on the cash-entry form (`src/views/cash-form.tsx`, `src/transactions/cash.ts`), not family data, so the export leaves it out; it will be listed as a named exclusion. The owner did not know either way; this is read from the code.
+- Demo reset: `household_settings` is handled on purpose (its own delete, keeping the day's `jev_calls_*` rows, then a re-insert), so leaving it out of `TABLES_CHILD_FIRST` is right. Nothing in the code or decisions says whether `feedback` and `push_subscriptions` are left out on purpose; the owner does not know either; they are left as they are, and the conversion will name them as explicit exclusions.

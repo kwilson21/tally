@@ -1610,7 +1610,7 @@ html:not(.js) [data-money-js] {
 	padding-bottom: calc(40vh + 11rem);
 }
 
-/* A diagram drawn by Pele (decision 176, src/views/pele-diagram.tsx). Pele sets these variables in an inline style
+/* A diagram drawn by Pele (decision 181, src/views/pele-diagram.tsx). Pele sets these variables in an inline style
    attribute, which the CSP refuses, so they are set here from the tokens: ink lines and text, paper boxes, band for
    a finished state, rule for the muted words. test/pele-diagram.test.ts fails if a Pele upgrade uses another one. */
 @layer components {

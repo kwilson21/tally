@@ -6,11 +6,66 @@
 // own batch while its group's reservation record exists (decision 143). A save that already went through finds no
 // record, so it takes nothing.
 
+import type { sortingTurnMachine } from "../machines/sorting-turn";
+
 export const SORTING_TURN_MS = 15 * 60_000;
+
+/** What the `sorting_turn` row holds: the group with the turn, and when it ends (missing on a turn that can't block). */
+export type SortingTurn = { id: string; until: number | null };
+
+/**
+ * Which state of the sorting-turn machine the stored turn is in at time `now` (ms): free with no row, ran out when its
+ * `until` has passed or is missing, held otherwise. A pure function of the row, so the test can ask it before and
+ * after every statement.
+ */
+export function sortingTurnState(
+	turn: SortingTurn | null,
+	now: number,
+): keyof typeof sortingTurnMachine.states {
+	if (turn === null) return "free";
+	return (turn.until ?? 0) < now ? "expired" : "held";
+}
+
+/**
+ * The turn as the database holds it now, for `sortingTurnState`. It is read by the same SQL the statements use
+ * (`turnIdSql`, `turnUntilSql`), so there is one reading of a stored turn and no second parser to disagree with it: a
+ * damaged row has no id, so it reads as no turn, exactly as the take, release and guard statements see it.
+ */
+export async function readSortingTurn(
+	db: D1Database,
+): Promise<SortingTurn | null> {
+	const row = await db
+		.prepare(
+			`SELECT ${turnIdSql("value")} AS id, ${turnUntilSql("value")} AS until FROM household_settings WHERE key = 'sorting_turn'`,
+		)
+		.first<{ id: string | null; until: number | null }>();
+	// A null id is a damaged row. An id that is empty text is still a turn, as the statements treat it.
+	return row && row.id !== null ? { id: row.id, until: row.until } : null;
+}
+
+/**
+ * Whether a stored turn has the shape of a turn: JSON that is an object with a text `id`, and an `until` that is a
+ * number, null or missing. 1 or 0. The shape is judged as a whole, so a row with a future `until` and no valid `id`
+ * is a damaged row, not a turn nobody can take. This is the one place a stored turn is read: every statement and
+ * `readSortingTurn` go through it, so there is no second parser to disagree with it (SQLite reads the first of a
+ * duplicated key, and every reader here sees that same one).
+ */
+export const turnShapeOkSql = (column: string) =>
+	`(CASE WHEN json_valid(${column}) THEN (json_type(${column}, '$') = 'object' AND json_type(${column}, '$.id') = 'text' AND COALESCE(json_type(${column}, '$.until'), 'null') IN ('null', 'integer', 'real')) ELSE 0 END)`;
+
+/**
+ * The group id and the `until` of a stored turn, null for a damaged row (so, with no until, a turn that ran out that
+ * nobody holds). Plain `json_extract` would raise an error on a value that is not JSON, and would trust one field of a
+ * row whose other fields make it damaged.
+ */
+export const turnIdSql = (column: string) =>
+	`(CASE WHEN ${turnShapeOkSql(column)} THEN json_extract(${column}, '$.id') END)`;
+export const turnUntilSql = (column: string) =>
+	`(CASE WHEN ${turnShapeOkSql(column)} THEN (CASE WHEN json_type(${column}, '$.until') IN ('integer', 'real') THEN json_extract(${column}, '$.until') END) END)`;
 
 /** True while the turn is held by the id bound to `param`; a save's statements append it to their WHERE clause. */
 export const turnHeldSql = (param = "?") =>
-	`EXISTS (SELECT 1 FROM household_settings WHERE key = 'sorting_turn' AND json_extract(value, '$.id') = ${param})`;
+	`EXISTS (SELECT 1 FROM household_settings WHERE key = 'sorting_turn' AND ${turnIdSql("value")} = ${param})`;
 
 /**
  * Appends the turn guard to a statement's WHERE clause and binds the turn id last, when a turn is given. With
@@ -30,8 +85,8 @@ export function withTurnGuard(
  * own back), and gives it `until` 15 minutes on. Shared by the read's take and the save's (below).
  */
 const TAKE_ON_CONFLICT = `ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	WHERE COALESCE(json_extract(household_settings.value, '$.until'), 0) < ?2
-		OR json_extract(household_settings.value, '$.id') = ?3`;
+	WHERE COALESCE(${turnUntilSql("household_settings.value")}, 0) < ?2
+		OR ${turnIdSql("household_settings.value")} = ?3`;
 
 const turnValue = (turnId: string, now: number) =>
 	JSON.stringify({ id: turnId, until: now + SORTING_TURN_MS });
@@ -77,7 +132,7 @@ export const takeSortingTurnStatement = (
 export const releaseSortingTurnStatement = (db: D1Database, turnId: string) =>
 	db
 		.prepare(
-			"DELETE FROM household_settings WHERE key = 'sorting_turn' AND json_extract(value, '$.id') = ?",
+			`DELETE FROM household_settings WHERE key = 'sorting_turn' AND ${turnIdSql("value")} = ?`,
 		)
 		.bind(turnId);
 

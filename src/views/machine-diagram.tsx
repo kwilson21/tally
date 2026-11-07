@@ -1,4 +1,4 @@
-// A state machine drawn by Pele (decision 176) from the machine's definition by machineGraph, so the picture is the
+// A state machine drawn by Pele (decision 181) from the machine's definition by machineGraph, so the picture is the
 // rule: add a state or an event and it appears here. Boxes are states, top to bottom in the order a thing moves
 // through them; a finished state is shaded; a short word on each arrow names the event. The list under the picture
 // says every arrow in a sentence.
