@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	parseSortingTurn,
 	readSortingTurn,
 	releaseSortingTurn,
 	SORTING_TURN_MS,
@@ -266,6 +265,8 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 		// A future until with no valid id, or with an id that is not text, is damaged, not a turn nobody can take.
 		'{"until":9999999999999}',
 		'{"id":3,"until":9999999999999}',
+		// SQLite reads the first of a duplicated key, in every statement and in the state reader alike.
+		'{"id":3,"id":"B","until":9999999999999}',
 	];
 
 	async function seedRaw(value: string) {
@@ -288,8 +289,11 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 				.first<{ value: string }>()
 		)?.value;
 
-	it("the parser reads each as no turn", () => {
-		for (const bad of DAMAGED) expect(parseSortingTurn(bad), bad).toBeNull();
+	it("the state reader reads each as no turn", async () => {
+		for (const bad of DAMAGED) {
+			await seedRaw(bad);
+			expect(await readSortingTurn(db), bad).toBeNull();
+		}
 	});
 
 	it("take succeeds where the machine says take from free does, and the row becomes ours", async () => {
@@ -343,25 +347,24 @@ describe("a damaged row is a free turn to the statements, as it is to the parser
 	});
 });
 
-describe("parseSortingTurn", () => {
-	it("reads a good row, with or without an until", () => {
-		expect(parseSortingTurn('{"id":"a","until":5}')).toEqual({
-			id: "a",
-			until: 5,
-		});
-		expect(parseSortingTurn('{"id":"a"}')).toEqual({ id: "a", until: null });
-	});
-
-	it("reads a damaged row as no turn", () => {
-		for (const bad of [
-			"",
-			"nope",
-			"null",
-			"[]",
-			'{"until":5}',
-			'{"id":3}',
-			'{"id":"a","until":"soon"}',
-		])
-			expect(parseSortingTurn(bad), bad).toBeNull();
+describe("a duplicated key reads the same everywhere", () => {
+	it("a first text id makes a live turn that every statement and the reader agree on", async () => {
+		const raw = `{"id":"B","id":3,"until":${Date.now() + SORTING_TURN_MS}}`;
+		await db
+			.prepare("DELETE FROM household_settings WHERE key = 'sorting_turn'")
+			.run();
+		await db
+			.prepare(
+				"INSERT INTO household_settings (key, value) VALUES ('sorting_turn', ?)",
+			)
+			.bind(raw)
+			.run();
+		expect((await readSortingTurn(db))?.id).toBe(OTHER);
+		expect(await takeSortingTurn(db, ME)).toBe(false);
+		const guard = await db
+			.prepare(`SELECT ${turnHeldSql()} AS held`)
+			.bind(OTHER)
+			.first<{ held: number }>();
+		expect(guard?.held).toBe(1);
 	});
 });

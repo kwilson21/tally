@@ -14,26 +14,6 @@ export const SORTING_TURN_MS = 15 * 60_000;
 export type SortingTurn = { id: string; until: number | null };
 
 /**
- * Reads the stored `sorting_turn` value, checking its shape: a group id, and an `until` that is a number or missing.
- * Null for anything else, so a damaged row reads as no turn rather than being trusted.
- */
-export function parseSortingTurn(value: string): SortingTurn | null {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(value);
-	} catch {
-		// Not JSON at all: a damaged row is no turn, the same as a missing one.
-		return null;
-	}
-	if (typeof parsed !== "object" || parsed === null) return null;
-	const { id, until } = parsed as { id?: unknown; until?: unknown };
-	if (typeof id !== "string") return null;
-	if (until !== undefined && until !== null && typeof until !== "number")
-		return null;
-	return { id, until: typeof until === "number" ? until : null };
-}
-
-/**
  * Which state of the sorting-turn machine the stored turn is in at time `now` (ms): free with no row, ran out when its
  * `until` has passed or is missing, held otherwise. A pure function of the row, so the test can ask it before and
  * after every statement.
@@ -46,28 +26,36 @@ export function sortingTurnState(
 	return (turn.until ?? 0) < now ? "expired" : "held";
 }
 
-/** The turn as the database holds it now, for `sortingTurnState`. */
+/**
+ * The turn as the database holds it now, for `sortingTurnState`. It is read by the same SQL the statements use
+ * (`turnIdSql`, `turnUntilSql`), so there is one reading of a stored turn and no second parser to disagree with it: a
+ * damaged row has no id, so it reads as no turn, exactly as the take, release and guard statements see it.
+ */
 export async function readSortingTurn(
 	db: D1Database,
 ): Promise<SortingTurn | null> {
 	const row = await db
-		.prepare("SELECT value FROM household_settings WHERE key = 'sorting_turn'")
-		.first<{ value: string }>();
-	return row ? parseSortingTurn(row.value) : null;
+		.prepare(
+			`SELECT ${turnIdSql("value")} AS id, ${turnUntilSql("value")} AS until FROM household_settings WHERE key = 'sorting_turn'`,
+		)
+		.first<{ id: string | null; until: number | null }>();
+	return row?.id ? { id: row.id, until: row.until } : null;
 }
 
 /**
- * Whether a stored turn has the whole shape `parseSortingTurn` accepts: JSON that is an object with a text `id`, and an
- * `until` that is a number, null or missing. 1 or 0. The shape is judged as a whole, as the parser judges it, so a row
- * with a future `until` and no valid `id` is a damaged row, not a turn nobody can take.
+ * Whether a stored turn has the shape of a turn: JSON that is an object with a text `id`, and an `until` that is a
+ * number, null or missing. 1 or 0. The shape is judged as a whole, so a row with a future `until` and no valid `id`
+ * is a damaged row, not a turn nobody can take. This is the one place a stored turn is read: every statement and
+ * `readSortingTurn` go through it, so there is no second parser to disagree with it (SQLite reads the first of a
+ * duplicated key, and every reader here sees that same one).
  */
 export const turnShapeOkSql = (column: string) =>
 	`(CASE WHEN json_valid(${column}) THEN (json_type(${column}, '$') = 'object' AND json_type(${column}, '$.id') = 'text' AND COALESCE(json_type(${column}, '$.until'), 'null') IN ('null', 'integer', 'real')) ELSE 0 END)`;
 
 /**
- * The group id and the `until` of a stored turn, read as SQL with the same reading as `parseSortingTurn`: null for a
- * damaged row (so, with no until, a turn that ran out that nobody holds). Plain `json_extract` would raise an error on
- * a value that is not JSON, and would trust one field of a row whose other fields make it damaged.
+ * The group id and the `until` of a stored turn, null for a damaged row (so, with no until, a turn that ran out that
+ * nobody holds). Plain `json_extract` would raise an error on a value that is not JSON, and would trust one field of a
+ * row whose other fields make it damaged.
  */
 export const turnIdSql = (column: string) =>
 	`(CASE WHEN ${turnShapeOkSql(column)} THEN json_extract(${column}, '$.id') END)`;
