@@ -127,29 +127,29 @@ export const NOTE_STATES = Object.keys(
 
 /**
  * How far along a note is, for the pending-to-posted merge (decision 172): the later state wins, and a tie keeps the
- * posted row's state. In plain words:
+ * posted row's state. In plain words, why each state ranks where it does:
  * - unasked (0): nothing has been asked yet, so any answer beats it.
- * - unanswered (1): Jev was asked the detail question but gave no answer to the note question; a Jev answer beats it.
- * - no_call (2) and queued (2): Jev's answer. They tie, so the posted row's own answer stays: the merge moves a note
- *   only when the pending one is strictly later.
- * - failed (3): Workers AI failed; a later try beats it.
- * - tried_empty (4): Workers AI answered with no note; a guess beats it.
- * - guessed (5): Workers AI wrote a note. It is a machine's act, so a person's act beats it.
- * - emptied_by_person (6) and dismissed (6): a person emptied the note, or emptied a guess. A person's act beats any
+ * - unanswered (1): Jev was asked the detail question but gave no answer to the note question, so a Jev answer beats it.
+ * - queued (2), failed (3), tried_empty (4): an attempt is in progress or unresolved on the older row. A posted row's Jev
+ *   answer is newer than the pending row's attempt, so none of these beats a posted no_call.
+ * - no_call (5): Jev said no. It is a settled answer, so it outranks every unresolved attempt above.
+ * - guessed (6): Workers AI wrote a note, which is a note in the row. It outranks a Jev no, since a note is more than a
+ *   verdict.
+ * - emptied_by_person (7) and dismissed (7): a person emptied the note, or emptied a guess. A person's act beats any
  *   machine's act, and a guess copied onto a dismissed row never wins.
- * - written (7): a person's own note, or a guess a person kept. It is the newest and most personal act, so it wins.
+ * - written (8): a person's own note, or a guess a person kept. It is the newest and most personal act, so it wins.
  */
 export const NOTE_RANK: Record<NoteState, number> = {
 	unasked: 0,
 	unanswered: 1,
-	no_call: 2,
 	queued: 2,
 	failed: 3,
 	tried_empty: 4,
-	guessed: 5,
-	emptied_by_person: 6,
-	dismissed: 6,
-	written: 7,
+	no_call: 5,
+	guessed: 6,
+	emptied_by_person: 7,
+	dismissed: 7,
+	written: 8,
 };
 
 /** The later of two states. On a tie the first one (the posted row's) is kept. */

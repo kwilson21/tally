@@ -416,13 +416,13 @@ describe("the pending-to-posted merge picks the later note state", () => {
 		expect(row).toMatchObject({ state: "queued", worth: 1, detailsAsked: 1 });
 	});
 
-	it("a failed pending note is later than a posted Jev no, so the state is failed (the rank rule)", async () => {
+	it("a failed pending note does not override a posted Jev no", async () => {
 		const row = await merge(
 			"d",
 			{ state: "failed", failed: STAMP },
 			{ state: "no_call", worth: 0 },
 		);
-		expect(row?.state).toBe("failed");
+		expect(row).toMatchObject({ state: "no_call", worth: 0 });
 	});
 
 	it("a posted person's note keeps its text over a pending guess", async () => {

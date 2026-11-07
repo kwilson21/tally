@@ -69,6 +69,11 @@ describe("laterNoteState", () => {
 		["queued", "emptied_by_person", "emptied_by_person"], // a person's emptying beats a queue
 		["guessed", "emptied_by_person", "emptied_by_person"],
 		["emptied_by_person", "written", "written"],
+		// A posted Jev no is newer than an unresolved attempt on the pending row, so it survives all three.
+		["no_call", "queued", "no_call"],
+		["no_call", "failed", "no_call"],
+		["no_call", "tried_empty", "no_call"],
+		["no_call", "guessed", "guessed"], // a note in the row outranks a Jev no
 	];
 	for (const [a, b, expected] of MUST_HOLD) {
 		it(`${a} with ${b} is ${expected}`, () => {

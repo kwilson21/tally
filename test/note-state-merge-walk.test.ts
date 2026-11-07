@@ -94,8 +94,9 @@ describe("the merge's note state, pair by pair", () => {
 	it("the Greptile case: a pending try merged onto a posted Jev no is the later state, never emptied_by_person", async () => {
 		const row = await merge("greptile", "tried_empty", "no_call");
 		expect(row?.state).toBe(laterNoteState("no_call", "tried_empty"));
-		expect(row?.state).toBe("tried_empty");
-		expect(row?.triedAt).not.toBeNull();
+		// A posted Jev no is newer than the pending try, so it survives; the pending try's stamp is not copied onto it.
+		expect(row?.state).toBe("no_call");
+		expect(row?.triedAt).toBeNull();
 	});
 
 	for (const posted of NOTE_STATES) {
