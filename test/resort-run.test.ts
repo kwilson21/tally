@@ -10,6 +10,7 @@ import {
 	closeToastOnce,
 	finishRun,
 	movedKey,
+	readMoved,
 	readRun,
 	STALE_MS,
 	startOrJoinRun,
@@ -1762,3 +1763,102 @@ function synthCandidate(id: number): ResortCandidate {
 		},
 	};
 }
+
+describe("reading the stored run and moved record", () => {
+	const stored = async (key: string) =>
+		(
+			await db
+				.prepare("SELECT value FROM household_settings WHERE key = ?")
+				.bind(key)
+				.first<{ value: string }>()
+		)?.value ?? "";
+	const put = (key: string, value: string) =>
+		db
+			.prepare("UPDATE household_settings SET value = ? WHERE key = ?")
+			.bind(value, key)
+			.run();
+
+	/** A finished run with one moved row, so both records exist. */
+	async function finishedRun() {
+		const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+		const candidates = (await candidatesNow()).filter((c) => c.id === a);
+		const started = await startOrJoinRun(db, {
+			candidates,
+			categoryId: groceries,
+			categoryName: "Groceries",
+			now: T0,
+		});
+		const runId = runIdOf(started);
+		await answer(a, groceries);
+		await finishRun(db, { runId, now: T0 + 5000 });
+		return runId;
+	}
+
+	it("reads back exactly what the writers stored, a run and its moved record", async () => {
+		const runId = await finishedRun();
+		expect(await readRun(db)).toEqual(JSON.parse(await stored("resort_run")));
+		expect(await readMoved(db, runId)).toEqual(
+			JSON.parse(await stored(movedKey(runId))),
+		);
+	});
+
+	it("treats a stored run that is not JSON or has a field of the wrong type as none, logs fixed words, and starts over it", async () => {
+		await finishedRun();
+		const run = JSON.parse(await stored("resort_run"));
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			for (const bad of [
+				"not json",
+				JSON.stringify({ ...run, total: "2" }),
+				JSON.stringify({ ...run, snapshots: [{ id: 1 }] }),
+			]) {
+				await put("resort_run", bad);
+				expect(await readRun(db)).toBeNull();
+			}
+			expect(logged).toHaveBeenCalledWith(
+				"a stored re-sort record is unusable, none used",
+			);
+			// A run that is running and unreadable would otherwise hold the re-sort for good: the next start replaces it.
+			await put(
+				"resort_run",
+				JSON.stringify({ ...run, status: "running", total: "2" }),
+			);
+			const a = await tx({ plaidCategory: HINT, confidence: 0.3 });
+			const started = await startOrJoinRun(db, {
+				candidates: (await candidatesNow()).filter((c) => c.id === a),
+				categoryId: groceries,
+				categoryName: "Groceries",
+				now: T0 + 10_000,
+			});
+			expect(started.runId).not.toBeNull();
+			expect((await readRun(db))?.id).toBe(started.runId);
+			// The log holds the fixed words only, never a row's text.
+			expect(JSON.stringify(logged.mock.calls)).not.toContain("CHECKCARD");
+		} finally {
+			logged.mockRestore();
+		}
+	});
+
+	it("treats a moved record whose rows are not rows as none, in the read, the counts and Undo alike", async () => {
+		const runId = await finishedRun();
+		const record = JSON.parse(await stored(movedKey(runId)));
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await put(movedKey(runId), JSON.stringify({ ...record, rows: "x" }));
+			expect(await readMoved(db, runId)).toBeNull();
+			expect(await undoRun(db, { runId, now: T0 + 6000 })).toEqual({
+				restored: 0,
+				changedSince: 0,
+				expired: true,
+			});
+			await expect(
+				finishRun(db, { runId, now: T0 + 7000 }),
+			).resolves.toBeDefined();
+			expect(logged).toHaveBeenCalledWith(
+				"a stored re-sort record is unusable, none used",
+			);
+		} finally {
+			logged.mockRestore();
+		}
+	});
+});
