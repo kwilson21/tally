@@ -15,17 +15,11 @@ import {
 	setBudget,
 	threeMonthAverageSpentCents,
 } from "../db/budgets";
-import {
-	COUNTED_JOINS,
-	countedCategorySql,
-	countedMonthSql,
-	FOLLOWS_PURCHASE,
-	INCLUDED,
-} from "../db/counted-month";
+import { COUNTED_JOINS, countedMonthSql } from "../db/counted-month";
 import { homeForecastDays } from "../db/home-forecast";
 import { firstCountedMonth, monthResults } from "../db/month";
 import { setSavingsGoal } from "../db/savings-goals";
-import { olderNeedsCategoryCount } from "../db/transactions";
+import { NEEDS_CATEGORY, olderNeedsCategoryCount } from "../db/transactions";
 import { HOME_SEEN_EVERY_MS } from "../first-tally/home-seen";
 import { readSetup, type SetupView } from "../first-tally/setup";
 import { FORECAST_START_DAY, forecastMonth } from "../home-forecast";
@@ -68,9 +62,6 @@ const amount = (cents: number) =>
 /** The Band's amount: whole dollars like the budget rows, but cents under $1, so it never reads "$0" for 30¢. */
 const bandAmount = (cents: number) =>
 	formatCents(cents, { wholeDollars: cents >= 100 || cents === 0 });
-
-const COUNTED_CATEGORY = countedCategorySql();
-const NEEDS_CATEGORY_SQL = `${COUNTED_CATEGORY} IS NULL AND ${INCLUDED} AND t.is_split = 0 AND t.flag_income = 0 AND NOT ${FOLLOWS_PURCHASE} AND (t.amount_cents >= 0 OR t.credit_reviewed = 1)`;
 
 // Opening a budget swaps in only the sheet, so Home keeps its place.
 const openAttrs = (href: string) => ({
@@ -199,7 +190,7 @@ async function renderHome(
 	const { spentCents } = summary.uncategorized;
 	const needsCount = current
 		? await c.env.DB.prepare(
-				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${countedMonthSql()} = ? AND ${NEEDS_CATEGORY_SQL}`,
+				`SELECT COUNT(*) AS n FROM transactions t ${COUNTED_JOINS} WHERE ${countedMonthSql()} = ? AND ${NEEDS_CATEGORY}`,
 			)
 				.bind(month)
 				.first<{ n: number }>()
