@@ -62,6 +62,49 @@ describe("the text limits", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	it("are not kept in a named constant elsewhere: a limit-like constant set to one of these numbers is listed with its reason", () => {
+		// Numbers that are a different rule from a typed text's length, so they stay where they are.
+		const OTHER_RULES = [
+			{
+				file: "src/ai/suggest-name.ts",
+				name: "MAX_LENGTH",
+				why: "the longest name the model may suggest",
+			},
+			{
+				file: "src/ai/suggest-name.ts",
+				name: "MAX_NOTE_LENGTH",
+				why: "the longest note the model may suggest",
+			},
+			{
+				file: "src/ai/suggest-name.ts",
+				name: "MAX_BANK_TEXT",
+				why: "how much bank text may be sent to the model",
+			},
+			{
+				file: "src/routes/push.ts",
+				name: "MAX_ENDPOINT_LENGTH",
+				why: "a push subscription's endpoint URL, not typed text",
+			},
+		];
+		const pattern = new RegExp(
+			`\\bconst\\s+((?=[A-Z0-9_]*(?:MAX|LIMIT|LENGTH|LEN|CHARS))[A-Z][A-Z0-9_]*)\\s*=\\s*(?:${LIMITS})\\s*;`,
+			"g",
+		);
+		const found: { file: string; name: string }[] = [];
+		for (const [file, text] of APP)
+			for (const match of codeLines(text).join("\n").matchAll(pattern))
+				found.push({ file: file.replace("../", ""), name: match[1] as string });
+		const unlisted = found.filter(
+			(f) => !OTHER_RULES.some((o) => o.file === f.file && o.name === f.name),
+		);
+		expect(unlisted.map((f) => `${f.file}: ${f.name}`)).toEqual([]);
+		// A listed constant that no longer exists is removed from the list.
+		const stale = OTHER_RULES.filter(
+			(o) => !found.some((f) => f.file === o.file && f.name === o.name),
+		);
+		expect(stale.map((o) => `${o.file}: ${o.name}`)).toEqual([]);
+	});
+
 	it("are each defined in one place", () => {
 		const names = [
 			"CATEGORY_NAME_MAX",
@@ -71,7 +114,9 @@ describe("the text limits", () => {
 			"NOTE_MAX",
 			"CASH_MERCHANT_MAX",
 			"FEEDBACK_MESSAGE_MAX",
+			"MERCHANT_KEY_MAX",
 			"MAX_OWN_NAME",
+			"MAX_STORE_KEY",
 		];
 		const definers = APP.filter(([, text]) =>
 			new RegExp(`\\bconst\\s+(?:${names.join("|")})\\s*=`).test(text),

@@ -40,7 +40,7 @@ import {
 	transferAskedSql,
 } from "../db/suggestions-queue";
 import { hxTrigger } from "../htmx";
-import { DISPLAY_NAME_MAX } from "../limits";
+import { DISPLAY_NAME_MAX, MERCHANT_KEY_MAX } from "../limits";
 import { STARTED_ANNOUNCEMENT } from "../resort-toast";
 import { activeNamed } from "../settings/category-form";
 import { tidyName } from "../transactions/tidy-name";
@@ -60,7 +60,6 @@ import {
 type App = { Bindings: Env };
 
 const PATH = "/settings/suggestions";
-const MAX_STORE_KEY = 500;
 
 /** The words when a suggestion was answered somewhere else first (decision 120): Settings and Organize say the same. */
 export const CHANGED_SUGGESTION =
@@ -615,7 +614,9 @@ suggestions.post(PATH, async (c) => {
 				form
 					.getAll("store")
 					.map((store) => store.toString())
-					.filter((store) => store.length > 0 && store.length <= MAX_STORE_KEY),
+					.filter(
+						(store) => store.length > 0 && store.length <= MERCHANT_KEY_MAX,
+					),
 			),
 		];
 		if (
